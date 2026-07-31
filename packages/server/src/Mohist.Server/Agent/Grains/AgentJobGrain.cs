@@ -410,8 +410,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             throw new InvalidOperationException(
                 $"AgentJob '{Key}' cannot be re-submitted; current status is {State.Status}");
 
-        if (input is null || string.IsNullOrWhiteSpace(input.Prompt))
-            throw new ArgumentException("AgentJobInput.Prompt is required", nameof(input));
+        if (input is null
+            || (string.IsNullOrWhiteSpace(input.Prompt)
+                && (input.Attachments is null || input.Attachments.Count == 0)))
+            throw new ArgumentException(
+                "AgentJobInput.Prompt is required unless at least one attachment is accepted.",
+                nameof(input));
         if (string.IsNullOrWhiteSpace(input.AgentId))
             throw new ArgumentException("AgentJobInput.AgentId is required", nameof(input));
 
@@ -583,8 +587,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         await HydrateAsync();
         ArgumentNullException.ThrowIfNull(command);
-        if (string.IsNullOrWhiteSpace(command.Prompt))
-            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt)
+            && (command.Attachments is null || command.Attachments.Count == 0))
+        {
+            throw new ArgumentException(
+                "Prompt is required unless at least one attachment is accepted.",
+                nameof(command));
+        }
         if (string.IsNullOrWhiteSpace(command.AgentId))
             throw new ArgumentException("AgentId is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.SessionId))
@@ -724,7 +733,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             EpicNumber: command.EpicNumber,
             WorkflowRunId: command.WorkflowRunId,
             InitialInputId: command.InputId,
-            InitialTurnId: command.TurnId);
+            InitialTurnId: command.TurnId,
+            Attachments: command.Attachments);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -741,7 +751,28 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && left.IssueNumber == right.IssueNumber
         && left.EpicNumber == right.EpicNumber
         && string.Equals(left.WorkflowRunId ?? string.Empty, right.WorkflowRunId ?? string.Empty, StringComparison.Ordinal)
-        && JsonEquals(left.AgentConfig, right.AgentConfig);
+        && JsonEquals(left.AgentConfig, right.AgentConfig)
+        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
+
+    private static bool AttachmentDescriptorsEquivalent(
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? left,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? right)
+    {
+        var leftCount = left?.Count ?? 0;
+        var rightCount = right?.Count ?? 0;
+        if (leftCount != rightCount) return false;
+        if (leftCount == 0) return true;
+        for (var index = 0; index < leftCount; index++)
+        {
+            var a = left![index];
+            var b = right![index];
+            if (!string.Equals(a.Id, b.Id, StringComparison.Ordinal)) return false;
+            if (!string.Equals(a.OriginalFileName, b.OriginalFileName, StringComparison.Ordinal)) return false;
+            if (!string.Equals(a.ContentType, b.ContentType, StringComparison.Ordinal)) return false;
+            if (a.Size != b.Size) return false;
+        }
+        return true;
+    }
 
     private static System.Text.Json.JsonElement? DeserializeAgentConfig(string? json) =>
         string.IsNullOrWhiteSpace(json)
@@ -768,7 +799,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.AgentInstructions, right.AgentInstructions, StringComparison.Ordinal)
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
-        && JsonEquals(left.AgentConfig, right.AgentConfig);
+        && JsonEquals(left.AgentConfig, right.AgentConfig)
+        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
     {
@@ -783,6 +815,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.AgentSessionId));
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
+        if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
         return string.Join(", ", fields);
     }
 
@@ -1077,6 +1110,21 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
         if (input.Skills is { Count: > 0 })
             with["skills"] = JSON.SerializeToElement(input.Skills);
+        // Carry accepted attachment descriptors verbatim so the runner
+        // resolves content through the owning-input scoped route
+        // (without bytes on the wire). An empty/absent list means no
+        // attachments — neither the workspace materialization nor the
+        // manifest block is emitted.
+        if (input.Attachments is { Count: > 0 })
+            with["attachments"] = JSON.SerializeToElement(input.Attachments
+                .Select(descriptor => new
+                {
+                    id = descriptor.Id,
+                    name = descriptor.OriginalFileName,
+                    contentType = descriptor.ContentType,
+                    size = descriptor.Size,
+                })
+                .ToArray());
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(

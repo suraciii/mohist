@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Sessions.Domain;
 using Orleans.Concurrency;
 
 namespace Mohist.Server.Agent.Grains;
@@ -140,7 +141,16 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(12)] int? IssueNumber = null,
     [property: Id(13)] int? EpicNumber = null,
     [property: Id(14)] string? WorkflowRunId = null,
-    [property: Id(15)] ConnectionLaunchOrigin? ConnectionOrigin = null);
+    [property: Id(15)] ConnectionLaunchOrigin? ConnectionOrigin = null,
+    /// <summary>
+    /// Accepted attachment descriptors the route already bound to
+    /// <see cref="InputId"/>. Persisted on the canonical plan and
+    /// projected onto the AgentJobInput dispatch envelope so the
+    /// Runner receives the descriptors without re-reading mutable
+    /// attachment state. Append-only Orleans field id (next free
+    /// after <see cref="ConnectionOrigin"/>).
+    /// </summary>
+    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
 
 [GenerateSerializer]
 public sealed record PendingTerminalDeliveryEvent(
@@ -479,14 +489,24 @@ public sealed record AgentJobInput(
     /// Orleans field id (next free after WorkflowRunId).
     /// </summary>
     [property: Id(14)] string? InitialInputId = null,
+/// <summary>
+/// Stable id of the launch-time <c>AgentTurn</c> the coordinator
+/// recorded on the AgentSession. The Runner correlates its
+/// executing/terminal progress with this id so the Session's
+/// turn status stays consistent with the Job's lifecycle.
+/// Append-only Orleans field id (next free after InitialInputId).
+/// </summary>
+    [property: Id(15)] string? InitialTurnId = null,
     /// <summary>
-    /// Stable id of the launch-time <c>AgentTurn</c> the coordinator
-    /// recorded on the AgentSession. The Runner correlates its
-    /// executing/terminal progress with this id so the Session's
-    /// turn status stays consistent with the Job's lifecycle.
-    /// Append-only Orleans field id (next free after InitialInputId).
+    /// Accepted attachment descriptors for the launch-time input.
+    /// The Runner uses these to materialize the workspace and to
+    /// build the honest, system-attributed manifest block. Absent on
+    /// jobs persisted before attachments were attached to inputs —
+    /// the Runner treats an absent or empty list as no attachments.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="InitialTurnId"/>).
     /// </summary>
-    [property: Id(15)] string? InitialTurnId = null);
+    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

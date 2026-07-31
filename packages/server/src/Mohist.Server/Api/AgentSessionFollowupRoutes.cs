@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
@@ -24,6 +27,12 @@ namespace Mohist.Server.Api;
 public static class AgentSessionFollowupRoutes
 {
     public const string FollowupPathPrefix = "/api/projects/{projectRef}/agent-sessions";
+
+    internal static readonly IReadOnlySet<string> AllowedTopLevelFields = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "text",
+        "attachments",
+    };
 
     public static WebApplication MapAgentSessionFollowupRoutes(this WebApplication app)
     {
@@ -63,22 +72,141 @@ public static class AgentSessionFollowupRoutes
             HttpContext context,
             string projectRef,
             string sessionId,
-            GenericFollowupRequest body,
+            HttpRequest request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
             AgentSessionFollowupDispatcher dispatcher,
+            AttachmentService attachments,
             CancellationToken ct) =>
         {
-            var text = body?.Text;
-            if (string.IsNullOrWhiteSpace(text))
-                return Rejected(sessionId, "followup_text_missing", "text is required");
+            JsonElement raw;
+            try
+            {
+                raw = await JsonSerializer.DeserializeAsync<JsonElement>(request.Body, JSON.Options, ct);
+            }
+            catch (JsonException)
+            {
+                return Rejected(sessionId, "followup_body_invalid", "request body is not valid JSON");
+            }
+            if (raw.ValueKind != JsonValueKind.Object)
+            {
+                return Rejected(sessionId, "followup_body_invalid", "request body must be a JSON object");
+            }
+
+            var undeclared = new List<string>();
+            foreach (var property in raw.EnumerateObject())
+            {
+                if (!AllowedTopLevelFields.Contains(property.Name))
+                    undeclared.Add(property.Name);
+            }
+            if (undeclared.Count > 0)
+            {
+                return ApiResults.BadRequest(
+                    $"unsupported top-level field(s): {string.Join(", ", undeclared)}; " +
+                    "the follow-up body accepts only text and attachments.",
+                    "unsupported_field",
+                    new { fields = undeclared.ToArray() });
+            }
+
+            var text = raw.TryGetProperty("text", out var textElement)
+                && textElement.ValueKind != JsonValueKind.Null
+                ? textElement.ValueKind == JsonValueKind.String
+                    ? textElement.GetString()
+                    : throw new JsonException("text must be a string")
+                : null;
+            IReadOnlyList<string>? attachmentIds = null;
+            if (raw.TryGetProperty("attachments", out var attachmentsElement)
+                && attachmentsElement.ValueKind != JsonValueKind.Null)
+            {
+                attachmentIds = TryReadAttachments(attachmentsElement);
+            }
+
+            var hasText = !string.IsNullOrWhiteSpace(text);
+            var hasAttachments = attachmentIds is { Count: > 0 };
+            if (!hasText && !hasAttachments)
+            {
+                return Rejected(sessionId, "followup_input_required",
+                    "follow-up requires non-empty text or at least one accepted attachment");
+            }
 
             var project = context.GetResolvedProject();
+
+            // Pre-mint the input id so we can validate+bind attachments
+            // before the Session grain mints the durable input. The grain
+            // adopts this id verbatim when supplied.
+            var preMintedInputId = Guid.NewGuid().ToString("N");
+
+            AgentInputAttachmentAcceptanceBatch attachmentBatch;
+            try
+            {
+                attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
+                    project.Id,
+                    agentSessionId: sessionId,
+                    inputId: preMintedInputId,
+                    attachmentIds,
+                    ct);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return Rejected(sessionId, "followup_attachment_limit", ex.Message);
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return Rejected(sessionId, "followup_attachment_invalid", ex.Message);
+            }
+
+            if (attachmentBatch.AcceptedCount == 0 && !hasText)
+            {
+                return Rejected(sessionId, "followup_input_unusable",
+                    "follow-up has no usable content: all attachments were rejected",
+                    attachmentBatch.Results);
+            }
+
             var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context) ?? string.Empty;
-            return await ExecuteFollowupAsync(project.Id, sessionId, text, idempotencyKey, sessions, grains, dispatcher, ct);
+            return await ExecuteFollowupAsync(
+                project.Id,
+                sessionId,
+                text ?? string.Empty,
+                idempotencyKey,
+                attachmentBatch.Results
+                    .Where(r => r.IsAccepted && r.Descriptor is not null)
+                    .Select(r => r.Descriptor!)
+                    .ToArray(),
+                attachmentBatch.Results,
+                preMintedInputId,
+                sessions,
+                grains,
+                dispatcher,
+                ct);
         });
 
         return app;
+    }
+
+    private static IReadOnlyList<string> TryReadAttachments(JsonElement element)
+    {
+        if (element.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("attachments must be an array of attachment ids");
+        }
+
+        var ids = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in element.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.Null) continue;
+            if (entry.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException("attachments entries must be strings");
+            }
+            var raw = entry.GetString();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (seen.Add(raw.Trim()))
+            {
+                ids.Add(raw.Trim());
+            }
+        }
+        return ids;
     }
 
     internal static async Task<IResult> ExecuteFollowupAsync(
@@ -86,6 +214,9 @@ public static class AgentSessionFollowupRoutes
         string sessionId,
         string text,
         string idempotencyKey,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults,
+        string? preMintedInputId,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher dispatcher,
@@ -102,7 +233,10 @@ public static class AgentSessionFollowupRoutes
             accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
                 Text: text,
                 Source: "agent-session-followup",
-                IdempotencyKey: idempotencyKey));
+                IdempotencyKey: idempotencyKey,
+                Attachments: attachments,
+                PreMintedInputId: preMintedInputId,
+                AttachmentResults: attachmentResults));
         }
         catch (RuntimeSessionMissingException ex)
         {
@@ -150,28 +284,68 @@ public static class AgentSessionFollowupRoutes
 
         await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);
 
-        return ApiResults.Ok(new AgentSessionFollowupResult(
-            target.SessionId,
+        return ApiResults.Ok(BuildAcceptedResult(target.SessionId, accept));
+    }
+
+    private static AgentSessionFollowupResult BuildAcceptedResult(string sessionId, AgentSessionFollowupAcceptResult accept)
+    {
+        IReadOnlyList<AgentSessionLaunchAttachment>? accepted = null;
+        IReadOnlyList<AgentSessionLaunchAttachmentRejection>? rejected = null;
+        if (accept.Attachments is { Count: > 0 } attachments)
+        {
+            accepted = attachments
+                .Select(a => new AgentSessionLaunchAttachment(a.Id, a.OriginalFileName, a.ContentType, a.Size))
+                .ToArray();
+        }
+        var verdicts = accept.AttachmentResults;
+        if (verdicts is { Count: > 0 })
+        {
+            rejected = verdicts
+                .Where(r => !r.IsAccepted)
+                .Select(r => new AgentSessionLaunchAttachmentRejection(
+                    r.Id,
+                    r.RejectionReason?.ToString() ?? "unknown",
+                    r.RejectionMessage ?? "Attachment was rejected."))
+                .ToArray();
+        }
+        return new AgentSessionFollowupResult(
+            sessionId,
             InputId: accept.InputId,
             TurnId: accept.TurnId,
             Status: "accepted",
             InputAcceptance: AgentSessionObservationMapper.InputAcceptance(accept.InputAcceptance),
-            TurnStatus: AgentSessionObservationMapper.TurnStatus(accept.TurnStatus)));
+            TurnStatus: AgentSessionObservationMapper.TurnStatus(accept.TurnStatus),
+            Attachments: accepted ?? [],
+            RejectedAttachments: rejected ?? []);
     }
 
-    private static IResult Rejected(string sessionId, string code, string error) =>
+    private static IResult Rejected(
+        string sessionId,
+        string code,
+        string error,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null) =>
         ApiResults.Ok(new AgentSessionFollowupResult(
             sessionId,
             Status: "rejected",
             Error: error,
-            Code: code));
+            Code: code,
+            Attachments: attachmentResults?
+                .Where(r => r.IsAccepted)
+                .Select(r => new AgentSessionLaunchAttachment(r.Id, r.Descriptor!.OriginalFileName, r.Descriptor.ContentType, r.Descriptor.Size))
+                .ToArray() ?? [],
+            RejectedAttachments: attachmentResults?
+                .Where(r => !r.IsAccepted)
+                .Select(r => new AgentSessionLaunchAttachmentRejection(r.Id, r.RejectionReason?.ToString() ?? "unknown", r.RejectionMessage ?? "Attachment was rejected."))
+                .ToArray() ?? []));
 }
 
 /// <summary>
 /// Body for <c>POST /api/projects/{projectRef}/agent-sessions/{sessionId}/followup</c>.
-/// <see cref="Text"/> is required and must be non-empty; whitespace-only text
-/// is rejected with 400 (<c>followup_text_missing</c>) before any session
-/// or runner lookup, mirroring the issue-scoped followup body shape.
+/// The route binds the JSON object directly (no longer a simple record) so it
+/// can apply the same raw-JSON presence allowlist used by the launch path.
+/// <see cref="Text"/> is optional: an attachment-only input is a valid follow-up.
+/// Whitespace-only text is accepted as no-text so the attachment-only rule
+/// still triggers when attachments are also supplied.
 /// </summary>
 public sealed record GenericFollowupRequest(string? Text = null);
 
@@ -183,4 +357,6 @@ public sealed record AgentSessionFollowupResult(
     string? Error = null,
     string? Code = null,
     string? InputAcceptance = null,
-    string? TurnStatus = null);
+    string? TurnStatus = null,
+    IReadOnlyList<AgentSessionLaunchAttachment>? Attachments = null,
+    IReadOnlyList<AgentSessionLaunchAttachmentRejection>? RejectedAttachments = null);

@@ -8,6 +8,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Storage;
 
 namespace Mohist.Server.Issue.Services.Attachments;
@@ -316,6 +317,172 @@ public sealed class AttachmentService : IScopedService
         IReadOnlyCollection<string>? attachmentIds,
         CancellationToken cancellationToken = default) =>
         await ValidateAgentInputBindCoreAsync(projectId, BuildAgentInputOwnerId(agentSessionId, inputId), attachmentIds, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>
+    /// Validates every submitted attachment id individually, binds
+    /// the accepted set to the owning agent-input, and returns a
+    /// per-file verdict the API layer surfaces to the caller. The
+    /// aggregate <c>MaxCountPerOwner</c> limit is enforced across
+    /// already-bound + new submissions; an over-limit aggregate
+    /// rejects the whole submission with
+    /// <see cref="AttachmentLimitException"/> (matching the existing
+    /// issue/comment helpers). Per-file rejections include:
+    /// <list type="bullet">
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.NotFound"/>
+    ///   — id not present in this project;</description></item>
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.Expired"/>
+    ///   — pending TTL has elapsed;</description></item>
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.NotReadable"/>
+    ///   — storage backend cannot serve the bytes;</description></item>
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.ExceedsSizeLimit"/>
+    ///   — stored bytes exceed <c>MaxFileBytes</c>;</description></item>
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.UnsupportedType"/>
+    ///   — content-type falls outside the accepted set;</description></item>
+    ///   <item><description><see cref="AgentInputAttachmentRejectionReason.AlreadyBound"/>
+    ///   — id is owned by another owner (issue/comment/agent-input).</description></item>
+    /// </list>
+    /// </summary>
+    public async Task<AgentInputAttachmentAcceptanceBatch> ValidateAndBindAgentInputAsync(
+        string projectId,
+        string agentSessionId,
+        string inputId,
+        IReadOnlyCollection<string>? attachmentIds,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAgentInputOwnerScope(agentSessionId, inputId);
+        var ownerId = BuildAgentInputOwnerId(agentSessionId, inputId);
+        var ids = NormalizeAttachmentIds(attachmentIds);
+        var results = new List<AgentInputAttachmentAcceptance>(ids.Length);
+        if (ids.Length == 0)
+        {
+            return new AgentInputAttachmentAcceptanceBatch(results, 0);
+        }
+
+        var now = _time.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+
+        var existingCount = await db.Attachments.CountAsync(a =>
+                a.ProjectId == projectId
+                && a.OwnerKind == OwnerKindAgentInput
+                && a.OwnerId == ownerId,
+            cancellationToken).ConfigureAwait(false);
+
+        var rows = await db.Attachments.AsNoTracking()
+            .Where(a => a.ProjectId == projectId && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        var rowsById = rows.ToDictionary(a => a.Id, StringComparer.Ordinal);
+
+        var accepted = new List<AttachmentRow>();
+        foreach (var id in ids)
+        {
+            if (!rowsById.TryGetValue(id, out var row))
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.NotFound, "Attachment id was not found for this project."));
+                continue;
+            }
+
+            if (row.ExpiresAt is { } expires && expires <= now && row.OwnerKind is null)
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.Expired, "Attachment pending upload has expired."));
+                continue;
+            }
+
+            if (row.OwnerKind is not null)
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.AlreadyBound, "Attachment is already bound to another owner."));
+                continue;
+            }
+
+            if (row.Size > _options.MaxFileBytes)
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.ExceedsSizeLimit, $"Attachment exceeds the configured size limit of {_options.MaxFileBytes} bytes."));
+                continue;
+            }
+
+            if (!IsAcceptableAgentInputContentType(row.ContentType))
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.UnsupportedType, $"Attachment content-type '{row.ContentType ?? string.Empty}' is not supported."));
+                continue;
+            }
+
+            if (!await IsReadableAsync(row, cancellationToken).ConfigureAwait(false))
+            {
+                results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.NotReadable, "Attachment storage could not open the recorded content."));
+                continue;
+            }
+
+            accepted.Add(row);
+            results.Add(new AgentInputAttachmentAcceptance(
+                id,
+                new AgentSessionInputAttachmentDescriptor(
+                    Id: row.Id,
+                    OriginalFileName: row.OriginalFileName,
+                    ContentType: row.ContentType,
+                    Size: row.Size,
+                    AcceptedAt: now),
+                null,
+                null));
+        }
+
+        // Enforce the aggregate per-input attachment cap (already-bound +
+        // newly-accepted). The accepted list is the authoritative count;
+        // the over-limit case rejects the whole submission with no
+        // binding applied so the caller's per-file verdicts still report
+        // the individual reasons and nothing is silently dropped.
+        EnsureAttachmentLimit(existingCount, accepted.Count);
+
+        if (accepted.Count > 0)
+        {
+            var acceptedIds = accepted.Select(a => a.Id).ToArray();
+            var bindRows = await db.Attachments.Where(a =>
+                    a.ProjectId == projectId
+                    && acceptedIds.Contains(a.Id))
+                .ToListAsync(cancellationToken).ConfigureAwait(false);
+            foreach (var row in bindRows)
+            {
+                row.OwnerKind = OwnerKindAgentInput;
+                row.OwnerId = ownerId;
+                row.OwnerIssueNumber = null;
+                row.ExpiresAt = null;
+            }
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        return new AgentInputAttachmentAcceptanceBatch(results, accepted.Count);
+    }
+
+    private async Task<bool> IsReadableAsync(AttachmentRow row, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var metadata = await _storage.ReadMetadataAsync(row.StoragePath, cancellationToken).ConfigureAwait(false);
+            return metadata is not null;
+        }
+        catch (Exception ex) when (ex is AttachmentNotFoundException or AttachmentStorageException)
+        {
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool IsAcceptableAgentInputContentType(string? contentType)
+    {
+        if (string.IsNullOrWhiteSpace(contentType)) return true;
+        // The runtime honors text, image, application/pdf, and common
+        // document types as Agent-readable content. Anything outside this
+        // set is rejected with a clear reason at acceptance time. The
+        // set is intentionally conservative; broadening is a future
+        // capability, not a silent default.
+        if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)) return true;
+        if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
+        if (contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return true;
+        if (contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase)) return true;
+        if (contentType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
 
     public static string BuildAgentInputOwnerId(string agentSessionId, string inputId) =>
         $"{agentSessionId}{AgentInputOwnerIdSeparator}{inputId}";

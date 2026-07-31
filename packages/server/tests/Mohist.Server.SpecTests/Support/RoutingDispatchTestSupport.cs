@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Orleans;
@@ -477,6 +478,9 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         AgentLaunchContext context,
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 

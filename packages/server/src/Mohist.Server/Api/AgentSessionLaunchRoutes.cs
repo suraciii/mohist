@@ -6,7 +6,9 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -45,6 +47,7 @@ public static class AgentSessionLaunchRoutes
     {
         "prompt",
         "context",
+        "attachments",
     };
 
     public static WebApplication MapAgentSessionLaunchRoutes(this WebApplication app)
@@ -61,6 +64,7 @@ public static class AgentSessionLaunchRoutes
             IssueQuerier issueQuerier,
             EpicQuerier epicQuerier,
             IAgentLauncher launcher,
+            AttachmentService attachments,
             CancellationToken ct) =>
         {
             if (body is null)
@@ -74,12 +78,14 @@ public static class AgentSessionLaunchRoutes
             {
                 return ApiResults.BadRequest(
                     $"unsupported top-level field(s): {string.Join(", ", body.UndeclaredFields)}; " +
-                    "the launch body accepts only prompt and context.",
+                    "the launch body accepts only prompt, context, and attachments.",
                     "unsupported_field",
                     new { fields = body.UndeclaredFields.ToArray() });
             }
 
             var prompt = body.Prompt;
+            var hasText = !string.IsNullOrWhiteSpace(prompt);
+
             var idempotencyKey = ReadIdempotencyKey(context.Request);
             if (string.IsNullOrWhiteSpace(idempotencyKey))
             {
@@ -90,6 +96,12 @@ public static class AgentSessionLaunchRoutes
             }
 
             var project = context.GetResolvedProject();
+
+            // The fingerprint folds the caller-submitted attachment ids
+            // (raw, in order) so a replay with a different attachment set
+            // is rejected as a conflicting idempotency replay. The
+            // accepted subset is what the dispatch envelope carries and
+            // is established later via ValidateAndBindAgentInputAsync.
             var launchRequest = new AgentLaunchCoordinatorRequest(
                 Prompt: prompt?.Trim() ?? string.Empty,
                 AgentRef: agentRef,
@@ -98,8 +110,12 @@ public static class AgentSessionLaunchRoutes
                 IssueNumber: body.Context?.IssueNumber,
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
-                Title: null);
+                Title: null,
+                AttachmentIds: body.Attachments?.ToArray());
 
+            // Resume first: a replay that conflicts on the existing
+            // fingerprint (prompt, attachments, context) must surface as
+            // 409 launch_idempotency_conflict, not a 400 input_required.
             try
             {
                 var resumed = await launcher.ResumeIdempotentAsync(
@@ -108,7 +124,7 @@ public static class AgentSessionLaunchRoutes
                     launchRequest,
                     ct);
                 if (resumed is not null)
-                    return AcceptedLaunch(project.Id, resumed);
+                    return AcceptedLaunch(project.Id, resumed, attachmentResults: null);
             }
             catch (LaunchIdempotencyConflictException ex)
             {
@@ -126,12 +142,58 @@ public static class AgentSessionLaunchRoutes
                 return ReadinessRejected(ex);
             }
 
-            if (string.IsNullOrWhiteSpace(prompt))
+            var hasAttachments = body.Attachments is { Count: > 0 };
+            if (!hasText && !hasAttachments)
             {
                 return ApiResults.BadRequest(
-                    "prompt is required",
-                    "prompt_required",
-                    new { fields = new[] { "prompt" } });
+                    "input requires non-empty prompt or at least one accepted attachment",
+                    "input_required",
+                    new { fields = new[] { "prompt", "attachments" } });
+            }
+
+            // Pre-mint the launch-time input id so we can validate+bind
+            // attachments against a stable owner before the coordinator
+            // commits the plan. The coordinator adopts this id verbatim
+            // when supplied (see AgentLaunchCoordinatorCommandEnvelope).
+            var preMintedInputId = Guid.NewGuid().ToString("N");
+            var preMintedTurnId = Guid.NewGuid().ToString("N");
+
+            AgentInputAttachmentAcceptanceBatch attachmentBatch;
+            try
+            {
+                attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
+                    project.Id,
+                    agentSessionId: $"agent-launch-pending/{preMintedInputId}",
+                    inputId: preMintedInputId,
+                    body.Attachments,
+                    ct);
+            }
+            catch (AttachmentLimitException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "attachment_limit_exceeded",
+                    new { fields = new[] { "attachments" } });
+            }
+            catch (AttachmentValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "attachment_invalid",
+                    new { fields = new[] { "attachments" } });
+            }
+
+            if (attachmentBatch.AcceptedCount == 0 && !hasText)
+            {
+                // All attachments were rejected and there is no text: the
+                // input is unusable. Surface the per-file rejection
+                // reasons in the response so the caller sees exactly why.
+                return ApiResults.BadRequest(
+                    "input has no usable content: all attachments were rejected",
+                    "input_unusable",
+                    new
+                    {
+                        fields = new[] { "prompt", "attachments" },
+                        attachments = attachmentBatch.Results
+                            .Select(BuildAttachmentResultDto)
+                            .ToArray(),
+                    });
             }
 
             var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
@@ -161,11 +223,17 @@ public static class AgentSessionLaunchRoutes
             {
                 result = await launcher.LaunchIdempotentAsync(
                     agent,
-                    prompt!,
+                    prompt ?? string.Empty,
                     launchContext,
                     idempotencyKey,
                     launchRequest,
-                    ct: ct);
+                    attachmentBatch.Results
+                        .Where(r => r.IsAccepted && r.Descriptor is not null)
+                        .Select(r => r.Descriptor!)
+                        .ToArray(),
+                    preMintedInputId,
+                    preMintedTurnId,
+                    ct);
             }
             catch (ArgumentException ex)
             {
@@ -187,14 +255,51 @@ public static class AgentSessionLaunchRoutes
                 return ReadinessRejected(ex);
             }
 
-            return AcceptedLaunch(project.Id, result);
+            return AcceptedLaunch(project.Id, result, attachmentBatch.Results);
         });
 
         return app;
     }
 
-    private static IResult AcceptedLaunch(string projectId, AgentLaunchResult result)
+    private static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
+        acceptance.IsAccepted
+            ? (object)new
+            {
+                id = acceptance.Id,
+                accepted = true,
+                name = acceptance.Descriptor!.OriginalFileName,
+                contentType = acceptance.Descriptor.ContentType,
+                size = acceptance.Descriptor.Size,
+            }
+            : new
+            {
+                id = acceptance.Id,
+                accepted = false,
+                reason = acceptance.RejectionReason?.ToString(),
+                message = acceptance.RejectionMessage,
+            };
+
+    private static IResult AcceptedLaunch(
+        string projectId,
+        AgentLaunchResult result,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null)
     {
+        var acceptedAttachments = attachmentResults?
+            .Where(r => r.IsAccepted)
+            .Select(r => new AgentSessionLaunchAttachment(
+                r.Id,
+                r.Descriptor!.OriginalFileName,
+                r.Descriptor.ContentType,
+                r.Descriptor.Size))
+            .ToArray();
+        var rejectedAttachments = attachmentResults?
+            .Where(r => !r.IsAccepted)
+            .Select(r => new AgentSessionLaunchAttachmentRejection(
+                r.Id,
+                r.RejectionReason?.ToString() ?? "unknown",
+                r.RejectionMessage ?? "Attachment was rejected."))
+            .ToArray();
+
         return Results.Json(
                 new ApiResponse<AgentSessionLaunchResponse>(
                     true,
@@ -206,6 +311,8 @@ public static class AgentSessionLaunchRoutes
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
                         Status: "queued",
+                        Attachments: acceptedAttachments,
+                        RejectedAttachments: rejectedAttachments,
                         TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
                         JobUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
                         ObservationUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
@@ -274,6 +381,7 @@ public static class AgentSessionLaunchRoutes
 public sealed record AgentSessionLaunchBody(
     string? Prompt,
     AgentSessionLaunchContextRef? Context,
+    IReadOnlyList<string>? Attachments,
     IReadOnlyList<string> UndeclaredFields,
     JsonElement Raw)
 {
@@ -285,7 +393,7 @@ public sealed record AgentSessionLaunchBody(
         }
         catch (JsonException)
         {
-            return new AgentSessionLaunchBody(null, null, [], default);
+            return new AgentSessionLaunchBody(null, null, null, [], default);
         }
     }
 
@@ -297,6 +405,7 @@ public sealed record AgentSessionLaunchBody(
             return new AgentSessionLaunchBody(
                 Prompt: null,
                 Context: null,
+                Attachments: null,
                 UndeclaredFields: [],
                 Raw: raw);
         }
@@ -326,11 +435,45 @@ public sealed record AgentSessionLaunchBody(
                 WorkspacePath: TryReadString(ctxElement, "workspacePath"));
         }
 
+        var attachments = TryReadAttachments(raw);
+
         return new AgentSessionLaunchBody(
             Prompt: prompt,
             Context: ctx,
+            Attachments: attachments,
             UndeclaredFields: undeclared,
             Raw: raw);
+    }
+
+    private static IReadOnlyList<string>? TryReadAttachments(JsonElement parent)
+    {
+        if (!parent.TryGetProperty("attachments", out var attachmentsElement)
+            || attachmentsElement.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        if (attachmentsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("attachments must be an array of attachment ids");
+        }
+
+        var ids = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in attachmentsElement.EnumerateArray())
+        {
+            if (entry.ValueKind == JsonValueKind.Null) continue;
+            if (entry.ValueKind != JsonValueKind.String)
+            {
+                throw new JsonException("attachments entries must be strings");
+            }
+            var raw = entry.GetString();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            if (seen.Add(raw.Trim()))
+            {
+                ids.Add(raw.Trim());
+            }
+        }
+        return ids.Count == 0 ? null : ids;
     }
 
     private static string? TryReadString(JsonElement parent, string name) =>
@@ -377,6 +520,31 @@ public sealed record AgentSessionLaunchResponse(
     string AgentId,
     string AgentName,
     string Status,
+    IReadOnlyList<AgentSessionLaunchAttachment>? Attachments,
+    IReadOnlyList<AgentSessionLaunchAttachmentRejection>? RejectedAttachments,
     string TranscriptUrl,
     string JobUrl,
     string ObservationUrl);
+
+/// <summary>
+/// Accepted attachment descriptor the launch route surfaces in the
+/// 201 response. Mirrors <see cref="AgentSessionInputAttachmentDescriptor"/>
+/// minus the server-side <c>AcceptedAt</c> stamp (a launch-time
+/// concern the client does not render).
+/// </summary>
+public sealed record AgentSessionLaunchAttachment(
+    string Id,
+    string Name,
+    string? ContentType,
+    long Size);
+
+/// <summary>
+/// Per-file rejection surfaced alongside <see cref="AgentSessionLaunchAttachment"/>
+/// in the 201 response. The reason is the stable enum name (e.g.
+/// <c>"NotFound"</c>, <c>"AlreadyBound"</c>) and the message is the
+/// human-readable explanation the caller should render to the user.
+/// </summary>
+public sealed record AgentSessionLaunchAttachmentRejection(
+    string Id,
+    string Reason,
+    string Message);

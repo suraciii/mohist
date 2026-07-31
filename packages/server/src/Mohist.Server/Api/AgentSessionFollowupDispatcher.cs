@@ -48,7 +48,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 WorkDir: target.WorkDir,
                 Definition: target.Definition,
                 OperationId: dispatch.OperationId,
-                InputTexts: dispatch.InputTexts), ct);
+                InputTexts: dispatch.InputTexts,
+                Attachments: dispatch.Attachments), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

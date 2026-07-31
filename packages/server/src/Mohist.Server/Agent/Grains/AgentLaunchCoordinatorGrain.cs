@@ -77,8 +77,13 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             throw new ArgumentException("AgentId is required.", nameof(command));
         if (string.IsNullOrWhiteSpace(command.AgentName))
             throw new ArgumentException("AgentName is required.", nameof(command));
-        if (string.IsNullOrWhiteSpace(command.Prompt))
-            throw new ArgumentException("Prompt is required.", nameof(command));
+        if (string.IsNullOrWhiteSpace(command.Prompt)
+            && (command.Attachments is null || command.Attachments.Count == 0))
+        {
+            throw new ArgumentException(
+                "Prompt is required unless at least one attachment is accepted.",
+                nameof(command));
+        }
 
         var fingerprint = AgentLaunchCoordinatorCodec.Fingerprint(command.Request, command.ConnectionOrigin);
 
@@ -110,8 +115,12 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 RequestFingerprint: fingerprint,
                 JobKey: $"agent-job-launch-{Guid.NewGuid():N}",
                 SessionId: $"agent-session-{Guid.NewGuid():N}",
-                InputId: Guid.NewGuid().ToString("N"),
-                TurnId: Guid.NewGuid().ToString("N"),
+                InputId: string.IsNullOrWhiteSpace(command.PreMintedInputId)
+                    ? Guid.NewGuid().ToString("N")
+                    : command.PreMintedInputId!,
+                TurnId: string.IsNullOrWhiteSpace(command.PreMintedTurnId)
+                    ? Guid.NewGuid().ToString("N")
+                    : command.PreMintedTurnId!,
                 AgentId: command.AgentId,
                 AgentName: command.AgentName,
                 AgentInstructions: command.AgentInstructions,
@@ -127,7 +136,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 Title: command.Title,
                 AgentRef: command.Request.AgentRef,
                 Completed: false,
-                ConnectionOrigin: command.ConnectionOrigin);
+                ConnectionOrigin: command.ConnectionOrigin,
+                Attachments: command.Attachments);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -247,7 +257,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             IssueNumber: plan.IssueNumber,
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null,
-            ConnectionOrigin: plan.ConnectionOrigin));
+            ConnectionOrigin: plan.ConnectionOrigin,
+            Attachments: plan.Attachments));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
@@ -329,7 +340,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             JobId: plan.JobKey,
             Metadata: metadata,
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
-            WorkDir: plan.WorkspacePath));
+            WorkDir: plan.WorkspacePath,
+            Attachments: plan.Attachments));
         await _participantProbe.OnEnsureInitialLaunchAsync(plan.SessionId, commandId);
 
         _state.State.Plan = plan with
@@ -437,4 +449,31 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(13)] string? Repository,
     [property: Id(14)] string? Title,
     [property: Id(15)] AgentLaunchCoordinatorRequest Request = null!,
-    [property: Id(16)] ConnectionLaunchOrigin? ConnectionOrigin = null);
+    [property: Id(16)] ConnectionLaunchOrigin? ConnectionOrigin = null,
+    /// <summary>
+    /// Pre-minted input id the route wants the coordinator to use.
+    /// When non-null the coordinator adopts this id verbatim
+    /// instead of minting a fresh one. Required when the launch
+    /// carries attachments so the route can validate+bind them
+    /// before the plan is committed (binding keys on the input id).
+    /// Append-only Orleans field id (next free after
+    /// <see cref="ConnectionOrigin"/>).
+    /// </summary>
+    [property: Id(17)] string? PreMintedInputId = null,
+    /// <summary>
+    /// Pre-minted turn id the route wants the coordinator to use.
+    /// Mirrors <see cref="PreMintedInputId"/>: when non-null the
+    /// coordinator adopts this id verbatim. Append-only Orleans
+    /// field id (next free after <see cref="PreMintedInputId"/>).
+    /// </summary>
+    [property: Id(18)] string? PreMintedTurnId = null,
+    /// <summary>
+    /// Accepted attachment descriptors the route already bound to
+    /// <see cref="PreMintedInputId"/>. Persisted on the durable
+    /// plan so recovery replays the same accepted set; the
+    /// AgentSession initial-launch and AgentJob dispatch builders
+    /// project these onto the durable SessionInput child record
+    /// and the AgentJob dispatch envelope. Append-only Orleans
+    /// field id (next free after <see cref="PreMintedTurnId"/>).
+    /// </summary>
+    [property: Id(19)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);

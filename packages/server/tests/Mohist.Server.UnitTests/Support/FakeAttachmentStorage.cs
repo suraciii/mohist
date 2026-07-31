@@ -99,6 +99,21 @@ public sealed class FakeAttachmentStorage : IAttachmentStorage
         }
     }
 
+    /// <summary>
+    /// Marks the recorded metadata for the given storage path as
+    /// unreadable so the next <see cref="ReadMetadataAsync"/> returns
+    /// null. Used to simulate a storage backend that no longer serves
+    /// a previously-uploaded attachment. The bytes remain in the fake
+    /// so other storage tests can still observe the path.
+    /// </summary>
+    public void MarkUnreadable(string storagePath)
+    {
+        lock (_gate)
+        {
+            _metadata.Remove(storagePath);
+        }
+    }
+
     private static string ReadSegment(string storagePath, int index)
     {
         var segments = storagePath.Split('/');

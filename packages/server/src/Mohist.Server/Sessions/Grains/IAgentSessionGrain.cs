@@ -216,7 +216,39 @@ public sealed record AgentSessionFollowupReservation(
 public sealed record AcceptFollowupCommand(
     [property: Id(0)] string Text,
     [property: Id(1)] string Source,
-    [property: Id(2)] string IdempotencyKey);
+    [property: Id(2)] string IdempotencyKey,
+    /// <summary>
+    /// Accepted attachments the route already validated and bound to
+    /// the input id the coordinator mints. Persisted on the input
+    /// record so the accepted set is authoritative across restart
+    /// and the dispatch payload can carry the descriptors.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="IdempotencyKey"/>).
+    /// </summary>
+    [property: Id(3)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// Optional pre-minted input id the route wants the Session grain
+    /// to adopt verbatim. Required when attachments are supplied so
+    /// binding keys on the same id the Session record will carry.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="Attachments"/>).
+    /// </summary>
+    [property: Id(4)] string? PreMintedInputId = null,
+    /// <summary>
+    /// Optional pre-minted turn id mirroring
+    /// <see cref="PreMintedInputId"/>. Append-only Orleans field id
+    /// (next free after <see cref="PreMintedInputId"/>).
+    /// </summary>
+    [property: Id(5)] string? PreMintedTurnId = null,
+    /// <summary>
+    /// Per-attachment verdicts the route validated at acceptance.
+    /// Echoed through the accept result so the API layer can render
+    /// rejected files alongside the accepted set; the grain only
+    /// persists the descriptors it stored, the verdict set is
+    /// response-only metadata. Append-only Orleans field id (next
+    /// free after <see cref="PreMintedTurnId"/>).
+    /// </summary>
+    [property: Id(6)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRuntimeEventInput(
@@ -290,7 +322,15 @@ public sealed record EnsureInitialLaunchCommand(
     [property: Id(4)] string JobId,
     [property: Id(5)] AgentSessionMetadata? Metadata = null,
     [property: Id(6)] string? Runtime = null,
-    [property: Id(7)] string? WorkDir = null);
+    [property: Id(7)] string? WorkDir = null,
+    /// <summary>
+    /// Accepted attachments the launch path already validated and
+    /// bound to <see cref="InputId"/>. Persisted on the input
+    /// record so the accepted set is authoritative across restart
+    /// and the dispatch payload can carry the descriptors.
+    /// Append-only Orleans field id (next free after WorkDir).
+    /// </summary>
+    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(
@@ -318,4 +358,12 @@ public sealed record RecordFollowupTurnCommand(
     [property: Id(0)] string InputId,
     [property: Id(1)] string TurnId,
     [property: Id(2)] string Prompt,
-    [property: Id(3)] string Source);
+    [property: Id(3)] string Source,
+    /// <summary>
+    /// Accepted attachments the follow-up path already validated and
+    /// bound to <see cref="InputId"/>. Persisted on the input record
+    /// so the accepted set is authoritative across restart and the
+    /// dispatch payload can carry the descriptors. Append-only
+    /// Orleans field id (next free after Source).
+    /// </summary>
+    [property: Id(4)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);

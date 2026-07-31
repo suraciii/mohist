@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -67,7 +68,17 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(20)] string? AgentRef,
     [property: Id(21)] bool Completed,
     [property: Id(22)] AgentLaunchCoordinatorPending? Pending = null,
-    [property: Id(23)] ConnectionLaunchOrigin? ConnectionOrigin = null);
+    [property: Id(23)] ConnectionLaunchOrigin? ConnectionOrigin = null,
+    /// <summary>
+    /// Accepted attachment descriptors the route already bound to
+    /// <see cref="InputId"/>. Persisted on the plan so recovery
+    /// replays the same set the first delivery accepted; the
+    /// AgentSession initial-launch and AgentJob dispatch builders
+    /// project these onto the durable SessionInput child record and
+    /// the AgentJob dispatch envelope. Append-only Orleans field id
+    /// (next free after <see cref="ConnectionOrigin"/>).
+    /// </summary>
+    [property: Id(24)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -76,6 +87,14 @@ public sealed record AgentLaunchCoordinatorPlan(
 /// with different content raises
 /// <see cref="LaunchIdempotencyConflictException"/>.
 /// </summary>
+/// <param name="AttachmentIds">
+/// Ordered, caller-supplied attachment ids the route already
+/// validated and bound to the launch-time input id. Empty/null
+/// when the launch carries no attachments. The fingerprint folds
+/// these into the canonical hash so a replay with a different
+/// attachment set is rejected as a conflicting idempotency replay.
+/// Append-only Orleans field id (next free after <see cref="Title"/>).
+/// </param>
 [GenerateSerializer]
 public sealed record AgentLaunchCoordinatorRequest(
     [property: Id(0)] string Prompt,
@@ -85,7 +104,8 @@ public sealed record AgentLaunchCoordinatorRequest(
     [property: Id(4)] int? IssueNumber,
     [property: Id(5)] int? EpicNumber,
     [property: Id(6)] string? Repository,
-    [property: Id(7)] string? Title);
+    [property: Id(7)] string? Title,
+    [property: Id(8)] IReadOnlyList<string>? AttachmentIds = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -159,6 +179,11 @@ public static class AgentLaunchCoordinatorCodec
         AgentLaunchCoordinatorRequest request,
         ConnectionLaunchOrigin? connectionOrigin)
     {
+        var attachments = request.AttachmentIds is null
+            ? string.Empty
+            : string.Join('\u001e', request.AttachmentIds
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Select(id => id.Trim()));
         var canonical = string.Join('\u001f',
             request.Prompt?.Trim() ?? string.Empty,
             request.AgentRef?.Trim() ?? string.Empty,
@@ -168,6 +193,7 @@ public static class AgentLaunchCoordinatorCodec
             request.EpicNumber?.ToString() ?? string.Empty,
             request.Repository?.Trim() ?? string.Empty,
             request.Title?.Trim() ?? string.Empty,
+            attachments,
             connectionOrigin?.ConnectionId ?? string.Empty,
             connectionOrigin?.WorkspaceTeamId ?? string.Empty,
             connectionOrigin?.SlackUserId ?? string.Empty,

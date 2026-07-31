@@ -120,6 +120,8 @@ public static partial class IssueRoutes
                 sessionId,
                 text,
                 idempotencyKey,
+                attachments: null,
+                preMintedInputId: null,
                 sessions,
                 grains,
                 dispatcher,

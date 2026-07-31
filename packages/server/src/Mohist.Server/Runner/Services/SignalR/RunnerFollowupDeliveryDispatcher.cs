@@ -59,6 +59,17 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
             target,
             text = string.Join("\n", request.InputTexts),
             operationId = request.OperationId,
+            attachments = request.Attachments is { Count: > 0 }
+                ? request.Attachments
+                    .Select(descriptor => new
+                    {
+                        id = descriptor.Id,
+                        name = descriptor.OriginalFileName,
+                        contentType = descriptor.ContentType,
+                        size = descriptor.Size,
+                    })
+                    .ToArray()
+                : null,
         };
 
         try
