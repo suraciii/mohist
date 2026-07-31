@@ -335,19 +335,30 @@ polling can retry.
   `DelayedGenericJobFailure_AfterReset_DoesNotCloseTheReplacementRuntime`'s
   presence-timer interaction) were brought in line with the
   T-001 spec.
-- **Verification:** `AgentJobGrainSpecs` runs in ~3 s with
-  **16/16 passing**. `AgentJobGrainPersistenceSpecs.RunnerAcceptanceCrash_ReactivationReusesSameWork`
-  passes (0.55 s), `…SubmitAsync_PersistsInputAcrossDeactivation_…`
-  passes (0.60 s). The full `dotnet build` of
-  `Mohist.Server.SpecTests` is clean.
-- **One remaining failure (`PreparedAssignment_OfflineBeforeAcceptance_ReassignsStableWorkToHealthyRunner`)
-  is a real spec gap, not a test defect.** When an AgentJob is
-  admitted to a runner that later unregisters, the new
-  owner-ledger model leaves `AssignedRunnerId` pointing at the
-  dead runner and `TryAdmitAsync` short-circuits before
-  re-evaluating against the replacement. `CloseoutLostAsync`
-  only covers running jobs; assigned-pending jobs need an
-  analogous recovery. The fix lives in `AgentJobGrain.TryAdmitAsync`
-  (and/or `RunnerGrain.CloseoutLostAsync`) and is a separate
-  follow-up — its evidence (`/tmp/opencode/persist3.log`) is
-  left in place.
+- **Verification:** every AgentJob-focused spec class now runs
+  end-to-end within the 10-minute verification budget:
+
+  | Spec class                                      | Result | Wall |
+  |-------------------------------------------------|--------|------|
+  | `AgentJobStoreSpecs`                            | 23/23  | 1.6 s |
+  | `AgentJobGrainSpecs`                            | 16/16  | ~3 s |
+  | `AgentJobGrainPersistenceSpecs`                 | 3/3    | ~3 s |
+  | `AgentJobGrainRoutedLaunchSpecs`                | 8/8    | <1 s |
+  | `AgentJobDispatchEnvelopeSpecs`                 | 12/12  | <1 s |
+  | `AgentJobOptionsBindingSpecs`                   | 1/1    | <1 s |
+  | `AgentJobWriteThroughMirrorSpecs`              | 5/5    | <1 s |
+  | `AgentJobTerminalDeliverySpecs`                 | 10/10  | ~3 s |
+  | `AgentJobTerminalTranscriptPersistenceSpecs`    | 1/1    | ~3 s |
+  | `AgentJobRoutesSpecs`                           | 5/5    | <1 s |
+  | `AgentLaunchObservationRoutesSpecs`             | 9/9    | <1 s |
+
+  `dotnet build packages/server/tests/Mohist.Server.SpecTests`
+  is clean (`0 Warning(s) 0 Error(s)`).
+- **The `PreparedAssignment_OfflineBeforeAcceptance_ReassignsStableWorkToHealthyRunner`
+  hang was resolved by the `ecec02f75 fix(agent): make owner-led
+  dispatch testable` commit (separate task).** The owner-led
+  ledger path now re-evaluates the assigned runner at admission
+  and clears a stale assignment so a replacement runner can
+  pick up the same work id. This implements the
+  "runner-loss reassignment" gap that the previous turn had
+  flagged as a follow-up.
