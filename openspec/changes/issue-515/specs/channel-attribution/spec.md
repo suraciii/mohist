@@ -38,6 +38,11 @@ When a channel message addresses exactly one Mohist Agent — a single message m
 - **WHEN** a reply arrives in a thread bound to exactly one Agent and does not mention a different Bot
 - **THEN** the message is attributed to that bound Agent and routed as a thread follow-up
 
+#### Scenario: Another Connection ignores a single-Agent thread reply
+
+- **WHEN** an unmentioned reply in a thread bound only to one Agent is delivered to a different Mohist Connection
+- **THEN** that different Connection ignores the event without creating an inbox entry, AgentJob, AgentSession, or SessionInput
+
 ### Requirement: Mohist does not guess when the target Agent is ambiguous
 
 When the target Agent cannot be determined unambiguously, the Connection boundary SHALL NOT start, continue, or attribute work to any Agent, and SHALL NOT select one by natural language, channel topic, or the previous speaker. A single channel message that mentions more than one Mohist Bot managed by the same Server SHALL start no work. A reply in a thread bound to more than one Agent that does not explicitly mention one of them SHALL be treated as human discussion and SHALL trigger no Agent. In both cases no Job, Session, SessionInput, or inbox entry SHALL be created.

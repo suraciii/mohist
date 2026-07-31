@@ -174,6 +174,8 @@ machine is:
        otherwise follow-up the bound session.
    - `|M ∩ W| = 0` (no Bot mention) and the message is a thread reply:
      - thread binding list contains exactly `C` → follow-up `C`'s session.
+     - thread binding list contains exactly one Connection other than `C` → `C` stays silent with
+       no inbox entry, rejection, prompt, or Agent work; the reply is for the bound Connection.
      - thread binding list contains ≥2 Agents → **ambiguous**; contribute to the once-only prompt, trigger nothing.
      - thread binding list is empty → plain channel message → ignore (covered by gate).
 3. **Owner check (D7).** Once `C` is the resolved target, require `sender == C.OwnerSlackUserId`;
