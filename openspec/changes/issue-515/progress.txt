@@ -59,3 +59,22 @@
 - `dotnet test Mohist.Server.UnitTests` — 1672 / 1672 pass.
 - `dotnet test Mohist.Server.ArchTests` — 51 / 51 pass.
 - Slack SpecTests namespace (15 channel-thread + 8 multi-agent + 7 DM new-task) — all green.
+
+## Review fixes
+
+- Channel root redelivery now retries `LaunchConnectionAsync` when the accepted inbox route has no
+  session id, so a crash before launch or before route stamping cannot turn the event into a dispatched
+  no-op. Channel follow-up redelivery re-enters the idempotent Session acceptance and dispatch path,
+  including the case where the inbox row was committed before the first follow-up call.
+- Empty or Bot-only bound-thread replies are rejected before inbox acceptance with the same actionable
+  task prompt used by root mentions. Ambiguous prompts are claimed only by a mentioned or already-bound
+  Connection; unrelated workspace Connections remain silent.
+- `AgentSessionInputProvenance` is persisted on initial and follow-up `SessionInput` records and exposed
+  by Session observations. Slack ingress supplies workspace, conversation, thread, member, message, and
+  Connection identity; the provider inbox also stores the originating thread timestamp via migration
+  `20260731160000_AddSlackInboxThreadProvenance`.
+- Regression coverage includes root/follow-up inbox crash windows, empty thread replies, unrelated
+  ambiguity claimants, root and follow-up provenance, inbox thread persistence, and migration schema.
+- Review-fix verification: full Server SpecTests 3541/3541, Slack SpecTests namespace 139/139,
+  Sessions SpecTests namespace 393/393, UnitTests 1673/1673, ArchTests 51/51, Slack adapter
+  typecheck, and Slack adapter tests 8/8 passed.
