@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json.Nodes;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
@@ -18,26 +19,26 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
-    public async Task OtelQuery_NoArgs_FailsWithGuidance()
+    public async Task OtelQuery_NoArgs_FailsWithGuidanceAndNoHttp()
     {
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
 
-        var exitCode = await RunAsync(handler, ["otel", "query"], output, error);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("SQL", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
     public async Task OtelQuery_Help_ListsSubcommands()
     {
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
-        var exitCode = await RunAsync(handler, ["otel", "--help"], output, error);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("query", output.ToString());
@@ -45,221 +46,251 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
-    public async Task OtelQuery_CustomDbPath_RunsAgainstExplicitPath()
+    public async Task OtelQuery_SelectOne_SendsPostAndRendersServerResult()
     {
-        var dbPath = "/tmp/otel-custom.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var executor = FakeOtelQueryExecutor.ReturningColumns(
-            new[] { "total" },
-            new[] { new object?[] { 1L } });
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            async (req, _) =>
+            {
+                Assert.Equal(HttpMethod.Post, req.Method);
+                Assert.Equal("/otel/api/query", req.RequestUri?.AbsolutePath);
+                var bodyText = req.Content is null ? null : await req.Content.ReadAsStringAsync();
+                Assert.NotNull(bodyText);
+                var payload = JsonNode.Parse(bodyText!) as JsonObject;
+                Assert.NotNull(payload);
+                Assert.Equal("SELECT 1", payload!["sql"]!.GetValue<string>());
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+                return RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        columns = new[] { "1" },
+                        rows = new object[] { new Dictionary<string, object?> { ["1"] = 1L } },
+                        truncated = false,
+                    },
+                });
+            });
 
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("total", output.ToString());
-        Assert.Contains("1", output.ToString());
+        var text = output.ToString();
+        Assert.Contains("1", text);
+        Assert.Single(handler.Requests);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelQuery_DbOption_RejectedAsUnknownOption()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1", "--db", "/tmp/otel.db"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
         Assert.Empty(handler.Requests);
     }
 
     [Fact]
-    public async Task OtelQuery_LocalPath_ReturnsAllRowsWithoutHttpTruncationMetadata()
+    public async Task OtelQuery_BareJson_ListsSelectableFieldsWithoutHttp()
     {
-        var dbPath = "/tmp/otel-unbounded-local.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var rows = new List<object?[]>(capacity: 1001);
-        for (var i = 1; i <= 1001; i++)
-            rows.Add([i]);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
 
-        var executor = FakeOtelQueryExecutor.ReturningColumns(["value"], rows);
-        var handler = new ThrowingHttpHandler();
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT value FROM traces", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "--json"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(1003, output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries).Length);
-        Assert.Contains("1001", output.ToString());
-        Assert.DoesNotContain("truncated", output.ToString(), StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(error.ToString());
-        Assert.Equal(0, handler.CallCount);
-    }
-
-    [Fact]
-    public async Task OtelQuery_DoesNotRequireServer()
-    {
-        var dbPath = "/tmp/otel-no-server.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var executor = FakeOtelQueryExecutor.ReturningColumns(
-            new[] { "total" },
-            new[] { new object?[] { 1L } });
-        var handler = new ThrowingHttpHandler();
-
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
-
-        Assert.Equal(0, exitCode);
-        Assert.Contains("total", output.ToString());
-        Assert.Equal(0, handler.CallCount);
+        Assert.Empty(handler.Requests);
+        var fields = JsonNode.Parse(output.ToString()) as JsonArray;
+        Assert.NotNull(fields);
+        var names = fields!.Select(n => n!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(
+            new HashSet<string>(StringComparer.Ordinal) { "columns", "rows", "truncated", "truncate_reason" },
+            names);
         Assert.Empty(error.ToString());
     }
 
     [Fact]
-    public async Task OtelQuery_DbMissing_FailsWithClearError()
+    public async Task OtelQuery_InvalidJsonField_RejectedLocallyWithExitTwo()
     {
-        var dbPath = "/tmp/otel-does-not-exist-" + Guid.NewGuid().ToString("N") + ".db";
-        var fileSystem = new FakeFileSystem();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1", "--json", "nonexistent"], output, error, fs, executor);
 
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT 1", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: FakeOtelQueryExecutor.ReturningEmpty());
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("otel.db not found", error.ToString());
-        Assert.Contains(dbPath, error.ToString());
+        Assert.Equal(2, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("nonexistent", error.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Empty(output.ToString());
     }
 
     [Fact]
-    public async Task OtelQuery_SqlReferencesMissingTable_FailsWithSqliteError()
+    public async Task OtelQuery_SelectedJson_ProjectsRequestedFields()
     {
-        var dbPath = "/tmp/otel-missing-table.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var executor = FakeOtelQueryExecutor.Throwing("SQLite error: no such table: nonexistent");
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    columns = new[] { "total" },
+                    rows = new object[] { new Dictionary<string, object?> { ["total"] = 2L } },
+                    truncated = false,
+                },
+            })));
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["otel", "query", "SELECT COUNT(*) AS total FROM traces", "--json", "rows,truncated"],
+            output, error, fs, executor);
 
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT * FROM nonexistent", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("SQLite error", error.ToString());
-        Assert.Contains("no such table", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exitCode);
+        var projected = JsonNode.Parse(output.ToString()) as JsonObject;
+        Assert.NotNull(projected);
+        Assert.True(projected!.ContainsKey("rows"));
+        Assert.True(projected.ContainsKey("truncated"));
+        Assert.False(projected.ContainsKey("columns"));
+        Assert.False(projected.ContainsKey("truncate_reason"));
+        var rows = projected["rows"] as JsonArray;
+        Assert.NotNull(rows);
+        Assert.Single(rows!);
+        var firstRow = rows![0] as JsonObject;
+        Assert.NotNull(firstRow);
+        Assert.Equal(2L, firstRow!["total"]!.GetValue<long>());
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
-    public async Task OtelQuery_OpensConnectionReadOnly_RejectsWrites()
+    public async Task OtelQuery_TruncatedResult_RendersTruncationNotice()
     {
-        var dbPath = "/tmp/otel-readonly.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var executor = FakeOtelQueryExecutor.Throwing(
-            "SQLite error: attempt to write a readonly database",
-            isReadOnlyViolation: true);
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    columns = new[] { "x" },
+                    rows = new object[] { new Dictionary<string, object?> { ["x"] = 1L } },
+                    truncated = true,
+                    truncate_reason = "row_limit",
+                },
+            })));
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT x FROM large"], output, error, fs, executor);
 
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "INSERT INTO traces (trace_id) VALUES ('abc')", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("SQLite error", error.ToString());
-        Assert.Contains("readonly", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("(truncated: row_limit)", text);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
-    public async Task OtelQuery_SqlSyntaxError_FailsWithSqliteError()
+    public async Task OtelQuery_NonTruncatedResult_OmitsTruncationNotice()
     {
-        var dbPath = "/tmp/otel-syntax.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        var executor = FakeOtelQueryExecutor.Throwing("SQLite error: near \"FROM\": syntax error");
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    columns = new[] { "service_name" },
+                    rows = new object[] { new Dictionary<string, object?> { ["service_name"] = "svc" } },
+                    truncated = false,
+                },
+            })));
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT service_name FROM traces"], output, error, fs, executor);
 
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT FROM WHERE", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
-
-        Assert.NotEqual(0, exitCode);
-        Assert.Contains("SQLite error", error.ToString());
+        Assert.Equal(0, exitCode);
+        Assert.DoesNotContain("truncated", output.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(error.ToString());
     }
 
     [Fact]
     public async Task OtelQuery_EmptyResultSet_RendersHeaderAndZeroRowsMessage()
     {
-        var dbPath = "/tmp/otel-empty.db";
-        var fileSystem = new FakeFileSystem();
-        fileSystem.AddFile(dbPath, "");
-        // The traces table schema is what the production otel.db exposes; the
-        // column names drive the rendered header. An empty result (WHERE 1=0)
-        // triggers the "(0 rows)" sentinel.
-        var executor = FakeOtelQueryExecutor.ReturningColumns(
-            new[] { "trace_id", "service_name", "start_time", "end_time", "span_count" },
-            Array.Empty<object?[]>());
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    columns = new[] { "trace_id", "service_name" },
+                    rows = Array.Empty<object>(),
+                    truncated = false,
+                },
+            })));
 
-        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
-        var output = new StringWriter();
-        var error = new StringWriter();
-
-        var exitCode = await RunAsync(
-            handler,
-            ["otel", "query", "SELECT * FROM traces WHERE 1=0", "--db", dbPath],
-            output,
-            error,
-            fileSystem: fileSystem,
-            queryExecutor: executor);
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT trace_id, service_name FROM traces WHERE 1=0"],
+            output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var text = output.ToString();
         Assert.Contains("trace_id", text);
         Assert.Contains("(0 rows)", text);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelQuery_ServerUnreachable_SurfacesStandardServerUnavailableMessage()
+    {
+        var handler = new ThrowingHttpHandler();
+        var http = new HttpClient(handler) { BaseAddress = new Uri(CliTestFactory.BaseAddress) };
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var fs = new FakeFileSystem();
+        var executor = new FakeCommandExecutor();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Equal(MohistCliApi.ServerUnavailableMessage + Environment.NewLine, error.ToString());
+        Assert.DoesNotContain("ECONNREFUSED", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Connection refused", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task OtelQuery_ServerRejects_SurfacesErrorAndCode()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(
+                new { success = false, error = "Only SELECT queries are allowed.", code = "query_not_select" },
+                HttpStatusCode.BadRequest)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "DELETE FROM traces"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("Only SELECT queries are allowed.", error.ToString());
+        Assert.Contains("query_not_select", error.ToString());
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task OtelQuery_ServerSqliteError_SurfacesErrorAndCode()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(
+                new { success = false, error = "SQLite error: no such table: nonexistent", code = "query_sqlite_error" },
+                HttpStatusCode.BadRequest)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT * FROM nonexistent"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("SQLite error", error.ToString());
+        Assert.Contains("query_sqlite_error", error.ToString());
+        Assert.Empty(output.ToString());
     }
 
     [Fact]
@@ -372,77 +403,34 @@ public class CliOtelCommandSpecs
         Assert.Contains("boom", error.ToString());
     }
 
-    [Fact]
-    public void ResolveDatabasePath_NullOrEmpty_ReturnsHomeDirPath()
-    {
-        var environment = new FakeEnvironment
-        {
-            ["HOME"] = CliTestFactory.UserHome,
-        };
-        var resolved = OtelCommands.ResolveDatabasePath(null, environment);
-        var expected = Path.Combine(
-            CliTestFactory.UserHome,
-            ".mohist",
-            "otel.db");
-        Assert.Equal(expected, resolved);
-
-        var empty = OtelCommands.ResolveDatabasePath("  ", environment);
-        Assert.Equal(expected, empty);
-    }
-
-    [Fact]
-    public void ResolveDatabasePath_DefaultUsesMainDbPathDirectory()
-    {
-        const string tempDir = "/mohist-tests/otel-main-db";
-        var mainDbPath = Path.Combine(tempDir, "mohist.db");
-        var environment = new FakeEnvironment();
-        environment[OtelCommands.MainDbPathEnvironmentVariable] = mainDbPath;
-
-        var resolved = OtelCommands.ResolveDatabasePath(null, environment);
-
-        Assert.Equal(Path.Combine(tempDir, "otel.db"), resolved);
-    }
-
-    [Fact]
-    public void ResolveDatabasePath_SuppliedPath_ReturnsFullPath()
-    {
-        var resolved = OtelCommands.ResolveDatabasePath("./foo/otel.db", new FakeEnvironment());
-        Assert.True(Path.IsPathRooted(resolved));
-        Assert.EndsWith(Path.Combine("foo", "otel.db"), resolved);
-    }
-
     private int Run(string[] args, out StringWriter output, out StringWriter error)
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
         output = new StringWriter();
         error = new StringWriter();
         return MohistCliCommands.RunAsync(
-            new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") },
+            new HttpClient(handler) { BaseAddress = new Uri(CliTestFactory.BaseAddress) },
             args,
             output,
             error,
             new FakeFileSystem(),
-            new FakeCommandExecutor(),
-            queryExecutor: FakeOtelQueryExecutor.ReturningEmpty()).GetAwaiter().GetResult();
+            new FakeCommandExecutor()).GetAwaiter().GetResult();
     }
 
     private static async Task<int> RunAsync(
         HttpMessageHandler handler,
         string[] args,
         StringWriter output,
-        StringWriter error,
-        FakeFileSystem? fileSystem = null,
-        IOtelQueryExecutor? queryExecutor = null)
+        StringWriter error)
     {
-        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:3456") };
+        var http = new HttpClient(handler) { BaseAddress = new Uri(CliTestFactory.BaseAddress) };
         return await MohistCliCommands.RunAsync(
             http,
             args,
             output,
             error,
-            fileSystem ?? new FakeFileSystem(),
-            new FakeCommandExecutor(),
-            queryExecutor: queryExecutor);
+            new FakeFileSystem(),
+            new FakeCommandExecutor());
     }
 
     private static object ValidStatus(bool collectorOnline, string status, object[]? routes = null) => new
@@ -466,36 +454,5 @@ public class CliOtelCommandSpecs
             CallCount++;
             throw new HttpRequestException("Connection refused (simulated).", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused));
         }
-    }
-
-    private sealed class FakeEnvironment : IEnvironmentVariableProvider
-    {
-        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
-
-        public string? this[string variable]
-        {
-            get => _values.TryGetValue(variable, out var value) ? value : null;
-            set
-            {
-                if (value is null)
-                    _values.Remove(variable);
-                else
-                    _values[variable] = value;
-            }
-        }
-
-        public string? GetEnvironmentVariable(string variable) => this[variable];
-
-        public string? GetEnvironmentVariable(string variable, EnvironmentVariableTarget target) => this[variable];
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables() => _values;
-
-        public IReadOnlyDictionary<string, string> GetEnvironmentVariables(EnvironmentVariableTarget target) => _values;
-
-        public string ExpandEnvironmentVariables(string name) => name;
-
-        public void SetEnvironmentVariable(string variable, string? value) => this[variable] = value;
-
-        public void SetEnvironmentVariable(string variable, string? value, EnvironmentVariableTarget target) => this[variable] = value;
     }
 }
