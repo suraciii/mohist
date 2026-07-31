@@ -1,0 +1,90 @@
+{
+  "project": "mohist-local",
+  "description": "Make Slack DMs a continuous, controllable conversation: route normal messages as follow-ups into a current AgentSession per DM conversation, add explicit New task switching (without canceling prior work), annotate late replies with work identity, and enable cancel/stop from the DM reusing existing Turn control — all by wiring the existing follow-up and Turn-control machinery into the Slack ingress path for agent-connection sessions.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "DM current-session mapping and follow-up routing",
+      "spec": "specs/dm-session-continuity/spec.md#one-current-agentsession-per-dm-conversation",
+      "description": "Add the DM current-session mapping store (SlackDmSessionMappingStore + SlackDmSessionMappingRow, SQLite-backed, keyed by (ConnectionId, DmConversationId), implementing ISlackConnectionProviderCleanup) and replace the ingress handler's unconditional LaunchConnectionAsync call with a routing decision: after inbox dedup, read the mapping; if a current session exists, call IAgentSessionGrain.AcceptFollowupAsync directly with the Slack-derived idempotency key (slack:{team}:{conv}:{ts}) and DispatchNextAsync, then craft a follow-up-aware ack (continuing / accepted-pending / already-accepted); otherwise launch as today and upsert the mapping. Also make agent-connection a first-class source: ResolveCanonicalFollowupTargetAsync and ResolveCancelTargetAsync accept agent-connection, and QueryRowsByLabels supports ConnectionId/SlackUserId/SlackConversationId label lookups.",
+      "acceptanceCriteria": [
+        "A SlackDmSessionMappingStore with GetCurrentSessionIdAsync/SetCurrentSessionIdAsync persists the current AgentSession per (ConnectionId, DmConversationId) and cascades on Connection deletion via ISlackConnectionProviderCleanup; the EF migration applies cleanly on top of the current schema.",
+        "The first DM (no current session) launches a new AgentJob+Session and records it as current; a subsequent normal DM continues that session as a follow-up input via AcceptFollowupAsync and creates no new AgentJob or AgentSession.",
+        "A normal DM sent while the current Turn is executing is accepted into a queued Turn; the Bot replies that the input is accepted and pending, not executing; the queued input dispatches after the current Turn terminates.",
+        "A normal DM sent after the current Turn has terminated still continues the same session as a follow-up, starting the next AgentTurn.",
+        "A redelivered Slack message resolves to the same SessionInput and creates no second input or Turn — both via the inbox dedup (first layer) and the AcceptFollowupAsync idempotency key (second layer).",
+        "ResolveCanonicalFollowupTargetAsync and ResolveCancelTargetAsync accept agent-connection source sessions; QueryRowsByLabels returns sessions matching ConnectionId/SlackUserId/SlackConversationId labels.",
+        "Server spec tests cover follow-up continuation, accept-and-queue during Turn execution, post-terminal continuation, redelivery idempotency, resolver acceptance, and label queries — using fake Slack ingress, fake storage, and injectable TimeProvider with no real network; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "SlackDmSessionMappingStore + row + EF migration + ingress routing decision (follow-up vs launch) + AcceptFollowupAsync grain call from ingress + follow-up-aware ack text + resolver/query acceptance of agent-connection source.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1 + D2 (follow-up branch) + D4 + D5. The mapping store mirrors the SlackProviderInboxStore pattern (scoped, keyed by ConnectionId, outside Agent/Session domain). The ingress handler calls the session grain directly (it has the sessionId from the mapping) — no detour through AgentSessionFollowupRoutes. The idempotency key format matches the launch path (AgentLauncher.cs:203) so both layers of dedup use the same identity. The resolver changes (D5) are not required by the DM path itself but close the second-class-source gap for Web/CLI consistency."
+    },
+    {
+      "id": "T-002",
+      "title": "New task switching",
+      "spec": "specs/dm-session-continuity/spec.md#new-task-switches-the-current-session-without-canceling-prior-work",
+      "description": "Add New task detection to the ingress handler: when the DM text starts with a recognized leading marker (e.g., 'new task'), strip the marker and route to LaunchConnectionAsync (creating a new AgentJob+Session), then upsert the mapping so the new session becomes current. The prior session's work continues independently — no cancel or stop is issued. If the stripped text is empty, reply with the existing empty-prompt rejection. The ack distinguishes 'Starting a new task' from the normal follow-up ack.",
+      "acceptanceCriteria": [
+        "An explicit New task DM (leading marker detected) creates a new AgentJob+AgentSession and switches the DM conversation's current session to the new one; the prior session is no longer current.",
+        "A New task issued while prior work is executing does not cancel or stop the prior work; the prior work continues to its natural terminal result.",
+        "The leading marker is matched case-insensitively as a standalone leading token (not a substring); a normal message that happens to contain the words is not misread as New task.",
+        "If the New task marker is followed by empty text, the Bot replies with the existing empty-prompt rejection and no work is created.",
+        "Server spec tests cover New task switching, prior-work continuation, marker disambiguation, and empty-text rejection using fake Slack ingress; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "New task keyword detection + launch-and-switch routing + mapping upsert + distinct ack text.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D2 (New task branch) + D3. The marker is an explicit Owner action, not auto-detection (the non-goal '自动判断用户是在补充还是在换话题' excludes guessing). Slash commands (/new) and buttons are viable follow-ups if user feedback shows the keyword is insufficient (design D3 alternatives)."
+    },
+    {
+      "id": "T-003",
+      "title": "Terminal delivery work identity",
+      "spec": "specs/dm-session-continuity/spec.md#late-replies-from-superseded-work-carry-identifiable-work-identity",
+      "description": "Extend AgentJobLineage.BuildTerminalDeliveryEnvelope to include a short work label (first ~80 chars of the session's launch prompt) in the delivery payload. Extend the SlackTerminalDelivery record to declare this field and update SlackTerminalDeliveryHandler.Render to prefix the reply with 'Task: {label}' so the Owner can distinguish which task a result belongs to. The annotation is always present, not conditional on session currency.",
+      "acceptanceCriteria": [
+        "Every terminal delivery reply to a DM conversation includes a concise work identity label (the original prompt's first ~80 chars) prefixed before the conclusion/evidence/next-step.",
+        "When prior work completes after a New task switch, its late reply carries the prior work's identity and is not presented as a result of the current session.",
+        "A late failure reply also carries the originating work's identity and is distinguishable from the current session's output.",
+        "The work label is derived from the session's first SessionInput and carried through the terminal delivery event to the rendered Slack reply.",
+        "Server spec tests cover work-identity annotation, late-reply distinguishability after a switch, and truncation behavior using fake Slack delivery; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended BuildTerminalDeliveryEnvelope (work label) + SlackTerminalDelivery record field + Render prefix.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D7. The annotation is always on (not conditional on mapping state) to avoid a store-read race in the delivery handler. The JobKey is available in the event payload for unambiguous lookup if the label is ambiguous. Independent of T-001/T-002 — a pure rendering change."
+    },
+    {
+      "id": "T-004",
+      "title": "Cancel and stop from DM",
+      "spec": "specs/dm-work-control/spec.md#the-owner-can-cancel-or-stop-work-from-the-dm",
+      "description": "Add cancel/stop keyword detection to the ingress handler: when the DM text starts with 'cancel' or 'stop', resolve the current session from the mapping, find its active Turn (most recent non-terminal Turn) via ResolveTurnControl, and apply the operation using existing Turn control — cancel for a queued Turn (CancelQueuedTurnAsync, or IAgentJobGrain.CancelAsync for a launch Turn), stop for an executing Turn (ClaimTurnStopAsync + CancelAgentSession dispatch to Runner). If all Turns are terminal, reply 'that work has already ended'. Cancel against an executing Turn redirects to stop. Reply in the DM with the outcome.",
+      "acceptanceCriteria": [
+        "The Owner can cancel a queued Turn from the DM; the queued Turn is cancelled and the Bot reports the cancellation.",
+        "The Owner can request a stop of an executing Turn from the DM; a runtime stop request is issued and the Bot reports the stop outcome (stopped/stop-requested/unknown).",
+        "Cancel against an executing Turn indicates that the Turn is running and a stop is required rather than performing a deterministic cancel.",
+        "A cancel or stop targeting a Turn that has already reached a terminal state reports 'work has already ended' and does not affect any Turn that started after the target — including a Turn executing under a later session after a New task switch.",
+        "If the current session has no active (non-terminal) Turn, the Bot replies that there is no active work to cancel or stop.",
+        "Cancel and stop affect only the single identified Turn; no other Turn in any session is affected.",
+        "Server spec tests cover cancel queued, stop executing, redirect cancel-to-stop, stale-entry protection, and no-active-work — using fake Slack ingress, fake Runner stop dispatch, and injectable TimeProvider for Turn-terminal timing; npm test passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Cancel/stop keyword detection + implicit current-Turn resolution + Turn control application + outcome reply in the ingress handler.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Implements design D6. Reuses the Turn control logic built in issue 522 (CancelQueuedTurn, ClaimTurnStop, ClassifyTurn, stale-entry protection) — no new control path. Authorization is inherent: DMs are Owner-only (issue 514). The Owner does not need to know Turn IDs; the current work is the implied target. Slash commands (/cancel /stop) are viable follow-ups (design D6 alternative)."
+    }
+  ]
+}

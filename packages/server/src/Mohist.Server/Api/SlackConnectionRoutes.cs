@@ -1,9 +1,14 @@
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack;
 using Mohist.Server.Agent.Domain;
 
@@ -254,9 +259,15 @@ public static class SlackConnectionRoutes
             SlackOwnerClaimService claims,
             SlackProviderInboxStore inbox,
             SlackOutboxStore outbox,
+            SlackDmSessionMappingStore mapping,
             AgentQuerier agents,
-            IAgentLauncher launcher,
-            OperatorCredential credential,
+             IAgentLauncher launcher,
+             IGrainFactory grains,
+             AgentSessionFollowupDispatcher followupDispatcher,
+             AgentSessionQuerier sessions,
+             IHubContext<RunnerHub> runnerHub,
+             RunnerConnectionTracker runnerConnections,
+             OperatorCredential credential,
             CancellationToken ct) =>
         {
             if (!credential.Authorizes(http.Request.Headers))
@@ -312,47 +323,169 @@ public static class SlackConnectionRoutes
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
 
-            var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
-            if (agent is null)
-                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
-
-            var dispatchDecision = AgentConnectionDispatchDecision.For(
-                AgentReadinessDeriver.Derive(agent.AgentConfig));
-            if (!dispatchDecision.Accepted)
+            var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
+            if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
             {
-                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
-                    dispatchDecision.Reason!, null, ct);
-                return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+                const string reason = "Please send a task for the Agent to perform.";
+                await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId, reason, null, ct);
+                return ApiResults.Ok(new { kind = "rejected", reason });
             }
+
+            TurnControlCommand controlCommand = default;
+            var isControl = !isNewTask && TryGetTurnControlCommand(prompt, out controlCommand);
+            AgentInfo? agent = null;
+            AgentConnectionDispatchDecision? dispatchDecision = null;
+            if (!isControl)
+            {
+                agent = await agents.GetByIdAsync(projectId, connection.AgentId);
+                if (agent is null)
+                    return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+
+                dispatchDecision = AgentConnectionDispatchDecision.For(
+                    AgentReadinessDeriver.Derive(agent.AgentConfig));
+                if (!dispatchDecision.Accepted)
+                {
+                    await EnqueueReplyAsync(outbox, projectId, connection, body.ConversationId,
+                        dispatchDecision.Reason!, null, ct);
+                    return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
+                }
+            }
+
+            var routeDraft = await ResolveInboxRouteDraftAsync(
+                projectId,
+                connectionId,
+                body.ConversationId,
+                isNewTask,
+                isControl ? controlCommand : null,
+                mapping,
+                sessions,
+                grains,
+                ct);
 
             SlackProviderInboxAcceptResult accepted;
             try
             {
                 accepted = await inbox.AcceptAsync(new SlackProviderInboxDraft(
-                    projectId, connectionId, identity, body.SenderSlackUserId), ct);
+                    projectId, connectionId, identity, body.SenderSlackUserId), routeDraft, ct);
             }
             catch (SlackProviderInboxCapacityExceededException ex)
             {
                 return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
             }
 
-            var launch = await launcher.LaunchConnectionAsync(agent, prompt, new ConnectionLaunchOrigin(
-                connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs), ct);
-            var acknowledgement = accepted.AlreadyExisted
-                ? "This task was already accepted; execution is being resumed."
-                : dispatchDecision.Reason ?? "Task accepted and queued for execution.";
+            var route = await inbox.GetRouteAsync(projectId, accepted.Id, ct);
+
+            if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
+            {
+                var control = await ExecuteTurnControlAsync(
+                    projectId,
+                    route.Kind == SlackProviderInboxRouteKinds.Cancel ? TurnControlCommand.Cancel : TurnControlCommand.Stop,
+                    route.SessionId!,
+                    route.TurnId!,
+                    sessions,
+                    grains,
+                    runnerHub,
+                    runnerConnections,
+                    ct);
+                await EnqueueRequiredReplyAsync(
+                    outbox,
+                    projectId,
+                    connection,
+                    body.ConversationId,
+                    control.Reply,
+                    $"slack-ack:{identity.AsKey()}",
+                    ct);
+                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new
+                {
+                    kind = control.Kind,
+                    sessionId = control.SessionId,
+                    turnId = control.TurnId,
+                    control = true,
+                });
+            }
+
+            if (route.Kind is SlackProviderInboxRouteKinds.NoActiveWork or SlackProviderInboxRouteKinds.AlreadyEnded)
+            {
+                var reply = route.Kind == SlackProviderInboxRouteKinds.AlreadyEnded
+                    ? "That work has already ended; there is no active work to cancel or stop."
+                    : "There is no active work to cancel or stop.";
+                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
+                    reply,
+                    $"slack-ack:{identity.AsKey()}",
+                    ct);
+                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new { kind = route.Kind, control = true });
+            }
+
+            if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
+            {
+                var isRoutedNewTask = route.Kind == SlackProviderInboxRouteKinds.NewTaskLaunch;
+                var sessionId = route.SessionId;
+                AgentLaunchResult? launch = null;
+                if (string.IsNullOrWhiteSpace(sessionId))
+                {
+                    launch = await launcher.LaunchConnectionAsync(
+                        agent!,
+                        isRoutedNewTask ? newTaskPrompt : prompt,
+                        new ConnectionLaunchOrigin(
+                            connectionId, body.TeamId, body.SenderSlackUserId, body.ConversationId, body.MessageTs),
+                        ct);
+                    sessionId = await inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
+                }
+
+                await mapping.SetCurrentSessionIdAsync(
+                    projectId,
+                    connectionId,
+                    body.TeamId,
+                    body.SenderSlackUserId,
+                    body.ConversationId,
+                    sessionId,
+                    body.MessageTs,
+                    ct);
+                var acknowledgement = isRoutedNewTask
+                    ? BuildNewTaskAck(accepted.AlreadyExisted, dispatchDecision!.Reason)
+                    : accepted.AlreadyExisted
+                        ? "This task was already accepted; execution is being resumed."
+                        : dispatchDecision!.Reason ?? "Task accepted and queued for execution.";
+                await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
+                    acknowledgement,
+                    $"slack-ack:{identity.AsKey()}",
+                    ct);
+                await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new
+                {
+                    kind = accepted.AlreadyExisted ? "queued" : "accepted",
+                    sessionId,
+                    jobKey = launch?.JobKey,
+                    inputId = launch?.InputId,
+                    turnId = launch?.TurnId,
+                    newTask = isRoutedNewTask,
+                });
+            }
+
+            var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+            var followupResult = await RouteFollowupAsync(
+                projectId,
+                route.SessionId!,
+                prompt,
+                idempotencyKey,
+                grains,
+                followupDispatcher,
+                ct);
+            var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
             await EnqueueRequiredReplyAsync(outbox, projectId, connection, body.ConversationId,
-                acknowledgement,
+                followupAck,
                 $"slack-ack:{identity.AsKey()}",
                 ct);
             await inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new
             {
-                kind = accepted.AlreadyExisted ? "queued" : "accepted",
-                sessionId = launch.SessionId,
-                jobKey = launch.JobKey,
-                inputId = launch.InputId,
-                turnId = launch.TurnId,
+                kind = followupResult.Kind,
+                sessionId = followupResult.SessionId,
+                inputId = followupResult.InputId,
+                turnId = followupResult.TurnId,
+                followup = true,
             });
         });
 
@@ -471,6 +604,304 @@ public static class SlackConnectionRoutes
         if (!string.IsNullOrWhiteSpace(botUserId))
             result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
         return result;
+    }
+
+    /// <summary>
+    /// Result of routing an inbound DM into the current session. The grain
+    /// call's <see cref="AgentSessionFollowupAcceptResult"/> is normalized
+    /// into a Slack-shaped kind plus the durable session/input/turn ids the
+    /// caller needs for logging and the response payload. <see cref="Status"/>
+    /// is one of <c>"queued"</c>, <c>"executing"</c>, or <c>"already_accepted"</c>
+    /// (the values <see cref="BuildFollowupAck"/> consumes), not the
+    /// underlying <see cref="Mohist.Server.Sessions.Domain.AgentTurnStatus"/>
+    /// enum verbatim — the surface is the three-way follow-up verdict the
+    /// ingress wants the Bot to read back.
+    /// </summary>
+    internal sealed record FollowupRouteResult(
+        string Kind,
+        string Status,
+        string SessionId,
+        string InputId,
+        string TurnId);
+
+    /// <summary>
+    /// Routes a normal DM into the current session of the conversation
+    /// rather than minting a new one. The session grain's idempotent
+    /// accept is keyed by the Slack message identity (same format as the
+    /// launch path so both layers of dedup collapse to one input); the
+    /// dispatcher then pumps the queued turn the same way the HTTP
+    /// follow-up route does. Exceptions raised by the grain during accept
+    /// are translated to a deterministic Slack response kind so the
+    /// ingress can post a coherent reply instead of crashing the call.
+    /// </summary>
+    private static async Task<FollowupRouteResult> RouteFollowupAsync(
+        string projectId,
+        string currentSessionId,
+        string prompt,
+        string idempotencyKey,
+        IGrainFactory grains,
+        AgentSessionFollowupDispatcher followupDispatcher,
+        CancellationToken ct)
+    {
+        var grain = grains.GetGrain<IAgentSessionGrain>(currentSessionId);
+        AgentSessionFollowupAcceptResult accept;
+        try
+        {
+            accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: prompt,
+                Source: "agent-session-followup",
+                IdempotencyKey: idempotencyKey));
+        }
+        catch (RuntimeSessionMissingException)
+        {
+            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (RecoveryOperationInProgressException)
+        {
+            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (AgentSessionFollowupCapacityExceededException)
+        {
+            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (StopOperationInProgressException)
+        {
+            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (SessionActivityUnknownException)
+        {
+            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (FollowupConcurrencyLimitException)
+        {
+            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+        catch (InvalidOperationException)
+        {
+            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty);
+        }
+
+        await followupDispatcher.DispatchNextAsync(projectId, currentSessionId, ct);
+
+        if (accept.AlreadyAccepted)
+            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId);
+        var status = accept.TurnStatus switch
+        {
+            AgentTurnStatus.Executing => "executing",
+            _ => "queued",
+        };
+        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId);
+    }
+
+    /// <summary>
+    /// Translates the follow-up verdict into the Bot's reply text. The
+    /// <c>alreadyExisted</c> flag from the inbox store takes priority so a
+    /// redelivered Slack message still produces the original "already
+    /// accepted" phrasing even when the grain call happens to land in a
+    /// different state — the inbox dedup is the authoritative user-facing
+    /// signal; the grain call is the second-layer idempotency.
+    /// </summary>
+    private static string BuildFollowupAck(string followupStatus, bool inboxAlreadyExisted)
+    {
+        if (inboxAlreadyExisted)
+            return "This message was already accepted.";
+        return followupStatus switch
+        {
+            "already_accepted" => "This message was already accepted.",
+            "executing" => "Continuing. Running now.",
+            "queued" => "Continuing. Will resume after the current step finishes.",
+            _ => "Continuing.",
+        };
+    }
+
+    /// <summary>
+    /// Leading marker that the Owner uses to start a brand new task
+    /// instead of continuing the DM conversation. Matched
+    /// case-insensitively as a standalone leading token (followed by
+    /// whitespace or end-of-string); see <see cref="TryStripNewTaskMarker"/>.
+    /// </summary>
+    internal const string NewTaskMarker = "new task";
+
+    /// <summary>
+    /// Detects the New task leading marker in a DM prompt. Returns true
+    /// when the trimmed prompt starts with <see cref="NewTaskMarker"/>
+    /// (case-insensitive) followed by whitespace or end-of-string; on
+    /// success <paramref name="remaining"/> holds the trimmed text after
+    /// the marker (which may be empty — the caller treats that as an
+    /// empty-prompt rejection). The marker must be a standalone token:
+    /// "new tasks foo" is NOT a New task command (no whitespace after
+    /// "task"), only an Owner who explicitly types "new task" at the
+    /// start of the message triggers the branch.
+    /// </summary>
+    internal static bool TryStripNewTaskMarker(string prompt, out string remaining)
+    {
+        remaining = string.Empty;
+        if (string.IsNullOrEmpty(prompt))
+            return false;
+        var trimmed = prompt.TrimStart();
+        if (trimmed.Length < NewTaskMarker.Length)
+            return false;
+        if (!trimmed.StartsWith(NewTaskMarker, StringComparison.OrdinalIgnoreCase))
+            return false;
+        var afterMarker = trimmed.Substring(NewTaskMarker.Length);
+        if (afterMarker.Length > 0 && !char.IsWhiteSpace(afterMarker[0]))
+            return false;
+        remaining = afterMarker.TrimStart();
+        return true;
+    }
+
+    /// <summary>
+    /// Crafts the Bot's reply for the New task branch. Prefixes
+    /// "Starting a new task." so the Owner can tell the new-work ack
+    /// apart from the normal first-DM launch ack ("Task accepted and
+    /// queued for execution.") and the follow-up ack ("Continuing.").
+    /// The dispatch-decision reason supplies the operational detail
+    /// (e.g. the Unknown-readiness explanation); a Ready agent falls
+    /// back to the standard "Task accepted and queued for execution."
+    /// phrasing. A redelivered New task message replies with the
+    /// already-accepted variant just like the other branches.
+    /// </summary>
+    internal static string BuildNewTaskAck(bool inboxAlreadyExisted, string? dispatchDecisionReason)
+    {
+        if (inboxAlreadyExisted)
+            return "This new task was already accepted; execution is being resumed.";
+        var detail = !string.IsNullOrWhiteSpace(dispatchDecisionReason)
+            ? dispatchDecisionReason
+            : "Task accepted and queued for execution.";
+        return "Starting a new task. " + detail;
+    }
+
+    private enum TurnControlCommand
+    {
+        Cancel,
+        Stop,
+    }
+
+    private sealed record TurnControlReply(
+        string Kind,
+        string Reply,
+        string? SessionId = null,
+        string? TurnId = null);
+
+    private static bool TryGetTurnControlCommand(string prompt, out TurnControlCommand command)
+    {
+        command = default;
+        var trimmed = prompt.TrimStart();
+        if (StartsWithStandaloneKeyword(trimmed, "cancel"))
+        {
+            command = TurnControlCommand.Cancel;
+            return true;
+        }
+        if (StartsWithStandaloneKeyword(trimmed, "stop"))
+        {
+            command = TurnControlCommand.Stop;
+            return true;
+        }
+        return false;
+    }
+
+    private static bool StartsWithStandaloneKeyword(string text, string keyword) =>
+        text.StartsWith(keyword, StringComparison.OrdinalIgnoreCase)
+        && (text.Length == keyword.Length || char.IsWhiteSpace(text[keyword.Length]));
+
+    private static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
+        string projectId,
+        string connectionId,
+        string conversationId,
+        bool isNewTask,
+        TurnControlCommand? controlCommand,
+        SlackDmSessionMappingStore mapping,
+        AgentSessionQuerier sessions,
+        IGrainFactory grains,
+        CancellationToken ct)
+    {
+        if (isNewTask)
+            return new(SlackProviderInboxRouteKinds.NewTaskLaunch);
+
+        var sessionId = await mapping.GetCurrentSessionIdAsync(projectId, connectionId, conversationId, ct);
+        if (controlCommand is null)
+            return string.IsNullOrWhiteSpace(sessionId)
+                ? new(SlackProviderInboxRouteKinds.Launch)
+                : new(SlackProviderInboxRouteKinds.Followup, sessionId);
+
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return new(SlackProviderInboxRouteKinds.NoActiveWork);
+
+        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
+        if (target is null)
+            return new(SlackProviderInboxRouteKinds.NoActiveWork);
+
+        var current = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ResolveCurrentTurnControlAsync();
+        if (current is null)
+        {
+            var turns = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ListTurnsAsync();
+            return new(turns.Count == 0 ? SlackProviderInboxRouteKinds.NoActiveWork : SlackProviderInboxRouteKinds.AlreadyEnded);
+        }
+
+        return controlCommand == TurnControlCommand.Cancel
+            ? new(SlackProviderInboxRouteKinds.Cancel, target.SessionId, current.TurnId)
+            : new(SlackProviderInboxRouteKinds.Stop, target.SessionId, current.TurnId);
+    }
+
+    private static async Task<TurnControlReply> ExecuteTurnControlAsync(
+        string projectId,
+        TurnControlCommand command,
+        string sessionId,
+        string turnId,
+        AgentSessionQuerier sessions,
+        IGrainFactory grains,
+        IHubContext<RunnerHub> runnerHub,
+        RunnerConnectionTracker runnerConnections,
+        CancellationToken ct)
+    {
+        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
+        if (target is null)
+            return new("no_active_work", "There is no active work to cancel or stop.", sessionId);
+
+        if (command == TurnControlCommand.Cancel)
+        {
+            var result = await AgentSessionTurnControlOperations.CancelAsync(
+                grains, target.SessionId, turnId);
+            return result.Kind switch
+            {
+                TurnControlResultKind.Cancelled => new(
+                    "cancelled", "Work cancelled.", target.SessionId, turnId),
+                TurnControlResultKind.Executing => new(
+                    "executing", "The work is running; use stop to request a runtime stop.", target.SessionId, turnId),
+                TurnControlResultKind.AlreadyEnded => new(
+                    "already_ended", "That work has already ended.", target.SessionId, turnId),
+                _ => new(
+                    "no_active_work", "There is no active work to cancel or stop.", target.SessionId, turnId),
+            };
+        }
+
+        var stop = await AgentSessionTurnControlOperations.StopAsync(
+            projectId,
+            grains,
+            runnerHub,
+            runnerConnections,
+            target,
+            turnId,
+            ct);
+        return stop.Kind switch
+        {
+            TurnControlResultKind.Stopped => new(
+                "stopped", "Work stopped.", target.SessionId, turnId),
+            TurnControlResultKind.Unknown => new(
+                "unknown", "Stop requested, but the runtime could not confirm it.", target.SessionId, turnId),
+            TurnControlResultKind.StopRequested => new(
+                "stop_requested", "Stop requested.", target.SessionId, turnId),
+            TurnControlResultKind.NotCancellable => new(
+                "not_cancellable", "The runtime reported that this work could not be stopped.", target.SessionId, turnId),
+            TurnControlResultKind.Queued => new(
+                "queued", "The work is queued; use cancel to cancel it.", target.SessionId, turnId),
+            TurnControlResultKind.AlreadyEnded => new(
+                "already_ended", "That work has already ended.", target.SessionId, turnId),
+            TurnControlResultKind.RunnerUnavailable => new(
+                "runner_unavailable", "Stop could not be requested because the Runner is unavailable.", target.SessionId, turnId),
+            _ => new(
+                "no_active_work", "There is no active work to cancel or stop.", target.SessionId, turnId),
+        };
     }
 
     internal static async Task<string> ProbeOwnerAvailabilityAsync(

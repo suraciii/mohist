@@ -100,13 +100,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (IsTerminal)
         {
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
+            if (State.PendingSessionClose is not null
+                || State.PendingFailureEvent is not null
+                || State.PendingTerminalDeliveryEvent is not null)
             {
                 await EnsureRecoveryReminderAsync();
                 if (State.PendingSessionClose is not null)
                     await DeliverTerminalToSessionAsync(State.PendingSessionClose);
                 if (State.PendingFailureEvent is not null)
                     await EmitFailureEventAsync(State.PendingFailureEvent);
+                if (State.PendingTerminalDeliveryEvent is not null)
+                    await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             }
             return;
         }
@@ -286,6 +290,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 Key, runnerId, workId, State.Status);
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
+            if (State.PendingTerminalDeliveryEvent is not null)
+                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             return new AgentJobReportResult(false, "stale");
         }
 
@@ -664,6 +670,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await PersistAsync();
 
         await PropagateUnknownToInitialTurnAsync(reason);
+        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, reason, "unknown", null, null);
+        await PersistAsync();
+        if (State.PendingTerminalDeliveryEvent is not null)
+            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
 
         _log.LogInformation(
             "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
@@ -1192,13 +1202,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal)
         {
             State.PendingSessionClose ??= pending;
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
+            if (State.PendingSessionClose is not null
+                || State.PendingFailureEvent is not null
+                || State.PendingTerminalDeliveryEvent is not null)
                 await EnsureRecoveryReminderAsync();
             await PersistAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
+            if (State.PendingTerminalDeliveryEvent is not null)
+                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             return;
         }
 
@@ -1214,6 +1228,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureReason,
             terminalExitCode ?? exitCode);
         State.PendingSessionClose = pending;
+        StageTerminalDeliveryEvent(
+            terminalStatus,
+            message,
+            failureReason,
+            failureCategory,
+            artifactUploadIds,
+            terminalExitCode ?? exitCode);
 
         if (terminalStatus == AgentJobStatus.Failed)
         {
@@ -1241,6 +1262,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await MarkInitialTurnTerminalAsync(terminalStatus, message, output, failureReason, failureCategory, terminalExitCode ?? exitCode);
         if (State.PendingFailureEvent is not null)
             await EmitFailureEventAsync(State.PendingFailureEvent);
+        if (State.PendingTerminalDeliveryEvent is not null)
+            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
     }
 
     private async Task MarkInitialTurnExecutingAsync()
@@ -1409,7 +1432,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         State.PendingSessionClose = null;
         await PersistAsync();
-        if (State.PendingFailureEvent is not null)
+        if (State.PendingFailureEvent is not null || State.PendingTerminalDeliveryEvent is not null)
             return;
         try
         {
@@ -1425,6 +1448,59 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
+    private void StageTerminalDeliveryEvent(
+        AgentJobStatus status,
+        string? message,
+        string? failureReason,
+        string? failureCategory,
+        string[]? artifactUploadIds,
+        int? exitCode)
+    {
+        var origin = State.ManualPlan?.ConnectionOrigin;
+        if (origin is null || State.PendingTerminalDeliveryEvent is not null)
+            return;
+
+        State.PendingTerminalDeliveryEvent = new PendingTerminalDeliveryEvent(
+            AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key),
+            origin,
+            status,
+            message,
+            failureReason,
+            failureCategory,
+            artifactUploadIds?.Length ?? 0,
+            exitCode,
+            _timeProvider.GetUtcNow());
+    }
+
+    private async Task EmitTerminalDeliveryEventAsync(PendingTerminalDeliveryEvent pending)
+    {
+        try
+        {
+            var envelope = BuildTerminalDeliveryEnvelope(pending);
+            await _eventStore.AppendAsync(envelope, CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            State.PendingTerminalDeliveryEvent = null;
+            await PersistAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "AgentJob {Id} terminal delivery event is retained for retry", Key);
+        }
+    }
+
+    internal CloudEvent BuildTerminalDeliveryEnvelope(PendingTerminalDeliveryEvent obligation)
+    {
+        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
+        var sessionLaunchPrompt = State.Input?.Prompt
+            ?? State.ManualPlan?.Prompt
+            ?? State.RoutedPlan?.Prompt;
+        return AgentJobLineage.BuildTerminalDeliveryEnvelope(
+            Key,
+            obligation,
+            extensions,
+            sessionLaunchPrompt);
+    }
+
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
         if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
@@ -1438,7 +1514,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingSessionClose is null && State.PendingFailureEvent is null)
+            if (State.PendingTerminalDeliveryEvent is not null)
+                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingSessionClose is null
+                && State.PendingFailureEvent is null
+                && State.PendingTerminalDeliveryEvent is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;

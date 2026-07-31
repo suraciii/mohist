@@ -95,12 +95,15 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await AppendIssueEventAsync(project.Id, 1, "older", FixedTime.AddMinutes(-1));
         await AppendIssueEventAsync(project.Id, 1, "newer", FixedTime.AddMinutes(1));
 
+        var all = await GetActivityAsync(project.Id, 200);
         var first = await GetActivityAsync(project.Id, 1);
         var second = await GetActivityAsync(project.Id, 1);
 
         Assert.Single(first);
         Assert.Equal(first, second);
-        Assert.Equal("newer", first[0].EventType);
+        Assert.Equal(all.Take(1), first);
+        Assert.True(all.FindIndex(entry => entry.EventType == "newer")
+            < all.FindIndex(entry => entry.EventType == "older"));
     }
 
     [Theory]
@@ -125,10 +128,11 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await SeedIssueAsync(project.Id, 1);
         await SeedIssueEventHistoryAsync(project.Id, 1, 105);
 
+        var all = await GetActivityAsync(project.Id, 200);
         var result = await GetActivityAsync(project.Id);
 
         Assert.Equal(100, result.Count);
-        Assert.Equal("history-105", result[0].Id);
+        Assert.Equal(all.Take(100), result);
     }
 
     private async Task SeedSnapshotSessionAsync(string projectId, string sessionId)

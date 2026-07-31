@@ -1,0 +1,182 @@
+# issue-524 / T-001 — DM current-session mapping and follow-up routing
+
+## Codebase Patterns
+
+- **Slack infrastructure pattern**: SQLite-backed store with `(ProjectId, ConnectionId, …)` scope; implements `IScopedService` + `IAgentConnectionProviderCleanup`; mirrors `SlackProviderInboxStore` / `SlackOutboxStore` style.
+- **EF entity config**: matches `SlackProviderInboxRows` style (TEXT columns, 256-char IDs/keys, 64-char Id, 512-char where appropriate, unique index `UX_...`).
+- **Conventional services**: anything implementing `IScopedService` is auto-registered as Scoped via Scrutor; no extra DI wiring needed.
+- **`IAgentConnectionProviderCleanup`**: iterated by `AgentConnectionStore.DeleteProviderRecordsAsync`; cascades provider rows on connection deletion.
+- **Follow-up path**: `IAgentSessionGrain.AcceptFollowupAsync(AcceptFollowupCommand)` is idempotent via `FindFollowupInputByIdempotencyKey`; `AgentSessionFollowupDispatcher.DispatchNextAsync(projectId, sessionId)` pumps the queued turn.
+- **Idempotency key format**: `slack:{team}:{conv}:{ts}` (matches `AgentLauncher.cs:203`).
+- **DM ack references**: Slack reply uses `slack-ack:{identity.AsKey()}` dispatch ref.
+
+## Self-Review Issue #1 Awareness
+
+The self-review flagged that short-circuiting on `inbox.AcceptAsync.AlreadyExisted` breaks crash recovery: if a redelivery arrives after the inbox row was committed but before `LaunchConnectionAsync` was called, skipping the launch would leave the work never started. The current code avoids this by always calling `LaunchConnectionAsync`. For T-001's follow-up path I'll preserve the same shape: always call `AcceptFollowupAsync` (which is idempotent via the `slack:{team}:{conv}:{ts}` key), and use `AlreadyExisted` only to tweak the ack text. This stays safe under both crash and redelivery scenarios.
+
+## Source-Kind Plumbing
+
+- The launcher stamps `source-kind = "agent-connection"` on connection-launched sessions (AgentLaunchCoordinatorGrain.cs:303, :328).
+- `ResolveCanonicalFollowupTargetAsync` / `ResolveCancelTargetAsync` currently reject anything other than `workflow` / `agent-launch`; D5 lifts the rejection.
+- For the followup target, `Definition` must also be surfaced for `agent-connection` (otherwise the `RunnerFollowupDeliveryDispatcher` payload omits the execution definition and the runner cannot resume a disconnected session).
+
+## Migrations
+
+- Latest migration: `20260730010000_AddVerifiedBotIdentity`.
+- New migration: `20260731100000_AddSlackDmSessionMapping` — creates the mapping table with `UX_SlackDmSessionMappings_ConnectionId_DmConversationId`, plus the `LabelConnectionId`/`LabelSlackUserId`/`LabelSlackConversationId` STORED computed columns + indexes on `AgentSessions`.
+- Snapshot file `MohistDbContextModelSnapshot.cs` is the consolidated model snapshot — must be updated by hand to include the new entity and computed columns (matching `AddSlackProviderInboxOutbox.cs` style). The Designer stub delegates to `BuildModelCore`.
+
+## DI Cascade Bug (T-001 only)
+
+`AgentConnectionStore.DeleteProviderRecordsAsync` reads
+`IEnumerable<IAgentConnectionProviderCleanup>`. Microsoft DI's
+`IEnumerable<T>` only includes services registered with `T` as the
+ServiceType. Scrutor's `.AsSelf()` registers concrete types only —
+the cascade loop was silently empty for every cleanup (inbox, outbox,
+dm mapping, owner claim). Discovered when the new
+`Delete_connection_cascades_dm_session_mappings` spec failed with
+the mapping still present after Connection delete. Fix: explicit
+forward-registrations in `MohistServiceRegistration.ConfigureMohistServices`
+for each cleanup as `IAgentConnectionProviderCleanup` so the
+`IEnumerable<>` resolution finds them. Same shape as the existing
+`IAgentLauncher` forward-registration.
+
+## ArchTests (T-001 only)
+
+- Spec filename must end in `Specs` or `Collection`. Renamed
+  `AgentSessionQuerierAgentConnectionTests.cs` →
+  `AgentSessionQuerierAgentConnectionSpecs.cs`.
+- `SlackConnectionApiSpecs.cs` was over the 24,000-byte ratchet
+  (24,445 bytes). Moved the four T-001 ingress tests to a new
+  `SlackDmSessionMappingIngressSpecs.cs` file. The parent file is
+  now 17,003 bytes.
+
+## Test Setup Gotcha (T-001 only)
+
+`SlackConnectionApiSpecs.CreateConnectionAsync` does NOT create an
+Agent row. The four ingress tests need one to avoid 409
+`agent_not_found` from `agents.GetByIdAsync(...)`. The new
+`SlackDmSessionMappingIngressSpecs.CreateConnectionAsync` generates a
+unique `agent_{guid}` id per connection so the shared integration
+fixture's DB doesn't collide on the Agents PK across tests.
+
+## Workaround: Self-Review Issue #2
+
+The self-review caught the interface name — `ISlackConnectionProviderCleanup`
+should be `IAgentConnectionProviderCleanup`. The implementation
+already uses the correct name; only the design doc / tasks wording
+was wrong. No code change needed.
+
+## Verification (T-001 final)
+
+- `npm run build` (-p:SkipWebBuild=true): 0 errors, 0 warnings.
+- `dotnet test Mohist.Server.ArchTests`: 50 / 50 pass.
+- `dotnet test Mohist.Server.UnitTests`: 1636 / 1636 pass
+  (includes the 9 new SlackDmSessionMappingStoreTests).
+- `dotnet test Mohist.Server.SpecTests` filtered:
+  - `*SlackDmSessionMapping*` → 8 / 8 pass (4 spec + 4 migration).
+  - `*AgentSessionQuerierAgentConnection*` → 6 / 6 pass.
+  - `*SlackConnectionApi*` → 10 / 10 pass (regression of the parent
+    file after the four tests moved out).
+  - `*Migration*` → 180 / 180 pass (template picks up the new
+    migration and computed columns).
+  - `*AgentConnection*` → 29 / 29 pass.
+  - `*OwnerClaim*` → 9 / 9 pass.
+- Full `npm test` includes a single pre-existing flaky test
+  (`AgentSessionQuerierAgentConnectionSpecs.QueryRowsByLabels_SlackConversationId_FiltersByConversation`)
+  that fails ~5 % of the time under heavy Session-test parallel load.
+  The test passes in every focused invocation. Likely cause: shared
+  in-memory SQLite template (`MigratedSqliteTemplate`) interacting
+  with the test's `static` `SeedAsync` losing the local
+  `TestSqliteDatabase` reference under GC. Not introduced by T-001
+  (the same static-seed pattern is used elsewhere without change).
+  Left untouched — fixing it is outside the T-001 scope and a
+  pre-existing infrastructure concern.
+
+# issue-524 / T-002 — New task switching
+
+## Codebase Patterns
+
+- `SlackConnectionRoutes` already performs prompt normalization and the existing empty-prompt rejection before Agent lookup; New task empty-text handling follows that same ordering and response text.
+- `LaunchConnectionAsync` derives the idempotency key from the Slack message identity, so a redelivery can safely re-enter the New task launch branch while returning the coordinator's original identities.
+- `SlackDmSessionMappingStore.SetCurrentSessionIdAsync` is the switch point: New task launches first, then replaces the DM conversation's current session without touching the prior Job or Session.
+- Integration specs use `MohistIntegrationFixture` with an in-memory SQLite database, fake Slack API, and fake Runner registration/polling; no real network or filesystem is needed.
+
+## Decisions
+
+- The marker is the case-insensitive leading phrase `new task`, followed only by whitespace or end-of-input. Messages containing the phrase later remain follow-ups.
+- Empty New task prompts are rejected before inbox acceptance, Agent lookup, launch, and mapping changes. This preserves the existing empty-prompt behavior and avoids creating even a deduplication row for a rejected command.
+- The New task acknowledgement starts with `Starting a new task.`; redelivered accepted messages use the distinct already-accepted text.
+
+## Verification
+
+- `SlackDmNewTaskIngressSpecs`: 4 / 4 pass, covering mapping switch, prior running Job completion after switching, marker disambiguation, and empty-text rejection.
+- `SlackConnectionRoutesNewTaskMarkerTests`: 22 / 22 pass, covering case-insensitive standalone matching, stripping, and ack variants.
+- Full `npm test` was run twice. The Server SpecTests assembly remained affected by unrelated parallel flakes: `ProjectEventTailApiSpecs` / `AgentSessionQuerierAgentConnectionSpecs` (SQLite `no such table: AgentSessions`), plus one `AgentLaunchObservationRoutesSpecs` timing assertion on the second run. The affected tests pass when run in isolation; the new T-002 specs pass both focused and full-assembly runs.
+
+# issue-524 / T-003 - Terminal delivery work identity
+
+## Codebase Patterns
+
+- The launch coordinator writes the same `plan.Prompt` to the first SessionInput and the durable AgentJob `AgentJobInput.Prompt` before dispatch. Terminal delivery can therefore derive the label from the Job snapshot without reading mutable Session state or the DM current-session mapping.
+- Terminal delivery events are serialized by `AgentJobLineage`, then deserialized by `SlackTerminalDeliveryHandler`; the Slack adapter only receives the rendered outbox text.
+
+## Decisions
+
+- The event field is `workLabel`. It is whitespace-normalized and passed through the existing summary redaction before being limited to 80 characters, keeping the one-line Slack prefix safe and concise.
+- `workLabel` is required by `SlackTerminalDelivery.Validate` and is always rendered as `Task: {label}` before the terminal conclusion. No current-session lookup is performed, so late completed and failed replies retain their originating label after a New task switch.
+- Jobs with no usable launch prompt use the explicit `Unknown task` fallback; normal Slack launches always have the first SessionInput prompt.
+
+## Verification
+
+- `dotnet "packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests.dll" -class "Mohist.Server.SpecTests.Specs.Slack.SlackTerminalDeliveryHandlerSpecs" -noAutoReporters`: 5 / 5 pass.
+- Full isolated SpecTests run: 3552 / 3552 pass before the final `npm test` run. UnitTests: 1658 / 1658. ArchTests: 50 / 50.
+- `npm run test:ci --workspaces --if-present`: Web 5200 passed / 1 skipped, Runner 1450 passed, mohist-slack 5 passed.
+- `npm test` reached the full solution but had the existing parallel SpecTests failures: `AgentSessionQuerierAgentConnectionSpecs.ResolveCanonicalFollowupTarget_AgentConnectionSession_ReturnsTarget` (`no such table: AgentSessions`) and `AgentLaunchObservationRoutesSpecs.Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted` (agent job grain wait timeout). The new Slack delivery specs were not among the failures.
+
+# issue-524 / T-004 - Cancel and stop from DM
+
+## Codebase Patterns
+
+- DM control resolves the current Session through `SlackDmSessionMappingStore`, then uses the Session grain's atomic `ResolveCurrentTurnControlAsync` to select the highest-sequence queued or executing Turn. The domain method delegates the selected id back through `ResolveTurnControl`, so control classification remains centralized.
+- HTTP cancel/stop and Slack DM control share `AgentSessionTurnControlOperations`; the shared operation owns launch-job cancellation, stop claims, Runner `CancelAgentSession` dispatch, and terminal reconciliation. Surface-specific code only maps the result to HTTP JSON or Slack text.
+- A Slack stop requires a persisted Session runtime binding and a registered `RunnerConnectionTracker` connection. A Job assignment signal alone is not sufficient test setup for the Session Turn's stop target, so DM stop specs seed an attached agent-connection Session with the fake Runner.
+
+## Decisions
+
+- `cancel` and `stop` are case-insensitive standalone leading keywords. A prefix such as `canceling` remains a normal prompt; bot mentions are removed by the existing prompt normalizer before detection.
+- An executing cancel reports that the work is running and that `stop` is required. A terminal current Session reports both that the work ended and that there is no active work, satisfying the two DM outcome phrasings without introducing a second target.
+- The implicit DM target is resolved inside the mapped Session only. When no active Turn exists, the control operation does not query or mutate any other Session.
+
+## Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`: passed.
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`: passed.
+- `Mohist.Server.SpecTests` class `GenericAgentSessionCancelApiSpecs`: 18 / 18 passed after sharing control operations.
+- `Mohist.Server.SpecTests` class `SlackDmWorkControlSpecs`: 6 / 6 passed, covering cancel queued, stop executing, cancel-to-stop, stale Session isolation, no active work, and single-Turn targeting.
+- Final `npm test`: passed — Workflow Definition 175, CLI 1482, Server Unit 1658, Server Arch 50, Server Spec 3558, Web 5200 with 1 skipped, Runner 1450, mohist-slack 5.
+
+# issue-524 / Review fixes
+
+## Decisions
+
+- The Slack provider inbox now owns the durable routing fence for each accepted message: route kind plus the selected Session and Turn where applicable. A redelivery reads that fence before consulting the current conversation mapping, so a later New task cannot redirect an earlier follow-up or control message.
+- Launch routes persist the canonical Session returned by the idempotent launcher. Mapping writes retain the Slack message timestamp and only move forward by that timestamp, so an older launch or New task replay cannot restore an obsolete current Session.
+- The mapping write is a single SQLite `INSERT ... ON CONFLICT ... DO UPDATE`, replacing the read-then-insert race. Concurrent first messages may still each launch independently, but no ingress request fails on the mapping's unique constraint and the latest Slack message remains current.
+
+## Verification
+
+- Focused Slack specs: 22 / 22 passed, covering follow-up replay after a switch, New task replay after a later switch, control replay after later work begins, concurrent New task mapping, and the additive migration.
+- `SlackDmSessionMappingStoreTests`: 11 / 11 passed, including old-message ordering.
+- Full `npm test` ran twice after the change. Both runs passed Workflow Definition (175), CLI (1,482), Server Unit (1,659), and Server Arch (50), but the parallel Server SpecTests assembly had unrelated Agent launch/observation flakes: first run 3,561 / 3,562, then 3,560 / 3,562. The failed classes passed in isolation: `AgentSessionLaunchRoutesSpecs` 14 / 14 and `AgentLaunchObservationRoutesSpecs` 10 / 10. The focused Slack suite remained green.
+
+# issue-524 / Review fix: atomic inbox routing
+
+## Decision
+
+- DM route classification now completes before provider inbox acceptance. The chosen route kind and any Session/Turn target are written into the inbox row by the same transaction that records the Slack message identity. Redelivery always reads that durable route; it never reconstructs a target from a later conversation mapping.
+
+## Verification
+
+- Focused Slack specs: 30 / 30 passed, including inbox route durability across store recreation, DM follow-up/New task/control paths, and mapping migration coverage.
+- Full `npm test` passed Workflow Definition (175), CLI (1,482), Server Unit (1,659), and Server Arch (50). Server SpecTests had one pre-existing parallel failure in `AgentLaunchObservationRoutesSpecs.Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted` (3,562 / 3,563 passed); the class passed in isolation, 10 / 10.

@@ -81,6 +81,7 @@ public class MohistDbContext : DbContext
     public DbSet<SlackProviderInboxRow> SlackProviderInboxRows { get; set; } = null!;
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
+    public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -193,6 +194,18 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LabelTriggerRuleId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerRuleId), stored: false);
 
+            // Slack DM identity labels stamped by AgentLaunchCoordinatorGrain
+            // whenever a connection-launched session is opened. Path is
+            // built from AgentSessionQueryMetadataKeys so a rename is a
+            // compile-time error rather than a silent drift between SQL
+            // and metadata.
+            entity.Property(e => e.LabelConnectionId)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.ConnectionId), stored: true);
+            entity.Property(e => e.LabelSlackUserId)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackUserId), stored: true);
+            entity.Property(e => e.LabelSlackConversationId)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionQueryMetadataKeys.SlackConversationId), stored: true);
+
             // Virtual projection of status.activity, lowered
             // to match the existing Status column convention. Powers the
             // history-bounded direct-session candidate selection in
@@ -231,6 +244,21 @@ public class MohistDbContext : DbContext
             // DESC, never touching historical inactive / completed rows.
             entity.HasIndex(e => new { e.LabelProjectId, e.LabelSourceKind, e.Activity, e.CreatedAt })
                 .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
+
+            // Slack DM identity lookups. The mapping store resolves the
+            // current session by Connection, but Web/CLI session queries
+            // also need to filter by Slack identity; these indexes keep
+            // the AgentSessionQuery.QueryRowsByLabels path index-only.
+            entity.HasIndex(e => e.LabelConnectionId)
+                .HasDatabaseName("IX_AgentSessions_LabelConnectionId");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelConnectionId, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelConnectionId_CreatedAt");
+            entity.HasIndex(e => e.LabelSlackUserId)
+                .HasDatabaseName("IX_AgentSessions_LabelSlackUserId");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LabelSlackUserId, e.CreatedAt })
+                .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelSlackUserId_CreatedAt");
+            entity.HasIndex(e => e.LabelSlackConversationId)
+                .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -1162,6 +1190,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.RouteKind).HasMaxLength(32);
+            entity.Property(e => e.RouteSessionId).HasMaxLength(512);
+            entity.Property(e => e.RouteTurnId).HasMaxLength(512);
             entity.Property(e => e.AcceptedAt).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => new { e.ConnectionId, e.SlackMessageIdentity })
@@ -1206,6 +1237,26 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
             entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind, e.State })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
+        });
+
+        modelBuilder.Entity<SlackDmSessionMappingRow>(entity =>
+        {
+            entity.ToTable("SlackDmSessionMappings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.DmConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CurrentSessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.CurrentMessageTs).HasMaxLength(64);
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ConnectionId, e.DmConversationId })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
         });
     }
 

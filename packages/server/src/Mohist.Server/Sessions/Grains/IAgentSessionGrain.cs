@@ -64,6 +64,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task CompleteTurnStopAsync(string turnId, string operationId);
 
     Task<AgentTurnControlState?> ResolveTurnControlAsync(string turnId);
+    Task<AgentTurnControlState?> ResolveCurrentTurnControlAsync();
 
     Task<AgentSessionInfo?> GetAsync();
     Task EnsureRuntimeSessionPresentAsync();

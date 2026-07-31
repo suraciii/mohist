@@ -790,6 +790,14 @@ public static partial class AgentSessionExtensions
                 JobId: match.JobId);
         }
 
+        public AgentTurnControlState? ResolveCurrentTurnControl()
+        {
+            var turn = (session.Status.Turns ?? [])
+                .OrderByDescending(candidate => candidate.Sequence)
+                .FirstOrDefault(candidate => ClassifyTurn(candidate.Status) != AgentTurnControlClassification.Terminal);
+            return turn is null ? null : session.ResolveTurnControl(turn.Id);
+        }
+
         private static AgentTurnControlClassification ClassifyTurn(AgentTurnStatus status) =>
             status switch
             {

@@ -162,6 +162,7 @@ public sealed class SlackConnectionApiSpecs
                 JsonSerializer.SerializeToElement(new
                 {
                     jobKey = "job-1",
+                    workLabel = "queued work",
                     connectionId = connection.Id,
                     workspaceTeamId = connection.WorkspaceTeamId,
                     dmConversationId = "D123",

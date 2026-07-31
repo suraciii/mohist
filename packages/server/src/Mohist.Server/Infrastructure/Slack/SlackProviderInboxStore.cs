@@ -51,9 +51,11 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
     /// </summary>
     public async Task<SlackProviderInboxAcceptResult> AcceptAsync(
         SlackProviderInboxDraft draft,
+        SlackProviderInboxRouteDraft route,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(draft);
+        ArgumentNullException.ThrowIfNull(route);
         var identityError = draft.Identity.Validate();
         if (!string.IsNullOrEmpty(identityError))
             throw new ArgumentException(identityError, nameof(draft));
@@ -63,6 +65,8 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             throw new ArgumentException("ConnectionId is required.", nameof(draft));
         if (string.IsNullOrWhiteSpace(draft.SlackUserId))
             throw new ArgumentException("SlackUserId is required.", nameof(draft));
+        if (string.IsNullOrWhiteSpace(route.Kind))
+            throw new ArgumentException("Route kind is required.", nameof(route));
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -102,6 +106,9 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
             WorkspaceTeamId = draft.Identity.WorkspaceTeamId,
             DmConversationId = draft.Identity.DmConversationId,
             SlackUserId = draft.SlackUserId,
+            RouteKind = route.Kind,
+            RouteSessionId = route.SessionId,
+            RouteTurnId = route.TurnId,
             AcceptedAt = now,
             CreatedAt = now,
         };
@@ -125,6 +132,51 @@ public sealed class SlackProviderInboxStore : IScopedService, IAgentConnectionPr
                 duplicate?.Id ?? $"slkinb_duplicate:{identity}",
                 AlreadyExisted: true);
         }
+    }
+
+    public async Task<SlackProviderInboxRoute> GetRouteAsync(
+        string projectId,
+        string id,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var route = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => new { row.RouteKind, row.RouteSessionId, row.RouteTurnId })
+            .SingleOrDefaultAsync(ct);
+        if (route?.RouteKind is null)
+            throw new InvalidOperationException($"Slack inbox entry {id} does not have a route.");
+
+        return new SlackProviderInboxRoute(route.RouteKind, route.RouteSessionId, route.RouteTurnId);
+    }
+
+    public async Task<string> SetRouteSessionIdAsync(
+        string projectId,
+        string id,
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await db.SlackProviderInboxRows
+            .Where(row => row.ProjectId == projectId && row.Id == id && row.RouteSessionId == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.RouteSessionId, sessionId), ct);
+        var persisted = await db.SlackProviderInboxRows.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.Id == id)
+            .Select(row => row.RouteSessionId)
+            .SingleOrDefaultAsync(ct);
+        if (string.IsNullOrWhiteSpace(persisted))
+            throw new InvalidOperationException($"Slack inbox entry {id} does not have a routed session.");
+        if (!string.Equals(persisted, sessionId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Slack inbox entry {id} resolved to a different session.");
+
+        return persisted;
     }
 
     /// <summary>

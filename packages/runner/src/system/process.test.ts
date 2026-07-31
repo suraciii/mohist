@@ -1,13 +1,13 @@
 import { EventEmitter } from "node:events"
 import { PassThrough } from "node:stream"
-import type { ChildProcessWithoutNullStreams } from "node:child_process"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { runCommand, setProcessKillerForTest, setProcessSpawnerForTest } from "./process.js"
+import { runCommand, setProcessKillerForTest, setProcessSpawnerForTest, type ProcessSpawner } from "./process.js"
 
-function fakeChild(pid: number) {
-  const child = new EventEmitter() as ChildProcessWithoutNullStreams
-  Object.assign(child, { pid, stdout: new PassThrough(), stderr: new PassThrough() })
-  return child
+function fakeChild(pid: number): ReturnType<ProcessSpawner> & { stdout: PassThrough; stderr: PassThrough } {
+  const stdout = new PassThrough()
+  const stderr = new PassThrough()
+  const child = new EventEmitter() as ReturnType<ProcessSpawner>
+  return Object.assign(child, { pid, stdout, stderr })
 }
 
 afterEach(() => {
@@ -20,7 +20,7 @@ describe("runCommand cancellation", () => {
   it("returns a timeout result and force-kills descendants after the shell exits", async () => {
     vi.useFakeTimers()
     const child = fakeChild(4242)
-    const signals: Array<[number, NodeJS.Signals]> = []
+    const signals: Array<[number, string | number | undefined]> = []
     setProcessSpawnerForTest(() => child)
     setProcessKillerForTest(((pid, signal) => {
       signals.push([pid, signal!])

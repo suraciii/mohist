@@ -20,6 +20,27 @@ public sealed record SlackProviderInboxDraft(
 /// </summary>
 public sealed record SlackProviderInboxAcceptResult(string Id, bool AlreadyExisted);
 
+public static class SlackProviderInboxRouteKinds
+{
+    public const string Launch = "launch";
+    public const string NewTaskLaunch = "new_task_launch";
+    public const string Followup = "followup";
+    public const string Cancel = "cancel";
+    public const string Stop = "stop";
+    public const string NoActiveWork = "no_active_work";
+    public const string AlreadyEnded = "already_ended";
+}
+
+public sealed record SlackProviderInboxRouteDraft(
+    string Kind,
+    string? SessionId = null,
+    string? TurnId = null);
+
+public sealed record SlackProviderInboxRoute(
+    string Kind,
+    string? SessionId,
+    string? TurnId);
+
 /// <summary>
 /// Read model of an inbox row, returned by <c>ListAsync</c> for operator
 /// inspection. <see cref="IsPending"/> mirrors the capacity count: a row

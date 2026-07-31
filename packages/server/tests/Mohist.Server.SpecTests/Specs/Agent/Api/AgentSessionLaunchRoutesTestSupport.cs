@@ -44,7 +44,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string expectedSessionId)
     {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
-        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId);
+        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId)
+            ?? await PollDispatchOnceAsync(runnerId, expectedSessionId);
         if (dispatch is null)
         {
             throw new XunitException(

@@ -29,6 +29,7 @@ namespace Mohist.Server.Agent.Grains;
 public static class AgentJobLineage
 {
     private const int SummaryFactMaxLength = 480;
+    private const int WorkLabelMaxLength = 80;
     private static readonly Regex SecretAssignment = new(
         "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
         RegexOptions.Compiled);
@@ -100,11 +101,13 @@ public static class AgentJobLineage
     public static CloudEvent BuildTerminalDeliveryEnvelope(
         string jobKey,
         PendingTerminalDeliveryEvent payload,
-        IReadOnlyDictionary<string, string> extensions)
+        IReadOnlyDictionary<string, string> extensions,
+        string? sessionLaunchPrompt)
     {
         var data = JsonSerializer.SerializeToElement(new
         {
             jobKey,
+            workLabel = BuildWorkLabel(sessionLaunchPrompt),
             connectionId = payload.Origin.ConnectionId,
             workspaceTeamId = payload.Origin.WorkspaceTeamId,
             slackUserId = payload.Origin.SlackUserId,
@@ -125,6 +128,17 @@ public static class AgentJobLineage
             data: data,
             subject: jobKey,
             extensions: extensions);
+    }
+
+    private static string BuildWorkLabel(string? sessionLaunchPrompt)
+    {
+        var label = SafeSummaryFact(sessionLaunchPrompt);
+        if (string.IsNullOrWhiteSpace(label))
+            return "Unknown task";
+
+        return label.Length <= WorkLabelMaxLength
+            ? label
+            : label[..WorkLabelMaxLength];
     }
 
     private static string? SafeSummaryFact(string? value)
