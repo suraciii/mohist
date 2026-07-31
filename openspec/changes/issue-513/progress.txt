@@ -110,3 +110,8 @@
 
 - The generic follow-up route resolves the canonical session before binding any attachment. Rejected follow-up outcomes now restore only attachments newly claimed by that request to pending ownership and the standard pending TTL.
 - Added regressions proving missing-session and conflicting same-key follow-ups leave their attachment pending and unreadable through the scoped content route. Server specs pass 3518/3518.
+
+## Conflicting launch repair
+
+- Manual launch now restores only attachments newly claimed by a request when the coordinator rejects it for an idempotency conflict, validation/readiness failure, or unexpected setup failure. Recovering launch plans keep their accepted attachments.
+- Added a concurrent same-key, different-attachment launch regression that proves the losing attachment returns to pending ownership and is unavailable through the winning input scope. Server specs pass 3519/3519.

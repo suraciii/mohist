@@ -188,4 +188,47 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
+
+    [Fact]
+    public async Task Launch_ConcurrentConflictingKeyLeavesLosingAttachmentPending()
+    {
+        var projectId = await CreateProjectAsync("launch-attachment-conflict");
+        var runnerId = $"launch-attachment-conflict-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "launch-attachment-conflict-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var firstUpload = await UploadAsync(projectId, "first.txt", "text/plain", "first"u8.ToArray());
+        var secondUpload = await UploadAsync(projectId, "second.txt", "text/plain", "second"u8.ToArray());
+        var idempotencyKey = Guid.NewGuid().ToString("N");
+
+        try
+        {
+            var responses = await Task.WhenAll(
+                LaunchAsync(projectId, agent.Id, new { prompt = "read this", attachments = new[] { firstUpload.Id } }, idempotencyKey),
+                LaunchAsync(projectId, agent.Id, new { prompt = "read this", attachments = new[] { secondUpload.Id } }, idempotencyKey));
+            using var first = responses[0];
+            using var second = responses[1];
+            var createdIndex = first.StatusCode == HttpStatusCode.Created ? 0 : 1;
+            Assert.Equal(HttpStatusCode.Created, responses[createdIndex].StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, responses[1 - createdIndex].StatusCode);
+
+            var createdData = (await responses[createdIndex].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var losingAttachmentId = createdIndex == 0 ? secondUpload.Id : firstUpload.Id;
+            await using var scope = _fixture.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var losingRow = await db.Attachments.AsNoTracking().SingleAsync(attachment => attachment.Id == losingAttachmentId);
+            Assert.Null(losingRow.OwnerKind);
+            Assert.NotNull(losingRow.ExpiresAt);
+
+            var sessionId = createdData.GetProperty("sessionId").GetString()!;
+            var inputId = createdData.GetProperty("inputId").GetString()!;
+            using var content = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{losingAttachmentId}/content");
+            Assert.Equal(HttpStatusCode.NotFound, content.StatusCode);
+            await CompleteLaunchAsync(runnerId, createdData);
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
 }

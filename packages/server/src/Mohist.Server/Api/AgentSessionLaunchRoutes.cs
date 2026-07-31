@@ -231,6 +231,12 @@ public static class AgentSessionLaunchRoutes
                 Title: null);
 
             AgentLaunchResult result;
+            Task RollbackNewlyBoundAttachmentsAsync() => attachments.UnbindAgentInputAsync(
+                project.Id,
+                preMintedSessionId,
+                preMintedInputId,
+                attachmentBatch.NewlyBoundAttachmentIds ?? [],
+                ct);
             try
             {
                 result = await launcher.LaunchIdempotentAsync(
@@ -250,10 +256,12 @@ public static class AgentSessionLaunchRoutes
             }
             catch (ArgumentException ex)
             {
+                await RollbackNewlyBoundAttachmentsAsync();
                 return ApiResults.BadRequest(ex.Message, "validation_failed");
             }
             catch (LaunchIdempotencyConflictException ex)
             {
+                await RollbackNewlyBoundAttachmentsAsync();
                 return ApiResults.Conflict(
                     ex.Message,
                     "launch_idempotency_conflict",
@@ -265,7 +273,13 @@ public static class AgentSessionLaunchRoutes
             }
             catch (AgentReadinessException ex)
             {
+                await RollbackNewlyBoundAttachmentsAsync();
                 return ReadinessRejected(ex);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                await RollbackNewlyBoundAttachmentsAsync();
+                throw;
             }
 
             return AcceptedLaunch(project.Id, result, attachmentBatch.Results);
