@@ -81,6 +81,11 @@ internal static class OtelCommands
             await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
             return CliExitCode.For(CliExitOutcome.OperationFailure);
         }
+        catch (TaskCanceledException)
+        {
+            await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
+        }
 
         if (response is null)
             return CliExitCode.For(CliExitOutcome.OperationFailure);

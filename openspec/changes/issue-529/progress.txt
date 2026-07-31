@@ -43,3 +43,4 @@
 ## Review fixes
 
 - Corrected the `otel` group and `otel query` command presentations to describe Server-routed execution, and extended the group-help spec to reject the removed direct-`otel.db` description.
+- `RunQueryAsync` now maps `TaskCanceledException` to the same standard Server-unavailable diagnostic as connection failures; a `RecordingHttpHandler` timeout fake covers the behavior without wall-clock waiting.

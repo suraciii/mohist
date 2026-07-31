@@ -262,6 +262,21 @@ public class CliOtelCommandSpecs
     }
 
     [Fact]
+    public async Task OtelQuery_ServerTimeout_SurfacesStandardServerUnavailableMessage()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new TaskCanceledException("timeout"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "query", "SELECT 1"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Equal(MohistCliApi.ServerUnavailableMessage + Environment.NewLine, error.ToString());
+        Assert.Empty(output.ToString());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
     public async Task OtelQuery_ServerRejects_SurfacesErrorAndCode()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
