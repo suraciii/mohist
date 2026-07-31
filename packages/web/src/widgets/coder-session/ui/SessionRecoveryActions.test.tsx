@@ -50,9 +50,10 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
         repositories: [],
       }]}>
         <SessionRecoveryActions
-          issueNumber={110}
-          sessionName="session-abc"
-          activity="idle"
+           issueNumber={110}
+           sessionName="session-abc"
+           runtimeSessionId="runtime-abc"
+           activity="idle"
           clients={recoveryClients}
           {...props}
         />
@@ -136,6 +137,16 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
     renderActions({ activity: 'idle' })
     expect(screen.getByTestId('session-recovery-compact')).not.toBeDisabled()
     expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
+  })
+
+  it('disables Compact without a runtime binding but keeps Reset available', () => {
+    renderActions({ runtimeSessionId: null })
+
+    expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
+    expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
+
+    fireEvent.focus(screen.getByTestId('session-recovery-compact').parentElement as HTMLElement)
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Runtime session unavailable')
   })
 })
 
@@ -427,6 +438,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
+            runtimeSessionId="runtime-abc"
             activity="idle"
             clients={recoveryClients}
           />
@@ -452,6 +464,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
           <SessionRecoveryActions
             issueNumber={110}
             sessionName="session-abc"
+            runtimeSessionId="runtime-abc"
             activity="active"
             clients={recoveryClients}
           />

@@ -83,7 +83,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionList =>
                 ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs"],
             MohistCliApi.TableShape.SessionShow =>
-                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns"],
+                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory"],
             MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.SessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.SessionCancel => ["state", "interruptUnconfirmed"],

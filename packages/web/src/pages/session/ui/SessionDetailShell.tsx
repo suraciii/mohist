@@ -253,15 +253,15 @@ export function SessionDetailShell({
         )}
         {(recoverySessionName || recoverySessionId) && (
           <div className="contents md:block md:shrink-0">
-               <SessionRecoveryActions
+            <SessionRecoveryActions
               issueNumber={issueNumber}
               sessionName={recoverySessionName ?? ''}
               genericSessionId={recoverySessionId ?? undefined}
-                 activity={meta?.activity}
-                 recoveryAvailable={recoveryAvailable}
-                 onSettled={handleRecoverySuccess}
-                 bare
-
+              runtimeSessionId={meta?.runtimeSessionId}
+              activity={meta?.activity}
+              recoveryAvailable={recoveryAvailable}
+              onSettled={handleRecoverySuccess}
+              bare
             />
           </div>
         )}
@@ -998,7 +998,7 @@ function SessionInputTurnEvidence({
         {(turns ?? []).map((turn) => (
           <div key={turn.id} data-testid={`session-turn-evidence-${turn.id}`} className="rounded border border-border bg-background px-3 py-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <span className="font-medium text-foreground">Turn {turn.sequence + 1}</span>
+              <span className="font-medium text-foreground">Turn {turn.sequence}</span>
               <span className="font-mono text-muted-foreground">{turn.id}</span>
               <span data-testid={`session-turn-status-${turn.id}`} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{turn.status}</span>
             </div>

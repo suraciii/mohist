@@ -137,6 +137,7 @@ describe('UnifiedSessionPage', () => {
     expect(evidence).toHaveTextContent('accepted: accepted')
     expect(evidence).toHaveTextContent('accepted: pending')
     expect(evidence).toHaveTextContent('delivered: executing')
+    expect(evidence).toHaveTextContent('Turn 1')
     expect(screen.getByTestId('session-turn-evidence-turn-1')).toBeInTheDocument()
   })
 
