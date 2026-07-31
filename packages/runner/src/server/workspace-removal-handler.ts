@@ -8,24 +8,24 @@
 // registry-safety invariant:
 //   - runner-root containment check (rejects `workspace_cleanup_refused`)
 //   - paths outside runnerRoot never mutate the registry
-//   - for in-root paths, registry entry drop before disk deletion (so the
-//     registry tracks disk reality: dropped regardless of whether the
-//     directory exists)
+//   - for in-root paths, path inspection, identity validation, deletion, and
+//     registry mutation run inside one directory removal fence
 //   - `workspace_missing` reply when the directory was already absent
 //   - `workspace_cleanup_failed` reply carrying the error message on
 //     delete failure
 //   - reply shape `{ removed, status, path, reason, message }`
 //
-// The handler deps are minimised: `runnerRoot` (needed for
-// the containment check), `registry` (for the consistent-entry drop),
-// and `pathExists` (kept as an optional injection point, falls through
-// to `existsSync` from `node:fs` so existing tests work unchanged).
+// The handler deps are minimised: `runnerRoot` (needed for the containment
+// check), `registry` (for the consistent-entry drop), a late-bound removal
+// fence, and `pathExists` (kept as an optional injection point, falling
+// through to `existsSync` from `node:fs` when no test seam is supplied).
 
 import { existsSync as defaultExistsSync } from "node:fs"
 import { resolve } from "node:path"
 import * as signalR from "@microsoft/signalr"
 import { deleteDirectory } from "../system/process.js"
 import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } from "../runtime/workspace-query.js"
+import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
 
@@ -33,6 +33,7 @@ export interface WorkspaceRemovalHandlerDeps {
   runnerRoot: string
   registry?: WorkspaceRegistry | null
   pathExists?: typeof defaultExistsSync
+  removalFence?: () => WorkspaceRemovalFence | null
 }
 
 export function registerWorkspaceRemovalHandler(
@@ -55,36 +56,50 @@ export function registerWorkspaceRemovalHandler(
     if (workspacePath !== issueWorkspacePath(deps.runnerRoot, query.workflowRunId)) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_refused", "Workspace path does not belong to the workflow run")
     }
-    if (!pathExists(workspacePath)) {
-      await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-      return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+    const removeWorkspace = async () => {
+      if (!pathExists(workspacePath)) {
+        await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+        return removal(false, "missing", workspacePath, "workspace_missing", "Workspace already removed")
+      }
+      const expected: IssueWorkspaceMarker = {
+        workflowRunId: query.workflowRunId,
+        runBranch: query.branch,
+      }
+      try {
+        await validateWorkspaceIdentity(workspacePath, expected, query.gitUrl, new AbortController().signal, null, deps.runnerRoot)
+      } catch (error) {
+        return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
+      }
+      try {
+        await deleteDirectory(workspacePath)
+        await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
+        return removal(true, "removed", workspacePath, null, "Workspace removed")
+      } catch (error) {
+        return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
+      }
     }
-    const expected: IssueWorkspaceMarker = {
-      workflowRunId: query.workflowRunId,
-      runBranch: query.branch,
-    }
+
+    const fence = deps.removalFence?.() ?? null
+    if (!fence) return await removeWorkspace()
     try {
-      await validateWorkspaceIdentity(workspacePath, expected, query.gitUrl, new AbortController().signal, null, deps.runnerRoot)
-    } catch (error) {
-      return removal(false, "failed", workspacePath, "workspace_identity_mismatch", error instanceof Error ? error.message : String(error))
-    }
-    try {
-      await deleteDirectory(workspacePath)
-      await dropRegistryEntryForPath(deps.registry ?? null, workspacePath)
-      return removal(true, "removed", workspacePath, null, "Workspace removed")
+      const result = await fence.withRemovalFence(workspacePath, removeWorkspace)
+      if (result.kind === "completed") return result.value
+      const message = result.kind === "busy"
+        ? "Workspace is busy and cannot be safely released"
+        : "Workspace cannot be safely released because the removal fence failed"
+      return removal(false, "failed", workspacePath, "workspace_cleanup_failed", message)
     } catch (error) {
       return removal(false, "failed", workspacePath, "workspace_cleanup_failed", error instanceof Error ? error.message : String(error))
     }
   })
 }
 
-// Drop the registry entry whose workspace path resolves to
-// `workspacePath`. Called by the manual RemoveWorkspace handler so the
-// registry stays consistent with disk reality: the entry is dropped
-// regardless of whether the directory existed on disk — an already-missing
-// directory is treated as removed and its entry deleted. `null` is accepted
-// to cover the "query.workspacePath missing" branch — there is no path
-// to match, so the registry is left untouched.
+// Drop the registry entry whose workspace path resolves to `workspacePath`.
+// The caller invokes this only after the removal fence has admitted the
+// directory callback. The entry is dropped regardless of whether the
+// directory existed on disk — an already-missing directory is treated as
+// removed and its entry deleted. `null` is accepted for the query branch
+// with no path, where there is no registry identity to match.
 async function dropRegistryEntryForPath(
   registry: WorkspaceRegistry | null,
   workspacePath: string | null,
