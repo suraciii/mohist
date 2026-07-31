@@ -113,3 +113,23 @@ was wrong. No code change needed.
 - `SlackDmNewTaskIngressSpecs`: 4 / 4 pass, covering mapping switch, prior running Job completion after switching, marker disambiguation, and empty-text rejection.
 - `SlackConnectionRoutesNewTaskMarkerTests`: 22 / 22 pass, covering case-insensitive standalone matching, stripping, and ack variants.
 - Full `npm test` was run twice. The Server SpecTests assembly remained affected by unrelated parallel flakes: `ProjectEventTailApiSpecs` / `AgentSessionQuerierAgentConnectionSpecs` (SQLite `no such table: AgentSessions`), plus one `AgentLaunchObservationRoutesSpecs` timing assertion on the second run. The affected tests pass when run in isolation; the new T-002 specs pass both focused and full-assembly runs.
+
+# issue-524 / T-003 - Terminal delivery work identity
+
+## Codebase Patterns
+
+- The launch coordinator writes the same `plan.Prompt` to the first SessionInput and the durable AgentJob `AgentJobInput.Prompt` before dispatch. Terminal delivery can therefore derive the label from the Job snapshot without reading mutable Session state or the DM current-session mapping.
+- Terminal delivery events are serialized by `AgentJobLineage`, then deserialized by `SlackTerminalDeliveryHandler`; the Slack adapter only receives the rendered outbox text.
+
+## Decisions
+
+- The event field is `workLabel`. It is whitespace-normalized and passed through the existing summary redaction before being limited to 80 characters, keeping the one-line Slack prefix safe and concise.
+- `workLabel` is required by `SlackTerminalDelivery.Validate` and is always rendered as `Task: {label}` before the terminal conclusion. No current-session lookup is performed, so late completed and failed replies retain their originating label after a New task switch.
+- Jobs with no usable launch prompt use the explicit `Unknown task` fallback; normal Slack launches always have the first SessionInput prompt.
+
+## Verification
+
+- `dotnet "packages/server/tests/Mohist.Server.SpecTests/bin/Debug/net11.0/Mohist.Server.SpecTests.dll" -class "Mohist.Server.SpecTests.Specs.Slack.SlackTerminalDeliveryHandlerSpecs" -noAutoReporters`: 5 / 5 pass.
+- Full isolated SpecTests run: 3552 / 3552 pass before the final `npm test` run. UnitTests: 1658 / 1658. ArchTests: 50 / 50.
+- `npm run test:ci --workspaces --if-present`: Web 5200 passed / 1 skipped, Runner 1450 passed, mohist-slack 5 passed.
+- `npm test` reached the full solution but had the existing parallel SpecTests failures: `AgentSessionQuerierAgentConnectionSpecs.ResolveCanonicalFollowupTarget_AgentConnectionSession_ReturnsTarget` (`no such table: AgentSessions`) and `AgentLaunchObservationRoutesSpecs.Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted` (agent job grain wait timeout). The new Slack delivery specs were not among the failures.

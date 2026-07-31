@@ -73,7 +73,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             "failed" => "Reply with corrected instructions or retry after fixing the reported problem.",
             _ => "Wait for reconciliation, then retry only after the outcome is confirmed.",
         };
-        return $"Conclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
+        return $"Task: {delivery.WorkLabel}\nConclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
     }
 
     private static string BuildEvidence(SlackTerminalDelivery delivery)
@@ -105,6 +105,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
 
 public sealed record SlackTerminalDelivery(
     string JobKey,
+    string WorkLabel,
     string ConnectionId,
     string WorkspaceTeamId,
     string DmConversationId,
@@ -118,6 +119,7 @@ public sealed record SlackTerminalDelivery(
     public void Validate()
     {
         if (string.IsNullOrWhiteSpace(JobKey)
+            || string.IsNullOrWhiteSpace(WorkLabel)
             || string.IsNullOrWhiteSpace(ConnectionId)
             || string.IsNullOrWhiteSpace(WorkspaceTeamId)
             || string.IsNullOrWhiteSpace(DmConversationId)
