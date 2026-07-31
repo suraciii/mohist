@@ -133,3 +133,25 @@ was wrong. No code change needed.
 - Full isolated SpecTests run: 3552 / 3552 pass before the final `npm test` run. UnitTests: 1658 / 1658. ArchTests: 50 / 50.
 - `npm run test:ci --workspaces --if-present`: Web 5200 passed / 1 skipped, Runner 1450 passed, mohist-slack 5 passed.
 - `npm test` reached the full solution but had the existing parallel SpecTests failures: `AgentSessionQuerierAgentConnectionSpecs.ResolveCanonicalFollowupTarget_AgentConnectionSession_ReturnsTarget` (`no such table: AgentSessions`) and `AgentLaunchObservationRoutesSpecs.Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted` (agent job grain wait timeout). The new Slack delivery specs were not among the failures.
+
+# issue-524 / T-004 - Cancel and stop from DM
+
+## Codebase Patterns
+
+- DM control resolves the current Session through `SlackDmSessionMappingStore`, then uses the Session grain's atomic `ResolveCurrentTurnControlAsync` to select the highest-sequence queued or executing Turn. The domain method delegates the selected id back through `ResolveTurnControl`, so control classification remains centralized.
+- HTTP cancel/stop and Slack DM control share `AgentSessionTurnControlOperations`; the shared operation owns launch-job cancellation, stop claims, Runner `CancelAgentSession` dispatch, and terminal reconciliation. Surface-specific code only maps the result to HTTP JSON or Slack text.
+- A Slack stop requires a persisted Session runtime binding and a registered `RunnerConnectionTracker` connection. A Job assignment signal alone is not sufficient test setup for the Session Turn's stop target, so DM stop specs seed an attached agent-connection Session with the fake Runner.
+
+## Decisions
+
+- `cancel` and `stop` are case-insensitive standalone leading keywords. A prefix such as `canceling` remains a normal prompt; bot mentions are removed by the existing prompt normalizer before detection.
+- An executing cancel reports that the work is running and that `stop` is required. A terminal current Session reports both that the work ended and that there is no active work, satisfying the two DM outcome phrasings without introducing a second target.
+- The implicit DM target is resolved inside the mapped Session only. When no active Turn exists, the control operation does not query or mutate any other Session.
+
+## Verification
+
+- `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore -p:SkipWebBuild=true`: passed.
+- `dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj --no-restore -p:SkipWebBuild=true`: passed.
+- `Mohist.Server.SpecTests` class `GenericAgentSessionCancelApiSpecs`: 18 / 18 passed after sharing control operations.
+- `Mohist.Server.SpecTests` class `SlackDmWorkControlSpecs`: 6 / 6 passed, covering cancel queued, stop executing, cancel-to-stop, stale Session isolation, no active work, and single-Turn targeting.
+- Final `npm test`: passed — Workflow Definition 175, CLI 1482, Server Unit 1658, Server Arch 50, Server Spec 3558, Web 5200 with 1 skipped, Runner 1450, mohist-slack 5.
