@@ -101,6 +101,22 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
     }
 
     [Fact]
+    public async Task ValidateAndBindAgentInput_ReplayForSameOwnerReturnsAcceptedDescriptor()
+    {
+        var (_, _, _, service) = NewStack();
+        var projectId = "proj-same-owner";
+        var upload = await service.UploadAsync(projectId, NewFormFile("retry.txt", "text/plain", "retry"u8.ToArray()));
+
+        await service.ValidateAndBindAgentInputAsync(projectId, "session-1", "input-1", [upload.Id]);
+        var replay = await service.ValidateAndBindAgentInputAsync(projectId, "session-1", "input-1", [upload.Id]);
+
+        var accepted = Assert.Single(replay.Results);
+        Assert.True(accepted.IsAccepted);
+        Assert.Equal(upload.Id, accepted.Descriptor!.Id);
+        Assert.Equal(1, replay.AcceptedCount);
+    }
+
+    [Fact]
     public async Task ValidateAndBindAgentInput_RejectsUnsupportedContentType()
     {
         var (database, _, _, service) = NewStack();

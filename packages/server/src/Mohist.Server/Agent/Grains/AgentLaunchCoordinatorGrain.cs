@@ -477,4 +477,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     /// and the AgentJob dispatch envelope. Append-only Orleans
     /// field id (next free after <see cref="PreMintedTurnId"/>).
     /// </summary>
-    [property: Id(19)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(19)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    [property: Id(20)] string? PreMintedSessionId = null);

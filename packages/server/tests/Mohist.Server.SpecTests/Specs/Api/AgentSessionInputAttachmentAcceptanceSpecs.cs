@@ -61,6 +61,39 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
     }
 
     [Fact]
+    public async Task Launch_AttachmentContentIsAvailableThroughReturnedSessionAndInputScope()
+    {
+        var projectId = await CreateProjectAsync("launch-attachment-content");
+        var runnerId = $"launch-attachment-content-runner-{Guid.NewGuid():N}";
+        var agent = await CreateAgentAsync(projectId, "attachment-content-agent");
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        var upload = await UploadAsync(projectId, "scope.txt", "text/plain", "scoped-content"u8.ToArray());
+
+        try
+        {
+            var launch = await LaunchAsync(projectId, agent.Id, new
+            {
+                prompt = "read the attachment",
+                attachments = new[] { upload.Id },
+            });
+            Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
+            var body = await launch.Content.ReadFromJsonAsync<JsonElement>();
+            var data = body.GetProperty("data");
+            var sessionId = data.GetProperty("sessionId").GetString();
+            var inputId = data.GetProperty("inputId").GetString();
+
+            using var content = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{upload.Id}/content");
+            Assert.Equal(HttpStatusCode.OK, content.StatusCode);
+            Assert.Equal("scoped-content", await content.Content.ReadAsStringAsync());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
     public async Task Launch_EmptyTextAndNoAttachments_ReturnsInputRequired()
     {
         var projectId = await CreateProjectAsync("launch-empty-input");

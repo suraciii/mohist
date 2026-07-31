@@ -480,6 +480,7 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default) =>

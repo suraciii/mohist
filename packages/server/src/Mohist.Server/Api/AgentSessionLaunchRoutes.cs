@@ -64,6 +64,7 @@ public static class AgentSessionLaunchRoutes
             AgentQuerier agentQuerier,
             IssueQuerier issueQuerier,
             EpicQuerier epicQuerier,
+            AgentReadinessService readiness,
             IAgentLauncher launcher,
             AttachmentService attachments,
             CancellationToken ct) =>
@@ -152,10 +153,33 @@ public static class AgentSessionLaunchRoutes
                     new { fields = new[] { "prompt", "attachments" } });
             }
 
-            // Pre-mint the launch-time input id so we can validate+bind
-            // attachments against a stable owner before the coordinator
-            // commits the plan. The coordinator adopts this id verbatim
-            // when supplied (see AgentLaunchCoordinatorCommandEnvelope).
+            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
+            if (agent is null)
+            {
+                return ApiResults.NotFound($"Agent '{agentRef}' not found");
+            }
+            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
+            {
+                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
+            }
+
+            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier);
+            if (contextError is not null)
+                return contextError;
+
+            try
+            {
+                await readiness.EnsureLaunchableAsync(project.Id, agent, ct);
+            }
+            catch (AgentReadinessException ex)
+            {
+                return ReadinessRejected(ex);
+            }
+
+            // The route mints every identity used by attachment ownership.
+            // The coordinator persists and adopts them as its canonical plan,
+            // so a scoped content read always names the durable SessionInput.
+            var preMintedSessionId = $"agent-session-{Guid.NewGuid():N}";
             var preMintedInputId = Guid.NewGuid().ToString("N");
             var preMintedTurnId = Guid.NewGuid().ToString("N");
 
@@ -164,7 +188,7 @@ public static class AgentSessionLaunchRoutes
             {
                 attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
                     project.Id,
-                    agentSessionId: $"agent-launch-pending/{preMintedInputId}",
+                    agentSessionId: preMintedSessionId,
                     inputId: preMintedInputId,
                     body.Attachments,
                     ct);
@@ -197,20 +221,6 @@ public static class AgentSessionLaunchRoutes
                     });
             }
 
-            var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
-            if (agent is null)
-            {
-                return ApiResults.NotFound($"Agent '{agentRef}' not found");
-            }
-            if (string.Equals(agent.Status, AgentStatus.Archived, StringComparison.Ordinal))
-            {
-                return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
-            }
-
-            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier);
-            if (contextError is not null)
-                return contextError;
-
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
                 IssueNumber: body.Context?.IssueNumber,
@@ -232,6 +242,7 @@ public static class AgentSessionLaunchRoutes
                         .Where(r => r.IsAccepted && r.Descriptor is not null)
                         .Select(r => r.Descriptor!)
                         .ToArray(),
+                    preMintedSessionId,
                     preMintedInputId,
                     preMintedTurnId,
                     ct);

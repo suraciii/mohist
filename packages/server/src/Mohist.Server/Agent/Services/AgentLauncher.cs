@@ -132,6 +132,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string idempotencyKey,
         AgentLaunchCoordinatorRequest request,
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default)
@@ -182,6 +183,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Repository: context.Repository,
             Title: context.Title,
             Request: request,
+            PreMintedSessionId: preMintedSessionId,
             PreMintedInputId: preMintedInputId,
             PreMintedTurnId: preMintedTurnId,
             Attachments: attachments));

@@ -361,20 +361,21 @@ public sealed class AttachmentService : IScopedService
         var now = _time.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
 
+        var rows = await db.Attachments.AsNoTracking()
+            .Where(a => a.ProjectId == projectId && ids.Contains(a.Id))
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
+        var rowsById = rows.ToDictionary(a => a.Id, StringComparer.Ordinal);
+
         var existingCount = await db.Attachments.CountAsync(a =>
                 a.ProjectId == projectId
                 && a.OwnerKind == OwnerKindAgentInput
                 && a.OwnerId == ownerId,
             cancellationToken).ConfigureAwait(false);
 
-        var rows = await db.Attachments.AsNoTracking()
-            .Where(a => a.ProjectId == projectId && ids.Contains(a.Id))
-            .ToListAsync(cancellationToken).ConfigureAwait(false);
-        var rowsById = rows.ToDictionary(a => a.Id, StringComparer.Ordinal);
-
-        var accepted = new List<AttachmentRow>();
-        foreach (var id in ids)
+        var accepted = new List<(int ResultIndex, AttachmentRow Row)>();
+        for (var index = 0; index < ids.Length; index++)
         {
+            var id = ids[index];
             if (!rowsById.TryGetValue(id, out var row))
             {
                 results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.NotFound, "Attachment id was not found for this project."));
@@ -387,7 +388,8 @@ public sealed class AttachmentService : IScopedService
                 continue;
             }
 
-            if (row.OwnerKind is not null)
+            if (row.OwnerKind is not null
+                && !(row.OwnerKind == OwnerKindAgentInput && row.OwnerId == ownerId))
             {
                 results.Add(new AgentInputAttachmentAcceptance(id, null, AgentInputAttachmentRejectionReason.AlreadyBound, "Attachment is already bound to another owner."));
                 continue;
@@ -411,17 +413,14 @@ public sealed class AttachmentService : IScopedService
                 continue;
             }
 
-            accepted.Add(row);
+            var descriptor = ToAgentInputDescriptor(row, now);
             results.Add(new AgentInputAttachmentAcceptance(
                 id,
-                new AgentSessionInputAttachmentDescriptor(
-                    Id: row.Id,
-                    OriginalFileName: row.OriginalFileName,
-                    ContentType: row.ContentType,
-                    Size: row.Size,
-                    AcceptedAt: now),
+                descriptor,
                 null,
                 null));
+            if (row.OwnerKind is null)
+                accepted.Add((results.Count - 1, row));
         }
 
         // Enforce the aggregate per-input attachment cap (already-bound +
@@ -433,23 +432,38 @@ public sealed class AttachmentService : IScopedService
 
         if (accepted.Count > 0)
         {
-            var acceptedIds = accepted.Select(a => a.Id).ToArray();
-            var bindRows = await db.Attachments.Where(a =>
-                    a.ProjectId == projectId
-                    && acceptedIds.Contains(a.Id))
-                .ToListAsync(cancellationToken).ConfigureAwait(false);
-            foreach (var row in bindRows)
+            foreach (var candidate in accepted)
             {
-                row.OwnerKind = OwnerKindAgentInput;
-                row.OwnerId = ownerId;
-                row.OwnerIssueNumber = null;
-                row.ExpiresAt = null;
+                var claimed = await db.Attachments
+                    .Where(row => row.ProjectId == projectId
+                        && row.Id == candidate.Row.Id
+                        && row.OwnerKind == null)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(row => row.OwnerKind, OwnerKindAgentInput)
+                        .SetProperty(row => row.OwnerId, ownerId)
+                        .SetProperty(row => row.OwnerIssueNumber, (int?)null)
+                        .SetProperty(row => row.ExpiresAt, (DateTimeOffset?)null),
+                        cancellationToken).ConfigureAwait(false);
+                if (claimed == 1) continue;
+
+                results[candidate.ResultIndex] = new AgentInputAttachmentAcceptance(
+                    candidate.Row.Id,
+                    null,
+                    AgentInputAttachmentRejectionReason.AlreadyBound,
+                    "Attachment is already bound to another owner.");
             }
-            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        return new AgentInputAttachmentAcceptanceBatch(results, accepted.Count);
+        return new AgentInputAttachmentAcceptanceBatch(results, results.Count(result => result.IsAccepted));
     }
+
+    private static AgentSessionInputAttachmentDescriptor ToAgentInputDescriptor(AttachmentRow row, DateTimeOffset acceptedAt) =>
+        new(
+            Id: row.Id,
+            OriginalFileName: row.OriginalFileName,
+            ContentType: row.ContentType,
+            Size: row.Size,
+            AcceptedAt: acceptedAt);
 
     private async Task<bool> IsReadableAsync(AttachmentRow row, CancellationToken cancellationToken)
     {
