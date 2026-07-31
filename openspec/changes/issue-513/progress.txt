@@ -38,3 +38,20 @@
 - `AttachmentService.ValidateAndBindAgentInputAsync` checks `row.Size > _options.MaxFileBytes` BEFORE checking readability, but the unit test approach (seed a row whose `Size` exceeds the runtime limit) requires bypassing the upload's own size guard — the cleanest path is the FakeTimeProvider + a row inserted via `db.Attachments.Add` so the upload pipeline never sees it.
 - `InMemoryAttachmentStorage.MarkUnreadable(storagePath)` requires the storage path (not the attachment id) and the path must pass `ParseStoragePath` (3 segments, ends in `/content`). Always use `storage.GenerateStoragePath(projectId, attachmentId)` rather than hand-formatting the path.
 - For HTTP integration tests the `Attachments: []` (empty array) is intentional — JSON omits null fields. The followup route returns `Attachments: accepted ?? []` and `RejectedAttachments: rejected ?? []` to guarantee both keys always serialize.
+
+## T-003 decisions
+
+- Runner attachment delivery is centralized in `runtime/attachment-delivery.ts`: accepted descriptors are fetched through `ServerConnection.openAgentInputAttachment`, written below `.mohist/attachments/<inputId>/<attachmentId>/<safeName>`, and represented in a factual `[mohist-attachments]` block. Fetch or materialization failures remain `unavailable` entries and never produce a delivered file or native part.
+- OpenCode receives additive native `file` parts only for image content, using a data URL built from bytes already fetched through the owning-input route. Pi remains workspace-only; both runtimes receive the same manifest content.
+- Follow-up dispatches must carry the stable owning `InputId`; the server now adds it to `AgentSessionFollowupDispatch` and the SignalR payload. Workflow follow-ups also carry the canonical agent session id on the wire so the scoped content route remains usable.
+- The follow-up handler accepts an empty text when descriptors are present, materializes attachments before invoking the runtime, and keeps the durable `session.input` event text-only. Caller URL/token/raw event fields are not read or copied into the prompt, manifest, or outbox record.
+
+## T-003 verification
+
+- Added runner tests for AgentJob and follow-up attachment-only turns, workspace materialization, OpenCode image parts, scoped URL construction, unavailable delivery, manifest attribution, path containment, and secret non-leakage.
+- `npm run typecheck -w packages/runner`, `npm run typecheck:tests -w packages/runner`, `npm run test:ci -w packages/runner`, and `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` are the required final checks; the first full runner test run exposed and was fixed by preserving the existing `FollowupTarget` object shape.
+
+## T-003 follow-up
+
+- Attachment workspace roots now sanitize the dispatch-provided input id as a single path segment; this preserves the normal UUID path while preventing malformed wire values from escaping `.mohist/attachments`.
+- Added an AgentJob executor assertion that a fetched image reaches the fake OpenCode runtime as a native data URL file part; text attachments continue to assert workspace-only delivery.

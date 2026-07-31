@@ -639,7 +639,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         leases[index] = leases[index] with { Dispatching = true, PayloadSealed = true };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
-        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments);
+        var inputId = turn.InputIds.Count == 1 ? turn.InputIds[0] : null;
+        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments, inputId);
     }
 
     private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? CollectAttachmentsForDispatch(

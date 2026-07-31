@@ -403,6 +403,53 @@ export class ServerConnection {
     return response.json() as Promise<AgentSessionRuntimeEventReceipt[]>
   }
 
+  /**
+   * Fetch an accepted attachment's bytes through the owning
+   * SessionInput's scoped content route. The server only serves the
+   * content when the attachment's owner matches the supplied session +
+   * input id; a mismatch (or a missing / expired / unreadable row)
+   * surfaces as `null` so the caller can render an honest
+   * "unavailable" status without leaking the request URL into the
+   * transcript.
+   *
+   * Issue-513: the runner never reaches this surface via caller
+   * temp URLs, tokens, or raw platform event payloads — the wire
+   * identity is the runner's existing server connection plus the
+   * owning `agentSessionId` + `inputId` carried on the dispatch
+   * envelope.
+   */
+  async openAgentInputAttachment(
+    projectId: string,
+    agentSessionId: string,
+    inputId: string,
+    attachmentId: string,
+    signal: AbortSignal,
+  ): Promise<AgentInputAttachmentContent | null> {
+    const response = await fetch(this.agentInputAttachmentContentUrl(projectId, agentSessionId, inputId, attachmentId), {
+      method: "GET",
+      signal,
+    })
+    if (response.status === 404) return null
+    if (!response.ok) throw new Error(`agent-input attachment content failed: ${response.status} ${await response.text()}`)
+    const bytes = new Uint8Array(await response.arrayBuffer())
+    const contentType = response.headers.get("content-type")
+    const contentDisposition = response.headers.get("content-disposition")
+    return {
+      bytes,
+      contentType,
+      contentDisposition,
+    }
+  }
+
+  private agentInputAttachmentContentUrl(
+    projectId: string,
+    agentSessionId: string,
+    inputId: string,
+    attachmentId: string,
+  ): string {
+    return `${this.options.serverUrl.replace(/\/$/, "")}/api/projects/${encodeURIComponent(projectId)}/agent-sessions/${encodeURIComponent(agentSessionId)}/inputs/${encodeURIComponent(inputId)}/attachments/${encodeURIComponent(attachmentId)}/content`
+  }
+
   private async post(path: string, body: unknown, signal: AbortSignal) {
     const response = await fetch(this.url(path), { method: "POST", headers: body === undefined ? undefined : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
@@ -430,6 +477,12 @@ export interface WorkflowAgentSession {
 
 export interface AgentSessionRuntimeEventReceipt {
   type: string
+}
+
+export interface AgentInputAttachmentContent {
+  readonly bytes: Uint8Array
+  readonly contentType: string | null
+  readonly contentDisposition: string | null
 }
 
 export interface AgentSessionRuntimeEventAcceptance {

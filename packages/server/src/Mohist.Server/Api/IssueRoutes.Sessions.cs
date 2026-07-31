@@ -121,11 +121,12 @@ public static partial class IssueRoutes
                 text,
                 idempotencyKey,
                 attachments: null,
+                attachmentResults: null,
                 preMintedInputId: null,
-                sessions,
-                grains,
-                dispatcher,
-                ctx.RequestAborted);
+                sessions: sessions,
+                grains: grains,
+                dispatcher: dispatcher,
+                ct: ctx.RequestAborted);
         });
 
         group.MapPost("/{number:int}/sessions/{name}/cancel", async (

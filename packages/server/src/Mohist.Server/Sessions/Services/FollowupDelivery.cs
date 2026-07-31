@@ -33,6 +33,7 @@ public sealed record FollowupDeliveryRequest(
     /// block; bytes are never carried over the wire — content is fetched
     /// via the owning-input scoped content route.
     /// </summary>
-    IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    string? InputId = null);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

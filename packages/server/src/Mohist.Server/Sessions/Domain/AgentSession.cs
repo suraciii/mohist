@@ -477,7 +477,13 @@ public sealed record AgentSessionFollowupDispatch(
     /// turn. Empty when the turn is text-only. Append-only Orleans
     /// field id (next free after <see cref="InputTexts"/>).
     /// </summary>
-    [property: Id(3)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(3)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// The owning input id for the dispatched attachment content route.
+    /// A follow-up currently consumes one input; null preserves the
+    /// legacy multi-input shape without inventing an owner scope.
+    /// </summary>
+    [property: Id(4)] string? InputId = null);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.

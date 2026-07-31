@@ -44,6 +44,7 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
                 projectId = request.ProjectId,
                 workflowRunId = request.WorkflowRunId,
                 sessionName = request.SessionName,
+                sessionId = request.SessionId,
                 binding,
             }
             : new
@@ -59,6 +60,7 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
             target,
             text = string.Join("\n", request.InputTexts),
             operationId = request.OperationId,
+            inputId = request.InputId,
             attachments = request.Attachments is { Count: > 0 }
                 ? request.Attachments
                     .Select(descriptor => new
