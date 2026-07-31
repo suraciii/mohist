@@ -34,4 +34,5 @@ public sealed record AgentInputAttachmentAcceptance(
 
 public sealed record AgentInputAttachmentAcceptanceBatch(
     IReadOnlyList<AgentInputAttachmentAcceptance> Results,
-    int AcceptedCount);
+    int AcceptedCount,
+    IReadOnlyList<string>? NewlyBoundAttachmentIds = null);

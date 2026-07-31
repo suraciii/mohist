@@ -318,6 +318,32 @@ public sealed class AttachmentService : IScopedService
         CancellationToken cancellationToken = default) =>
         await ValidateAgentInputBindCoreAsync(projectId, BuildAgentInputOwnerId(agentSessionId, inputId), attachmentIds, cancellationToken).ConfigureAwait(false);
 
+    public async Task UnbindAgentInputAsync(
+        string projectId,
+        string agentSessionId,
+        string inputId,
+        IReadOnlyCollection<string> attachmentIds,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAgentInputOwnerScope(agentSessionId, inputId);
+        if (attachmentIds.Count == 0) return;
+
+        var ownerId = BuildAgentInputOwnerId(agentSessionId, inputId);
+        var pendingExpiry = _time.GetUtcNow().Add(PendingTtl);
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        await db.Attachments
+            .Where(row => row.ProjectId == projectId
+                && attachmentIds.Contains(row.Id)
+                && row.OwnerKind == OwnerKindAgentInput
+                && row.OwnerId == ownerId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.OwnerKind, (string?)null)
+                .SetProperty(row => row.OwnerId, (string?)null)
+                .SetProperty(row => row.OwnerIssueNumber, (int?)null)
+                .SetProperty(row => row.ExpiresAt, (DateTimeOffset?)pendingExpiry),
+                cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Validates every submitted attachment id individually, binds
     /// the accepted set to the owning agent-input, and returns a
@@ -373,6 +399,7 @@ public sealed class AttachmentService : IScopedService
             cancellationToken).ConfigureAwait(false);
 
         var accepted = new List<(int ResultIndex, AttachmentRow Row)>();
+        var newlyBoundIds = new List<string>();
         for (var index = 0; index < ids.Length; index++)
         {
             var id = ids[index];
@@ -437,15 +464,26 @@ public sealed class AttachmentService : IScopedService
                 var claimed = await db.Attachments
                     .Where(row => row.ProjectId == projectId
                         && row.Id == candidate.Row.Id
-                        && (row.OwnerKind == null
-                            || (row.OwnerKind == OwnerKindAgentInput && row.OwnerId == ownerId)))
+                        && row.OwnerKind == null)
                     .ExecuteUpdateAsync(setters => setters
                         .SetProperty(row => row.OwnerKind, OwnerKindAgentInput)
                         .SetProperty(row => row.OwnerId, ownerId)
                         .SetProperty(row => row.OwnerIssueNumber, (int?)null)
                         .SetProperty(row => row.ExpiresAt, (DateTimeOffset?)null),
                         cancellationToken).ConfigureAwait(false);
-                if (claimed == 1) continue;
+                if (claimed == 1)
+                {
+                    newlyBoundIds.Add(candidate.Row.Id);
+                    continue;
+                }
+
+                var isOwnedByThisInput = await db.Attachments.AsNoTracking().AnyAsync(row =>
+                    row.ProjectId == projectId
+                    && row.Id == candidate.Row.Id
+                    && row.OwnerKind == OwnerKindAgentInput
+                    && row.OwnerId == ownerId,
+                    cancellationToken).ConfigureAwait(false);
+                if (isOwnedByThisInput) continue;
 
                 results[candidate.ResultIndex] = new AgentInputAttachmentAcceptance(
                     candidate.Row.Id,
@@ -455,7 +493,10 @@ public sealed class AttachmentService : IScopedService
             }
         }
 
-        return new AgentInputAttachmentAcceptanceBatch(results, results.Count(result => result.IsAccepted));
+        return new AgentInputAttachmentAcceptanceBatch(
+            results,
+            results.Count(result => result.IsAccepted),
+            newlyBoundIds);
     }
 
     private static AgentSessionInputAttachmentDescriptor ToAgentInputDescriptor(AttachmentRow row, DateTimeOffset acceptedAt) =>

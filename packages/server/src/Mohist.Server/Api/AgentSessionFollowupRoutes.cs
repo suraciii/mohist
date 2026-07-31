@@ -132,6 +132,10 @@ public static class AgentSessionFollowupRoutes
             }
 
             var project = context.GetResolvedProject();
+            var target = await sessions.ResolveCanonicalFollowupTargetAsync(project.Id, sessionId, ct);
+            if (target is null)
+                return Rejected(sessionId, "not_found", $"Agent session {sessionId} not found");
+
             var idempotencyKey = AgentSessionRecoveryRoutes.RecoveryIdempotencyKey(context);
             if (string.IsNullOrWhiteSpace(idempotencyKey))
                 idempotencyKey = Guid.NewGuid().ToString("N");
@@ -147,7 +151,7 @@ public static class AgentSessionFollowupRoutes
             {
                 attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
                     project.Id,
-                    agentSessionId: sessionId,
+                    agentSessionId: target.SessionId,
                     inputId: preMintedInputId,
                     attachmentIds,
                     ct);
@@ -182,7 +186,13 @@ public static class AgentSessionFollowupRoutes
                 sessions,
                 grains,
                 dispatcher,
-                ct);
+                ct,
+                rollbackAcceptedAttachments: rollbackCt => attachments.UnbindAgentInputAsync(
+                    project.Id,
+                    target.SessionId,
+                    preMintedInputId,
+                    attachmentBatch.NewlyBoundAttachmentIds ?? [],
+                    rollbackCt));
         });
 
         return app;
@@ -225,11 +235,15 @@ public static class AgentSessionFollowupRoutes
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher dispatcher,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<CancellationToken, Task>? rollbackAcceptedAttachments = null)
     {
         var target = await sessions.ResolveCanonicalFollowupTargetAsync(projectId, sessionId, ct);
         if (target is null)
-            return Rejected(sessionId, "not_found", $"Agent session {sessionId} not found");
+            return await RollbackAndReturnAsync(
+                Rejected(sessionId, "not_found", $"Agent session {sessionId} not found"),
+                rollbackAcceptedAttachments,
+                ct);
 
         var grain = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
         AgentSessionFollowupAcceptResult accept;
@@ -245,51 +259,61 @@ public static class AgentSessionFollowupRoutes
         }
         catch (RuntimeSessionMissingException ex)
         {
-            return Rejected(ex.SessionId, "runtime_session_missing", ex.Message);
+            return await RollbackAndReturnAsync(Rejected(ex.SessionId, "runtime_session_missing", ex.Message), rollbackAcceptedAttachments, ct);
         }
         catch (RecoveryOperationInProgressException ex)
         {
-            return Rejected(ex.SessionId, "recovery_in_progress", ex.Message);
+            return await RollbackAndReturnAsync(Rejected(ex.SessionId, "recovery_in_progress", ex.Message), rollbackAcceptedAttachments, ct);
         }
         catch (AgentSessionFollowupCapacityExceededException ex)
         {
-            return Rejected(ex.SessionId, "capacity_exceeded", ex.Message);
+            return await RollbackAndReturnAsync(Rejected(ex.SessionId, "capacity_exceeded", ex.Message), rollbackAcceptedAttachments, ct);
         }
         catch (FollowupOperationInProgressException ex)
         {
-            return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
+            return await RollbackAndReturnAsync(ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId }), rollbackAcceptedAttachments, ct);
         }
         catch (StopOperationInProgressException ex)
         {
-            return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
+            return await RollbackAndReturnAsync(ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId }), rollbackAcceptedAttachments, ct);
         }
         catch (SessionActivityUnknownException ex)
         {
-            return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
+            return await RollbackAndReturnAsync(ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId }), rollbackAcceptedAttachments, ct);
         }
         catch (FollowupConcurrencyLimitException ex)
         {
-            return ApiResults.Conflict(
+            return await RollbackAndReturnAsync(ApiResults.Conflict(
                 ex.Message,
                 "concurrency_limit",
-                new { sessionId = ex.SessionId, agentId = ex.AgentId });
+                new { sessionId = ex.SessionId, agentId = ex.AgentId }), rollbackAcceptedAttachments, ct);
         }
         catch (InvalidOperationException ex)
         {
-            return Rejected(target.SessionId, "followup_rejected", ex.Message);
+            return await RollbackAndReturnAsync(Rejected(target.SessionId, "followup_rejected", ex.Message), rollbackAcceptedAttachments, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
-            return ApiResults.Ok(new AgentSessionFollowupResult(
+            return await RollbackAndReturnAsync(ApiResults.Ok(new AgentSessionFollowupResult(
                 target.SessionId,
                 Status: "unknown",
                 Error: ex.Message,
-                Code: "followup_acceptance_unknown"));
+                Code: "followup_acceptance_unknown")), rollbackAcceptedAttachments, ct);
         }
 
         await dispatcher.DispatchNextAsync(projectId, target.SessionId, ct);
 
         return ApiResults.Ok(BuildAcceptedResult(target.SessionId, accept));
+    }
+
+    private static async Task<IResult> RollbackAndReturnAsync(
+        IResult result,
+        Func<CancellationToken, Task>? rollbackAcceptedAttachments,
+        CancellationToken ct)
+    {
+        if (rollbackAcceptedAttachments is not null)
+            await rollbackAcceptedAttachments(ct);
+        return result;
     }
 
     private static AgentSessionFollowupResult BuildAcceptedResult(string sessionId, AgentSessionFollowupAcceptResult accept)
