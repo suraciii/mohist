@@ -102,44 +102,45 @@ attribution requirement. (c) Continue rejecting events without `event.user` in t
 rejected: the throw occurs before Socket Mode acknowledgement and turns an ignored Bot/unknown event
 into an infinite redelivery.
 
-### D2. A thread→session binding store keyed by (Connection, Channel, ThreadTs), with durable reconciliation
+### D2. A thread→session binding store keyed by (Connection, Workspace, Channel, ThreadTs), with durable reconciliation
 
 Add `Infrastructure/Slack/SlackThreadSessionMappingStore.cs` with
 `Infrastructure/Data/Slack/SlackThreadSessionMappingRow.cs`, uniquely indexed on
-`(ConnectionId, ConversationId, ThreadTs)` → `SessionId` (plus `ProjectId/WorkspaceTeamId/SlackUserId`
-denormalized for audit). `ConversationId` is part of the key because Slack guarantees `MessageTs`
-only within a channel; the same Connection can be present in several channels. It implements
-`IAgentConnectionProviderCleanup` so Connection delete cascades. Operations are:
+`(ConnectionId, WorkspaceTeamId, ConversationId, ThreadTs)` → `SessionId` (plus
+`ProjectId/SlackUserId` denormalized for audit). `WorkspaceTeamId` and `ConversationId` are part of
+the key because Slack's stable message identity is workspace + channel + timestamp; a Project can
+manage Connections in several workspaces and the same Connection can be present in several channels.
+It implements `IAgentConnectionProviderCleanup` so Connection delete cascades. Operations are:
 
-- `GetSessionIdAsync(projectId, connectionId, conversationId, threadTs)`;
-- `ListBindingsAsync(projectId, conversationId, threadTs)` to resolve the exact set and cardinality
-  of Agents bound to one thread; and
-- `BindAsync(projectId, connectionId, conversationId, threadTs, sessionId)`, an idempotent upsert
-  that does **not** swap on repeat (a bound `(connection, channel, thread)` keeps its session;
-  threads have no New-task switch).
+- `GetSessionIdAsync(projectId, workspaceTeamId, connectionId, conversationId, threadTs)`;
+- `ListBindingsAsync(projectId, workspaceTeamId, conversationId, threadTs)` to resolve the exact set
+  and cardinality of Agents bound to one thread; and
+- `BindAsync(projectId, workspaceTeamId, connectionId, conversationId, threadTs, sessionId)`, an
+  idempotent upsert that does **not** swap on repeat (a bound `(connection, workspace, channel,
+  thread)` keeps its session; threads have no New-task switch).
 
 Thread identity is the root message ts: for a root mention it is the message's own ts; for a reply
 it is the envelope `thread_ts`.
 
 Multi-Agent-per-thread falls out of the key: different Connections produce different rows under the
-same `(conversation, thread_ts)`, each pointing at its own session. There is no "current session per
-thread" shared across Agents.
+same `(workspace, conversation, thread_ts)`, each pointing at its own session. There is no "current
+session per thread" shared across Agents.
 
 `LaunchConnectionAsync` and the mapping write cannot share a transaction. The launch branch SHALL
 therefore first persist the resolved session id on the accepted root inbox route, then idempotently
 bind that persisted id before replying. Every channel ingress that finds no mapping SHALL reconcile
 before classifying the message: it looks up the accepted root inbox route by
-`(connection, conversation, threadTs)` and, if that route has a session id, repairs the mapping; if
-the route is absent but a unique session with matching connection/conversation/thread provenance
-labels exists, it repairs from that session. Only after both recovery sources are absent is the thread
-treated as unbound. This makes a crash after launch but before `BindAsync` recoverable by either root
-redelivery or the next thread reply.
+`(connection, workspace, conversation, threadTs)` and, if that route has a session id, repairs the
+mapping; if the route is absent but a unique session with matching connection/conversation/thread
+provenance labels exists, it repairs from that session. Only after both recovery sources are absent is
+the thread treated as unbound. This makes a crash after launch but before `BindAsync` recoverable by
+either root redelivery or the next thread reply.
 
 **Rationale:** the DM mapping (524 D1) is a *current-session* concept whose upsert swaps on a New
 task and whose unique key is `(ConnectionId, DmConversationId)`. Thread binding is append-once-per-
-`(connection, channel, thread)` with no swap. Overloading the DM store would either prevent multiple
-Agents per thread (its unique key collapses them) or risk a thread reply swapping a "current" session
-that threads do not have. The inbox/outbox/DM-mapping trio established the per-connection
+`(connection, workspace, channel, thread)` with no swap. Overloading the DM store would either
+prevent multiple Agents per thread (its unique key collapses them) or risk a thread reply swapping a
+"current" session that threads do not have. The inbox/outbox/DM-mapping trio established the per-connection
 infrastructure pattern; a fourth store of the same shape is consistent. The inbox route and Session
 labels are durable recovery facts already owned by the Server, so reconciliation adds no second
 authority.
@@ -163,7 +164,8 @@ machine is:
 1. **Acceptance gate.** A normalized `bot` or `unknown` sender is acknowledged and ignored with no
    resources. A human sender's plain channel message — i.e. not a root mention of any workspace Bot
    and not a reply in a thread with a binding — is also ignored. The `ListBindingsAsync` result from
-   D2, not a per-Connection lookup alone, determines whether the thread has one or several bindings.
+   D2, scoped to the inbound `WorkspaceTeamId`, not a per-Connection lookup alone, determines whether
+   the thread has one or several bindings.
 2. **Target resolution** (using D4's workspace bot set `W` and the parsed mentions `M`):
    - `|M ∩ W| ≥ 2` → **ambiguous**; contribute to the once-only prompt (D5), trigger nothing.
    - `|M ∩ W| = 1`, target `T`:
@@ -308,8 +310,8 @@ owns that surface and would have to migrate any premature model.
 1. **Adapter envelope (D1):** `normalizeSocketEvent` + `SlackEnvelope` gain `threadTs`,
    `mentionedUserIds`, and normalized sender kind; Bot/unknown events are acknowledged and ignored.
    Outbox drain posts `thread_ts`. Add TS types + tests.
-2. **Storage (D2, D4, D5):** `SlackThreadSessionMappingStore` + channel-scoped row, binding-list
-   query, DbContext index, and EF migration; inbox route/provenance lookup for binding repair;
+2. **Storage (D2, D4, D5):** `SlackThreadSessionMappingStore` + workspace-and-channel-scoped row,
+   binding-list query, DbContext index, and EF migration; inbox route/provenance lookup for binding repair;
    `SlackAmbiguousPromptStore` + row + migration; `AgentConnectionStore.ListBoundBotsByWorkspaceAsync`.
    All additive.
 3. **Ingress state machine (D3, D7):** channel branch in `/ingress`; channel route kinds; owner

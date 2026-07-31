@@ -60,9 +60,9 @@ thread 的独立归属。
   当前 `:281` 对非 DM 一律 `ignored`；需在「忽略 / 拒绝 / launch / follow-up」之间按频道
   场景分流——解析提及、判断 thread 是否已绑定、归属唯一时 launch 或 follow-up、归属不
   明时只回复一次选择提示。`SlackIngressBody`（`:973`）缺 `thread_ts` 与 mention 信息。
-- **Server — thread 会话映射**: 新增 channel + thread →（Connection, AgentSession）映射存储，
-  键为 Connection、Slack channel/conversation 与 thread 根消息 ts，既避免不同频道的同 ts 串线，
-  又支持同一 thread 多个 Agent（当前 `SlackDmSessionMappingStore` 唯一索引为
+- **Server — thread 会话映射**: 新增 workspace + channel + thread →（Connection, AgentSession）
+  映射存储，键为 Connection、Slack workspace、channel/conversation 与 thread 根消息 ts，既避免不同
+  workspace 或频道的同 ts 串线，又支持同一 thread 多个 Agent（当前 `SlackDmSessionMappingStore` 唯一索引为
   `ConnectionId+DmConversationId`，无法表达多 Agent 同一 thread）；与 DM current-session 映射
   是两套语义（thread 无 New task 切换）。映射缺失时必须能由持久 inbox 路由或 Session provenance
   幂等修复，避免 launch 成功后重启把后续 thread 回复变成新工作或丢弃。删除 Connection 时随
