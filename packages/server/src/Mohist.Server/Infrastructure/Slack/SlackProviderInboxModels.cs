@@ -29,6 +29,10 @@ public static class SlackProviderInboxRouteKinds
     public const string Stop = "stop";
     public const string NoActiveWork = "no_active_work";
     public const string AlreadyEnded = "already_ended";
+    public const string LaunchThread = "launch_thread";
+    public const string FollowupThread = "followup_thread";
+    public const string Ambiguous = "ambiguous";
+    public const string Ignored = "ignored";
 }
 
 public sealed record SlackProviderInboxRouteDraft(

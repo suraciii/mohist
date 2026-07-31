@@ -82,6 +82,7 @@ public class MohistDbContext : DbContext
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
     public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
+    public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -1262,6 +1263,30 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackThreadSessionMappingRow>(entity =>
+        {
+            entity.ToTable("SlackThreadSessionMappings");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.RootMessageTs).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ConnectionId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackThreadSessionMappings_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.WorkspaceTeamId, e.ConversationId, e.ThreadTs })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
         });
     }
 
