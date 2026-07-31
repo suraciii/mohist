@@ -65,7 +65,7 @@ public class SlackThreadSessionMappingMigrationSpecs
     [Fact]
     public async Task Up_AddsWorkspaceLookupIndex()
     {
-        await using var database = CreateDatabase();
+        await using var database = CreateDatabase("20260731150000_AddSlackThreadWorkspaceLookupIndex");
         await using var context = database.CreateDbContext();
 
         var indexes = await ReadIndexesAsync(context, "SlackThreadSessionMappings");

@@ -17,8 +17,9 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// most once per ambiguous message</c>). D5: the row is
 /// <c>INSERT ... ON CONFLICT DO NOTHING</c>; the race winner records
 /// <see cref="SlackAmbiguousPromptResult.Claimed"/> = true and posts
-/// the prompt from its own outbox, losers observe the row exists and
-/// no-op.
+/// the prompt from its own outbox. If that delivery is not persisted,
+/// the same winner can retry with the stable delivery reference; other
+/// callers observe an existing claim with a delivery and no-op.
 /// </summary>
 /// <remarks>
 /// The row is short-lived advisory state that does NOT participate in
@@ -43,11 +44,10 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
     /// <summary>
     /// First-writer-wins claim. Returns
     /// <see cref="SlackAmbiguousPromptResult.Claimed"/> = true when this
-    /// caller inserted the row and must post the prompt; the race
-    /// loser observes the row already exists and the prompt should
-    /// not be posted by this caller. Losers can still read
-    /// <see cref="SlackAmbiguousPromptResult.Existing"/> to confirm
-    /// who won the race; only the winner needs the outbox post.
+    /// caller inserted the row, or when it is the winner retrying after
+    /// the row was written but its outbox delivery was not. The stable
+    /// delivery reference makes concurrent retries idempotent in the
+    /// outbox.
     /// </summary>
     public async Task<SlackAmbiguousPromptResult> TryClaimAsync(
         string projectId,
@@ -73,6 +73,7 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             throw new ArgumentNullException(nameof(mentionedConnectionIds));
 
         var now = _timeProvider.GetUtcNow();
+        var dispatchRef = PromptDispatchRef(workspaceTeamId, conversationId, messageTs);
         var serialized = JSON.Serialize(mentionedConnectionIds);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -102,9 +103,25 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             })
             .SingleAsync(ct);
 
+        var claimed = inserted > 0;
+        if (!claimed && string.Equals(existing.WinningConnectionId, winningConnectionId, StringComparison.Ordinal))
+        {
+            var deliveryExists = await db.SlackOutboxRows.AsNoTracking()
+                .AnyAsync(row => row.ConnectionId == winningConnectionId
+                    && row.Kind == SlackOutboxKinds.UserAction
+                    && row.DispatchRef == dispatchRef, ct);
+            claimed = !deliveryExists;
+        }
+
         var mentioned = DeserializeMentioned(existing.MentionedConnectionIdsJson);
-        return new SlackAmbiguousPromptResult(inserted > 0, existing.Id, existing.WinningConnectionId, existing.ThreadTs, mentioned);
+        return new SlackAmbiguousPromptResult(claimed, existing.Id, existing.WinningConnectionId, existing.ThreadTs, mentioned);
     }
+
+    public static string PromptDispatchRef(
+        string workspaceTeamId,
+        string conversationId,
+        string messageTs) =>
+        $"slack-ambiguous:{workspaceTeamId}:{conversationId}:{messageTs}";
 
     private static IReadOnlyList<string> DeserializeMentioned(string json)
     {
@@ -122,11 +139,10 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
 
 /// <summary>
 /// Outcome of <see cref="SlackAmbiguousPromptStore.TryClaimAsync"/>.
-/// When <see cref="Claimed"/> is true the caller is the race winner
-/// and must post the prompt via its own outbox; when false another
-/// caller already claimed it (likely a concurrent per-Connection
-/// ingress for the same ambiguous message, or a Slack redelivery)
-/// and the prompt is the loser's no-op.
+/// When <see cref="Claimed"/> is true the caller is the race winner, or
+/// the winner is retrying a delivery that was not persisted. It must
+/// ensure the prompt exists in its own outbox. When false another
+/// caller already claimed it and its delivery is present.
 /// </summary>
 public sealed record SlackAmbiguousPromptResult(
     bool Claimed,

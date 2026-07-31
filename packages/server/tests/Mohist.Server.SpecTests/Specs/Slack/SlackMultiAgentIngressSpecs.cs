@@ -37,7 +37,7 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs = "1710000000.010100",
             threadTs = (string?)null,
             mentionedUserIds = new[] { connectionA.BotUserId, connectionB.BotUserId },
-            senderSlackUserId = "U_OWNER",
+            senderSlackUserId = connectionA.OwnerSlackUserId,
             senderKind = "human",
             text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> who answers?",
         };
@@ -76,7 +76,7 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs = "1710000000.010200",
             threadTs = (string?)null,
             mentionedUserIds = new[] { connectionA.BotUserId, connectionB.BotUserId },
-            senderSlackUserId = "U_OWNER",
+            senderSlackUserId = connectionA.OwnerSlackUserId,
             senderKind = "human",
             text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> task",
         };
@@ -93,7 +93,7 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs = "1710000000.010200",
             threadTs = (string?)null,
             mentionedUserIds = new[] { connectionA.BotUserId, connectionB.BotUserId },
-            senderSlackUserId = "U_OWNER",
+            senderSlackUserId = connectionB.OwnerSlackUserId,
             senderKind = "human",
             text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> task",
         };
@@ -130,7 +130,7 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs = "1710000000.010300",
             threadTs = (string?)null,
             mentionedUserIds = new[] { connectionA.BotUserId, connectionB.BotUserId },
-            senderSlackUserId = "U_OWNER",
+            senderSlackUserId = connectionA.OwnerSlackUserId,
             senderKind = "human",
             text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> task",
         };
@@ -150,6 +150,63 @@ public sealed class SlackMultiAgentIngressSpecs
                 && row.Kind == SlackOutboxKinds.UserAction)
             .ToListAsync();
         Assert.Single(promptRows);
+    }
+
+    [Fact]
+    public async Task Ambiguous_prompt_retries_after_claim_without_delivery()
+    {
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-retry", "U_OWNER", "A_BOT_RETRY_A");
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-retry", "U_OWNER", "A_BOT_RETRY_B");
+        const string conversationId = "C-multi-retry";
+        const string messageTs = "1710000000.010350";
+
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var prompts = scope.ServiceProvider.GetRequiredService<SlackAmbiguousPromptStore>();
+            await prompts.TryClaimAsync(
+                connectionA.ProjectId, connectionA.WorkspaceTeamId, conversationId, messageTs,
+                null, connectionA.Id, new[] { connectionA.Id, connectionB.Id });
+        }
+
+        var replay = await PostChannelAsync(connectionA, conversationId,
+            messageTs, null,
+            new[] { connectionA.BotUserId, connectionB.BotUserId },
+            $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose");
+        Assert.Equal("ambiguous", replay.GetProperty("kind").GetString());
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var db = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var promptRows = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connectionA.Id
+                && row.DispatchRef == SlackAmbiguousPromptStore.PromptDispatchRef(
+                    connectionA.WorkspaceTeamId, conversationId, messageTs))
+            .ToListAsync();
+        Assert.Single(promptRows);
+    }
+
+    [Fact]
+    public async Task Non_owner_ambiguous_message_is_rejected_without_prompt()
+    {
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-owner", "U_OWNER", "A_BOT_OWNER_A");
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-owner", "U_OWNER_B", "A_BOT_OWNER_B");
+
+        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connectionA), new
+        {
+            isDirectMessage = false,
+            teamId = connectionA.WorkspaceTeamId,
+            conversationId = "C-multi-owner",
+            messageTs = "1710000000.010360",
+            threadTs = (string?)null,
+            mentionedUserIds = new[] { connectionA.BotUserId, connectionB.BotUserId },
+            senderSlackUserId = "U_OTHER",
+            senderKind = "human",
+            text = $"<@{connectionA.BotUserId}> <@{connectionB.BotUserId}> choose",
+        });
+
+        response.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        Assert.Equal("rejected", doc.RootElement.GetProperty("data").GetProperty("kind").GetString());
+        Assert.Contains("owner", doc.RootElement.GetProperty("data").GetProperty("reason").GetString()!, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

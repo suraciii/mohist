@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Services;
@@ -18,6 +19,10 @@ namespace Mohist.Server.Api;
 
 public static class SlackConnectionRoutes
 {
+    private static readonly Regex SlackMentionToken = new(
+        @"<@(?<id>[A-Za-z0-9_-]+)(?:\|[^>]*)?>",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     public static WebApplication MapSlackConnectionRoutes(this WebApplication app)
     {
         var management = app.MapGroup("/api/projects/{projectRef}/slack-connections")
@@ -435,10 +440,13 @@ public static class SlackConnectionRoutes
 
     private static string RemoveBotMention(string text, string botUserId)
     {
-        var result = text.Trim();
-        if (!string.IsNullOrWhiteSpace(botUserId))
-            result = result.Replace($"<@{botUserId}>", string.Empty, StringComparison.OrdinalIgnoreCase).Trim();
-        return result;
+        if (string.IsNullOrWhiteSpace(botUserId))
+            return text.Trim();
+
+        return SlackMentionToken.Replace(text.Trim(), match =>
+            string.Equals(match.Groups["id"].Value, botUserId, StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : match.Value).Trim();
     }
 
     /// <summary>
@@ -855,8 +863,7 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "rejected", reason = decision.Reason });
         }
 
-        if (connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
-            && connection.HealthReason?.Contains("backpressured", StringComparison.OrdinalIgnoreCase) == true)
+        if (IsBackpressured(connection))
             return ApiResults.Conflict(
                 "This Slack Connection is backpressured; retry after pending deliveries drain.",
                 "slack_backpressured");
@@ -1062,6 +1069,11 @@ public static class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
 
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
+
         var rootTs = !string.IsNullOrWhiteSpace(body.ThreadTs) ? body.ThreadTs : body.MessageTs;
         var mentionedUserIds = BuildMentionedBotIds(body.MentionedUserIds);
         var ownBotUserId = connection.BotUserId ?? string.Empty;
@@ -1072,11 +1084,15 @@ public static class SlackConnectionRoutes
             body.TeamId, body.ConversationId, rootTs, ct);
 
         if (mentionedWorkspaceBots.Count >= 2)
+        {
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+                return await RejectNonOwnerChannelMessageAsync(req, ct);
             return await HandleAmbiguousPromptAsync(
                 req,
                 mentionedWorkspaceBots.Select(b => b.BotUserId).ToArray(),
                 mentionedWorkspaceBots.Select(b => b.ConnectionId).Distinct(StringComparer.Ordinal).ToArray(),
                 ct);
+        }
 
         if (mentionedWorkspaceBots.Count == 1)
         {
@@ -1140,6 +1156,8 @@ public static class SlackConnectionRoutes
 
         if (threadBindings.Count >= 2)
         {
+            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
+                return await RejectNonOwnerChannelMessageAsync(req, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
             var botLabels = threadBindings
                 .Select(binding => botLookup.TryGetValue(binding.ConnectionId, out var label) ? label : binding.ConnectionId)
@@ -1325,6 +1343,8 @@ public static class SlackConnectionRoutes
 
         var labelSummary = string.Join(", ", ambiguousBotLabels);
         var promptText = $"Multiple Agents could answer this; mention a single Bot to address one. Mentioned: {labelSummary}.";
+        var dispatchRef = SlackAmbiguousPromptStore.PromptDispatchRef(
+            body.TeamId, body.ConversationId, body.MessageTs);
 
         var claim = await req.AmbiguousPrompts.TryClaimAsync(
             projectId, body.TeamId, body.ConversationId, body.MessageTs,
@@ -1333,10 +1353,24 @@ public static class SlackConnectionRoutes
         if (!claim.Claimed)
             return ApiResults.Ok(new { kind = "ambiguous", reason = "Another Bot is responding.", winner = claim.WinningConnectionId });
 
-        await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            promptText, null, ct, body.ThreadTs);
+        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+            promptText, dispatchRef, ct, body.ThreadTs);
         return ApiResults.Ok(new { kind = "ambiguous", reason = promptText });
     }
+
+    private static async Task<IResult> RejectNonOwnerChannelMessageAsync(
+        HandleChannelIngressRequest req,
+        CancellationToken ct)
+    {
+        const string reason = "This Slack Connection is available only to its owner.";
+        await EnqueueReplyAsync(req.Outbox, req.ProjectId, req.Connection, req.Body.ConversationId,
+            reason, null, ct, req.Body.ThreadTs);
+        return ApiResults.Ok(new { kind = "rejected", reason });
+    }
+
+    private static bool IsBackpressured(AgentConnection connection) =>
+        connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
+        && connection.HealthReason?.Contains("backpressured", StringComparison.OrdinalIgnoreCase) == true;
 
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
@@ -1445,6 +1479,8 @@ public static class SlackConnectionRoutes
 
         if (accepted.AlreadyExisted)
         {
+            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                BuildFollowupAck("already_accepted", inboxAlreadyExisted: true), dispatchRef, ct, body.ThreadTs);
             await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new { kind = "already_accepted", sessionId, threadRoot = body.ThreadTs ?? body.MessageTs });
         }
