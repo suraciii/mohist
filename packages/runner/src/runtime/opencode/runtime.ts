@@ -256,13 +256,18 @@ export class OpenCodeRuntime {
       }])
       return { ok: false, error, diagnostics: error.diagnostics }
     }
+    const server = this.state.server
     try {
       const deps: TurnExecutionDeps = {
-        client: this.state.server.client,
+        client: server.client,
         events: this.state.events,
         ...(this.deps.providerErrorPolicy ? { policy: this.deps.providerErrorPolicy } : {}),
       }
-      return await runTurn(request, deps, signal, observer)
+      const result = await runTurn(request, deps, signal, observer)
+      if (!result.ok && result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")) {
+        this.triggerRebuild(server)
+      }
+      return result
     } finally {
       inFlight.end(sessionKey)
     }
@@ -512,22 +517,9 @@ export class OpenCodeRuntime {
   }
 
   private watchExit(events: RuntimeEventSubscription, server: OpencodeServerHandle): void {
-    const triggerRebuild = () => {
-      if (this.state.rebuildTriggered) return
-      if (!this.state.ready) return
-      if (this.state.server !== server) return
-      this.state.rebuildTriggered = true
-      this.state.ready = false
-      this.state.diagnostic = {
-        severity: "error",
-        code: "server-exit",
-        message: "OpenCode server exited; rebuilding runtime",
-      }
-      this.scheduleRebuild()
-    }
     const listener = (event: { type: string }) => {
       if (event.type === "server.disconnected" || event.type === "server.heartbeat-failed") {
-        triggerRebuild()
+        this.triggerRebuild(server)
       }
     }
     events.subscribe(listener)
@@ -536,6 +528,20 @@ export class OpenCodeRuntime {
       // path above triggers the rebuild. This promise is intentionally
       // long-lived so external code can await it on shutdown.
     })
+  }
+
+  private triggerRebuild(server: OpencodeServerHandle): void {
+    if (this.state.rebuildTriggered) return
+    if (!this.state.ready) return
+    if (this.state.server !== server) return
+    this.state.rebuildTriggered = true
+    this.state.ready = false
+    this.state.diagnostic = {
+      severity: "error",
+      code: "server-exit",
+      message: "OpenCode server exited; rebuilding runtime",
+    }
+    this.scheduleRebuild()
   }
 
   private scheduleRebuild(): void {

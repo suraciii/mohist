@@ -588,6 +588,34 @@ describe("OpenCodeRuntime.runTurn — provider-error failure policy", () => {
 })
 
 describe("OpenCodeRuntime.runTurn — restart reconciliation", () => {
+  it("Rebuilds after a transport failure whose abort confirmation cannot reach the server", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client } = buildRuntime({ rebuildDelayMs: 50 })
+      const serverFactory = vi.fn(deps.serverFactory)
+      const runtime = new OpenCodeRuntime({ ...deps, serverFactory })
+      await runtime.start()
+      client.sessionPrompt.mockRejectedValueOnce(new TypeError("fetch failed"))
+      client.sessionAbort.mockRejectedValueOnce(new TypeError("fetch failed"))
+
+      const result = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "do",
+      }, new AbortController().signal)
+
+      expect(result.ok).toBe(false)
+      if (result.ok) return
+      expect(result.error.diagnostics.some((diagnostic) => diagnostic.code === "opencode-transport-failed")).toBe(true)
+      expect(runtime.ready()).toBe(false)
+
+      await vi.advanceTimersByTimeAsync(50)
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("Reconciles state from session.status/get/messages on reconnect without V2 replay state", async () => {
     vi.useFakeTimers()
     try {
