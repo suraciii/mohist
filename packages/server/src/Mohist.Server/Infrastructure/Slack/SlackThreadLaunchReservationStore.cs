@@ -8,6 +8,8 @@ namespace Mohist.Server.Infrastructure.Slack;
 
 public sealed class SlackThreadLaunchReservationStore : IScopedService, IAgentConnectionProviderCleanup
 {
+    internal static readonly TimeSpan StaleThreshold = TimeSpan.FromMinutes(5);
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
@@ -32,8 +34,16 @@ public sealed class SlackThreadLaunchReservationStore : IScopedService, IAgentCo
         Validate(projectId, workspaceTeamId, connectionId, conversationId, threadTs, launchMessageTs, slackUserId);
 
         var now = _timeProvider.GetUtcNow();
+        var staleCutoff = now - StaleThreshold;
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
+            DELETE FROM "SlackThreadLaunchReservations"
+            WHERE "ConnectionId" = {connectionId}
+              AND "WorkspaceTeamId" = {workspaceTeamId}
+              AND "ConversationId" = {conversationId}
+              AND "ThreadTs" = {threadTs}
+              AND "SessionId" IS NULL
+              AND "CreatedAt" < {staleCutoff};
             INSERT INTO "SlackThreadLaunchReservations" (
                 "Id", "ProjectId", "ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs",
                 "LaunchMessageTs", "SlackUserId", "SessionId", "CreatedAt", "UpdatedAt")

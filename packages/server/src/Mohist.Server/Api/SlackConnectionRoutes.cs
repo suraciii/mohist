@@ -604,6 +604,7 @@ public static class SlackConnectionRoutes
             "already_accepted" => "This message was already accepted.",
             "executing" => "Continuing. Running now.",
             "queued" => "Continuing. Will resume after the current step finishes.",
+            "rejected" => "Could not continue the session. Please try again or start a new task.",
             _ => "Continuing.",
         };
     }
@@ -1086,11 +1087,6 @@ public static class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
 
-        if (IsBackpressured(connection))
-            return ApiResults.Conflict(
-                "This Slack Connection is backpressured; retry after pending deliveries drain.",
-                "slack_backpressured");
-
         var rootTs = !string.IsNullOrWhiteSpace(body.ThreadTs) ? body.ThreadTs : body.MessageTs;
         var mentionedUserIds = BuildMentionedBotIds(body.MentionedUserIds);
         var ownBotUserId = connection.BotUserId ?? string.Empty;
@@ -1460,6 +1456,11 @@ public static class SlackConnectionRoutes
         var connection = req.Connection;
         var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
 
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
+
         var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
         if (agent is null)
             return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
@@ -1577,6 +1578,11 @@ public static class SlackConnectionRoutes
         var projectId = req.ProjectId;
         var connection = req.Connection;
         var dispatchRef = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+
+        if (IsBackpressured(connection))
+            return ApiResults.Conflict(
+                "This Slack Connection is backpressured; retry after pending deliveries drain.",
+                "slack_backpressured");
 
         if (string.IsNullOrWhiteSpace(prompt))
         {

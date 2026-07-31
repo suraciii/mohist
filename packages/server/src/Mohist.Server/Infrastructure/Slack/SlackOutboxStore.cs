@@ -167,13 +167,39 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             UpdatedAt = now,
         };
         db.SlackOutboxRows.Add(row);
-        await db.SaveChangesAsync(ct);
-        await transaction.CommitAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
+        {
+            db.Entry(row).State = EntityState.Detached;
+            var duplicate = await db.SlackOutboxRows.AsNoTracking()
+                .Where(r => r.ConnectionId == draft.ConnectionId
+                    && r.Kind == draft.Kind
+                    && r.DispatchRef == draft.DispatchRef)
+                .Select(r => new { r.Id })
+                .FirstOrDefaultAsync(ct);
+            await transaction.CommitAsync(ct);
+            return new SlackOutboxEnqueueResult(duplicate?.Id ?? string.Empty, MergedIntoExisting: true);
+        }
 
         if (backpressured)
             await _healthBackpressurer.FlipBackpressuredAsync(
                 draft.ProjectId, draft.ConnectionId, SlackProviderBackpressureReasons.OutboxOverflow, ct);
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
+    }
+
+    private static bool IsDispatchRefConflict(DbUpdateException ex)
+    {
+        for (var inner = (Exception?)ex; inner is not null; inner = inner.InnerException)
+        {
+            var message = inner.Message;
+            if (message.Contains("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     private static Task<bool> IsEnabledConnectionAsync(

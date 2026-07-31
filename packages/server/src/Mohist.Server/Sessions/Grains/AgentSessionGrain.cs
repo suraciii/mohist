@@ -25,11 +25,13 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ITranscriptEventPublisher _transcriptPublisher;
     private readonly IAgentSessionPersistenceObserver _persistenceObserver;
-    private readonly ILogger<AgentSessionGrain> _log;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentSessionConnectionRegistry _connections;
     private readonly IGrainFactory _grains;
+    private readonly IEventStore _eventStore;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IFollowupDispatchScheduler? _followupDispatchScheduler;
+    private readonly ILogger<AgentSessionGrain> _log;
     private readonly TranscriptAccumulator _transcript = new();
     private AgentSession? _session;
     private bool _sessionReloadRequired;
@@ -51,6 +53,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         IAgentSessionConnectionRegistry connections,
         IGrainFactory grains,
         ILogger<AgentSessionGrain> log,
+        IEventStore eventStore,
+        IBackgroundTaskLauncher backgroundTasks,
         IFollowupDispatchScheduler? followupDispatchScheduler = null)
     {
         _stateStore = stateStore;
@@ -61,6 +65,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _timeProvider = timeProvider;
         _connections = connections;
         _grains = grains;
+        _eventStore = eventStore;
+        _backgroundTasks = backgroundTasks;
         _followupDispatchScheduler = followupDispatchScheduler;
         _log = log;
     }
@@ -1199,6 +1205,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         runtimeEvents = supportedEvents;
 
         var session = await GetRequiredAsync();
+        var turnStatusBefore = SnapshotNonLaunchTurnStatuses(session);
         if (requireCurrentRuntimeBinding
             && (string.IsNullOrWhiteSpace(runtimeSessionId)
                 || !string.Equals(runtimeSessionId, session.Status.AgentRuntimeSessionId, StringComparison.Ordinal)))
@@ -1351,6 +1358,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
         foreach (var (token, agentId) in pendingConcurrencyReleases)
             await ReleaseFollowupConcurrencyPermitAsync(session, token, agentId);
+
+        await TryEmitFollowupTerminalDeliveriesAsync(session, turnStatusBefore);
 
         return entries.Select(e => ToEventInfo(e)).ToList();
     }
@@ -2411,5 +2420,95 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     {
         var session = await GetRequiredAsync();
         return session.Status.Turns ?? (IReadOnlyList<AgentTurnRecord>)[];
+    }
+
+    private static Dictionary<string, AgentTurnStatus> SnapshotNonLaunchTurnStatuses(AgentSession session)
+    {
+        var turns = session.Status.Turns;
+        if (turns is null || turns.Count == 0) return new();
+        return turns
+            .Where(t => string.IsNullOrWhiteSpace(t.JobId))
+            .ToDictionary(t => t.Id, t => t.Status);
+    }
+
+    private async Task TryEmitFollowupTerminalDeliveriesAsync(
+        AgentSession session,
+        Dictionary<string, AgentTurnStatus> before)
+    {
+        var turns = session.Status.Turns;
+        if (turns is null || turns.Count == 0) return;
+        foreach (var turn in turns)
+        {
+            if (!string.IsNullOrWhiteSpace(turn.JobId)) continue;
+            before.TryGetValue(turn.Id, out var prior);
+            if (IsTerminalTurn(prior) || !IsTerminalTurn(turn.Status)) continue;
+            await TryEmitFollowupDeliveryAsync(session, turn);
+        }
+    }
+
+    private static bool IsTerminalTurn(AgentTurnStatus status) =>
+        status is not AgentTurnStatus.Queued and not AgentTurnStatus.Executing;
+
+    private async Task TryEmitFollowupDeliveryAsync(AgentSession session, AgentTurnRecord turn)
+    {
+        var metadata = session.Metadata;
+        if (metadata is null) return;
+
+        var connectionId = metadata.Label(AgentSessionQueryMetadataKeys.ConnectionId);
+        var workspaceTeamId = metadata.Label(AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId);
+        var conversationId = metadata.Label(AgentSessionQueryMetadataKeys.SlackConversationId);
+        if (string.IsNullOrWhiteSpace(connectionId)
+            || string.IsNullOrWhiteSpace(workspaceTeamId)
+            || string.IsNullOrWhiteSpace(conversationId))
+            return;
+
+        var threadTs = metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
+        var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
+        var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var status = turn.Status.ToString().ToLowerInvariant();
+
+        var delivery = new
+        {
+            jobKey = $"agent-session-followup:{session.Id}:{turn.Id}",
+            workLabel = !string.IsNullOrWhiteSpace(title) ? title : "Follow-up",
+            connectionId,
+            workspaceTeamId,
+            slackUserId = (string?)metadata.Label(AgentSessionQueryMetadataKeys.SlackUserId),
+            conversationId,
+            threadTs,
+            messageTs = (string?)null,
+            status,
+            message = turn.Result?.Message,
+            failureReason = (string?)null,
+            failureCategory = (string?)null,
+            artifactCount = 0,
+            exitCode = (int?)null,
+        };
+        var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
+        var extensions = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (!string.IsNullOrWhiteSpace(projectId))
+            extensions[EventCatalog.Lineage.ProjectId] = projectId;
+
+        var envelope = new CloudEvent(
+            id: $"followup-delivery:{session.Id}:{turn.Id}",
+            source: new Uri($"agent-session/{session.Id}", UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
+            time: _timeProvider.GetUtcNow(),
+            data: data,
+            subject: session.Id,
+            extensions: extensions);
+
+        try
+        {
+            await _eventStore.AppendAsync(envelope, CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentSessionGrain), _backgroundTasks);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentSession {SessionId} follow-up delivery event could not be emitted for turn {TurnId}",
+                session.Id,
+                turn.Id);
+        }
     }
 }

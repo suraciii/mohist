@@ -139,6 +139,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ConnectionId", "DispatchRef", "Kind", "State")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
 
+                    b.HasIndex("ConnectionId", "DispatchRef", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
+
                     b.HasIndex("ConnectionId", "State", "ClaimedAt")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
 

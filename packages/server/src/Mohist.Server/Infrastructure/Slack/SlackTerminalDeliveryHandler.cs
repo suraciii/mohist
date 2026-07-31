@@ -135,5 +135,24 @@ public sealed record SlackTerminalDelivery(
         extensions.TryGetValue(EventCatalog.Lineage.ProjectId, out var projectId)
         && !string.IsNullOrWhiteSpace(projectId)
             ? projectId
-            : throw new InvalidOperationException("Terminal delivery event has no project lineage.");
+             : throw new InvalidOperationException("Terminal delivery event has no project lineage.");
+}
+
+[Subscription(
+    Type = EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
+    Identity = "Mohist.Server.Infrastructure.Slack.SlackFollowupDeliveryHandler")]
+public sealed class SlackFollowupDeliveryHandler : ICloudEventHandler
+{
+    private readonly SlackTerminalDeliveryHandler _inner;
+
+    public SlackFollowupDeliveryHandler(
+        IServiceScopeFactory scopeFactory,
+        ILogger<SlackTerminalDeliveryHandler> log)
+    {
+        _inner = new SlackTerminalDeliveryHandler(scopeFactory, log);
+    }
+
+    public bool Filter(CloudEvent evt) => _inner.Filter(evt);
+
+    public Task HandleAsync(CloudEvent evt, CancellationToken ct) => _inner.HandleAsync(evt, ct);
 }

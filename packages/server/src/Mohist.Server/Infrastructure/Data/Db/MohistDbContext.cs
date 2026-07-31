@@ -1247,6 +1247,9 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
             entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind, e.State })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
+            entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
         });
 
         modelBuilder.Entity<SlackDmSessionMappingRow>(entity =>

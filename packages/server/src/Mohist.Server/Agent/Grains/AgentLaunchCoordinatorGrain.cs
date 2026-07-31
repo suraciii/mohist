@@ -330,6 +330,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         if (plan.ConnectionOrigin is { } origin)
         {
             labels[AgentSessionQueryMetadataKeys.ConnectionId] = origin.ConnectionId;
+            labels[AgentSessionQueryMetadataKeys.SlackWorkspaceTeamId] = origin.WorkspaceTeamId;
             labels[AgentSessionQueryMetadataKeys.SlackUserId] = origin.SlackUserId;
             labels[AgentSessionQueryMetadataKeys.SlackConversationId] = origin.ConversationId;
             if (!string.IsNullOrWhiteSpace(origin.ThreadTs))
