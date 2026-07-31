@@ -518,12 +518,13 @@ public sealed class SlackChannelThreadIngressSpecs
                 && row.ConversationId == conversationId
                 && row.ThreadTs == "1710000000.000300"
                 && row.Kind == SlackOutboxKinds.UserAction)
-            .OrderByDescending(row => row.Id)
-            .Select(row => row.PayloadJson)
+            .Select(row => new { row.PayloadJson, row.CreatedAt })
             .ToListAsync();
         Assert.NotEmpty(candidates);
-        var latest = candidates.First();
-        return JsonDocument.Parse(latest).RootElement.GetProperty("text").GetString()!;
+        var latest = candidates
+            .OrderByDescending(row => row.CreatedAt)
+            .First();
+        return JsonDocument.Parse(latest.PayloadJson).RootElement.GetProperty("text").GetString()!;
     }
 
     private async Task<AgentConnection> CreateConnectionAsync(string agentNameSuffix = "")

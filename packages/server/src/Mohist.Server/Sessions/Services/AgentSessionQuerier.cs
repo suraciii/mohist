@@ -239,6 +239,31 @@ public class AgentSessionQuerier : IScopedService
         return record?.Session.Id;
     }
 
+    /// <summary>
+    /// Resolves the single AgentSession bound to a Slack (connection,
+    /// conversation, thread) provenance. Used by the channel ingress to
+    /// repair a missing thread-binding row after a launch crashed
+    /// between <c>LaunchConnectionAsync</c> and <c>BindAsync</c>: the
+    /// session is already persisted with these labels, only the
+    /// mapping row is gone. Returns null when no matching session exists.
+    /// </summary>
+    public async Task<string?> FindSessionIdBySlackThreadProvenanceAsync(
+        string projectId,
+        string connectionId,
+        string conversationId,
+        string threadTs,
+        CancellationToken ct = default)
+    {
+        var record = await _sessionQuery.FirstByLabelsAsync(
+            AgentSessionDtoMapper.Labels(
+                (AgentSessionQueryMetadataKeys.ProjectId, projectId),
+                (AgentSessionQueryMetadataKeys.ConnectionId, connectionId),
+                (AgentSessionQueryMetadataKeys.SlackConversationId, conversationId),
+                (AgentSessionQueryMetadataKeys.SlackThreadTs, threadTs)),
+            ct: ct);
+        return record?.Session.Id;
+    }
+
     public async Task<FollowupTarget?> ResolveFollowupTargetAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);

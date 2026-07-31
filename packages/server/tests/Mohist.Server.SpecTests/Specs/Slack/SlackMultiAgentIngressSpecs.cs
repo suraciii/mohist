@@ -155,8 +155,9 @@ public sealed class SlackMultiAgentIngressSpecs
     [Fact]
     public async Task Multi_agent_thread_no_mention_starts_no_work_and_prompts_once()
     {
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-4", "U_BOT_A4", "A_BOT_A4");
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-4", "U_BOT_B4", "A_BOT_B4");
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-4", "U_BOT_A4", "A_BOT_A4", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-4", "U_BOT_B4", "A_BOT_B4", sharedProjectId);
 
         var firstA = await PostChannelAsync(connectionA, "C-multi-thread",
             messageTs: "1710000000.010400",
@@ -197,8 +198,9 @@ public sealed class SlackMultiAgentIngressSpecs
     [Fact]
     public async Task Explicit_single_bot_in_multi_agent_thread_continues_only_that_bot()
     {
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-5", "U_BOT_A5", "A_BOT_A5");
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-5", "U_BOT_B5", "A_BOT_B5");
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-5", "U_BOT_A5", "A_BOT_A5", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-5", "U_BOT_B5", "A_BOT_B5", sharedProjectId);
 
         var firstA = await PostChannelAsync(connectionA, "C-multi-iso",
             messageTs: "1710000000.010500",
@@ -236,8 +238,9 @@ public sealed class SlackMultiAgentIngressSpecs
     [Fact]
     public async Task First_second_agent_binding_is_isolated_from_existing_binding()
     {
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-6", "U_BOT_A6", "A_BOT_A6");
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-6", "U_BOT_B6", "A_BOT_B6");
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-6", "U_BOT_A6", "A_BOT_A6", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-6", "U_BOT_B6", "A_BOT_B6", sharedProjectId);
 
         var firstA = await PostChannelAsync(connectionA, "C-multi-bind",
             messageTs: "1710000000.010600",
@@ -336,8 +339,9 @@ public sealed class SlackMultiAgentIngressSpecs
     [Fact]
     public async Task Ambiguous_prompt_threaded_reply_is_prompted_in_thread()
     {
-        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-7", "U_BOT_A7", "A_BOT_A7");
-        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-7", "U_BOT_B7", "A_BOT_B7");
+        var sharedProjectId = $"project_{Guid.NewGuid():N}";
+        var connectionA = await CreateConnectionAsync("agent-A", "T-multi-7", "U_BOT_A7", "A_BOT_A7", sharedProjectId);
+        var connectionB = await CreateConnectionAsync("agent-B", "T-multi-7", "U_BOT_B7", "A_BOT_B7", sharedProjectId);
 
         var firstA = await PostChannelAsync(connectionA, "C-thread-prompt",
             messageTs: "1710000000.010800",
@@ -388,7 +392,7 @@ public sealed class SlackMultiAgentIngressSpecs
             messageTs,
             threadTs,
             mentionedUserIds = mentions,
-            senderSlackUserId = "U_OWNER",
+            senderSlackUserId = connection.OwnerSlackUserId ?? "U_OWNER",
             senderKind = "human",
             text,
         };
@@ -402,10 +406,11 @@ public sealed class SlackMultiAgentIngressSpecs
         string agentNameSuffix,
         string workspaceTeamId,
         string ownerSlackUserId,
-        string appId)
+        string appId,
+        string? projectId = null)
     {
         var id = $"connection_{Guid.NewGuid():N}";
-        var projectId = $"project_{Guid.NewGuid():N}";
+        var resolvedProjectId = projectId ?? $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
         _fixture.Slack.UsersInfo = new(true, null,
@@ -413,24 +418,29 @@ public sealed class SlackMultiAgentIngressSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        db.Projects.Add(new ProjectRow
+        var existingProject = await db.Projects
+            .FirstOrDefaultAsync(p => p.Id == resolvedProjectId);
+        if (existingProject is null)
         {
-            Id = projectId,
-            Name = projectId,
-            CreatedAt = now,
-            UpdatedAt = now,
-        });
+            db.Projects.Add(new ProjectRow
+            {
+                Id = resolvedProjectId,
+                Name = resolvedProjectId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        }
         var botUserId = $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
         db.Agents.Add(new AgentRow
         {
             Id = agentId,
-            ProjectId = projectId,
+            ProjectId = resolvedProjectId,
             Name = $"Mohist Agent {agentNameSuffix}",
             Status = AgentStatus.Active,
             State = JsonSerializer.Serialize(new Mohist.Server.Agent.Domain.Agent
             {
                 Id = agentId,
-                ProjectId = projectId,
+                ProjectId = resolvedProjectId,
                 Name = $"Mohist Agent {agentNameSuffix}",
                 Status = AgentStatus.Active,
                 AgentConfig = JsonSerializer.SerializeToElement(new { model = "openai/gpt-4o", runtime = "opencode" }),
@@ -439,7 +449,7 @@ public sealed class SlackMultiAgentIngressSpecs
         db.AgentConnections.Add(new AgentConnectionRow
         {
             Id = id,
-            ProjectId = projectId,
+            ProjectId = resolvedProjectId,
             AgentId = agentId,
             ProviderKind = ConnectionProviderKind.Slack,
             WorkspaceTeamId = workspaceTeamId,
@@ -458,14 +468,15 @@ public sealed class SlackMultiAgentIngressSpecs
         await db.SaveChangesAsync();
 
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAsync(new SecretStoreAddress(resolvedProjectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
+        await secrets.StoreAsync(new SecretStoreAddress(resolvedProjectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
         return new AgentConnection
         {
             Id = id,
-            ProjectId = projectId,
+            ProjectId = resolvedProjectId,
             WorkspaceTeamId = workspaceTeamId,
             BotUserId = botUserId,
+            OwnerSlackUserId = ownerSlackUserId,
         };
     }
 

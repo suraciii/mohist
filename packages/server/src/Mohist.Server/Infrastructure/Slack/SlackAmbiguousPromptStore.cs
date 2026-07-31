@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
@@ -28,11 +29,6 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// </remarks>
 public sealed class SlackAmbiguousPromptStore : IScopedService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = false,
-    };
-
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
@@ -77,10 +73,10 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             throw new ArgumentNullException(nameof(mentionedConnectionIds));
 
         var now = _timeProvider.GetUtcNow();
-        var serialized = JsonSerializer.Serialize(mentionedConnectionIds, JsonOptions);
+        var serialized = JSON.Serialize(mentionedConnectionIds);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await db.Database.ExecuteSqlInterpolatedAsync($"""
+        var inserted = await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "SlackAmbiguousPrompts" (
                 "Id", "ProjectId", "WorkspaceTeamId", "ConversationId", "MessageTs",
                 "ThreadTs", "WinningConnectionId", "MentionedConnectionIdsJson",
@@ -106,11 +102,8 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
             })
             .SingleAsync(ct);
 
-        var claimed = string.Equals(existing.WinningConnectionId, winningConnectionId, StringComparison.Ordinal)
-            && (threadTs is null
-                || string.Equals(existing.ThreadTs ?? string.Empty, threadTs, StringComparison.Ordinal));
         var mentioned = DeserializeMentioned(existing.MentionedConnectionIdsJson);
-        return new SlackAmbiguousPromptResult(claimed, existing.Id, existing.WinningConnectionId, existing.ThreadTs, mentioned);
+        return new SlackAmbiguousPromptResult(inserted > 0, existing.Id, existing.WinningConnectionId, existing.ThreadTs, mentioned);
     }
 
     private static IReadOnlyList<string> DeserializeMentioned(string json)
@@ -118,7 +111,7 @@ public sealed class SlackAmbiguousPromptStore : IScopedService
         if (string.IsNullOrWhiteSpace(json)) return Array.Empty<string>();
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? new List<string>();
+            return JSON.Deserialize<List<string>>(json) ?? new List<string>();
         }
         catch (JsonException)
         {

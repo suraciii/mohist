@@ -1254,17 +1254,8 @@ public static class SlackConnectionRoutes
         string threadTs,
         CancellationToken ct)
     {
-        await using var scope = req.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<Mohist.Server.Infrastructure.Data.Db.MohistDbContext>();
-        var provenance = await db.AgentSessions.AsNoTracking()
-            .Where(row => row.LabelProjectId == projectId
-                && row.LabelConnectionId == connectionId
-                && row.LabelSlackConversationId == conversationId
-                && row.LabelSlackThreadTs == threadTs)
-            .OrderBy(row => row.Id)
-            .Select(row => row.Id)
-            .FirstOrDefaultAsync(ct);
-        return provenance;
+        return await req.Sessions.FindSessionIdBySlackThreadProvenanceAsync(
+            projectId, connectionId, conversationId, threadTs, ct);
     }
 
     /// <summary>
