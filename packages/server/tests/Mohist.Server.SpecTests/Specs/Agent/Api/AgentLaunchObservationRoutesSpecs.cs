@@ -158,6 +158,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // Drive past the configured 8s timeout via fake time.
             await WaitForJobTerminalAsync(
@@ -262,6 +263,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // Force the Job into Unknown via the report-timeout path.
             await WaitForJobTerminalAsync(
@@ -277,7 +279,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             // Reconciliation: an authoritative terminal report from
             // the original Runner resolves the same Job and Turn to
             // Completed — no second dispatch, no new Input/Turn.
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain!.ReportResultAsync(
                 runnerId,

@@ -642,6 +642,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await TryAdmitAsync();
     }
 
+    public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
+
     internal async Task EnterUnknownStateAsync(string reason)
     {
         if (IsTerminal)
@@ -851,7 +853,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && !string.IsNullOrWhiteSpace(_ledger?.DispatchJson)
             && !string.IsNullOrWhiteSpace(State.WorkId))
         {
-            return;
+            var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
+            if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
+                return;
+
+            State.RunnerId = null;
+            State.RunnerAccepted = false;
+            State.RunningSince = null;
+            State.ReadySince = null;
+            await PersistAsync();
         }
 
         if (!await AcquireConcurrencyPermitAsync())
@@ -876,8 +886,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
-        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-        await ReleaseConcurrencyPermitAsync();
+        await EnterTerminalStateAsync(
+            AgentJobStatus.Failed,
+            null,
+            AgentJobFailureReasons.RunnerUnavailable,
+            AgentJobFailureReasons.RunnerUnavailable,
+            AgentJobFailureReasons.RunnerUnavailable,
+            "no eligible runner has admission capacity",
+            null,
+            null,
+            null);
     }
 
     private async Task<bool> AcquireConcurrencyPermitAsync()

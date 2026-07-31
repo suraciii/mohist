@@ -213,13 +213,14 @@ public class RunnerConfigApiSpecs : IClassFixture<RunnerConfigFixture>, IAsyncLi
                 jobId = jobKey,
                 workspace = new { path = "/tmp/runner-config-poll", projectId },
             });
-
-        var workId = await _fixture.WaitForAgentJobDispatchAsync(jobKey, runnerId);
+        await _fixture.WaitForAgentJobAssignmentPreparedAsync(jobKey);
 
         using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.ReadFirstDispatchElementAsync()
             ?? throw new InvalidOperationException("Expected a dispatch from /poll");
+        var workId = body.GetProperty("workId").GetString()
+            ?? throw new InvalidOperationException("AgentJob dispatch returned no work id");
         Assert.Equal(string.Empty, body.GetProperty("workflowRunId").GetString());
         Assert.Equal(workId, body.GetProperty("workId").GetString());
         // AgentJob dispatches no longer carry a `Uses` selector — the
@@ -371,17 +372,13 @@ public class RunnerConfigFixture : IAsyncLifetime
         return (projectId, agentId);
     }
 
-    public async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
-    {
-        var assignment = await _factory.Services
-            .GetRequiredService<AgentJobDispatchProbe>()
-            .WaitForRunnerAcceptedAsync(agentJobId);
-        Assert.Equal(expectedRunnerId, assignment.RunnerId);
-        return assignment.WorkId;
-    }
-
     public void WakeAgentJobValidationAwaiter() =>
         TimeProvider.Advance(TimeSpan.FromMilliseconds(100));
+
+    public Task WaitForAgentJobAssignmentPreparedAsync(string agentJobId) =>
+        _factory.Services
+            .GetRequiredService<AgentJobDispatchProbe>()
+            .WaitForAssignmentPreparedAsync(agentJobId);
 
     /// <summary>
     /// Unregisters every runner created since the last call so leftover

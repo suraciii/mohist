@@ -333,7 +333,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-route", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
             await jobGrain.ReportResultAsync(
                 runnerId,
@@ -386,7 +386,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
             await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
                 runnerId,
                 workId,
@@ -430,7 +430,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
 
             var reportResponse = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/report",
@@ -486,7 +486,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
 
             using var httpResponse = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
             var httpBody = await httpResponse.ReadFirstDispatchElementAsync()
@@ -553,10 +553,14 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             $"Runner '{runnerId}' to reach Online");
     }
 
-    private async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
+    private async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
     {
-        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(agentJobId);
-        Assert.Equal(expectedRunnerId, assignment.RunnerId);
-        return assignment.WorkId;
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        var dispatch = await response.ReadFirstDispatchElementAsync()
+            ?? throw new InvalidOperationException("Expected an AgentJob dispatch from /poll");
+        Assert.Equal(agentJobId, dispatch.GetProperty("agentJobId").GetString());
+        return dispatch.GetProperty("workId").GetString()
+            ?? throw new InvalidOperationException("AgentJob dispatch returned no work id");
     }
 }

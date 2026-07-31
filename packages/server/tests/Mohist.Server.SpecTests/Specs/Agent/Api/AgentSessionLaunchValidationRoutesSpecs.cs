@@ -353,9 +353,11 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var jobGrain = await FindAgentJobGrainAsync(sessionId);
             Assert.NotNull(jobGrain);
+            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
 
             // The fixture configures JobTimeout=8s. An inconclusive
             // timeout remains Unknown so a caller cannot safely replay
