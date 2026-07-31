@@ -60,15 +60,20 @@ public abstract class AgentSessionLaunchRoutesTestSupport
     protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
     {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
-        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-        var dispatch = await response.ReadFirstDispatchElementAsync()
-            ?? throw new InvalidOperationException("Expected an AgentJob dispatch from /poll");
-        Assert.Equal(agentJobId, dispatch.GetProperty("agentJobId").GetString());
-        return dispatch.GetProperty("workId").GetString()
-            ?? throw new InvalidOperationException("AgentJob dispatch returned no work id");
+        var dispatch = (await TestWait.ForAsync(
+            () => PollDispatchOnceAsync(runnerId, expectedSessionId: null, expectedAgentJobId: agentJobId),
+            candidate => candidate is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"an AgentJob dispatch for '{agentJobId}' on runner '{runnerId}'"))!;
+        Assert.Equal(agentJobId, dispatch.AgentJobId);
+        return dispatch.WorkId;
     }
 
-    private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
+    private async Task<PollSnapshot?> PollDispatchOnceAsync(
+        string runnerId,
+        string? expectedSessionId,
+        string? expectedAgentJobId = null)
     {
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
         var dispatches = await poll.ReadDispatchElementsAsync();
@@ -80,13 +85,15 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 && sessionIdElement.ValueKind != JsonValueKind.Null
                 ? sessionIdElement.GetString()
                 : null;
-            if (match is null && polledSessionId == expectedSessionId)
+            var polledAgentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
+                && agentJobIdElement.ValueKind != JsonValueKind.Null
+                ? agentJobIdElement.GetString()
+                : null;
+            var matchesSession = expectedSessionId is not null && polledSessionId == expectedSessionId;
+            var matchesAgentJob = expectedAgentJobId is not null && polledAgentJobId == expectedAgentJobId;
+            if (match is null && (matchesSession || matchesAgentJob))
             {
                 var workId = data.GetProperty("workId").GetString() ?? string.Empty;
-                var agentJobId = data.TryGetProperty("agentJobId", out var agentJobIdElement)
-                    && agentJobIdElement.ValueKind != JsonValueKind.Null
-                    ? agentJobIdElement.GetString()
-                    : null;
                 var projectId = data.TryGetProperty("projectId", out var projectIdElement)
                     && projectIdElement.ValueKind != JsonValueKind.Null
                     ? projectIdElement.GetString()
@@ -98,7 +105,7 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 match = new PollSnapshot(
                     WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
                     WorkId: workId,
-                    AgentJobId: agentJobId,
+                    AgentJobId: polledAgentJobId,
                     ProjectId: projectId,
                     AgentSessionId: polledSessionId,
                     OwnerKind: ownerKind);
