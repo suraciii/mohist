@@ -90,51 +90,54 @@ internal static class OtelCommands
         if (response is null)
             return CliExitCode.For(CliExitOutcome.OperationFailure);
 
-        var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-        JsonNode? node = string.IsNullOrWhiteSpace(content) ? null : JsonNode.Parse(content);
-
-        var envelope = MohistCliApi.ExtractEnvelope(node, response);
-        if (!envelope.HasBody)
+        using (response)
         {
-            await api.Error.WriteLineAsync(
-                $"Server returned an empty response with status {(int)response.StatusCode}.")
-                .ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.OperationFailure);
-        }
+            var content = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            JsonNode? node = string.IsNullOrWhiteSpace(content) ? null : JsonNode.Parse(content);
 
-        if (!envelope.Success)
-        {
-            await api.Error.WriteLineAsync($"{envelope.Error} (code={envelope.Code})").ConfigureAwait(false);
-            return CliExitCode.For(CliExitOutcome.OperationFailure);
-        }
+            var envelope = MohistCliApi.ExtractEnvelope(node, response);
+            if (!envelope.HasBody)
+            {
+                await api.Error.WriteLineAsync(
+                    $"Server returned an empty response with status {(int)response.StatusCode}.")
+                    .ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
 
-        var data = envelope.Data
-            ?? throw new InvalidDataException("Server returned a query response without data.");
+            if (!envelope.Success)
+            {
+                await api.Error.WriteLineAsync($"{envelope.Error} (code={envelope.Code})").ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
 
-        if (selection.Kind == JsonSelectionKind.Selected)
-        {
-            var projected = selection.Project(data, QueryDescriptor.Cardinality);
-            await api.Output.WriteLineAsync(projected.ToJsonString(MohistCliApi.JsonOutputOptions))
-                .ConfigureAwait(false);
+            var data = envelope.Data
+                ?? throw new InvalidDataException("Server returned a query response without data.");
+
+            if (selection.Kind == JsonSelectionKind.Selected)
+            {
+                var projected = selection.Project(data, QueryDescriptor.Cardinality);
+                await api.Output.WriteLineAsync(projected.ToJsonString(MohistCliApi.JsonOutputOptions))
+                    .ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.Success);
+            }
+
+            var columns = ReadColumns(data);
+            var rows = ReadRows(data);
+            var truncated = data["truncated"]?.GetValue<bool>() ?? false;
+            var truncateReason = data["truncate_reason"]?.GetValue<string>();
+
+            await RenderTableAsync(api.Output, columns, rows).ConfigureAwait(false);
+            if (rows.Count == 0)
+            {
+                await api.Output.WriteLineAsync("(0 rows)").ConfigureAwait(false);
+            }
+            if (truncated)
+            {
+                var reason = string.IsNullOrWhiteSpace(truncateReason) ? "unknown" : truncateReason;
+                await api.Output.WriteLineAsync($"(truncated: {reason})").ConfigureAwait(false);
+            }
             return CliExitCode.For(CliExitOutcome.Success);
         }
-
-        var columns = ReadColumns(data);
-        var rows = ReadRows(data);
-        var truncated = data["truncated"]?.GetValue<bool>() ?? false;
-        var truncateReason = data["truncate_reason"]?.GetValue<string>();
-
-        await RenderTableAsync(api.Output, columns, rows).ConfigureAwait(false);
-        if (rows.Count == 0)
-        {
-            await api.Output.WriteLineAsync("(0 rows)").ConfigureAwait(false);
-        }
-        if (truncated)
-        {
-            var reason = string.IsNullOrWhiteSpace(truncateReason) ? "unknown" : truncateReason;
-            await api.Output.WriteLineAsync($"(truncated: {reason})").ConfigureAwait(false);
-        }
-        return CliExitCode.For(CliExitOutcome.Success);
     }
 
     private static IReadOnlyList<string> ReadColumns(JsonNode data)
