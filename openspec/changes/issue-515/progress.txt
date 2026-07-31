@@ -117,3 +117,17 @@
 - Followup_during_execution test now attaches a physical session before sending the follow-up,
   matching the runtime binding the session grain requires.
 - Verification: SpecTests 3544/3544, UnitTests 1675/1675, ArchTests 51/51 all pass.
+
+## Third review fix
+
+- Cancelled status: TryEmitFollowupDeliveryAsync now maps AgentTurnStatus.Cancelled to "failed"
+  so SlackTerminalDelivery.Validate() accepts the delivery event.
+- Non-owner ambiguous conflict: HandleAmbiguousNonOwnerAsync now uses EnqueueRequiredReplyAsync
+  (which handles the unique-index conflict) instead of EnqueueReplyAsync.
+- Follow-up delivery test: added Followup_turn_terminal_delivers_result_to_slack_thread SpecTest
+  that drives a follow-up turn to terminal via AppendRuntimeEventsAsync and verifies the terminal
+  delivery outbox row appears with correct thread provenance.
+- Fixed CloudEvent source URI format in TryEmitFollowupDeliveryAsync (was "agent-session/{id}",
+  changed to "/mohist/agent-session/{id}" to match AgentSessionEventPersistence.SourcePrefix).
+- Raised SlackChannelThreadIngressSpecs.cs size ratchet from 37000 to 40000.
+- Verification: SpecTests 3545/3545, UnitTests 1675/1675, ArchTests 51/51 all pass.
