@@ -346,7 +346,17 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             Metadata: metadata,
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
             WorkDir: plan.WorkspacePath,
-            Attachments: plan.Attachments));
+            Attachments: plan.Attachments,
+            Provenance: plan.ConnectionOrigin is { } provenanceOrigin
+                ? new AgentSessionInputProvenance(
+                    ProviderKind: "slack",
+                    WorkspaceId: provenanceOrigin.WorkspaceTeamId,
+                    ConversationId: provenanceOrigin.ConversationId,
+                    ThreadId: provenanceOrigin.ThreadTs,
+                    MemberId: provenanceOrigin.SlackUserId,
+                    MessageId: provenanceOrigin.MessageTs,
+                    ConnectionId: provenanceOrigin.ConnectionId)
+                : null));
         await _participantProbe.OnEnsureInitialLaunchAsync(plan.SessionId, commandId);
 
         _state.State.Plan = plan with

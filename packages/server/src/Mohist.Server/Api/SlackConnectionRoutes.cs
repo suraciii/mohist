@@ -449,6 +449,19 @@ public static class SlackConnectionRoutes
                 : match.Value).Trim();
     }
 
+    private static AgentSessionInputProvenance BuildSlackInputProvenance(
+        string connectionId,
+        SlackIngressBody body,
+        string? threadTs) =>
+        new(
+            ProviderKind: "slack",
+            WorkspaceId: body.TeamId,
+            ConversationId: body.ConversationId,
+            ThreadId: threadTs,
+            MemberId: body.SenderSlackUserId!,
+            MessageId: body.MessageTs,
+            ConnectionId: connectionId);
+
     /// <summary>
     /// Sender kind surfaced by the adapter on the normalized envelope.
     /// The adapter sets <see cref="Bot"/> for Slack Bot subtype /
@@ -517,6 +530,7 @@ public static class SlackConnectionRoutes
         string currentSessionId,
         string prompt,
         string idempotencyKey,
+        AgentSessionInputProvenance provenance,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         CancellationToken ct)
@@ -528,7 +542,8 @@ public static class SlackConnectionRoutes
             accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
                 Text: prompt,
                 Source: "agent-session-followup",
-                IdempotencyKey: idempotencyKey));
+                IdempotencyKey: idempotencyKey,
+                Provenance: provenance));
         }
         catch (RuntimeSessionMissingException)
         {
@@ -919,7 +934,7 @@ public static class SlackConnectionRoutes
         try
         {
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId), routeDraft, ct);
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
         }
         catch (SlackProviderInboxCapacityExceededException ex)
         {
@@ -1026,6 +1041,7 @@ public static class SlackConnectionRoutes
             route.SessionId!,
             prompt,
             idempotencyKey,
+            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
             req.Grains,
             req.FollowupDispatcher,
             ct);
@@ -1409,7 +1425,7 @@ public static class SlackConnectionRoutes
         try
         {
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId), routeDraft, ct);
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
         }
         catch (SlackProviderInboxCapacityExceededException ex)
         {
@@ -1482,7 +1498,7 @@ public static class SlackConnectionRoutes
         try
         {
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, req.SenderSlackUserId), routeDraft, ct);
+                projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
         }
         catch (SlackProviderInboxCapacityExceededException ex)
         {
@@ -1495,6 +1511,7 @@ public static class SlackConnectionRoutes
             sessionId,
             prompt,
             idempotencyKey,
+            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
             req.Grains,
             req.FollowupDispatcher,
             ct);

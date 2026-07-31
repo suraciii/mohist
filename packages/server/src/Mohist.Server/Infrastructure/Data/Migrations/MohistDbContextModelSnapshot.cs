@@ -210,6 +210,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ThreadTs")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("WorkspaceTeamId")
                         .IsRequired()
                         .HasMaxLength(256)

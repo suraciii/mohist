@@ -1195,6 +1195,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.SlackMessageIdentity).HasMaxLength(512).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ThreadTs).HasMaxLength(64);
             entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.RouteKind).HasMaxLength(32);
             entity.Property(e => e.RouteSessionId).HasMaxLength(512);

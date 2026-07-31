@@ -559,7 +559,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             var existingText = accepted.Text ?? string.Empty;
             if (!string.Equals(existingText, expectedText, StringComparison.Ordinal)
                 || !string.Equals(accepted.Source, command.Source, StringComparison.Ordinal)
-                || !AttachmentSetEquivalent(accepted.Attachments, command.Attachments))
+                || !AttachmentSetEquivalent(accepted.Attachments, command.Attachments)
+                || !Equals(accepted.Provenance, command.Provenance))
             {
                 throw new InvalidOperationException(
                     $"AgentSession {session.Id} already has input '{accepted.Id}' with different content/source for idempotency key.");
@@ -599,7 +600,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             source: command.Source,
             idempotencyKey: key,
             now: Now(),
-            attachments: command.Attachments);
+            attachments: command.Attachments,
+            provenance: command.Provenance);
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
         return result with { AttachmentResults = command.AttachmentResults };
     }
@@ -2137,7 +2139,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 source: command.Source,
                 jobId: command.JobId,
                 now: Now(),
-                attachments: command.Attachments);
+                attachments: command.Attachments,
+                provenance: command.Provenance);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
@@ -2169,7 +2172,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
                 || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
                 || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
-                || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments))
+                || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
+                || !Equals(inputMatch.Provenance, command.Provenance))
             {
                 throw new InvalidOperationException(
                     $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");
@@ -2262,7 +2266,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             prompt: command.Prompt,
             source: command.Source,
             now: Now(),
-            attachments: command.Attachments);
+            attachments: command.Attachments,
+            provenance: command.Provenance);
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);

@@ -10,7 +10,8 @@ public sealed record SlackProviderInboxDraft(
     string ProjectId,
     string ConnectionId,
     SlackMessageIdentity Identity,
-    string SlackUserId);
+    string SlackUserId,
+    string? ThreadTs = null);
 
 /// <summary>
 /// Result of <see cref="SlackProviderInboxStore.AcceptAsync"/>. When
@@ -59,6 +60,7 @@ public sealed class SlackProviderInboxEntry
     public string SlackMessageIdentity { get; init; } = string.Empty;
     public string WorkspaceTeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;
+    public string? ThreadTs { get; init; }
     public string SlackUserId { get; init; } = string.Empty;
     public DateTimeOffset AcceptedAt { get; init; }
     public DateTimeOffset? DispatchedAt { get; init; }

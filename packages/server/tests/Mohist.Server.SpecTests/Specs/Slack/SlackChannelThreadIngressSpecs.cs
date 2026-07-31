@@ -63,6 +63,20 @@ public sealed class SlackChannelThreadIngressSpecs
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var session = await db.AgentSessions.SingleAsync(row => row.Id == sessionId);
         Assert.Equal("1710000000.000100", session.LabelSlackThreadTs);
+        var input = await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId!).GetInitialLaunchAsync();
+        Assert.Equal(new AgentSessionInputProvenance(
+            ProviderKind: "slack",
+            WorkspaceId: connection.WorkspaceTeamId,
+            ConversationId: "C-channel-A",
+            ThreadId: "1710000000.000100",
+            MemberId: "U_OWNER",
+            MessageId: "1710000000.000100",
+            ConnectionId: connection.Id), input!.Input!.Provenance);
+        var inboxRow = await db.SlackProviderInboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "C-channel-A"
+            && row.SlackMessageIdentity.EndsWith("1710000000.000100"));
+        Assert.Equal("1710000000.000100", inboxRow.ThreadTs);
         Assert.NotNull(data.GetProperty("jobKey").GetString());
     }
 

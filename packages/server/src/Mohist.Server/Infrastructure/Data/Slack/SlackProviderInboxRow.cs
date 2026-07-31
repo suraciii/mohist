@@ -14,6 +14,7 @@ public sealed class SlackProviderInboxRow
     public string SlackMessageIdentity { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
     public string ConversationId { get; set; } = string.Empty;
+    public string? ThreadTs { get; set; }
     public string SlackUserId { get; set; } = string.Empty;
     public string? RouteKind { get; set; }
     public string? RouteSessionId { get; set; }

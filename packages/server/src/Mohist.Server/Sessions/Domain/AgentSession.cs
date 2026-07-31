@@ -530,6 +530,16 @@ public sealed record AgentSessionTranscriptEvidence(
 /// </para>
 /// </summary>
 [GenerateSerializer]
+public sealed record AgentSessionInputProvenance(
+    [property: Id(0)] string ProviderKind,
+    [property: Id(1)] string WorkspaceId,
+    [property: Id(2)] string ConversationId,
+    [property: Id(3)] string? ThreadId,
+    [property: Id(4)] string MemberId,
+    [property: Id(5)] string MessageId,
+    [property: Id(6)] string? ConnectionId = null);
+
+[GenerateSerializer]
 public sealed record AgentSessionInputRecord(
     [property: Id(0)] string Id,
     [property: Id(1)] long Sequence,
@@ -539,7 +549,8 @@ public sealed record AgentSessionInputRecord(
     [property: Id(5)] DateTime RecordedAt,
     [property: Id(6)] string? JobId = null,
     [property: Id(7)] string? IdempotencyKey = null,
-    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    [property: Id(9)] AgentSessionInputProvenance? Provenance = null);
 
 public enum AgentSessionInputAcceptance
 {
