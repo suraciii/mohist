@@ -1429,7 +1429,7 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "ignored" });
 
         const string reason = "This Slack Connection is available only to its owner.";
-        await EnqueueReplyAsync(
+        await EnqueueRequiredReplyAsync(
             req.Outbox,
             req.ProjectId,
             req.Connection,

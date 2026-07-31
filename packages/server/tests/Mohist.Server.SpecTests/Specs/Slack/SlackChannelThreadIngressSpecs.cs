@@ -334,6 +334,61 @@ public sealed class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
+    public async Task Followup_turn_terminal_delivers_result_to_slack_thread()
+    {
+        var connection = await CreateConnectionAsync();
+        const string conversationId = "C-channel-followup-delivery";
+        const string rootTs = "1710000000.000500";
+        const string followupTs = "1710000000.000510";
+        const string runtimeSessionId = "runtime-followup-delivery";
+
+        var first = await PostChannelAsync(connection, conversationId,
+            messageTs: rootTs, threadTs: null,
+            mentions: new[] { connection.BotUserId },
+            text: "<@U123> initial task");
+        var sessionId = first.GetProperty("sessionId").GetString()!;
+
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                runtimeSessionId, "/mohist-tests/slack-followup-delivery"));
+
+        var followup = await PostChannelAsync(connection, conversationId,
+            messageTs: followupTs, threadTs: rootTs,
+            mentions: Array.Empty<string>(),
+            text: "follow-up question");
+        Assert.True(followup.GetProperty("followup").GetBoolean());
+
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId)
+            .AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    Type: "session.activity",
+                    PayloadJson: "{\"activity\":\"idle\"}"),
+            }, runtimeSessionId));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var dispatchRefPrefix = $"agent-job:agent-session-followup:{sessionId}:";
+
+        var deliveryDispatchRef = await TestWait.ForAsync(
+            async () => await db.SlackOutboxRows.AsNoTracking()
+                .Where(row => row.ConnectionId == connection.Id
+                    && row.ConversationId == conversationId
+                    && row.Kind == SlackOutboxKinds.TerminalResult
+                    && row.ThreadTs == rootTs
+                    && row.DispatchRef != null && row.DispatchRef.StartsWith(dispatchRefPrefix, StringComparison.Ordinal))
+                .Select(row => row.DispatchRef)
+                .FirstOrDefaultAsync(),
+            value => value is not null,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromMilliseconds(50),
+            $"follow-up terminal delivery outbox row for session {sessionId}");
+
+        Assert.NotNull(deliveryDispatchRef);
+        Assert.StartsWith(dispatchRefPrefix, deliveryDispatchRef);
+    }
+
+    [Fact]
     public async Task Non_owner_mention_is_rejected_with_no_agent_resources()
     {
         var connection = await CreateConnectionAsync();

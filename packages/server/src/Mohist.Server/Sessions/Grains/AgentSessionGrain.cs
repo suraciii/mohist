@@ -2465,7 +2465,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var threadTs = metadata.Label(AgentSessionQueryMetadataKeys.SlackThreadTs);
         var title = metadata.Label(AgentSessionQueryMetadataKeys.Title);
         var projectId = metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
-        var status = turn.Status.ToString().ToLowerInvariant();
+        var status = turn.Status switch
+        {
+            AgentTurnStatus.Cancelled => "failed",
+            _ => turn.Status.ToString().ToLowerInvariant(),
+        };
 
         var delivery = new
         {
