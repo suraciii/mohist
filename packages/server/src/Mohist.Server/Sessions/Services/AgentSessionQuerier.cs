@@ -527,7 +527,11 @@ public class AgentSessionQuerier : IScopedService
     /// <see cref="FindGenericSessionAsync"/> — a workflow-originated session
     /// resolves here by the same stable id as an agent-launch session. The
     /// cross-project guard matches <see cref="ResolveCanonicalFollowupTargetAsync"/>
-    /// so the caller never observes a session from a different project.
+    /// so the caller never observes a session from a different project. The
+    /// DTO carries every fact the Web session detail page consumes — source
+    /// and current state, current-turn and input/turn observations,
+    /// terminal/failure evidence, model/usage, recovery availability, and
+    /// the runtime binding.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -538,6 +542,15 @@ public class AgentSessionQuerier : IScopedService
     /// <c>workflowRunId</c> / <c>sessionName</c>. The absent-when-empty idiom
     /// (<see cref="Infrastructure.JSON.Options"/>) omits the unused branch's
     /// fields from the wire rather than nulling them.
+    /// </para>
+    /// <para>
+    /// Failure evidence (category, reason, tool counts) and the resolved
+    /// model are computed from the session's transcript scoped to the
+    /// current <see cref="AgentSessionStatusSnapshot.AgentRuntimeSessionId"/>
+    /// binding so a prior Runtime Session's terminal facts do not leak into
+    /// the current view. The same total order
+    /// (<c>(turn sequence, part sequence, part id)</c>) used by
+    /// <see cref="GetGenericSessionSummaryAsync"/> is preserved.
     /// </para>
     /// <para>
     /// Returns <c>null</c> when the session id does not resolve, when the
@@ -557,7 +570,7 @@ public class AgentSessionQuerier : IScopedService
         if (!isWorkflow && !isAgentLaunch) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var resolvedModel = await ResolveModelAsync(db, session.Id, session, ct);
+        var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
 
         var activity = ResolveAgentSessionActivity(record);
         var usage = AgentSessionJsonHelper.Usage(session);
@@ -571,13 +584,19 @@ public class AgentSessionQuerier : IScopedService
             CreatedAt: session.Status.CreatedAt.ToString("o"),
             LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             Model: session.Settings.Model,
-            ResolvedModel: resolvedModel,
+            ResolvedModel: transcriptSummary.ResolvedModel,
+            FailureCategory: transcriptSummary.FailureCategory,
+            FailureReason: transcriptSummary.FailureReason,
+            ToolCallCount: transcriptSummary.ToolCallCount,
+            ToolErrorCount: transcriptSummary.ToolErrorCount,
             AgentId: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
             AgentName: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
             WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
             SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
             ContextRefs: BuildUnifiedContextRefs(record),
             Usage: AgentSessionDtoMapper.ToUsageDto(usage),
+            RecoveryAvailable: session.Status.Activity == AgentSessionActivity.Idle,
+            CurrentTurnId: CurrentTurnId(session),
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
             Turns: AgentSessionObservationMapper.Turns(session.Status));
     }
@@ -629,12 +648,18 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
-    /// Resolves the model name for a unified summary. For sessions with a
-    /// transcript-persisted resolved model, prefers the latest transcript
-    /// model event; otherwise falls back to the session's declared
-    /// <see cref="AgentSessionSettings.Model"/>.
+    /// Resolves the full transcript summary for the unified session read —
+    /// resolved model, failure category/reason, and tool call/error counts
+    /// — scoped to the session's current
+    /// <see cref="AgentSessionStatusSnapshot.AgentRuntimeSessionId"/>
+    /// binding so prior-runtime facts do not leak into the current view.
+    /// For sessions with a transcript-persisted resolved model, prefers the
+    /// latest transcript <c>model</c> event; falls back to the session's
+    /// declared <see cref="AgentSessionSettings.Model"/> when no
+    /// transcript-persisted resolved model exists, so the unified read
+    /// surfaces a model name even on a freshly-opened session.
     /// </summary>
-    private async Task<string?> ResolveModelAsync(
+    private async Task<UnifiedTranscriptSummary> ResolveTranscriptSummaryAsync(
         MohistDbContext db,
         string sessionId,
         AgentSession session,
@@ -642,14 +667,23 @@ public class AgentSessionQuerier : IScopedService
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var projections = ToTranscriptProjectionsInSequenceOrder(loaded);
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
+        var runtimeSessionId = session.Status.AgentRuntimeSessionId;
         var summary = TranscriptEventSummaryProjector.Summarize(
-            projections.Select(e => new TranscriptSummaryEvent(
-                TurnSequence: 0,
-                Sequence: e.Sequence,
-                PartId: e.Id.ToString(),
-                Type: e.Type,
-                PayloadJson: e.PayloadJson)));
-        return summary.ResolvedModel ?? session.Settings.Model;
+            projections
+                .Where(e => IsApplicableToCurrentRuntime(e, turnSequenceByTurnId, runtimeSessionId, loaded))
+                .Select(e => new TranscriptSummaryEvent(
+                    TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
+                    Sequence: e.Sequence,
+                    PartId: e.Id.ToString(),
+                    Type: e.Type,
+                    PayloadJson: e.PayloadJson)));
+        return new UnifiedTranscriptSummary(
+            summary.ResolvedModel ?? session.Settings.Model,
+            summary.FailureCategory,
+            summary.FailureReason,
+            summary.ToolCallCount,
+            summary.ToolErrorCount);
     }
 
     /// <summary>
@@ -947,3 +981,10 @@ public sealed record SessionCancelTarget(
     string? Runtime,
     string? RuntimeSessionId,
     string? WorkDir);
+
+internal sealed record UnifiedTranscriptSummary(
+    string? ResolvedModel,
+    string? FailureCategory,
+    string? FailureReason,
+    int? ToolCallCount,
+    int? ToolErrorCount);

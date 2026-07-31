@@ -1,0 +1,103 @@
+## T-001: Complete the unified AgentSession read projection
+
+### What changed
+
+Server (`packages/server`):
+
+- `Sessions/AgentSessionReadModels.cs:341` — extended `UnifiedSessionSummaryDto`
+  with `FailureCategory`, `FailureReason`, `ToolCallCount`,
+  `ToolErrorCount`, `RecoveryAvailable`, and `CurrentTurnId` so the DTO
+  carries every fact the Web session detail page consumes (current-turn
+  observation, terminal/failure evidence, recovery gate, runtime binding).
+  Source-specific identity (AgentId/AgentName vs WorkflowRunId/SessionName)
+  remains absent-when-empty via the existing `WhenWritingNull` JSON
+  setting.
+- `Sessions/Services/AgentSessionQuerier.cs:497` — reworked
+  `GetUnifiedSessionSummaryAsync` to load the session's transcript scoped
+  to the current `AgentRuntimeSessionId` binding via
+  `TranscriptPartLoader` + `TranscriptEventSummaryProjector.Summarize`,
+  resolving the full transcript summary (resolvedModel, failure category /
+  reason, tool counts). Recovery availability is sourced from
+  `session.Status.Activity == Idle`. The previous `ResolveModelAsync`
+  helper is replaced by the new `ResolveTranscriptSummaryAsync` helper
+  (file scope `UnifiedTranscriptSummary`).
+- Cross-source guards and source-specific absent-when-empty remain
+  unchanged: `agent-launch` rows expose AgentId/AgentName only, `workflow`
+  rows expose WorkflowRunId/SessionName only; an unsupported source kind
+  returns null → 404.
+
+CLI (`packages/cli`):
+
+- `Mohist.Cli/ResourceOutput.cs:86` — `SessionShow` field catalog now
+  advertises the six new fields (`failureCategory`, `failureReason`,
+  `toolCallCount`, `toolErrorCount`, `recoveryAvailable`,
+  `currentTurnId`) so the contract test
+  `CliFieldContractTests.MappedCatalogsMatchServerSerializationFields`
+  stays in lockstep with the server DTO.
+
+Tests (`packages/server/tests/Mohist.Server.SpecTests`):
+
+- New file `Specs/Sessions/UnifiedSessionSummarySpecs.cs` (size ratchet
+  needs the 26000-byte allowance below). Spec coverage:
+  - `Show_*_CarriesEnrichedFieldsFromTranscriptAndState` for both sources
+    (failure category/reason, tool counts, currentTurnId, recovery,
+    runtime binding, inputs/turns observations).
+  - `Show_*_RecoveryAvailable{True,False}_*WhenActivity*` for both
+    sources — recovery gate flips with activity, currentTurnId is absent
+    when idle.
+  - `Show_AgentLaunchSession_FailureEvidenceScopedToCurrentRuntimeBinding`
+    — prior-runtime failure evidence does not leak into the current
+    runtime view (the same `IsApplicableToCurrentRuntime` filter the
+    generic-session route uses).
+  - `Show_*_CarriesUsageFromSession` — usage block surfaces from session
+    state.
+  - `Show_/Transcript_UnsupportedSourceKind_Returns404` — unsupported
+    source kinds return 404 for both endpoints.
+  - `Show_AgentLaunchSession_OmitsNullableFailureFields_*` — nullable
+    failure fields are absent on the wire when no transcript event
+    populates them.
+- The original `UnifiedSessionRoutesSpecs.cs` keeps the existing source
+  / project isolation / transcript / list coverage; nothing regressed.
+  File size dropped to 20108 bytes (under the 24k budget).
+
+ArchTests (`packages/server/tests/Mohist.Server.ArchTests`):
+
+- `spec-file-size-baseline.json` — added `UnifiedSessionSummarySpecs.cs`
+  entry with 26000-byte allowance (next bucket over the actual 25051
+  bytes) per the established ratchet policy. The original file
+  `UnifiedSessionRoutesSpecs.cs` is back under the 24000-byte absolute
+  budget and needs no baseline entry.
+
+### Verification run
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings / 0 errors.
+- `UnifiedSessionRoutesSpecs` (16) + `UnifiedSessionSummarySpecs` (10)
+  pass.
+- Server-side session namespace tests (404 total) pass.
+- `Mohist.Server.UnitTests` (1679), `Mohist.Server.ArchTests` (51),
+  `Mohist.Cli.Tests` (1484), `Mohist.Workflow.Definition.Tests` (175)
+  pass.
+- Web / Runner / Slack vitest suites pass (1461 + 5 tests).
+- `npm test` overall: 1 pre-existing flaky failure in
+  `Mohist.Server.SpecTests.Specs.Agent.Api.AgentLaunchObservationRoutesSpecs.Observation_DuringTerminalState_ReportsJobResultAndTurnResult`
+  (passes in isolation, unrelated to this task — verifies the HTTP
+  request path on a shared port). Reproduces without my changes.
+
+### Gotchas / decisions
+
+- The transcript events that carry terminal failure facts use
+  `TranscriptPartTypes.SessionActivity` (i.e. type `"session.activity"`),
+  not `"session.closed"` — the projector only recognises the former for
+  failure-category / failure-reason selection. The seed helper must
+  emit that type.
+- `AgentSessionActivity` JSON deserialisation requires the
+  `JsonStringEnumConverter` with camelCase (already wired in
+  `JSON.Options`); seeding `"executing"` rather than
+  `AgentTurnStatus.Executing.ToString()` keeps the seed independent of
+  enum-string drift.
+- The CLI `SessionShow` resource descriptor had to be updated
+  alongside the DTO; `CliFieldContractTests` enforces parity and the
+  failure mode is silent (CLI dropping fields, not erroring).
+- File-size ratchet: keep the new spec file under 26000 bytes by
+  parameterising the seed helpers and inlining the bare-session seeds;
+  the actual size is 25051 bytes (next 1000-byte bucket = 26000).
