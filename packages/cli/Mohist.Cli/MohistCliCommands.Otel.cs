@@ -1,200 +1,51 @@
 using System.CommandLine;
-using System.CommandLine.Parsing;
 using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
-using Microsoft.Data.Sqlite;
 
 namespace Mohist.Cli;
 
 /// <summary>
-/// Result of a <c>mo otel query</c> execution: the column names plus the
-/// materialized rows. Kept framework-agnostic so tests can supply a fake
-/// executor without touching <see cref="SqliteConnection"/>.
-/// </summary>
-internal sealed record OtelQueryResult(string[] Columns, IReadOnlyList<object?[]> Rows);
-
-/// <summary>
-/// Executes a SQL statement against the OTel SQLite database. The default
-/// production implementation (<see cref="SqliteOtelQueryExecutor"/>) opens a
-/// read-only <see cref="SqliteConnection"/>; tests inject a fake so they never
-/// touch a real SQLite file (design/testing.md hard-constraint 1).
-/// </summary>
-internal interface IOtelQueryExecutor
-{
-    /// <summary>
-    /// Runs <paramref name="sql"/> against <paramref name="databasePath"/>.
-    /// Returns the column names and rows on success; throws
-    /// <see cref="OtelQueryException"/> for SQL/SQLite errors so the caller can
-    /// surface a uniform diagnostic.
-    /// </summary>
-    Task<OtelQueryResult> ExecuteAsync(string databasePath, string sql, CancellationToken cancellationToken = default);
-}
-
-/// <summary>
-/// Wraps a <see cref="SqliteException"/> (or other SQLite-engine failure) so the
-/// command layer can distinguish SQLite errors from other failures when deciding
-/// which diagnostic to print.
-/// </summary>
-internal sealed class OtelQueryException : Exception
-{
-    public bool IsReadOnlyViolation { get; }
-
-    public OtelQueryException(string message, bool isReadOnlyViolation = false)
-        : base(message)
-    {
-        IsReadOnlyViolation = isReadOnlyViolation;
-    }
-
-    public OtelQueryException(string message, Exception inner, bool isReadOnlyViolation = false)
-        : base(message, inner)
-    {
-        IsReadOnlyViolation = isReadOnlyViolation;
-    }
-}
-
-/// <summary>
-/// Production <see cref="IOtelQueryExecutor"/>: opens a read-only
-/// <see cref="SqliteConnection"/> against <paramref name="databasePath"/>,
-/// materializes the result set, and translates SQLite errors into
-/// <see cref="OtelQueryException"/>.
-/// </summary>
-internal sealed class SqliteOtelQueryExecutor : IOtelQueryExecutor
-{
-    /// <summary>Wall-clock timeout for a single query.</summary>
-    private static readonly TimeSpan QueryCommandTimeout = TimeSpan.FromSeconds(30);
-
-    public async Task<OtelQueryResult> ExecuteAsync(string databasePath, string sql, CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            await using var connection = OpenReadOnlyConnection(databasePath);
-            await using var cmd = connection.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.CommandTimeout = (int)QueryCommandTimeout.TotalSeconds;
-
-            await using var reader = await cmd.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
-
-            var fieldCount = reader.FieldCount;
-            var columnNames = new string[fieldCount];
-            for (var i = 0; i < fieldCount; i++)
-            {
-                columnNames[i] = reader.GetName(i);
-            }
-
-            var rows = new List<object?[]>();
-            while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
-            {
-                var row = new object?[fieldCount];
-                for (var i = 0; i < fieldCount; i++)
-                {
-                    row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                }
-                rows.Add(row);
-            }
-
-            return new OtelQueryResult(columnNames, rows);
-        }
-        catch (SqliteException ex)
-        {
-            // SQLite error 8 ("attempt to write a readonly database") surfaces as
-            // the "readonly" message users see for write attempts against otel.db.
-            var isReadOnly = ex.Message.Contains("readonly", StringComparison.OrdinalIgnoreCase);
-            throw new OtelQueryException($"SQLite error: {ex.Message}", isReadOnly);
-        }
-    }
-
-    private static SqliteConnection OpenReadOnlyConnection(string databasePath)
-    {
-        var builder = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-        };
-        var connection = new SqliteConnection(builder.ToString());
-        connection.Open();
-        return connection;
-    }
-}
-
-/// <summary>
-/// <c>mo otel</c> command group. Provides <c>query</c> (direct
-/// read-only SQLite against <c>otel.db</c>) and <c>status</c> (HTTP
-/// probe of <c>GET /otel/api/status</c>). See
-/// <c>openspec/changes/issue-219/specs/otel-cli/spec.md</c>.
+/// <c>mo otel</c> command group. Provides <c>query</c> (HTTP
+/// submission to <c>POST /otel/api/query</c>) and <c>status</c>
+/// (HTTP probe of <c>GET /otel/api/status</c>). Both subcommands
+/// go through the Server; the CLI never opens the local SQLite
+/// database. See <c>openspec/changes/issue-529/specs/otel-cli-query/spec.md</c>.
 /// </summary>
 internal static class OtelCommands
 {
-    /// <summary>Default name of the OTel SQLite database file.</summary>
-    public const string DefaultDatabaseFileName = "otel.db";
-
-    /// <summary>Default data directory under <c>$HOME</c>.</summary>
-    public const string DataDirectoryName = ".mohist";
-
-    public const string MainDbPathEnvironmentVariable = "MOHIST_DB_PATH";
-
     private const string StatusPath = "/otel/api/status";
+    private const string QueryPath = "/otel/api/query";
 
-    public static Command Build(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor)
+    internal static readonly ResourceDescriptor QueryDescriptor = new(
+        ResourceCardinality.Single,
+        ["columns", "rows", "truncated", "truncate_reason"]);
+
+    public static Command Build(MohistCliApi api)
     {
         var otel = new Command("otel", "OpenTelemetry trace collection and query commands");
-        otel.Subcommands.Add(BuildQuery(api, environment, queryExecutor));
+        otel.Subcommands.Add(BuildQuery(api));
         otel.Subcommands.Add(BuildStatus(api));
         return otel;
     }
 
-    /// <summary>
-    /// Resolves the absolute path of the <c>otel.db</c> file. When
-    /// <paramref name="dbPath"/> is supplied the value is returned
-    /// (after <see cref="Path.GetFullPath"/>); otherwise the default
-    /// <c>otel.db</c> next to the configured main database is returned.
-    /// </summary>
-    public static string ResolveDatabasePath(string? dbPath, IEnvironmentVariableProvider environment)
+    private static Command BuildQuery(MohistCliApi api)
     {
-        ArgumentNullException.ThrowIfNull(environment);
-
-        if (!string.IsNullOrWhiteSpace(dbPath))
-            return Path.GetFullPath(dbPath);
-
-        return Path.GetFullPath(Path.Combine(ResolveDefaultDataDirectory(environment), DefaultDatabaseFileName));
-    }
-
-    private static string ResolveDefaultDataDirectory(IEnvironmentVariableProvider environment)
-    {
-        var mainDbPath = environment.GetEnvironmentVariable(MainDbPathEnvironmentVariable);
-        if (!string.IsNullOrWhiteSpace(mainDbPath))
-        {
-            var fullMainDbPath = Path.GetFullPath(mainDbPath);
-            var directory = Path.GetDirectoryName(fullMainDbPath);
-            if (!string.IsNullOrWhiteSpace(directory))
-                return directory;
-        }
-
-        var home = environment.GetEnvironmentVariable("HOME");
-        if (string.IsNullOrWhiteSpace(home))
-            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, DataDirectoryName);
-    }
-
-    private static Command BuildQuery(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor)
-    {
-        var cmd = new Command("query", "Run a SQL query against otel.db directly (does not require the server)");
+        var cmd = new Command("query", "Run a SQL query against the OTel SQLite database through the Server");
         var sqlArg = new Argument<string?>("sql")
         {
             Description = "SQL statement to execute (e.g. \"SELECT COUNT(*) FROM traces\")",
             Arity = ArgumentArity.ZeroOrOne,
         };
-        var dbOpt = new Option<string?>("--db")
-        {
-            Description = "Path to the otel.db file (defaults to ~/.mohist/otel.db)",
-        };
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(QueryDescriptor);
         cmd.Arguments.Add(sqlArg);
-        cmd.Options.Add(dbOpt);
+        cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var sql = ctx.GetValue(sqlArg);
-            var dbPath = ctx.GetValue(dbOpt);
-            return RunQueryAsync(api, environment, queryExecutor, sql, dbPath);
+            var json = ctx.GetValue(jsonOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
+            return RunQueryAsync(api, sql, jsonProvided, json);
         });
         return cmd;
     }
@@ -206,46 +57,133 @@ internal static class OtelCommands
         return cmd;
     }
 
-    private static async Task<int> RunQueryAsync(MohistCliApi api, IEnvironmentVariableProvider environment, IOtelQueryExecutor queryExecutor, string? sql, string? dbPath)
+    private static async Task<int> RunQueryAsync(MohistCliApi api, string? sql, bool jsonProvided, string? json)
     {
+        var selection = JsonSelection.Parse(QueryDescriptor, jsonProvided, json);
+        if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+            return api.WriteJsonSelectionResult(QueryDescriptor, selection);
+
         if (string.IsNullOrWhiteSpace(sql))
         {
             await api.Error.WriteLineAsync(
                 "mo otel query requires a SQL argument (e.g. mo otel query \"SELECT COUNT(*) FROM traces\")")
                 .ConfigureAwait(false);
-            return 1;
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
         }
 
-        var resolvedPath = ResolveDatabasePath(dbPath, environment);
-        if (!api.FileSystem.Exists(resolvedPath))
-        {
-            await api.Error.WriteLineAsync(
-                $"otel.db not found at '{resolvedPath}'. Start the server to create it, or pass --db <path>.")
-                .ConfigureAwait(false);
-            return 1;
-        }
-
+        HttpResponseMessage? response;
         try
         {
-            var result = await queryExecutor.ExecuteAsync(resolvedPath, sql).ConfigureAwait(false);
+            response = await api.SendAsync(HttpMethod.Post, QueryPath, new { sql }).ConfigureAwait(false);
+        }
+        catch (HttpRequestException)
+        {
+            await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
+        }
 
-            await RenderTableAsync(api.Output, result.Columns, result.Rows).ConfigureAwait(false);
-            if (result.Rows.Count == 0)
+        if (response is null)
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
+
+        await using var stream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false);
+        JsonNode? node = stream.Length == 0 ? null : await JsonNode.ParseAsync(stream).ConfigureAwait(false);
+
+        var envelope = MohistCliApi.ExtractEnvelope(node, response);
+        if (!envelope.HasBody)
+        {
+            await api.Error.WriteLineAsync(
+                $"Server returned an empty response with status {(int)response.StatusCode}.")
+                .ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
+        }
+
+        if (!envelope.Success)
+        {
+            await api.Error.WriteLineAsync($"{envelope.Error} (code={envelope.Code})").ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.OperationFailure);
+        }
+
+        var data = envelope.Data
+            ?? throw new InvalidDataException("Server returned a query response without data.");
+
+        if (selection.Kind == JsonSelectionKind.Selected)
+        {
+            var projected = selection.Project(data, QueryDescriptor.Cardinality);
+            await api.Output.WriteLineAsync(projected.ToJsonString(MohistCliApi.JsonOutputOptions))
+                .ConfigureAwait(false);
+            return CliExitCode.For(CliExitOutcome.Success);
+        }
+
+        var columns = ReadColumns(data);
+        var rows = ReadRows(data);
+        var truncated = data["truncated"]?.GetValue<bool>() ?? false;
+        var truncateReason = data["truncate_reason"]?.GetValue<string>();
+
+        await RenderTableAsync(api.Output, columns, rows).ConfigureAwait(false);
+        if (rows.Count == 0)
+        {
+            await api.Output.WriteLineAsync("(0 rows)").ConfigureAwait(false);
+        }
+        if (truncated)
+        {
+            var reason = string.IsNullOrWhiteSpace(truncateReason) ? "unknown" : truncateReason;
+            await api.Output.WriteLineAsync($"(truncated: {reason})").ConfigureAwait(false);
+        }
+        return CliExitCode.For(CliExitOutcome.Success);
+    }
+
+    private static IReadOnlyList<string> ReadColumns(JsonNode data)
+    {
+        if (data["columns"] is JsonArray columnArray)
+        {
+            var columns = new List<string>(columnArray.Count);
+            foreach (var item in columnArray)
             {
-                await api.Output.WriteLineAsync("(0 rows)").ConfigureAwait(false);
+                var value = item?.GetValue<string>();
+                columns.Add(value ?? string.Empty);
             }
-            return 0;
+            return columns;
         }
-        catch (OtelQueryException ex)
+        return Array.Empty<string>();
+    }
+
+    private static IReadOnlyList<Dictionary<string, object?>> ReadRows(JsonNode data)
+    {
+        if (data["rows"] is not JsonArray rowArray)
+            return Array.Empty<Dictionary<string, object?>>();
+
+        var rows = new List<Dictionary<string, object?>>(rowArray.Count);
+        foreach (var item in rowArray)
         {
-            await api.Error.WriteLineAsync(ex.Message).ConfigureAwait(false);
-            return 1;
+            if (item is JsonObject obj)
+            {
+                var row = new Dictionary<string, object?>(obj.Count, StringComparer.Ordinal);
+                foreach (var entry in obj)
+                    row[entry.Key] = JsonNodeToObject(entry.Value);
+                rows.Add(row);
+            }
+            else
+            {
+                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal));
+            }
         }
-        catch (Exception ex)
+        return rows;
+    }
+
+    private static object? JsonNodeToObject(JsonNode? node)
+    {
+        if (node is null) return null;
+        if (node is JsonValue value)
         {
-            await api.Error.WriteLineAsync($"Failed to execute query: {ex.Message}").ConfigureAwait(false);
-            return 1;
+            if (value.TryGetValue<string>(out var s)) return s;
+            if (value.TryGetValue<long>(out var l)) return l;
+            if (value.TryGetValue<double>(out var d)) return d;
+            if (value.TryGetValue<bool>(out var b)) return b;
+            return value.ToJsonString();
         }
+        if (node is JsonArray || node is JsonObject)
+            return node.ToJsonString();
+        return null;
     }
 
     private static async Task<int> RunStatusAsync(MohistCliApi api)
@@ -284,9 +222,6 @@ internal static class OtelCommands
         }
         catch (TaskCanceledException)
         {
-            // Timeout: server is reachable but slow. Surface the same
-            // "not running" diagnostic rather than a stack trace so the
-            // user is nudged toward the right next step.
             await api.Error.WriteLineAsync(MohistCliApi.ServerUnavailableMessage).ConfigureAwait(false);
             return 1;
         }
@@ -297,15 +232,15 @@ internal static class OtelCommands
         }
     }
 
-    private static async Task RenderTableAsync(TextWriter output, string[] columns, IReadOnlyList<object?[]> rows)
+    private static async Task RenderTableAsync(TextWriter output, IReadOnlyList<string> columns, IReadOnlyList<Dictionary<string, object?>> rows)
     {
-        if (columns.Length == 0)
+        if (columns.Count == 0)
         {
             return;
         }
 
-        var columnWidths = new int[columns.Length];
-        for (var i = 0; i < columns.Length; i++)
+        var columnWidths = new int[columns.Count];
+        for (var i = 0; i < columns.Count; i++)
         {
             columnWidths[i] = columns[i].Length;
         }
@@ -313,10 +248,11 @@ internal static class OtelCommands
         var renderedRows = new string[rows.Count][];
         for (var r = 0; r < rows.Count; r++)
         {
-            renderedRows[r] = new string[columns.Length];
-            for (var i = 0; i < columns.Length; i++)
+            renderedRows[r] = new string[columns.Count];
+            for (var i = 0; i < columns.Count; i++)
             {
-                var rendered = RenderCell(rows[r][i]);
+                rows[r].TryGetValue(columns[i], out var cell);
+                var rendered = RenderCell(cell);
                 renderedRows[r][i] = rendered;
                 if (rendered.Length > columnWidths[i])
                     columnWidths[i] = rendered.Length;

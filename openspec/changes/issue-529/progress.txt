@@ -2,6 +2,10 @@
 
 - `OtelQueryRoutesIntegrationSpecs` runs reliably through the built xUnit v3 assembly with `-class`; the project-level `dotnet test --filter` option is ignored by Microsoft Testing Platform in this environment.
 - `TraceQuerier.ExecuteBoundedQuery` collects reader field names before materializing rows, so the same `fieldNames` array can be returned for every result path.
+- `RecordingHttpHandler` captures `req.Content` after the responder reads it; inside a responder, use `await req.Content.ReadAsStringAsync()` to inspect the request body (the captured `Body` field is on the captured request, not the live `HttpRequestMessage`).
+- System.CommandLine rejects unknown options at parse time with a non-zero exit code; no contact to the Server happens.
+- `OtelCommands.RunStatusAsync`'s exception path uses `MohistCliApi.ServerUnavailableMessage` for both `HttpRequestException` and `TaskCanceledException` — the new `RunQueryAsync` follows the same pattern.
+- `Mohist.Cli` no longer needs `Microsoft.Data.Sqlite` (CLI imports were only used by the deleted SQLite executor). The package reference is left in place since the Server-side workload still shares the same project graph; verify by checking the project still compiles cleanly (it does).
 
 ## T-001
 
@@ -9,3 +13,14 @@
 - Added `QueryResult.Columns` serialized as `columns` and passed `fieldNames` through normal, row-limit, and byte-limit returns.
 - Updated the blocked-query fake constructor and added route assertions for normal, empty, row-limit, and byte-limit results.
 - Post-change focused integration run passed all 37 tests.
+
+## T-002
+
+- `OtelCommands.Build` now takes only `MohistCliApi api`; the `IEnvironmentVariableProvider environment` and `IOtelQueryExecutor queryExecutor` parameters were removed because the only consumer (database path resolution) is gone.
+- `MohistCliCommands.RunAsync` dropped its `IOtelQueryExecutor? queryExecutor` parameter and the matching `services.AddSingleton(queryExecutor)` registration.
+- `RunQueryAsync` POSTs `{ sql }` to `/otel/api/query`, reads the response through `MohistCliApi.ExtractEnvelope`, and renders columns/rows directly from the `columns` and `rows` arrays. The `(truncated: <reason>)` notice is appended only when `truncated` is true, matching the spec's "non-truncated result renders no truncation" rule.
+- The `--json` option wires through `JsonSelectionOption(QueryDescriptor)` with `["columns", "rows", "truncated", "truncate_reason"]`. Bare `--json` lists the four fields without contacting the Server (handled by the early `WriteJsonSelectionResult` branch).
+- All CLI otel query tests were rewritten to use `RecordingHttpHandler` + `CliTestFactory.Create`. `FakeOtelQueryExecutor` is deleted.
+- Focused run of `Mohist.Cli.Tests` via the built assembly (`Mohist.Cli.Tests -class Mohist.Cli.Tests.CliOtelCommandSpecs`) reports 19 passed, 0 failed. Full suite passes 1443/1443.
+- `dotnet build packages/cli/Mohist.Cli` succeeds with 0 warnings. `dotnet build packages/cli/tests/Mohist.Cli.Tests` succeeds with 0 warnings. `npm run typecheck:scripts` succeeds.
+- The pre-existing archtest failure (`OtelQueryRoutesIntegrationSpecs.cs` growing past the 24,000-byte ratchet) is from T-001's columns-assertion additions, not from T-002.

@@ -35,7 +35,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
         root.Subcommands.Add(NotifyCommands.Build(api));
-        root.Subcommands.Add(OtelCommands.Build(api, environment, provider.GetService<IOtelQueryExecutor>() ?? new SqliteOtelQueryExecutor()));
+        root.Subcommands.Add(OtelCommands.Build(api));
         root.Subcommands.Add(CommandHelpHook.BuildHelpCommand());
 
         CommandHelpHook.Install(root);
@@ -171,7 +171,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IOtelQueryExecutor? queryExecutor = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null)
     {
         OutputOptionState.Explicit = false;
         if (IsDirectSlackCredentialArgument(args))
@@ -209,11 +209,6 @@ internal static class MohistCliCommands
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
         services.AddSingleton<OperatorCredentialProvider>();
         services.AddSingleton(http);
-        // Production callers leave queryExecutor null and the default
-        // SqliteOtelQueryExecutor is used; tests inject a fake so otel query
-        // specs never touch a real SQLite file.
-        if (queryExecutor is not null)
-            services.AddSingleton(queryExecutor);
         // Production callers leave installer/updater null and the default
         // SystemdServiceInstaller / WindowsScheduledTaskInstaller and a default
         // SourceCodeUpdater are constructed. Tests inject fakes so install/update
