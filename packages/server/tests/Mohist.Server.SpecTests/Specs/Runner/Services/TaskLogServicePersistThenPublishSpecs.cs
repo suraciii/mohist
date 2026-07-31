@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
@@ -23,7 +24,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     private readonly TestSqliteDatabase _database;
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogStore _store;
-    private readonly RunnerWorkStore _runnerWorks;
+    private readonly IAgentJobStore _agentJobs;
     private readonly WorkflowRunQuerier _runQuerier;
 
     public TaskLogServicePersistThenPublishSpecs()
@@ -31,7 +32,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         _database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(_database.Options);
         _store = new TaskLogStore(factory, _timeProvider);
-        _runnerWorks = new RunnerWorkStore(factory);
+        _agentJobs = new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _timeProvider);
         _runQuerier = new WorkflowRunQuerier(factory);
     }
 
@@ -141,9 +142,12 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         // Completed / Failed one) is rejected BEFORE any
         // persistence or publish attempt.
         await SeedOutstandingWorkAsync("runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-4");
-        await _runnerWorks.TryMarkTerminalAsync(
-            "runner-A", TaskLogOwnershipKinds.AgentJob, "owner-1", "work-4",
-            RunnerWorkStatus.Completed, "ok", _timeProvider.GetUtcNow());
+        await using (var db = new MohistDbContext(_database.Options))
+        {
+            var row = await db.AgentJobs.SingleAsync(r => r.JobKey == "owner-1");
+            row.State = "{\"status\":\"completed\",\"runnerId\":\"runner-A\",\"workId\":\"work-4\"}";
+            await db.SaveChangesAsync();
+        }
 
         var publisher = new RecordingPublisher();
         var service = NewService(publisher);
@@ -286,7 +290,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     {
         return new TaskLogService(
             _store,
-            _runnerWorks,
+            _agentJobs,
             _runQuerier,
             publisher,
             NullLogger<TaskLogService>.Instance);
@@ -294,13 +298,25 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
 
     private async Task SeedOutstandingWorkAsync(string runnerId, string ownerKind, string ownerId, string workId)
     {
-        await _runnerWorks.InsertOutstandingAsync(new RunnerWork(
-            RunnerId: runnerId,
-            OwnerKind: ownerKind,
-            OwnerId: ownerId,
+        Assert.Equal(TaskLogOwnershipKinds.AgentJob, ownerKind);
+        var now = _timeProvider.GetUtcNow();
+        await _agentJobs.InsertLedgerAsync(new AgentJobLedgerRecord(
+            JobKey: ownerId,
+            StateJson: $"{{\"status\":\"running\",\"runnerId\":\"{runnerId}\",\"workId\":\"{workId}\"}}",
+            Revision: 0,
+            AssignedRunnerId: runnerId,
             WorkId: workId,
-            TakenAt: _timeProvider.GetUtcNow(),
-            Status: RunnerWorkStatus.Outstanding));
+            ReadySince: null,
+            RunningSince: now,
+            DispatchJson: null,
+            WorkType: "agent-job",
+            Stage: "agent",
+            Title: "Agent Job",
+            IssueProjectId: null,
+            IssueNumber: null,
+            AgentSessionId: null,
+            InitialInputId: null,
+            InitialTurnId: null));
     }
 
     private async Task SeedWorkflowRunAsync(string workflowRunId, string taskId, string workId)

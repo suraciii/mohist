@@ -1,7 +1,10 @@
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Support;
+using Orleans.Core.Internal;
+using Orleans.Storage;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Grain;
@@ -84,6 +87,38 @@ public class RunnerActionCatalogSpecs : WorkflowGrainSpecs
         var info = await reactivated.GetInfoAsync();
         Assert.NotNull(info);
         AssertCatalog(catalog, info!.ActionCatalog);
+    }
+
+    [Fact]
+    public async Task FirstActivation_MigratesLegacyRunnerRegistrationState()
+    {
+        var runnerId = $"runner-legacy-registration-{Guid.NewGuid():N}";
+        var catalog = CreateCatalog("legacy");
+        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
+        var storage = _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IGrainStorage>();
+        var legacy = new GrainState<LegacyRunnerRegistrationState>
+        {
+            State = new LegacyRunnerRegistrationState
+            {
+                LastKnownInfo = new RunnerInfo(runnerId, ["spec/*"], "legacy-host", "legacy-project"),
+                LastKnownActionCatalogJson = System.Text.Json.JsonSerializer.Serialize(catalog),
+            },
+        };
+        await storage.WriteStateAsync("runner-works", runner.GetGrainId(), legacy);
+
+        var info = await runner.GetInfoAsync();
+
+        Assert.NotNull(info);
+        Assert.Equal("legacy-project", info!.ProjectId);
+        AssertCatalog(catalog, info.ActionCatalog);
+
+        await TestLifecycle.Deactivate(runner);
+        await Grains.GetGrain<IManagementGrain>(0).ForceActivationCollection(TimeSpan.Zero);
+
+        var reactivated = await Grains.GetGrain<IRunnerGrain>(runnerId).GetInfoAsync();
+        Assert.NotNull(reactivated);
+        Assert.Equal("legacy-project", reactivated!.ProjectId);
+        AssertCatalog(catalog, reactivated.ActionCatalog);
     }
 
     [Fact]

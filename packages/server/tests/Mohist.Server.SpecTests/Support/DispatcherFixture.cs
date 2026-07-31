@@ -637,7 +637,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Issue.IIssueStore, Mohist.Server.Infrastructure.Data.Issue.IssueStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore, Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();
-        siloBuilder.Services.AddScoped<RunnerWorkStore>();
         siloBuilder.Services.AddScoped<RunnerDefinitionStore>();
         siloBuilder.Services.AddScoped<WorkflowRunVariablesStore>();
         siloBuilder.Services.AddScoped<ProjectVariableStore>();
@@ -652,7 +651,6 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.DispatchService>();
         siloBuilder.Services.AddScoped<Mohist.Server.Runner.Services.WorkflowReportService>();
         siloBuilder.Services.AddScoped<WorkflowItemTranslator>();
-        siloBuilder.Services.AddSingleton<IAgentJobWorkCoordinator, AgentJobWorkCoordinator>();
         siloBuilder.Services.AddScoped<IssueWorkflowProfileRegistry>();
         siloBuilder.Services.AddScoped<EffectiveWorkflowProfileResolver>();
         siloBuilder.Services.AddSingleton<FakeRunnerWorkspaceClient>();

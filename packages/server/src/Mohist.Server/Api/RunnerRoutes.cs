@@ -162,12 +162,8 @@ public static class RunnerRoutes
                 RunnerConfigJsonOptions);
         });
 
-        // Report direct to the owning grain. Agent-job reports still flow
-        // through the runner grain (its ledger tracks the push-dispatched
-        // work and the closeout path). Workflow reports no longer touch the
-        // runner grain — translation is a stateless service, the workflow
-        // grain is the idempotent arbiter, and the runner retires the work
-        // from awaitingAck on Accepted or Stale (both are acks).
+        // Reports go directly to the owning grain. Accepted and stale are
+        // both terminal acknowledgements for runner retry purposes.
         group.MapPost("/report", async (
             string runnerId,
             HttpRequest request,
@@ -208,14 +204,15 @@ public static class RunnerRoutes
 
             var result = new WorkResult(req.Status, req.Message, req.Output, req.ExitCode, req.ArtifactUploadIds, req.AddTasks, req.Error);
 
-            // Agent-job: route through the runner grain (push-model ledger).
+            // AgentJob owns its report validation and terminal transition.
             if (string.Equals(ownerKind, WorkDispatchOwnerKinds.AgentJob, StringComparison.Ordinal))
             {
-                var runner = grains.GetGrain<IRunnerGrain>(runnerId);
-                var report = await runner.ReportAgentJobResultAsync(req.AgentJobId ?? string.Empty, req.WorkId, result);
+                var report = await grains.GetGrain<IAgentJobGrain>(req.AgentJobId ?? string.Empty)
+                    .ReportResultAsync(runnerId, req.WorkId, result);
+                var acknowledged = report.Accepted || string.Equals(report.Reason, "stale", StringComparison.Ordinal);
                 return Results.Ok(new RunnerReportResponse(
-                    report.WorkflowRunId, report.WorkflowStatus, report.Tracked,
-                    report.Reason, report.OwnerKind, report.OwnerId));
+                    req.AgentJobId ?? string.Empty, null, acknowledged,
+                    report.Reason, ownerKind, req.AgentJobId));
             }
 
             // Workflow: report direct to the owning grain via the stateless

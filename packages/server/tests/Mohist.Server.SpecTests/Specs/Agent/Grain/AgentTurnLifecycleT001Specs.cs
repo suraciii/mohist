@@ -584,9 +584,8 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
         Assert.Equal(jobKey, turn.JobId);
 
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await runner.ReportAgentJobResultAsync(
-            agentJobId: jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId: workId,
             result: new WorkResult(
                 Status: "completed",

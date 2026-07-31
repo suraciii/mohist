@@ -45,8 +45,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var workId = snapshot.CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(
                 Status: "failed",
@@ -100,8 +100,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(Status: "completed", Message: "ok", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
@@ -163,8 +163,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(
                 Status: "failed",
@@ -203,8 +203,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(
                 Status: "failed",
@@ -243,8 +243,8 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
 
-        await runner.ReportAgentJobResultAsync(
-            jobKey,
+        await job.ReportResultAsync(
+            runnerId,
             workId,
             new WorkResult(Status: "failed", Message: "boom", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
         await WaitForStatusAsync(job, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
@@ -358,12 +358,10 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         await WaitForStatusAsync(job, AgentJobStatus.Running, TimeSpan.FromSeconds(5));
         var workId = (await job.GetRuntimeSnapshotAsync()).CurrentWorkId!;
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-
-        await runner.ReportAgentJobResultAsync(
-            agentJobId: job.GetPrimaryKeyString(),
-            workId: workId,
-            result: new WorkResult(Status: "completed", Message: "first result", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
+        await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult(Status: "completed", Message: "first result", Output: JSON.DeserializeElement("{}"), ExitCode: 0));
         await WaitForStatusAsync(job, AgentJobStatus.Completed, TimeSpan.FromSeconds(5));
 
         var firstClosed = await GetSingleClosedAsync(sessionId);
@@ -373,13 +371,14 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
 
         // A redelivered runner report on the already-terminal job must
         // not produce a duplicate activity fact. The AgentJob retains the
-        // original delivery id and reports "already-terminal".
-        var redeliver = await runner.ReportAgentJobResultAsync(
-            agentJobId: job.GetPrimaryKeyString(),
-            workId: workId,
-            result: new WorkResult(Status: "failed", Message: "redelivered", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
-        Assert.False(redeliver.Tracked,
+        // original delivery id and reports "stale".
+        var redeliver = await job.ReportResultAsync(
+            runnerId,
+            workId,
+            new WorkResult(Status: "failed", Message: "redelivered", Output: JSON.DeserializeElement("{}"), ExitCode: 1));
+        Assert.False(redeliver.Accepted,
             "Already-terminal AgentJob rejects report replay but still owns the original delivery");
+        Assert.Equal("stale", redeliver.Reason);
 
         var parts = await ListSessionClosedPartsAsync(sessionId);
         var activityParts = parts

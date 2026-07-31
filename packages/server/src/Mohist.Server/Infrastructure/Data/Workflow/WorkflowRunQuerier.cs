@@ -89,6 +89,29 @@ public sealed class WorkflowRunQuerier
             .ToListAsync(ct);
     }
 
+    public async Task<IReadOnlyList<WorkflowRunScheduleCandidate>> FindAssignedCandidatesAsync(
+        string workerId,
+        int limit = 20,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(workerId))
+            return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Ready) && row.AssignedWorkerId == workerId)
+            .OrderBy(row => row.ReadySince)
+            .ThenBy(row => row.WorkflowRunId)
+            .Take(limit)
+            .Select(row => new { row.WorkflowRunId, row.ReadySince, row.CreatedAt })
+            .ToListAsync(ct);
+
+        return rows.Select(row => new WorkflowRunScheduleCandidate(
+            row.WorkflowRunId,
+            ToUtc(row.ReadySince ?? row.CreatedAt ?? DateTime.UnixEpoch))).ToList();
+    }
+
     /// <summary>
     /// returns workflow runs that are unassigned and waiting
     /// for *any* runner to claim (<c>Pending</c>). Filters at the database
@@ -116,6 +139,33 @@ public sealed class WorkflowRunQuerier
             .Take(limit)
             .Select(row => row.WorkflowRunId)
             .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<WorkflowRunScheduleCandidate>> FindAssignableCandidatesAsync(
+        string? projectId = null,
+        int limit = 20,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+
+        var query = db.WorkflowRuns
+            .AsNoTracking()
+            .Where(row => row.Status == StatusString(WorkflowRunStatus.Pending) && row.AssignedWorkerId == null);
+
+        if (!string.IsNullOrWhiteSpace(projectId))
+            query = query.Where(row => row.MetadataProjectId == projectId);
+
+        var rows = await query
+            .OrderBy(row => row.ReadySince)
+            .ThenBy(row => row.CreatedAt)
+            .ThenBy(row => row.WorkflowRunId)
+            .Take(limit)
+            .Select(row => new { row.WorkflowRunId, row.ReadySince, row.CreatedAt })
+            .ToListAsync(ct);
+
+        return rows.Select(row => new WorkflowRunScheduleCandidate(
+            row.WorkflowRunId,
+            ToUtc(row.ReadySince ?? row.CreatedAt ?? DateTime.UnixEpoch))).ToList();
     }
 
     /// <summary>
@@ -171,7 +221,12 @@ public sealed class WorkflowRunQuerier
     // changes one site, not three (or all the read sites).
     private static string StatusString(WorkflowRunStatus status) =>
         status.ToString().ToLowerInvariant();
+
+    private static DateTimeOffset ToUtc(DateTime value) =>
+        new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
 }
+
+public sealed record WorkflowRunScheduleCandidate(string WorkflowRunId, DateTimeOffset ReadySince);
 
 public sealed record WorkflowRunRoutingContext(
     string WorkflowRunId,

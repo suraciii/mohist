@@ -6,6 +6,7 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
@@ -59,8 +60,41 @@ public abstract class AgentJobGrainTestSupport
 
     protected async Task WaitForRunningAsync(IAgentJobGrain job)
     {
+        var runnerId = await WaitForAssignedRunnerAsync(job);
+        await PollRunnerAsync(runnerId);
         await _fixture.DispatchObserver.WaitForRunnerAcceptedAsync();
         Assert.Equal(AgentJobStatus.Running, await job.GetStatusAsync());
+    }
+
+    private async Task<string> WaitForAssignedRunnerAsync(IAgentJobGrain job)
+    {
+        await WaitForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            snapshot => !string.IsNullOrWhiteSpace(snapshot.RunnerId)
+                || snapshot.Status is AgentJobStatus.Completed
+                    or AgentJobStatus.Failed
+                    or AgentJobStatus.Unknown,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            "AgentJob receives a runner assignment or terminates");
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        if (string.IsNullOrWhiteSpace(snapshot.RunnerId))
+        {
+            throw new InvalidOperationException(
+                $"AgentJob {job.GetPrimaryKeyString()} never received a runner assignment before running (status={snapshot.Status})");
+        }
+        return snapshot.RunnerId!;
+    }
+
+    private Task PollRunnerAsync(string runnerId)
+    {
+        var dispatch = _fixture.Cluster
+            .GetSiloServiceProvider(null)
+            .GetRequiredService<IServiceScopeFactory>()
+            .CreateScope()
+            .ServiceProvider
+            .GetRequiredService<DispatchService>();
+        return dispatch.PollAsync(runnerId, new RunnerPollRequest([], []));
     }
 
     protected static async Task<T> WaitForAsync<T>(

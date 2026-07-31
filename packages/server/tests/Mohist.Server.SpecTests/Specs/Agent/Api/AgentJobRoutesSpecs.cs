@@ -199,6 +199,7 @@ internal sealed class TerminalAgentJobGrain : IAgentJobGrain
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "already-terminal"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_result.Status);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input) => Task.CompletedTask;
     public Task EnsureSubmittedAsync(AgentJobInput input) => Task.CompletedTask;
@@ -226,6 +227,7 @@ internal sealed class PendingAgentJobGrain : IAgentJobGrain
     public Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result) => Task.FromResult(new AgentJobReportResult(false, "not-running"));
     public Task<AgentJobStatus> GetStatusAsync() => Task.FromResult(_failureReason is null ? AgentJobStatus.Pending : AgentJobStatus.Failed);
     public Task<string?> GetCurrentWorkIdAsync() => Task.FromResult<string?>(null);
+    public Task<ClaimResult?> ClaimNextAsync(string runnerId) => Task.FromResult<ClaimResult?>(null);
     public Task AssignRunnerAsync(string runnerId, string workId) => Task.CompletedTask;
     public Task SubmitAsync(AgentJobInput input)
     {
@@ -331,10 +333,10 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-route", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+            await jobGrain.ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult("completed", "ok", JSON.DeserializeElement("{\"hello\":\"world\"}"), 0, ["artifact-a"]));
 
@@ -353,7 +355,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(AgentJobStatus.Completed, snapshot.Status);
             Assert.Equal(runnerId, snapshot.RunnerId);
 
-            var finalState = await runnerGrain.GetRuntimeStateAsync();
+            var finalState = await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).GetRuntimeStateAsync();
             Assert.DoesNotContain(jobKey, finalState.ActiveWorks.Select(w => w.OwnerId));
         }
         finally
@@ -384,10 +386,9 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-fail", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
+            await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult("failed", "runner reported failure", JSON.DeserializeElement("{\"error\":\"x\"}"), 1));
 
@@ -429,7 +430,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-report", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
 
             var reportResponse = await _fixture.Client.PostAsJsonAsync(
                 $"/api/runner/{runnerId}/report",
@@ -485,7 +486,7 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
                     workspace = new { path = "/tmp/agent-job-http-poll", projectId },
                 });
 
-            var workId = await WaitForAgentJobDispatchAsync(jobKey, runnerId);
+            var workId = await PollAgentJobDispatchAsync(jobKey, runnerId);
 
             using var httpResponse = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
             var httpBody = await httpResponse.ReadFirstDispatchElementAsync()
@@ -494,9 +495,8 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal(WorkDispatchOwnerKinds.AgentJob, httpBody.GetProperty("ownerKind").GetString());
             Assert.Equal(jobKey, httpBody.GetProperty("agentJobId").GetString());
 
-            var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-            await runnerGrain.ReportAgentJobResultAsync(
-                jobKey,
+            await _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey).ReportResultAsync(
+                runnerId,
                 workId,
                 new WorkResult(Status: "completed", Message: "ok"));
 
@@ -553,10 +553,4 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
             $"Runner '{runnerId}' to reach Online");
     }
 
-    private async Task<string> WaitForAgentJobDispatchAsync(string agentJobId, string expectedRunnerId)
-    {
-        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(agentJobId);
-        Assert.Equal(expectedRunnerId, assignment.RunnerId);
-        return assignment.WorkId;
-    }
 }

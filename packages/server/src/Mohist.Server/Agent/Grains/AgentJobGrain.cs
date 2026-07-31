@@ -2,13 +2,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Serialization;
-using Mohist.Server.Agent.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -18,26 +18,32 @@ using Orleans.Runtime;
 namespace Mohist.Server.Agent.Grains;
 
 /// <summary>
-/// Authoritative owner of a standalone agent job's lifecycle and terminal result.
-/// Persisted and non-reentrant so the backoff timer and
-/// <see cref="ReportResultAsync"/> cannot race on the lifecycle state. Dispatches
-/// its work directly to an idle Runner via <see cref="IRunnerRegistryGrain"/>, never
-/// touching workflow assignment or workflow polling.
+/// Authoritative owner of a standalone agent job's lifecycle, terminal
+/// result, and dispatch ledger. State lives entirely on the
+/// <c>AgentJobs</c> relational row; the grain hydrates from it on
+/// activation and writes back through <see cref="IAgentJobStore"/> with
+/// optimistic revision checking. There is no Orleans persistent state
+/// for this grain — the relational row is the single durable source.
 ///
-/// State machine:
-/// <c>Pending</c> → <c>Running</c> (when a Runner accepts the dispatch) → <c>Completed</c>
-/// or <c>Failed</c> (terminal). <c>Pending</c> → <c>Failed</c> when the dispatch retry
-/// bound is reached without ever acquiring a slot.
+/// Admission writes the AgentJob ledger row directly with
+/// <see cref="AgentJobLedgerRecord.AssignedRunnerId"/>,
+/// <see cref="AgentJobLedgerRecord.ReadySince"/>, and
+/// <see cref="AgentJobLedgerRecord.DispatchJson"/>; no
+/// <see cref="IRunnerGrain"/> call, no <c>RunnerWorks</c> row. The
+/// poll-time path claims the job via
+/// <see cref="ClaimNextAsync"/>.
+///
+/// State machine: <c>Pending</c> → <c>Running</c> (claim) →
+/// <c>Completed</c> or <c>Failed</c> (terminal). <c>Pending</c> →
+/// <c>Failed</c> when the readiness deadline elapses without a
+/// successful claim.
 ///
 /// Every terminal transition persists a <see cref="PendingSessionClose"/>
 /// payload (with a stable delivery id and the recorded timestamp) and
-/// registers a durable <c>agent-job-recovery</c> Orleans reminder. The
-/// AgentSession grain's idempotent <c>AppendTerminalCloseAsync</c> command
-/// flips that pending flag off and unregisters the reminder only after
-/// the matching terminal <c>session.activity</c> transcript fact is durable. The
-/// reminder drives retries until acknowledgement so a process restart,
-/// an activation loss, or a Session-persistence failure cannot lose the
-/// terminal fact.
+/// registers a durable <c>agent-job-recovery</c> Orleans reminder.
+/// The reminder drives retries until acknowledgement so a process
+/// restart, an activation loss, or a Session-persistence failure
+/// cannot lose the terminal fact.
 /// </summary>
 public sealed class AgentJobGrain : Grain, IAgentJobGrain
 {
@@ -48,75 +54,59 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private readonly ILogger<AgentJobGrain> _log;
     private readonly AgentJobOptions _options;
-    private readonly AgentJobBackoffSchedule _backoff;
     private readonly TimeProvider _timeProvider;
-    private readonly IPersistentState<AgentJobState> _state;
-    private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly IAgentJobStore _jobStore;
     private readonly IEventStore _eventStore;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly IGrainFactory _grains;
+    private readonly IAgentJobDispatchObserver _dispatchObserver;
     private readonly TaskCompletionSource<AgentJobTerminalResult> _terminalCompletion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private IDisposable? _dispatchTimer;
     private IDisposable? _jobTimeoutTimer;
+
+    private AgentJobState? _state;
+    private AgentJobLedgerRecord? _ledger;
+    private bool _hydrated;
 
     public AgentJobGrain(
         ILogger<AgentJobGrain> log,
         IOptions<AgentJobOptions> options,
         TimeProvider timeProvider,
-        [PersistentState("agent-job")] IPersistentState<AgentJobState> state,
-        IEventStore eventStore,
-        IAgentJobDispatchObserver dispatchObserver,
         IAgentJobStore jobStore,
+        IEventStore eventStore,
         IBackgroundTaskLauncher backgroundTasks,
-        IGrainFactory grains)
+        IGrainFactory grains,
+        IAgentJobDispatchObserver dispatchObserver)
     {
         _log = log;
         _options = options.Value;
         _timeProvider = timeProvider;
-        _state = state;
-        _eventStore = eventStore;
-        _dispatchObserver = dispatchObserver;
         _jobStore = jobStore;
+        _eventStore = eventStore;
         _backgroundTasks = backgroundTasks;
         _grains = grains;
-        // The backoff schedule is captured at activation time from the current
-        // snapshot of AgentJobOptions. Hot-reload of the configuration section
-        // is not applied to an already-active grain; it takes effect on the
-        // next activation. (Switching to IOptionsMonitor would not change this
-        // because Orleans instantiates grains per-activation, not per-call.)
-        _backoff = _options.ResolveBackoffSchedule();
+        _dispatchObserver = dispatchObserver;
     }
 
     public override async Task OnActivateAsync(CancellationToken ct)
     {
-        if (!_state.RecordExists)
-            await _state.ReadStateAsync();
+        await HydrateAsync();
+
+        if (IsTerminal && State.TerminalResult is not null)
+            _terminalCompletion.TrySetResult(State.TerminalResult);
 
         _log.LogInformation("AgentJob {Id} OnActivateAsync: status={Status}, input={Input}, routedPlan={RoutedPlan}",
             Key, State.Status, State.Input is not null, State.RoutedPlan is not null);
 
         if (IsTerminal)
         {
-            // A terminal job carries a durable recovery obligation:
-            // either the pending Session-close delivery or the pending
-            // failure-event append is still outstanding.
-            // Try to deliver here so a freshly reactivated grain
-            // finishes the work without waiting for the next reminder
-            // tick (the reminder is the safety net, not the only path).
-            // If a reminder was lost across silos, re-register it so the
-            // background loop keeps retrying until both obligations are
-            // durable.
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null || State.PendingTerminalDeliveryEvent is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
             {
                 await EnsureRecoveryReminderAsync();
                 if (State.PendingSessionClose is not null)
                     await DeliverTerminalToSessionAsync(State.PendingSessionClose);
                 if (State.PendingFailureEvent is not null)
                     await EmitFailureEventAsync(State.PendingFailureEvent);
-                if (State.PendingTerminalDeliveryEvent is not null)
-                    await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             }
             return;
         }
@@ -124,12 +114,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.Input is null && State.RoutedPlan is null)
             return;
 
-        // Routed-launch preparation recovery: the plan is durable but
-        // Session open / LaunchReady / Pending dispatch have not yet
-        // converged. Advance the persisted plan idempotently; this
-        // branch is hit after a process loss before Session open,
-        // before LaunchReady persisted, or before Runner acceptance.
-        if (State.RoutedPlan is not null && !State.RunnerAccepted)
+        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
         {
             await EnsureRecoveryReminderAsync();
             await AdvancePreparedLaunchAsync();
@@ -138,53 +123,43 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Status == AgentJobStatus.Running)
         {
+            if (JobTimeoutExceeded())
+            {
+                await OnJobTimeoutAsync();
+                return;
+            }
             ArmJobTimeout();
             return;
         }
 
-        // Unknown is intentionally non-dispatchable.
-        // A freshly reactivated Unknown job must NOT auto-replay;
-        // reconciliation waits for an authoritative running or
-        // terminal report from the original Runner.
         if (State.Status == AgentJobStatus.Unknown)
         {
             return;
         }
 
-        await TryDispatchAsync();
+        if (State.Status == AgentJobStatus.Pending)
+            await EvaluatePendingAsync();
     }
 
     public override Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
     {
-        _dispatchTimer?.Dispose();
-        _dispatchTimer = null;
         _jobTimeoutTimer?.Dispose();
         _jobTimeoutTimer = null;
+        _state = null;
+        _ledger = null;
+        _hydrated = false;
         return Task.CompletedTask;
     }
 
     private string Key => this.GetPrimaryKeyString();
-    private AgentJobState State => _state.State;
+    private AgentJobState State => _state ?? throw new InvalidOperationException(
+        $"AgentJob '{Key}' state accessed before hydration");
     private bool IsTerminal => State.Status is AgentJobStatus.Completed
         or AgentJobStatus.Failed
         or AgentJobStatus.Cancelled;
 
-    /// <summary>
-    /// Job is in a state where no further dispatch attempts are
-    /// allowed. Unknown is intentionally non-dispatchable: a Runner
-    /// disconnect or inconclusive delivery never fabricates a new
-    /// dispatch; reconciliation uses the original work identity.
-    /// </summary>
     private bool IsDispatchable => State.Status is AgentJobStatus.Pending;
 
-    /// <summary>
-    /// Job still has a recoverable first-execution obligation. Both
-    /// <see cref="AgentJobStatus.Pending"/> and <see cref="AgentJobStatus.Running"/>
-    /// qualify, and <see cref="AgentJobStatus.Unknown"/> is also
-    /// reachable for reconciliation — a Runner reconnect or
-    /// authoritative terminal report must update the original Job
-    /// rather than minting a replacement.
-    /// </summary>
     private bool IsReconcilable => State.Status is AgentJobStatus.Pending
         or AgentJobStatus.Running
         or AgentJobStatus.Unknown;
@@ -193,6 +168,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     public async Task<AgentJobCancelResult> CancelAsync()
     {
+        await HydrateAsync();
+
         if (State.Status == AgentJobStatus.Pending)
         {
             await EnterTerminalStateAsync(
@@ -223,7 +200,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.RunnerId,
             State.WorkId,
             State.FailureReason,
-            State.DispatchAttempts,
             State.RunnerAccepted,
             State.PendingSessionClose is not null,
             State.Input?.ProjectId ?? State.RoutedPlan?.ProjectId,
@@ -232,17 +208,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: State.Input?.InitialInputId,
             InitialTurnId: State.Input?.InitialTurnId));
 
-    /// <summary>
-    /// Returns the job's terminal result. Before the job has reached a terminal
-    /// state (<see cref="AgentJobStatus.Completed"/> or <see cref="AgentJobStatus.Failed"/>),
-    /// this method returns a synthesised <see cref="AgentJobTerminalResult"/>
-    /// whose <see cref="AgentJobTerminalResult.Status"/> mirrors the current
-    /// grain state but whose <see cref="AgentJobTerminalResult.Message"/>,
-    /// <see cref="AgentJobTerminalResult.Output"/>, and
-    /// <see cref="AgentJobTerminalResult.ArtifactUploadIds"/> are all <c>null</c>.
-    /// Callers that need to distinguish "not yet terminal" from "terminal" must
-    /// check the <see cref="AgentJobTerminalResult.Status"/> field.
-    /// </summary>
     public Task<AgentJobTerminalResult> GetTerminalResultAsync()
     {
         if (State.TerminalResult is not null)
@@ -257,36 +222,35 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ? Task.FromResult(State.TerminalResult!)
             : _terminalCompletion.Task;
 
-    public async Task AssignRunnerAsync(string runnerId, string workId)
+    public async Task<ClaimResult?> ClaimNextAsync(string runnerId)
     {
+        await HydrateAsync();
+
+        if (string.IsNullOrWhiteSpace(runnerId))
+            return null;
+
+        // Validate the assignment under the row's revision. A concurrent
+        // admission can move the AssignedRunnerId; in that case the
+        // claim is skipped (the caller observes the new assignee on a
+        // later poll).
+        if (!string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal))
+            return null;
         if (State.Status != AgentJobStatus.Pending)
-            throw new InvalidOperationException(
-                $"AgentJob '{Key}' cannot accept runner assignment in status {State.Status}");
+            return null;
+        if (string.IsNullOrWhiteSpace(State.WorkId))
+            return null;
 
-        AssignRunnerInternal(runnerId, workId);
-        State.RunnerAccepted = true;
-        State.Status = AgentJobStatus.Running;
-        State.RunningSince = _timeProvider.GetUtcNow();
-        State.WaitingReason = null;
-        await SaveAsync();
+        var record = await _jobStore.ClaimAsync(Key, runnerId, _timeProvider.GetUtcNow());
+        _hydrated = false;
+        await HydrateAsync();
+        var dispatch = DeserializeDispatch(record.DispatchJson)
+            ?? throw new AgentJobLedgerReconstructionException(
+                $"AgentJob '{Key}' claim returned a row without a parseable dispatch snapshot");
+
         ArmJobTimeout();
-        await MarkInitialTurnExecutingAsync();
-    }
+        await SafeRunnerAcceptedAsync(runnerId, State.WorkId!);
 
-    private void AssignRunnerInternal(string runnerId, string workId)
-    {
-        State.RunnerId = runnerId;
-        State.WorkId = workId;
-        State.RunnerAccepted = false;
-        State.RunningSince = null;
-    }
-
-    public Task<bool> IsWorkRunnableAsync(string runnerId, string workId)
-    {
-        return Task.FromResult(
-            !IsTerminal
-            && string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            && string.Equals(State.WorkId, workId, StringComparison.Ordinal));
+        return new ClaimResult(Key, runnerId, State.WorkId!, dispatch);
     }
 
     public async Task<bool> RecordRuntimeSessionBindingAsync(
@@ -307,28 +271,25 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return string.Equals(State.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal);
 
         State.RuntimeSessionId = runtimeSessionId;
-        await SaveAsync();
+        await PersistAsync();
         return true;
     }
 
     public async Task<AgentJobReportResult> ReportResultAsync(string runnerId, string workId, WorkResult result)
     {
+        await HydrateAsync();
+
         if (IsTerminal)
         {
             _log.LogDebug(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: already in terminal {Status}",
                 Key, runnerId, workId, State.Status);
-            // Repair: a redelivered report on an already-terminal job
-            // must not silently lose its pending Session close. Retry
-            // the durable delivery here so report replay and reminder
-            // ticks converge on the same single close fact.
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
-            return new AgentJobReportResult(false, "already-terminal");
+            return new AgentJobReportResult(false, "stale");
         }
 
-        if (State.Status != AgentJobStatus.Running
-            && (State.RunnerId is null || State.WorkId is null))
+        if (State.Status is not (AgentJobStatus.Running or AgentJobStatus.Unknown))
         {
             _log.LogWarning(
                 "AgentJob {Id} rejecting report from {Runner} for {Work}: unexpected status {Status}",
@@ -354,13 +315,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ? null
             : (string.IsNullOrWhiteSpace(result.Message) ? result.Status : result.Message);
 
-        // Runner category precedence: structured output `failureCategory`
-        // → `WorkResult.Error.Code` → report status. The output JSON is
-        // parsed here so the persisted terminal fact (and downstream
-        // AgentSession close event) reflects the same verdict the runner
-        // surfaced, even when `result.Error.Code` carries the pre-execution
-        // `invalid-input` classification a generic status fallback would
-        // collapse to `failed`.
         var failureCategory = isSuccess
             ? null
             : FailureCategoryFromOutput(result.Output)
@@ -383,29 +337,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         return new AgentJobReportResult(true);
     }
 
-    public async Task ReconcileRunningAsync(string runnerId, string workId)
+    public async Task FailAsync(string reason, string? agentId = null)
     {
-        if (IsTerminal
-            || !string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            || !string.Equals(State.WorkId, workId, StringComparison.Ordinal))
-            return;
+        await HydrateAsync();
 
-        if (State.Status == AgentJobStatus.Unknown)
-        {
-            State.Status = AgentJobStatus.Running;
-            State.FailureReason = null;
-            State.RunningSince ??= _timeProvider.GetUtcNow();
-            await SaveAsync();
-            ArmJobTimeout();
-            await MarkInitialTurnExecutingAsync();
-        }
-    }
-
-    public Task FailAsync(string reason, string? agentId = null)
-    {
         if (IsTerminal)
         {
-            return Task.CompletedTask;
+            return;
         }
 
         var resolvedAgentId = !string.IsNullOrWhiteSpace(agentId)
@@ -432,7 +370,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.Input = State.Input with { AgentId = resolvedAgentId };
         }
 
-        return EnterTerminalStateAsync(
+        await EnterTerminalStateAsync(
             AgentJobStatus.Failed,
             null,
             reason,
@@ -446,13 +384,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     public async Task SubmitAsync(AgentJobInput input)
     {
+        await HydrateAsync();
+
         if (State.Input is not null)
         {
             var existingInput = InputWithAgentConfig()!;
             if (EquivalentInput(existingInput, input))
             {
                 if (!IsTerminal && State.Status == AgentJobStatus.Pending)
-                    await TryDispatchAsync();
+                    await TryAdmitAsync();
                 return;
             }
             throw new InvalidOperationException(
@@ -472,83 +412,48 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.AgentConfigJson = SerializeAgentConfig(input.AgentConfig);
         State.Input = input with { AgentConfig = null };
         State.SubmittedAt = _timeProvider.GetUtcNow();
-        State.NextDispatchDelay = TimeSpan.Zero;
-        State.DispatchAttempts = 0;
-        await SaveAsync();
-        await TryDispatchAsync();
+        await PersistAsync();
+        await TryAdmitAsync();
     }
 
     public async Task EnsureSubmittedAsync(AgentJobInput input)
     {
+        await HydrateAsync();
+
         if (State.Input is not null)
         {
             if (!IsTerminal && State.Status == AgentJobStatus.Pending)
-                await TryDispatchAsync();
+                await TryAdmitAsync();
             return;
         }
 
         await SubmitAsync(input);
     }
 
-    /// <summary>
-    /// Idempotent routed-launch preparation. Registers the durable
-    /// <c>agent-job-recovery</c> reminder
-    /// BEFORE persisting the canonical plan so a crash between
-    /// reminder registration and plan persistence still leaves an
-    /// orphan reminder that self-cleans on its first tick. The reminder
-    /// keeps serving <see cref="AdvancePreparedLaunchAsync"/> (and the
-    /// terminal-delivery retry loop) until the job reaches Runner
-    /// acceptance or a durable terminal close.
-    ///
-    /// <para>
-    /// On replay the canonical plan (the one currently persisted on
-    /// state) is returned even when the caller's resolved values
-    /// differ — first-writer semantics. Redelivery cannot overwrite
-    /// the workspace, lineage, or preflight outcome that the first
-    /// delivery decided.
-    /// </para>
-    /// </summary>
     public async Task<RoutedAgentLaunchPlan> EnsurePreparedAsync(RoutedAgentLaunchPlan plan)
     {
+        await HydrateAsync();
         ArgumentNullException.ThrowIfNull(plan);
         if (string.IsNullOrWhiteSpace(plan.AgentId))
             throw new ArgumentException("RoutedAgentLaunchPlan.AgentId is required", nameof(plan));
 
         if (State.RoutedPlan is { } existing)
         {
-            // First-writer: replay returns the persisted canonical
-            // plan, not the caller's newly resolved values. Ensure the
-            // recovery reminder is registered so OnActivate / the
-            // reminder tick can advance the plan if the silo was
-            // restarted between preparation and the caller calling
-            // AdvancePreparedLaunchAsync.
             await EnsureRecoveryReminderAsync();
             return existing;
         }
 
-        // Register reminder first so a crash between registration and
-        // plan persistence still leaves a recoverable reminder. The
-        // tick self-cleans when State.RoutedPlan is null and there is
-        // no terminal pending close — covering the rare
-        // reminder-before-failed-write edge case.
         await EnsureRecoveryReminderAsync();
 
         State.RoutedPlan = plan;
-        await SaveAsync();
+        await PersistAsync();
         return plan;
     }
 
-    /// <summary>
-    /// Advance the durable prepared launch plan. Idempotent across
-    /// immediate, OnActivate, and
-    /// reminder-recovery paths. Opens the AgentSession from the
-    /// persisted plan only — never from caller's newly resolved
-    /// values — and either persists LaunchReady and submits the
-    /// AgentJobInput (executable disposition) or enters the durable
-    /// preflight terminal-delivery protocol.
-    /// </summary>
     public async Task AdvancePreparedLaunchAsync()
     {
+        await HydrateAsync();
+
         var plan = State.RoutedPlan;
         _log.LogInformation("AgentJob {Id} AdvancePreparedLaunchAsync: plan={Plan}, disposition={Disp}",
             Key, plan is not null, plan?.Disposition);
@@ -566,15 +471,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (IsTerminal)
         {
-            // Terminal state already covers either a successful runner
-            // report or the preflight-failed terminal close; the
-            // reminder self-cleans via ReceiveReminder when there is no
-            // pending delivery.
             return;
         }
 
-        // Ensure reminder is registered across all advance paths so a
-        // crash between steps is recoverable without event redelivery.
         await EnsureRecoveryReminderAsync();
 
         var sessionGrain = GrainFactory.GetGrain<IAgentSessionGrain>(plan.SessionId);
@@ -609,17 +508,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (plan.Disposition == RoutedLaunchDisposition.PreflightFailed)
         {
-            // Persist LaunchReady so subsequent state reads reflect the
-            // Session has been opened from the canonical plan. Then
-            // enter the durable terminal-delivery protocol; the
-            // reminder stays active until Session-close acknowledgement.
             State.LaunchReady = true;
-            // Surface the session id via the AgentJobInput.AgentSessionId
-            // field even for the preflight branch so the durable
-            // terminal-delivery helper can route the close to the
-            // AgentSession grain we just opened above. The job will
-            // never reach dispatch because the terminal transition
-            // happens immediately afterwards.
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = new AgentJobInput(
                 Prompt: plan.Prompt ?? string.Empty,
@@ -636,7 +525,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 EpicNumber: plan.EpicNumber,
                 WorkflowRunId: plan.WorkflowRunId,
                 Skills: plan.Skills);
-            await SaveAsync();
+            await PersistAsync();
 
             var reason = plan.PreflightReason ?? AgentJobFailureReasons.WorkspaceUnavailable;
             var category = plan.PreflightCategory ?? AgentJobFailureReasons.WorkspaceUnavailable;
@@ -673,36 +562,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.AgentConfigJson = plan.AgentConfigJson;
             State.Input = input with { AgentConfig = null };
             State.SubmittedAt = _timeProvider.GetUtcNow();
-            State.NextDispatchDelay = TimeSpan.Zero;
-            State.DispatchAttempts = 0;
         }
 
         if (!State.LaunchReady)
         {
             State.LaunchReady = true;
-            await SaveAsync();
+            await PersistAsync();
         }
 
-        // Either the input was newly persisted or it was already
-        // there from an earlier advance. TryDispatchAsync is the
-        // existing dispatch loop; it is a no-op for terminal jobs and
-        // idempotent for Pending ones.
-        await TryDispatchAsync();
+        await TryAdmitAsync();
     }
 
-    /// <summary>
-    /// Manual-launch preparation. Persists the
-    /// canonical <see cref="PrepareManualLaunchCommand"/> as the
-    /// grain's durable plan, then builds the matching
-    /// <see cref="AgentJobInput"/> snapshot. The grain refuses to
-    /// dispatch until <see cref="SubmitPreparedLaunchAsync"/> is called
-    /// — the coordinator uses the gap between prepare and submit to
-    /// first persist the AgentSession's initial Input and Turn.
-    /// Re-issuing with the same plan is a no-op; re-issuing with a
-    /// different plan is rejected.
-    /// </summary>
     public async Task<AgentJobInput> PrepareManualLaunchAsync(PrepareManualLaunchCommand command)
     {
+        await HydrateAsync();
         ArgumentNullException.ThrowIfNull(command);
         if (string.IsNullOrWhiteSpace(command.Prompt))
             throw new ArgumentException("Prompt is required.", nameof(command));
@@ -735,8 +608,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (State.Input is not null)
         {
-            // Manual launch must come before submission; we refuse to
-            // overwrite an already-submitted input.
             throw new InvalidOperationException(
                 $"AgentJob '{Key}' already has input; manual launch preparation must be the first write.");
         }
@@ -746,20 +617,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.AgentConfigJson = SerializeAgentConfig(command.AgentConfig);
         State.Input = input with { AgentConfig = null };
         State.SubmittedAt = _timeProvider.GetUtcNow();
-        State.NextDispatchDelay = TimeSpan.Zero;
-        State.DispatchAttempts = 0;
-        await SaveAsync();
+        await PersistAsync();
         await EnsureRecoveryReminderAsync();
         return input;
     }
 
-    /// <summary>
-    /// Submit the manual launch to dispatch. The prepare step
-    /// already persisted the input; the submission bumps the
-    /// dispatch attempts and triggers the regular dispatch loop.
-    /// </summary>
     public async Task SubmitPreparedLaunchAsync()
     {
+        await HydrateAsync();
         if (State.RoutedPlan is not null)
             throw new InvalidOperationException(
                 $"AgentJob '{Key}' cannot submit a manual launch; routed launch path owns this job.");
@@ -774,33 +639,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!State.LaunchReady)
         {
             State.LaunchReady = true;
-            await SaveAsync();
+            await PersistAsync();
         }
-        await TryDispatchAsync();
+        await TryAdmitAsync();
     }
 
-    public Task MarkUnknownAsync(string reason)
-    {
-        if (IsTerminal)
-            return Task.CompletedTask;
-        if (State.Status == AgentJobStatus.Unknown
-            && string.Equals(State.FailureReason ?? string.Empty, reason ?? string.Empty, StringComparison.Ordinal))
-        {
-            return Task.CompletedTask;
-        }
-        return EnterUnknownStateAsync(reason ?? AgentJobFailureReasons.RunnerUnavailable);
-    }
+    public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
 
-    /// <summary>
-    /// Move a non-terminal Job into <see cref="AgentJobStatus.Unknown"/>
-    /// without dispatching a new prompt or emitting a terminal
-    /// session-close. Preserves the durable Job / work / input / turn
-    /// identities so a Runner reconnect or authoritative terminal
-    /// report resolves the original Job. Also propagates the same
-    /// verdict to the linked initial <see cref="Mohist.Server.Sessions.Domain.AgentTurnRecord"/>
-    /// so the Session's view of the first turn stays consistent with
-    /// the Job's verdict.
-    /// </summary>
     internal async Task EnterUnknownStateAsync(string reason)
     {
         if (IsTerminal)
@@ -810,29 +655,15 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         State.Status = AgentJobStatus.Unknown;
         State.FailureReason = reason;
         State.RunningSince = null;
-        // Clear any terminal result so subsequent GetTerminalResult
-        // reads do not fabricate a previously-set Completed/Failed
-        // verdict. A later authoritative terminal transition repopulates
-        // TerminalResult through the normal EnterTerminalStateAsync path.
         State.TerminalResult = null;
         State.TerminalAt = null;
 
-        DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
 
-        // Re-register the recovery reminder so OnActivate / the
-        // reminder tick keeps the durable identities coherent and the
-        // Session-side initial-turn verdict mirrors the Job-side one.
-        // No terminal session-close / failure-event obligations are
-        // staged — Unknown is non-terminal and not a Session close.
         await EnsureRecoveryReminderAsync();
-        await SaveAsync();
+        await PersistAsync();
 
         await PropagateUnknownToInitialTurnAsync(reason);
-        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, reason, "unknown", null, null);
-        await SaveAsync();
-        if (State.PendingTerminalDeliveryEvent is not null)
-            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
 
         _log.LogInformation(
             "AgentJob {Id} unknown: previous={Previous}, reason={Reason}",
@@ -971,14 +802,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     public async Task CheckTimeoutsAsync()
     {
+        await HydrateAsync();
+
         if (State.Status == AgentJobStatus.Pending)
         {
-            if (State.RunnerId is not null && JobTimeoutExceeded())
-            {
-                await OnJobTimeoutAsync();
-                return;
-            }
-            await TryDispatchAsync();
+            await EvaluatePendingAsync();
             return;
         }
 
@@ -988,43 +816,35 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private async Task TryDispatchAsync()
-    {
-        try
-        {
-            await TryDispatchCoreAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError(ex, "AgentJob {Id} dispatch attempt failed", Key);
-            await ScheduleNextDispatchAsync();
-        }
-    }
-
-    private async Task TryDispatchCoreAsync()
+    private async Task TryAdmitAsync()
     {
         if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
+
+        // If the row already carries a dispatch snapshot (a previous
+        // admission succeeded), the next claim race is owned by the
+        // poll path. Re-admitting here would clobber ReadySince and
+        // extend the deadline; only re-admit when no runner was found.
+        if (!string.IsNullOrWhiteSpace(State.RunnerId)
+            && !string.IsNullOrWhiteSpace(_ledger?.DispatchJson)
+            && !string.IsNullOrWhiteSpace(State.WorkId))
+        {
+            var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
+            if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
+                return;
+
+            State.RunnerId = null;
+            State.RunnerAccepted = false;
+            State.RunningSince = null;
+            State.ReadySince = null;
+            await PersistAsync();
+        }
 
         if (!await AcquireConcurrencyPermitAsync())
             return;
 
         State.WaitingReason = null;
-        State.DispatchAttempts++;
-        await SaveAsync();
-
-        if (State.RunnerId is not null)
-        {
-            if (await TryAssignToRunnerAsync(State.RunnerId))
-                return;
-            if (State.RunnerId is not null)
-            {
-                State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-                await ReleaseConcurrencyPermitAsync();
-                await ScheduleNextDispatchAsync();
-                return;
-            }
-        }
+        await PersistAsync();
 
         var projectId = State.Input.ProjectId ?? string.Empty;
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
@@ -1033,27 +853,32 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         {
             State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
             await ReleaseConcurrencyPermitAsync();
-            await ScheduleNextDispatchAsync();
             return;
         }
 
         foreach (var runnerInfo in runners)
         {
-            if (State.Status != AgentJobStatus.Pending)
-                return;
-            if (await TryAssignToRunnerAsync(runnerInfo.RunnerId))
+            if (await TryAdmitOnRunnerAsync(runnerInfo.RunnerId))
                 return;
         }
 
-        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
-        await ReleaseConcurrencyPermitAsync();
-        await ScheduleNextDispatchAsync();
+        await EnterTerminalStateAsync(
+            AgentJobStatus.Failed,
+            null,
+            AgentJobFailureReasons.RunnerUnavailable,
+            AgentJobFailureReasons.RunnerUnavailable,
+            AgentJobFailureReasons.RunnerUnavailable,
+            "no eligible runner has admission capacity",
+            null,
+            null,
+            null);
     }
 
     private async Task<bool> AcquireConcurrencyPermitAsync()
     {
         if (State.Input is null)
             return false;
+
         var projectId = State.Input.ProjectId;
         var agentId = State.Input.AgentId;
         if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
@@ -1071,12 +896,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         {
             State.ConcurrencyPermitHeld = false;
             State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
-            await SaveAsync();
+            await PersistAsync();
             return false;
         }
 
         State.ConcurrencyPermitHeld = true;
-        await SaveAsync();
+        await PersistAsync();
 
         var confirmation = await gate.AcquireAsync(
             projectId,
@@ -1089,98 +914,133 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         State.ConcurrencyPermitHeld = false;
         State.WaitingReason = AgentAvailabilityWaitReasons.ConcurrencyLimit;
-        await SaveAsync();
+        await PersistAsync();
         return false;
     }
 
     public async Task ConcurrencyPermitGrantedAsync()
     {
+        await HydrateAsync();
         if (State.Status == AgentJobStatus.Pending)
-            await TryDispatchAsync();
+            await TryAdmitAsync();
     }
 
     private async Task ReleaseConcurrencyPermitAsync()
     {
         if (!State.ConcurrencyPermitHeld || State.Input is null)
             return;
+
         var projectId = State.Input.ProjectId;
         var agentId = State.Input.AgentId;
-        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
-            return;
         var token = State.ConcurrencyPermitToken;
-        if (string.IsNullOrWhiteSpace(token))
+        if (string.IsNullOrWhiteSpace(projectId)
+            || string.IsNullOrWhiteSpace(agentId)
+            || string.IsNullOrWhiteSpace(token))
+        {
             return;
+        }
+
         State.ConcurrencyPermitHeld = false;
-        await SaveAsync();
+        await PersistAsync();
         await _grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
             .ReleaseAsync(projectId, agentId, token);
     }
 
-    private async Task<bool> TryAssignToRunnerAsync(string runnerId)
+    private async Task<bool> TryAdmitOnRunnerAsync(string runnerId)
     {
         var runner = GrainFactory.GetGrain<IRunnerGrain>(runnerId);
-        var assignmentPrepared = string.Equals(State.RunnerId, runnerId, StringComparison.Ordinal)
-            && State.WorkId is not null;
-        if (!assignmentPrepared)
-        {
-            var state = await runner.GetRuntimeStateAsync();
-            if (state.Status != RunnerStatus.Online)
-                return false;
-
-            var maxSlots = await runner.GetSlotsAsync();
-            var activeWorkCount = state.ActiveWorks
-                .Select(w => w.OwnerId)
-                .Distinct(StringComparer.Ordinal)
-                .Count();
-            if (activeWorkCount >= maxSlots)
-                return false;
-        }
-
-        if (State.Status != AgentJobStatus.Pending)
+        var state = await runner.GetRuntimeStateAsync();
+        if (state.Status != RunnerStatus.Online)
             return false;
 
-        if (!assignmentPrepared)
-        {
-            AssignRunnerInternal(runnerId, StableWorkId(Key));
-            await SaveAsync();
-            await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, State.WorkId!);
-        }
-
-        var dispatch = BuildDispatch(State.WorkId!);
-        var result = await runner.AssignAgentJobAsync(dispatch);
-
-        if (result.Status != RunnerWorkAssignmentStatus.Assigned)
-        {
-            if (State.Status != AgentJobStatus.Pending)
-                return false;
-            if (string.Equals(result.Reason, "runner-reconciling", StringComparison.Ordinal))
-                return false;
-
-            State.RunnerId = null;
-            State.WorkId = null;
-            State.RunnerAccepted = false;
-            State.RunningSince = null;
-            await SaveAsync();
-            await ReleaseConcurrencyPermitAsync();
+        var maxSlots = await runner.GetSlotsAsync();
+        var activeWorkCount = state.ActiveWorks
+            .Select(w => w.OwnerId)
+            .Distinct(StringComparer.Ordinal)
+            .Count();
+        if (activeWorkCount >= maxSlots)
             return false;
+
+        // Admission writes the ledger row directly. The grain does not
+        // call RunnerGrain.AssignAgentJobAsync and does not transition
+        // the job to Running; the next poll claim does that.
+        var now = _timeProvider.GetUtcNow();
+        var workId = StableWorkId(Key);
+        var dispatch = BuildDispatch(workId);
+
+        State.RunnerId = runnerId;
+        State.WorkId = workId;
+        State.ReadySince = now;
+        State.RunnerAccepted = false;
+        State.RunningSince = null;
+
+        var record = new AgentJobLedgerRecord(
+            JobKey: Key,
+            StateJson: JsonSerializer.Serialize(State, JSON.Options),
+            Revision: _ledger?.Revision ?? 0,
+            AssignedRunnerId: runnerId,
+            WorkId: workId,
+            ReadySince: now,
+            RunningSince: null,
+            DispatchJson: JsonSerializer.Serialize(dispatch, JSON.Options),
+            WorkType: "agent-job",
+            Stage: "agent",
+            Title: "Agent Job",
+            IssueProjectId: State.Input?.ProjectId,
+            IssueNumber: State.Input?.IssueNumber,
+            AgentSessionId: State.Input?.AgentSessionId,
+            InitialInputId: State.Input?.InitialInputId,
+            InitialTurnId: State.Input?.InitialTurnId);
+
+        if (_ledger is null)
+        {
+            var inserted = await _jobStore.InsertLedgerAsync(record);
+            _ledger = inserted;
+            await HydrateAsync();
+        }
+        else
+        {
+            var saved = await _jobStore.SaveLedgerAsync(record);
+            _ledger = saved;
+            await HydrateAsync();
         }
 
-        await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, State.WorkId!);
-        State.RunnerAccepted = true;
-        State.Status = AgentJobStatus.Running;
-        State.RunningSince = _timeProvider.GetUtcNow();
-        await SaveAsync();
-        DisposeDispatchTimer();
-        ArmJobTimeout();
-        // Durable Runner-acceptance fence: clear the prepared/pending-dispatch
-        // obligation by unregistering the recovery reminder. The next
-        // obligation is the terminal Session-close delivery, which
-        // (re-)registers its own reminder via EnterTerminalStateAsync.
-        await UnregisterSelfAsync(RecoveryReminderName);
         _log.LogInformation(
-            "AgentJob {Id} assigned to runner {Runner} as work {Work}",
-            Key, runnerId, State.WorkId);
+            "AgentJob {Id} admitted to runner {Runner} as work {Work} (readySince={ReadySince})",
+            Key, runnerId, workId, now);
+
+        await EnsureRecoveryReminderAsync();
+        await SafeAssignmentPreparedAsync(runnerId, workId);
+
         return true;
+    }
+
+    private async Task SafeAssignmentPreparedAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.AssignmentPreparedAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer AssignmentPrepared threw; ledger row remains authoritative",
+                Key);
+        }
+    }
+
+    private async Task SafeRunnerAcceptedAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.RunnerAcceptedAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer RunnerAccepted threw; claim remains authoritative",
+                Key);
+        }
     }
 
     private WorkDispatch BuildDispatch(string workId)
@@ -1203,15 +1063,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             with["model"] = JSON.SerializeToElement(input.Model);
         if (!string.IsNullOrWhiteSpace(input.Variant))
             with["variant"] = JSON.SerializeToElement(input.Variant);
-        // The dispatch envelope carries the
-        // snapshot-fixed runtime so the runner AgentJob executor can
-        // select the right runtime (PiRuntime / OpenCodeRuntime).
         if (!string.IsNullOrWhiteSpace(input.Runtime))
             with["runtime"] = JSON.SerializeToElement(input.Runtime);
-        // Carry the captured ordered Skill names verbatim so the runner
-        // resolves SKILL.md bodies from its configured Skill roots.
-        // An empty/absent list means no Skills input — neither resolution
-        // nor a Skills envelope is emitted.
         if (input.Skills is { Count: > 0 })
             with["skills"] = JSON.SerializeToElement(input.Skills);
         var withJson = JSON.Serialize(with);
@@ -1234,18 +1087,18 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId);
     }
 
-    private async Task ScheduleNextDispatchAsync()
+    private static WorkDispatch? DeserializeDispatch(string? json)
     {
-        if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
-            return;
-
-        State.NextDispatchDelay = _backoff.NextDelay(State.NextDispatchDelay);
-        await SaveAsync();
-        DisposeDispatchTimer();
-        _dispatchTimer = this.RegisterGrainTimer(
-            _ => TryDispatchAsync(),
-            State.NextDispatchDelay,
-            TimeSpan.FromMilliseconds(-1));
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+        try
+        {
+            return JsonSerializer.Deserialize<WorkDispatch>(json, JSON.Options);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void ArmJobTimeout()
@@ -1272,12 +1125,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (IsTerminal || State.RunnerId is null)
             return;
 
-        // A report timeout is inconclusive
-        // delivery, not authoritative failure. The job transitions to
-        // Unknown so the durable identities (job/work/input/turn) are
-        // preserved for reconciliation; an authoritative terminal
-        // report from the original Runner later resolves the original
-        // Job and Turn. A retryable new launch MUST NOT be issued.
         _log.LogWarning(
             "AgentJob {Id} report timeout after {Timeout}; transitioning to unknown",
             Key, _options.JobTimeout);
@@ -1285,11 +1132,40 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}");
     }
 
-    private bool DispatchRetryBoundExceeded()
+    private bool ReadinessTimeoutExceeded()
     {
-        return State.Status == AgentJobStatus.Pending
-            && State.SubmittedAt is not null
-            && _timeProvider.GetUtcNow() >= State.SubmittedAt.Value + _backoff.TotalBound;
+        if (State.Status != AgentJobStatus.Pending)
+            return false;
+        if (State.ReadySince is null)
+            return false;
+        var bound = _options.DispatchRetryBound;
+        if (bound <= TimeSpan.Zero)
+            return false;
+        return _timeProvider.GetUtcNow() >= State.ReadySince.Value + bound;
+    }
+
+    private async Task EvaluatePendingAsync()
+    {
+        if (ReadinessTimeoutExceeded())
+        {
+            await EnterTerminalStateAsync(
+                AgentJobStatus.Failed,
+                null,
+                AgentJobFailureReasons.RunnerUnavailable,
+                AgentJobFailureReasons.RunnerUnavailable,
+                AgentJobFailureReasons.RunnerUnavailable,
+                "readiness timeout exceeded without claim",
+                null,
+                null,
+                null);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(State.RunnerId)
+            || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
+        {
+            await TryAdmitAsync();
+        }
     }
 
     private bool JobTimeoutExceeded()
@@ -1300,17 +1176,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             && _timeProvider.GetUtcNow() >= State.RunningSince.Value + _options.JobTimeout;
     }
 
-    /// <summary>
-    /// Single canonical entry point for every AgentJob terminal transition.
-    /// Persists a <see cref="PendingSessionClose"/> payload + records the
-    /// stable delivery id before saving terminal state, then registers a
-    /// durable <c>agent-job-recovery</c> reminder so the durable delivery
-    /// to the AgentSession survives activation loss, process restart, and
-    /// report replay. Idempotent for
-    /// already-terminal jobs that still carry a pending delivery — the
-    /// same delivery is retried so a redelivered report or a fresh
-    /// activation converges on exactly one terminal <c>session.activity</c> fact.
-    /// </summary>
     internal async Task EnterTerminalStateAsync(
         AgentJobStatus terminalStatus,
         int? exitCode,
@@ -1326,23 +1191,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         if (IsTerminal)
         {
-            // Already-terminal path: re-attach the same pending payload
-            // (preserving the original delivery id + recorded timestamp)
-            // so a redelivered report, an activation loss, or a reminder
-            // tick all retry the original delivery and converge on a
-            // single close fact. The failure-event obligation is also
-            // re-attached on the same path so a freshly reactivated grain
-            // finishes both durable writes before returning.
             State.PendingSessionClose ??= pending;
-            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null || State.PendingTerminalDeliveryEvent is not null)
+            if (State.PendingSessionClose is not null || State.PendingFailureEvent is not null)
                 await EnsureRecoveryReminderAsync();
-            await SaveAsync();
+            await PersistAsync();
             if (State.PendingSessionClose is not null)
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingTerminalDeliveryEvent is not null)
-                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
             return;
         }
 
@@ -1358,22 +1214,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureReason,
             terminalExitCode ?? exitCode);
         State.PendingSessionClose = pending;
-        StageTerminalDeliveryEvent(
-            terminalStatus,
-            message,
-            failureReason,
-            failureCategory,
-            artifactUploadIds,
-            terminalExitCode ?? exitCode);
-        await ReleaseConcurrencyPermitAsync();
 
         if (terminalStatus == AgentJobStatus.Failed)
         {
-            // Issue-491 D1: stage the durable failure-event obligation on
-            // every failed terminal transition. A redelivery from
-            // OnActivate / ReportResult retry / recovery-reminder tick
-            // reuses the original EventId and collapses at the store
-            // layer (source, eventId) uniqueness.
             State.PendingFailureEvent = new PendingFailureEvent(
                 EventId: AgentJobSessionDeliveryIds.FailureEventId(Key),
                 FailureReason: failureReason ?? pendingReason,
@@ -1381,16 +1224,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 RecordedAt: _timeProvider.GetUtcNow());
         }
 
-        DisposeDispatchTimer();
         DisposeJobTimeoutTimer();
 
-        // Register before persisting terminal state. This makes the
-        // reminder an orphan if the state write fails, which its next tick
-        // cleans up, but avoids persisting a terminal close obligation that
-        // has no durable wake-up after an activation loss.
+        await ReleaseConcurrencyPermitAsync();
         await EnsureRecoveryReminderAsync();
-        await SaveAsync();
-        _terminalCompletion.TrySetResult(State.TerminalResult!);
+        await PersistAsync();
+        _terminalCompletion.TrySetResult(State.TerminalResult);
 
         _log.LogInformation(
             "AgentJob {Id} terminal: {Status} ({Reason}, category={Category}, deliveryId={DeliveryId})",
@@ -1402,8 +1241,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await MarkInitialTurnTerminalAsync(terminalStatus, message, output, failureReason, failureCategory, terminalExitCode ?? exitCode);
         if (State.PendingFailureEvent is not null)
             await EmitFailureEventAsync(State.PendingFailureEvent);
-        if (State.PendingTerminalDeliveryEvent is not null)
-            await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
     }
 
     private async Task MarkInitialTurnExecutingAsync()
@@ -1448,11 +1285,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
         catch (Exception ex)
         {
-            // Issue-491 D1: leave the obligation in place; the recovery
-            // reminder re-attempts on its next tick. Never surface a
-            // terminal-delivery failure as an unobserved exception — the
-            // Session-close delivery is the only consumer that must
-            // succeed synchronously.
             _log.LogWarning(ex,
                 "AgentJob {Id} failed to append {Type} event (eventId={EventId}); reminder will retry",
                 Key, EventCatalog.ReverseDns.AgentJobFailed, obligation.EventId);
@@ -1460,7 +1292,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
         State.PendingFailureEvent = null;
-        await SaveAsync();
+        await PersistAsync();
         _log.LogInformation(
             "AgentJob {Id} emitted {Type} event (eventId={EventId}, reason={Reason}, category={Category})",
             Key,
@@ -1535,8 +1367,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var sessionId = State.Input?.AgentSessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            // No AgentSession to close. Clear that obligation while retaining
-            // the reminder for a pending failure event, if one exists.
             await ClearPendingSessionCloseAndMaybeReminderAsync();
             return;
         }
@@ -1572,17 +1402,14 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             _log.LogWarning(ex,
                 "AgentJob {Id} terminal delivery to session {SessionId} failed; deliveryId={DeliveryId} retained for retry",
                 Key, sessionId, pending.DeliveryId);
-            // Leave PendingSessionClose and the reminder in place so
-            // OnActivate, the reminder tick, or the next ReportResult
-            // replay retries the same delivery until it succeeds.
         }
     }
 
     private async Task ClearPendingSessionCloseAndMaybeReminderAsync()
     {
         State.PendingSessionClose = null;
-        await SaveAsync();
-        if (State.PendingFailureEvent is not null || State.PendingTerminalDeliveryEvent is not null)
+        await PersistAsync();
+        if (State.PendingFailureEvent is not null)
             return;
         try
         {
@@ -1592,75 +1419,18 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
         catch (Exception ex)
         {
-            // A future reminder tick observes no pending payload and
-            // unregisters itself; a transient reminder-service failure
-            // here is recoverable.
             _log.LogDebug(ex,
                 "AgentJob {Id} could not unregister recovery reminder; orphan tick will self-clean",
                 Key);
         }
     }
 
-    private void StageTerminalDeliveryEvent(
-        AgentJobStatus status,
-        string? message,
-        string? failureReason,
-        string? failureCategory,
-        string[]? artifactUploadIds,
-        int? exitCode)
-    {
-        var origin = State.ManualPlan?.ConnectionOrigin;
-        if (origin is null || State.PendingTerminalDeliveryEvent is not null)
-            return;
-
-        State.PendingTerminalDeliveryEvent = new PendingTerminalDeliveryEvent(
-            AgentJobSessionDeliveryIds.TerminalDeliveryEventId(Key),
-            origin,
-            status,
-            message,
-            failureReason,
-            failureCategory,
-            artifactUploadIds?.Length ?? 0,
-            exitCode,
-            _timeProvider.GetUtcNow());
-    }
-
-    private async Task EmitTerminalDeliveryEventAsync(PendingTerminalDeliveryEvent pending)
-    {
-        try
-        {
-            var envelope = BuildTerminalDeliveryEnvelope(pending);
-            await _eventStore.AppendAsync(envelope, CancellationToken.None);
-            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
-            State.PendingTerminalDeliveryEvent = null;
-            await SaveAsync();
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex, "AgentJob {Id} terminal delivery event is retained for retry", Key);
-        }
-    }
-
-    internal CloudEvent BuildTerminalDeliveryEnvelope(PendingTerminalDeliveryEvent obligation)
-    {
-        var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
-        return AgentJobLineage.BuildTerminalDeliveryEnvelope(Key, obligation, extensions);
-    }
-
-    /// Durable reminder tick driving three recovery loops:
-    /// terminal-delivery retry, prepared-launch advancement, and the
-    /// failure-event emission retry. A single
-    /// reminder name covers all three so the grain keeps a durable
-    /// wake-up until either Runner acceptance is persisted (preparation)
-    /// or the Session-close acknowledgement clears the pending payload
-    /// (terminal). The tick self-cleans only when no recoverable
-    /// obligation is left — for failed jobs without an AgentSession that
-    /// means waiting for the failure-event append to succeed.
-    /// </summary>
     public async Task ReceiveReminder(string reminderName, TickStatus status)
     {
         if (!string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
             return;
+
+        await HydrateAsync();
 
         if (IsTerminal)
         {
@@ -1668,9 +1438,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingFailureEvent is not null)
                 await EmitFailureEventAsync(State.PendingFailureEvent);
-            if (State.PendingTerminalDeliveryEvent is not null)
-                await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
-            if (State.PendingSessionClose is null && State.PendingFailureEvent is null && State.PendingTerminalDeliveryEvent is null)
+            if (State.PendingSessionClose is null && State.PendingFailureEvent is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;
@@ -1684,18 +1452,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
-        if (State.RoutedPlan is not null && !State.RunnerAccepted)
+        if (State.RoutedPlan is not null && State.Input is null && !State.RunnerAccepted)
         {
             await AdvancePreparedLaunchAsync();
             return;
         }
 
-        // Unknown is a reconcilable, non-terminal
-        // state. The reminder must stay registered so a later
-        // authoritative running or terminal report from the original
-        // Runner can update the same Job, and so a Runner reconnect
-        // path can re-deliver the Unknown verdict to the linked
-        // AgentSession if the first propagation failed.
         if (State.Status == AgentJobStatus.Unknown)
         {
             await PropagateUnknownToInitialTurnAsync(State.FailureReason
@@ -1703,9 +1465,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        if (State.Status == AgentJobStatus.Pending)
+        {
+            await EvaluatePendingAsync();
+            return;
+        }
+
         // Non-terminal, non-prepared state: no recoverable obligation.
-        // Reminder was registered before terminal save committed but
-        // the save then failed; the orphan tick self-cleans.
         await UnregisterSelfAsync(reminderName);
     }
 
@@ -1725,15 +1491,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    /// <summary>
-    /// Runner failure category precedence:
-    /// structured output <c>failureCategory</c> → <c>WorkResult.Error.Code</c>
-    /// → report status. The output JSON is the most specific runner signal
-    /// (e.g., <c>prompt_timeout</c>); the error code carries pre-execution
-    /// classifications like <c>invalid-input</c>; the status is the
-    /// coarsest fallback. All three are intentionally nullable — a
-    /// successful close persists no category.
-    /// </summary>
     private static string? FailureCategoryFromOutput(JsonElement? output)
     {
         if (output is not { ValueKind: JsonValueKind.Object } element) return null;
@@ -1749,37 +1506,113 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private static string? FailureCategoryFromStatus(string? status) =>
         string.IsNullOrWhiteSpace(status) ? null : status;
 
-    private async Task SaveAsync()
+    /// <summary>
+    /// Reads the AgentJob ledger row and hydrates the in-memory state
+    /// caches. Called on activation and after every state transition
+    /// that flows through the store.
+    /// </summary>
+    private async Task HydrateAsync()
     {
-        await _state.WriteStateAsync();
-        await MirrorToJobStoreAsync();
+        if (_hydrated && _ledger is not null)
+            return;
+
+        var record = await _jobStore.LoadLedgerAsync(Key);
+        if (record is null)
+        {
+            _state = new AgentJobState();
+            _ledger = null;
+            _hydrated = true;
+            return;
+        }
+
+        _ledger = record;
+        _state = JsonSerializer.Deserialize<AgentJobState>(record.StateJson, JSON.Options) ?? new AgentJobState();
+        // Backfill scheduling fields from the row so callers that read
+        // state see the indexed values too.
+        _state.RunnerId ??= record.AssignedRunnerId;
+        _state.WorkId ??= record.WorkId;
+        _state.SubmittedAt ??= record.ReadySince;
+        _state.ReadySince ??= record.ReadySince;
+        _state.RunningSince ??= record.RunningSince;
+        _hydrated = true;
     }
 
-    private async Task MirrorToJobStoreAsync()
+    /// <summary>
+    /// Persists the current in-memory state back to the AgentJob ledger
+    /// row. Optimistic revision check: if the row was updated
+    /// concurrently the save throws <see cref="AgentJobLedgerConflictException"/>;
+    /// the caller reloads via <see cref="HydrateAsync"/> and retries the
+    /// idempotent command.
+    /// </summary>
+    private async Task PersistAsync()
     {
-        try
+        var stateJson = JsonSerializer.Serialize(State, JSON.Options);
+        var record = new AgentJobLedgerRecord(
+            JobKey: Key,
+            StateJson: stateJson,
+            Revision: _ledger?.Revision ?? 0,
+            AssignedRunnerId: State.RunnerId,
+            WorkId: State.WorkId,
+            ReadySince: ResolveReadySinceForPersist(),
+            RunningSince: State.RunningSince,
+            DispatchJson: ResolveDispatchJsonForPersist(),
+            WorkType: State.RunnerId is null ? null : "agent-job",
+            Stage: State.RunnerId is null ? null : "agent",
+            Title: State.RunnerId is null ? null : "Agent Job",
+            IssueProjectId: State.Input?.ProjectId,
+            IssueNumber: State.Input?.IssueNumber,
+            AgentSessionId: State.Input?.AgentSessionId,
+            InitialInputId: State.Input?.InitialInputId,
+            InitialTurnId: State.Input?.InitialTurnId);
+
+        if (_ledger is null)
         {
-            var json = JsonSerializer.Serialize(State, Infrastructure.JSON.Options);
-            await _jobStore.SaveAsync(Key, json);
+            var inserted = await _jobStore.InsertLedgerAsync(record);
+            _ledger = inserted;
         }
-        catch (Exception ex)
+        else
         {
-            _log.LogWarning(ex,
-                "AgentJob {Id} mirror write to AgentJobs relational read model failed; grain state remains authoritative",
-                Key);
+            try
+            {
+                var saved = await _jobStore.SaveLedgerAsync(record);
+                _ledger = saved;
+            }
+            catch (AgentJobLedgerConflictException)
+            {
+                _hydrated = false;
+                await HydrateAsync();
+                throw;
+            }
         }
     }
+
+    /// <summary>
+    /// Pending jobs without an AssignedRunnerId re-arm admission and
+    /// clear the readiness timestamp on persist so the next admission
+    /// resets the deadline. Pending jobs with an AssignedRunnerId
+    /// preserve the timestamp the admission wrote; terminal jobs have
+    /// no readiness projection.
+    /// </summary>
+    private DateTimeOffset? ResolveReadySinceForPersist()
+    {
+        if (State.Status != AgentJobStatus.Pending)
+            return null;
+        if (!string.IsNullOrWhiteSpace(State.RunnerId))
+            return _ledger?.ReadySince ?? State.ReadySince;
+        return null;
+    }
+
+    /// <summary>
+    /// The dispatch snapshot is owned by the row. Subsequent saves
+    /// (terminal transition, session close, etc.) must not clobber it
+    /// with null.
+    /// </summary>
+    private string? ResolveDispatchJsonForPersist() => _ledger?.DispatchJson;
 
     private static string StableWorkId(string key)
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key));
         return $"agent-work-{Convert.ToHexString(hash.AsSpan(0, 16)).ToLowerInvariant()}";
-    }
-
-    private void DisposeDispatchTimer()
-    {
-        _dispatchTimer?.Dispose();
-        _dispatchTimer = null;
     }
 
     private void DisposeJobTimeoutTimer()

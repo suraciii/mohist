@@ -72,7 +72,6 @@ public class MohistDbContext : DbContext
     public DbSet<LabelDefinitionRow> LabelDefinitions { get; set; } = null!;
     public DbSet<ProjectIssueTemplateRow> ProjectIssueTemplates { get; set; } = null!;
     public DbSet<RunnerRow> Runners { get; set; } = null!;
-    public DbSet<RunnerWorkRow> RunnerWorks { get; set; } = null!;
     public DbSet<InboxItemRow> InboxItems { get; set; } = null!;
     public DbSet<InboxSubscriptionRow> InboxSubscriptions { get; set; } = null!;
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
@@ -262,8 +261,28 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql("""json_extract("State", '$.submittedAt')""", stored: true);
             entity.Property(e => e.TerminalAt)
                 .HasComputedColumnSql("""json_extract("State", '$.terminalAt')""", stored: true);
+            entity.Property(e => e.Revision).IsRequired();
+            entity.Property(e => e.AssignedRunnerId).HasMaxLength(256);
+            entity.Property(e => e.WorkId).HasMaxLength(128);
+            entity.Property(e => e.WorkType).HasMaxLength(64);
+            entity.Property(e => e.Stage).HasMaxLength(128);
+            entity.Property(e => e.Title).HasMaxLength(512);
+            entity.Property(e => e.IssueProjectId).HasMaxLength(256);
+            entity.Property(e => e.AgentSessionId).HasMaxLength(512);
+            entity.Property(e => e.InitialInputId).HasMaxLength(128);
+            entity.Property(e => e.InitialTurnId).HasMaxLength(128);
             entity.HasIndex(e => new { e.AgentId, e.ProjectId, e.SubmittedAt })
                 .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+            // Poll-time queries: assigned running, assigned pending by
+            // readiness time, eligible unassigned pending by readiness.
+            // Three narrow indexes match the three DispatchService
+            // projections; each one is sized to a status-filtered scan.
+            entity.HasIndex(e => new { e.AssignedRunnerId, e.Status })
+                .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status");
+            entity.HasIndex(e => new { e.AssignedRunnerId, e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+            entity.HasIndex(e => new { e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_Status_ReadySince");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>
@@ -1035,22 +1054,6 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.ToTable(t => t.HasCheckConstraint("CK_Runners_Slots_Positive", "\"Slots\" > 0"));
-        });
-
-        modelBuilder.Entity<RunnerWorkRow>(entity =>
-        {
-            entity.ToTable("RunnerWorks");
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedOnAdd();
-            entity.Property(e => e.RunnerId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.OwnerKind).HasMaxLength(16).IsRequired();
-            entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
-            entity.Property(e => e.TakenAt).IsRequired();
-            entity.Property(e => e.Status).HasMaxLength(16).IsRequired();
-            entity.Property(e => e.Reason).HasMaxLength(256);
-            entity.HasIndex(e => new { e.RunnerId, e.Status });
-            entity.HasIndex(e => new { e.RunnerId, e.OwnerKind, e.OwnerId, e.WorkId });
         });
 
         modelBuilder.Entity<TaskLogEntryRow>(entity =>
