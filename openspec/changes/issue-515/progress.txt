@@ -88,7 +88,12 @@
   reservation rows.
 - Multi-Agent ambiguity now selects a workspace-wide claimant using the sender's Owner identity.
   The sender's own mentioned or bound Connection may process the prompt, while other-owner
-  deliveries stay silent; the existing durable prompt claim still limits the outbox prompt to one.
+  deliveries stay silent. Ownerless ambiguous deliveries use the same durable claim to emit at
+  most one owner rejection; the existing durable prompt claim still limits the choose-one outbox
+  prompt to one.
 - Added regression coverage for concurrent same-Connection launches and different-owner ambiguity,
   plus reservation unit and migration tests. The latest full Server SpecTests run passed 3544/3544;
   UnitTests passed 1675/1675 and ArchTests passed 51/51.
+- Slack adapter typecheck passed and adapter tests passed 8/8. A repository `npm test` run hit the
+  pre-existing AgentLaunchObservation runner-poll race once; the standalone SpecTests rerun passed
+  3544/3544.
