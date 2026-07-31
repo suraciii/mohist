@@ -55,3 +55,15 @@
 
 - Attachment workspace roots now sanitize the dispatch-provided input id as a single path segment; this preserves the normal UUID path while preventing malformed wire values from escaping `.mohist/attachments`.
 - Added an AgentJob executor assertion that a fetched image reaches the fake OpenCode runtime as a native data URL file part; text attachments continue to assert workspace-only delivery.
+
+## T-004 decisions
+
+- Web launch derives the explicit `attachments` request array with the existing `extractAttachmentIds` helper. The existing `att:` Markdown links remain in composer text for preview and transcript rendering, but are no longer the only attachment transport.
+- Follow-up uses the same shared `AttachmentComposer` only for generic Agent sessions; workflow issue-session follow-up remains text-only because its compatibility alias has not adopted the attachment acceptance contract. The generic data source includes attachment ids in the retry fingerprint and returns the server result to the composer.
+- Launch and follow-up render accepted and rejected attachment results with the same shared `AttachmentResults` component. A launch with attachment verdicts stays on the composer until the user opens the created session, ensuring mixed acceptance is visible before navigation.
+- Agent input observations now include persisted attachment descriptors. The transcript prompt path maps each turn's input ids to the scoped `agent-sessions/{session}/inputs/{input}/attachments/{attachment}/content` URL and resolves `att:` links through `MarkdownReader`.
+
+## T-004 verification
+
+- Added Web coverage for explicit launch/follow-up request bodies, pending file name/size preview, mixed acceptance rendering, scoped attachment URL construction, and transcript Markdown resolution.
+- `npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, `npm run check:fsd -w packages/web`, and `dotnet build packages/server/src/Mohist.Server/Mohist.Server.csproj --no-restore` pass.

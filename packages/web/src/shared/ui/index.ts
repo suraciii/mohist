@@ -13,6 +13,13 @@ export {
   type UploadedAttachment,
 } from './attachment-composer'
 
+export { AttachmentResults } from './attachment-results'
+export type {
+  AttachmentResultAccepted,
+  AttachmentResultRejected,
+  AttachmentResultsValue,
+} from './attachment-results'
+
 export {
   EpicDescriptionField,
   type EpicDescriptionFieldProps,

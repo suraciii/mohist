@@ -21,6 +21,7 @@ const state = {
   launchCalls: [] as Array<{ agentRef: string; body: unknown; idempotencyKey?: string }>,
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
+  launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -39,14 +40,15 @@ const dataHook: AgentSessionComposerDataHook = () => {
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
-    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; idempotencyKey?: string }
-  >({
-    mutationFn: async ({ agentRef, prompt, context, idempotencyKey }) => {
-      state.launchCalls.push({ agentRef, body: { prompt, context }, idempotencyKey })
+    { agentRef: string; prompt: string; context?: AgentSessionLaunchContext | null; attachments?: string[]; idempotencyKey?: string }
+    >({
+     mutationFn: async ({ agentRef, prompt, context, attachments, idempotencyKey }) => {
+       state.launchCalls.push({ agentRef, body: { prompt, context, attachments }, idempotencyKey })
       if (state.launchError && (state.launchFailuresRemaining < 0 || state.launchFailuresRemaining-- > 0)) {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
       }
-      return {
+       return {
+         ...state.launchResponse,
         sessionId: 'sess-123',
         agentId: agentRef,
         agentName: 'Agent 1',
@@ -124,6 +126,7 @@ describe('AgentSessionComposerPage', () => {
     state.launchCalls.length = 0
     state.launchError = null
     state.launchFailuresRemaining = -1
+    state.launchResponse = null
   })
 
   afterEach(() => {
@@ -250,6 +253,7 @@ describe('AgentSessionComposerPage', () => {
       body: {
         prompt: 'Analyze this',
         context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
+        attachments: [],
       },
     })
     expect(state.launchCalls[0].body).not.toHaveProperty('runtime')
@@ -257,6 +261,23 @@ describe('AgentSessionComposerPage', () => {
     expect(state.launchCalls[0].body).not.toHaveProperty('variant')
     expect(state.launchCalls[0].body).not.toHaveProperty('skills')
     expect(state.launchCalls[0].body).not.toHaveProperty('maxConcurrentRuns')
+  })
+
+  it('sends attachment ids explicitly and displays mixed acceptance results', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchResponse = {
+      attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
+      rejectedAttachments: [{ id: 'att-bad', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
+    }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Use [accepted.txt](att:att-ok) and [rejected.zip](att:att-bad)' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+
+    await waitFor(() => expect(screen.getByTestId('launch-attachment-results')).toBeInTheDocument())
+    expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
+    expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
+    expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
   })
 
   it('navigates to session detail on success', async () => {

@@ -9,7 +9,12 @@ internal static class AgentSessionObservationMapper
             input.Id,
             input.Sequence,
             input.Source,
-            InputAcceptance(input.Acceptance))).ToArray();
+            InputAcceptance(input.Acceptance),
+            input.Attachments?.Select(attachment => new AgentSessionInputAttachmentObservationDto(
+                attachment.Id,
+                attachment.OriginalFileName,
+                attachment.ContentType,
+                attachment.Size)).ToArray())).ToArray();
 
     public static IReadOnlyList<AgentTurnObservationDto>? Turns(AgentSessionStatusSnapshot status) =>
         status.Turns?.Select(turn => new AgentTurnObservationDto(
