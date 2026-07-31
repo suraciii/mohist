@@ -2,21 +2,6 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-// Why partial: TableRenderer is a single-responsibility JSON→table renderer with 18
-// peer-case entity branches. Partial is the right tool here because the class is
-// single-purpose, every branch is a peer (no divergent dependencies), and they share
-// the same infrastructure (TextWriter, _activeProjectId, column-width constants,
-// WriteTable / AsArray / StringOf / BoolOf / NumberOf / Truncate). Splitting into
-// collaborator classes would force infrastructure duplication or reverse-dependency
-// on a "core" — worse than partial. This is the textbook partial use-case, not a
-// god-class split.
-//
-// Cluster layout:
-//   TableRenderer.cs         — dispatch + shared infrastructure
-//   TableRenderer.Issues.cs  — Issue / template / workflow / delivery / feedback / sessions / labels
-//   TableRenderer.Runners.cs — Runner / repository
-//   TableRenderer.Epics.cs   — Epic list / show / membership
-//   TableRenderer.Entities.cs — Project / Agent (thin peers)
 internal sealed partial class TableRenderer
 {
     private const int TitleSoftCap = 60;
@@ -213,8 +198,6 @@ internal sealed partial class TableRenderer
             _out.WriteLine(string.Join("  ", row.Select((c, i) => c.PadRight(widths[i]))).TrimEnd());
     }
 
-    // Renders the `mo run list` collection. Full detail is available through
-    // `mo run view <runId>`.
     private void RenderRunList(JsonNode? data)
     {
         var rows = AsArray(data);
