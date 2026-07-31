@@ -54,6 +54,12 @@ export {
 export { OpenCodeRuntime } from "./runtime.js"
 export type { OpenCodeRuntimeDeps } from "./runtime.js"
 
+export type {
+  DirectoryReclaimResult,
+  DirectoryReleaseOutcome,
+  DirectoryReleaseResult,
+} from "./directory-instance.js"
+
 export {
   getOpenCodeRuntimeFactory,
   setOpenCodeRuntimeFactoryForTest,
