@@ -371,14 +371,17 @@ public sealed class SlackChannelThreadIngressSpecs
         var dispatchRefPrefix = $"agent-job:agent-session-followup:{sessionId}:";
 
         var deliveryDispatchRef = await TestWait.ForAsync(
-            async () => await db.SlackOutboxRows.AsNoTracking()
-                .Where(row => row.ConnectionId == connection.Id
-                    && row.ConversationId == conversationId
-                    && row.Kind == SlackOutboxKinds.TerminalResult
-                    && row.ThreadTs == rootTs
-                    && row.DispatchRef != null && row.DispatchRef.StartsWith(dispatchRefPrefix, StringComparison.Ordinal))
-                .Select(row => row.DispatchRef)
-                .FirstOrDefaultAsync(),
+            async () =>
+            {
+                var rows = await db.SlackOutboxRows.AsNoTracking()
+                    .Where(row => row.ConnectionId == connection.Id
+                        && row.ConversationId == conversationId
+                        && row.Kind == SlackOutboxKinds.TerminalResult
+                        && row.ThreadTs == rootTs)
+                    .Select(row => row.DispatchRef)
+                    .ToListAsync();
+                return rows.FirstOrDefault(r => r is not null && r.StartsWith(dispatchRefPrefix, StringComparison.Ordinal));
+            },
             value => value is not null,
             TimeSpan.FromSeconds(10),
             TimeSpan.FromMilliseconds(50),
