@@ -390,3 +390,24 @@ polling can retry.
   remains red because the unrelated Runner test typecheck rejects
   `packages/runner/src/system/process.test.ts:26` (`string | number` is not
   assignable to `Signals`).
+
+## Review Follow-up (2026-07-31)
+
+- The owner-ledger migration normalizes legacy PascalCase lifecycle and input
+  fields into the camelCase paths used by the indexed AgentJobs projections.
+  Legacy Running rows are consequently visible to owner-ledger polling after
+  migration.
+- Missing legacy dispatch snapshots now rebuild the full AgentJob dispatch
+  envelope: prompt, optional instructions/model/variant/runtime/skills, and
+  workspace variables retain their typed JSON-string representation.
+- `AgentJobOwnerLedgerMigrationSpecs` covers both behaviors: fallback dispatch
+  deserialization and owner-ledger discovery of a PascalCase Running row.
+
+## Verification (2026-07-31)
+
+- Direct xUnit migration class: 4/4 passed.
+- `npm test`: all .NET suites passed, including 3465 Server specs and 51
+  architecture tests. The aggregate command remains red in unrelated code:
+  Web `AgentProfileEditor.test.tsx` emits five React `act(...)` environment
+  console errors, and Runner `process.test.ts:26` has the existing `Signals`
+  type error.

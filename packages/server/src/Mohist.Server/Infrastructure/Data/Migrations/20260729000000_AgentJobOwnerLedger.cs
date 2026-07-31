@@ -133,6 +133,7 @@ public partial class AgentJobOwnerLedger : Migration
         migrationBuilder.Sql(CreateValidationTableSql);
         migrationBuilder.Sql(ValidateLegacyStateSql);
         migrationBuilder.Sql("DROP TABLE \"AgentJobOwnerLedgerValidation\";");
+        migrationBuilder.Sql(NormalizeProjectionStateSql);
 
         // One migration execution timestamp for every valid legacy pending
         // row; running rows retain their existing assignment + dispatch
@@ -224,6 +225,18 @@ public partial class AgentJobOwnerLedger : Migration
         FROM "AgentJobs";
         """;
 
+    private const string NormalizeProjectionStateSql = """
+        UPDATE "AgentJobs"
+        SET "State" = json_set(
+            "State",
+            '$.status', LOWER(COALESCE(json_extract("State", '$.status'), json_extract("State", '$.Status'))),
+            '$.submittedAt', COALESCE(json_extract("State", '$.submittedAt'), json_extract("State", '$.SubmittedAt')),
+            '$.terminalAt', COALESCE(json_extract("State", '$.terminalAt'), json_extract("State", '$.TerminalAt')),
+            '$.input.projectId', COALESCE(json_extract("State", '$.input.projectId'), json_extract("State", '$.Input.ProjectId')),
+            '$.input.agentId', COALESCE(json_extract("State", '$.input.agentId'), json_extract("State", '$.Input.AgentId')))
+        WHERE json_type("State", '$') = 'object';
+        """;
+
     // Backfills the new scheduling columns from the legacy state JSON.
     // One timestamp for every valid legacy pending row, valid running rows
     // keep their existing assignment + dispatch with no pending-timeout
@@ -277,7 +290,19 @@ public partial class AgentJobOwnerLedger : Migration
                     'agentSessionId', COALESCE(json_extract("State", '$.input.agentSessionId'), json_extract("State", '$.Input.AgentSessionId')),
                     'initialInputId', COALESCE(json_extract("State", '$.input.initialInputId'), json_extract("State", '$.Input.InitialInputId')),
                     'initialTurnId', COALESCE(json_extract("State", '$.input.initialTurnId'), json_extract("State", '$.Input.InitialTurnId')),
-                    'with', json_object('prompt', COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt')))
+                    'with', json_object(
+                        'prompt', COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt')),
+                        'instructions', COALESCE(json_extract("State", '$.input.agentInstructions'), json_extract("State", '$.Input.AgentInstructions')),
+                        'model', COALESCE(json_extract("State", '$.input.model'), json_extract("State", '$.Input.Model')),
+                        'variant', COALESCE(json_extract("State", '$.input.variant'), json_extract("State", '$.Input.Variant')),
+                        'runtime', COALESCE(json_extract("State", '$.input.runtime'), json_extract("State", '$.Input.Runtime')),
+                        'skills', json(COALESCE(json_extract("State", '$.input.skills'), json_extract("State", '$.Input.Skills'), 'null'))) || '',
+                    'variables', CASE
+                        WHEN length(trim(COALESCE(json_extract("State", '$.input.workspacePath'), json_extract("State", '$.Input.WorkspacePath'), ''), char(9,10,11,12,13,32))) > 0
+                        THEN (json_object('workspace', json_object(
+                            'path', COALESCE(json_extract("State", '$.input.workspacePath'), json_extract("State", '$.Input.WorkspacePath')))) || '')
+                        ELSE NULL
+                    END
                 )
             END,
             "WorkType" = 'agent-job',
@@ -317,7 +342,19 @@ public partial class AgentJobOwnerLedger : Migration
                         'agentSessionId', COALESCE(json_extract("State", '$.input.agentSessionId'), json_extract("State", '$.Input.AgentSessionId')),
                         'initialInputId', COALESCE(json_extract("State", '$.input.initialInputId'), json_extract("State", '$.Input.InitialInputId')),
                         'initialTurnId', COALESCE(json_extract("State", '$.input.initialTurnId'), json_extract("State", '$.Input.InitialTurnId')),
-                        'with', json_object('prompt', COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt')))
+                        'with', json_object(
+                            'prompt', COALESCE(json_extract("State", '$.input.prompt'), json_extract("State", '$.Input.Prompt')),
+                            'instructions', COALESCE(json_extract("State", '$.input.agentInstructions'), json_extract("State", '$.Input.AgentInstructions')),
+                            'model', COALESCE(json_extract("State", '$.input.model'), json_extract("State", '$.Input.Model')),
+                            'variant', COALESCE(json_extract("State", '$.input.variant'), json_extract("State", '$.Input.Variant')),
+                            'runtime', COALESCE(json_extract("State", '$.input.runtime'), json_extract("State", '$.Input.Runtime')),
+                            'skills', json(COALESCE(json_extract("State", '$.input.skills'), json_extract("State", '$.Input.Skills'), 'null'))) || '',
+                        'variables', CASE
+                            WHEN length(trim(COALESCE(json_extract("State", '$.input.workspacePath'), json_extract("State", '$.Input.WorkspacePath'), ''), char(9,10,11,12,13,32))) > 0
+                            THEN (json_object('workspace', json_object(
+                                'path', COALESCE(json_extract("State", '$.input.workspacePath'), json_extract("State", '$.Input.WorkspacePath')))) || '')
+                            ELSE NULL
+                        END
                     ))
                 ELSE NULL
             END,
