@@ -19,11 +19,20 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
 [Collection("MohistIntegration")]
-public sealed class SlackDmNewTaskIngressSpecs
+public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly List<string> _runnerIds = [];
 
     public SlackDmNewTaskIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var runnerId in _runnerIds)
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+    }
 
     [Fact]
     public async Task New_task_creates_work_and_switches_the_current_session()
@@ -179,6 +188,7 @@ public sealed class SlackDmNewTaskIngressSpecs
             projectId,
         });
         register.EnsureSuccessStatusCode();
+        _runnerIds.Add(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
     }

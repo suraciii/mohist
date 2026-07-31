@@ -38,7 +38,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task ResolveCanonicalFollowupTarget_AgentConnectionSession_ReturnsTarget()
     {
-        var (factory, sessionId) = await SeedAsync();
+        var (database, factory, sessionId) = await SeedAsync();
+        await using var _ = database;
         var querier = NewQuerier(factory);
 
         var target = await querier.ResolveCanonicalFollowupTargetAsync(ProjectId, sessionId);
@@ -54,7 +55,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task ResolveCanonicalFollowupTarget_AgentConnection_CrossProject_ReturnsNull()
     {
-        var (factory, sessionId) = await SeedAsync();
+        var (database, factory, sessionId) = await SeedAsync();
+        await using var _ = database;
         var querier = NewQuerier(factory);
 
         var target = await querier.ResolveCanonicalFollowupTargetAsync(OtherProject, sessionId);
@@ -64,7 +66,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task ResolveCancelTarget_AgentConnectionSession_ReturnsTarget()
     {
-        var (factory, sessionId) = await SeedAsync();
+        var (database, factory, sessionId) = await SeedAsync();
+        await using var _ = database;
         var querier = NewQuerier(factory);
 
         await using var db = factory.CreateDbContext();
@@ -87,7 +90,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task QueryRowsByLabels_ConnectionId_FindsAgentConnectionSessions()
     {
-        var (factory, _) = await SeedAsync();
+        var (database, factory, _) = await SeedAsync();
+        await using var _ = database;
         var query = new AgentSessionQuery(factory, TimeProvider);
 
         var records = await query.ListByLabelsAsync(
@@ -106,7 +110,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task QueryRowsByLabels_SlackUserId_FiltersByOwner()
     {
-        var (factory, _) = await SeedAsync();
+        var (database, factory, _) = await SeedAsync();
+        await using var _ = database;
         var query = new AgentSessionQuery(factory, TimeProvider);
 
         var records = await query.ListByLabelsAsync(
@@ -125,7 +130,8 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
     [Fact]
     public async Task QueryRowsByLabels_SlackConversationId_FiltersByConversation()
     {
-        var (factory, _) = await SeedAsync();
+        var (database, factory, _) = await SeedAsync();
+        await using var _ = database;
         var query = new AgentSessionQuery(factory, TimeProvider);
 
         var records = await query.ListByLabelsAsync(
@@ -145,7 +151,7 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         return new AgentSessionQuerier(factory, sessionQuery);
     }
 
-    private static async Task<(IDbContextFactory<MohistDbContext> Factory, string sessionId)> SeedAsync()
+    private static async Task<(TestSqliteDatabase Database, IDbContextFactory<MohistDbContext> Factory, string SessionId)> SeedAsync()
     {
         var database = TestSqliteDatabase.CreateMigrated();
         var factory = new TestDbContextFactory(database.Options);
@@ -196,7 +202,7 @@ public sealed class AgentSessionQuerierAgentConnectionSpecs
         await InsertSessionAsync(factory, "session-other-user", labelsOtherUser, "rt-session-other-user");
         await InsertSessionAsync(factory, "session-workflow", labelsWorkflow, "rt-session-workflow");
 
-        return (factory, "session-conn-A");
+        return (database, factory, "session-conn-A");
     }
 
     private static async Task InsertSessionAsync(

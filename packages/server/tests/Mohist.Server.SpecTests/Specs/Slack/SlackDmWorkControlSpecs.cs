@@ -23,11 +23,20 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
 [Collection("MohistIntegration")]
-public sealed class SlackDmWorkControlSpecs
+public sealed class SlackDmWorkControlSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly List<string> _runnerIds = [];
 
     public SlackDmWorkControlSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+
+    public ValueTask InitializeAsync() => ValueTask.CompletedTask;
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var runnerId in _runnerIds)
+            await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).UnregisterAsync();
+    }
 
     [Fact]
     public async Task Cancel_cancels_the_current_queued_launch_turn()
@@ -265,6 +274,7 @@ public sealed class SlackDmWorkControlSpecs
             projectId,
         });
         register.EnsureSuccessStatusCode();
+        _runnerIds.Add(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
     }
