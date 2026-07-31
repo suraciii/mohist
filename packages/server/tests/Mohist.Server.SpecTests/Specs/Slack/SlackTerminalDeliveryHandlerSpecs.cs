@@ -4,6 +4,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
@@ -61,6 +63,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var delivery = new
         {
             jobKey = "job-1",
+            workLabel = "ship the release",
             connectionId = "conn-1",
             workspaceTeamId = "team-1",
             dmConversationId = "D1",
@@ -89,11 +92,77 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var row = Assert.Single(rows);
         Assert.Equal(expectedKind, row.Kind);
         var text = JsonDocument.Parse(row.PayloadJson).RootElement.GetProperty("text").GetString()!;
+        Assert.StartsWith("Task: ship the release\n", text, StringComparison.Ordinal);
         Assert.Contains($"Conclusion: {expectedConclusion}", text);
         Assert.Contains("Evidence: ", text);
         Assert.True(text.Contains($"Next step: {expectedNextStep}", StringComparison.Ordinal), text);
         Assert.DoesNotContain("xoxb-secret", text);
         Assert.DoesNotContain("raw tool output", text);
+    }
+
+    [Fact]
+    public void BuildTerminalDeliveryEnvelope_CarriesTheFirstSessionInputAsAnEightyCharacterLabel()
+    {
+        var prompt = "Investigate the release pipeline and document every failing check before proposing a fix. "
+            + "Then summarize the safest rollout.";
+        var pending = new PendingTerminalDeliveryEvent(
+            EventId: "delivery-1",
+            Origin: new ConnectionLaunchOrigin("conn-1", "team-1", "U_OWNER", "D1", "1710000000.000001"),
+            Status: AgentJobStatus.Completed,
+            Message: "completed",
+            FailureReason: null,
+            FailureCategory: null,
+            ArtifactCount: 0,
+            ExitCode: 0,
+            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+
+        var envelope = AgentJobLineage.BuildTerminalDeliveryEnvelope(
+            "job-1",
+            pending,
+            new Dictionary<string, string> { [EventCatalog.Lineage.ProjectId] = "proj-1" },
+            prompt);
+
+        var workLabel = envelope.Data!.Value.GetProperty("workLabel").GetString();
+        Assert.Equal(prompt[..80], workLabel);
+    }
+
+    [Fact]
+    public void Render_AlwaysKeepsCompletedAndFailedRepliesTiedToTheirOriginatingWork()
+    {
+        var priorWork = new SlackTerminalDelivery(
+            "job-prior",
+            "migrate the database schema",
+            "conn-1",
+            "team-1",
+            "D1",
+            "failed",
+            "migration failed",
+            "migration-error",
+            "runtime-failed",
+            0,
+            1);
+        var currentWork = new SlackTerminalDelivery(
+            "job-current",
+            "update the dashboard",
+            "conn-1",
+            "team-1",
+            "D1",
+            "completed",
+            "dashboard updated",
+            null,
+            null,
+            0,
+            0);
+
+        var priorReply = SlackTerminalDeliveryHandler.Render(priorWork);
+        var currentReply = SlackTerminalDeliveryHandler.Render(currentWork);
+
+        Assert.StartsWith("Task: migrate the database schema\n", priorReply, StringComparison.Ordinal);
+        Assert.Contains("The task failed.", priorReply);
+        Assert.StartsWith("Task: update the dashboard\n", currentReply, StringComparison.Ordinal);
+        Assert.Contains("The task completed.", currentReply);
+        Assert.DoesNotContain("update the dashboard", priorReply);
+        Assert.DoesNotContain("migrate the database schema", currentReply);
     }
 
     private sealed class NoopHealthBackpressurer : ISlackConnectionHealthBackpressurer

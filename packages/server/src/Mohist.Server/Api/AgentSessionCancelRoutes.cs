@@ -55,45 +55,19 @@ public static class AgentSessionCancelRoutes
         if (target is null)
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-        var session = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
-        var cancellation = await session.CancelQueuedTurnAsync(request.TurnId);
-        var control = cancellation.Control;
-        if (control is null)
-            return ApiResults.NotFound($"Turn {request.TurnId} not found");
-
-        if (cancellation.Cancelled)
-            return ApiResults.Ok(new { state = "cancelled" });
-
-        if (control.Classification == AgentTurnControlClassification.Terminal)
+        var result = await AgentSessionTurnControlOperations.CancelAsync(grains, target.SessionId, request.TurnId);
+        return result.Kind switch
         {
-            return ApiResults.Ok(new
+            TurnControlResultKind.NotFound => ApiResults.NotFound($"Turn {request.TurnId} not found"),
+            TurnControlResultKind.Cancelled => ApiResults.Ok(new { state = "cancelled" }),
+            TurnControlResultKind.AlreadyEnded => ApiResults.Ok(new
             {
                 state = "turn-already-ended",
-                turnStatus = ToStatusString(control.Status),
-            });
-        }
-
-        if (control.Classification == AgentTurnControlClassification.Executing)
-        {
-            return ApiResults.Ok(new { state = "executing", action = "stop" });
-        }
-
-        if (control.IsLaunchTurn)
-        {
-            var result = await grains.GetGrain<IAgentJobGrain>(control.JobId!).CancelAsync();
-            return result.Disposition switch
-            {
-                AgentJobCancelDisposition.Cancelled => ApiResults.Ok(new { state = "cancelled" }),
-                AgentJobCancelDisposition.Executing => ApiResults.Ok(new { state = "executing", action = "stop" }),
-                _ => ApiResults.Ok(new
-                {
-                    state = "turn-already-ended",
-                    turnStatus = ToStatusString(result.Status),
-                }),
-            };
-        }
-
-        return ApiResults.Ok(new { state = "cancelled" });
+                turnStatus = result.StatusText ?? ToStatusString(result.Status!.Value),
+            }),
+            TurnControlResultKind.Executing => ApiResults.Ok(new { state = "executing", action = "stop" }),
+            _ => throw new InvalidOperationException($"Unexpected cancel result {result.Kind}"),
+        };
     }
 
     private static string ToStatusString(AgentTurnStatus status) => status.ToString().ToLowerInvariant();

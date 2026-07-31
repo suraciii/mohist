@@ -2312,6 +2312,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return session.ResolveTurnControl(turnId);
     }
 
+    public async Task<AgentTurnControlState?> ResolveCurrentTurnControlAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.ResolveCurrentTurnControl();
+    }
+
     public async Task<AgentInitialLaunchSnapshot?> GetInitialLaunchAsync()
     {
         var session = await GetRequiredAsync();

@@ -200,6 +200,10 @@ public class AgentSessionQuery : IScopedService
                 GenericAgentSessionMetadata.TriggerEventId => query.Where(s => s.LabelTriggerEventId == value),
                 GenericAgentSessionMetadata.TriggerRuleId => query.Where(s => s.LabelTriggerRuleId == value),
 
+                AgentSessionQueryMetadataKeys.ConnectionId => query.Where(s => s.LabelConnectionId == value),
+                AgentSessionQueryMetadataKeys.SlackUserId => query.Where(s => s.LabelSlackUserId == value),
+                AgentSessionQueryMetadataKeys.SlackConversationId => query.Where(s => s.LabelSlackConversationId == value),
+
                 _ => query.Where(_ => false),
             };
         }
