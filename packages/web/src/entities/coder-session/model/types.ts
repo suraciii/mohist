@@ -108,6 +108,8 @@ export interface SessionInputAttachmentObservation {
   name: string
   contentType?: string | null
   size: number
+  source: string
+  availability: string
 }
 
 export interface AgentTurnObservation {

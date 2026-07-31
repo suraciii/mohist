@@ -86,3 +86,11 @@
 - Focused verification now passes: server architecture 50/50, server unit tests 1640/1640, and the issue-513 acceptance class 8/8.
 - The complete verify then found the Web launch page test at 509 lines, over the 500-line boundary. Extracted its fake state/render support into `packages/web/tests/support`, keeping all 30 page assertions in the active test file; Web typecheck, FSD, test-boundary, and page tests pass.
 - Final `npm run verify` passes with no Git-visible verification-only changes.
+
+## Review fixes
+
+- Launch attachment ownership now pre-mints the canonical AgentSession id, validates Agent/context/readiness before binding, and makes the coordinator adopt that id. The scoped content route therefore uses the same session/input pair recorded in the durable launch plan.
+- Agent-input binding is a conditional `OwnerKind == null` claim. A losing concurrent claimant receives `AlreadyBound`; an idempotent call against the same owner receives the original accepted descriptor.
+- Attachment-bearing follow-ups do not share a queued turn with other inputs, preserving the existing single-input scoped delivery path.
+- Accepted descriptors and session observations now expose `source = upload` and `availability = usable`.
+- Server unit tests, server build, and Web typecheck pass. Full server specs exercise the new attachment cases successfully but still have an unrelated `AgentJobDispatchRouteSpecs.RunnerPollEndpoint_ForAgentJob_ExposesOwnerKindAndAgentJobId` shared-runner isolation failure.

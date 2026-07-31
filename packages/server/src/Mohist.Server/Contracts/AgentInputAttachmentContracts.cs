@@ -8,7 +8,9 @@ public sealed record AgentSessionInputAttachmentDescriptor(
     [property: Id(1)] string OriginalFileName,
     [property: Id(2)] string? ContentType,
     [property: Id(3)] long Size,
-    [property: Id(4)] DateTimeOffset AcceptedAt);
+    [property: Id(4)] DateTimeOffset AcceptedAt,
+    [property: Id(5)] string Source = "upload",
+    [property: Id(6)] string Availability = "usable");
 
 public enum AgentInputAttachmentRejectionReason
 {

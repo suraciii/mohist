@@ -463,7 +463,9 @@ public sealed class AttachmentService : IScopedService
             OriginalFileName: row.OriginalFileName,
             ContentType: row.ContentType,
             Size: row.Size,
-            AcceptedAt: acceptedAt);
+            AcceptedAt: acceptedAt,
+            Source: "upload",
+            Availability: "usable");
 
     private async Task<bool> IsReadableAsync(AttachmentRow row, CancellationToken cancellationToken)
     {

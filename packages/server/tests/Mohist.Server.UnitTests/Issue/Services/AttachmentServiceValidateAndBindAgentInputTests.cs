@@ -38,6 +38,8 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
         Assert.Equal("notes.txt", accepted.Descriptor.OriginalFileName);
         Assert.Equal("text/plain", accepted.Descriptor.ContentType);
         Assert.Equal("hello"u8.ToArray().LongLength, accepted.Descriptor.Size);
+        Assert.Equal("upload", accepted.Descriptor.Source);
+        Assert.Equal("usable", accepted.Descriptor.Availability);
         Assert.Equal(1, batch.AcceptedCount);
 
         await using var db = database.CreateContext();

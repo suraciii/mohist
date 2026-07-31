@@ -266,7 +266,9 @@ public sealed record AgentSessionInputAttachmentObservationDto(
     string Id,
     string Name,
     string? ContentType,
-    long Size);
+    long Size,
+    string Source,
+    string Availability);
 
 public sealed record AgentTurnObservationDto(
     string Id,

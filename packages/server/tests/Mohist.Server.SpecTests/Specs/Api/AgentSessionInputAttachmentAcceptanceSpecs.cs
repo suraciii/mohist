@@ -53,6 +53,8 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             }
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+            var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            await CompleteLaunchAsync(runnerId, data);
         }
         finally
         {
@@ -86,6 +88,15 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}/inputs/{inputId}/attachments/{upload.Id}/content");
             Assert.Equal(HttpStatusCode.OK, content.StatusCode);
             Assert.Equal("scoped-content", await content.Content.ReadAsStringAsync());
+
+            using var summary = await _fixture.Client.GetAsync(
+                $"/api/projects/{projectId}/agent-sessions/{sessionId}");
+            var summaryData = (await summary.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
+            var observed = summaryData.GetProperty("inputs")[0].GetProperty("attachments")[0];
+            Assert.Equal("upload", observed.GetProperty("source").GetString());
+            Assert.Equal("usable", observed.GetProperty("availability").GetString());
+
+            await CompleteLaunchAsync(runnerId, data);
         }
         finally
         {
@@ -233,7 +244,9 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             });
             Assert.Equal(HttpStatusCode.Created, launchResponse.StatusCode);
             var launchBody = await launchResponse.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchBody.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var launchData = launchBody.GetProperty("data");
+            var jobId = launchData.GetProperty("jobId").GetString()!;
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
 
             var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await grain.AsReference<IGrainManagementExtension>().DeactivateOnIdle();
@@ -254,6 +267,10 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             Assert.Equal(upload.Id, dispatchAttachment.GetProperty("id").GetString());
             Assert.Equal("snapshot.txt", dispatchAttachment.GetProperty("name").GetString());
             Assert.Equal("text/plain", dispatchAttachment.GetProperty("contentType").GetString());
+            await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).ReportResultAsync(
+                runnerId,
+                snapshot.WorkId!,
+                new WorkResult(Status: "completed", Message: "ok"));
         }
         finally
         {
@@ -273,7 +290,9 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         {
             var launch = await LaunchAsync(projectId, agent.Id, new { prompt = "first" });
             var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchBody.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var launchData = launchBody.GetProperty("data");
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
+            await CompleteLaunchAsync(runnerId, launchData);
 
             var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await sessionGrain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-followup-att"));
@@ -318,7 +337,9 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         {
             var launch = await LaunchAsync(projectId, agent.Id, new { prompt = "first" });
             var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchBody.GetProperty("data").GetProperty("sessionId").GetString()!;
+            var launchData = launchBody.GetProperty("data");
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
+            await CompleteLaunchAsync(runnerId, launchData);
 
             var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await sessionGrain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-followup-empty"));
@@ -351,8 +372,10 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         {
             var launch = await LaunchAsync(projectId, agent.Id, new { prompt = "first" });
             var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
-            var sessionId = launchBody.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var inputId = launchBody.GetProperty("data").GetProperty("inputId").GetString()!;
+            var launchData = launchBody.GetProperty("data");
+            var sessionId = launchData.GetProperty("sessionId").GetString()!;
+            var inputId = launchData.GetProperty("inputId").GetString()!;
+            await CompleteLaunchAsync(runnerId, launchData);
 
             var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
             await sessionGrain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-followup-already"));
@@ -401,4 +424,14 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         }
     }
 
+    private async Task CompleteLaunchAsync(string runnerId, JsonElement launchData)
+    {
+        var jobId = launchData.GetProperty("jobId").GetString()!;
+        var sessionId = launchData.GetProperty("sessionId").GetString()!;
+        var dispatch = await PollDispatchForSessionAsync(runnerId, sessionId);
+        await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).ReportResultAsync(
+            runnerId,
+            dispatch.WorkId!,
+            new WorkResult(Status: "completed", Message: "ok"));
+    }
 }

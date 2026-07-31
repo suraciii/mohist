@@ -1051,7 +1051,11 @@ public static partial class AgentSessionExtensions
                     TurnStatus: existingTurn.Status);
             }
 
-            var candidateTurn = ChooseFollowupTurnForAssignment(turns, leases);
+            var candidateTurn = ChooseFollowupTurnForAssignment(
+                turns,
+                leases,
+                inputs,
+                hasAttachments);
 
             var newInput = new AgentSessionInputRecord(
                 Id: inputId,
@@ -1149,8 +1153,13 @@ public static partial class AgentSessionExtensions
         /// </summary>
         private static AgentTurnRecord? ChooseFollowupTurnForAssignment(
             IReadOnlyList<AgentTurnRecord> turns,
-            IReadOnlyList<AgentSessionFollowupLease> leases)
+            IReadOnlyList<AgentSessionFollowupLease> leases,
+            IReadOnlyList<AgentSessionInputRecord> inputs,
+            bool incomingHasAttachments)
         {
+            if (incomingHasAttachments)
+                return null;
+
             for (var i = turns.Count - 1; i >= 0; i--)
             {
                 var candidate = turns[i];
@@ -1160,6 +1169,9 @@ public static partial class AgentSessionExtensions
                     continue;
                 if (leases.Any(lease => string.Equals(lease.TurnId, candidate.Id, StringComparison.Ordinal)
                     && lease.PayloadSealed))
+                    continue;
+                if (candidate.InputIds.Any(inputId => inputs.Any(input => input.Id == inputId
+                    && input.Attachments is { Count: > 0 })))
                     continue;
                 return candidate;
             }

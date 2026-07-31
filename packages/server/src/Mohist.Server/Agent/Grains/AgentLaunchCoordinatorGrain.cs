@@ -115,7 +115,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 IdempotencyKey: command.IdempotencyKey,
                 RequestFingerprint: fingerprint,
                 JobKey: $"agent-job-launch-{Guid.NewGuid():N}",
-                SessionId: $"agent-session-{Guid.NewGuid():N}",
+                SessionId: string.IsNullOrWhiteSpace(command.PreMintedSessionId)
+                    ? $"agent-session-{Guid.NewGuid():N}"
+                    : command.PreMintedSessionId!,
                 InputId: string.IsNullOrWhiteSpace(command.PreMintedInputId)
                     ? Guid.NewGuid().ToString("N")
                     : command.PreMintedInputId!,
