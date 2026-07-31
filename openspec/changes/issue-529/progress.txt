@@ -45,3 +45,4 @@
 - Corrected the `otel` group and `otel query` command presentations to describe Server-routed execution, and extended the group-help spec to reject the removed direct-`otel.db` description.
 - `RunQueryAsync` now maps `TaskCanceledException` to the same standard Server-unavailable diagnostic as connection failures; a `RecordingHttpHandler` timeout fake covers the behavior without wall-clock waiting.
 - Query response parsing now uses `ReadAsStringAsync` with a whitespace empty-body check instead of `Stream.Length`, and the CLI spec exercises a successful query response delivered through the non-seekable `RecordingHttpHandler.Ndjson` stream.
+- Updated the C# spec-file size baseline from 29698 to 31059 for the wide-column response-cap test; `ArchitectureRules` and the focused OTel route specs pass.
