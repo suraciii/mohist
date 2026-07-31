@@ -22,6 +22,7 @@ import {
   getOpenCodeRuntimeFactory,
   type OpenCodeRuntime,
 } from "./opencode/index.js"
+import { formatDirectoryReclaimSummary } from "./opencode/reclaim-summary.js"
 import {
   getOpencodeModelDiscovery,
   mergeOpencodeModelCatalogs,
@@ -375,6 +376,7 @@ export class RunnerHost {
           console.error("workspace cleanup runtime reclamation failed:", error)
           return
         }
+        if (reclaim.candidates > 0) console.log(formatDirectoryReclaimSummary(reclaim))
         blockedPaths = new Set(reclaim.blockedDirectories)
       }
       const policy = await this.connection.fetchConfig(signal)

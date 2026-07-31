@@ -588,15 +588,14 @@ Session 与 global event 调用做了一次冒烟验证（详见
 表内 `client.session.*` 与 `client.global.event()` 调用可用；
 `client.v2.session.wait()` 与 `client.v2.session.compact()` 仍返回
 `ServiceUnavailableError`，确认不进入执行链。
-实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 尚未包含在该次记录中，
-落地 Directory Instance 回收前必须补做真实 Server 冒烟验证。
+2026-07-31 又使用锁定的 `@opencode-ai/sdk/v2` 1.18.3 和 OpenCode CLI 1.18.10，
+通过 Runner 的 OS-assigned loopback Server factory，在临时 directory 上验证了
+`client.global.health()` 返回 healthy、`client.session.status({ directory })` 返回空
+status map，以及 `client.instance.dispose({ directory })` 返回 `data: true`；finally
+关闭 Server 与 dispatcher 后临时 directory 无残留，现有 4096 端口 Server 未受影响。
+实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 的 smoke 证据已补齐。
 
 ## 实装差距
-
-Directory Instance 回收尚未落地。当前 `OpenCodeRuntime` 不跟踪 current Server generation
-访问过的 directory，也不调用 `client.instance.dispose()`；WorkflowRun 终态目前只驱动
-磁盘 workspace 的 eligibility 与 retention / budget cleanup。对应实施 issue 待从本
-spec 创建。
 
 「Prompt 期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
 到达直接终止执行，agent 没有收尾机会。

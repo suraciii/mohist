@@ -447,6 +447,51 @@ describe("RunnerHost idle-system cleanup", () => {
     await expect(run).resolves.toBeUndefined()
   })
 
+  it("LogsOneBoundedReclaimSummaryOnlyWhenCandidatesExist", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    const RunnerHost = await importHost()
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+    await waitForHostStartup(hostEvents)
+    const runtime = await runtimeHandles.runtimeCreated
+    const reclaim = vi.spyOn(runtime, "reclaimWhere")
+      .mockResolvedValueOnce({ tracked: 2, candidates: 0, disposed: 0, busy: 0, failed: 0, blockedDirectories: [], diagnostics: [] })
+      .mockResolvedValueOnce({
+        tracked: 6,
+        candidates: 2,
+        disposed: 1,
+        busy: 1,
+        failed: 0,
+        blockedDirectories: ["/busy"],
+        diagnostics: [
+          { severity: "warning", code: "zeta", message: "hidden" },
+          { severity: "info", code: "alpha", message: "hidden" },
+          { severity: "warning", code: "alpha", message: "hidden" },
+          { severity: "warning", code: "delta", message: "hidden" },
+          { severity: "warning", code: "beta", message: "hidden" },
+          { severity: "warning", code: "omega", message: "hidden" },
+        ],
+      })
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
+
+    try {
+      await advanceCleanupTick(cleanupEvents)
+      expect(log).not.toHaveBeenCalled()
+      await advanceCleanupTick(cleanupEvents)
+      expect(log).toHaveBeenCalledOnce()
+      expect(log).toHaveBeenCalledWith("workspace reclaim: tracked=6 candidates=2 disposed=1 busy=1 failed=0 diagnostics=alpha:2,beta:1,delta:1,omega:1 omitted=1")
+      expect(reclaim).toHaveBeenCalledTimes(2)
+    } finally {
+      log.mockRestore()
+      controller.abort()
+      await expect(run).resolves.toBeUndefined()
+    }
+  })
+
   it("SkipsDiskCleanup_WhenRuntimeReclamationThrows", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
