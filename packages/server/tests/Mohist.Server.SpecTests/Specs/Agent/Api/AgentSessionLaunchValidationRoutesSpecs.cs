@@ -177,7 +177,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             var sessionCountAfter = await CountAgentLaunchSessionsAsync(projectId);
             Assert.Equal(sessionCountBefore, sessionCountAfter);
             using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            Assert.Equal(HttpStatusCode.NoContent, poll.StatusCode);
+            Assert.Empty(await poll.ReadDispatchElementsAsync());
         }
         finally
         {

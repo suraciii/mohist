@@ -56,6 +56,17 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         return dispatch;
     }
 
+    protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
+    {
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
+        var dispatch = await response.ReadFirstDispatchElementAsync()
+            ?? throw new InvalidOperationException("Expected an AgentJob dispatch from /poll");
+        Assert.Equal(agentJobId, dispatch.GetProperty("agentJobId").GetString());
+        return dispatch.GetProperty("workId").GetString()
+            ?? throw new InvalidOperationException("AgentJob dispatch returned no work id");
+    }
+
     private async Task<PollSnapshot?> PollDispatchOnceAsync(string runnerId, string expectedSessionId)
     {
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
