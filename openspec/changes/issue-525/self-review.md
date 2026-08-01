@@ -1,89 +1,64 @@
-# Self-Review — issue-525 (从 Web 创建和接管 Slack Connection)
+# Self-Review (round 2) — issue-525 (从 Web 创建和接管 Slack Connection)
 
-Reviewer stance: reviewer, not fixer. Findings only; a separate task applies fixes.
+Reviewer stance: reviewer, not fixer. This round re-reviews the plan after the
+round-1 findings were fixed.
 
 ## Summary
 
-The four artifacts are internally aligned on scope, capability boundaries, and the
-task graph. All six issue acceptance criteria are covered by the specs; the task DAG
-is a valid acyclic graph with strictly decreasing priorities and test verification on
-every task; design decisions are grounded in verified code references
-(`App.tsx:74`, `AgentDetailPage.tsx:42-45/584`, `SlackConnectionRoutes.cs:33-64`,
-`SlackConnectionApiSpecs.cs`, `Agent.cs`). Non-goals match the issue exactly.
+All three round-1 findings are resolved and consistent across artifacts:
 
-One must-fix defect remains: a spec requirement/scenario asserts behavior that the
-codebase cannot satisfy and that the design + tasks deliberately contradict.
+- **F1 (was must-fix) — avatar derivation:** `specs/web-connection-setup/spec.md`
+  requirement "Creating a Connection presents a Bot identity preview derived from
+  the bound Agent" now derives name + description only and explicitly states the
+  avatar SHALL NOT be derived (applied manually in Slack App settings); its scenario
+  matches. `proposal.md` line 8 and `design.md` Decision C / Risk are aligned. The
+  unsatisfiable requirement is gone.
+- **O1 — claim-owner traceability:** `tasks.json` T-004 notes now cross-reference
+  web-connection-setup "The owner claim step generates a one-time code claimed through
+  the Bot".
+- **O2 — preview/navigate UX:** the connection page is now the authoritative,
+  resumable surface for the identity preview + Create-in-Slack; `design.md` Decisions
+  A/B/C/G updated, and `tasks.json` T-001 exposes the preview on `GET /slack-connections/{id}`,
+  T-003 creates+navigates, T-004 renders the first setup step.
 
-## Acceptance-criteria coverage
+Structural checks pass:
+- All six issue acceptance criteria (+ the claim-owner product-shape item) are covered
+  by a spec requirement with at least one scenario.
+- 22 scenarios total; every scenario uses exactly 4 hashtags; no 3-hashtag scenarios.
+- Every spec requirement has ≥1 scenario.
+- All four task `spec` anchors resolve to real requirement headings.
+- `tasks.json` is valid JSON; the dependency graph is an acyclic DAG with strictly
+  decreasing priorities (T-001 p1 → T-003 p3 → T-004 p4; T-002 p2 → T-004 p4) and
+  every task carries test-verification acceptance criteria.
+- All requirements are owned by a task; web-credential-input "persisted only by the
+  Server's encrypted secret store" is met by the existing AES-GCM store + T-004's
+  submission to `/configure` (no new server task needed).
+- Cited code references verified: `App.tsx:74`, `AgentDetailPage.tsx:42-45/584`,
+  `SlackConnectionRoutes.cs:33-64`, `SlackConnectionApiSpecs.cs`, `Agent.cs` (no avatar).
 
-| Issue acceptance criterion | Covered by |
-|---|---|
-| Create from Agent detail + Bot identity preview + App creation step | `web-connection-setup`: "exposes a Connections entry…", "Bot identity preview…", "external Create in Slack…" |
-| Protected credential input/save, no echo/page-state/log | `web-credential-input`: all four requirements |
-| Resumable after close/refresh/device | `web-connection-setup`: "Setup progress is owned by the server…" |
-| Service offline / token invalid / Agent not Ready → keep progress + single next step | `web-connection-setup`: "Transient blocking conditions do not lose progress…" |
-| Summary highlights one state + one next step; four facts readable | `web-connection-setup`: "The summary highlights one current state…" |
-| Same progress in Web and CLI; one side holds on the other | `web-connection-setup`: "The Web and the CLI operate the same Connection…" |
-| (Product shape) identity verification + Owner claim | `web-connection-setup`: "The owner claim step generates a one-time code…" |
+## Observations (non-blocking — cosmetic/tidiness only)
 
-All criteria have at least one requirement with a scenario; scenario hashtag depth is
-correct (4 `#`) across both spec files.
+These do not block building; recorded for an optional tidy-up pass:
 
-## Findings
+- **N1 — stale parenthetical in design Decision C:** it still says the avatar handling
+  "reconciles the spec wording 'identity … derived from the bound Agent'". The spec is
+  now corrected, so the reconciliation is done; the sentence reads as historical. Could
+  be simplified to a plain statement (name+description derived, avatar in Slack).
+- **N2 — T-003 title overstates scope:** "Web: Connections widget on Agent detail with
+  Add Slack and identity preview" — but identity-preview rendering moved to T-004 in the
+  O2 fix. The description and notes are unambiguous (preview rendering is T-004); only
+  the title still implies T-003 renders it. Could drop "and identity preview" from the title.
+- **N3 — migration plan omits the GET exposure:** `design.md` Migration Plan step 1 says
+  "add preview to response" (create) but does not mention exposing the preview on
+  `GET /slack-connections/{id}`, which Decision C and T-001 now include. A one-clause
+  addition would keep the migration plan in sync.
 
-### F1 — MUST FIX: spec asserts an unsatisfiable "avatar derived from the Agent"
-
-`specs/web-connection-setup/spec.md`, requirement "Creating a Connection presents a
-Bot identity preview derived from the bound Agent", states the preview SHALL present
-"name, short description, **and avatar** — derived from the bound Agent", and its
-scenario "Identity preview is derived from the Agent" asserts the Web shows "the Bot
-name, App description, **and avatar** … all derived from the Agent."
-
-This cannot be implemented as written: the Agent carries no avatar field
-(`packages/server/src/Mohist.Server/Agent/Domain/Agent.cs` has only Name/Description;
-`packages/web/src/entities/agent/api/client.ts` `AgentInfo` has only name/description).
-There is nothing to derive an avatar from.
-
-It also conflicts directly with the rest of the plan:
-- `design.md` Decision C: "Avatar is deliberately not derived — the Agent carries no
-  avatar … the avatar is applied manually in Slack App settings."
-- `tasks.json` T-001 acceptance: derives `botName` + `appDescription` only; explicitly
-  "Avatar is not derived."
-- Product spec `docs/agent-connections.md:61`: "头像需要在 Slack App 设置中手动应用"
-  (avatar is applied manually in Slack App settings).
-
-Why it blocks: the spec is the normative contract tasks reference (T-001's `spec`
-anchor points at this requirement). A test author encoding the scenario would write an
-unwritable/failing test ("show avatar derived from the Agent"). The requirement and its
-scenario must be reworded so the preview covers name + description (derived from the
-Agent) and the avatar is configured in Slack, not derived — matching design Decision C,
-T-001, and the product spec.
-
-Suggested fix scope (for the fix task): in that one requirement + its first scenario,
-drop "avatar" from the derived-from-Agent clause and state the avatar is applied in
-Slack App settings (not derived). No change to design, tasks, or proposal needed — they
-already state the correct behavior.
-
-### O1 — Observation (non-blocking): T-004 does not anchor the claim-owner spec
-
-T-004 implements the owner-claim step and its acceptance criteria cover it ("claim-owner
-shows the code once… regenerate re-POSTs and prior code invalidated"), but its `spec`
-anchor points only at "Setup progress is owned by the server…". The requirement "The
-owner claim step generates a one-time code claimed through the Bot" is satisfied without
-being anchored. Not a defect (one anchor per task matches the #517 precedent), but the
-fix task may add a cross-reference in T-004 notes for traceability.
-
-### O2 — Observation (non-blocking): "show preview, then navigate" UX tension
-
-Design Decision A / T-003 say Add Slack shows the derived identity preview, then
-navigates to the connection page. Showing a preview immediately before navigating away
-risks a flash or the user missing it. Not a correctness issue (the connection page can
-also surface the preview), but worth a note for the implementer.
+None of these affect correctness or buildability — a builder following the task
+descriptions, acceptance criteria, and design decisions will implement the right thing.
 
 ## Verdict
 
-One must-fix spec defect (F1): a normative requirement and scenario assert an
-unsatisfiable avatar-from-Agent behavior that contradicts the design, the task, and the
-product spec. The rest of the plan is consistent and buildable.
+Round-1 must-fix resolved; no new must-fix problems; remaining items are cosmetic nits.
+The plan is ready to build.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
