@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
@@ -16,6 +17,7 @@ internal interface IWorkflowGrainContext
     IGrainFactory Grains { get; }
     ILogger Log { get; }
     DateTimeOffset Now();
+    IDispatchSnapshotStore DispatchSnapshotStore { get; }
 
     void CacheAssignedWorkerId(string? workerId);
     Task SaveAsync();

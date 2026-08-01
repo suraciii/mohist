@@ -42,7 +42,6 @@ public sealed class TaskRun
     public string? CausedByFailedTaskId { get; init; }
     public JsonElement? Output { get; set; }
     public ExecutionError? Error { get; set; }
-    public WorkDispatch? DispatchSnapshot { get; set; }
 }
 
 public static class TaskRunExtensions

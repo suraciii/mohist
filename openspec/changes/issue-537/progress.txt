@@ -1,0 +1,114 @@
+# Issue 537 progress
+
+## T-001 — WorkflowDispatchSnapshot store + grain/DispatchService switchover
+
+### Status
+**Implementation complete.** All acceptance criteria pass under build
+(`TreatWarningsAsErrors`, 0 warnings). New unit tests pass (1726 total,
++7 from store harness). Existing + new spec tests pass (3613 total, +10
+new DispatchSnapshotPersistenceSpecs).
+
+### What landed
+- `WorkflowDispatchSnapshotRow` EF entity + `WorkflowDispatchSnapshots`
+  table keyed by `(WorkflowRunId, WorkId)`. Migration
+  `20260801092137_AddWorkflowDispatchSnapshots` adds the table; same
+  `BuildModel` / `BuildModelCore` static-method pattern as the earlier
+  Designer.cs files (the ModelSnapshot exposes
+  `BuildModelCore(modelBuilder)` so the older migration Designer.cs
+  shells keep compiling).
+- `IDispatchSnapshotStore` + `DispatchSnapshotStore` (SQLite impl
+  against `IDbContextFactory<MohistDbContext>`). API:
+  - `LoadAsync(runId, workId)` — PK fetch; returns `null` on missing or
+    deserialization failure (logs warning).
+  - `SaveFirstAsync(runId, workId, dispatch)` — load-then-insert,
+    first-write-wins. PK collision handled by reloading the winner
+    (covers both a race and a retry-after-grain-reactivation).
+  - `DeleteAsync(runId, workId)` — best-effort; tolerates
+    `DbUpdateConcurrencyException` (the row is already gone).
+  - `DeleteForRunAsync(runId)` — `ExecuteDeleteAsync` per run (used by
+    `WorkflowRunStore.DeleteAsync` cascade).
+- `WorkflowGrain` writes via the store only; `TaskRun.DispatchSnapshot`
+  and `WorkflowActiveWork.DispatchSnapshot` are removed (record shape
+  change; Orleans `[GenerateSerializer]` regenerates transparently).
+- `DispatchService.RenderActiveWorkflowAsync` reads from the store on
+  the `IsTask` redelivery path; checks dispatch never touches the
+  store (re-renders via `TranslateToDispatchAsync`).
+- `WorkflowGrain.Reports.cs` (Complete / Fail / Reject callbacks) and
+  `WorkflowGrain.StopAsync` capture the terminal workId before
+  `CommitAsync`, then call `DeleteSnapshotBestEffortAsync` after a
+  successful commit. The best-effort writer swallows the exception
+  and logs — the snapshot is invisible to `RunningTask` gating
+  regardless, and the startup sweep (T-002) reclaims the orphan.
+- `WorkflowRunStore.DeleteAsync` cascades snapshot rows via
+  `DeleteForRunAsync` after the run row is removed.
+- DI: `IDispatchSnapshotStore` registered scoped in
+  `MohistServiceRegistration`, `GrainTestConfig.ConfigureSilo` (the
+  in-process test silo), and `DispatcherFixture.ConfigureDispatcherSilo`.
+
+### Tests
+- `DispatchSnapshotStoreTests` (unit):
+  - `SaveFirstAsync_InsertsRowAndReturnsCallerPayload`
+  - `SaveFirstAsync_OnSecondCallForSameAttempt_ReturnsFirstStoredUnchanged`
+  - `DeleteAsync_RemovesRowThatExists`
+  - `DeleteAsync_OnMissingRow_IsNoop`
+  - `DeleteForRunAsync_RemovesAllSnapshotsForRun`
+  - `LoadAsync_ReturnsNullForUnknownRun`
+  - `LoadAsync_EmptyKeysReturnNull`
+- `DispatchSnapshotPersistenceSpecs` (spec, integration):
+  - `PersistedTaskRun_StateHasNoDispatchSnapshot_SnapshotInSeparateStore`
+    — asserts the running TaskRun JSON carries no `dispatchSnapshot`
+    / `workDispatch` member and the snapshot is in the separate store.
+  - `Redelivery_AfterGrainDeactivation_ReturnsStoredSnapshotVerbatim`
+  - `SaveFirstAsync_SecondCallForSameAttempt_ReturnsFirstStoredUnchanged`
+  - `CompletedTask_LosesSnapshot`
+  - `FailedTask_LosesSnapshot`
+  - `Retry_AfterFailure_OnlyNewAttemptSnapshotExists`
+  - `StoppedRun_LosesSnapshot`
+  - `ChecksDispatch_DoesNotPersistSnapshotAndRedeliveryReconstructs`
+  - `WorkflowRunStore_DeleteAsync_CascadeDeletesSnapshots`
+  - `TerminalTransition_SaveFailure_LeavesSnapshotIntact` — verifies
+    that a saved snapshot remains in the store after the in-memory
+    terminal transition (the delete only runs after a successful
+    `CommitAsync`; a `MarkRunReloadRequired` quarantine keeps the
+    snapshot so the next grain activation can re-dispatch verbatim).
+
+### Decisions / gotchas
+- The Orleans `[GenerateSerializer]` shape change on
+  `WorkflowActiveWork` is incremental (`Id(16)` was unused → no new
+  field id bump). The `WorkflowActiveWork` signature dropped
+  `DispatchSnapshot`; both `ActiveTask` and `ActiveChecks` were
+  touched.
+- `WorkflowRunStore` constructor takes the **`IDispatchSnapshotStore`
+  interface**, not the concrete `DispatchSnapshotStore`. Without
+  this, the silo DI (which only registers `IDispatchSnapshotStore`)
+  cannot resolve the dependency when constructing `WorkflowRunStore`
+  as a grain-injected service. The same fix is required in every
+  test helper that hand-constructs `WorkflowRunStore` (5 places).
+- `BuildModelCore(modelBuilder)` was added to the
+  `MohistDbContextModelSnapshot` partial as a `static` that delegates
+  to `BuildModel` so the existing migration Designer.cs files
+  (which call `MohistDbContextModelSnapshot.BuildModelCore(...)`)
+  keep compiling. The new migration's Designer.cs is the same
+  16-line pattern as the latest migration
+  (`20260731180000_AddSlackOutboxRequiredDeliveryUniqueIndex`).
+- `WorkflowGrain.Reports.cs` preserves the failing-state semantics:
+  if `CommitAsync` throws (e.g. `DbUpdateConcurrencyException` →
+  `MarkRunReloadRequired`), the snapshot is **not** deleted — the
+  task is still `Running` in the persisted State, and redelivery
+  must continue to return the verbatim snapshot from the store.
+- `DispatchService` routes the snapshot-load only on the `IsTask`
+  branch; checks continue to fall through to
+  `TranslateToDispatchAsync` and never write to the store, matching
+  the `Checks dispatch never writes to the snapshot store` scenario.
+- One flake unrelated to this task surfaced and receded on rerun:
+  `AgentSessionLaunchRoutesSpecs.Launch_WithoutRuntimeOverride_UsesAgentConfigRuntime`
+  — runner polling timeout. Rerun was green.
+
+### Open for follow-up (T-002)
+- The cold-start upgrader (`WorkflowDispatchSnapshotDataUpgrader`)
+  that externalizes in-flight snapshots from the legacy
+  `TaskRun.DispatchSnapshot` field into the new table is T-002.
+  T-001 ships the table; T-002 ships the migration.
+- The startup orphan sweep (deleting snapshot rows whose task is no
+  longer Running) is also T-002; T-001 already best-effort deletes on
+  every terminal transition in the happy path.

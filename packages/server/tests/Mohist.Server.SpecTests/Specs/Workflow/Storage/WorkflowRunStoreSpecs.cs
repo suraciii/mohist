@@ -27,7 +27,7 @@ public partial class WorkflowRunStoreSpecs
     private static readonly DateTimeOffset FixedTime = new(2026, 7, 15, 0, 0, 0, TimeSpan.Zero);
 
     private static WorkflowRunStore CreateStore(IDbContextFactory<MohistDbContext> factory, IEventStore eventStore) =>
-        new(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks);
+        new(factory, eventStore, new NullDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks, new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
     [Fact]
     public async Task SaveAsync_WithProjectAnnotation_StampsProjectIdOnPersistedEventExtensions()

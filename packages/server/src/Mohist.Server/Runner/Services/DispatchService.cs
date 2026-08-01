@@ -16,6 +16,7 @@ public sealed class DispatchService : IScopedService
     private readonly IGrainFactory _grains;
     private readonly WorkflowRunQuerier _workflowRuns;
     private readonly IAgentJobStore _agentJobs;
+    private readonly IDispatchSnapshotStore _dispatchSnapshots;
     private readonly WorkflowItemTranslator _translator;
     private readonly ILogger<DispatchService> _log;
     private readonly IDispatchPollObserver _pollObserver;
@@ -24,6 +25,7 @@ public sealed class DispatchService : IScopedService
         IGrainFactory grains,
         WorkflowRunQuerier workflowRuns,
         IAgentJobStore agentJobs,
+        IDispatchSnapshotStore dispatchSnapshots,
         WorkflowItemTranslator translator,
         ILogger<DispatchService> log,
         IDispatchPollObserver? pollObserver = null)
@@ -31,6 +33,7 @@ public sealed class DispatchService : IScopedService
         _grains = grains;
         _workflowRuns = workflowRuns;
         _agentJobs = agentJobs;
+        _dispatchSnapshots = dispatchSnapshots;
         _translator = translator;
         _log = log;
         _pollObserver = pollObserver ?? NoopDispatchPollObserver.Instance;
@@ -239,16 +242,20 @@ public sealed class DispatchService : IScopedService
 
         try
         {
-            if (activeWork.DispatchSnapshot is not null)
-                return (workKey, activeWork.DispatchSnapshot);
+            if (activeWork.IsTask)
+            {
+                var stored = await _dispatchSnapshots.LoadAsync(workflowRunId, workId, ct);
+                if (stored is not null)
+                    return (workKey, stored);
+            }
 
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);
             var concrete = WithIssueFromRun(dispatch, run);
             if (activeWork.IsChecks)
                 return (workKey, concrete);
 
-            var stored = await StoreDispatchAsync(workflowRunId, runnerId, workId, concrete);
-            return (workKey, stored);
+            var saved = await StoreDispatchAsync(workflowRunId, runnerId, workId, concrete);
+            return (workKey, saved);
         }
         catch (WorkflowDispatchRejectedException ex)
         {

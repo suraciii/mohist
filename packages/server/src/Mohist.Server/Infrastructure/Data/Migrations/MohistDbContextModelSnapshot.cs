@@ -14,102 +14,69 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
     {
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
-            BuildModelCore(modelBuilder);
-        }
-
-        public static void BuildModelCore(ModelBuilder modelBuilder)
-        {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.8");
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Secrets.ConnectionSecretRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow", b =>
                 {
-                    b.Property<string>("ProjectId")
+                    b.Property<string>("Id")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ConnectionId")
+                    b.Property<string>("AgentId")
+                        .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("Kind")
+                    b.Property<string>("AgentReadiness")
+                        .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("Blob")
-                        .IsRequired()
-                        .HasColumnType("BLOB");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ProjectId", "ConnectionId", "Kind");
-
-                    b.HasIndex("ProjectId", "ConnectionId")
-                        .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
-
-                    b.ToTable("ConnectionSecrets", (string)null, t =>
-                        {
-                            t.HasCheckConstraint("CK_ConnectionSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken')");
-                        });
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOutboxRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("AttemptCount")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("ClaimedByAdapterId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("ClaimedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
+                    b.Property<string>("AppId")
                         .IsRequired()
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AvatarHash")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BotName")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BotUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionHealth")
+                        .IsRequired()
+                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("DeadLetteredAt")
+                    b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("DeliveredAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("DeliveryUncertainAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DispatchRef")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Kind")
+                    b.Property<string>("DesiredState")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("LastError")
+                    b.Property<string>("HealthReason")
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                    b.Property<DateTimeOffset?>("LastHeartbeatAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PayloadJson")
-                        .IsRequired()
+                    b.Property<string>("OwnerSlackUserId")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ProjectId")
@@ -117,105 +84,25 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("State")
+                    b.Property<string>("ProviderKind")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ThreadTs")
+                    b.Property<string>("SetupProgress")
+                        .IsRequired()
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
+                    b.Property<string>("VerifiedBotIconUrl")
+                        .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "DispatchRef", "Kind", "State")
-                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
-
-                    b.HasIndex("ConnectionId", "DispatchRef", "Kind")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
-
-                    b.HasIndex("ConnectionId", "State", "ClaimedAt")
-                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
-
-                    b.HasIndex("ConnectionId", "State", "DeliveryUncertainAt")
-                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
-
-                    b.HasIndex("ConnectionId", "State", "NextAttemptAt")
-                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_NextAttemptAt");
-
-                    b.HasIndex("ProjectId", "ConnectionId", "State")
-                        .HasDatabaseName("IX_SlackOutboxRows_ProjectId_ConnectionId_State");
-
-                    b.ToTable("SlackOutboxRows", (string)null, t =>
-                        {
-                            t.HasCheckConstraint("CK_SlackOutboxRows_Kind", "\"Kind\" IN ('replaceable_progress', 'terminal_result', 'explicit_failure', 'user_action')");
-                            t.HasCheckConstraint("CK_SlackOutboxRows_State", "\"State\" IN ('pending', 'claimed', 'delivered', 'delivery_uncertain', 'dead_lettered')");
-                        });
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackProviderInboxRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("AcceptedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("DispatchedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RouteKind")
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RouteSessionId")
+                    b.Property<string>("VerifiedBotName")
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RouteTurnId")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlackMessageIdentity")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlackUserId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ThreadTs")
-                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("WorkspaceTeamId")
@@ -225,14 +112,18 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId", "ConnectionId", "DispatchedAt")
-                        .HasDatabaseName("IX_SlackProviderInboxRows_ProjectId_ConnectionId_DispatchedAt");
+                    b.HasIndex("Id")
+                        .HasDatabaseName("IX_AgentConnections_Id");
 
-                    b.HasIndex("ConnectionId", "SlackMessageIdentity")
+                    b.HasIndex("ProjectId", "AgentId")
+                        .HasDatabaseName("IX_AgentConnections_ProjectId_AgentId");
+
+                    b.HasIndex("ProjectId", "AgentId", "WorkspaceTeamId")
                         .IsUnique()
-                        .HasDatabaseName("UX_SlackProviderInboxRows_ConnectionId_SlackMessageIdentity");
+                        .HasDatabaseName("UX_AgentConnections_ProjectId_AgentId_WorkspaceTeamId")
+                        .HasFilter("\"DeletedAt\" IS NULL");
 
-                    b.ToTable("SlackProviderInboxRows", (string)null);
+                    b.ToTable("AgentConnections", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentRow", b =>
@@ -370,456 +261,26 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WatchEntries", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AgentId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AgentReadiness")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AppId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("AvatarHash")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("BotName")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("BotUserId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionHealth")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("DeletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DesiredState")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("HealthReason")
-                        .HasMaxLength(1024)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset?>("LastHeartbeatAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("OwnerSlackUserId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProviderKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SetupProgress")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("VerifiedBotIconUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("VerifiedBotName")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Id")
-                        .HasDatabaseName("IX_AgentConnections_Id");
-
-                    b.HasIndex("ProjectId", "AgentId")
-                        .HasDatabaseName("IX_AgentConnections_ProjectId_AgentId");
-
-                    b.HasIndex("ProjectId", "AgentId", "WorkspaceTeamId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_AgentConnections_ProjectId_AgentId_WorkspaceTeamId")
-                        .HasFilter("\"DeletedAt\" IS NULL");
-
-                    b.ToTable("AgentConnections", (string)null);
-                 });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackDmSessionMappingRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CurrentSessionId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CurrentMessageTs")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("DmConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlackUserId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
-
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "DmConversationId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
-
-                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
-
-                    b.ToTable("SlackDmSessionMappings", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackThreadSessionMappingRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RootMessageTs")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SessionId")
-                        .IsRequired()
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlackUserId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ThreadTs")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
-
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackThreadSessionMappings_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
-
-                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
-
-                    b.HasIndex("ProjectId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
-                        .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
-
-                    b.HasIndex("WorkspaceTeamId", "ConversationId", "ThreadTs")
-                        .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
-
-                    b.ToTable("SlackThreadSessionMappings", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackThreadLaunchReservationRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-
-                    b.Property<string>("LaunchMessageTs")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SessionId")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SlackUserId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ThreadTs")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt").HasColumnType("TEXT");
-
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackThreadLaunchReservations_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
-
-                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackThreadLaunchReservations_ProjectId_ConnectionId_UpdatedAt");
-
-                    b.ToTable("SlackThreadLaunchReservations", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAmbiguousPromptRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConversationId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MessageTs")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MentionedConnectionIdsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("PromptedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ThreadTs")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WinningConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkspaceTeamId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ProjectId", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
-
-                    b.HasIndex("WorkspaceTeamId", "ConversationId", "MessageTs")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
-
-                    b.ToTable("SlackAmbiguousPrompts", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
-                {
-                    b.Property<string>("Id")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ConnectionId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<DateTimeOffset>("CreatedAt").HasColumnType("TEXT");
-                    b.Property<DateTimeOffset>("ExpiresAt").HasColumnType("TEXT");
-
-                    b.Property<string>("Kind")
-                        .IsRequired()
-                        .HasMaxLength(32)
-                        .HasColumnType("TEXT")
-                        .HasDefaultValue("initial");
-
-                    b.Property<string>("ProjectId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("SupersededBy")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-                    b.Property<DateTimeOffset?>("UsedAt").HasColumnType("TEXT");
-                    b.HasKey("Id");
-                    b.HasIndex("ProjectId", "ConnectionId", "CodeHash")
-                        .IsUnique()
-                        .HasDatabaseName("UX_SlackOwnerClaimCodes_ProjectId_ConnectionId_CodeHash");
-                    b.HasIndex("ProjectId", "ConnectionId", "UsedAt", "SupersededBy")
-                        .HasDatabaseName("IX_SlackOwnerClaimCodes_ProjectId_ConnectionId_UsedAt_SupersededBy");
-                    b.ToTable("SlackOwnerClaimCodes", (string)null);
-                });
-
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.AgentJobs.AgentJobRow", b =>
                 {
                     b.Property<string>("JobKey")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("State")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
+                    b.Property<string>("AgentId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.input.agentId')", true);
 
-                    b.Property<long>("Revision")
-                        .HasColumnType("INTEGER");
+                    b.Property<string>("AgentSessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("AssignedRunnerId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("WorkId")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ReadySince")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("RunningSince")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("DispatchJson")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("WorkType")
-                        .HasMaxLength(64)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Stage")
-                        .HasMaxLength(128)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("Title")
-                        .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("IssueProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("IssueNumber")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("AgentSessionId")
-                        .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("InitialInputId")
@@ -830,40 +291,76 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("IssueProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.input.projectId')", stored: true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.input.projectId')", true);
 
-                    b.Property<string>("AgentId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.input.agentId')", stored: true);
+                    b.Property<string>("ReadySince")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Revision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("RunningSince")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Stage")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.status')", stored: true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.status')", true);
 
                     b.Property<string>("SubmittedAt")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.submittedAt')", stored: true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.submittedAt')", true);
 
                     b.Property<string>("TerminalAt")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.terminalAt')", stored: true);
+                        .HasComputedColumnSql("json_extract(\"State\", '$.terminalAt')", true);
+
+                    b.Property<string>("Title")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkType")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
 
                     b.HasKey("JobKey");
-                    b.HasIndex("AgentId", "ProjectId", "SubmittedAt")
-                        .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+
                     b.HasIndex("AssignedRunnerId", "Status")
                         .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status");
-                    b.HasIndex("AssignedRunnerId", "Status", "ReadySince")
-                        .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+
                     b.HasIndex("Status", "ReadySince")
                         .HasDatabaseName("IX_AgentJobs_Status_ReadySince");
+
+                    b.HasIndex("AgentId", "ProjectId", "SubmittedAt")
+                        .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
+
+                    b.HasIndex("AssignedRunnerId", "Status", "ReadySince")
+                        .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+
                     b.ToTable("AgentJobs", (string)null);
                 });
 
@@ -1890,11 +1387,48 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("TaskLogEntries", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Secrets.ConnectionSecretRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<byte[]>("Blob")
+                        .IsRequired()
+                        .HasColumnType("BLOB");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "ConnectionId", "Kind");
+
+                    b.HasIndex("ProjectId", "ConnectionId")
+                        .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
+
+                    b.ToTable("ConnectionSecrets", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ConnectionSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken')");
+                        });
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.AgentSessionRow", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Activity")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))");
 
                     b.Property<string>("AgentSessionId")
                         .HasColumnType("TEXT");
@@ -1932,6 +1466,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/agent-name\"')", true);
 
+                    b.Property<string>("LabelConnectionId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/connection-id\"')", true);
+
                     b.Property<string>("LabelIssueNumber")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1946,6 +1485,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/session-name\"')", true);
+
+                    b.Property<string>("LabelSlackConversationId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-conversation-id\"')", true);
+
+                    b.Property<string>("LabelSlackThreadTs")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-thread-ts\"')", true);
+
+                    b.Property<string>("LabelSlackUserId")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-user-id\"')", true);
 
                     b.Property<string>("LabelSourceId")
                         .ValueGeneratedOnAddOrUpdate()
@@ -1982,31 +1536,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
-                    b.Property<string>("LabelConnectionId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/connection-id\"')", true);
-
-                    b.Property<string>("LabelSlackUserId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-user-id\"')", true);
-
-                    b.Property<string>("LabelSlackConversationId")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-conversation-id\"')", true);
-
-                    b.Property<string>("LabelSlackThreadTs")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/slack-thread-ts\"')", true);
-
-                    b.Property<string>("Activity")
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("TEXT")
-                        .HasComputedColumnSql("LOWER(COALESCE(json_extract(\"State\", '$.status.activity'), json_extract(\"State\", '$.status.Activity')))");
-
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");
 
@@ -2033,6 +1562,18 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("LabelAgentLaunchIssueNumber")
                         .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchIssueNumber");
 
+                    b.HasIndex("LabelConnectionId")
+                        .HasDatabaseName("IX_AgentSessions_LabelConnectionId");
+
+                    b.HasIndex("LabelSlackConversationId")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
+
+                    b.HasIndex("LabelSlackThreadTs")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
+
+                    b.HasIndex("LabelSlackUserId")
+                        .HasDatabaseName("IX_AgentSessions_LabelSlackUserId");
+
                     b.HasIndex("LabelSourceId")
                         .HasDatabaseName("IX_AgentSessions_LabelSourceId");
 
@@ -2053,29 +1594,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("LabelProjectId", "LabelAgentLaunchIssueNumber", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelAgentLaunchIssueNumber_CreatedAt");
 
-                    b.HasIndex("LabelProjectId", "LabelIssueNumber", "CreatedAt")
-                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
-
-                    b.HasIndex("LabelProjectId", "LabelSourceKind", "Activity", "CreatedAt")
-                        .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
-
-                    b.HasIndex("LabelConnectionId")
-                        .HasDatabaseName("IX_AgentSessions_LabelConnectionId");
-
                     b.HasIndex("LabelProjectId", "LabelConnectionId", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelConnectionId_CreatedAt");
 
-                    b.HasIndex("LabelSlackUserId")
-                        .HasDatabaseName("IX_AgentSessions_LabelSlackUserId");
+                    b.HasIndex("LabelProjectId", "LabelIssueNumber", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelIssueNumber_CreatedAt");
 
                     b.HasIndex("LabelProjectId", "LabelSlackUserId", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_LabelProjectId_LabelSlackUserId_CreatedAt");
 
-                    b.HasIndex("LabelSlackConversationId")
-                        .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
-
-                    b.HasIndex("LabelSlackThreadTs")
-                        .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
+                    b.HasIndex("LabelProjectId", "LabelSourceKind", "Activity", "CreatedAt")
+                        .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
 
                     b.ToTable("AgentSessions", (string)null);
                 });
@@ -2182,6 +1711,488 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("SessionId", "RuntimeSessionId", "Sequence");
 
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAmbiguousPromptRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MentionedConnectionIdsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageTs")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("PromptedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WinningConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
+
+                    b.HasIndex("WorkspaceTeamId", "ConversationId", "MessageTs")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
+
+                    b.ToTable("SlackAmbiguousPrompts", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackDmSessionMappingRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentMessageTs")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CurrentSessionId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DmConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "DmConversationId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackDmSessionMappings_ConnectionId_DmConversationId");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackDmSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+
+                    b.ToTable("SlackDmSessionMappings", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOutboxRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClaimedByAdapterId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeadLetteredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeliveredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DeliveryUncertainAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DispatchRef")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("NextAttemptAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "DispatchRef", "Kind")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
+
+                    b.HasIndex("ConnectionId", "State", "ClaimedAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
+
+                    b.HasIndex("ConnectionId", "State", "DeliveryUncertainAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
+
+                    b.HasIndex("ConnectionId", "State", "NextAttemptAt")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_NextAttemptAt");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "State")
+                        .HasDatabaseName("IX_SlackOutboxRows_ProjectId_ConnectionId_State");
+
+                    b.HasIndex("ConnectionId", "DispatchRef", "Kind", "State")
+                        .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
+
+                    b.ToTable("SlackOutboxRows", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackOutboxRows_Kind", "\"Kind\" IN ('replaceable_progress', 'terminal_result', 'explicit_failure', 'user_action')");
+
+                            t.HasCheckConstraint("CK_SlackOutboxRows_State", "\"State\" IN ('pending', 'claimed', 'delivered', 'delivery_uncertain', 'dead_lettered')");
+                        });
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("initial");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SupersededBy")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("UsedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "CodeHash")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackOwnerClaimCodes_ProjectId_ConnectionId_CodeHash");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "UsedAt", "SupersededBy");
+
+                    b.ToTable("SlackOwnerClaimCodes", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackProviderInboxRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("AcceptedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RouteKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RouteSessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RouteTurnId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackMessageIdentity")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConnectionId", "SlackMessageIdentity")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackProviderInboxRows_ConnectionId_SlackMessageIdentity");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "DispatchedAt")
+                        .HasDatabaseName("IX_SlackProviderInboxRows_ProjectId_ConnectionId_DispatchedAt");
+
+                    b.ToTable("SlackProviderInboxRows", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackThreadLaunchReservationRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LaunchMessageTs")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackThreadLaunchReservations_ProjectId_ConnectionId_UpdatedAt");
+
+                    b.HasIndex("ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackThreadLaunchReservations_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+
+                    b.ToTable("SlackThreadLaunchReservations", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackThreadSessionMappingRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RootMessageTs")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SlackUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ThreadTs")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkspaceTeamId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "ConnectionId", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_ConnectionId_UpdatedAt");
+
+                    b.HasIndex("WorkspaceTeamId", "ConversationId", "ThreadTs")
+                        .HasDatabaseName("IX_SlackThreadSessionMappings_WorkspaceTeamId_ConversationId_ThreadTs");
+
+                    b.HasIndex("ConnectionId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SlackThreadSessionMappings_ConnectionId_WorkspaceTeamId_ConversationId_ThreadTs");
+
+                    b.HasIndex("ProjectId", "WorkspaceTeamId", "ConversationId", "ThreadTs")
+                        .HasDatabaseName("IX_SlackThreadSessionMappings_ProjectId_WorkspaceTeamId_ConversationId_ThreadTs");
+
+                    b.ToTable("SlackThreadSessionMappings", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.IssueWorkflowProfile", b =>
@@ -2475,6 +2486,25 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkflowArtifacts", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowDispatchSnapshotRow", b =>
+                {
+                    b.Property<string>("WorkflowRunId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("WorkflowRunId", "WorkId");
+
+                    b.ToTable("WorkflowDispatchSnapshots", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", b =>
                 {
                     b.Property<string>("ProjectId")
@@ -2678,6 +2708,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 #pragma warning restore 612, 618
+        }
+
+        public static void BuildModelCore(ModelBuilder modelBuilder)
+        {
+            var snapshot = new MohistDbContextModelSnapshot();
+            snapshot.BuildModel(modelBuilder);
         }
     }
 }

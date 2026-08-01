@@ -13,8 +13,10 @@ public partial class WorkflowGrain
 
         var now = Now();
         IReadOnlyList<WorkflowEvent> events;
+        string? terminalWorkId = null;
         if (activeWork.IsTask)
         {
+            terminalWorkId = activeWork.WorkId;
             events = _run.FailTask(new TaskResult("failed", message), now);
         }
         else if (activeWork.IsChecks)
@@ -29,6 +31,8 @@ public partial class WorkflowGrain
         if (events.Count == 0) return ReportAck.Stale;
 
         await CommitAsync(events);
+        if (terminalWorkId is not null)
+            await DeleteSnapshotBestEffortAsync(terminalWorkId);
         return ReportAck.Accepted;
     }
 
@@ -49,6 +53,7 @@ public partial class WorkflowGrain
             "Workflow {Id} rejected dispatch for {WorkId}: {Code} {Message}",
             GrainKey, workId, error.Code, error.Message);
         await CommitAsync(events);
+        await DeleteSnapshotBestEffortAsync(workId);
         return ReportAck.Accepted;
     }
 
@@ -66,6 +71,7 @@ public partial class WorkflowGrain
         var events = await _workLifecycle.ApplyTaskReportAsync(_run, report, activeWork.TaskRunId);
 
         await CommitAsync(events);
+        await DeleteSnapshotBestEffortAsync(workId);
         return ReportAck.Accepted;
     }
 
@@ -85,5 +91,19 @@ public partial class WorkflowGrain
 
         await CommitAsync(events);
         return ReportAck.Accepted;
+    }
+
+    private async Task DeleteSnapshotBestEffortAsync(string workId)
+    {
+        try
+        {
+            await _dispatchSnapshotStore.DeleteAsync(GrainKey, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Workflow {Id} failed to delete dispatch snapshot for {WorkId}; orphaned row will be swept at startup",
+                GrainKey, workId);
+        }
     }
 }
