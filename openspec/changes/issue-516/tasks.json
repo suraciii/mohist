@@ -8,11 +8,11 @@
       "spec": "specs/agent-startup-context/spec.md#agent-launch-accepts-an-optional-first-launch-only-startup-context",
       "description": "Thread a new optional startup-context value through the launch chain (launcher parameter -> AgentLaunchCoordinatorRequest -> plan -> EnsureInitialLaunchCommand -> AgentSessionInputRecord -> AgentJobInput) using append-only Orleans field ids. Persist it on the coordinator plan for recovery but exclude it from the launch fingerprint. At dispatch (BuildDispatch), compose the context as an explicit read-only background block preceding the task prompt, keeping AgentJobInput.Prompt and AgentSessionInputRecord.Text task-only so the work label stays clean. Cover all three requirements of the agent-startup-context capability with spec/unit tests.",
       "acceptanceCriteria": [
-        "A new optional startup-context value threads through the entire launch chain as append-only Orleans field ids; a launch that omits it produces byte-identical plan, fingerprint, session input, and dispatch payload as before this change.",
+        "A new optional startup-context value threads through the entire launch chain as append-only Orleans field ids; a launch that omits it is observationally identical to before this change — same fingerprint, same dispatched prompt, same session-input text, same job references (only an extra null field is carried).",
         "The coordinator fingerprint is unchanged when only the startup context varies (background excluded), while existing prompt/attachment/connection-origin fingerprint behavior is preserved.",
         "The startup context is persisted on the coordinator plan so a recovery replay reuses the same snapshot rather than recomputing it.",
         "At dispatch the startup context is composed as an explicit read-only background block preceding the task prompt; the resolved Instructions, Runtime, Model, Variant, and Skills on the dispatched AgentJobInput are identical with and without the context.",
-        "A truncation marker carried with the context reaches both the composed agent input and the session input audit record.",
+        "A truncation marker carried with the context reaches both the composed agent input and the session input audit record, and the attestation is surfaced in the session input observation so the audit is inspectable.",
         "Follow-up inputs to the same session do not carry, replace, or append any startup context.",
         "Spec/unit tests (no real Slack, injectable time) cover: launch-with-context composition, instructions/capabilities immutability, fingerprint-exclusion across varying background, first-launch-only behavior, and truncation-marker propagation.",
         "`npm test` (server) is green."
