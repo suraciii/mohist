@@ -303,6 +303,7 @@ public static class SlackConnectionRoutes
             string connectionId,
             AgentConnectionStore connections,
             SlackOwnerClaimService claims,
+            SlackConnectionAccessDecider accessDecider,
             SlackProviderInboxStore inbox,
             SlackOutboxStore outbox,
             SlackDmSessionMappingStore mapping,
@@ -352,7 +353,7 @@ public static class SlackConnectionRoutes
                     HandleChannelIngressRequest.From(
                         projectId, connection, identity, senderSlackUserId, body,
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
-                        sessions, agents, claims, inbox, outbox,
+                        sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, grains, followupDispatcher,
                         runnerHub, runnerConnections,
                         secrets, threadHistory, slackProviderOptions,
@@ -1172,6 +1173,16 @@ public static class SlackConnectionRoutes
         var threadBindings = await req.ThreadMapping.ListBindingsByWorkspaceAsync(
             body.TeamId, body.ConversationId, rootTs, ct);
 
+        // The decision for THIS Connection is read once per ingress and
+        // reused at the five channel owner-check sites below. Under the
+        // default owner_only policy this stays a single equality check
+        // (Allow iff sender == Owner) with no Slack API traffic; the
+        // other policy branches swap the Allow path but keep the
+        // no-cache contract.
+        var decision = await req.AccessDecider.EvaluateAsync(
+            connection, req.SenderSlackUserId, body.TeamId, body.ConversationId,
+            isDirectMessage: false, ct);
+
         if (mentionedWorkspaceBots.Count >= 2)
         {
             var mentionedConnectionIds = mentionedWorkspaceBots
@@ -1183,8 +1194,7 @@ public static class SlackConnectionRoutes
                 .Select(bot => bot.ConnectionId)
                 .FirstOrDefault();
             var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
-            var senderOwnsCurrentConnection = string.Equals(
-                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            var senderOwnsCurrentConnection = decision.Allowed;
             if (!currentConnectionIsMentioned
                 || (ownerClaimantConnectionId is not null
                     && !senderOwnsCurrentConnection
@@ -1205,12 +1215,8 @@ public static class SlackConnectionRoutes
             if (!string.Equals(addressedBot.BotUserId, ownBotUserId, StringComparison.Ordinal))
                 return ApiResults.Ok(new { kind = "ignored" });
 
-            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
-            {
-                const string reason = "This Slack Connection is available only to its owner.";
-                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-                return ApiResults.Ok(new { kind = "rejected", reason });
-            }
+            if (!decision.Allowed)
+                return await RejectAsync(req, decision.Reason, ct);
 
             var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
             var isRootMention = string.IsNullOrWhiteSpace(body.ThreadTs);
@@ -1283,8 +1289,7 @@ public static class SlackConnectionRoutes
                     && string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))?.ConnectionId)
                 .FirstOrDefault(connectionId => connectionId is not null);
             var currentConnectionIsBound = bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
-            var senderOwnsCurrentConnection = string.Equals(
-                req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal);
+            var senderOwnsCurrentConnection = decision.Allowed;
             if (!currentConnectionIsBound
                 || (ownerClaimantConnectionId is not null
                     && !senderOwnsCurrentConnection
@@ -1305,12 +1310,8 @@ public static class SlackConnectionRoutes
             if (!string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal))
                 return ApiResults.Ok(new { kind = "ignored" });
 
-            if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
-            {
-                const string reason = "This Slack Connection is available only to its owner.";
-                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-                return ApiResults.Ok(new { kind = "rejected", reason });
-            }
+            if (!decision.Allowed)
+                return await RejectAsync(req, decision.Reason, ct);
 
             var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
             return await DispatchChannelFollowupAsync(req, binding.SessionId, prompt, ct);
@@ -1322,12 +1323,8 @@ public static class SlackConnectionRoutes
                 req, projectId, body.TeamId, body.ConversationId, rootTs, ct);
             if (reconciled is not null)
             {
-                if (!string.Equals(req.SenderSlackUserId, connection.OwnerSlackUserId, StringComparison.Ordinal))
-                {
-                    const string reason = "This Slack Connection is available only to its owner.";
-                    await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-                    return ApiResults.Ok(new { kind = "rejected", reason });
-                }
+                if (!decision.Allowed)
+                    return await RejectAsync(req, decision.Reason, ct);
                 var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
                 return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
             }
@@ -1488,11 +1485,11 @@ public static class SlackConnectionRoutes
         return ApiResults.Ok(new { kind = "ambiguous", reason = promptText });
     }
 
-    private static async Task<IResult> RejectNonOwnerChannelMessageAsync(
+    private static async Task<IResult> RejectAsync(
         HandleChannelIngressRequest req,
+        string reason,
         CancellationToken ct)
     {
-        const string reason = "This Slack Connection is available only to its owner.";
         await EnqueueReplyAsync(req.Outbox, req.ProjectId, req.Connection, req.Body.ConversationId,
             reason, null, ct, req.Body.ThreadTs);
         return ApiResults.Ok(new { kind = "rejected", reason });
@@ -1800,6 +1797,7 @@ internal sealed record HandleChannelIngressRequest(
     AgentSessionQuerier Sessions,
     AgentQuerier Agents,
     SlackOwnerClaimService Claims,
+    SlackConnectionAccessDecider AccessDecider,
     SlackProviderInboxStore Inbox,
     SlackOutboxStore Outbox,
     IAgentLauncher Launcher,
@@ -1825,6 +1823,7 @@ internal sealed record HandleChannelIngressRequest(
         AgentSessionQuerier sessions,
         AgentQuerier agents,
         SlackOwnerClaimService claims,
+        SlackConnectionAccessDecider accessDecider,
         SlackProviderInboxStore inbox,
         SlackOutboxStore outbox,
         IAgentLauncher launcher,
@@ -1838,7 +1837,7 @@ internal sealed record HandleChannelIngressRequest(
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
-            sessions, agents, claims, inbox, outbox,
+            sessions, agents, claims, accessDecider, inbox, outbox,
             launcher, grains, followupDispatcher, runnerHub, runnerConnections,
             secrets, threadHistory, slackProviderOptions, services);
 }
