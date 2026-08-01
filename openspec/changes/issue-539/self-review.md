@@ -1,12 +1,14 @@
-# Self-Review — Issue 539 (WorkflowRun status ETag cache)
+# Self-Review (round 2) — Issue 539 (WorkflowRun status ETag cache)
 
-Reviewer role: reviewer, not fixer. Findings below; a separate task resolves each.
+Reviewer role: reviewer, not fixer. Round 1 raised one blocker + two minors;
+this round verifies the fixes and re-checks the whole plan.
 
-## Verdict: FAIL
+## Verdict: PASS
 
-One blocker: the spec and design contradict each other on whether the `State`
-column is read on a cache hit, because `GetStatusAsync`'s mandatory definition
-resolution already reads `State` twice per call.
+The round-1 blocker (spec/design contradiction on State reads during
+definition resolution) is resolved and now consistent across spec, design, and
+tasks. The two remaining observations are non-blocking polish/uncertainty items
+that do not prevent building.
 
 ---
 
@@ -18,128 +20,70 @@ resolution already reads `State` twice per call.
 - `openspec/changes/issue-539/tasks.json`
 - Against issue #539 body and the live codebase.
 
-## Strengths
+## Round-1 findings — resolution verified
 
-- Capability boundary is clean: one capability (`workflow-run-status-cache`),
-  one spec file, one cohesive task — no over-granular technical-step split.
-- D1 (cache the deserialized aggregate only; keep definition + artifact
-  resolution per-call) correctly targets the proven LOH source (the full typed
-  `JSON.Deserialize<WorkflowRun>`) and avoids inventing artifact/definition
-  version signals whose failure mode is *wrong data*.
-- D2 (singleton store injected into the scoped querier) is the right lifetime:
-  a per-scope cache could not help the cross-request 3s poll. Grounded in the
-  codebase's `ISingletonService` convention (`ProjectQuerier` precedent).
-- Spec scenarios use exactly 4 hashtags, normative MUST/SHALL language, and map
-  1:1 to the proposal's capability. No `ADDED/MODIFIED/REMOVED` headers.
-- Migration/rollback are correctly scoped: no schema change, additive code,
-  safe revert (ETag column and its increment rule untouched).
+1. **BLOCKER (spec↔design contradiction on State reads on a hit).** Fixed and
+   verified consistent:
+   - Spec Requirement 1 now guarantees only "MUST NOT execute the full typed
+     deserialization of `State` (`JSON.Deserialize<WorkflowRun>`)" and adds an
+     explicit scope paragraph acknowledging definition resolution's residual
+     `State` reads (profile-id extraction) as out-of-scope-accepted.
+   - Design D1 carries a matching scope note with evidence
+     (`WorkflowDefinitionResolver.cs:220-221` full-row load; `:234-241`
+     `Select(x => x.State)` + `JsonDocument.Parse`); Open Questions lists the
+     follow-up (bypass via cached `WorkflowProfileId`).
+   - tasks.json description + hit/miss/artifact acceptance criteria all say
+     "full typed deserialization" consistently. No artifact still claims "MUST
+     NOT read the State column".
+2. **MINOR (ETag is a save-count, not a content hash).** Fixed in design D3
+   ("ETag is a save-count, not a content hash … bumps `ETag` unconditionally on
+   every update save, even when byte-identical") and D1 rationale. Correctness
+   framing updated ("ETag differs → deserialize once" still holds; hit-rate
+   ceiling depends on non-redundant saves).
+3. **MINOR (no-mutation guard absent from task criteria).** Fixed: tasks.json
+   now has a criterion asserting the cached `WorkflowRun` is not mutated by
+   `BuildStatusView`/`AttachArtifactSummariesAsync`/per-call paths.
 
----
+## Re-check of the whole plan
 
-## Finding 1 — BLOCKER: spec requires "MUST NOT read the State column" on a hit; design (and code) reads it every call
+- Capability boundary intact: one capability (`workflow-run-status-cache`),
+  one spec file, one cohesive task; no over-granular split.
+- Spec format compliant: requirements `###`, scenarios exactly `####`, each
+  requirement has ≥1 scenario, no `ADDED/MODIFIED/REMOVED` headers, normative
+  MUST/SHALL language throughout.
+- Issue-required regression coverage present: ETag-unchanged → zero full
+  deserializes (Req 1); ETag-changed → exactly one (Req 2); both reflected in
+  task acceptance criteria.
+- Proposal wording ("完整反序列化" / "仅消除重复反序列化开销") already matches the
+  spec's scoped "full typed deserialization" guarantee — no proposal↔spec gap.
+- Decision rationale (D1–D5) is internally consistent; D2 singleton lifetime is
+  correct for the cross-request poll; D4 bounding prevents the cache from
+  regressing memory (the epic's purpose); no schema migration, additive code,
+  safe rollback.
 
-**The contradiction.**
+## Non-blocking observations (do not block building)
 
-`spec.md` Requirement 1, scenario "First read after process start with a
-stable ETag":
-> the query MUST serve the cached view and **MUST NOT read or deserialize the
-> State column**
+### N1 — Context § repeats the round-1 "actual State write" phrasing
 
-and the normative text: "MUST NOT deserialize the run's State", scenario 1:
-"the run's State JSON MUST be deserialized zero times during the second call".
+`design.md:15` still says the ETag is "incremented on every actual State write"
+— the same imprecision round-1 finding-2 flagged. It is harmless because (a)
+the authoritative decision D3 states the correct save-count semantics
+explicitly and unambiguously, and (b) the citation
+(`WorkflowRunStore.cs:156,166`) leads an implementer straight to the
+unconditional increment. A future tidy-up can align the background sentence
+with D3; it will not mislead a builder today.
 
-But `WorkflowQuerier.GetStatusAsync` calls
-`_definitionResolver.LoadTemplateAsync(workflowRunId)` **unconditionally**
-(`packages/server/src/Mohist.Server/Workflow/Services/WorkflowQuerier.cs:44`),
-and `LoadTemplateAsync` reads `State` on every call:
+### N2 — Net LOH benefit is uncertain until profiling
 
-- `ResolveRunContextAsync` (`WorkflowDefinitionResolver.cs:220-221`):
-  `db.WorkflowRuns.AsNoTracking().FirstOrDefaultAsync(x => x.WorkflowRunId == runId)`
-  — loads the **full row, `State` column included**, into the entity.
-- `LoadBoundProfileIdAsync` (`WorkflowDefinitionResolver.cs:234-241`):
-  `Select(x => x.State)` + `JsonDocument.Parse(state)` — reads `State` again
-  and parses it.
+On a cache hit the typed deserialize is skipped, but definition resolution still
+materializes the `State` string twice per call (`ResolveRunContextAsync`
+full-row load + `LoadBoundProfileIdAsync` `Select(x => x.State)`); a ~325 KB
+string is LOH-eligible, so the residual LOH may be non-trivial. The design
+acknowledges this honestly (D1 scope note + Open Questions #3, which scopes
+eliminating those reads as a follow-up gated on post-implementation profiling).
+This aligns with the issue's explicit scope ("仅消除重复反序列化开销") and its
+`effort=small` label, so deferring is defensible — but the team should treat
+the follow-up profiling as a real commitment, not a nice-to-have, since the
+headline memory win partially depends on it.
 
-The design itself acknowledges this: Context step 3 ("re-runs the definition
-cascade … a small `JsonDocument.Parse` over State to read the bound profile
-id") and D1 ("definition resolution … remain per-call"). So the design keeps
-the `State` read; the spec forbids it.
-
-**Impact.** The primary LOH win (skipping the full typed
-`JSON.Deserialize<WorkflowRun>`) is real and consistent across both artifacts.
-But the spec's literal guarantee ("MUST NOT read or deserialize the State
-column" / "deserialized zero times") is **unachievable** without changing the
-definition-resolution coupling. A test written to that scenario cannot pass
-against the designed implementation; an implementer following the spec will
-either fail the test or be forced to silently deviate from the design. This is
-a contract contradiction between two plan artifacts that the build task would
-inherit as ambiguity.
-
-**Fix options (for the separate fix task — pick one and reconcile both
-artifacts):**
-
-- **(A) Narrow the spec's guarantee** to what the design delivers: on a hit,
-  the query MUST NOT perform the full LOH-allocating typed deserialize
-  (`JSON.Deserialize<WorkflowRun>`); lightweight metadata extraction (bound
-  profile id via `JsonDocument.Parse`) may still read/parse `State`. Update
-  Requirement 1 wording + scenarios accordingly. Smallest change; preserves
-  the proven win.
-- **(B) Extend the design** so a hit avoids the definition-resolution `State`
-  re-read: source the bound profile id from the cached `WorkflowRun`
-  (`run.WorkflowProfileId`) and source `projectId`/`issueNumber`/`RunExists`
-  from scalar projections or the cached aggregate, bypassing
-  `LoadTemplateAsync`'s two `State` reads on the hot path. Achieves the spec's
-  literal wording; larger refactor of the querier↔definition-resolver coupling.
-
-Either is valid; the plan must not ship with the two artifacts disagreeing.
-
----
-
-## Finding 2 — Minor: "ETag versions exactly State" overstates precision
-
-`WorkflowRunStore.StageRunAsync` (`WorkflowRunStore.cs:160-166`) unconditionally
-re-serializes `State` and increments `ETag` on **every** update save, even when
-the serialized content is byte-identical to the prior write. (The
-byte-idempotency rule in `design/workflow/run-state.md:64-66` applies only to
-cold-start data upgraders, not the runtime store.)
-
-So `ETag` is a save-count proxy, not a content hash: a redundant grain save
-invalidates the cache and triggers one redundant deserialize. Correctness is
-unaffected (spec's "ETag differs → deserialize once" is honored), but the
-design's D3 framing ("ETag is the State version authority and increments on
-every actual write") and the spec's "State is unchanged (ETag matches)"
-implicitly assume content-equality. Recommend a one-line clarification so the
-implementer does not assume content-hash semantics when reasoning about hit
-rate.
-
-## Finding 3 — Minor: no-mutation guard is a design risk but absent from task acceptance criteria
-
-Design Risks calls for "a test/arch guard [to] assert no mutation path writes
-back to a cached aggregate" (the singleton shares one `WorkflowRun` across
-request scopes). That mitigation is **not** reflected in `tasks.json`
-acceptance criteria, so the build task has no verifiable gate for it. Either
-add an acceptance criterion (e.g. a unit/arch test asserting the cached
-aggregate is not mutated by `BuildStatusView`/`AttachArtifactSummariesAsync`/
-any per-call path) or drop the risk from the design. As written, a future
-caller mutating the shared instance would be a silent concurrency bug with no
-guard.
-
----
-
-## Non-issues (checked, no change needed)
-
-- `EF.Property<long>(e, "ETag")` scalar projection is standard EF Core for
-  shadow properties (`ETag` is configured in `MohistDbContext.cs:868` as a
-  shadow concurrency token, absent from `WorkflowRunRow`); the design's
-  provider-fallback note is sufficient.
-- Issue-body reference to "spec: dispatch-snapshot-persistence" points at a
-  doc that does not exist; the plan correctly cites `run-state.md` instead.
-  Not a plan defect.
-- Returning the full cached view (vs. the issue's phrase "轻量摘要") is a
-  faithful interpretation — the deserialize-free full view *is* the
-  lightweight result.
-- `tasks.json` `spec` field omits the `#requirement` anchor; field guidance
-  says "when applicable", and one task covers all six requirements, so a
-  file-level reference is defensible.
-
-<promise>FAIL</promise>
+<promise>PASS</promise>
