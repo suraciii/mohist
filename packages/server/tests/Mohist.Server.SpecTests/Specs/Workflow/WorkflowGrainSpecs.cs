@@ -53,7 +53,9 @@ public abstract class WorkflowGrainSpecs
 
     protected RecordingEventStore EventStore => _fixture.EventStore;
 
-    protected WorkflowQuerier GetQuerier()
+    protected WorkflowQuerier GetQuerier(
+        WorkflowRunStatusCache? statusCache = null,
+        IWorkflowRunDeserializer? runDeserializer = null)
     {
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(_fixture.ConnectionString)
@@ -74,7 +76,9 @@ public abstract class WorkflowGrainSpecs
             factory,
             definitionResolver,
             variableResolver,
-            new WorkflowArtifactQuerier(factory));
+            new WorkflowArtifactQuerier(factory),
+            statusCache ?? new WorkflowRunStatusCache(),
+            runDeserializer ?? new WorkflowRunDeserializer());
     }
 
     protected async Task<string> RegisterRunnerAsync(string? runnerId = null, int maxWorkflowSlots = RunnerCapacity.DefaultMaxWorkflowSlots)

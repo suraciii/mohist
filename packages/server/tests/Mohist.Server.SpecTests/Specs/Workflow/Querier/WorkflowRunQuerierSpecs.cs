@@ -1,6 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
+using Mohist.Server.Workflow.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
@@ -9,6 +13,28 @@ namespace Mohist.Server.SpecTests.Specs.Workflow.Querier;
 public class WorkflowRunQuerierSpecs : WorkflowGrainSpecs
 {
     public WorkflowRunQuerierSpecs(WorkflowGrainFixture fixture) : base(fixture) { }
+
+    [Fact]
+    public async Task StatusCacheRebuildsAfterWorkflowRunStoreSave()
+    {
+        await StartWorkflowWithoutRunnerAsync(SingleStage());
+        var cache = new WorkflowRunStatusCache();
+        var deserializer = new CountingDeserializer();
+        var querier = GetQuerier(cache, deserializer);
+
+        await querier.GetStatusAsync(_workflowId!);
+        var store = Services.GetRequiredService<IWorkflowRunStore>();
+        var run = await store.LoadAsync(_workflowId!);
+        Assert.NotNull(run);
+        run!.Status = WorkflowRunStatus.Paused;
+        await store.SaveAsync(run);
+
+        var changed = await querier.GetStatusAsync(_workflowId!);
+        await querier.GetStatusAsync(_workflowId!);
+
+        Assert.Equal("paused", changed?.Status);
+        Assert.Equal(2, deserializer.Count);
+    }
 
     [Fact]
     public async Task RunnerPoll_SkipsNonRunnableRowsBeyondFirstPage()
@@ -37,5 +63,16 @@ public class WorkflowRunQuerierSpecs : WorkflowGrainSpecs
 
         Assert.NotNull(work);
         Assert.Equal(runnableWorkflowId, work.WorkflowRunId);
+    }
+
+    private sealed class CountingDeserializer : IWorkflowRunDeserializer
+    {
+        public int Count { get; private set; }
+
+        public WorkflowRun? Deserialize(string state)
+        {
+            Count++;
+            return Mohist.Server.Infrastructure.JSON.Deserialize<WorkflowRun>(state);
+        }
     }
 }

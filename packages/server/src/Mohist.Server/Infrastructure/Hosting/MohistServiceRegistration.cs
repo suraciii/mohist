@@ -25,6 +25,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Workflow.Services;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
@@ -67,6 +68,8 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+        services.AddSingleton<IWorkflowRunDeserializer>(sp =>
+            sp.GetRequiredService<WorkflowRunDeserializer>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
 
         services.AddRouting(options =>

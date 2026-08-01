@@ -132,7 +132,13 @@ public sealed class CountingWorkflowQuerier : WorkflowQuerier
         Mohist.Server.Workflow.Services.WorkflowDefinitionResolver definitionResolver,
         Mohist.Server.Workflow.Services.WorkflowVariableResolver variableResolver,
         IWorkflowArtifactQuerier artifactQuerier)
-        : base(dbFactory, definitionResolver, variableResolver, artifactQuerier)
+        : base(
+            dbFactory,
+            definitionResolver,
+            variableResolver,
+            artifactQuerier,
+            new WorkflowRunStatusCache(),
+            new WorkflowRunDeserializer())
     {
     }
 

@@ -1,0 +1,15 @@
+## Codebase Patterns
+
+- `WorkflowQuerier` is conventionally registered as scoped, while cross-request read state must use an `ISingletonService`; conventional singleton registration is `AsSelf()` only, so interface seams need an explicit forward registration in `MohistServiceRegistration`.
+- Workflow status specs can use `TestSqliteDatabase.CreateMigrated()` plus `WorkflowDefinitionResolverTestFactory`; the status definition resolver is intentionally run per call.
+- `WorkflowRuns.ETag` is an EF shadow property and is queried with `EF.Property<long>(row, "ETag")`; direct test state writes must increment the shadow value when they model a store save.
+
+## T-001
+
+- Added a fixed-capacity FIFO `WorkflowRunStatusCache` that stores only hydrated `WorkflowRun` references and compares the stored ETag on every lookup.
+- Added `IWorkflowRunDeserializer`/`WorkflowRunDeserializer`; only the status miss path uses this seam so deserialization-cost specs can count the typed state deserialize.
+- `GetStatusAsync` now performs a nullable scalar ETag projection first, then loads and hydrates the full row only on a cache miss. Definition resolution, view mapping, and artifact attachment remain per call.
+- Existing status, structure, and querier specs passed before adding the new cache specs; the new cache specs cover repeat hits, ETag rebuild, equivalence, artifact freshness, unknown runs, eviction, and read-only cached snapshots.
+- `dotnet test` filtering is ignored by this repository's Microsoft Testing Platform setup; exact test classes run through `dotnet run <test-project> -- -class ...`.
+- Added a real `IWorkflowRunStore.SaveAsync` status-cache spec to verify the persisted ETag increment invalidates the aggregate exactly once.
+- The read-only snapshot spec records an artifact after the first read, then verifies per-call artifact attachment changes only the returned view, not the cached aggregate.
