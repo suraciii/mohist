@@ -31,18 +31,18 @@
       "id": "T-002",
       "title": "Remove legacy-State conversion from all read entry points",
       "spec": "specs/canonical-state-read-path/spec.md#Read entry points deserialize canonical State directly",
-      "description": "Remove the MigrateLegacyWorkflowRunJson call from every service-phase read entry point so each deserializes persisted State directly against the current model: WorkflowRunStore.Deserialize, WorkflowRunQuerier, WorkflowQuerier, IssueMetricsQuerier, IssueReadModelLoader, and ActiveSessionReconciler. The converter remains only as a member of WorkflowRunStateDataUpgrader reachable solely from the cold-start migration boundary. No read path probes historical fields, branches on legacy-vs-canonical shape, or silently repairs a legacy-shaped row.",
+      "description": "Remove the MigrateLegacyWorkflowRunJson call from every service-phase read entry point so each deserializes persisted State directly against the current model (six files, seven call sites — WorkflowRunQuerier has two): WorkflowRunStore.Deserialize, WorkflowRunQuerier, WorkflowQuerier, IssueMetricsQuerier, IssueReadModelLoader, and ActiveSessionReconciler. Entry points may go through the shared IWorkflowRunDeserializer; the point is that no converter is applied. The converter remains only as a member of WorkflowRunStateDataUpgrader reachable solely from the cold-start migration boundary. No read path probes historical fields, branches on legacy-vs-canonical shape, or converts/rewrites a legacy-shaped row.",
       "acceptanceCriteria": [
-        "Every service-phase read entry point deserializes canonical State directly with JSON.Deserialize<WorkflowRun> and does not invoke the legacy converter or perform whole-document legacy probing.",
-        "The legacy converter's only reachable caller is WorkflowRunStateDataUpgrader via DatabaseInitializer; enumerating call sites across the production read paths yields zero invocations.",
-        "A read entry point does not silently convert or rewrite a legacy-shaped row; deserialization against the current model surfaces the inconsistency rather than masking it.",
+        "Every service-phase read entry point deserializes canonical State directly with JSON.Deserialize<WorkflowRun> (directly or via IWorkflowRunDeserializer) and does not invoke the legacy converter or perform whole-document legacy probing.",
+        "The legacy converter's only reachable caller is WorkflowRunStateDataUpgrader via DatabaseInitializer; enumerating call sites across the production read paths yields zero invocations (six files, seven call sites before this task).",
+        "A read entry point does not convert or rewrite a legacy-shaped row, and does not branch on legacy-vs-canonical shape. (Detection of un-migrated rows is not a read-path responsibility; it is guaranteed upstream by T-001 blocking the service phase. JSON.Options does not disallow unmapped members, so STJ silently ignores legacy fields rather than throwing — the read-path obligation is non-conversion, not detection.)",
         "Existing WorkflowRun storage / query / control / recovery / dispatch spec and unit tests pass green (safety net), confirming canonical-only reads behave identically to the prior compatibility reads on already-migrated data.",
         "Server builds with TreatWarningsAsErrors (C# lint)."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Compat conversion removed from the six read entry points; converter confined to WorkflowRunStateDataUpgrader; green WorkflowRun storage/query/control/recovery spec and unit tests",
+      "output": "Compat conversion removed from the six read entry points (seven call sites); converter confined to WorkflowRunStateDataUpgrader; green WorkflowRun storage/query/control/recovery spec and unit tests",
       "dependsOn": ["T-001"],
       "passes": false,
       "notes": "Safe only after T-001 guarantees startup migration completes before the Server enters its service phase; on failure the upgrader blocks startup, so a read path never observes an un-migrated legacy row in the service phase. This is the delivery of the canonical-state-read-path capability and the issue's acceptance criterion that read-path legacy-converter invocations equal zero."

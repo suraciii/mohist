@@ -7,7 +7,7 @@ WorkflowRun 持久化 State（`WorkflowRuns.State`）历史上经历过若干字
 当前架构关键点（决定方案可行性的约束）：
 
 - **冷启动迁移管线**：`DatabaseInitializer.InitializeAsync`（`DatabaseInitializer.cs:11`）顺序执行 EF `MigrateAsync` → 各 data upgrader → Profile 迁移。本 issue 的 State 升级挂入同一条管线，位于 `MigrateAsync` 之后、dispatch 快照外置（#537）与 Profile 迁移之前。
-- **读路径绕过 grain**：执行平面（`DispatchService`）、控制平面 status 查询（`WorkflowQuerier`）、reconciler（`ActiveSessionReconciler`）、issue 读模型（`IssueReadModelLoader`、`IssueMetricsQuerier`）直接反序列化 State，不经 grain hop——因此兼容转换曾散布在这些读入口。
+- **读路径绕过 grain**：执行平面（`DispatchService`）、加载 State 的控制平面查询（`WorkflowQuerier`）、reconciler（`ActiveSessionReconciler`）、issue 读模型（`IssueReadModelLoader`、`IssueMetricsQuerier`）直接反序列化 State，不经 grain hop——因此兼容转换曾散布在这些读入口。（注：#538 之后 `WorkflowQuerier.GetStatusAsync` 改为 ETag 版本化缓存、仅在 miss 时经共享 `IWorkflowRunDeserializer` 反序列化；本 issue 的范围是移除这些入口的遗留兼容调用，status 查询的缓存化属 #538。）
 - **ETag 是 shadow property**：`WorkflowRuns` 行带 `ETag`（`WorkflowRunStore.StageRunAsync` 每次实际写递增一次）。迁移需在同一事务内按行递增，保持 ETag 语义（乐观并发、status 查询版本化缓存）。
 - **#537 已剥离 `dispatchSnapshot`**：本 issue 的转换与快照外置作用在 State JSON 的不同路径上，正交；管线按序执行（#536 先、#537 后），#537 在 canonical State 上操作。
 
@@ -89,7 +89,9 @@ schema 与能由 SQLite JSON 操作无歧义表达的转换走 EF migration；�
 
 ### H. 读路径直接反序列化；转换器只留冷启动边界
 
-从 `WorkflowRunStore.Deserialize`（及 `WorkflowRunQuerier`、`WorkflowQuerier`、`IssueMetricsQuerier`、`IssueReadModelLoader`、`ActiveSessionReconciler`）移除 `MigrateLegacyWorkflowRunJson` 调用，直接 `JSON.Deserialize<WorkflowRun>`。转换器降级为 `WorkflowRunStateDataUpgrader` 上的成员，仅由 `DatabaseInitializer` 调用。
+从 `WorkflowRunStore.Deserialize`（及 `WorkflowRunQuerier`、`WorkflowQuerier`、`IssueMetricsQuerier`、`IssueReadModelLoader`、`ActiveSessionReconciler`）移除 `MigrateLegacyWorkflowRunJson` 调用，直接 `JSON.Deserialize<WorkflowRun>`（部分入口在 #538 后经共享 `IWorkflowRunDeserializer`，仍属同一 canonical 反序列化，无兼容调用）。转换器降级为 `WorkflowRunStateDataUpgrader` 上的成员，仅由 `DatabaseInitializer` 调用。
+
+**读路径不对遗留行做检测**：`JSON.Options`（`Infrastructure/JSON.cs`）基于 `JsonSerializerDefaults.Web`、未设 `UnmappedMemberHandling.Disallow`，因此 STJ 对遗留字段（`claim`、task 级 `runnerId`、`dispatchActivated` 等）是静默忽略而非抛错。所以读路径对遗留行的义务只是「不转换、不改写」（可测、可保证），「识别并报错」不是读路径职责——未迁移的遗留行根本到不了服务阶段（Decision C 失败即阻止启动）。
 
 **选型理由**：迁移已完成是进入服务阶段的前置（Decision C 失败即阻止启动），读路径无需也无法再承担兼容；保留转换器于冷启动边界是为了支持从更旧数据库升级。
 
@@ -107,7 +109,7 @@ schema 与能由 SQLite JSON 操作无歧义表达的转换走 EF migration；�
 
 1. **挂载 upgrader**：`DatabaseInitializer.InitializeAsync` 在 `db.Database.MigrateAsync` 之后调用 `WorkflowRunStateDataUpgrader.UpgradeAsync`（位于其它 upgrader / Profile 迁移之前）。失败抛出 → 阻止进入服务阶段。
 2. **搬迁转换器**：`MigrateLegacyWorkflowRunJson` 及辅助逻辑迁至 `WorkflowRunStateDataUpgrader`（Decision A）。
-3. **移除读路径兼容**：`WorkflowRunStore.Deserialize` 及其余 5 个读入口改为直接反序列化（Decision H）。
+3. **移除读路径兼容**：`WorkflowRunStore.Deserialize` 及其余 5 个读入口（共 6 文件、7 处调用点，`WorkflowRunQuerier` 占两处）改为直接反序列化（Decision H）。
 4. **首次部署**：新二进制启动 → EF `MigrateAsync` → State upgrader preflight（候选 254、失败 0）→ 一致备份 + 完整性校验 → 单事务提交（254 行 State 改写、ETag 各 +1，canonical 110 行逐字节不变）→ 快照外置 → Profile 迁移 → 进入服务。
 
 **Rollback**：用 upgrader 生成的 SQLite 备份恢复 `mohist.db`（WAL，须含已提交 WAL；用 online backup，非复制主 `.db`）。恢复后部署旧二进制——旧读路径的 `MigrateLegacyWorkflowRunJson` 对 canonical 行是 no-op、对遗留行仍兼容，因此旧二进制可读新旧两种 State，回滚安全。不为迁移编造逆向转换。
