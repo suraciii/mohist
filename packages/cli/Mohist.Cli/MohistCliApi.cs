@@ -920,6 +920,81 @@ internal sealed class MohistCliApi
         return response is null ? 1 : await PrintEnvelopeAsync(response, mode, tableShape);
     }
 
+    public Task<int> CreateWebhookSubscriptionAsync(
+        string projectId,
+        string name,
+        string match,
+        string targetUrl,
+        string? secret,
+        string mode) =>
+        PrintPostWithOutputAsync(
+            WebhookSubscriptionsPath(projectId),
+            new { name, match, targetUrl, secret },
+            mode,
+            nameof(TableShape.WebhookSubscription));
+
+    public Task<int> ListWebhookSubscriptionsAsync(string projectId, string mode, bool includeArchived = false) =>
+        PrintWithOutputAsync(
+            WebhookSubscriptionsPath(projectId, includeArchived),
+            mode,
+            nameof(TableShape.WebhookSubscriptionList));
+
+    public Task<int> ViewWebhookSubscriptionAsync(string projectId, string subscriptionId, string mode) =>
+        PrintWithOutputAsync(
+            WebhookSubscriptionPath(projectId, subscriptionId),
+            mode,
+            nameof(TableShape.WebhookSubscription));
+
+    public Task<int> UpdateWebhookSubscriptionAsync(
+        string projectId,
+        string subscriptionId,
+        JsonObject updates,
+        string mode) =>
+        PrintPatchWithOutputAsync(
+            WebhookSubscriptionPath(projectId, subscriptionId),
+            updates,
+            mode,
+            nameof(TableShape.WebhookSubscription));
+
+    public Task<int> ChangeWebhookSubscriptionStatusAsync(
+        string projectId,
+        string subscriptionId,
+        string action,
+        string mode) =>
+        PrintPostWithOutputAsync(
+            $"{WebhookSubscriptionPath(projectId, subscriptionId)}/{Uri.EscapeDataString(action)}",
+            new { },
+            mode,
+            nameof(TableShape.WebhookSubscription));
+
+    public Task<int> RotateWebhookSubscriptionSecretAsync(
+        string projectId,
+        string subscriptionId,
+        string secret,
+        string mode) =>
+        PrintPostWithOutputAsync(
+            $"{WebhookSubscriptionPath(projectId, subscriptionId)}/rotate-secret",
+            new { secret },
+            mode,
+            nameof(TableShape.WebhookSubscription));
+
+    public Task<int> ListWebhookDeliveryFailuresAsync(
+        string projectId,
+        string mode,
+        string? subscriptionId = null) =>
+        PrintWithOutputAsync(
+            subscriptionId is null
+                ? $"{WebhookSubscriptionsPath(projectId)}/failures"
+                : $"{WebhookSubscriptionPath(projectId, subscriptionId)}/failures",
+            mode,
+            nameof(TableShape.WebhookDeliveryFailureList));
+
+    private static string WebhookSubscriptionsPath(string projectId, bool includeArchived = false) =>
+        $"/api/projects/{Uri.EscapeDataString(projectId)}/webhook/subscriptions{(includeArchived ? "?all=true" : string.Empty)}";
+
+    private static string WebhookSubscriptionPath(string projectId, string subscriptionId) =>
+        $"{WebhookSubscriptionsPath(projectId)}/{Uri.EscapeDataString(subscriptionId)}";
+
     public async Task<int> PrintDeleteWithOutputAsync(string path, string mode, string? tableShape = null, JsonNode? successDataFallback = null)
     {
         var localExit = HandleLocalJsonSelection(mode, tableShape);
@@ -1079,6 +1154,9 @@ internal sealed class MohistCliApi
         SessionFollowup,
         SessionCancel,
         OtelTracesList,
+        WebhookSubscriptionList,
+        WebhookSubscription,
+        WebhookDeliveryFailureList,
     }
 
     internal static TableShape ParseTableShape(string? shape)

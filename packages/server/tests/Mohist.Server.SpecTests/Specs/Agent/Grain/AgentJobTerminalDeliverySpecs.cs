@@ -325,6 +325,11 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
     [Fact]
     public async Task ForcedFailAsync_PersistsCloseWithForcedReason()
     {
+        // This test exercises the explicit FailAsync path. Clear shared
+        // runner state so SubmitAsync cannot race into the separate
+        // runner-unavailable terminal path before FailAsync is invoked.
+        await ClearGlobalRunnerRegistryAsync();
+
         var projectId = $"agent-job-forced-{Guid.NewGuid():N}";
         var sessionId = $"session-forced-{Guid.NewGuid():N}";
         await OpenSessionAsync(sessionId, projectId);

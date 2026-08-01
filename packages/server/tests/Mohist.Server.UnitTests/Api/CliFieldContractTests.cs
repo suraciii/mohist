@@ -20,6 +20,8 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Prompts;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Webhooks.Domain;
+using Mohist.Server.Webhooks.Services;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Api;
@@ -73,6 +75,9 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.AgentSessionTranscript] = D<AgentSessionTranscriptResponse>(),
             [MohistCliApi.TableShape.RoutingRuleList] = D<RoutingRuleDto>(),
             [MohistCliApi.TableShape.RoutingRule] = D<RoutingRuleDto>(),
+            [MohistCliApi.TableShape.WebhookSubscriptionList] = D<WebhookSubscriptionDto>(),
+            [MohistCliApi.TableShape.WebhookSubscription] = D<WebhookSubscriptionDto>(),
+            [MohistCliApi.TableShape.WebhookDeliveryFailureList] = D<WebhookDeliveryFailureDto>(),
             [MohistCliApi.TableShape.ProjectTemplateList] = D<ProjectTemplateInfo>(),
             [MohistCliApi.TableShape.ProjectTemplateShow] = D<WorkflowProfileCollectionEntry>(),
             [MohistCliApi.TableShape.ProjectWorkflowProfile] = D<ProjectWorkflowProfileResponse>(),
