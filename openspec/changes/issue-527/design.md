@@ -46,7 +46,7 @@ Each of the four Slack dispatch sites mirrors the Web launch / Web follow-up pat
 1. Premint identities deterministically from the Slack message identity (the same key the launch coordinator already uses, `slack:{teamId}:{conversationId}:{messageTs}`):
    - Launch: `preMintedSessionId`/`preMintedInputId`/`preMintedTurnId` from `{projectId}\n{messageKey}` (same formula as `AgentSessionLaunchRoutes.cs:182`–`185`).
    - Follow-up: `preMintedInputId` from `{sessionId}\n{messageKey}\nfollowup-input` (same as `AgentSessionFollowupRoutes.cs:146`).
-2. For each Slack file: pre-verdict size/type from envelope metadata (D3), fetch bytes Server-side (D2), ingest into a pending `AttachmentRow` (D3).
+2. For each Slack file: compute the message-scoped deterministic attachment id (D5); pre-verdict size/type from envelope metadata; then fetch-if-absent (check the deterministic-id row; fetch bytes Server-side (D2) and ingest (D3) only when absent) — so redelivery neither re-fetches nor duplicates.
 3. `ValidateAndBindAgentInputAsync(projectId, premintedSessionId-or-sessionId, premintedInputId, ingestedIds)` → per-file verdicts.
 4. Pass accepted descriptors + preminted ids into `LaunchConnectionAsync` (launch) or `AcceptFollowupAsync` (follow-up) — the existing envelope/command fields.
 5. Rollback newly-bound ids via `UnbindAgentInputAsync` on any downstream failure (same `rollbackAcceptedAttachments` closure Web follow-up uses).
@@ -59,21 +59,26 @@ Each of the four Slack dispatch sites mirrors the Web launch / Web follow-up pat
 
 Add `ISlackApiClient.OpenFileContentAsync(fileId, botToken, ct)` → `SlackFileContent { Stream, FileName, ContentType, Size }`. It performs `files.info` (authoritative metadata + Bot-access check + download URL) then downloads via the bearer-token-authenticated `url_private`. `SlackApiClient.PostAsync`/`HttpClient` already handle bearer auth (`ISlackApiClient.cs:66`–`77`); the download is a GET variant.
 
-The `mohist-slack` adapter parses `files[]` from the inbound Slack event and adds a `files` array to `SlackEnvelope` (`types.ts`) carrying `{ id, name, mimetype, size }` only — **never `url_private`, never the bot token, never raw event JSON beyond these fields**. The server `SlackIngressBody` gains the matching field. The adapter makes no new Slack API call; it stays stateless and capped at `postMessage`.
+The `mohist-slack` adapter parses `files[]` from the inbound Slack event and adds a `files` array to `SlackEnvelope` (`types.ts`) carrying `{ id, name, mimetype, size }` only — **never `url_private`, never the bot token, never raw event JSON beyond these fields**. The server `SlackIngressBody` gains the matching field. The adapter makes no new Slack API call; it stays stateless and capped at `postMessage`. The Slack file id carried here is **transient**: it is consumed by the route to compute the opaque deterministic attachment id (D5) and is then discarded — it is never persisted on `AttachmentRow` or exposed in the observation.
 
 **Rationale:** issue-516 precedent — Server owns all Slack reads via decrypted bot token; adapter stays a stateless translator. Centralizing the read Server-side means the token never crosses to the adapter and `url_private` is consumed and discarded inside the fetch.
 
 **Alternative considered:** Adapter downloads content and uploads bytes to the Server (multipart, like Web). Rejected: violates the stateless-adapter boundary, forces the adapter to hold the bot token for downloads, and duplicates the fetch authority. The metadata-only envelope is the minimal cross-process contract.
 
-### D3. New `AttachmentService.IngestProviderFileAsync`; pre-verdict from envelope metadata before the API call
+### D3. New `AttachmentService.IngestProviderFileAsync` with deterministic id and fetch-if-absent; pre-verdict from envelope metadata before the API call
 
-Add `AttachmentService.IngestProviderFileAsync(projectId, source, fileName, contentType, size, Stream content, ct)` → `AttachmentUploadResult`. It is the Server-side analog of `UploadAsync`: writes bytes to `IAttachmentStorage`, creates a pending `AttachmentRow` (`OwnerKind = null`, `ExpiresAt = now + PendingTtl`), stamps `Source`. Reuses `SanitizeFileName`/`NormalizeContentType`/`MaxFileBytes`.
+Add `AttachmentService.IngestProviderFileAsync(projectId, deterministicId, source, fileName, contentType, size, Stream content, ct)` → `AttachmentUploadResult`. It is the Server-side analog of `UploadAsync` with two additions:
 
-The route pre-verdicts **before** calling the Slack API: a file whose envelope `size > MaxFileBytes` is rejected `ExceedsSizeLimit`, and whose `mimetype` fails `IsAcceptableAgentInputContentType` is rejected `UnsupportedType`, **without** spending a fetch. Only files passing pre-verdict are fetched via D2; a fetch failure (403/404/network) becomes `NotReadable`. This keeps oversized/unsupported files off the network and matches the verdict reasons one-to-one.
+1. **Caller-supplied deterministic id** — instead of minting `att_{Guid}`, it writes the row under the supplied `deterministicId` and is **insert-if-absent**: if a row with that id already exists, it returns the existing descriptor and writes nothing. This makes redelivery a storage-level no-op (no second byte copy, no second row).
+2. **Fetch-if-absent ordering** — the route checks for an existing deterministic-id row *before* calling the Slack API (D2), and only fetches+writes when the row is absent. A redelivery therefore neither re-fetches nor re-binds (honors the spec's "SHALL NOT fetch the file content again or create additional attachment bindings").
 
-**Rationale:** the envelope already carries Slack's authoritative `size`/`mimetype`; using them to short-circuit is efficient and keeps the verdict honest (we never claim we tried to read a 2GB file).
+The created row is pending (`OwnerKind = null`, `ExpiresAt = now + PendingTtl`) and stamps `Source`. The method reuses `SanitizeFileName`/`NormalizeContentType`/`MaxFileBytes`.
 
-**Alternative considered:** A single combined fetch-then-verdict that downloads first. Rejected: downloads bytes we will reject anyway; slower and costlier.
+The route pre-verdicts **before** any Slack API call: a file whose envelope `size > MaxFileBytes` is rejected `ExceedsSizeLimit`, and whose `mimetype` fails `IsAcceptableAgentInputContentType` is rejected `UnsupportedType`, **without** spending a fetch. Only files passing pre-verdict reach the fetch-if-absent path; a fetch failure (403/404/network) becomes `NotReadable`. This keeps oversized/unsupported files off the network and matches the verdict reasons one-to-one.
+
+**Rationale:** the envelope already carries Slack's authoritative `size`/`mimetype`; using them to short-circuit is efficient and keeps the verdict honest (we never claim we tried to read a 2GB file). The deterministic id + fetch-if-absent is required for correct redelivery idempotency (D5) — it cannot be achieved with fresh per-delivery ids.
+
+**Alternative considered:** A single combined fetch-then-verdict that downloads first. Rejected: downloads bytes we will reject anyway; slower and costlier, and re-downloads on every redelivery.
 
 ### D4. Persist `Source` on `AttachmentRow`; `ToAgentInputDescriptor` reads it
 
@@ -83,13 +88,24 @@ Add a nullable `Source` column to `AttachmentRow` (default `"upload"` for existi
 
 **Alternative considered:** Keep `Source` descriptor-only, stamped by the route post-bind. Rejected: the descriptor is built inside `ValidateAndBindAgentInputAsync` from the row; a second mutation site diverges from the persisted truth and breaks the "accepted set is authoritative across restart" invariant.
 
-### D5. Idempotency reuses the provider-inbox dedup + deterministic preminted owner; no new dedup
+### D5. Idempotency: message-scoped deterministic attachment ids + provider-inbox dedup + deterministic preminted owner
 
-Slack delivers at-least-once. The existing `SlackProviderInboxStore.AcceptAsync(draft)` returns `AlreadyExisted` for a repeated message identity and is the first durable write on the inbound path. The four dispatch sites run file fetch + bind **only after** the inbox accepts a new identity; a redelivery short-circuits before any fetch. The preminted `{sessionId}/{inputId}` owner is deterministic from the message identity (D1), so even if a bind is reached twice, the second pass re-validates rows already owned by that owner (the `OwnerKind == agent-input && OwnerId == ownerId` branch in `ValidateAndBindAgentInputAsync`) rather than colliding. Orphan pending rows from a crash mid-ingest expire via the 24h pending TTL (`CleanupExpiredPendingAsync`); Slack redelivers the unacked message and re-runs the route against the same preminted owner.
+Slack delivers at-least-once, and the Slack launch/follow-up block re-runs whenever a route has no recorded session id — i.e. across any crash between inbox-accept and `SetRouteSessionIdAsync` (`SlackConnectionRoutes.cs:1133`–`1142`), **regardless of `AlreadyExisted`**. Redelivery idempotency for attachments therefore cannot rely on the inbox alone; the per-file work must itself be idempotent. Three layers compose:
 
-**Rationale:** the text-only Slack path already relies on exactly this two-layer dedup (inbox + coordinator-key idempotency). Attachments ride the same guarantee; adding a per-file dedup mechanism would duplicate it.
+1. **Message-scoped deterministic attachment id.** For each Slack file the route computes a deterministic, **opaque** Mohist attachment id: `att_{StableToken($"{teamId}/{conversationId}/{messageTs}/{slackFileId}")}` (reusing `AgentLaunchCoordinatorCodec.StableToken`, the same primitive that mints preminted session/input ids). The id is:
+   - **Stable across redelivery** of the same message → the same file maps to the same id → D3's insert-if-absent + fetch-if-absent make re-ingest a no-op (no re-fetch, no duplicate row/bytes).
+   - **Scoped to the message** → the same physical Slack file sent in a *different* message maps to a *different* id → a fresh attachment, no spurious `AlreadyBound`. This is the property that makes deterministic ids safe where a bare `att_slack_{fileId}` (global per-file) would not be.
+   - **Opaque** — produced by `StableToken`, it does not embed the raw Slack file id, so no Slack file identifier lands in the stored record or observation (the F4 invariant).
 
-**Alternative considered:** Deterministic attachment ids keyed by Slack file id (`att_slack_{fileId}`, insert-if-absent). Rejected: it makes one physical Slack file a single globally-owned attachment, so the same screenshot sent to a second session would be rejected `AlreadyBound` — surprising for users, and inconsistent with Web/CLI where each submission is a fresh attachment. Per-message ingest (fresh `att_{guid}`) matches Web/CLI semantics; the inbox dedup is the correct single guard.
+2. **Deterministic preminted owner.** The preminted `{sessionId}/{inputId}` is deterministic from the message identity (D1). On redelivery, `ValidateAndBindAgentInputAsync` is called with the same deterministic id and the same owner; for a row already owned by that owner it takes the `OwnerKind == agent-input && OwnerId == ownerId` branch (`AttachmentService.cs:418`–`423`), reports the descriptor as accepted, and adds nothing to `newlyBoundIds` — no duplicate binding.
+
+3. **Provider-inbox dedup + coordinator idempotency** remain the outer guards (the text-only path's existing two-layer dedup); they collapse repeated messages to one SessionInput.
+
+**Ack-timing assumption (load-bearing):** the Server's HTTP response to the adapter is returned *after* the launch completes (`SlackConnectionRoutes.cs:1135`–`1174`, the `return ApiResults.Ok` follows `LaunchConnectionAsync`), and the adapter does not ack Slack until the Server responds. Therefore a Server crash before the response → the adapter sees no success → Slack redelivers → the route re-runs against the same deterministic owner and the same deterministic attachment ids → D3 + layer 2 make completion idempotent. This is what satisfies the spec scenario "A restart does not lose pending file binding." Orphan pending rows from a crash mid-ingest expire via the 24h pending TTL (`CleanupExpiredPendingAsync`); a redelivery re-runs the fetch-if-absent path, which either reuses the partially-created row or creates it.
+
+**Rationale:** the inbox dedup is necessary but not sufficient, because the launch block re-runs across the inbox-accepted / session-recorded window. Message-scoped deterministic ids make the per-file work idempotent without introducing cross-message coupling, and the preminted-owner re-validation is already supported by `ValidateAndBindAgentInputAsync` unchanged.
+
+**Alternative considered:** (a) Gate fetch+bind on `!accepted.AlreadyExisted`. Rejected: `AlreadyExisted` does not distinguish "launch completed" from "inbox persisted but launch not yet done," so a crash in that window would silently drop the files. (b) Bind inside the launch coordinator grain. Rejected as in D1 — grains must stay fast; Slack I/O belongs in the route/service layer. (c) Bare per-file deterministic id (`att_slack_{fileId}`). Rejected: global single-owner per physical file → the same screenshot sent to a second session is rejected `AlreadyBound`, surprising and inconsistent with Web/CLI. The message-scoped variant adopted here keeps per-message freshness while gaining redelivery idempotency.
 
 ### D6. Per-file result surfaced to the Slack conversation via the existing outbox
 
@@ -101,10 +117,10 @@ The Bot's acceptance reply already flows through `SlackOutboxStore`/`SlackTermin
 
 ## Risks / Trade-offs
 
-- **[Inline fetch adds latency to the dispatch path]** -> Only files passing the D3 pre-verdict are fetched; oversized/unsupported cost nothing. Ack semantics are unchanged (custody = inbox persist, which precedes fetch). If profiling shows pressure, move fetch behind a bounded semaphore per message; the route shape stays the same.
+- **[Inline fetch adds latency to the Slack-ack path]** -> Mohist takes durable custody at inbox persist (fast), but the adapter does not ack Slack until the Server's HTTP response returns, which follows the launch — so fetch is on the Slack-ack critical path. Only files passing the D3 pre-verdict are fetched, and the fetch-if-absent check skips already-stored files on redelivery; oversized/unsupported cost nothing. If profiling shows pressure, move fetch behind a bounded semaphore per message; the route shape stays the same.
 - **[Slack rate limits / many files on one message]** -> Bound concurrent fetches per message (small cap, e.g. 4); each file is an independent verdict, so a limited/failing file becomes `NotReadable` without blocking the others.
 - **[Bot lacks `files:read` scope]** -> `files.info`/download 403s → every file verdicts `NotReadable` and the Bot reply explains it. Open question whether the setup verifier should require/advertise the scope up front (see Open Questions).
-- **[Same Slack file sent in two messages]** -> Two fresh attachments (two byte copies in the store). Acceptable and consistent with Web/CLI one-upload-one-attachment; avoids the surprising `AlreadyBound` from D5's rejected alternative.
+- **[Same Slack file sent in two messages]** -> Two attachments (two byte copies), because the deterministic id is message-scoped. Acceptable and consistent with Web/CLI one-upload-one-attachment; a bare per-file id (rejected in D5) would instead make the second submission spuriously `AlreadyBound`.
 - **[`url_private` / token leakage in logs]** -> The fetch method treats `url_private` as a transient secret: never logged, never stored on the row, scope-limited to the fetch call. Banned from the descriptor/observation by the existing `attachment-input-lifecycle` invariant.
 - **[Migration adds a column]** -> `Source` is nullable with a safe default; backfill is `UPDATE ... SET Source = 'upload' WHERE Source IS NULL`. No downtime; old code paths keep working.
 
@@ -112,7 +128,7 @@ The Bot's acceptance reply already flows through `SlackOutboxStore`/`SlackTermin
 
 1. **Schema** — EF migration adding `Attachments.Source` (nullable string, default `'upload'`); backfill existing rows.
 2. **Adapter** — `SlackEnvelope.files` is an additive optional field; envelopes without it deserialize as before (text-only). No adapter version gate required; deploy adapter and server independently.
-3. **Server** — `ISlackApiClient.OpenFileContentAsync`, `AttachmentService.IngestProviderFileAsync`, `AttachmentRow.Source`, `ToAgentInputDescriptor` source read, `LaunchConnectionAsync` signature, the four `SlackConnectionRoutes` sites. All behind the natural gate: if the envelope carries no `files`, the path is today's text-only path.
+3. **Server** — `ISlackApiClient.OpenFileContentAsync`, `AttachmentService.IngestProviderFileAsync` (deterministic-id, insert-if-absent, fetch-if-absent), `AttachmentRow.Source`, `ToAgentInputDescriptor` source read, `LaunchConnectionAsync` signature, the four `SlackConnectionRoutes` sites (each computing the message-scoped deterministic attachment id). All behind the natural gate: if the envelope carries no `files`, the path is today's text-only path.
 4. **Runner** — no change.
 5. **Rollback** — revert server; the `Source` column is harmless if unused (nullable, defaulted). Revert adapter; envelopes stop carrying `files` and the server falls back to text-only. Already-accepted `slack`-sourced attachments remain readable through the unchanged scoped fetch (they are ordinary rows in the Mohist store).
 

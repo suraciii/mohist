@@ -26,12 +26,13 @@
       "id": "T-002",
       "title": "Provider-file ingest + source provenance in the attachment boundary",
       "spec": "specs/slack-attachment-entry/spec.md#accepted-slack-files-record-a-slack-source-and-bind-exclusively-to-one-input",
-      "description": "Add a nullable `Source` column to `AttachmentRow` (default `\"upload\"`) with an EF Core migration + backfill, add `AttachmentService.IngestProviderFileAsync(projectId, source, fileName, contentType, size, stream, ct)` as the Server-side analog of `UploadAsync` that writes a provider stream into a pending `AttachmentRow` and stamps its `Source`, and have `ToAgentInputDescriptor` read `row.Source` so accepted attachments expose their provenance.",
+      "description": "Add a nullable `Source` column to `AttachmentRow` (default `\"upload\"`) with an EF Core migration + backfill, add `AttachmentService.IngestProviderFileAsync(projectId, deterministicId, source, fileName, contentType, size, stream, ct)` as the Server-side analog of `UploadAsync` that writes a provider stream into a pending `AttachmentRow` under the caller-supplied deterministic id and stamps its `Source`, and have `ToAgentInputDescriptor` read `row.Source` so accepted attachments expose their provenance. The ingest is insert-if-absent: when a row with the given `deterministicId` already exists it returns that descriptor and writes nothing (idempotent across redelivery).",
       "acceptanceCriteria": [
         "EF migration adds `Attachments.Source` (nullable string); existing rows backfill to `\"upload\"`; the existing `UploadAsync` path stamps `\"upload\"`.",
-        "`IngestProviderFileAsync` writes bytes to `IAttachmentStorage`, creates a pending `AttachmentRow` (`OwnerKind=null`, `ExpiresAt=now+PendingTtl`) with the supplied `Source`, and enforces `MaxFileBytes` (rejects oversized before writing).",
+        "`IngestProviderFileAsync` writes bytes to `IAttachmentStorage`, creates a pending `AttachmentRow` (`OwnerKind=null`, `ExpiresAt=now+PendingTtl`) with the supplied `Source` and the caller-supplied `deterministicId`, and enforces `MaxFileBytes` (rejects oversized before writing).",
+        "`IngestProviderFileAsync` is idempotent on id: a second call with the same `deterministicId` returns the existing descriptor and performs no write.",
         "`ToAgentInputDescriptor` reads `row.Source`; an accepted attachment descriptor exposes the persisted source.",
-        "Unit tests verify ingest (pending row created with correct source + stored bytes), `MaxFileBytes` enforcement, and that the existing Web/CLI upload path still yields `Source = \"upload\"` with no regression.",
+        "Unit tests verify ingest (pending row created with correct source + stored bytes), `MaxFileBytes` enforcement, idempotent re-ingest (same id → no duplicate row/bytes), and that the existing Web/CLI upload path still yields `Source = \"upload\"` with no regression.",
         "Server build is warning-clean (`TreatWarningsAsErrors`)."
       ],
       "priority": 2,
@@ -46,14 +47,14 @@
       "id": "T-003",
       "title": "Wire Slack files into connection launch + shared ingest-for-input helper + honest reply",
       "spec": "specs/slack-attachment-entry/spec.md#files-are-accepted-on-every-inbound-slack-dispatch-path",
-      "description": "Build the shared \"Slack message -> accepted attachment descriptors\" pipeline (premint deterministic owner ids from the message identity, pre-verdict size/type from the envelope, fetch via `OpenFileContentAsync`, ingest via `IngestProviderFileAsync`, `ValidateAndBindAgentInputAsync`, rollback newly-bound ids on downstream failure) and wire it into the DM-launch and channel-root-launch sites. Extend `AgentLauncher.LaunchConnectionAsync` to accept attachment descriptors + preminted ids and remove the empty-prompt guard (delegate to `EnsureInitialLaunch`'s text-or-attachment rule). Add `files` to `SlackIngressBody` and render the per-file verdict into the Bot acceptance reply via the existing outbox.",
+      "description": "Build the shared \"Slack message -> accepted attachment descriptors\" pipeline and wire it into the DM-launch and channel-root-launch sites. Per file the helper: computes a message-scoped deterministic attachment id (`att_{StableToken(teamId/conversationId/messageTs/slackFileId)}`, opaque — no raw Slack id embedded), pre-verdicts size/type from the envelope, then fetch-if-absent (reuse the existing deterministic-id row without a Slack API call; otherwise fetch via `OpenFileContentAsync` and ingest via `IngestProviderFileAsync`), and finally `ValidateAndBindAgentInputAsync` against the preminted owner. Extend `AgentLauncher.LaunchConnectionAsync` to accept attachment descriptors + preminted ids and remove the empty-prompt guard (delegate to `EnsureInitialLaunch`'s text-or-attachment rule). Add `files` to `SlackIngressBody` and render the per-file verdict into the Bot acceptance reply via the existing outbox. Include the deterministic attachment ids in the launch idempotency fingerprint (mirroring Web launch `AgentSessionLaunchRoutes.cs:102-137`) — they are stable across redelivery, so a replay does not falsely conflict.",
       "acceptanceCriteria": [
         "`LaunchConnectionAsync` accepts optional attachment descriptors + preminted session/input/turn ids and no longer rejects empty-prompt inputs; an input with neither text nor an accepted attachment is rejected by `EnsureInitialLaunch`.",
         "A DM or channel-root message carrying a usable file and no text launches a new AgentSession with the file bound to the first SessionInput and `Source = \"slack\"`; no prompt is fabricated.",
         "An oversized or unsupported file is rejected with its reason without any Slack content fetch; a file the Bot cannot read (403/download failure) is rejected `NotReadable`; each rejected file is reported, not silently dropped.",
-        "Redelivery of the same Slack launch message resolves to the same SessionInput and the same bound attachments with no duplicate fetch or bind (provider-inbox dedup + deterministic preminted owner).",
+        "Redelivery of the same Slack launch message resolves to the same SessionInput and the same bound attachments with no duplicate fetch, no duplicate row/bytes, and no duplicate binding (deterministic id + fetch-if-absent + same-owner re-validation); a crash between inbox-accept and session-recorded re-runs idempotently on redelivery.",
         "The Bot acceptance reply names the accepted files and each rejected file with its concrete reason.",
-        "Spec tests cover DM-launch-files, channel-launch-files, attachment-only launch, per-file rejection (oversized/unsupported/Bot-unauthorized), launch redelivery idempotency, and Instructions/reply/transcript free of bot token, `url_private`, and raw event payload.",
+        "Spec tests cover DM-launch-files, channel-launch-files, attachment-only launch, per-file rejection (oversized/unsupported/Bot-unauthorized), launch redelivery idempotency (incl. the inbox-accepted/session-not-yet-recorded window), and Instructions/reply/transcript free of bot token, `url_private`, raw event payload, and raw Slack file identifier.",
         "Server + runner build and the existing Web/CLI attachment spec tests remain green."
       ],
       "priority": 3,
@@ -75,7 +76,7 @@
       "acceptanceCriteria": [
         "A DM follow-up or thread reply carrying a usable file and no text is accepted as a SessionInput with the file bound (`Source = \"slack\"`) and assigned to a Turn, with no fabricated prompt.",
         "Per-file rejection (oversized/unsupported/Bot-unauthorized) is reported individually on the follow-up path; rejected files are not given to the Agent.",
-        "Redelivery of the same follow-up message resolves to the same SessionInput and bound attachments; after a restart that follows a durable accept, the message re-binds to the same preminted owner (no duplicate, no loss).",
+        "Redelivery of the same follow-up message resolves to the same SessionInput and bound attachments with no duplicate fetch/row/binding; after a restart that follows a durable accept, the message re-binds to the same preminted owner via the deterministic id (no duplicate, no loss).",
         "The Bot follow-up reply names accepted files and each rejected file with its reason.",
         "Spec tests cover DM-followup-files, thread-reply-files, attachment-only follow-up, follow-up redelivery/restart idempotency, and honest per-file reply.",
         "Server + runner build and all prior attachment spec tests remain green."
