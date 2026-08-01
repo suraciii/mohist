@@ -235,27 +235,7 @@ public class WorkflowDefinitionResolver : IScopedService
             .Where(x => x.WorkflowRunId == runId)
             .Select(x => x.State)
             .FirstOrDefaultAsync();
-        if (string.IsNullOrWhiteSpace(state)) return null;
-        try
-        {
-            using var doc = JsonDocument.Parse(state);
-            var root = doc.RootElement;
-            if (root.TryGetProperty("workflowProfileId", out var value)
-                && value.ValueKind == JsonValueKind.String)
-            {
-                return value.GetString();
-            }
-
-            return root.TryGetProperty("metadata", out var metadata)
-                && metadata.ValueKind == JsonValueKind.Object
-                && metadata.TryGetProperty("annotations", out var annotations)
-                && annotations.ValueKind == JsonValueKind.Object
-                && annotations.TryGetProperty("workflowProfileId", out var legacyValue)
-                && legacyValue.ValueKind == JsonValueKind.String
-                    ? legacyValue.GetString()
-                    : null;
-        }
-        catch { return null; }
+        return ReadWorkflowProfileId(state);
     }
 
     private async Task<ResolvedTemplate> LoadBoundTemplateAsync(string runId, string profileId, string? projectId)
