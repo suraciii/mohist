@@ -7,25 +7,34 @@ namespace Mohist.Cli;
 
 /// <summary>
 /// <c>mo otel</c> command group. Provides <c>query</c> (HTTP
-/// submission to <c>POST /otel/api/query</c>) and <c>status</c>
-/// (HTTP probe of <c>GET /otel/api/status</c>). Both subcommands
-/// go through the Server; the CLI never opens the local SQLite
-/// database. See <c>openspec/changes/issue-529/specs/otel-cli-query/spec.md</c>.
+/// submission to <c>POST /otel/api/query</c>), <c>status</c>
+/// (HTTP probe of <c>GET /otel/api/status</c>), and <c>traces</c>
+/// (typed recent-traces list against <c>GET /otel/api/traces</c>).
+/// All subcommands go through the Server; the CLI never opens the
+/// local SQLite database. See
+/// <c>openspec/changes/issue-529/specs/otel-cli-query/spec.md</c>
+/// and <c>openspec/changes/issue-530/specs/otel-cli-traces/spec.md</c>.
 /// </summary>
 internal static class OtelCommands
 {
     private const string StatusPath = "/otel/api/status";
     private const string QueryPath = "/otel/api/query";
+    private const string TracesPath = "/otel/api/traces";
 
     internal static readonly ResourceDescriptor QueryDescriptor = new(
         ResourceCardinality.Single,
         ["columns", "rows", "truncated", "truncate_reason"]);
+
+    internal static readonly ResourceDescriptor TracesDescriptor = new(
+        ResourceCardinality.Collection,
+        ["trace_id", "service_name", "start_time", "end_time", "span_count"]);
 
     public static Command Build(MohistCliApi api)
     {
         var otel = new Command("otel", "OpenTelemetry trace collection and query commands");
         otel.Subcommands.Add(BuildQuery(api));
         otel.Subcommands.Add(BuildStatus(api));
+        otel.Subcommands.Add(BuildTraces(api));
         return otel;
     }
 
@@ -55,6 +64,84 @@ internal static class OtelCommands
         var cmd = new Command("status", "Show OTel collector status and database statistics (requires server)");
         cmd.SetAction(_ => RunStatusAsync(api));
         return cmd;
+    }
+
+    private static Command BuildTraces(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "traces",
+            "List recent traces (most-recent first) through the Server. Use --service to restrict to one service and --limit to request more rows; for arbitrary SQL exploration use 'mo otel query'.");
+        var serviceOpt = new Option<string?>("--service")
+        {
+            Description = "Restrict results to a single service_name (exact match)",
+        };
+        var limitOpt = new Option<int?>("--limit")
+        {
+            Description = "Maximum number of traces to request (Server applies its own default and cap)",
+        };
+        var jsonOpt = MohistCliCommands.JsonSelectionOption(TracesDescriptor);
+        cmd.Options.Add(serviceOpt);
+        cmd.Options.Add(limitOpt);
+        cmd.Options.Add(jsonOpt);
+        cmd.SetAction(ctx =>
+        {
+            var service = ctx.GetValue(serviceOpt);
+            var limit = ctx.GetValue(limitOpt);
+            var json = ctx.GetValue(jsonOpt);
+            var jsonProvided = ctx.GetResult(jsonOpt) is not null;
+            return RunTracesAsync(api, service, limit, jsonProvided, json);
+        });
+        return cmd;
+    }
+
+    private static async Task<int> RunTracesAsync(
+        MohistCliApi api,
+        string? service,
+        int? limit,
+        bool jsonProvided,
+        string? json)
+    {
+        var selection = JsonSelection.Parse(TracesDescriptor, jsonProvided, json);
+        if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+            return api.WriteJsonSelectionResult(TracesDescriptor, selection);
+
+        var path = BuildTracesPath(service, limit);
+        var (exitCode, data) = await api.GetDataOrPrintErrorAsync(path).ConfigureAwait(false);
+        if (exitCode != 0)
+            return exitCode;
+
+        if (selection.Kind == JsonSelectionKind.Selected)
+        {
+            var projected = selection.Project(data, TracesDescriptor.Cardinality);
+            return await new CliResultWriter(api.Invocation)
+                .WriteSuccessAsync(projected)
+                .ConfigureAwait(false);
+        }
+
+        return await api.RenderTableAsync(data, MohistCliApi.TableShape.OtelTracesList).ConfigureAwait(false);
+    }
+
+    private static string BuildTracesPath(string? service, int? limit)
+    {
+        var hasLimit = limit.HasValue;
+        var hasService = !string.IsNullOrWhiteSpace(service);
+        if (!hasLimit && !hasService)
+            return TracesPath;
+
+        var separator = '?';
+        var query = new StringBuilder();
+        if (hasLimit)
+        {
+            query.Append(separator).Append("limit=").Append(limit!.Value.ToString(CultureInfo.InvariantCulture));
+            separator = '&';
+        }
+        if (hasService)
+        {
+            query.Append(separator)
+                .Append("service=")
+                .Append(Uri.EscapeDataString(service!.Trim()));
+        }
+        return TracesPath + query.ToString();
     }
 
     private static async Task<int> RunQueryAsync(MohistCliApi api, string? sql, bool jsonProvided, string? json)

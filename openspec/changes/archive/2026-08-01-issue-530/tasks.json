@@ -1,0 +1,47 @@
+{
+  "project": "mohist-local",
+  "description": "Add a typed `mo otel traces` recent-traces browser to the CLI, reusing the Server's existing GET /otel/api/traces capability.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Implement mo otel traces command",
+      "spec": "specs/otel-cli-traces/spec.md",
+      "description": "Add the read-only `traces` subcommand to the `otel` group on the GetDataOrPrintErrorAsync path (the Run list pattern, per design D1): a nullable `--service`/`--limit`, a Collection ResourceDescriptor over the five TraceSummary keys (trace_id, service_name, start_time, end_time, span_count), query-string assembly against GET /otel/api/traces, selection.Project + RenderTableAsync(TableShape.OtelTracesList), and leaf help contrasting typed browsing with `otel query`. Include the CLI spec coverage and canonical command-surface updates in the same task.",
+      "acceptanceCriteria": [
+        "`mo otel traces` issues GET /otel/api/traces and renders the returned summaries as a compact table; an empty result prints a clear 'no traces' line and exits 0",
+        "`--service <name>` and `--limit <n>` are forwarded as query parameters; `--limit` is not locally clamped, and its absence omits the param so the Server default applies",
+        "Bare `--json` lists trace_id,service_name,start_time,end_time,span_count without contacting the Server; `--json <fields>` projects only those fields; an unknown field is a local usage error that issues no request",
+        "Server unavailability yields the standard diagnostic on stderr and a non-zero exit, with no local-database access",
+        "`mo otel traces --help` names --service/--limit and references `mo otel query` to distinguish typed browsing from free-SQL exploration",
+        "New CliOtelCommandSpecs cases (success, filters, --json discovery/projection/rejection, empty list, server-unavailable, help) and the canonical command-surface assertion for `traces` pass; the solution builds under warnings-as-errors"
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Working `mo otel traces` command plus green Mohist.Cli.Tests suite",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Use packages/cli/Mohist.Cli/MohistCliCommands.Run.Reads.cs (BuildList) as the template: JsonSelection discovery check first, then api.GetDataOrPrintErrorAsync(path) (emits the standard ServerUnavailableMessage), then selection.Project(data, Cardinality) + WriteSuccessAsync, else api.RenderTableAsync(data, TableShape.OtelTracesList). Model the renderer on RenderActivityList (AsArray/StringOf/WriteTable/Truncate). Do NOT use PrintResourceAsync — its failure path emits `code=server-unavailable`, not the standard message the spec and the otel group require. Bounding policy lives only on the Server (TraceQuerier.ClampLimit) per D2; the OTel store is global so there is no --project."
+    },
+    {
+      "id": "T-002",
+      "title": "Close the otel traces docs gap",
+      "spec": "",
+      "description": "Once the command ships, remove the `otel traces` implementation-gap entry in docs/cli-reference.md (实装差距 section) and confirm `traces` remains listed in the `otel` command-map row alongside status/query, per the design Migration Plan.",
+      "acceptanceCriteria": [
+        "docs/cli-reference.md no longer lists `otel traces` as an open implementation gap",
+        "The `otel` command-map row still enumerates `traces` next to `status` and `query <sql>`",
+        "No unrelated doc content changes; the markdown renders cleanly"
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated docs/cli-reference.md",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Pure documentation change; depends on T-001 being verified so the gap closure is truthful."
+    }
+  ]
+}

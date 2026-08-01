@@ -85,6 +85,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.DeadLetterList] = D<DeadLetterListItemResponse>(),
             [MohistCliApi.TableShape.DeadLetterRedelivery] = D<DeadLetterRedeliveryResponse>(),
             [MohistCliApi.TableShape.ActivityList] = D<ActivityEntryDto>(),
+            [MohistCliApi.TableShape.OtelTracesList] = S("trace summaries are a CLI projection over the OTel traces endpoint"),
             [MohistCliApi.TableShape.IssueWatchList] = S("watch list is a CLI projection over issue watch state"),
             [MohistCliApi.TableShape.AgentJobList] = D<AgentJobListItemDto>(),
             [MohistCliApi.TableShape.AgentJobView] = D<AgentJobViewDto>(),

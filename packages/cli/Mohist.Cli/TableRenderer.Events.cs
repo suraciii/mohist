@@ -146,4 +146,31 @@ internal sealed partial class TableRenderer
                 return StringOf(row, "id");
         }
     }
+
+    internal void RenderOtelTracesList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No traces found");
+            return;
+        }
+
+        var headers = new[] { "trace_id", "service", "start", "end", "spans" };
+        var widths = new[] { 18, 24, 22, 22, 8 };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows.OfType<JsonObject>())
+        {
+            cells.Add([
+                Truncate(StringOf(row, "trace_id"), 18),
+                Truncate(StringOf(row, "service_name"), 24),
+                Truncate(FormatTime(StringOf(row, "start_time")), 22),
+                Truncate(FormatTime(StringOf(row, "end_time")), 22),
+                NumberOf(row, "span_count"),
+            ]);
+        }
+
+        WriteTable(headers, widths, cells);
+    }
 }
