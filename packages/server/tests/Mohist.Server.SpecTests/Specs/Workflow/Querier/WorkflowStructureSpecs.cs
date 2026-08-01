@@ -170,7 +170,9 @@ public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
             new TestDbContextFactory(Database.Options),
             DefinitionResolver,
             Resolver,
-            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)),
+            new WorkflowRunStatusCache(),
+            new WorkflowRunDeserializer());
 
         var yaml = await querier.GetDefinitionYamlAsync(runId);
         var status = await querier.GetStatusAsync(runId);
@@ -221,7 +223,9 @@ public class WorkflowStructureSpecs : WorkflowDefinitionResolverTestFactory
             new TestDbContextFactory(Database.Options),
             DefinitionResolver,
             Resolver,
-            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)));
+            new Mohist.Server.Workflow.Services.Artifacts.WorkflowArtifactQuerier(new TestDbContextFactory(Database.Options)),
+            new WorkflowRunStatusCache(),
+            new WorkflowRunDeserializer());
 
         var status = await querier.GetStatusAsync(runId);
 

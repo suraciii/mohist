@@ -19,26 +19,38 @@ public class WorkflowQuerier : IScopedService
     private readonly WorkflowDefinitionResolver _definitionResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly IWorkflowArtifactQuerier _artifactQuerier;
+    private readonly WorkflowRunStatusCache _statusCache;
+    private readonly IWorkflowRunDeserializer _runDeserializer;
 
     public WorkflowQuerier(
         IDbContextFactory<MohistDbContext> db,
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
-        IWorkflowArtifactQuerier artifactQuerier)
+        IWorkflowArtifactQuerier artifactQuerier,
+        WorkflowRunStatusCache statusCache,
+        IWorkflowRunDeserializer runDeserializer)
     {
         _db = db;
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _artifactQuerier = artifactQuerier;
+        _statusCache = statusCache;
+        _runDeserializer = runDeserializer;
     }
 
     public virtual async Task<WorkflowStatusView?> GetStatusAsync(string workflowRunId)
     {
         await using var db = await _db.CreateDbContextAsync();
 
-        var row = await db.WorkflowRuns.AsNoTracking()
-            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
-        var run = row is null ? null : Hydrate(row);
+        var etag = await db.WorkflowRuns.AsNoTracking()
+            .Where(e => e.WorkflowRunId == workflowRunId)
+            .Select(e => (long?)EF.Property<long>(e, "ETag"))
+            .FirstOrDefaultAsync();
+        if (etag is null) return null;
+
+        var run = _statusCache.TryGet(workflowRunId, etag.Value, out var cachedRun)
+            ? cachedRun
+            : await LoadAndCacheAsync(db, workflowRunId, etag.Value);
         if (run is null) return null;
 
         var definition = (await _definitionResolver.LoadTemplateAsync(workflowRunId)).Structure;
@@ -49,6 +61,21 @@ public class WorkflowQuerier : IScopedService
         await AttachArtifactSummariesAsync(view, workflowRunId);
 
         return view;
+    }
+
+    private async Task<WorkflowRun?> LoadAndCacheAsync(
+        MohistDbContext db,
+        string workflowRunId,
+        long etag)
+    {
+        var row = await db.WorkflowRuns.AsNoTracking()
+            .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
+        if (row is null) return null;
+
+        var run = Hydrate(row, _runDeserializer.Deserialize);
+        if (run is not null)
+            _statusCache.Store(workflowRunId, etag, run);
+        return run;
     }
 
     private async Task AttachArtifactSummariesAsync(WorkflowStatusView view, string workflowRunId)
@@ -101,7 +128,7 @@ public class WorkflowQuerier : IScopedService
 
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
-        var run = row is null ? null : Hydrate(row);
+        var run = row is null ? null : Hydrate(row, DeserializeWorkflowRun);
         return run?.Workspace;
     }
 
@@ -159,7 +186,7 @@ public class WorkflowQuerier : IScopedService
         await using var db = await _db.CreateDbContextAsync();
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
-        var run = row is null ? null : Hydrate(row);
+        var run = row is null ? null : Hydrate(row, DeserializeWorkflowRun);
         return run?.HasIncompleteTaskWithUses(uses) ?? false;
     }
 
@@ -168,16 +195,18 @@ public class WorkflowQuerier : IScopedService
         await using var db = await _db.CreateDbContextAsync();
         var row = await db.WorkflowRuns.AsNoTracking()
             .FirstOrDefaultAsync(e => e.WorkflowRunId == workflowRunId);
-        var run = row is null ? null : Hydrate(row);
+        var run = row is null ? null : Hydrate(row, DeserializeWorkflowRun);
         return run?.HasIncompleteTaskById(id) ?? false;
     }
 
     private static WorkflowRun? DeserializeWorkflowRun(string json) =>
         JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options);
 
-    private static WorkflowRun? Hydrate(WorkflowRunRow row)
+    private static WorkflowRun? Hydrate(
+        WorkflowRunRow row,
+        Func<string, WorkflowRun?> deserialize)
     {
-        var run = DeserializeWorkflowRun(row.State);
+        var run = deserialize(row.State);
         if (run is not null)
             WorkflowRunLineage.RestoreStoredEpicNumber(run, row.EpicNumber);
         return run;
