@@ -43,7 +43,7 @@ public sealed class SlackThreadHistoryReaderTests
     }
 
     [Fact]
-    public async Task ReadAsync_StopsAtMentionMessage()
+    public async Task ReadAsync_KeepsPriorMessages_StopsAtMention()
     {
         var fake = new FakeSlackApiClient();
         fake.ConversationsRepliesResult = new SlackConversationsRepliesPage(
@@ -59,8 +59,32 @@ public sealed class SlackThreadHistoryReaderTests
 
         var result = await reader.ReadAsync("proj", "connection", "C1", "1710.000000", "1710.000100");
 
-        Assert.Equal(SlackThreadHistoryReadOutcome.Empty, result.Outcome);
-        Assert.Empty(result.Messages);
+        Assert.Equal(SlackThreadHistoryReadOutcome.Imported, result.Outcome);
+        Assert.Single(result.Messages);
+        Assert.Equal("1710.000010", result.Messages[0].Ts);
+    }
+
+    [Fact]
+    public async Task ReadAsync_MentionExcluded_PostMentionMessagesDropped()
+    {
+        var fake = new FakeSlackApiClient();
+        fake.ConversationsRepliesResult = new SlackConversationsRepliesPage(
+            true,
+            null,
+            new[]
+            {
+                Message("1710.000010", "U1", "older"),
+                Message("1710.000100", "U_OWNER", "<@U_BOT> task"),
+                Message("1710.000200", "U2", "after the mention"),
+            },
+            null);
+        var reader = NewReader(fake, NewSecretStore());
+
+        var result = await reader.ReadAsync("proj", "connection", "C1", "1710.000000", "1710.000100");
+
+        Assert.Equal(SlackThreadHistoryReadOutcome.Imported, result.Outcome);
+        Assert.Single(result.Messages);
+        Assert.Equal("1710.000010", result.Messages[0].Ts);
     }
 
     [Fact]
@@ -113,7 +137,7 @@ public sealed class SlackThreadHistoryReaderTests
     }
 
     [Fact]
-    public async Task ReadAsync_PaginationDepthCap_StopsAtCap()
+    public async Task ReadAsync_PaginationDepthCap_RefusesWhenMentionBeyondCap()
     {
         var fake = new FakeSlackApiClient();
         for (var i = 0; i < 5; i++)
@@ -126,9 +150,26 @@ public sealed class SlackThreadHistoryReaderTests
 
         var result = await reader.ReadAsync("proj", "connection", "C1", "1710.000000", "1710.000100");
 
-        Assert.Equal(SlackThreadHistoryReadOutcome.Imported, result.Outcome);
-        Assert.Equal(3, result.Messages.Count);
+        Assert.Equal(SlackThreadHistoryReadOutcome.Refused, result.Outcome);
         Assert.Equal(3, fake.RepliesCalls);
+        Assert.Contains("depth cap", result.FailureReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadAsync_PaginationCompletes_ImportsWhenThreadEndsBeforeMention()
+    {
+        var fake = new FakeSlackApiClient();
+        fake.ConversationsRepliesPages.Enqueue(new SlackConversationsRepliesPage(
+            true,
+            null,
+            new[] { Message("1710.000010", "U1", "only message") },
+            null));
+        var reader = NewReader(fake, NewSecretStore(), depthCap: 2);
+
+        var result = await reader.ReadAsync("proj", "connection", "C1", "1710.000000", "1710.000100");
+
+        Assert.Equal(SlackThreadHistoryReadOutcome.Imported, result.Outcome);
+        Assert.Single(result.Messages);
     }
 
     [Fact]

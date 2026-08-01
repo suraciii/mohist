@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Hosting;
@@ -64,7 +65,12 @@ public sealed class SlackThreadHistoryReader : IScopedService
         var botToken = Encoding.UTF8.GetString(token);
 
         var depthCap = Math.Max(1, _options.Value.StartupContextPaginationDepthCap);
+        if (!TryReadMessageTs(mentionTs, out var mentionBoundary))
+            return Refused("mention timestamp is not readable");
+
         var collected = new List<SlackConversationMessage>();
+        var reachedMention = false;
+        var paginationComplete = false;
         string? cursor = null;
         for (var page = 0; page < depthCap; page++)
         {
@@ -87,18 +93,32 @@ public sealed class SlackThreadHistoryReader : IScopedService
                 return Refused($"slack rejected the read: {response.Error ?? "unknown_error"}");
             foreach (var message in response.Messages ?? [])
             {
-                if (message is null || string.IsNullOrWhiteSpace(message.Ts))
+                if (message is null)
                     continue;
-                if (string.Equals(message.Ts, mentionTs, StringComparison.Ordinal))
-                    return Empty(collected.Count);
+                if (!TryReadMessageTs(message.Ts, out var messageTs))
+                    continue;
+                if (messageTs >= mentionBoundary)
+                {
+                    reachedMention = true;
+                    break;
+                }
                 collected.Add(message);
             }
 
+            if (reachedMention)
+                break;
+
             var nextCursor = response.ResponseMetadata?.NextCursor;
             if (string.IsNullOrWhiteSpace(nextCursor))
+            {
+                paginationComplete = true;
                 break;
+            }
             cursor = nextCursor;
         }
+
+        if (!reachedMention && !paginationComplete)
+            return Refused("pagination depth cap reached before the mention");
 
         if (collected.Count == 0)
             return Empty(0);
@@ -118,8 +138,12 @@ public sealed class SlackThreadHistoryReader : IScopedService
             return (string.Empty, null, 0);
 
         var ordered = messages
-            .Where(m => m is not null && !string.IsNullOrWhiteSpace(m.Ts))
-            .OrderBy(m => double.Parse(m.Ts!, System.Globalization.CultureInfo.InvariantCulture))
+            .Where(m => m is not null && TryReadMessageTs(m.Ts, out _))
+            .OrderBy(m =>
+            {
+                TryReadMessageTs(m.Ts, out var ts);
+                return ts;
+            })
             .ToList();
         if (ordered.Count == 0)
             return (string.Empty, null, 0);
@@ -144,7 +168,7 @@ public sealed class SlackThreadHistoryReader : IScopedService
 
         var omitted = ordered.Count - kept.Count;
         var marker = string.Format(
-            System.Globalization.CultureInfo.InvariantCulture,
+            CultureInfo.InvariantCulture,
             TruncationMarkerFormat,
             omitted);
         return (RenderTranscript(kept), marker, omitted);
@@ -172,4 +196,14 @@ public sealed class SlackThreadHistoryReader : IScopedService
 
     private static SlackThreadHistoryReadResult Refused(string reason) =>
         new(SlackThreadHistoryReadOutcome.Refused, Array.Empty<SlackConversationMessage>(), reason, 0);
+
+    private static bool TryReadMessageTs(string? ts, out double value)
+    {
+        if (string.IsNullOrWhiteSpace(ts))
+        {
+            value = 0;
+            return false;
+        }
+        return double.TryParse(ts, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+    }
 }
