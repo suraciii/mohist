@@ -1,0 +1,51 @@
+{
+  "project": "mohist",
+  "description": "Move WorkflowRun legacy-State conversion out of every read entry point into a Server startup data upgrader (no-write preflight, verified backup, single-transaction commit, byte-level idempotency), so the service phase reads only canonical State.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Startup data upgrader: converge legacy WorkflowRun State to canonical at cold start",
+      "spec": "specs/workflow-run-state-startup-migration/spec.md#Legacy State converges to canonical at Server startup",
+      "description": "Relocate MigrateLegacyWorkflowRunJson and all its helpers (claim/runnerId/recovery normalization, profile-binding backfill) verbatim from WorkflowRunStore into a new WorkflowRunStateDataUpgrader invoked by DatabaseInitializer after db.Database.MigrateAsync and before the dispatch-snapshot and Profile upgraders. Implement the upgrader as: a no-write preflight that converts every row with the single rule, compares output to the original by ordinal string equality to find candidates, and deserializes each result against the current model (any failure names the run and blocks startup with no writes); a verified SQLite backup via online backup + PRAGMA integrity_check (reject in-memory sources and bare .db copies); a single transaction writing all candidate States with each row's shadow ETag incremented exactly once; and byte-level idempotency so canonical rows stay untouched and a repeat run writes zero. Do not filter by lifecycle — failed runs migrate identically.",
+      "acceptanceCriteria": [
+        "WorkflowRunStateDataUpgrader.UpgradeAsync converts every legacy row (claim/runnerId/recovery/profile-binding shapes) to canonical State, and the result deserializes against the current WorkflowRun model.",
+        "Preflight is no-write: an ambiguous or unreadable legacy row aborts with a message naming the WorkflowRun, and no State or ETag changes occur on failure.",
+        "A verified SQLite backup (online backup, PRAGMA integrity_check returns ok) is produced before any write; a backup failure or an in-memory source prevents all State and ETag writes.",
+        "All candidate rows commit in one transaction; each rewritten row's ETag increments by exactly one; a write failure on any row rolls back the whole batch leaving all original rows unchanged.",
+        "Rows already canonical are byte-for-byte unchanged (State and ETag); re-running the upgrader reports zero candidates and zero writes, creates no backup, and changes no State or ETag.",
+        "A failed run whose recovery is exhausted migrates and, after load + rerun, produces a fresh stage attempt (resume + stage-started, attempt incremented, prior tasks cleared) that persists identically on reload.",
+        "Candidates beyond a single fetch batch (over 500) still commit in one transaction with one ETag bump per rewritten row.",
+        "WorkflowRunStateDataUpgraderSpecs, WorkflowRunRerunMigrationSpecs, and WorkflowRunLegacyBindingSpecs pass green.",
+        "Existing WorkflowRun storage / query / control / recovery spec and unit tests pass green (safety net).",
+        "Server builds with TreatWarningsAsErrors (C# lint); the converter is reachable only from DatabaseInitializer, not from any service-phase read path."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "WorkflowRunStateDataUpgrader (relocated converter + preflight + verified backup + single-transaction commit + idempotency) wired into DatabaseInitializer after MigrateAsync; green WorkflowRunStateDataUpgraderSpecs / WorkflowRunRerunMigrationSpecs / WorkflowRunLegacyBindingSpecs",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The converter algorithm is relocated unchanged (Decision A) so its byte output matches what the read path long produced; no second rule is introduced and recovery normalization is not duplicated in SQL. The upgrader runs before the #537 dispatch-snapshot externalizer and the Profile migrator, which operate on orthogonal JSON paths and on already-canonical State. ETag is a shadow property on WorkflowRunRow; only rows whose State actually changed get bumped. The read path still calls the converter until T-002, so the system stays correct (just redundant) after this task alone."
+    },
+    {
+      "id": "T-002",
+      "title": "Remove legacy-State conversion from all read entry points",
+      "spec": "specs/canonical-state-read-path/spec.md#Read entry points deserialize canonical State directly",
+      "description": "Remove the MigrateLegacyWorkflowRunJson call from every service-phase read entry point so each deserializes persisted State directly against the current model: WorkflowRunStore.Deserialize, WorkflowRunQuerier, WorkflowQuerier, IssueMetricsQuerier, IssueReadModelLoader, and ActiveSessionReconciler. The converter remains only as a member of WorkflowRunStateDataUpgrader reachable solely from the cold-start migration boundary. No read path probes historical fields, branches on legacy-vs-canonical shape, or silently repairs a legacy-shaped row.",
+      "acceptanceCriteria": [
+        "Every service-phase read entry point deserializes canonical State directly with JSON.Deserialize<WorkflowRun> and does not invoke the legacy converter or perform whole-document legacy probing.",
+        "The legacy converter's only reachable caller is WorkflowRunStateDataUpgrader via DatabaseInitializer; enumerating call sites across the production read paths yields zero invocations.",
+        "A read entry point does not silently convert or rewrite a legacy-shaped row; deserialization against the current model surfaces the inconsistency rather than masking it.",
+        "Existing WorkflowRun storage / query / control / recovery / dispatch spec and unit tests pass green (safety net), confirming canonical-only reads behave identically to the prior compatibility reads on already-migrated data.",
+        "Server builds with TreatWarningsAsErrors (C# lint)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Compat conversion removed from the six read entry points; converter confined to WorkflowRunStateDataUpgrader; green WorkflowRun storage/query/control/recovery spec and unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Safe only after T-001 guarantees startup migration completes before the Server enters its service phase; on failure the upgrader blocks startup, so a read path never observes an un-migrated legacy row in the service phase. This is the delivery of the canonical-state-read-path capability and the issue's acceptance criterion that read-path legacy-converter invocations equal zero."
+    }
+  ]
+}
