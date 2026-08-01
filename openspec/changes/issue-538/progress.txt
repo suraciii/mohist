@@ -1,0 +1,14 @@
+## Codebase Patterns
+
+- `WorkflowRunStore.StageRunAsync` is the runtime funnel for both run save overloads. Projection writes must stay on its `DbContext` so `State`, active-work columns, and task-map rows share the `SaveChangesAsync` transaction.
+- `WorkflowRunWorkProjectionBuilder.Build` is the single calculation point for all-stage task membership and active-work identity. A future state upgrader should call this builder rather than reproduce the traversal.
+- Projection reads use `AsNoTracking` plus scalar `Select` expressions. Loading `WorkflowRunRow` is not suitable for projection reads because it also selects the large `State` column.
+- Migration tests that intentionally roll back to an older schema must use explicit column reads instead of materializing the current `WorkflowRunRow` model.
+
+## T-001
+
+- Added `WorkflowRunTaskMap`, nullable `WorkflowRuns.ActiveWorkId` and `ActiveWorkerId`, and migration `20260801140000_AddWorkflowRunWorkProjection`.
+- `WorkId` is normalized from null or whitespace to the task id. Active task work uses the same normalization; checks use their existing `checks-<stage>` work id and the run assignment worker.
+- Existing legacy state can contain duplicate task identities across stages. The identity projection de-duplicates equal `(TaskId, WorkId)` entries so those runs remain writable under the run-scoped task-id key.
+- `dotnet-ef` is not installed in this workspace, so the migration and model snapshot were added in the repository's existing generated-file shape by hand and verified through the migrated SQLite test template.
+- Verification: `npm test` passed all .NET, Web, Runner, and Slack suites after `npm ci` installed the workspace dependencies.
