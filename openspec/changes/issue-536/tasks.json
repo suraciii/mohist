@@ -17,7 +17,7 @@
         "Candidates beyond a single fetch batch (over 500) still commit in one transaction with one ETag bump per rewritten row.",
         "WorkflowRunStateDataUpgraderSpecs, WorkflowRunRerunMigrationSpecs, and WorkflowRunLegacyBindingSpecs pass green.",
         "Existing WorkflowRun storage / query / control / recovery spec and unit tests pass green (safety net).",
-        "Server builds with TreatWarningsAsErrors (C# lint); the converter is reachable only from DatabaseInitializer, not from any service-phase read path."
+        "Server builds with TreatWarningsAsErrors (C# lint)."
       ],
       "priority": 1,
       "mode": "AFK",
