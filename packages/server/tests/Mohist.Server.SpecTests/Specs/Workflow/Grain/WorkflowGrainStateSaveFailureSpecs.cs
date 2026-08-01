@@ -6,6 +6,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
@@ -170,6 +171,44 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
         Assert.Null(persisted.Metadata.EpicNumber);
     }
 
+    [Fact]
+    public async Task TerminalReport_SaveFailure_LeavesSnapshotIntact()
+    {
+        const string workflowRunId = "wr-snapshot-save-failure";
+        const string projectId = "proj-snapshot-save-failure";
+        const string workerId = "worker-snapshot-save-failure";
+        var context = new WorkflowIssueContext(projectId, 1, null);
+
+        await SeedWorkflowTemplateAsync(projectId);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<IWorkflowRunStore>();
+        var snapshotStore = scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>();
+
+        var setup = CreateGrain(scope.ServiceProvider, store, workflowRunId);
+        await setup.OnActivateAsync(CancellationToken.None);
+        await setup.EnsureStartedAsync(context);
+        await setup.AssignWorkerAsync(workerId);
+        var workItem = await setup.ClaimNextAsync(workerId);
+        Assert.NotNull(workItem);
+        var workId = workItem!.Id!;
+
+        var dispatch = new WorkDispatch(workflowRunId, workId, Uses: "spec/task");
+        var stored = await setup.StoreActiveWorkDispatchAsync(workerId, workId, dispatch);
+        Assert.NotNull(stored);
+        Assert.NotNull(await snapshotStore.LoadJsonAsync(workflowRunId, workId));
+
+        var failingStore = new FailingWorkflowRunStore(store);
+        var failingGrain = CreateGrain(scope.ServiceProvider, failingStore, workflowRunId);
+        await failingGrain.OnActivateAsync(CancellationToken.None);
+
+        var report = new TaskReport(workId, TaskReportStatus.Succeeded, Output: null, Artifacts: null);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            failingGrain.ReceiveTaskReportAsync(workerId, workId, report));
+        Assert.Equal(1, failingStore.EventSaveAttempts);
+
+        Assert.NotNull(await snapshotStore.LoadJsonAsync(workflowRunId, workId));
+    }
+
     private static WorkflowGrain CreateGrain(
         IServiceProvider services,
         IWorkflowRunStore store,
@@ -213,14 +252,16 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
     private sealed class FailingWorkflowRunStore : IWorkflowRunStore
     {
         private readonly IWorkflowRunStore _inner;
-        private int _remainingFailures = 1;
+        private int _remainingFailures;
 
-        public FailingWorkflowRunStore(IWorkflowRunStore inner)
+        public FailingWorkflowRunStore(IWorkflowRunStore inner, int remainingFailures = 1)
         {
             _inner = inner;
+            _remainingFailures = remainingFailures;
         }
 
         public int StateOnlySaveAttempts { get; private set; }
+        public int EventSaveAttempts { get; private set; }
 
         public Task<WorkflowRun?> LoadAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.LoadAsync(workflowRunId, ct);
@@ -233,8 +274,13 @@ public sealed class WorkflowGrainStateSaveFailureSpecs
             return _inner.SaveAsync(run, ct);
         }
 
-        public Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default) =>
-            _inner.SaveAsync(run, events, ct);
+        public Task SaveAsync(WorkflowRun run, IReadOnlyList<WorkflowEvent> events, CancellationToken ct = default)
+        {
+            EventSaveAttempts++;
+            if (Interlocked.CompareExchange(ref _remainingFailures, 0, 1) == 1)
+                throw new InvalidOperationException("simulated event save failure");
+            return _inner.SaveAsync(run, events, ct);
+        }
 
         public Task DeleteAsync(string workflowRunId, CancellationToken ct = default) =>
             _inner.DeleteAsync(workflowRunId, ct);

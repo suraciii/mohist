@@ -203,23 +203,6 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         }
     }
 
-    [Fact]
-    public async Task TerminalTransition_SaveFailure_LeavesSnapshotIntact()
-    {
-        await StartWorkflowAsync(SingleStage(
-            tasks: [new("task-1", "Task 1", "spec/task")],
-            checks: [new("check-1", "Check 1", "spec/check")]));
-
-        var (task, _) = await PollWorkAnyAsync();
-
-        await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
-        {
-            var snapshots = Store(scope.ServiceProvider);
-            var stored = await LoadAsync(snapshots, _workflowId!, task.WorkId);
-            Assert.NotNull(stored);
-        }
-    }
-
     private DispatchService Dispatch() =>
         _fixture.Cluster.GetSiloServiceProvider(null)
             .GetRequiredService<IServiceScopeFactory>().CreateScope()

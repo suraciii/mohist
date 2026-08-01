@@ -87,7 +87,6 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     WorkflowVariableResolver IWorkflowGrainContext.VariableResolver => _variableResolver;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     ILogger IWorkflowGrainContext.Log => _log;
-    IDispatchSnapshotStore IWorkflowGrainContext.DispatchSnapshotStore => _dispatchSnapshotStore;
     DateTimeOffset IWorkflowGrainContext.Now() => Now();
     void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
