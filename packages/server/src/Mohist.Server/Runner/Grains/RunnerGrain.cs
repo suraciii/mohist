@@ -83,9 +83,25 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await _state.ReadStateAsync();
         if (!_state.RecordExists)
         {
+            // The legacy runner-works state predates the RunnerState split and
+            // may carry a $type that no longer resolves (its state type was
+            // renamed from RunnerWorksState to LegacyRunnerRegistrationState).
+            // Its only purpose is a one-time migration of cached registration
+            // facts, which the runner re-supplies on connect, so a read failure
+            // is non-fatal: skip the migration and let the runner register
+            // fresh into the current runner storage.
             if (!_legacyState.RecordExists)
-                await _legacyState.ReadStateAsync();
-            if (_legacyState.RecordExists)
+            {
+                try
+                {
+                    await _legacyState.ReadStateAsync();
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Legacy runner-works state for runner {RunnerId} could not be read; skipping one-time migration.", RunnerId);
+                }
+            }
+            if (_legacyState.RecordExists && _legacyState.State is not null)
             {
                 _state.State = new RunnerState
                 {
