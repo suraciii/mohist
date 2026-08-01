@@ -127,7 +127,9 @@ public static class WorkflowGrainTestHelpers
             factory,
             definitionResolver,
             variableResolver,
-            new WorkflowArtifactQuerier(factory));
+            new WorkflowArtifactQuerier(factory),
+            new WorkflowRunStatusCache(),
+            new WorkflowRunDeserializer());
     }
 
     /// <summary>
