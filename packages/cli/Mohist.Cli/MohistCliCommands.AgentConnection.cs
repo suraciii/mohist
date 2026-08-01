@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -336,31 +337,126 @@ internal static class AgentConnectionCommands
         return string.Concat(firstLine[..(softCap - 1)], "...");
     }
 
+    private const string OwnerOnlyPolicy = "owner_only";
+    private const string AllowlistPolicy = "allowlist";
+    private const string AnyonePolicy = "anyone";
+
+    private const string AnyoneDisclosure =
+        "Invoking this Bot grants channel members the Agent's configured repository-write, tool, and credential authority.";
+
     private static Command BuildEdit(MohistCliApi api)
     {
-        var command = new Command("edit", "Edit Slack Connection presentation fields");
+        var command = new Command("edit", "Edit Slack Connection presentation fields and channel access policy");
         var id = new Argument<string>("connection-id");
         var botName = new Option<string?>("--bot-name");
         var avatar = new Option<string?>("--avatar-hash");
+        var accessPolicy = new Option<string?>("--access-policy")
+        {
+            Description = "Channel access policy: owner_only, allowlist, or anyone. Routes to Manage access (separate from --bot-name/--avatar-hash).",
+        };
+        var allowMember = new Option<string[]?>("--allow-member")
+        {
+            Description = "Slack member id allowed under allowlist. Repeatable; replaces the full list excluding the Owner. Only valid with --access-policy allowlist.",
+            AllowMultipleArgumentsPerToken = true,
+        };
+        var yes = new Option<bool>("--yes", "-y")
+        {
+            Description = "Bypass the Anyone execution-authority disclosure (required in non-interactive mode for --access-policy anyone).",
+        };
         var project = MohistCliCommands.ProjectRefOption();
         command.Arguments.Add(id);
         command.Options.Add(botName);
         command.Options.Add(avatar);
+        command.Options.Add(accessPolicy);
+        command.Options.Add(allowMember);
+        command.Options.Add(yes);
         command.Options.Add(project);
         command.SetAction(async ctx =>
         {
-            if (ctx.GetValue(botName) is null && ctx.GetValue(avatar) is null)
-                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--bot-name or --avatar-hash is required.");
+            var policy = ctx.GetValue(accessPolicy);
+            var members = ctx.GetValue(allowMember);
+            var hasAccess = policy is not null || members is { Length: > 0 };
+            var hasPresentation = ctx.GetValue(botName) is not null || ctx.GetValue(avatar) is not null;
+            if (!hasAccess && !hasPresentation)
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "Specify --access-policy/--allow-member or --bot-name/--avatar-hash.");
+
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
             if (exit != 0 || projectId is null) return exit;
-            return await api.PrintPatchAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!) }"), new
+
+            var connectionPath = Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}");
+
+            if (hasAccess)
             {
-                botName = ctx.GetValue(botName),
-                avatarHash = ctx.GetValue(avatar),
-            });
+                var accessExit = await ManageAccessAsync(api, ctx, policy, members, ctx.GetValue(yes), connectionPath);
+                if (accessExit != 0) return accessExit;
+            }
+
+            if (hasPresentation)
+            {
+                return await api.PrintPatchAsync(connectionPath, new
+                {
+                    botName = ctx.GetValue(botName),
+                    avatarHash = ctx.GetValue(avatar),
+                });
+            }
+            return 0;
         });
         return command;
     }
+
+    private static async Task<int> ManageAccessAsync(
+        MohistCliApi api,
+        ParseResult ctx,
+        string? accessPolicy,
+        string[]? allowMember,
+        bool yes,
+        string connectionPath)
+    {
+        var policy = accessPolicy?.Trim().ToLowerInvariant();
+        var members = allowMember ?? Array.Empty<string>();
+        var membersPresent = members.Length > 0;
+
+        if (policy is not null && policy is not (OwnerOnlyPolicy or AllowlistPolicy or AnyonePolicy))
+            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--access-policy must be owner_only, allowlist, or anyone.");
+
+        if (membersPresent && policy is null)
+            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--allow-member requires --access-policy allowlist.");
+
+        if (membersPresent && policy is not AllowlistPolicy)
+            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--allow-member may be supplied only with --access-policy allowlist.");
+
+        if (policy is AnyonePolicy)
+        {
+            if (!yes && !api.Invocation.PromptsEnabled)
+            {
+                await api.Error.WriteLineAsync(AnyoneDisclosure).ConfigureAwait(false);
+                await api.Error.WriteLineAsync("--yes is required to confirm this change in non-interactive mode.").ConfigureAwait(false);
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
+
+            if (!yes)
+            {
+                await api.Error.WriteLineAsync(AnyoneDisclosure).ConfigureAwait(false);
+                await api.Error.WriteAsync("Proceed with anyone? [y/N] ").ConfigureAwait(false);
+                var line = await api.Invocation.Input
+                    .ReadLineAsync(api.Invocation.CancellationToken).ConfigureAwait(false);
+                var confirmed = !string.IsNullOrEmpty(line)
+                    && line.TrimStart().StartsWith("y", StringComparison.OrdinalIgnoreCase);
+                if (!confirmed)
+                {
+                    await api.Error.WriteLineAsync("Aborted.").ConfigureAwait(false);
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+            }
+        }
+
+        return await api.PrintPostAsync($"{connectionPath}/manage-access", new
+        {
+            accessPolicy = policy ?? OwnerOnlyPolicy,
+            allowMembers = members,
+        });
+    }
+
 
     private static Command BuildDelete(MohistCliApi api)
     {

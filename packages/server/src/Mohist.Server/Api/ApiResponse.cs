@@ -9,7 +9,7 @@ public static class ApiResults
     public static IResult Ok() => Results.Ok(new ApiResponse<object>(true));
 
     public static IResult Fail(string error, int statusCode = 400, string? code = null, object? details = null) =>
-        Results.Json(new ApiResponse<object>(false, Error: error, Code: code, Details: details), statusCode: statusCode);
+        Results.Json(new ApiResponse<object>(false, Error: error, Code: code ?? "bad_request", Details: details), statusCode: statusCode);
 
     public static IResult NotFound(string error) => Fail(error, 404, "not_found");
 

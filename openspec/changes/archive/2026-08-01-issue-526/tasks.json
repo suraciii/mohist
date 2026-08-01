@@ -1,0 +1,101 @@
+{
+  "project": "mohist",
+  "description": "Add Owner-only/Allowlist/Anyone channel access policies to Slack Connections, a Manage-access control surface, and channel-originated stop/cancel authority.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Access-policy model, allowlist storage, and the single Owner-only access decision",
+      "spec": "specs/channel-access-policy/spec.md#The Connection carries one access policy that decides who may invoke the Agent in a channel",
+      "description": "Introduce the access-policy data model and consolidate the six inlined Owner-only checks into one access-decision service. Add an AccessPolicy field (default owner_only) and an allowlist child table to AgentConnection, then route every channel mention, bound-thread reply, and DM through a single SlackConnectionAccessDecider that evaluates the Owner-only/DM-Owner-only rule with no caching. This is a behavior-preserving substrate: after it, the system behaves exactly as before but through one decision point with the policy model in place.",
+      "acceptanceCriteria": [
+        "AgentConnection gains an AccessPolicy field with kind constants and a column default of owner_only, threaded through CreateAsync, UpdateAsync (as a non-immutable field, not in ImmutableBindingFields), and ToRow/ToDomain; an additive EF migration creates the column so existing connections resolve to owner_only.",
+        "A new SlackConnectionAllowedMemberStore with its row, DbSet, and a unique index on (ProjectId, ConnectionId, SlackUserId) is registered, implements IAgentConnectionProviderCleanup with an ExecuteDeleteAsync filtered by (projectId, connectionId), and is added as the matching forward-registration in MohistServiceRegistration so allowed-member rows cascade-delete with the Connection.",
+        "A SlackConnectionAccessDecider (IScopedService) exposes EvaluateAsync(connection, senderSlackUserId, workspaceTeamId, conversationId, isDirectMessage) returning an AccessDecision, and the five channel owner-check sites in SlackConnectionRoutes plus the DM gate in SlackOwnerClaimService route through it instead of inlining sender == OwnerSlackUserId.",
+        "For owner_only and for any direct message, the decider authorizes only the Owner, reads no Slack API, and caches nothing; a non-Owner channel mention or bound-thread reply is rejected with an actionable reason and creates no AgentJob, AgentSession, SessionInput, or inbox entry.",
+        "The Owner is always authorized under owner_only, and the allowlist child table exists and is queryable even though the owner_only path does not depend on it.",
+        "Existing channel root-mention launch, thread follow-up, multi-Agent attribution, ambiguous-prompt, and DM behavior remain unchanged with the default owner_only policy applied through the decider.",
+        "Server spec tests cover owner_only accept, non-Owner reject with no resources created, DM remaining Owner-only, and the default owner_only policy on a newly created Connection; `npm test` passes with TreatWarningsAsErrors as lint and no real Slack, network, process, or wall-clock dependencies."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Access-policy storage, an allowlist child store with Connection-delete cascade, and a single Owner-only/DM-Owner-only access decision replacing the duplicated checks.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Implements design D1 (storage) and D2 (single decider, owner_only + DM branches, no cache). The Owner is never stored in the allowlist child table, so 'Owner always present and immovable' is structural. Allowlist/Anyone decision rules and the Manage-access surface land in T-002 and T-003."
+    },
+    {
+      "id": "T-002",
+      "title": "Allowlist and Anyone channel invocation authorization with live member validation",
+      "spec": "specs/channel-access-policy/spec.md#Allowlist authorization is by stable workspace identity",
+      "description": "Extend the access decider with the allowlist and anyone rules, proving current member status and channel visibility live from Slack on each non-Owner invocation. Under allowlist the sender must be the Owner or a listed member who is still a current regular workspace member; under anyone the sender must be a current regular workspace member in a channel where the Bot is a member. Because the decider never caches, policy and allowlist changes take effect on the next received input, including follow-ups on existing sessions, without revoking already-accepted work.",
+      "acceptanceCriteria": [
+        "Under allowlist the decider authorizes the Owner, or a sender whose stable Slack identity is in the allowlist child table and who is confirmed a current regular member of the install workspace via UsersInfoAsync and SlackOwnerClaimService.IsEligibleMember (rejecting bot, deleted, guest, restricted, ultra-restricted, and other-team members).",
+        "Under anyone the decider additionally calls ConversationsInfoAsync and requires Channel.IsMember == true, so a sender in a channel the Bot is not a member of, a Slack Connect external participant, a guest, and any identity that cannot be confirmed are not authorized.",
+        "A Slack API call that returns not-OK, throws, or otherwise cannot confirm the member or channel-membership fact results in a deny decision, so an unverifiable identity never triggers the Agent; the Owner remains invokable because the Owner check needs no API call.",
+        "Tightening the policy (e.g. allowlist to owner_only) or removing an allowlist member causes the next received input, including a follow-up on an existing session, to be rejected immediately, while already-accepted work on that session is not revoked or interrupted and history is not deleted.",
+        "Loosening the policy (e.g. owner_only to allowlist) or adding a member accepts the next input without a process restart or reconnection.",
+        "A listed member who has since become a guest, been deleted, or been restricted is rejected, and a different member who merely shares a display name is evaluated solely on their own stable identity and is not authorized by the name match.",
+        "Server spec tests extend the RecordingSlackApiClient fake with settable per-user UsersInfo responses and a settable ConversationsInfo response, and cover allowlist listed-member accept, unlisted-member reject, Owner-always-accept, downgraded-listed-member reject, anyone workspace-member accept, external/guest/bot reject, bot-not-in-channel reject, DM remaining Owner-only under allowlist and anyone, immediate-effect tightening and loosening, no-name-auto-succession, and no-resource-creation on deny; `npm test` passes using fake Slack and injectable time only."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Allowlist and Anyone invocation authorization with live member and channel-visibility validation, immediate policy effect, and member-invalidation behavior.",
+      "dependsOn": [
+        "T-001"
+      ],
+      "passes": false,
+      "notes": "Implements design D2 (allowlist/anyone branches) and D3 (users.info + conversations.info live validation with safe-deny). Reuses the existing IsEligibleMember predicate so 'regular workspace member' semantics stay identical across claim, diagnostic, and access paths. Tested via seeded policy and allowlist rows; the owner-facing configuration surface is T-003."
+    },
+    {
+      "id": "T-003",
+      "title": "Manage-access control surface: server endpoint, CLI, and Web",
+      "spec": "specs/connection-access-management/spec.md#Only the Owner may change the access policy and allowlist",
+      "description": "Make the access policies owner-configurable end-to-end. Add a POST manage-access endpoint that validates each proposed member against Slack and atomically replaces the policy and allowlist, return the Anyone execution-grant disclosure as a contract field, and wire the CLI flags and Web Connection panel to it so the Owner can select a policy, edit the allowlist by recognizable member information, and see the Anyone warning before it takes effect.",
+      "acceptanceCriteria": [
+        "A POST /api/projects/{projectRef}/slack-connections/{id}/manage-access endpoint, project-resolved with no adapter credential like other management routes, accepts { accessPolicy, allowMembers } and rejects, before any mutation, an allowMembers list supplied with owner_only or anyone, and any member who is a bot, guest, deleted, restricted, or belongs to another workspace (validated via UsersInfoAsync and IsEligibleMember).",
+        "On success the endpoint updates the AccessPolicy column and replaces the allowlist child rows (delete existing, insert the new set) in one DbContext transaction, never stores the Owner as a removable row, and returns the updated connection read model including accessPolicy, allowMembers, and an anyoneDisclosure contract field.",
+        "Only an explicit Manage-access operation mutates the policy or allowlist; a Slack message does not change either, and a Slack member identity is not treated as a Mohist administrator identity.",
+        "The CLI connection edit command accepts --access-policy and a repeatable --allow-member, routes them to the manage-access endpoint (separate from the bot-name/avatar-hash PATCH), renders the anyoneDisclosure and requires confirmation before sending anyone, and errors before the call when --allow-member is supplied with owner_only or anyone.",
+        "The Web Connection panel renders the current policy, an allowlist editor backed by member name-and-avatar search that resolves to stable Slack identities, and the Anyone disclosure; display name and avatar are presentation only and are never the authorization identity.",
+        "Server spec tests cover setting each of the three policies, whole-list replace, the owner_only/anyone-with-allowMembers incompatibility rejection, invalid-member rejection, Owner auto-inclusion and non-storage, Owner-immovability, and the disclosure field; CLI and Web tests cover flag routing, the confirmation gate, and member-search-to-stable-id resolution.",
+        "End-to-end verification: after the Owner sets an allowlist via the endpoint a listed member's invocation is accepted, and after the Owner removes that member the member's next input is rejected; `npm test`, `npm run typecheck -w packages/web`, and `npm run test:ci -w packages/web` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A usable Manage-access control surface across server API, CLI, and Web that lets the Owner select and change the policy and allowlist with member validation and the Anyone disclosure.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Implements design D4 (validate-then-replace endpoint) and D6 (CLI flags + Web panel). The Anyone disclosure is a documented client-enforced contract field returned by the server; a server-side confirmation token is deferred (see design Open Questions). The endpoint reuses the IsEligibleMember predicate for add-time validation, matching the invocation-time check in T-002."
+    },
+    {
+      "id": "T-004",
+      "title": "Channel-originated stop and cancel with Owner-or-initiator authority",
+      "spec": "specs/channel-session-stop/spec.md#A channel-originated stop or cancel is permitted only to the Owner or the session initiator",
+      "description": "Add a stop/cancel branch to the channel ingress and authorize it by the Connection Owner or the Slack member who initiated the target AgentSession. After a channel message is resolved to this Connection and before launch or follow-up, a standalone stop/cancel keyword (after stripping the Bot mention) is treated as a Turn-control request whose authority is decided from recorded input provenance, reusing the existing cancel/stop dispatch.",
+      "acceptanceCriteria": [
+        "The channel ingress detects a standalone stop or cancel keyword in Body.Text after the Bot mention is stripped, using the existing TryGetTurnControlCommand, only after the message is resolved to this Connection (single-mention target or a reply in a thread bound to this Connection), and before any launch or follow-up.",
+        "Authority is granted when the sender is the Owner or equals the session initiator resolved via IAgentSessionGrain.GetInitialLaunchAsync().Input.Provenance.MemberId, compared by stable Slack identity; a stop or cancel from any other member is rejected with an actionable reason, creates no resources, and does not interrupt the Turn.",
+        "An authorized stop or cancel with an active Turn reuses ResolveCurrentTurnControlAsync and ExecuteTurnControlAsync and returns the existing cancel/stop result kinds; with no active Turn it replies no_active_work or already_ended exactly as the DM path does.",
+        "A stop or cancel targets only the Turn active when the request is processed; a gesture for a Turn that has already ended does not stop a later Turn.",
+        "A member authorized to invoke the Agent may still send a normal follow-up in a thread bound to a session another member initiated, but their stop or cancel of that session's active Turn is rejected.",
+        "Server spec tests cover an Owner stop, a session-initiator stop, rejection of a stop by an allowed non-initiator member with no Turn interruption, an expired gesture not stopping a later Turn, the no-active-work and already-ended replies, and a follow-up still being accepted from an allowed non-initiator; `npm test` passes with fake Slack and injectable time only."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Channel-originated stop and cancel restricted to the Owner or the session initiator, reusing the existing Turn-control dispatch.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Implements design D5. The initiator is already recorded per accepted input (AgentSessionInputProvenance.MemberId), so authority adds a stable-id compare with no new provenance storage. Depends on T-002 so the 'another allowed member cannot stop another member's Turn' negative case is verifiable with a non-Owner initiator. Does not depend on T-003 (management surface)."
+    }
+  ]
+}

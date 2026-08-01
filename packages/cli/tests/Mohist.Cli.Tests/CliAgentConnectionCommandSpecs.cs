@@ -290,6 +290,116 @@ public sealed class CliAgentConnectionCommandSpecs
         Assert.Equal(path, handler.Requests.Single().RequestUri?.PathAndQuery);
     }
 
+    [Fact]
+    public async Task Edit_AccessPolicy_PostsToManageAccessWithPolicyAndMembers()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "allowlist", "--allow-member", "U_A", "--allow-member", "U_B"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/manage-access", request.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(request.Body!)!;
+        Assert.Equal("allowlist", body["accessPolicy"]!.GetValue<string>());
+        Assert.Equal(new[] { "U_A", "U_B" }, body["allowMembers"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+    }
+
+    [Fact]
+    public async Task Edit_AccessPolicyCombinedWithPresentation_PostsManageAccessThenPatches()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "allowlist", "--bot-name", "helper"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal(HttpMethod.Post, handler.Requests[0].Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/manage-access", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal(HttpMethod.Patch, handler.Requests[1].Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1", handler.Requests[1].RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task Edit_AllowMemberWithOwnerOnly_RejectedBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "owner_only", "--allow-member", "U_A"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("allow-member", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_AllowMemberWithAnyone_RejectedBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone", "--allow-member", "U_A", "--yes"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("allow-member", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_InvalidPolicy_RejectedBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "bogus"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("access-policy", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_AnyoneWithoutYesInNonInteractiveMode_FailsWithDisclosureAndNoHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone"],
+            output, error, fs, executor,
+            terminalOverride: new CliTerminal(false));
+
+        Assert.Equal(1, exit);
+        Assert.Empty(handler.Requests);
+        var stderr = error.ToString();
+        Assert.Contains("repository-write", stderr, StringComparison.Ordinal);
+        Assert.Contains("--yes", stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Edit_AnyoneWithYes_PostsToManageAccess()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone", "--yes"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/manage-access", request.RequestUri?.PathAndQuery);
+        Assert.Equal("anyone", JsonNode.Parse(request.Body!)!["accessPolicy"]!.GetValue<string>());
+    }
+
     private static int Count(string text, string value)
     {
         var count = 0;

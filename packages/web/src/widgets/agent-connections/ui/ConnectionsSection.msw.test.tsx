@@ -47,6 +47,7 @@ function makeConnection(overrides: Partial<AgentConnectionDto> = {}): AgentConne
     healthReason: null,
     agentReadiness: 'unknown',
     ownerSlackUserId: null,
+    accessPolicy: 'owner_only',
     lastHeartbeatAt: null,
     createdAt: '2026-06-01T00:00:00.000Z',
     updatedAt: '2026-06-01T00:00:00.000Z',

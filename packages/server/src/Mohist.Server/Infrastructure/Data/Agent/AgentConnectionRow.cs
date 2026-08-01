@@ -1,3 +1,5 @@
+using Mohist.Server.Agent.Domain;
+
 namespace Mohist.Server.Infrastructure.Data.Agent;
 
 public sealed class AgentConnectionRow
@@ -19,6 +21,7 @@ public sealed class AgentConnectionRow
     public string? HealthReason { get; set; }
     public string AgentReadiness { get; set; } = string.Empty;
     public string? OwnerSlackUserId { get; set; }
+    public string AccessPolicy { get; set; } = AccessPolicyKind.OwnerOnly;
     public DateTimeOffset? LastHeartbeatAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

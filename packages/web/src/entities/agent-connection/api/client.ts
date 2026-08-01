@@ -6,7 +6,11 @@ import type {
   AgentConnectionCreateResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
+  AccessPolicyManageRequest,
+  AccessPolicyManageResponse,
+  AccessPolicyState,
   ConnectionDiagnostic,
+  SlackMemberSearchResponse,
 } from '../model/types'
 
 export function getConnectionDiagnostic(projectId: string | null | undefined, connectionId: string) {
@@ -59,5 +63,41 @@ export function claimAgentConnectionOwner(
   return request<AgentConnectionClaimOwnerResponse>(
     projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/claim-owner`),
     { method: 'POST' },
+  )
+}
+
+export function getAgentConnectionAccess(
+  projectId: string | null | undefined,
+  connectionId: string,
+) {
+  return request<AccessPolicyState>(
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/access`),
+  )
+}
+
+export function manageAgentConnectionAccess(
+  projectId: string | null | undefined,
+  connectionId: string,
+  data: AccessPolicyManageRequest,
+) {
+  return request<AccessPolicyManageResponse>(
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/manage-access`),
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function searchSlackConnectionMembers(
+  projectId: string | null | undefined,
+  connectionId: string,
+  query: string,
+) {
+  return request<SlackMemberSearchResponse>(
+    projectApiPath(
+      projectId,
+      `/slack-connections/${encodeURIComponent(connectionId)}/members?q=${encodeURIComponent(query)}`,
+    ),
   )
 }

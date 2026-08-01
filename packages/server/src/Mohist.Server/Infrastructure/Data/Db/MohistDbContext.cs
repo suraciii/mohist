@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Text.Json;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Webhooks;
@@ -87,6 +88,7 @@ public class MohistDbContext : DbContext
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
     public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
     public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
+    public DbSet<SlackConnectionAllowedMemberRow> SlackConnectionAllowedMembers { get; set; } = null!;
 
     public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
@@ -565,10 +567,18 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.HealthReason).HasMaxLength(1024);
             entity.Property(e => e.AgentReadiness).HasMaxLength(32).IsRequired();
             entity.Property(e => e.OwnerSlackUserId).HasMaxLength(256);
+            entity.Property(e => e.AccessPolicy)
+                .HasMaxLength(32)
+                .IsRequired()
+                .HasDefaultValue(AccessPolicyKind.OwnerOnly)
+                .HasConversion<string>();
             entity.Property(e => e.LastHeartbeatAt);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.Property(e => e.DeletedAt);
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_AgentConnections_AccessPolicy",
+                "\"AccessPolicy\" IN ('owner_only', 'allowlist', 'anyone')"));
             entity.HasIndex(e => new { e.ProjectId, e.AgentId, e.WorkspaceTeamId })
                 .IsUnique()
                 .HasFilter("\"DeletedAt\" IS NULL")
@@ -1392,6 +1402,23 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackAmbiguousPrompts_WorkspaceTeamId_ConversationId_MessageTs");
             entity.HasIndex(e => new { e.ProjectId, e.UpdatedAt })
                 .HasDatabaseName("IX_SlackAmbiguousPrompts_ProjectId_UpdatedAt");
+        });
+
+        modelBuilder.Entity<SlackConnectionAllowedMemberRow>(entity =>
+        {
+            entity.ToTable("SlackConnectionAllowedMembers");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SlackUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.SlackUserId })
+                .IsUnique()
+                .HasDatabaseName("UX_SlackConnectionAllowedMembers_ProjectId_ConnectionId_SlackUserId");
+            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
+                .HasDatabaseName("IX_SlackConnectionAllowedMembers_ProjectId_ConnectionId");
         });
     }
 

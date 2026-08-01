@@ -164,6 +164,7 @@ public sealed class AgentConnectionStore : IScopedService
         string? healthReason = null,
         string? agentReadiness = null,
         string? ownerSlackUserId = null,
+        string? accessPolicy = null,
         DateTimeOffset? lastHeartbeatAt = null,
         CancellationToken ct = default)
     {
@@ -190,6 +191,7 @@ public sealed class AgentConnectionStore : IScopedService
         if (fields.Contains(nameof(healthReason))) row.HealthReason = healthReason;
         if (fields.Contains(nameof(agentReadiness))) row.AgentReadiness = agentReadiness ?? existing.AgentReadiness;
         if (fields.Contains(nameof(ownerSlackUserId))) row.OwnerSlackUserId = ownerSlackUserId;
+        if (fields.Contains(nameof(accessPolicy))) row.AccessPolicy = accessPolicy ?? existing.AccessPolicy;
         if (fields.Contains(nameof(lastHeartbeatAt))) row.LastHeartbeatAt = lastHeartbeatAt;
 
         row.UpdatedAt = _timeProvider.GetUtcNow();
@@ -302,6 +304,7 @@ public sealed class AgentConnectionStore : IScopedService
         HealthReason = row.HealthReason,
         AgentReadiness = derivedReadiness ?? row.AgentReadiness,
         OwnerSlackUserId = row.OwnerSlackUserId,
+        AccessPolicy = string.IsNullOrEmpty(row.AccessPolicy) ? AccessPolicyKind.OwnerOnly : row.AccessPolicy,
         LastHeartbeatAt = row.LastHeartbeatAt,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
@@ -327,6 +330,7 @@ public sealed class AgentConnectionStore : IScopedService
         HealthReason = connection.HealthReason,
         AgentReadiness = connection.AgentReadiness,
         OwnerSlackUserId = connection.OwnerSlackUserId,
+        AccessPolicy = string.IsNullOrEmpty(connection.AccessPolicy) ? AccessPolicyKind.OwnerOnly : connection.AccessPolicy,
         LastHeartbeatAt = connection.LastHeartbeatAt,
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,

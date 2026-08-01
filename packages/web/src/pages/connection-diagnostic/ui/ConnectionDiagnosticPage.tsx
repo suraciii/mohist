@@ -3,14 +3,19 @@ import { useParams } from 'react-router-dom'
 import { AlertCircleIcon, CheckCircle2Icon, CircleOffIcon, Settings2Icon } from 'lucide-react'
 import {
   useAgentConnection,
+  useAgentConnectionAccess,
   useClaimAgentConnectionOwner,
   useConfigureAgentConnection,
   useConnectionDiagnostic,
+  useManageAgentConnectionAccess,
+  useSlackMemberSearchFn,
 } from '../../../entities/agent-connection'
 import type {
   AgentConnectionClaimOwnerResponse,
   AgentConnectionDetailResponse,
+  AccessPolicyState,
   ConnectionDiagnostic,
+  SlackMemberSearchEntry,
 } from '../../../entities/agent-connection'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -18,6 +23,7 @@ import { SetupStepList } from './setup-step-list'
 import { IdentityPreviewStep } from './identity-preview-step'
 import { CredentialFormStep } from './credential-form-step'
 import { ClaimOwnerCodeStep } from './claim-owner-code-step'
+import { AccessPolicySection } from './access-policy-section'
 
 export interface ConnectionDiagnosticPageData {
   data: ConnectionDiagnostic | undefined
@@ -50,16 +56,30 @@ export interface ConnectionDiagnosticPageOperations {
     data: AgentConnectionClaimOwnerResponse | undefined
     reset: () => void
   }
+  accessStateQuery: {
+    data: AccessPolicyState | undefined
+  }
+  manageAccessMutation: {
+    mutate: (input: { accessPolicy: 'owner_only' | 'allowlist' | 'anyone'; allowMembers: string[] }) => void
+    isPending: boolean
+    error: Error | null
+    reset: () => void
+  }
+  searchMembers: (query: string) => Promise<SlackMemberSearchEntry[]>
 }
 
 export type ConnectionDiagnosticPageOperationsHook = (
   connectionId: string | undefined,
+  setupComplete?: boolean,
 ) => ConnectionDiagnosticPageOperations
 
-const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connectionId) => {
+const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connectionId, setupComplete) => {
   const detailQuery = useAgentConnection(connectionId)
   const configure = useConfigureAgentConnection(connectionId)
   const claim = useClaimAgentConnectionOwner(connectionId)
+  const accessStateQuery = useAgentConnectionAccess(connectionId, setupComplete ?? false)
+  const manageAccess = useManageAgentConnectionAccess(connectionId)
+  const searchMembers = useSlackMemberSearchFn(connectionId)
   return {
     connectionDetailQuery: {
       data: detailQuery.data,
@@ -78,6 +98,14 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
       data: claim.data,
       reset: claim.reset,
     },
+    accessStateQuery: { data: accessStateQuery.data },
+    manageAccessMutation: {
+      mutate: manageAccess.mutate,
+      isPending: manageAccess.isPending,
+      error: manageAccess.error instanceof Error ? manageAccess.error : null,
+      reset: manageAccess.reset,
+    },
+    searchMembers,
   }
 }
 
@@ -96,6 +124,14 @@ export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
     data: undefined,
     reset: () => undefined,
   },
+  accessStateQuery: { data: undefined },
+  manageAccessMutation: {
+    mutate: () => undefined,
+    isPending: false,
+    error: null,
+    reset: () => undefined,
+  },
+  searchMembers: async () => [],
 }
 
 export const useReadOnlyOperations: ConnectionDiagnosticPageOperationsHook = () => readOnlyOperations
@@ -135,19 +171,22 @@ export function ConnectionDiagnosticPage({
 } = {}) {
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
-  const ops = operationsHook(connectionId)
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation } = ops
+  const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
+  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
   const configureResetRef = useRef<() => void>(() => undefined)
   configureResetRef.current = configureMutation.reset
   const claimResetRef = useRef<() => void>(() => undefined)
   claimResetRef.current = claimOwnerMutation.reset
+  const accessResetRef = useRef<() => void>(() => undefined)
+  accessResetRef.current = manageAccessMutation.reset
 
   useEffect(() => {
     return () => {
       claimResetRef.current()
       configureResetRef.current()
+      accessResetRef.current()
     }
   }, [])
 
@@ -268,6 +307,22 @@ export function ConnectionDiagnosticPage({
               errorMessage={claimOwnerMutation.error?.message ?? null}
             />
           </CardSection>
+        )}
+
+        {isSetupComplete && accessStateQuery.data && (
+          <AccessPolicySection
+            accessPolicy={accessStateQuery.data.accessPolicy}
+            allowMembers={accessStateQuery.data.allowMembers}
+            ownerSlackUserId={detail?.connection.ownerSlackUserId ?? null}
+            anyoneDisclosure={accessStateQuery.data.anyoneDisclosure}
+            onSubmit={(input) => {
+              manageAccessMutation.reset()
+              manageAccessMutation.mutate(input)
+            }}
+            isSubmitting={manageAccessMutation.isPending}
+            errorMessage={manageAccessMutation.error?.message ?? null}
+            searchMembers={ops.searchMembers}
+          />
         )}
 
         <details className="border-y border-border py-3" data-testid="connection-diagnostic-facts">

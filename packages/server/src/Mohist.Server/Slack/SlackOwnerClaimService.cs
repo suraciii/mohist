@@ -36,17 +36,20 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
     private readonly ISecretStore _secrets;
     private readonly ISlackApiClient _slack;
     private readonly TimeProvider _time;
+    private readonly SlackConnectionAccessDecider _accessDecider;
 
     public SlackOwnerClaimService(
         IDbContextFactory<MohistDbContext> dbFactory,
         ISecretStore secrets,
         ISlackApiClient slack,
-        TimeProvider time)
+        TimeProvider time,
+        SlackConnectionAccessDecider accessDecider)
     {
         _dbFactory = dbFactory;
         _secrets = secrets;
         _slack = slack;
         _time = time;
+        _accessDecider = accessDecider;
     }
 
     public async Task<SlackOwnerClaimCode> GenerateAsync(
@@ -145,9 +148,23 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
 
         if (connection.SetupProgress != SetupProgressKind.Complete)
             return Reject("Owner setup is not complete. Send a current owner claim code first.");
-        if (!string.Equals(connection.OwnerSlackUserId, inbound.SenderSlackUserId, StringComparison.Ordinal))
-            return Reject("This Slack Connection is available only to its owner.");
-        return new(SlackInboundDecisionKind.AcceptedOwnerTask, null);
+        var domain = new Mohist.Server.Agent.Domain.AgentConnection
+        {
+            Id = connection.Id,
+            ProjectId = connection.ProjectId,
+            AgentId = connection.AgentId,
+            WorkspaceTeamId = connection.WorkspaceTeamId,
+            AccessPolicy = string.IsNullOrEmpty(connection.AccessPolicy)
+                ? AccessPolicyKind.OwnerOnly
+                : connection.AccessPolicy,
+            OwnerSlackUserId = connection.OwnerSlackUserId,
+        };
+        var decision = await _accessDecider.EvaluateAsync(
+            domain, inbound.SenderSlackUserId, connection.WorkspaceTeamId,
+            conversationId: string.Empty, isDirectMessage: true, ct);
+        return decision.Allowed
+            ? new(SlackInboundDecisionKind.AcceptedOwnerTask, null)
+            : Reject(decision.Reason);
     }
 
     public async Task<int> DeleteForConnectionAsync(string projectId, string connectionId, CancellationToken ct = default)

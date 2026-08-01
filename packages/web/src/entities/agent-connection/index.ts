@@ -3,10 +3,15 @@ export {
   configureAgentConnection,
   createAgentConnection,
   getAgentConnection,
+  getAgentConnectionAccess,
   getConnectionDiagnostic,
   listAgentConnections,
+  manageAgentConnectionAccess,
+  searchSlackConnectionMembers,
 } from './api/client'
 export {
+  agentConnectionAccessQueryKey,
+  agentConnectionAccessQueryOptions,
   agentConnectionDetailQueryKey,
   agentConnectionDetailQueryOptions,
   agentConnectionsQueryKey,
@@ -15,14 +20,24 @@ export {
   configureAgentConnectionMutationOptions,
   connectionDiagnosticQueryOptions,
   createAgentConnectionMutationOptions,
+  manageAgentConnectionAccessMutationOptions,
   useAgentConnection,
+  useAgentConnectionAccess,
   useAgentConnections,
   useClaimAgentConnectionOwner,
   useConfigureAgentConnection,
   useConnectionDiagnostic,
   useCreateAgentConnection,
+  useManageAgentConnectionAccess,
+  useSearchSlackMembers,
+  useSlackMemberSearchFn,
 } from './api/queries'
+export { ACCESS_POLICY_VALUES } from './model/types'
 export type {
+  AccessPolicyKind,
+  AccessPolicyManageRequest,
+  AccessPolicyManageResponse,
+  AccessPolicyState,
   AgentConnectionClaimOwnerResponse,
   AgentConnectionConfigureRequest,
   AgentConnectionCreateRequest,
@@ -32,4 +47,6 @@ export type {
   ConnectionDiagnostic,
   ConnectionDiagnosticFacts,
   ConnectionIdentityFacts,
+  SlackMemberSearchEntry,
+  SlackMemberSearchResponse,
 } from './model/types'
