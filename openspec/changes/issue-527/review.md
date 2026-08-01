@@ -1,108 +1,83 @@
 # Review — issue-527 (Slack files as Agent input)
 
-Reviewed against the issue body, `proposal.md`, `design.md`, the `slack-attachment-entry`
-spec, and the task acceptance criteria in `tasks.json`. Only the product code/tests were
-judged; the `openspec/changes/issue-527/` artifacts are this workflow's own outputs.
+Re-review after the fix-up commits (`3310ec0be`, `21b5f1a71`). The change was judged
+against the issue body, `proposal.md`, `design.md`, the `slack-attachment-entry` spec,
+and the `tasks.json` acceptance criteria. Only product code/tests were judged; the
+`openspec/changes/issue-527/` artifacts are this workflow's own outputs.
 
-The change generally lands well: the adapter forwards metadata only (`adapter.ts:157`–`192`),
-the Server-side fetch reuses the issue-516 bearer pattern (`ISlackApiClient.cs:48`–`77`),
-the `Source` column + migration + descriptor read are correct and additive, the premint
-identity formulas mirror the Web launch/follow-up routes exactly, and the per-file ack is
-surfaced through the existing outbox. But two defects must be fixed before merge.
+The implementation lands the capability cleanly: the adapter forwards metadata only
+(`adapter.ts:157`–`192`), the Server fetches content via the issue-516 bearer pattern
+(`ISlackApiClient.cs:48`–`77`), the `Source` column + migration + descriptor read are
+additive and correct, premint identities mirror the Web launch/follow-up routes, and the
+per-file verdict rides the existing outbox. The two prior blockers and the minors are
+resolved. No new blocking issues found.
 
-## F1 — BLOCKER: `SlackAttachmentInputBinder.PrepareAsync` reorder loop throws on any mixed accept/reject message
+## Prior findings — status
 
-`packages/server/src/Mohist.Server/Api/SlackAttachmentInputBinder.cs:121`–`145`.
+### F1 (was BLOCKER: binder reorder crash) — RESOLVED
 
-The per-file loop builds two lists that grow at different rates:
-- `results` gets **one entry per file unconditionally** (every branch — oversized, unsupported,
-  bot-token-missing, fetch-failed, and the candidate/placeholder branches — calls `results.Add`).
-- `candidates` gets an entry **only** when a file reaches the candidate stage (ExistsAsync hit,
-  or a successful fetch+ingest).
+`SlackAttachmentInputBinder.PrepareAsync` (`SlackAttachmentInputBinder.cs:121`–`138`)
+previously reordered bound verdicts by positional index (`candidates[index]` over a
+`results.Count` loop), which threw `ArgumentOutOfRangeException` on any message mixing a
+rejected and an accepted file. The fix replaces the positional access with an id-keyed
+`verdictById` dictionary: placeholders whose id appears in the batch are overwritten with
+the bound verdict; pre-verdict rejections (ids not in the batch) are left untouched. This
+is correct and removes all `candidates[index]`/`bound.Results[index]` positional accesses.
 
-So `results.Count == files.Count` always, and `results.Count > candidates.Count` whenever the
-message has at least one pre-verdict or fetch rejection. The trailing reorder loop then runs:
+Verified by the new spec `Ingress_launch_with_mixed_oversized_and_valid_file_accepts_valid_and_reports_rejection`
+(`SlackAttachmentEntryIngressSpecs.cs`), which sends [oversized, valid] on a DM launch and
+asserts the valid file binds (`Source = slack`), the oversized file is not fetched, and the
+request returns 200 (it returned 500 before the fix). The full SpecTests suite (3710) is green.
 
-```csharp
-for (var index = 0; index < results.Count; index++)
-{
-    var existing = results[index];
-    if (existing.Id != candidates[index])   // <-- index can reach candidates.Count
-```
+### F2 (was must-fix: ingest conflict deletes shared bytes) — RESOLVED
 
-When `index >= candidates.Count` (guaranteed to happen once `results.Count > candidates.Count`),
-`candidates[index]` throws `ArgumentOutOfRangeException`.
+`AttachmentService.IngestProviderFileAsync` (`AttachmentService.cs:201`–`218`) no longer
+calls `DeleteAsync(storagePath)` on the `DbUpdateException` conflict branch. Because
+`GenerateStoragePath` is deterministic on the id, the loser's bytes occupy the winner's
+content-addressed path; the loser now just adopts the winning row. This is correct — the
+bytes are byte-identical content at the same id-keyed path, so leaving them is a storage-level
+no-op, and a destructive delete would have permanently `NotReadable`-ed the winning row under
+concurrent same-message delivery. The existing idempotency unit test
+(`IngestProviderFileAsync_IsIdempotentOnDeterministicId_...`) still passes (sequential path
+unchanged); the conflict branch is only reachable under true concurrency.
 
-**Trigger (exactly a named spec scenario):** a Slack message carrying two files where one is
-rejected (oversized / unsupported-type / not-readable) and one is accepted. Spec
-`spec.md:77`–`81` ("An oversized file is rejected while a valid one is accepted") and the T-003
-acceptance criterion ("each rejected file is reported, not silently dropped") require this to
-work and to report both results. It instead crashes the ingress request. The crash also hits the
-attachment-only-with-text path whenever files are mixed.
+### Minors — RESOLVED
 
-**Why the suite is green:** every attachment spec/unit test uses a *single* file
-(`SlackAttachmentEntryIngressSpecs.cs` — five tests, all one-file; the only multi-file test is
-`SlackAttachmentInputBinderTests.cs:26` which constructs the binding by hand and never calls
-`PrepareAsync`). No test exercises `PrepareAsync` with ≥1 rejection *and* ≥1 candidate, so the
-bug is unobserved.
+- Stray indentation drift across `SlackConnectionRoutes.cs` (launch/follow-up blocks,
+  prompt guards, parameter lists, factory `new(...)` calls, `SlackIngressBody`) is restored
+  to the surrounding indent. Build is warning-clean under `TreatWarningsAsErrors`.
+- Both launch early-reject branches (DM `:1185`, channel root `:1897`) now call
+  `AttachmentBinder.RollbackAsync`, mirroring the follow-up path. No leak existed before
+  (nothing is bound when `AcceptedCount == 0`), but the two paths are now symmetric.
 
-**Fix direction:** reorder by id, not by positional index. `ValidateAndBindAgentInputAsync`
-returns `bound.Results` ordered by the submitted `candidates` order; map each candidate's
-verdict back to its placeholder position in `results` by matching `Id` (a dictionary
-`candidateId -> bound verdict`), and leave non-candidate (pre-verdict rejected) entries as-is.
-Remove the `candidates[index]` / `bound.Results[index]` positional accesses entirely.
+## New check — no blocking issues
 
-## F2 — must fix: `IngestProviderFileAsync` conflict path deletes the winning row's bytes
-
-`packages/server/src/Mohist.Server/Issue/Services/Attachments/AttachmentService.cs:201`–`212`.
-
-`GenerateStoragePath` is deterministic on the id (`FileSystemAttachmentStorage.cs:42`–`47`:
-`{projectId}/{attachmentId}/content`), so the same `deterministicId` always resolves to the same
-storage path. On a `DbUpdateException` (unique-PK collision from a concurrent same-message
-delivery — the scenario `self-review.md:37` explicitly commits to handling), the handler does:
-
-```csharp
-catch (DbUpdateException)
-{
-    await _storage.DeleteAsync(storagePath, CancellationToken.None);
-    var winning = await LoadRowAsync(...);
-    return ToUploadResult(winning);
-}
-```
-
-`storagePath` is the **same path the winning row's bytes occupy**. Deleting it removes the
-winner's content. The returned `winning` row now references a missing file: every later
-`ReadMetadataAsync` returns null → the file verdicts `NotReadable` forever. Worse, redelivery
-cannot self-heal, because `PrepareAsync`'s `ExistsAsync` short-circuit sees the (present) row
-and never re-fetches/re-writes. Net effect: a permanently broken attachment from a race the
-design claimed to close.
-
-The `ExistsAsync` check-then-insert (`AttachmentService.cs:154`–`162`) does not make this
-unreachable — two concurrent calls can both observe "absent" before either inserts.
-
-**Fix direction:** on the conflict branch, do **not** delete shared storage. Either (a) leave
-the loser's bytes in place (they are byte-identical content at a content-addressed-by-id path,
-so they are the winner's bytes too), or (b) write to a unique per-attempt path and let the row's
-`StoragePath` be authoritative. Option (a) is the smaller change and matches the
-"insert-if-absent is a storage-level no-op" intent in D3.
-
-## Minor (non-blocking)
-
-- **Indentation drift in `SlackConnectionRoutes.cs`.** The diff re-indents large existing blocks
-  with stray leading spaces (e.g. the launch block `:1164`–`1277`, follow-up call `:2057`–`2076`,
-  `SlackIngressBody` `:2249`–`2257`). Not a warning under `TreatWarningsAsErrors`, but it pollutes
-  the diff and future blame; restore the original indentation where only a parameter/line changed.
-- **Inconsistent rollback on the launch early-reject.** The DM/channel launch sites' "no usable
-  file, no text" branch (`SlackConnectionRoutes.cs:1185`–`1198` and `:1900`–`1912`) returns
-  without calling `AttachmentBinder.RollbackAsync`, while the equivalent follow-up branch
-  (`RouteFollowupAsync:694`–`699`) does. No leak in practice (when `AcceptedCount == 0` there are
-  no newly-bound ids to unbind; ingested-but-rejected rows expire via pending TTL), but mirroring
-  the follow-up path's rollback keeps the two paths obviously symmetric and safe if a future
-  change binds before verdict.
+- **`AttachmentIds` includes rejected ids.** `SlackAttachmentBinding.AttachmentIds`
+  (`:172`) returns every result id (accepted + rejected) and is forwarded to
+  `LaunchConnectionAsync` as `attachmentIds` → `AgentLaunchCoordinatorRequest.AttachmentIds`.
+  Verified this is consumed **only** by the idempotency fingerprint
+  (`AgentLaunchCoordinatorTypes.cs:238`–`242`); the actual binding uses `candidates` and
+  `AcceptedDescriptors`, so the Agent only ever sees accepted files. The ids are
+  deterministic per message+file, so including rejected ids in the fingerprint is stable
+  across redelivery and does not cause false conflicts. Not a defect.
+- **`BuildAttachmentAck` indexes `files[index]` by result position** (`:2003`–`2010`).
+  Safe because every call site passes the `body.Files` the binding was prepared from, and
+  `PrepareAsync` appends exactly one result per file (`results.Count == files.Count`). Latent
+  fragility if a future caller passes a mismatched binding, but no current call site does.
+- **Spec coverage.** All four dispatch paths are wired; the binder is the single shared
+  pipeline. Coverage spans channel-root launch, DM attachment-only launch, DM redelivery,
+  DM follow-up, follow-up oversized rejection, and the new mixed accept/reject case. The
+  thread-reply follow-up shares `RouteFollowupAsync` with the DM follow-up, so it is covered
+  transitively.
+- **Credential isolation.** Bot token is decoded only inside the fetch call, `url_private`
+  is consumed and discarded inside `OpenFileContentAsync`, and the stored attachment id is an
+  opaque `StableToken` output (no embedded Slack file id). The "no Slack secrets in record /
+  observation / transcript" invariant holds.
+- **Build/test.** `Mohist.sln` warning-clean; Server Unit 1747/1747, Server Spec 3710/3710,
+  Server Arch 51/51.
 
 ## Verdict
 
-F1 breaks a named spec scenario and the T-003 acceptance criteria with an untested code path;
-F2 violates the concurrency idempotency guarantee the design commits to. Both must be fixed.
+Both blockers and the minors are fixed and verified; no new blocking issues found.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
