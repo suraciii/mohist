@@ -5,7 +5,7 @@ Slack Connection 的全部创建与推进步骤目前只在 CLI 里（`mo agent 
 ## What Changes
 
 - 在 Agent 详情页新增 Connections 区（右栏，与 SubscriptionsSection 并列的注入式 widget），列出该 Agent 的 Connection 并提供 **Add Slack**。
-- Web 可创建一条可恢复的 Slack Connection：立即得到将在 Slack 中出现的 Bot 身份预览（名称、头像、说明；Agent 名称不符合 Slack 命名规则时只预览带稳定后缀的 mention name，不改 Agent 本身）与 **Create in Slack** 入口，驱动既有服务端路由。
+- Web 可创建一条可恢复的 Slack Connection：立即得到由绑定 Agent 派生的 Bot 身份预览（名称与说明；Agent 名称不符合 Slack 命名规则时只预览带稳定后缀的 mention name，不改 Agent 本身；头像在 Slack App 设置中手动配置，不由 Agent 派生）与 **Create in Slack** 入口，驱动既有服务端路由。
 - 新增受保护凭据表单：Web 提交 App token（xapp-）/ Bot token（xoxb-）完成配置，token 不回显、不进入页面可见状态或日志、提交后不被 Web 读回；凭据仍由服务端 AES-GCM 加密保存。不提供把 token 写进 URL / query 的方式。
 - Setup 由服务端 `SetupProgress` 单一权威驱动：关闭页面、刷新或换设备后已完成步骤保留，用户从当前这一步继续；`mohist-slack` 离线、token 无效或 Agent 尚未 Ready 时不丢失进度，只给出可执行的唯一下一步。Web 不自维护一份步骤状态。
 - Connection 汇总区每次只突出一个当前状态与唯一下一步（复用既有 `connection-diagnostics` 的 `primaryState` / `nextAction`），同时仍可分别读出 Setup progress / Desired state / Connection health / Agent Readiness 四类事实。

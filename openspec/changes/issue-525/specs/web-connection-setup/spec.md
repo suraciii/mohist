@@ -12,11 +12,11 @@ The Web SHALL surface a Connections section on the Agent detail page that lists 
 
 ### Requirement: Creating a Connection presents a Bot identity preview derived from the bound Agent
 
-Creating a Connection SHALL immediately present the Bot identity that will appear in Slack — name, short description, and avatar — derived from the bound Agent. When the Agent name does not satisfy Slack's naming rules, Mohist SHALL derive and preview a mention name with a stable suffix and SHALL NOT modify the Agent itself. A short App description SHALL be derived from the Agent description; when the description is empty, Mohist SHALL generate a non-empty generic description.
+Creating a Connection SHALL immediately present the Bot identity that will appear in Slack — a name and a short description derived from the bound Agent. When the Agent name does not satisfy Slack's naming rules, Mohist SHALL derive and preview a mention name with a stable suffix and SHALL NOT modify the Agent itself. A short App description SHALL be derived from the Agent description; when the description is empty, Mohist SHALL generate a non-empty generic description. The Bot avatar SHALL NOT be derived from the Agent (the Agent carries none); it is applied manually in the Slack App settings, and the preview SHALL direct the operator there.
 
 #### Scenario: Identity preview is derived from the Agent
 - **WHEN** an operator creates a Connection for an Agent with a valid name and description
-- **THEN** the Web shows the Bot name, App description, and avatar that will appear in Slack, all derived from the Agent
+- **THEN** the Web shows the Bot name and App description that will appear in Slack, both derived from the Agent, and directs avatar configuration to the Slack App settings (no avatar is derived from the Agent)
 
 #### Scenario: Invalid Agent name yields a stable-suffix mention name without changing the Agent
 - **WHEN** the bound Agent's name violates Slack's naming rules
