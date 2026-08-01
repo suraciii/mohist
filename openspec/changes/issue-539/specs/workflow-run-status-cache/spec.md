@@ -1,26 +1,28 @@
-### Requirement: Status view served from cache without deserializing State when ETag is unchanged
+### Requirement: Status view served from cache without the full State deserialize when ETag is unchanged
 
-The status query path (`WorkflowQuerier.GetStatusAsync`) SHALL first read the persisted `ETag` of the target `WorkflowRuns` row as a lightweight scalar projection (without materializing or deserializing `State`). When that `ETag` matches the version of an already-built status view for that run, the query SHALL return the cached view and MUST NOT deserialize the run's `State`.
+The status query path (`WorkflowQuerier.GetStatusAsync`) SHALL first read the persisted `ETag` of the target `WorkflowRuns` row as a lightweight scalar projection (without materializing or deserializing `State`). When that `ETag` matches the version of a cached `WorkflowRun` aggregate for that run, the query SHALL reuse the cached aggregate and MUST NOT execute the full typed deserialization of `State` (`JSON.Deserialize<WorkflowRun>(row.State)`) — the LOH-allocating path that dominates status-read memory cost.
+
+Scope of this guarantee: it covers the full typed deserialization of `State` only. Definition resolution (`WorkflowDefinitionResolver.LoadTemplateAsync`) runs per call to preserve live profile edits and may still read the `State` column/string for lightweight metadata extraction (the bound profile id via pooled-buffer `JsonDocument.Parse`); eliminating those residual reads is not required by this change and is tracked as a follow-up. The cache therefore targets the dominant, profiled cost (the typed deserialize's LOH allocations), not every `State` touch.
 
 #### Scenario: Repeated status reads with no State write between them
-- **WHEN** `GetStatusAsync(workflowRunId)` is called twice in succession with no `WorkflowRunStore` write (and therefore no `ETag` increment) between the two calls
-- **THEN** the second call MUST return a view equivalent to the first, and the run's `State` JSON MUST be deserialized zero times during the second call
+- **WHEN** `GetStatusAsync(workflowRunId)` is called twice in succession with no `WorkflowRunStore` write between the two calls
+- **THEN** the second call MUST return a view equivalent to the first, and the full typed deserialization of `State` (`JSON.Deserialize<WorkflowRun>`) MUST execute zero times during the second call
 
 #### Scenario: First read after process start with a stable ETag
-- **WHEN** `GetStatusAsync` is called for a run whose `ETag` has not changed since the cached view was built, and the cache holds an entry for that `ETag`
-- **THEN** the query MUST serve the cached view and MUST NOT read or deserialize the `State` column
+- **WHEN** `GetStatusAsync` is called for a run whose `ETag` has not changed since the cached aggregate was built, and the cache holds an entry for that `ETag`
+- **THEN** the query MUST reuse the cached aggregate and MUST NOT execute the full typed deserialization of `State`
 
 ### Requirement: Cache rebuilt exactly once when State changes
 
-When the persisted `ETag` differs from the version of the cached entry (or no cached entry exists), the query SHALL deserialize `State` exactly once, rebuild the status view, and refresh the cache entry to the new `ETag`. Subsequent reads at the same new `ETag` MUST NOT deserialize `State` again.
+When the persisted `ETag` differs from the version of the cached entry (or no cached entry exists), the query SHALL deserialize `State` (the full typed `JSON.Deserialize<WorkflowRun>`) exactly once, rebuild the status view, and refresh the cache entry to the new `ETag`. Subsequent reads at the same new `ETag` MUST NOT deserialize `State` again.
 
 #### Scenario: State write between two reads
 - **WHEN** a `WorkflowRunStore` save increments the run's `ETag`, then `GetStatusAsync` is called
-- **THEN** the query MUST deserialize `State` exactly once, return a view reflecting the written State, and store it under the new `ETag`
+- **THEN** the query MUST deserialize `State` (the full typed deserialization) exactly once, return a view reflecting the written State, and store it under the new `ETag`
 
 #### Scenario: Repeated reads after a single State change
 - **WHEN** `ETag` increments once and `GetStatusAsync` is then called several times with no further write
-- **THEN** `State` MUST be deserialized exactly once across those calls, and every call MUST return the rebuilt view
+- **THEN** the full typed deserialization of `State` MUST execute exactly once across those calls, and every call MUST return the rebuilt view
 
 ### Requirement: Cached status view equivalent to an uncached read
 
@@ -48,7 +50,7 @@ Artifacts are persisted in a table separate from `State` and their addition or c
 
 #### Scenario: Artifact recorded then status read twice
 - **WHEN** an artifact is recorded (no State write) and `GetStatusAsync` is called twice
-- **THEN** both calls MUST return artifact summaries that include the artifact, and `State` MUST still be deserialized only to the extent required by the State-keyed portion of the cache (not re-deserialized solely because artifacts changed)
+- **THEN** both calls MUST return artifact summaries that include the artifact, and the full typed deserialization of `State` MUST NOT execute solely because artifacts changed (the artifact dimension is covered by per-call artifact attachment, not by State re-deserialization)
 
 ### Requirement: Cache must not reintroduce unbounded memory growth
 
