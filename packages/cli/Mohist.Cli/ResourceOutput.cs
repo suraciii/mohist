@@ -109,9 +109,9 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfileList => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookSubscription or MohistCliApi.TableShape.WebhookSubscriptionList =>
-                ["id", "projectId", "name", "match", "targetUrl", "status", "hasSecret", "createdAt", "updatedAt"],
+                ["id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookDeliveryFailureList =>
-                ["id", "projectId", "subscriptionId", "eventId", "eventType", "targetUrl", "errorSummary", "occurredAt"],
+                ["id", "projectId", "subscriptionId", "eventId", "eventType", "targetUrl", "responseStatus", "durationMs", "errorSummary", "occurredAt"],
             MohistCliApi.TableShape.DeadLetterList => ["id", "origin", "sourceId", "source", "eventId", "type", "time", "subject", "dataContentType", "data", "extensions", "handler", "error", "attempts", "deadLetteredAt", "status", "redeliveryAttemptedAt"],
             MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "delivered", "attempts", "error"],
             MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],

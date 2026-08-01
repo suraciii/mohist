@@ -923,15 +923,42 @@ internal sealed class MohistCliApi
     public Task<int> CreateWebhookSubscriptionAsync(
         string projectId,
         string name,
-        string match,
+        string? match,
         string targetUrl,
-        string? secret,
-        string mode) =>
-        PrintPostWithOutputAsync(
+        string? eventSelectionMode,
+        IReadOnlyList<string>? eventTypes,
+        string? authType,
+        string? authToken,
+        (string User, string Password)? authBasic,
+        IReadOnlyDictionary<string, string>? authHeaders,
+        string? legacySecret,
+        string mode)
+    {
+        object body = new
+        {
+            name,
+            match,
+            targetUrl,
+            eventSelectionMode,
+            eventTypes,
+            authType,
+            authToken,
+            authBasic = authBasic is { } b ? new { user = b.User, password = b.Password } : null,
+            authHeaders,
+            secret = legacySecret,
+        };
+        return PrintPostWithOutputAsync(
             WebhookSubscriptionsPath(projectId),
-            new { name, match, targetUrl, secret },
+            body,
             mode,
             nameof(TableShape.WebhookSubscription));
+    }
+
+    public Task<int> ListWebhookEventTypesAsync(string projectId, string mode) =>
+        PrintWithOutputAsync(
+            $"/api/projects/{Uri.EscapeDataString(projectId)}/webhook/event-types",
+            mode,
+            tableShape: null);
 
     public Task<int> ListWebhookSubscriptionsAsync(string projectId, string mode, bool includeArchived = false) =>
         PrintWithOutputAsync(
