@@ -38,8 +38,8 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
         Assert.Equal(2, await ETagAsync(database, runId));
         Assert.DoesNotContain("dispatchSnapshot", row.State);
         using var json = JsonDocument.Parse(row.State);
-        Assert.Equal("Running", json.RootElement.GetProperty("stages")[0].GetProperty("tasks")[0].GetProperty("status").GetString());
-        Assert.Equal("Completed", json.RootElement.GetProperty("stages")[0].GetProperty("tasks")[1].GetProperty("status").GetString());
+        Assert.Equal("running", json.RootElement.GetProperty("stages")[0].GetProperty("tasks")[0].GetProperty("status").GetString());
+        Assert.Equal("completed", json.RootElement.GetProperty("stages")[0].GetProperty("tasks")[1].GetProperty("status").GetString());
 
         var snapshot = await SnapshotAsync(database, runId, "t1.1");
         Assert.NotNull(snapshot);
@@ -149,6 +149,58 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     }
 
     [Fact]
+    public async Task ExternalizeAsync_PreflightValidatesRowsWithoutSnapshots()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        const string goodId = "wr_unchanged_good";
+        const string badId = "wr_unchanged_bad";
+        var good = LegacyEmbeddedState(goodId);
+        var bad = $$"""{"id":"{{badId}}","metadata":{"createdAt":"1970-01-01T00:00:00+00:00"},"status":"not-a-status","stages":[]}""";
+        await InsertAsync(database,
+            new WorkflowRunRow { WorkflowRunId = goodId, State = good },
+            new WorkflowRunRow { WorkflowRunId = badId, State = bad });
+
+        await using var db = database.CreateContext();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            WorkflowDispatchSnapshotDataUpgrader.ExternalizeAsync(
+                db,
+                backup: static (_, _) => throw new InvalidOperationException("backup must not run")));
+
+        Assert.Contains(badId, error.Message);
+        Assert.Equal(good, (await LoadAsync(database, goodId)).State);
+        Assert.Equal(1, await ETagAsync(database, goodId));
+        Assert.Null(await SnapshotAsync(database, goodId, "t1.1"));
+    }
+
+    [Fact]
+    public async Task ExternalizeAsync_DoesNotOverwritePreExistingSnapshot()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        const string runId = "wr_existing_snapshot";
+        const string existing = "{\"workId\":\"t1.1\",\"items\":[{\"prompt\":\"existing\"}]}";
+        await InsertAsync(database, new WorkflowRunRow
+        {
+            WorkflowRunId = runId,
+            State = LegacyEmbeddedState(runId),
+        });
+        await InsertSnapshotsAsync(database, new WorkflowDispatchSnapshotRow
+        {
+            WorkflowRunId = runId,
+            WorkId = "t1.1",
+            SnapshotJson = existing,
+        });
+
+        await using var db = database.CreateContext();
+        var result = await WorkflowDispatchSnapshotDataUpgrader.ExternalizeAsync(
+            db,
+            backup: VerifyBackupDelegate);
+
+        Assert.Equal(0, result.ExternalizedCount);
+        Assert.Equal(existing, (await SnapshotAsync(database, runId, "t1.1"))?.SnapshotJson);
+        Assert.DoesNotContain("dispatchSnapshot", (await LoadAsync(database, runId)).State);
+    }
+
+    [Fact]
     public async Task ExternalizeAsync_BackupFailurePreventsAllWrites()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
@@ -194,6 +246,29 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
     }
 
     [Fact]
+    public async Task SweepOrphansAsync_PreflightFailureDeletesNothing()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        const string runId = "wr_invalid_sweep";
+        await InsertAsync(database, new WorkflowRunRow
+        {
+            WorkflowRunId = runId,
+            State = "{\"status\":\"not-a-status\"}",
+        });
+        await InsertSnapshotsAsync(database,
+            new WorkflowDispatchSnapshotRow { WorkflowRunId = runId, WorkId = "unknown.1", SnapshotJson = "{}" },
+            new WorkflowDispatchSnapshotRow { WorkflowRunId = "wr_missing", WorkId = "missing.1", SnapshotJson = "{}" });
+
+        await using var db = database.CreateContext();
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            WorkflowDispatchSnapshotDataUpgrader.SweepOrphansAsync(db));
+
+        Assert.Contains(runId, error.Message);
+        Assert.NotNull(await SnapshotAsync(database, runId, "unknown.1"));
+        Assert.NotNull(await SnapshotAsync(database, "wr_missing", "missing.1"));
+    }
+
+    [Fact]
     public async Task SweepOrphansAsync_IsNoOpWithNoSnapshots()
     {
         using var database = TestSqliteDatabase.CreateMigrated();
@@ -219,7 +294,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
         return "verified-test-backup";
     }
 
-    private static string LegacyEmbeddedState(string id, string runStatus = "Running") => $$"""
+    private static string LegacyEmbeddedState(string id, string runStatus = "running") => $$"""
         {
           "id": "{{id}}",
           "metadata": { "createdAt": "1970-01-01T00:00:00+00:00" },
@@ -234,7 +309,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
                 "definitionId": "t1",
                 "attempt": 1,
                 "title": "T1",
-                "status": "Running",
+                "status": "running",
                 "workId": "t1.1",
                 "dispatchSnapshot": {{RunningSnapshotJson}}
               },
@@ -243,7 +318,7 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
                 "definitionId": "t2",
                 "attempt": 1,
                 "title": "T2",
-                "status": "Completed",
+                "status": "completed",
                 "workId": "t2.1",
                 "dispatchSnapshot": {"workId":"t2.1","items":[]}
               }
@@ -257,14 +332,14 @@ public sealed class WorkflowDispatchSnapshotDataUpgraderSpecs
         {
           "id": "{{id}}",
           "metadata": { "createdAt": "1970-01-01T00:00:00+00:00" },
-          "status": "Running",
+          "status": "running",
           "stages": [{
             "id": "build",
             "attempt": 1,
             "requiresApproval": false,
             "tasks": [
-              { "id": "active.1", "definitionId": "a", "attempt": 1, "title": "A", "status": "Running", "workId": "active.1" },
-              { "id": "terminal.1", "definitionId": "b", "attempt": 1, "title": "B", "status": "Failed", "workId": "terminal.1" }
+              { "id": "active.1", "definitionId": "a", "attempt": 1, "title": "A", "status": "running", "workId": "active.1" },
+              { "id": "terminal.1", "definitionId": "b", "attempt": 1, "title": "B", "status": "failed", "workId": "terminal.1" }
             ],
             "checks": []
           }]
