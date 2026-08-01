@@ -112,3 +112,12 @@ new DispatchSnapshotPersistenceSpecs).
 - The startup orphan sweep (deleting snapshot rows whose task is no
   longer Running) is also T-002; T-001 already best-effort deletes on
   every terminal transition in the happy path.
+
+## T-002 — Cold-start externalization hardening
+
+- Persisted task statuses use the Web JSON enum convention (`"running"`). The initial T-002 implementation compared `"Running"` ordinally, which stripped active snapshots without externalizing them and then swept valid separated snapshots. Extraction now compares status case-insensitively, and the sweep deserializes canonical State and tests `TaskRunStatus.Running`.
+- Externalization preflight now deserializes every WorkflowRun row, including byte-unchanged rows, before any backup or write. The orphan sweep likewise validates all relevant State rows before deleting anything.
+- Snapshot writes now execute literal parameterized SQLite `INSERT OR IGNORE` statements inside the same transaction as stripped State/ETag updates. Pre-existing rows remain byte-for-byte unchanged, and the result counts actual inserts.
+- Duplicate extracted `(WorkflowRunId, WorkId)` keys are deduplicated when snapshots match and block startup during preflight when payloads conflict. A Running embedded snapshot without a usable `WorkId` or task `Id` also blocks startup instead of being silently lost.
+- Orphan deletes are chunked at 500 WorkIds per statement. Active keys use `task.WorkId ?? task.Id`, matching runtime redelivery lookup.
+- Verification: all 3,624 Server specs, 1,726 Server unit tests, and 51 architecture tests passed; full solution build passed with 0 warnings and 0 errors. `npm test` encountered one unrelated Web retry-count flake in `IssueChangedFilesPage.recovery.test.tsx`; the exact 20-test file passed immediately on rerun. Runner and Slack suites passed.
