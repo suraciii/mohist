@@ -126,19 +126,12 @@ public sealed class SlackAttachmentInputBinder(
                 inputId,
                 candidates,
                 ct).ConfigureAwait(false);
+            var verdictById = bound.Results.ToDictionary(result => result.Id, StringComparer.Ordinal);
             for (var index = 0; index < results.Count; index++)
             {
                 var existing = results[index];
-                if (existing.Id != candidates[index])
-                {
-                    results[index] = bound.Results.FirstOrDefault(result => result.Id == existing.Id) is { } match
-                        ? match
-                        : existing;
-                }
-                else
-                {
-                    results[index] = bound.Results[index];
-                }
+                if (verdictById.TryGetValue(existing.Id, out var verdict))
+                    results[index] = verdict;
             }
             foreach (var newlyBound in bound.NewlyBoundAttachmentIds ?? Array.Empty<string>())
                 boundIds.Add(newlyBound);

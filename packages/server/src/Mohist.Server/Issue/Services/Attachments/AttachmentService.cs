@@ -205,7 +205,11 @@ public sealed class AttachmentService : IScopedService
         }
         catch (DbUpdateException)
         {
-            await _storage.DeleteAsync(storagePath, CancellationToken.None).ConfigureAwait(false);
+            // A concurrent ingest for the same deterministic id won the row.
+            // The bytes were written to the same content-addressed path the
+            // winner occupies (GenerateStoragePath is deterministic on the id),
+            // so there is nothing of ours to delete — removing the path would
+            // destroy the winner's content. Just adopt the winning row.
             var winning = await LoadRowAsync(deterministicId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException($"Attachment row '{deterministicId}' disappeared between insert and conflict resolution.");
             return ToUploadResult(winning);
