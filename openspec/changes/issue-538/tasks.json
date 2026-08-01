@@ -6,21 +6,22 @@
       "id": "T-001",
       "title": "Run-work projection read-model (schema, write maintenance, read API)",
       "spec": "specs/run-work-projection/spec.md#run-work-projection-content",
-      "description": "Add the WorkflowRunTaskMap child table (WorkflowRunId, TaskId, WorkId) with (runId,TaskId) and (runId,WorkId) indexes, plus nullable ActiveWorkId/ActiveWorkerId columns on WorkflowRunRow, via an EF Core migration. Maintain both in WorkflowRunStore.StageRunAsync (the single write funnel): rebuild the map from all TaskRuns across all stages (WorkId = TaskRun.WorkId ?? Id) and set the active-work columns from the run's current active work, committed in the same transaction as State; clear map rows in DeleteAsync. Add State-free read methods on WorkflowRunQuerier: ResolveWorkIdAsync(runId,taskId), ResolveTaskIdAsync(runId,workId), IsActiveWorkAsync(runId,workId,runnerId), and projectId via the existing MetadataProjectId column. Include unit tests for write-maintenance correctness and the read API.",
+      "description": "Add the WorkflowRunTaskMap child table (WorkflowRunId, TaskId, WorkId) with (runId,TaskId) and (runId,WorkId) indexes, plus nullable ActiveWorkId/ActiveWorkerId columns on WorkflowRunRow, via an EF Core migration. Maintain both in WorkflowRunStore.StageRunAsync via a single shared map/active-work helper (rebuilt from all TaskRuns across all stages, WorkId = TaskRun.WorkId ?? Id; active-work columns from the run's current active work), committed in the same transaction as State; clear map rows in DeleteAsync. Expose the State-free reads through a new narrow IWorkflowRunWorkProjection interface (ResolveWorkIdAsync(runId,taskId), ResolveTaskIdAsync(runId,workId), IsActiveWorkAsync(runId,workId,runnerId), GetProjectIdAsync(runId) via existing MetadataProjectId), with a concrete implementation registered in DI. Include unit tests for write-maintenance correctness and a read-API test asserting the implementation reads only projection columns.",
       "acceptanceCriteria": [
         "EF migration adds WorkflowRunTaskMap (indexed both directions) and nullable WorkflowRuns.ActiveWorkId/ActiveWorkerId; dotnet build is clean (TreatWarningsAsErrors).",
         "After StageRunAsync saves a run with tasks across multiple stages plus a running task, the persisted map rows equal (runId, task.Id, task.WorkId ?? task.Id) for every task in every stage, and ActiveWorkId/ActiveWorkerId match the run's single current active work (null when none).",
         "Deleting a WorkflowRun removes its WorkflowRunTaskMap rows.",
-        "WorkflowRunQuerier.ResolveWorkIdAsync/ResolveTaskIdAsync/IsActiveWorkAsync return correct results by reading only the projection (verified by a unit test that asserts the State-deserializing LoadAsync is not invoked on the read path).",
+        "IWorkflowRunWorkProjection is defined and registered in DI; its concrete implementation returns correct results reading only projection columns (unit test asserts the State-deserializing JSON.Deserialize<WorkflowRun> path is not invoked).",
+        "The map/active-work computation is a single shared helper reused by StageRunAsync (and later the backfill upgrader), so there is one author of the projection.",
         "Server test suite (npm test) passes."
       ],
       "priority": 1,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Projection schema + EF migration + StageRunAsync/DeleteAsync maintenance + WorkflowRunQuerier read API + unit tests",
+      "output": "Projection schema + EF migration + shared map/active-work helper + StageRunAsync/DeleteAsync maintenance + IWorkflowRunWorkProjection interface + DI registration + concrete read implementation + unit tests",
       "dependsOn": [],
       "passes": false,
-      "notes": "ActiveWorkId holds either a task workId or the checks workId (checks-<stage>); ActiveWorkerId is the assigned worker. WorkId stored as the effective work id (WorkId ?? Id). Maintenance is derived from the in-memory run, never by deserializing State on read."
+      "notes": "ActiveWorkId holds either a task workId or the checks workId (checks-<stage>); ActiveWorkerId is the assigned worker. WorkId stored as the effective work id (WorkId ?? Id); note taskId<->workId is identity today (claimed tasks set WorkId = logicalTaskId = Id), so the table's real job is run-scoped task membership, with WorkId carried for robustness. Maintenance is derived from the in-memory run, never by deserializing State on read."
     },
     {
       "id": "T-002",
@@ -40,16 +41,16 @@
       "output": "Cold-start data upgrader + idempotence/correctness unit test",
       "dependsOn": ["T-001"],
       "passes": false,
-      "notes": "Follow design/workflow/run-state.md migration discipline: ordered, idempotent, single-transaction, preflight before service. Reuses the same map/active-work computation as StageRunAsync (extract a shared helper to avoid two authors)."
+      "notes": "Follow design/workflow/run-state.md migration discipline: ordered, idempotent, single-transaction, preflight before service. Reuses the shared map/active-work helper extracted in T-001 (single author). This upgrader is itself a State-writing path and must refresh the projection in the same transaction it reads State, per the write-time obligation in design D2."
     },
     {
       "id": "T-003",
       "title": "Switch TaskLogService to the projection (remove all State loads)",
       "spec": "specs/task-log-stateless-read/spec.md#the-task-log-read-path-never-deserializes-workflowrun-state",
-      "description": "Rewrite TaskLogService.ResolveWorkIdAsync, IsActiveWorkAsync, and ResolvePublishScopeAsync to call the WorkflowRunQuerier projection read API instead of LoadAsync, removing all three State deserializations. Publish scope resolves workId->taskId from the map and projectId from MetadataProjectId; null taskId still means no fan-out. The agent-job ownership branch is untouched. Add a spec test using a fake WorkflowRunQuerier that records/throws on LoadAsync to assert the upload (active + inactive work) and query (hit + miss) paths never deserialize State while preserving acceptance, fan-out scope, pagination, and empty-page-on-miss behavior.",
+      "description": "Swap TaskLogService's dependency from the concrete WorkflowRunQuerier to IWorkflowRunWorkProjection, and rewrite ResolveWorkIdAsync, IsActiveWorkAsync, and ResolvePublishScopeAsync to call the projection reads, removing all three State deserializations. Publish scope resolves workId->taskId from the map and projectId (only when taskId resolves) from MetadataProjectId; an unmappable workId yields a null scope (no fan-out). The agent-job ownership branch is untouched. Add a spec test using a fake IWorkflowRunWorkProjection to drive upload (active + inactive work) and query (hit + miss), asserting acceptance, publish-scope stamping, null-scope no-fan-out, and empty-page-on-miss behavior are preserved. Because the interface exposes no State-deserializing member, State deserialize is structurally unreachable from TaskLogService.",
       "acceptanceCriteria": [
-        "No WorkflowRunQuerier.LoadAsync (State-deserializing) call remains anywhere in the TaskLogService upload or query paths.",
-        "Spec test asserts driving upload (active and inactive/unknown work) and query (hit and miss) never invokes LoadAsync, while acceptance (active->persist, inactive->4xx), publish-scope stamping (taskId + projectId), null-taskId no-fan-out, and empty-page-on-miss behavior are identical to the prior contract.",
+        "TaskLogService depends on IWorkflowRunWorkProjection (not the concrete WorkflowRunQuerier); no State-deserializing member is reachable from the task-log upload or query paths.",
+        "Spec test uses a fake IWorkflowRunWorkProjection to verify upload (active->persist, inactive/unknown->4xx) and query (hit->page, miss->empty page) behavior, plus publish-scope stamping (taskId + projectId) for task workIds and a null scope (no fan-out) for unmappable/checks workIds — all identical to the prior contract.",
         "Task-log HTTP/wire contract is unchanged.",
         "Server test suite (npm test) passes."
       ],

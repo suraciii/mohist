@@ -21,11 +21,13 @@ WorkflowRun `State`. This replaces the two full `State` loads the upload previou
 ### Requirement: Publish scope preserves workId-to-taskId and projectId resolution
 
 For an accepted workflow-owned upload, the publish-scope resolution SHALL resolve the
-`workId → taskId` mapping from the run-work projection and the `projectId` from the existing
-`WorkflowRunRow.MetadataProjectId` projection column. When the `workId` cannot be mapped to a
-`taskId` (or the owner is not workflow-owned), the resolved `taskId` SHALL be null, and the
-publisher SHALL treat a null `taskId` as "no matching subscription, no fan-out" — identical to
-today's behavior. Fan-out remains best-effort and never blocks persistence.
+`workId → taskId` mapping from the run-work projection and, only when a `taskId` is resolved,
+the `projectId` from the existing `WorkflowRunRow.MetadataProjectId` projection column. When the
+`workId` cannot be mapped to a `taskId` (including checks workIds, which are not `TaskRun`s; or
+the owner is not workflow-owned), the publish scope SHALL be null as a whole — both `taskId` and
+`projectId` absent — matching today's behavior where `ResolvePublishScopeAsync` returns `null`
+rather than a partial scope. The publisher SHALL treat a null `taskId` as "no matching
+subscription, no fan-out." Fan-out remains best-effort and never blocks persistence.
 
 #### Scenario: publish scope stamped with taskId and projectId
 
@@ -33,11 +35,12 @@ today's behavior. Fan-out remains best-effort and never blocks persistence.
 - **THEN** the published delta envelope carries that `taskId` and the run's `projectId`, with
   no `State` deserialization
 
-#### Scenario: unmappable workId yields null taskId and no fan-out
+#### Scenario: unmappable workId yields a null scope and no fan-out
 
-- **WHEN** an accepted upload's `workId` has no entry in the run-work projection (or the owner
-  kind is not workflow)
-- **THEN** the published envelope carries a null `taskId` and no subscriber is notified
+- **WHEN** an accepted upload's `workId` has no entry in the run-work projection (a checks
+  workId, or any non-task workId; or the owner kind is not workflow)
+- **THEN** the publish scope is null (both `taskId` and `projectId` absent), and no subscriber
+  is notified
 
 ### Requirement: Log query resolves taskId to workId without State
 

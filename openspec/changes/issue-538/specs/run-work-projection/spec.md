@@ -4,9 +4,13 @@ A WorkflowRun SHALL expose a persisted projection of its work surface that is su
 for the task-log read path (and future read paths) to resolve work identity and active-work
 membership. The projection SHALL contain, for the run:
 
-- The run-wide `taskId ↔ workId` mapping covering every `TaskRun` in every stage, where
-  `taskId` is `TaskRun.Id` and `workId` is the task's effective work identifier
-  (`TaskRun.WorkId`, falling back to `TaskRun.Id` when `WorkId` is unset).
+- The run-wide set of `TaskRun`s across every stage, each recorded as a
+  `taskId ↔ workId` entry where `taskId` is `TaskRun.Id` and `workId` is the task's effective
+  work identifier. Today `workId == taskId` for every task that has logs: `WorkId` is set to the
+  logical task id on dispatch (`StartTask` → `task.WorkId = logicalTaskId`, and the logical id
+  equals `TaskRun.Id`), so the correspondence is currently identity. The projection carries
+  `workId` explicitly so it stays correct if a future change lets `WorkId` diverge from `Id`;
+  for any task whose `WorkId` is unset it projects `workId = TaskRun.Id` to stay well-defined.
 - The single current active-work identity, if any: the effective `workId` and the owning
   `workerId` of the currently-running work in the run's current stage. A run has at most one
   active work at a time (the current stage's `Running` task claimed by a worker, or active
@@ -21,10 +25,17 @@ dispatch payloads, prompts, or any field outside the work-surface identity.
 - **THEN** the projection's `taskId ↔ workId` mapping contains an entry for every task in
   every stage, including completed ones, not only the current stage
 
-#### Scenario: effective work id falls back to task id
+#### Scenario: correspondence is identity for dispatched tasks
 
-- **WHEN** a `TaskRun` has a null or empty `WorkId`
-- **THEN** its projected `workId` equals its `TaskRun.Id`
+- **WHEN** a `TaskRun` has been dispatched (started/running/completed/failed)
+- **THEN** its projected `workId` equals its `taskId` (`TaskRun.Id`), matching the value the
+  runner uses to upload, since `WorkId` is set to the logical task id on start
+
+#### Scenario: unset work id stays well-defined
+
+- **WHEN** a `TaskRun` has a null or empty `WorkId` (a not-yet-dispatched pending task, which
+  has no logs)
+- **THEN** its projected `workId` equals its `TaskRun.Id`, so the projection has no null work id
 
 #### Scenario: active work is the single current running work
 
