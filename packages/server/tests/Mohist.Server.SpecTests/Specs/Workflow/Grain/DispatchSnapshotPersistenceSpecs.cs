@@ -20,6 +20,19 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
     private IDispatchSnapshotStore Store(IServiceProvider services) =>
         services.GetRequiredService<IDispatchSnapshotStore>();
 
+    private static async Task<WorkDispatch?> LoadAsync(IDispatchSnapshotStore store, string runId, string workId)
+    {
+        var json = await store.LoadJsonAsync(runId, workId);
+        return json is null ? null : JSON.Deserialize<WorkDispatch>(json);
+    }
+
+    private static async Task<WorkDispatch> SaveFirstAsync(
+        IDispatchSnapshotStore store, string runId, string workId, WorkDispatch dispatch)
+    {
+        var json = await store.SaveFirstJsonAsync(runId, workId, JSON.Serialize(dispatch));
+        return JSON.Deserialize<WorkDispatch>(json)!;
+    }
+
     [Fact]
     public async Task PersistedTaskRun_StateHasNoDispatchSnapshot_SnapshotInSeparateStore()
     {
@@ -30,7 +43,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         var (dispatch, _) = await PollWorkAnyAsync();
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
-        var stored = await Store(scope.ServiceProvider).LoadAsync(_workflowId!, dispatch.WorkId);
+        var stored = await LoadAsync(Store(scope.ServiceProvider), _workflowId!, dispatch.WorkId);
         Assert.Equal(dispatch, stored);
 
         var run = await LoadRunAsync(_workflowId!);
@@ -69,11 +82,11 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
 
-        var second = await store.SaveFirstAsync(_workflowId!, first.WorkId,
+        var second = await SaveFirstAsync(store, _workflowId!, first.WorkId,
             first with { Uses = "spec/second" });
 
         Assert.Equal(first, second);
-        var loaded = await store.LoadAsync(_workflowId!, first.WorkId);
+        var loaded = await LoadAsync(store, _workflowId!, first.WorkId);
         Assert.Equal(first, loaded);
     }
 
@@ -89,7 +102,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
-        Assert.Null(await store.LoadAsync(_workflowId!, task.WorkId));
+        Assert.Null(await LoadAsync(store, _workflowId!, task.WorkId));
     }
 
     [Fact]
@@ -104,7 +117,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
-        Assert.Null(await store.LoadAsync(_workflowId!, task.WorkId));
+        Assert.Null(await LoadAsync(store, _workflowId!, task.WorkId));
     }
 
     [Fact]
@@ -124,8 +137,8 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
-        Assert.Null(await store.LoadAsync(_workflowId!, first.WorkId));
-        Assert.NotNull(await store.LoadAsync(_workflowId!, second.WorkId));
+        Assert.Null(await LoadAsync(store, _workflowId!, first.WorkId));
+        Assert.NotNull(await LoadAsync(store, _workflowId!, second.WorkId));
     }
 
     [Fact]
@@ -140,7 +153,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
-        Assert.Null(await store.LoadAsync(_workflowId!, task.WorkId));
+        Assert.Null(await LoadAsync(store, _workflowId!, task.WorkId));
     }
 
     [Fact]
@@ -157,7 +170,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
 
         await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var store = Store(scope.ServiceProvider);
-        Assert.Null(await store.LoadAsync(_workflowId!, checksList.Work.WorkId));
+        Assert.Null(await LoadAsync(store, _workflowId!, checksList.Work.WorkId));
 
         var checksWork = checksList.Work;
         await DeactivateWorkflowAsync(_workflowId!);
@@ -186,7 +199,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         await using (var verifyScope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
             var store = Store(verifyScope.ServiceProvider);
-            Assert.Null(await store.LoadAsync(_workflowId!, task.WorkId));
+            Assert.Null(await LoadAsync(store, _workflowId!, task.WorkId));
         }
     }
 
@@ -202,7 +215,7 @@ public class DispatchSnapshotPersistenceSpecs : WorkflowGrainSpecs
         await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
         {
             var snapshots = Store(scope.ServiceProvider);
-            var stored = await snapshots.LoadAsync(_workflowId!, task.WorkId);
+            var stored = await LoadAsync(snapshots, _workflowId!, task.WorkId);
             Assert.NotNull(stored);
         }
     }

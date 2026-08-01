@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
@@ -16,6 +17,21 @@ public class DispatchSnapshotStoreTests
             WorkId: workId,
             Uses: uses,
             With: """{"prompt":"hello"}""");
+
+    // The store persists raw snapshot JSON; these helpers bridge to the
+    // WorkDispatch shape so assertions stay on the domain record.
+    private static async Task<WorkDispatch> SaveFirstAsync(
+        DispatchSnapshotStore store, string runId, string workId, WorkDispatch dispatch)
+    {
+        var json = await store.SaveFirstJsonAsync(runId, workId, JSON.Serialize(dispatch));
+        return JSON.Deserialize<WorkDispatch>(json)!;
+    }
+
+    private static async Task<WorkDispatch?> LoadAsync(DispatchSnapshotStore store, string runId, string workId)
+    {
+        var json = await store.LoadJsonAsync(runId, workId);
+        return json is null ? null : JSON.Deserialize<WorkDispatch>(json);
+    }
 
     private static async Task<Harness> CreateHarnessAsync()
     {
@@ -40,10 +56,10 @@ public class DispatchSnapshotStoreTests
         await using var harness = await CreateHarnessAsync();
         var dispatch = BuildDispatch("wr_a", "task-1.1");
 
-        var stored = await harness.Store.SaveFirstAsync("wr_a", "task-1.1", dispatch);
+        var stored = await SaveFirstAsync(harness.Store, "wr_a", "task-1.1", dispatch);
 
         Assert.Equal(dispatch, stored);
-        var loaded = await harness.Store.LoadAsync("wr_a", "task-1.1");
+        var loaded = await LoadAsync(harness.Store, "wr_a", "task-1.1");
         Assert.Equal(dispatch, loaded);
     }
 
@@ -54,12 +70,12 @@ public class DispatchSnapshotStoreTests
         var first = BuildDispatch("wr_b", "task-1.1", uses: "spec/first");
         var second = BuildDispatch("wr_b", "task-1.1", uses: "spec/second");
 
-        await harness.Store.SaveFirstAsync("wr_b", "task-1.1", first);
-        var result = await harness.Store.SaveFirstAsync("wr_b", "task-1.1", second);
+        await SaveFirstAsync(harness.Store, "wr_b", "task-1.1", first);
+        var result = await SaveFirstAsync(harness.Store, "wr_b", "task-1.1", second);
 
         Assert.Equal(first, result);
         Assert.NotEqual(second, result);
-        var loaded = await harness.Store.LoadAsync("wr_b", "task-1.1");
+        var loaded = await LoadAsync(harness.Store, "wr_b", "task-1.1");
         Assert.Equal(first, loaded);
     }
 
@@ -67,11 +83,11 @@ public class DispatchSnapshotStoreTests
     public async Task DeleteAsync_RemovesRowThatExists()
     {
         await using var harness = await CreateHarnessAsync();
-        await harness.Store.SaveFirstAsync("wr_c", "task-1.1", BuildDispatch("wr_c", "task-1.1"));
+        await SaveFirstAsync(harness.Store, "wr_c", "task-1.1", BuildDispatch("wr_c", "task-1.1"));
 
         await harness.Store.DeleteAsync("wr_c", "task-1.1");
 
-        Assert.Null(await harness.Store.LoadAsync("wr_c", "task-1.1"));
+        Assert.Null(await LoadAsync(harness.Store, "wr_c", "task-1.1"));
     }
 
     [Fact]
@@ -81,39 +97,39 @@ public class DispatchSnapshotStoreTests
 
         await harness.Store.DeleteAsync("wr_missing", "task-1.1");
 
-        Assert.Null(await harness.Store.LoadAsync("wr_missing", "task-1.1"));
+        Assert.Null(await LoadAsync(harness.Store, "wr_missing", "task-1.1"));
     }
 
     [Fact]
     public async Task DeleteForRunAsync_RemovesAllSnapshotsForRun()
     {
         await using var harness = await CreateHarnessAsync();
-        await harness.Store.SaveFirstAsync("wr_d", "task-1.1", BuildDispatch("wr_d", "task-1.1"));
-        await harness.Store.SaveFirstAsync("wr_d", "task-1.2", BuildDispatch("wr_d", "task-1.2"));
-        await harness.Store.SaveFirstAsync("wr_e", "task-1.1", BuildDispatch("wr_e", "task-1.1"));
+        await SaveFirstAsync(harness.Store, "wr_d", "task-1.1", BuildDispatch("wr_d", "task-1.1"));
+        await SaveFirstAsync(harness.Store, "wr_d", "task-1.2", BuildDispatch("wr_d", "task-1.2"));
+        await SaveFirstAsync(harness.Store, "wr_e", "task-1.1", BuildDispatch("wr_e", "task-1.1"));
 
         await harness.Store.DeleteForRunAsync("wr_d");
 
-        Assert.Null(await harness.Store.LoadAsync("wr_d", "task-1.1"));
-        Assert.Null(await harness.Store.LoadAsync("wr_d", "task-1.2"));
-        Assert.NotNull(await harness.Store.LoadAsync("wr_e", "task-1.1"));
+        Assert.Null(await LoadAsync(harness.Store, "wr_d", "task-1.1"));
+        Assert.Null(await LoadAsync(harness.Store, "wr_d", "task-1.2"));
+        Assert.NotNull(await LoadAsync(harness.Store, "wr_e", "task-1.1"));
     }
 
     [Fact]
-    public async Task LoadAsync_ReturnsNullForUnknownRun()
+    public async Task LoadJsonAsync_ReturnsNullForUnknownRun()
     {
         await using var harness = await CreateHarnessAsync();
 
-        Assert.Null(await harness.Store.LoadAsync("wr_unknown", "task-1.1"));
+        Assert.Null(await harness.Store.LoadJsonAsync("wr_unknown", "task-1.1"));
     }
 
     [Fact]
-    public async Task LoadAsync_EmptyKeysReturnNull()
+    public async Task LoadJsonAsync_EmptyKeysReturnNull()
     {
         await using var harness = await CreateHarnessAsync();
 
-        Assert.Null(await harness.Store.LoadAsync("", "task-1.1"));
-        Assert.Null(await harness.Store.LoadAsync("wr_x", ""));
+        Assert.Null(await harness.Store.LoadJsonAsync("", "task-1.1"));
+        Assert.Null(await harness.Store.LoadJsonAsync("wr_x", ""));
     }
 
     private sealed record Harness(
