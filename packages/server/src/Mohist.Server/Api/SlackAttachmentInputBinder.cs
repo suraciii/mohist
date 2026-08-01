@@ -57,6 +57,7 @@ public sealed class SlackAttachmentInputBinder(
             if (await attachments.ExistsAsync(projectId, attachmentId, ct).ConfigureAwait(false))
             {
                 candidates.Add(attachmentId);
+                results.Add(new AgentInputAttachmentAcceptance(attachmentId, null, null, null));
                 continue;
             }
 
@@ -92,6 +93,7 @@ public sealed class SlackAttachmentInputBinder(
                     content.Stream,
                     ct).ConfigureAwait(false);
                 candidates.Add(attachmentId);
+                results.Add(new AgentInputAttachmentAcceptance(attachmentId, null, null, null));
             }
             catch (SlackFileNotReadableException)
             {

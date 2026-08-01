@@ -654,7 +654,8 @@ public static class SlackConnectionRoutes
         string Status,
         string SessionId,
         string InputId,
-        string TurnId);
+        string TurnId,
+        SlackAttachmentBinding? AttachmentBinding = null);
 
     /// <summary>
     /// Routes a normal DM into the current session of the conversation
@@ -668,14 +669,36 @@ public static class SlackConnectionRoutes
     /// </summary>
     private static async Task<FollowupRouteResult> RouteFollowupAsync(
         string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        IReadOnlyList<SlackIngressFile> files,
         string currentSessionId,
         string prompt,
         string idempotencyKey,
         AgentSessionInputProvenance provenance,
+        SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         CancellationToken ct)
     {
+        var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken(
+            $"{currentSessionId}\n{idempotencyKey}\nfollowup-input");
+        var attachmentBinding = await attachmentBinder.PrepareAsync(
+            projectId,
+            connection,
+            identity,
+            currentSessionId,
+            preMintedInputId,
+            files,
+            ct);
+        if (string.IsNullOrWhiteSpace(prompt) && attachmentBinding.AcceptedCount == 0)
+        {
+            await attachmentBinder.RollbackAsync(
+                projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult(
+                "followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
+        }
+
         var grain = grains.GetGrain<IAgentSessionGrain>(currentSessionId);
         AgentSessionFollowupAcceptResult accept;
         try
@@ -684,47 +707,57 @@ public static class SlackConnectionRoutes
                 Text: prompt,
                 Source: "agent-session-followup",
                 IdempotencyKey: idempotencyKey,
+                Attachments: attachmentBinding.AcceptedDescriptors,
+                PreMintedInputId: preMintedInputId,
+                AttachmentResults: attachmentBinding.Results,
                 Provenance: provenance));
         }
         catch (RuntimeSessionMissingException)
         {
-            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (RecoveryOperationInProgressException)
         {
-            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (AgentSessionFollowupCapacityExceededException)
         {
-            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (StopOperationInProgressException)
         {
-            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (SessionActivityUnknownException)
         {
-            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (FollowupConcurrencyLimitException)
         {
-            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (InvalidOperationException)
         {
-            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
 
         await followupDispatcher.DispatchNextAsync(projectId, currentSessionId, ct);
 
         if (accept.AlreadyAccepted)
-            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId);
+            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
         var status = accept.TurnStatus switch
         {
             AgentTurnStatus.Executing => "executing",
             _ => "queued",
         };
-        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId);
+        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
     }
 
     /// <summary>
@@ -1221,17 +1254,24 @@ public static class SlackConnectionRoutes
          }
 
 
-        var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
-        var followupResult = await RouteFollowupAsync(
-            projectId,
-            route.SessionId!,
-            prompt,
-            idempotencyKey,
-            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
-            req.Grains,
-            req.FollowupDispatcher,
-            ct);
-        var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+         var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+         var followupResult = await RouteFollowupAsync(
+             projectId,
+             connection,
+             req.Identity,
+             body.Files,
+             route.SessionId!,
+             prompt,
+             idempotencyKey,
+             BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+             req.AttachmentBinder,
+             req.Grains,
+             req.FollowupDispatcher,
+             ct);
+         var followupAck = BuildAttachmentAck(
+             BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
+             body.Files,
+             followupResult.AttachmentBinding);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             followupAck,
             $"slack-ack:{req.Identity.AsKey()}",
@@ -2017,17 +2057,24 @@ public static class SlackConnectionRoutes
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
 
-        var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
-        var followupResult = await RouteFollowupAsync(
-            projectId,
-            sessionId,
-            prompt,
-            idempotencyKey,
-            BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
-            req.Grains,
-            req.FollowupDispatcher,
-            ct);
-        var ack = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+         var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
+         var followupResult = await RouteFollowupAsync(
+             projectId,
+             connection,
+             req.Identity,
+             body.Files,
+             sessionId,
+             prompt,
+             idempotencyKey,
+             BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+             req.AttachmentBinder,
+             req.Grains,
+             req.FollowupDispatcher,
+             ct);
+         var ack = BuildAttachmentAck(
+             BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
+             body.Files,
+             followupResult.AttachmentBinding);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             ack, dispatchRef, ct, body.ThreadTs);
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);

@@ -211,6 +211,173 @@ public sealed class SlackDmSessionMappingIngressSpecs
     }
 
     [Fact]
+    public async Task Ingress_followup_with_file_binds_slack_file_to_followup_input()
+    {
+        var connection = await CreateConnectionAsync();
+        var sessionId = $"session-followup-files-{connection.Id}";
+        await using (var setupScope = _fixture.Services.CreateAsyncScope())
+        {
+            var setupDb = setupScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var mapping = setupScope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
+            var now = _fixture.TimeProvider.GetUtcNow();
+            var sessionState = """
+                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP-FILES","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup-files","activity":"active","createdAt":"__NOW__","lastDataAt":"__NOW__"}}
+                """;
+            sessionState = sessionState
+                .Replace("__SESSION__", sessionId)
+                .Replace("__PROJECT__", connection.ProjectId)
+                .Replace("__CONNECTION__", connection.Id)
+                .Replace("__NOW__", now.UtcDateTime.ToString("O"));
+            setupDb.AgentSessions.Add(new AgentSessionRow
+            {
+                Id = sessionId,
+                AgentSessionId = "runtime-followup-files",
+                RunnerId = "r1",
+                Status = "bound",
+                State = sessionState,
+                CreatedAt = now.UtcDateTime,
+            });
+            setupDb.AgentSessionTranscriptTurns.Add(new AgentSessionTranscriptTurnRow
+            {
+                SessionId = sessionId,
+                RuntimeSessionId = "runtime-followup-files",
+                Sequence = 1,
+                PromptText = "initial",
+                PromptKind = "task",
+                StartedAt = now.UtcDateTime,
+                UpdatedAt = now.UtcDateTime,
+            });
+            await setupDb.SaveChangesAsync();
+
+            await mapping.SetCurrentSessionIdAsync(
+                connection.ProjectId, connection.Id, connection.WorkspaceTeamId, "U_OWNER",
+                "D-DM-FOLLOWUP-FILES", sessionId);
+        }
+
+        _fixture.Slack.FileContentResolver = fileId =>
+        {
+            return fileId switch
+            {
+                "F-DM-FOLLOWUP-FILE" => new SlackFileContent(
+                    new MemoryStream("followup"u8.ToArray()),
+                    "followup.txt",
+                    "text/plain",
+                    8,
+                    new MemoryStream()),
+                _ => throw new InvalidOperationException(fileId),
+            };
+        };
+
+         var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+         {
+             isDirectMessage = true,
+             teamId = connection.WorkspaceTeamId,
+             conversationId = "D-DM-FOLLOWUP-FILES",
+             messageTs = "1710000000.000800",
+             senderSlackUserId = "U_OWNER",
+             text = "",
+             files = new[]
+             {
+                 new { id = "F-DM-FOLLOWUP-FILE", name = "followup.txt", mimetype = "text/plain", size = 8 },
+             },
+         });
+         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+         var data = document.RootElement.GetProperty("data");
+         Assert.True(data.GetProperty("followup").GetBoolean(), await response.Content.ReadAsStringAsync());
+         var inputId = data.GetProperty("inputId").GetString();
+         Assert.False(string.IsNullOrWhiteSpace(inputId));
+         Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
+
+         await using var verifyScope = _fixture.Services.CreateAsyncScope();
+         var verifyDb = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+         var row = await verifyDb.Attachments.SingleAsync(attachment =>
+             attachment.ProjectId == connection.ProjectId
+             && attachment.OwnerKind == "agent-input"
+             && attachment.OwnerId == $"{sessionId}/{inputId}");
+         Assert.Equal("slack", row.Source);
+         Assert.Equal(1, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-FOLLOWUP-FILE"));
+
+         using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+         {
+             isDirectMessage = true,
+             teamId = connection.WorkspaceTeamId,
+             conversationId = "D-DM-FOLLOWUP-FILES",
+             messageTs = "1710000000.000800",
+             senderSlackUserId = "U_OWNER",
+             text = "",
+             files = new[]
+             {
+                 new { id = "F-DM-FOLLOWUP-FILE", name = "followup.txt", mimetype = "text/plain", size = 8 },
+             },
+         });
+         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+         Assert.Equal(1, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-FOLLOWUP-FILE"));
+     }
+
+    [Fact]
+    public async Task Ingress_followup_with_oversized_file_reports_rejection_individually()
+    {
+        var connection = await CreateConnectionAsync();
+        var sessionId = $"session-followup-rejection-{connection.Id}";
+        await using (var setupScope = _fixture.Services.CreateAsyncScope())
+        {
+            var setupDb = setupScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var mapping = setupScope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
+            var now = _fixture.TimeProvider.GetUtcNow();
+            var sessionState = """
+                {"id":"__SESSION__","metadata":{"labels":{"mohist.io/project-id":"__PROJECT__","mohist.io/source-kind":"agent-connection","mohist.io/connection-id":"__CONNECTION__","mohist.io/slack-user-id":"U_OWNER","mohist.io/slack-conversation-id":"D-DM-FOLLOWUP-REJECT","mohist.io/agent-id":"agent-1","mohist.io/agent-name":"Mohist Agent"}},"runtime":{"runnerId":"r1","workDir":null,"runtime":"opencode"},"settings":{"model":"gpt-4o"},"status":{"agentRuntimeSessionId":"runtime-followup-reject","activity":"active","createdAt":"__NOW__","lastDataAt":"__NOW__"}}
+                """;
+            sessionState = sessionState
+                .Replace("__SESSION__", sessionId)
+                .Replace("__PROJECT__", connection.ProjectId)
+                .Replace("__CONNECTION__", connection.Id)
+                .Replace("__NOW__", now.UtcDateTime.ToString("O"));
+            setupDb.AgentSessions.Add(new AgentSessionRow
+            {
+                Id = sessionId,
+                AgentSessionId = "runtime-followup-reject",
+                RunnerId = "r1",
+                Status = "bound",
+                State = sessionState,
+                CreatedAt = now.UtcDateTime,
+            });
+            await setupDb.SaveChangesAsync();
+
+            await mapping.SetCurrentSessionIdAsync(
+                connection.ProjectId, connection.Id, connection.WorkspaceTeamId, "U_OWNER",
+                "D-DM-FOLLOWUP-REJECT", sessionId);
+        }
+
+        using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-FOLLOWUP-REJECT",
+            messageTs = "1710000000.000850",
+            senderSlackUserId = "U_OWNER",
+            text = "",
+            files = new[]
+            {
+                new { id = "F-DM-FOLLOWUP-OVERSIZE", name = "big.bin", mimetype = "application/octet-stream", size = long.MaxValue },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        Assert.Equal("followup_rejected", data.GetProperty("kind").GetString());
+        Assert.Equal(sessionId, data.GetProperty("sessionId").GetString());
+
+        await using var followupScope = _fixture.Services.CreateAsyncScope();
+        var followupDb = followupScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var rows = await followupDb.Attachments
+            .Where(attachment => attachment.ProjectId == connection.ProjectId && attachment.OwnerKind == "agent-input")
+            .CountAsync();
+        Assert.Equal(0, rows);
+    }
+
+    [Fact]
     public async Task Ingress_followup_path_records_kinds_when_session_is_bound()
     {
         var connection = await CreateConnectionAsync();
