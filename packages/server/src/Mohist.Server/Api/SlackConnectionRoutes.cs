@@ -413,25 +413,13 @@ public static class SlackConnectionRoutes
         CancellationToken ct)
     {
         var body = req.Body;
-        var read = await req.ThreadHistory.ReadAsync(
+        return await req.ThreadHistory.ReadAsync(
             req.ProjectId,
             req.Connection.Id,
             body.ConversationId,
             rootTs,
             body.MessageTs,
             ct);
-        if (read.Outcome == SlackThreadHistoryReadOutcome.Refused)
-        {
-            await req.ThreadLaunchReservations.ReleaseAsync(
-                req.ProjectId,
-                body.TeamId,
-                req.Connection.Id,
-                body.ConversationId,
-                rootTs,
-                body.MessageTs,
-                ct);
-        }
-        return read;
     }
 
     private static AgentStartupContext BuildStartupContext(

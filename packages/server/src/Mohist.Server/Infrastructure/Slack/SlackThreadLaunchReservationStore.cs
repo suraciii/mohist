@@ -114,36 +114,6 @@ public sealed class SlackThreadLaunchReservationStore : IScopedService, IAgentCo
         return stored;
     }
 
-    /// <summary>
-    /// Release the unbound reservation owned by the supplied launch
-    /// message — used by the Slack first-mention path on a
-    /// refuse-on-incomplete read so a later re-mention can proceed
-    /// without waiting for the stale-reservation sweep. No-op when the
-    /// reservation has already been bound or did not exist.
-    /// </summary>
-    public async Task ReleaseAsync(
-        string projectId,
-        string workspaceTeamId,
-        string connectionId,
-        string conversationId,
-        string threadTs,
-        string launchMessageTs,
-        CancellationToken ct = default)
-    {
-        Validate(projectId, workspaceTeamId, connectionId, conversationId, threadTs, launchMessageTs, "slack-user");
-
-        await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        await db.SlackThreadLaunchReservations
-            .Where(row => row.ProjectId == projectId
-                && row.ConnectionId == connectionId
-                && row.WorkspaceTeamId == workspaceTeamId
-                && row.ConversationId == conversationId
-                && row.ThreadTs == threadTs
-                && row.LaunchMessageTs == launchMessageTs
-                && row.SessionId == null)
-            .ExecuteDeleteAsync(ct);
-    }
-
     public async Task<int> DeleteForConnectionAsync(string projectId, string connectionId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))

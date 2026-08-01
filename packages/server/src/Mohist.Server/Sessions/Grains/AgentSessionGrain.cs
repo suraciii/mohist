@@ -2182,19 +2182,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             return;
 
         alreadyPersisted = true;
-if (inputMatch is not null)
+        if (inputMatch is not null)
+        {
+            if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
+                || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
+                || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
+                || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
+                || !Equals(inputMatch.Provenance, command.Provenance)
+                || !Equals(inputMatch.StartupContext, command.StartupContext))
             {
-                if (!string.Equals(inputMatch.Text, command.Prompt, StringComparison.Ordinal)
-                    || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
-                    || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
-                    || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
-                    || !Equals(inputMatch.Provenance, command.Provenance)
-                    || !Equals(inputMatch.StartupContext, command.StartupContext))
-                {
-                    throw new InvalidOperationException(
-                        $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");
-                }
+                throw new InvalidOperationException(
+                    $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");
             }
+        }
 
         if (turnMatch is not null)
         {
