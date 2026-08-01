@@ -16,6 +16,9 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
     public SlackUserInfoResponse UsersInfo { get; set; } = new(true, null, new("U1", "T1", false, false, false, false, false));
     public SlackConversationInfoResponse ConversationsInfo { get; set; } = new(true, null, new("D1", null, null, true, true));
     public SlackUsersListResponse UsersList { get; set; } = new(true, null, [], null);
+    public Queue<SlackConversationsRepliesPage> ConversationsRepliesPages { get; } = new();
+    public SlackConversationsRepliesPage ConversationsRepliesResult { get; set; } = new(true, null, [], null);
+    public SlackConversationsRepliesPage? ConversationsRepliesError { get; set; }
 
     public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default)
     {
@@ -57,5 +60,20 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
     {
         Calls.Add("users.list");
         return Task.FromResult(UsersList);
+    }
+
+    public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+        string conversationId,
+        string threadTs,
+        string? cursor,
+        string botToken,
+        CancellationToken ct = default)
+    {
+        Calls.Add($"conversations.replies:{conversationId}:{threadTs}:{cursor}");
+        if (ConversationsRepliesError is not null)
+            return Task.FromResult(ConversationsRepliesError);
+        if (ConversationsRepliesPages.Count > 0)
+            return Task.FromResult(ConversationsRepliesPages.Dequeue());
+        return Task.FromResult(ConversationsRepliesResult);
     }
 }

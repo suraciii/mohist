@@ -163,8 +163,9 @@ Connection health、Agent Readiness 四类事实分离）、无状态 `mohist-sl
 Setup、Server 持有的 provider inbox / conversation mapping / outbound outbox、Owner-only
 DM 垂直路径均已实装，真实 Agent 已可从 Slack 私聊使用。第 1 步的跨入口契约仍未完整（见
 [`agent-api.md`](agent-api.md)）。第 4 步已部分落地：频道与 thread 路由、多 Agent 归属判定、
-Owner-only 频道权限、输入 provenance、重复投递保护和 thread 内出站投递已经实装；Allowlist/
-Anyone、附件与已有 thread 历史、频道控制操作仍未提供。
+Owner-only 频道权限、输入 provenance、重复投递保护和 thread 内出站投递已经实装；首次
+提及时已有 thread 历史作为可截断的 read-only 背景导入也已完成；Allowlist/Anyone、附件、
+频道控制操作仍未提供。
 
 Slack 原生 Agent 体验是后续阶段：它换的是 Slack 侧的入口和呈现，不改变 Agent 能力、执行结果或
 本文的任何边界。它会引入不可回退的 App 类型选择，因此要等 Standard Bot 路径被真实使用验证之后

@@ -166,6 +166,12 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUserInfoResponse(true, null, null));
         public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackConversationInfoResponse(true, null, null));
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+        public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+            string conversationId,
+            string threadTs,
+            string? cursor,
+            string botToken,
+            CancellationToken ct = default) => Task.FromResult(new SlackConversationsRepliesPage(true, null, [], null));
     }
 
     private sealed class FakeSecretStore : ISecretStore

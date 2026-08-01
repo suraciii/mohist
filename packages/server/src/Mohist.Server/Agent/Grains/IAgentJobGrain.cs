@@ -151,7 +151,21 @@ public sealed record PrepareManualLaunchCommand(
     /// attachment state. Append-only Orleans field id (next free
     /// after <see cref="ConnectionOrigin"/>).
     /// </summary>
-    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches as
+    /// first-launch-only background. Persisted on the durable
+    /// AgentJob plan so dispatch composes the same snapshot the
+    /// route accepted; the dispatched prompt is composed at
+    /// <c>BuildDispatch</c> time via
+    /// <see cref="Mohist.Server.Agent.Services.AgentStartupContextComposer"/>
+    /// so <see cref="Prompt"/> stays task-only and the work label
+    /// stays clean. Null when no startup context was supplied —
+    /// the absence is observationally identical to before this
+    /// capability existed. Append-only Orleans field id (next free
+    /// after <see cref="Attachments"/>).
+    /// </summary>
+    [property: Id(17)] AgentStartupContext? StartupContext = null);
 
 [GenerateSerializer]
 public sealed record PendingTerminalDeliveryEvent(
@@ -507,7 +521,25 @@ public sealed record AgentJobInput(
     /// Append-only Orleans field id (next free after
     /// <see cref="InitialTurnId"/>).
     /// </summary>
-    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(16)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches as
+    /// first-launch-only background. Persisted on the durable
+    /// AgentJob plan so dispatch composes the same snapshot the
+    /// route accepted; the dispatch envelope's <c>prompt</c> is
+    /// composed at <c>BuildDispatch</c> time via
+    /// <see cref="Mohist.Server.Agent.Services.AgentStartupContextComposer"/>
+    /// so <see cref="Prompt"/> stays task-only and the work label
+    /// (derived from <see cref="Prompt"/>) stays clean. The Agent's
+    /// Instructions / Runtime / Model / Variant / Skills are
+    /// unaffected by the background; the background is composed
+    /// only into the dispatched <c>prompt</c> user input. Null
+    /// when no startup context was supplied — the absence is
+    /// observationally identical to before this capability existed.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="Attachments"/>).
+    /// </summary>
+    [property: Id(17)] AgentStartupContext? StartupContext = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

@@ -2154,7 +2154,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 jobId: command.JobId,
                 now: Now(),
                 attachments: command.Attachments,
-                provenance: command.Provenance);
+                provenance: command.Provenance,
+                startupContext: command.StartupContext);
         }
 
         await _stateStore.SaveAsync(SessionId, _session);
@@ -2187,7 +2188,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 || !string.Equals(inputMatch.Source, command.Source, StringComparison.Ordinal)
                 || !string.Equals(inputMatch.JobId, command.JobId, StringComparison.Ordinal)
                 || !AttachmentSetEquivalent(inputMatch.Attachments, command.Attachments)
-                || !Equals(inputMatch.Provenance, command.Provenance))
+                || !Equals(inputMatch.Provenance, command.Provenance)
+                || !Equals(inputMatch.StartupContext, command.StartupContext))
             {
                 throw new InvalidOperationException(
                     $"AgentSession {SessionId} already has input '{command.InputId}' with different content/source/job/attachments.");

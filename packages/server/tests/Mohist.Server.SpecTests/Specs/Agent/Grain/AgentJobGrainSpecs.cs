@@ -334,7 +334,13 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
             AgentSessionId: sessionId,
             AgentId: "agent-test"));
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        // Stay below the configured DispatchRetryBound (5s): a leaked
+        // runner from a parallel test can admit this job via the global
+        // registry and set ReadySince, after which advancing past the
+        // bound would trip the readiness timeout. The no-runner case
+        // never sets ReadySince, so the advance only needs to exercise
+        // CheckTimeouts without exceeding the bound.
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(4));
         await job.CheckTimeoutsAsync();
 
         // Issue-520 D4: a job with no eligible runner now stays Pending —
