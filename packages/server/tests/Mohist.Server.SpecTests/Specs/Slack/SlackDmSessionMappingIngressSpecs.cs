@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -92,6 +93,121 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 && row.ConversationId == "D-DM-REPLAY")
             .CountAsync();
         Assert.Equal(1, uniqueIdentities);
+    }
+
+    [Fact]
+    public async Task Ingress_redelivery_does_not_re_fetch_or_rebind_attachments()
+    {
+        var connection = await CreateConnectionAsync();
+        _fixture.Slack.FileContentResolver = fileId =>
+        {
+            Assert.Equal("F-DM-REPLAY-ATTACHMENT", fileId);
+            return new SlackFileContent(
+                new MemoryStream("hello"u8.ToArray()),
+                "note.txt",
+                "text/plain",
+                5,
+                new MemoryStream());
+        };
+
+        var payload = new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-REPLAY-ATTACHMENT",
+            messageTs = "1710000000.000500",
+            senderSlackUserId = "U_OWNER",
+            text = "have a look",
+            files = new[]
+            {
+                new { id = "F-DM-REPLAY-ATTACHMENT", name = "note.txt", mimetype = "text/plain", size = 5 },
+            },
+        };
+
+        using var first = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), payload);
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        using var firstDocument = JsonDocument.Parse(await first.Content.ReadAsStringAsync());
+        var firstData = firstDocument.RootElement.GetProperty("data");
+        var firstSession = firstData.GetProperty("sessionId").GetString();
+        Assert.True(firstData.TryGetProperty("inputId", out var firstInputElement),
+            "DM launch must surface a SessionInput id so the caller can correlate the file binding.");
+        var firstInput = firstInputElement.GetString();
+        Assert.False(string.IsNullOrWhiteSpace(firstInput));
+
+        var fetchCountAfterFirst = _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-REPLAY-ATTACHMENT");
+        Assert.Equal(1, fetchCountAfterFirst);
+
+        using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), payload);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        using var replayDocument = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
+        var replayData = replayDocument.RootElement.GetProperty("data");
+        Assert.Equal(firstSession, replayData.GetProperty("sessionId").GetString());
+        if (replayData.TryGetProperty("inputId", out var replayInputElement)
+            && replayInputElement.ValueKind != System.Text.Json.JsonValueKind.Null)
+        {
+            Assert.Equal(firstInput, replayInputElement.GetString());
+        }
+        Assert.Equal(fetchCountAfterFirst, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-REPLAY-ATTACHMENT"));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var rows = await db.Attachments
+            .Where(attachment => attachment.ProjectId == connection.ProjectId
+                && attachment.OwnerKind == "agent-input"
+                && attachment.OwnerId == $"{firstSession}/{firstInput}")
+            .CountAsync();
+        Assert.Equal(1, rows);
+    }
+
+    [Fact]
+    public async Task Ingress_attachment_only_dm_binds_slack_file_to_first_input()
+    {
+        var connection = await CreateConnectionAsync();
+        _fixture.Slack.FileContentResolver = fileId =>
+        {
+            Assert.Equal("F-DM-ATTACHMENT", fileId);
+            return new SlackFileContent(
+                new MemoryStream("hello"u8.ToArray()),
+                "note.txt",
+                "text/plain",
+                5,
+                new MemoryStream());
+        };
+
+        using var response = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-ATTACHMENT",
+            messageTs = "1710000000.000150",
+            senderSlackUserId = "U_OWNER",
+            text = "",
+            files = new[]
+            {
+                new { id = "F-DM-ATTACHMENT", name = "note.txt", mimetype = "text/plain", size = 5 },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        Assert.True(data.TryGetProperty("sessionId", out var sessionIdElement),
+            "attachment-only DM launch must surface the SessionInput owner session id.");
+        var sessionId = sessionIdElement.GetString();
+        Assert.True(data.TryGetProperty("inputId", out var inputIdElement),
+            "attachment-only DM launch must surface a SessionInput id so the caller can correlate the file binding.");
+        var inputId = inputIdElement.GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.False(string.IsNullOrWhiteSpace(inputId));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var row = await db.Attachments.SingleAsync(attachment =>
+            attachment.ProjectId == connection.ProjectId
+            && attachment.OwnerKind == "agent-input"
+            && attachment.OwnerId == $"{sessionId}/{inputId}");
+        Assert.Equal("slack", row.Source);
+        Assert.Equal(1, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-ATTACHMENT"));
     }
 
     [Fact]

@@ -197,20 +197,21 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentName: outcome.AgentName);
     }
 
-public async Task<AgentLaunchResult> LaunchConnectionAsync(
+    public async Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
         AgentStartupContext? startupContext = null,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        IReadOnlyList<string>? attachmentIds = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(origin);
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(trimmedPrompt))
-            throw new ArgumentException(
-                "Prompt must not be empty or whitespace (connection launches do not accept attachments).",
-                nameof(prompt));
 
         var context = new AgentLaunchContext(agent.ProjectId);
         var key = $"slack:{origin.WorkspaceTeamId}:{origin.ConversationId}:{origin.MessageTs}";
@@ -238,9 +239,21 @@ public async Task<AgentLaunchResult> LaunchConnectionAsync(
             Repository: null,
             Title: null,
             Request: new AgentLaunchCoordinatorRequest(
-                trimmedPrompt, agent.Id, null, null, null, null, null, null, null,
+                trimmedPrompt,
+                agent.Id,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                attachmentIds ?? attachments?.Select(attachment => attachment.Id).ToArray(),
                 StartupContext: startupContext),
             ConnectionOrigin: origin,
+            PreMintedSessionId: preMintedSessionId,
+            PreMintedInputId: preMintedInputId,
+            PreMintedTurnId: preMintedTurnId,
+            Attachments: attachments,
             StartupContext: startupContext));
 
         return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);

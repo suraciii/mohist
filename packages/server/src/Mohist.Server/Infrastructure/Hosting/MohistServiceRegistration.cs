@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.AspNetCore.ResponseCompression;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Mohist.Server.Api;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Events.Hosting;
 using Mohist.Server.Events.Hub;
@@ -157,6 +158,7 @@ public static class MohistServiceRegistration
              client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");
              client.Timeout = TimeSpan.FromSeconds(10);
          });
+         services.AddScoped<SlackAttachmentInputBinder>();
 
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);

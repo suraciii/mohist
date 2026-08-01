@@ -29,6 +29,8 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
     public SlackConversationsRepliesPage? ConversationsRepliesError { get; set; }
     public List<string> UsersInfoCalls { get; } = new();
     public List<string> ConversationsInfoCalls { get; } = new();
+    public List<string> FileContentCalls { get; } = new();
+    public Func<string, SlackFileContent>? FileContentResolver { get; set; }
 
     public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) => Task.FromResult(AppsConnectionOpen);
     public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) => Task.FromResult(AuthTest);
@@ -60,8 +62,13 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
             return Task.FromResult(UsersListPages.Dequeue());
         return Task.FromResult(new SlackUsersListResponse(true, null, [], null));
     }
-    public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) =>
-        throw new NotSupportedException();
+    public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default)
+    {
+        FileContentCalls.Add(fileId);
+        if (FileContentResolver is not null)
+            return Task.FromResult(FileContentResolver(fileId));
+        throw new SlackFileNotReadableException(fileId);
+    }
     public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,
         string threadTs,

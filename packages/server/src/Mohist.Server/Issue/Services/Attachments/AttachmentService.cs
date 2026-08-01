@@ -214,6 +214,17 @@ public sealed class AttachmentService : IScopedService
         return ToUploadResult(row);
     }
 
+    public async Task<bool> ExistsAsync(
+        string projectId,
+        string attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.Attachments.AsNoTracking().AnyAsync(
+            row => row.ProjectId == projectId && row.Id == attachmentId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<AttachmentRow?> LoadRowAsync(string id, CancellationToken cancellationToken)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
@@ -646,14 +657,9 @@ public sealed class AttachmentService : IScopedService
         }
     }
 
-    private static bool IsAcceptableAgentInputContentType(string? contentType)
+    public static bool IsAcceptableAgentInputContentType(string? contentType)
     {
         if (string.IsNullOrWhiteSpace(contentType)) return true;
-        // The runtime honors text, image, application/pdf, and common
-        // document types as Agent-readable content. Anything outside this
-        // set is rejected with a clear reason at acceptance time. The
-        // set is intentionally conservative; broadening is a future
-        // capability, not a silent default.
         if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)) return true;
         if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
         if (contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return true;
