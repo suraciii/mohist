@@ -36,8 +36,10 @@ public sealed class SlackThreadContextSpecs
             null,
             new[]
             {
+                Message("1710000000.000100", "U_ROOT", "kicking off the thread"),
                 Message("1710000000.000110", "U_ALICE", "should we ship?"),
                 Message("1710000000.000120", "U_BOB", "yes, after code review"),
+                Message(mentionTs, "U_OWNER", "<@U123> summarize the decision"),
             },
             null));
 
@@ -96,12 +98,13 @@ public sealed class SlackThreadContextSpecs
         var longText = new string('a', 2000);
         var messages = new List<SlackConversationMessage>
         {
-            Message("1710000000.000410", "U_USER_0", longText),
-            Message("1710000000.000420", "U_USER_1", longText),
-            Message("1710000000.000430", "U_USER_2", longText),
-            Message("1710000000.000440", "U_USER_3", longText),
-            Message("1710000000.000445", "U_USER_4", longText),
-            Message("1710000000.000460", "U_NEWEST", "newest message"),
+            Message("1710000000.000405", "U_USER_0", longText),
+            Message("1710000000.000410", "U_USER_1", longText),
+            Message("1710000000.000420", "U_USER_2", longText),
+            Message("1710000000.000430", "U_USER_3", longText),
+            Message("1710000000.000440", "U_USER_4", longText),
+            Message("1710000000.000445", "U_NEWEST", "newest message"),
+            Message(mentionTs, "U_OWNER", "<@U123> summarize"),
         };
         EnqueueReplies(new SlackConversationsRepliesPage(true, null, messages, null));
 
@@ -140,7 +143,7 @@ public sealed class SlackThreadContextSpecs
     }
 
     [Fact]
-    public async Task SlackRejection_RefusesLaunch_ReleasesReservation_AndNoAgentJobCreated()
+    public async Task SlackRejection_RefusesLaunch_AndNoAgentJobCreated()
     {
         var connection = await CreateConnectionAsync();
         const string conversationId = "C-thread-refuse";
@@ -205,7 +208,7 @@ public sealed class SlackThreadContextSpecs
     }
 
     [Fact]
-    public async Task ReadFailureThenReMention_ReLaunchesAfterReservationReleased()
+    public async Task ReadFailureThenReMention_CanReLaunchWithoutWaiting()
     {
         var connection = await CreateConnectionAsync();
         const string conversationId = "C-thread-relaunch";
@@ -226,7 +229,11 @@ public sealed class SlackThreadContextSpecs
         EnqueueReplies(new SlackConversationsRepliesPage(
             true,
             null,
-            new[] { Message("1710000000.000720", "U_X", "context") },
+            new[]
+            {
+                Message("1710000000.000720", "U_X", "context"),
+                Message(secondMentionTs, "U_OWNER", "<@U123> second attempt"),
+            },
             null));
 
         var second = await PostChannelMentionAsync(
@@ -309,7 +316,11 @@ public sealed class SlackThreadContextSpecs
         EnqueueReplies(new SlackConversationsRepliesPage(
             true,
             null,
-            new[] { Message("1710000000.001020", "U_X", "original") },
+            new[]
+            {
+                Message("1710000000.001020", "U_X", "original"),
+                Message(mentionTs, "U_OWNER", "<@U123> summarize"),
+            },
             null));
 
         var result = await PostChannelMentionAsync(
