@@ -25,7 +25,8 @@ Constraints: no real Slack / real time in tests (fakes only); the adapter is del
 
 **Non-Goals:**
 - Slack files as input (separate issue).
-- Reading whole-channel history, DMs, or anything beyond the explicit thread; auto-opening URLs or expanding Agent network access.
+- Reading whole-channel history, DMs, or anything beyond the explicit thread; auto-opening URLs, parsing cloud-drive links, or expanding Agent network access.
+- Uploading Mohist artifacts as Slack files.
 - Guessing or inferring content missing from an incomplete read.
 - Token-accurate context-window fitting (character budget is sufficient for v1).
 - Moving existing Server-side Slack read APIs into the adapter.
@@ -42,7 +43,7 @@ Thread history is fetched by the Server via a new `ISlackApiClient.Conversations
 ### D2 — Background is a new optional field through the launch chain, persisted on the plan, EXCLUDED from the fingerprint
 A new optional `StartupContext` flows: `ConnectionLaunchOrigin`/launcher parameter → `AgentLaunchCoordinatorRequest` → plan → `EnsureInitialLaunchCommand` → `AgentSessionInputRecord` (append-only `[Id(n)]` on each, mirroring how `Attachments`/`Provenance` were added). It is persisted on the coordinator plan (next free id after `Attachments` at `Id(24)`) so recovery replays the same snapshot. It is **not** folded into `Fingerprint`.
 
-**Rationale:** The mention-message identity is the dedup boundary (provider inbox dedups on `(ConnectionId, SlackMessageIdentity)`; the coordinator returns the stored plan on repeat). Background is a *volatile snapshot* read at processing time — unlike `AttachmentIds`, which are caller-validated and bound before launch. Folding volatile history into the fingerprint would make a Slack at-least-once redelivery (after the thread grew) raise `LaunchIdempotencyConflictException` instead of returning the original plan. So: persist the first-accepted snapshot for recovery, dedup on message identity, exclude from fingerprint.
+**Rationale:** The mention-message identity is the dedup boundary, and background is a *volatile snapshot* read at processing time — unlike `AttachmentIds`, which are caller-validated and bound before launch, so they legitimately enter the fingerprint. A plain Slack redelivery never reaches the coordinator with drifted content: the provider inbox dedups on `(ConnectionId, SlackMessageIdentity)` and the launch reservation returns `Bound`, so a duplicate mention becomes a follow-up (`SlackConnectionRoutes.cs:1490-1531`). The reason to keep background *out* of the fingerprint is recovery/replay robustness — `ResumeIdempotentAsync` or a crash replay can re-derive the snapshot, and equality must not hinge on content that is captured once and then may differ. So: persist the first-accepted snapshot on the plan for recovery, dedup on message identity, and exclude volatile content from the replay-equality check.
 
 **Alternative considered:** Fold raw background into the fingerprint. Rejected for the redelivery-conflict reason above.
 
@@ -72,7 +73,7 @@ The background is every message in the thread with `ts` strictly less than the m
 
 ## Risks / Trade-offs
 
-- **[Slack at-least-once redelivery with thread drift]** → Background excluded from the fingerprint (D2); the first-accepted snapshot is authoritative; the inbox dedups on message identity before the coordinator is reached.
+- **[Recovery/replay re-deriving a drifted snapshot]** → Background excluded from the fingerprint (D2); a plain Slack redelivery is already absorbed by the inbox/reservation before the coordinator, and for recovery the first-accepted snapshot persisted on the plan is authoritative rather than re-deriving equality from volatile content.
 - **[History read latency blocks the acceptance reply]** → The read happens in the launch path before `AgentJob` creation, so the reply waits for it. Acceptable: it is a bounded, paged read. Making it async is rejected because completeness must be a *pre-launch* fact (the contract forbids launching then discovering gaps).
 - **[Large threads → many paged calls / cost]** → Pagination depth cap (D4) bounds fetches; character budget bounds stored/rendered size.
 - **[Character budget ≠ exact context-window fit]** → Approximate; documented as a v1 limitation. Over-budget is still safely truncated and marked.
