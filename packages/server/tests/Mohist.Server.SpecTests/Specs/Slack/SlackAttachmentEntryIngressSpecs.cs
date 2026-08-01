@@ -142,6 +142,58 @@ public sealed class SlackAttachmentEntryIngressSpecs
     }
 
     [Fact]
+    public async Task Ingress_launch_with_mixed_oversized_and_valid_file_accepts_valid_and_reports_rejection()
+    {
+        var connection = await CreateConnectionAsync();
+        _fixture.Slack.FileContentResolver = fileId =>
+        {
+            Assert.Equal("F-DM-VALID", fileId);
+            return new SlackFileContent(
+                new MemoryStream("hello"u8.ToArray()),
+                "valid.txt",
+                "text/plain",
+                5,
+                new MemoryStream());
+        };
+
+        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-DM-MIXED",
+            messageTs = "1710000000.000160",
+            senderSlackUserId = "U_OWNER",
+            text = "have a look",
+            files = new[]
+            {
+                new { id = "F-DM-OVERSIZE", name = "big.bin", mimetype = "application/octet-stream", size = long.MaxValue },
+                new { id = "F-DM-VALID", name = "valid.txt", mimetype = "text/plain", size = 5L },
+            },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = document.RootElement.GetProperty("data");
+        var sessionId = data.GetProperty("sessionId").GetString();
+        var inputId = data.GetProperty("inputId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(sessionId));
+        Assert.False(string.IsNullOrWhiteSpace(inputId));
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var rows = await db.Attachments
+            .Where(attachment => attachment.ProjectId == connection.ProjectId
+                && attachment.OwnerKind == "agent-input"
+                && attachment.OwnerId == $"{sessionId}/{inputId}")
+            .ToListAsync();
+        var valid = Assert.Single(rows);
+        Assert.Equal("slack", valid.Source);
+
+        Assert.Equal(0, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-OVERSIZE"));
+        Assert.Equal(1, _fixture.Slack.FileContentCalls.Count(file => file == "F-DM-VALID"));
+    }
+
+    [Fact]
     public async Task Ingress_attachment_only_dm_binds_slack_file_to_first_input()
     {
         var connection = await CreateConnectionAsync();
