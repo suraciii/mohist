@@ -1,0 +1,18 @@
+## Codebase Patterns
+
+- `MohistDbContext` exposes `WorkflowRuns` (rows) and `WorkflowRunTaskMaps` (`IDbContextFactory<MohistDbContext>` for hand-rolled tests). `ETag` is a shadow property accessed via `db.Entry(row).Property<long>("ETag")`. Bump pattern: `etag.CurrentValue = etag.OriginalValue + 1`.
+- Spec test scaffolding (`TestSqliteDatabase.CreateMigrated`, `TestDbContextFactory`, `NullDispatchGrainFactory`, `Mohist.Server.Infrastructure.BackgroundTaskLauncher`, `RecordingEventStore`) lets the upgrader and store tests run without an Orleans silo.
+- `MigrateLegacyWorkflowRunJson` lives on `WorkflowRunStateDataUpgrader` and stays a public static entry point — call sites in tests still call it directly. T-002 removes read-path call sites; this task only relocates and wires.
+- WorkflowRun reads use `JSON.Deserialize<WorkflowRun>` directly (no legacy converter in `WorkflowRunStore.Deserialize`). Read path remains correct (and redundant) after T-001 because the read path no longer invokes the converter — only `WorkflowRunStateDataUpgrader` does.
+
+## T-001
+
+- Implementation landed in `d3f992f00 refactor(workflow): migrate legacy run state at startup`. Verified on `mohist/run-wr_4cb905febea74fb2a47bddcaad5afc29` ahead of this run.
+- `WorkflowRunStateDataUpgrader` carries the verbatim `MigrateLegacyWorkflowRunJson` algorithm plus its helpers (`BuildLegacyRecoveryPlan`, `WriteRunObject`/`WriteStages`/`WriteTasks`, `ReadLegacyAnnotationProfileId`, `WriteAssignmentObject`, recovery declaration equality). No second rule introduced.
+- Upgrader wired into `DatabaseInitializer.InitializeAsync` after `db.Database.MigrateAsync` and before the dispatch-snapshot externalizer (#537) and Profile migrator.
+- Preflight collects diagnostics by `WorkflowRunId`, throws on any failure with all names listed, and writes nothing.
+- Backup: `CreateAndVerifyBackupAsync` uses `source.BackupDatabase(destination)`, runs `PRAGMA integrity_check`, rejects `:memory:` / `Mode=Memory`, and rejects bare `.db` copies. `UpgradeAsync` opens the source only as needed and restores prior `Open` state.
+- Commit phase: single `db.Database.BeginTransactionAsync` over chunked fetches (`Chunk(500)`); ETag incremented via `CurrentValue = OriginalValue + 1`. Any save error rolls back the whole transaction.
+- Idempotency: ordinal string comparison between converted and original State; canonical rows skip the upgrade and never bump ETag. Re-running reports `CandidateCount=0`, `WrittenCount=0`, `BackupPath=null`.
+- No lifecycle filter — `failed` runs migrate identically (covered by `WorkflowRunRerunMigrationSpecs`).
+- Verification on this branch: `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings (TreatWarningsAsErrors). `Mohist.Server.SpecTests` 3711/3711 pass. `Mohist.Server.UnitTests` 1737/1737 pass. `Mohist.Server.ArchTests` 51/51 pass. Filtered runs: `WorkflowRunStateDataUpgraderSpecs` 7/7, `WorkflowRunRerunMigrationSpecs` 1/1, `WorkflowRunLegacyBindingSpecs` 1/1, `WorkflowRunStoreSpecs` 14/14.
