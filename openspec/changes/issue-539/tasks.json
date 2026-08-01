@@ -1,0 +1,30 @@
+{
+  "project": "mohist-local",
+  "description": "ETag-versioned cache for the WorkflowRun status read path: skip the full State deserialize when State has not changed since the last read, while keeping definition and artifact resolution live-fresh and the cache bounded.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "ETag-versioned WorkflowRun aggregate cache for status reads",
+      "spec": "specs/workflow-run-status-cache/spec.md",
+      "description": "Add a bounded singleton WorkflowRunStatusCache (ISingletonService) keyed by workflowRunId holding (ETag, deserialized WorkflowRun) with a FIFO entry cap. Rework WorkflowQuerier.GetStatusAsync to first read the row ETag as a scalar projection (EF.Property<long>(e, \"ETag\"), no State materialization), serve the cached aggregate on an ETag match without reading or deserializing State, and on a miss load the full row, Hydrate (including RestoreStoredEpicNumber), and store the entry under the new ETag. Definition resolution, WorkflowStatusMapper.BuildStatusView, and artifact attachment remain per-call so live profile edits and new artifacts stay fresh. Introduce a deserialization seam (e.g. an injectable/countable WorkflowRun deserializer, or make the deserialize path observable) so cost tests can assert State-deserialize counts without wall-clock. Treat the cached WorkflowRun as a read-only shared snapshot (no caller mutates it).",
+      "acceptanceCriteria": [
+        "Two successive GetStatusAsync calls with no WorkflowRunStore write between them return equivalent views, and the second call deserializes the run's State zero times (asserted via a deserialization counter/probe, not timing).",
+        "After a WorkflowRunStore save increments ETag, the next GetStatusAsync deserializes State exactly once, returns a view reflecting the written State, and stores it under the new ETag; subsequent reads at the same ETag deserialize State zero times.",
+        "A view served from a cache hit for ETag N is field-by-field equal (Status, CurrentStage, stages, tasks, checks, approval, failure, pending work, artifact summaries) to a view produced by forcing a full rebuild at the same ETag N.",
+        "GetStatusAsync for an unknown workflowRunId returns null and creates no cache entry.",
+        "An artifact recorded for a task run after the most recent State write (ETag unchanged) appears in the returned view's artifact summaries, and is present on two successive reads; State is not re-deserialized solely because artifacts changed.",
+        "The cache enforces a bounded entry count with eviction; after evicting an entry, a later read for that run returns an equivalent rebuilt view (correctness holds on eviction).",
+        "Existing StatusSpecs and WorkflowStructureSpecs pass unchanged, proving the WorkflowStatusView? contract shape and null semantics are preserved and no caller (WorkflowRoutes*, IssueGrain, WorkflowActivityQuerier, AgentActivityFeedAssembler) required changes.",
+        "New specs are placed with the existing querier status tests; the deserialization-cost assertions follow design/testing.md §5 (count operations, never wall-clock; unit < 50ms, spec < 500ms).",
+        "`npm run build` (dotnet build Mohist.sln) succeeds with no warnings (TreatWarningsAsErrors acts as lint), and `npm test` (server) passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Singleton WorkflowRunStatusCache + reworked WorkflowQuerier.GetStatusAsync (read-ETag-then-hit/miss) + deserialization-counting seam + spec tests covering hit/miss/equivalence/contract-null/artifact-freshness/boundedness, all green.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design: openspec/changes/issue-539/design.md (D1 cache the aggregate only, not the assembled view; D2 singleton injected into scoped querier; D3 ETag-equality validation, no TTL/wall-clock; D4 bounded FIFO; D5 accept rare concurrent first-miss redundant deserialize). No schema/EF migration and no change to WorkflowRunStore's ETag increment rule. Shadow-property projection via EF.Property<long>(e, \"ETag\") is the standard EF Core form; if the SQLite provider blocks it in a Select, fall back to FindAsync + Entry(...).Property<long>(\"ETag\") on the miss path only. An optional config kill switch that bypasses the cache (falls back to today's unconditional deserialize) is cheap to add but not required for correctness; include only if it adds no extra surface."
+    }
+  ]
+}
