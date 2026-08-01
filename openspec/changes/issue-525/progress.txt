@@ -1,0 +1,16 @@
+## Codebase Patterns
+
+- Slack management routes use `AgentQuerier.GetByIdAsync(projectId, agentId)` for bound-Agent reads and `ApiResponse<T>` with camel-cased anonymous response objects.
+- `AgentConnectionStore.CreateAsync` validates the active Agent and persists `BotName` verbatim; `WorkspaceTeamId`, `AppId`, and `BotUserId` stay empty until `SlackSetupVerifier` calls `BindSlackIdentityAsync` after verification.
+- Pure Agent derivations are static `*Deriver` types under `Agent/Services`, with direct unit tests under `Mohist.Server.UnitTests/Agent/Services`.
+- Slack's current manifest contract for `features.bot_user.display_name` is 1–80 characters using only lowercase `a-z`, `0-9`, `-`, `_`, and `.`; `display_information.description` allows up to 140 characters, but T-001 requires a non-blank Agent description to remain unchanged.
+
+## T-001 Notes
+
+- No prior `progress.txt` existed.
+- Pre-change `SlackConnectionApiSpecs` passed when run directly with the xUnit v3 `-class` filter. `dotnet test --filter` is ignored by this repository's Microsoft.Testing.Platform runner and accidentally ran all 3,603 specs; one unrelated pre-existing AgentSession dispatch polling spec failed while all SlackConnectionApiSpecs passed.
+- `SlackBotIdentityDeriver` treats an Agent name as directly valid only when it is non-empty, at most 80 characters, and entirely within Slack's lowercase display-name alphabet. Invalid names are lowercased/sanitized, capped, and receive an 8-character lowercase SHA-256 prefix derived from the Agent id; blank bases use `agent`.
+- Explicit `BotName` keeps the pre-existing trim-and-persist behavior and remains the preview name. Omitted `BotName` persists the Agent-derived name. GET returns that persisted name (or derives one for a legacy blank value), derives the current Agent description, and still returns the connection with a generic preview if its Agent record is unexpectedly missing.
+- Create and detail responses share the existing Slack App creation reference and expose `connection`, `botName`, `appDescription`, and `slackAppCreationReference`; no avatar field was added.
+- Added pure unit coverage and HTTP specs for valid derivation, stable suffixing, blank-description fallback, Agent non-mutation, persistence, GET resumability, explicit BotName compatibility, and verification-only immutable binding fields.
+- Final `npm test` passed: all .NET unit/spec/architecture/CLI tests and all Web, Runner, and mohist-slack workspace tests succeeded.
