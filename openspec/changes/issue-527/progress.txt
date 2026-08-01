@@ -1,0 +1,7 @@
+## Codebase Patterns
+
+- T-001: `SlackEnvelope.files` is always present and defaults to `[]`; `normalizeSocketEvent` projects only valid `{id,name,mimetype,size}` values from the current event and intentionally carries no other file/event fields.
+- T-001: `ISlackApiClient.OpenFileContentAsync` performs `files.info` through the existing bearer POST helper, then a bearer GET with `ResponseHeadersRead`; `SlackFileContent` owns both the stream and HTTP response and must be disposed by callers.
+- T-001: Slack API HTTP/transport/invalid-response failures become `SlackFileNotReadableException`; cancellation remains cancellation rather than being relabeled.
+- T-001: Adding an `ISlackApiClient` method requires updating the shared UnitTests/SpecTests fakes plus five local SpecTests fakes and the local `SlackThreadHistoryReaderTests` fake.
+- T-001 verification: `npm run typecheck -w packages/mohist-slack`, adapter `test:ci`, full `npm test`, and `dotnet build Mohist.sln -p:SkipWebBuild=true` pass.

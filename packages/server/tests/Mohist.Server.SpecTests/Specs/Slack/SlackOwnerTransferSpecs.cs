@@ -332,6 +332,7 @@ public sealed class SlackOwnerTransferSpecs : IAsyncLifetime
             Task.FromResult(UsersInfoResponse?.Invoke(userId) ?? new SlackUserInfoResponse(true, null, new(userId, "T1", false, false, false, false, false)));
         public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackConversationInfoResponse(true, null, null));
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+        public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
             string conversationId,
             string threadTs,

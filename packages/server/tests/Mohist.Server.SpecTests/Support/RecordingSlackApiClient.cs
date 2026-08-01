@@ -60,6 +60,8 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
             return Task.FromResult(UsersListPages.Dequeue());
         return Task.FromResult(new SlackUsersListResponse(true, null, [], null));
     }
+    public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) =>
+        throw new NotSupportedException();
     public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,
         string threadTs,
