@@ -502,7 +502,9 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         var task = _run.CurrentStage().RunningTask;
         if (task is null || !string.Equals(task.WorkId, workId, StringComparison.Ordinal)) return null;
 
-        return await _dispatchSnapshotStore.SaveFirstAsync(GrainKey, workId, dispatch);
+        var winnerJson = await _dispatchSnapshotStore.SaveFirstJsonAsync(
+            GrainKey, workId, JSON.Serialize(dispatch));
+        return JSON.Deserialize<WorkDispatch>(winnerJson);
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)

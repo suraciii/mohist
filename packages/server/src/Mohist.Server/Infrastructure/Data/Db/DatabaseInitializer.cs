@@ -21,6 +21,11 @@ public static class DatabaseInitializer
         await db.Database.MigrateAsync(cancellationToken);
         await ProjectRepositoryDataUpgrader.UpgradeAsync(db, cancellationToken);
         await WorkflowRunStateDataUpgrader.UpgradeAsync(db, cancellationToken, logger: logger);
+        var dispatchSnapshotLogger = scope.ServiceProvider
+            .GetService<ILoggerFactory>()?
+            .CreateLogger(nameof(WorkflowDispatchSnapshotDataUpgrader));
+        await WorkflowDispatchSnapshotDataUpgrader.ExternalizeAsync(db, cancellationToken, logger: dispatchSnapshotLogger);
+        await WorkflowDispatchSnapshotDataUpgrader.SweepOrphansAsync(db, cancellationToken, logger: dispatchSnapshotLogger);
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         try
         {

@@ -244,9 +244,9 @@ public sealed class DispatchService : IScopedService
         {
             if (activeWork.IsTask)
             {
-                var stored = await _dispatchSnapshots.LoadAsync(workflowRunId, workId, ct);
-                if (stored is not null)
-                    return (workKey, stored);
+                var storedJson = await _dispatchSnapshots.LoadJsonAsync(workflowRunId, workId, ct);
+                if (storedJson is not null)
+                    return (workKey, JSON.Deserialize<WorkDispatch>(storedJson)!);
             }
 
             var dispatch = await _translator.TranslateToDispatchAsync(activeWork.Item, workflowRunId, run, runnerId);

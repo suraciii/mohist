@@ -1,15 +1,23 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Runner.Grains;
 
 namespace Mohist.Server.Infrastructure.Data.Workflow;
 
+// Persistence boundary for dispatch snapshots. Stores and returns the raw
+// snapshot JSON only — it deliberately does not know the WorkDispatch shape
+// (an Application-layer grain contract), keeping Infrastructure.Data free of
+// Application dependencies. Callers in the Application layer serialize and
+// deserialize.
 public interface IDispatchSnapshotStore
 {
-    Task<WorkDispatch?> LoadAsync(string workflowRunId, string workId, CancellationToken ct = default);
+    Task<string?> LoadJsonAsync(string workflowRunId, string workId, CancellationToken ct = default);
 
-    Task<WorkDispatch> SaveFirstAsync(string workflowRunId, string workId, WorkDispatch dispatch, CancellationToken ct = default);
+    Task<string> SaveFirstJsonAsync(
+        string workflowRunId,
+        string workId,
+        string snapshotJson,
+        CancellationToken ct = default);
 
     Task DeleteAsync(string workflowRunId, string workId, CancellationToken ct = default);
 
@@ -29,7 +37,7 @@ public sealed class DispatchSnapshotStore : IDispatchSnapshotStore
         _log = log;
     }
 
-    public async Task<WorkDispatch?> LoadAsync(string workflowRunId, string workId, CancellationToken ct = default)
+    public async Task<string?> LoadJsonAsync(string workflowRunId, string workId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(workId))
             return null;
@@ -37,28 +45,16 @@ public sealed class DispatchSnapshotStore : IDispatchSnapshotStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.WorkflowDispatchSnapshots.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct);
-        if (row is null)
-            return null;
-        try
-        {
-            return JSON.Deserialize<WorkDispatch>(row.SnapshotJson);
-        }
-        catch (Exception ex)
-        {
-            _log.LogWarning(ex,
-                "DispatchSnapshotStore failed to deserialize snapshot for workflow {WorkflowRunId} work {WorkId}",
-                workflowRunId, workId);
-            return null;
-        }
+        return row?.SnapshotJson;
     }
 
-    public async Task<WorkDispatch> SaveFirstAsync(
+    public async Task<string> SaveFirstJsonAsync(
         string workflowRunId,
         string workId,
-        WorkDispatch dispatch,
+        string snapshotJson,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(dispatch);
+        ArgumentNullException.ThrowIfNull(snapshotJson);
         if (string.IsNullOrWhiteSpace(workflowRunId) || string.IsNullOrWhiteSpace(workId))
             throw new ArgumentException("workflowRunId and workId must be non-empty");
 
@@ -66,54 +62,35 @@ public sealed class DispatchSnapshotStore : IDispatchSnapshotStore
         var existing = await db.WorkflowDispatchSnapshots.AsNoTracking()
             .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct);
         if (existing is not null)
-        {
-            try
-            {
-                return JSON.Deserialize<WorkDispatch>(existing.SnapshotJson) ?? dispatch;
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "DispatchSnapshotStore failed to deserialize existing snapshot for workflow {WorkflowRunId} work {WorkId}; falling back to caller payload",
-                    workflowRunId, workId);
-                return dispatch;
-            }
-        }
+            return existing.SnapshotJson;
 
         var newRow = new WorkflowDispatchSnapshotRow
         {
             WorkflowRunId = workflowRunId,
             WorkId = workId,
-            SnapshotJson = JSON.Serialize(dispatch),
+            SnapshotJson = snapshotJson,
         };
         db.WorkflowDispatchSnapshots.Add(newRow);
         try
         {
             await db.SaveChangesAsync(ct);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
             // A concurrent writer inserted the same key first (race between grains
             // or a retry after grain reactivation). Honor first-write-wins by
             // reloading the existing row.
+            _log.LogDebug(ex,
+                "DispatchSnapshotStore concurrent insert for workflow {WorkflowRunId} work {WorkId}; reloading winner",
+                workflowRunId, workId);
             await db.Entry(newRow).ReloadAsync(ct);
             var winner = await db.WorkflowDispatchSnapshots.AsNoTracking()
-                .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct);
-            if (winner is null)
-                throw;
-            try
-            {
-                return JSON.Deserialize<WorkDispatch>(winner.SnapshotJson) ?? dispatch;
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex,
-                    "DispatchSnapshotStore failed to deserialize winner snapshot for workflow {WorkflowRunId} work {WorkId}; falling back to caller payload",
-                    workflowRunId, workId);
-                return dispatch;
-            }
+                .FirstOrDefaultAsync(s => s.WorkflowRunId == workflowRunId && s.WorkId == workId, ct)
+                ?? throw new InvalidOperationException(
+                    $"DispatchSnapshotStore could not persist or load snapshot for workflow {workflowRunId} work {workId}");
+            return winner.SnapshotJson;
         }
-        return dispatch;
+        return snapshotJson;
     }
 
     public async Task DeleteAsync(string workflowRunId, string workId, CancellationToken ct = default)
