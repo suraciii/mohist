@@ -24,3 +24,29 @@
 - No read-path source change was required beyond this visibility tightening. Each read entry point already deserializes directly: `WorkflowRunStore.Deserialize` uses `JSON.Deserialize<WorkflowRun>`, `WorkflowRunQuerier` uses `JSON.Deserialize<WorkflowRun>` (twice), `WorkflowQuerier` uses both the shared `IWorkflowRunDeserializer` (status miss path) and `JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options)` (other loads), `IssueMetricsQuerier.DeserializeRun` and `IssueReadModelLoader.DeserializeRun` use `JsonSerializer.Deserialize<WorkflowRun>(json, JSON.Options)`, `ActiveSessionReconciler.DeserializeWorkflowRun` uses `JsonSerializer.Deserialize<WorkflowRun>(json, AgentSessionJson.JsonOptions)`.
 - No legacy-vs-canonical branching or whole-document probing in production read paths: a `rg 'TryGetProperty\("(claim|assignment|runnerId|dispatchActivated|workflowProfileId|recoveryRemaining)"'` sweep returns matches only in `WorkflowRunStateDataUpgrader` (cold-start) and `WorkflowProfileDataMigrator` (profile migration), both within startup boundaries.
 - Verification on this branch: `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings (TreatWarningsAsErrors). `Mohist.Server.SpecTests` 3711/3711 pass. `Mohist.Server.UnitTests` 1737/1737 pass. `Mohist.Server.ArchTests` 51/51 pass. Filtered runs: `WorkflowRunStateDataUpgraderSpecs` 7/7, `WorkflowRunStoreSpecs` (incl. rerun-migration partial) 14/14, `WorkflowRunLegacyBindingSpecs` 1/1, `WorkflowRunQuerierSpecs` 2/2, `WorkflowRunStatusCacheSpecs` 7/7 — combined 31/31.
+
+## T-002 review fix — legacy-shape branching removed from two more profile-id readers
+
+- Review F1 found two service-phase WorkflowRun State read entry points still probing the legacy
+  `metadata.annotations.workflowProfileId` annotation (canonical first, legacy fallback), which
+  `canonical-state-read-path` Requirements 1/2 prohibit. Both now read only the canonical top-level
+  `workflowProfileId`:
+  - `WorkflowDefinitionResolver.LoadBoundProfileIdAsync` delegates to the existing canonical-only
+    `ReadWorkflowProfileId` (legacy annotation block deleted).
+  - `WorkflowProfileDeletionBlockerQuery.ReadProfileId` returns only the top-level
+    `workflowProfileId` (legacy annotation block deleted).
+  Post-migration behavior is unchanged because T-001 promotes that annotation to a top-level field.
+- Tests that seeded legacy-annotation-only runs were updated to match the canonical-read contract:
+  - `WorkflowProfileCollectionSpecs.SeedWorkflowRunAsync` now emits canonical State (top-level
+    `workflowProfileId`, matching the current writer and `SeedIssueAsync`); the
+    `Delete_ActiveRunWithMissingBackingKey_StillReportsBlocker` scenario now sources the profile
+    from the top-level field.
+  - `WorkflowStageSpecs.LoadStageSpecsAsync_ReloadedLegacyRunKeepsBindingAfterSelectionsChange`
+    still seeds legacy annotation State but runs `WorkflowRunStateDataUpgrader.UpgradeAsync` before
+    resolution (same pattern as `WorkflowRunLegacyBindingSpecs`), so the reader sees canonical State.
+- A `rg` sweep confirms legacy annotation probing now lives only in `WorkflowRunStateDataUpgrader`
+  and `WorkflowProfileDataMigrator` (both cold-start boundaries); no service-phase read path
+  branches on legacy-vs-canonical shape.
+- Verification on this branch: `dotnet build Mohist.sln -p:SkipWebBuild=true` succeeds with 0 warnings
+  (TreatWarningsAsErrors). `Mohist.Server.SpecTests` 3711/3711 pass. `Mohist.Server.UnitTests`
+  1737/1737 pass. `Mohist.Server.ArchTests` 51/51 pass.
