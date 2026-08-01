@@ -28,11 +28,16 @@ Established precedents in `Infrastructure.Data.Workflow`:
   route through it; it receives the in-memory `WorkflowRun` and the `DbContext`, so it is the
   natural place to maintain a derived projection in the same transaction as `State`.
 
-`TaskRun` identity: `Id` (required) is the timeline taskId; `WorkId` (nullable) is the work id,
-falling back to `Id`; `WorkerId` is set when claimed/running. Active work is at most one per run
-(the current stage's `Running` task claimed by the assigned worker, or active checks); the
-taskId↔workId mapping is run-wide, including completed tasks in earlier stages (logs remain
-queryable for completed tasks).
+`TaskRun` identity: `Id` (required) is the timeline taskId; `WorkId` (nullable) is the work id;
+`WorkerId` is set when claimed/running. `MakeTask` (`TaskRun.cs`) never sets `WorkId`, so a
+**pending** task has `WorkId == null`. `StartTask` (`WorkflowRun.Task.cs`) sets `task.WorkId =
+workId`, and `MarkTaskRunningAsync` (`WorkflowWorkLifecycle.cs`) passes `workId = logicalTaskId`
+selected by `t.Id == logicalTaskId` — so every **claimed** (Running/Completed/Failed) task has
+`WorkId == Id`. The runner uploads with the dispatched workId, which is `item.Id == t.Id`. **The
+taskId↔workId correspondence is therefore the identity function today** for every task that has
+logs. Active work is at most one per run (the current stage's `Running` task claimed by the
+assigned worker, or active checks); the task set is run-wide, including completed tasks in earlier
+stages (logs remain queryable for completed tasks).
 
 ## Goals / Non-Goals
 
@@ -62,7 +67,12 @@ Two distinct data shapes are projected, each in its natural form:
 - **`WorkflowRunTaskMap`** — a child table, one row per `TaskRun` across all stages:
   `(WorkflowRunId, TaskId, WorkId)`, indexed on `(WorkflowRunId, TaskId)` and
   `(WorkflowRunId, WorkId)`. `WorkId` stored as the effective work id (`TaskRun.WorkId ?? Id`).
-  This serves `taskId → workId` and `workId → taskId`.
+  Its **primary job is run-scoped task membership** — answering "does this `taskId` belong to
+  this run, and has it been dispatched?" — which is the fact the query path needs to distinguish
+  a real task from an unknown id. `WorkId` is carried alongside for robustness; because the
+  correspondence is identity today (`WorkId == Id` for claimed tasks), `taskId → workId` and
+  `workId → taskId` resolve to the same value, but storing `WorkId` keeps the projection correct
+  if a future change lets `WorkId` diverge from `Id`.
 - **`ActiveWorkId` / `ActiveWorkerId`** — nullable stored columns on `WorkflowRunRow`,
   holding the single current active work (a task workId **or** the checks workId
   `checks-<stage>`) and its owning worker; null when no work is active. This serves
@@ -101,25 +111,40 @@ the work in `BeginTransactionAsync`, the projection commits atomically with `Sta
 `DeleteAsync` clears the run's map rows (mirroring the existing
 `_dispatchSnapshotStore.DeleteForRunAsync` call) — or a cascading FK does it.
 
+**Write-time obligation covers every `State` writer, not just `StageRunAsync`.** `StageRunAsync`
+is the single *runtime* write funnel, but cold-start data upgraders write `State` directly and
+bypass it (e.g. #536's `WorkflowRunStateDataUpgrader`). Per `design/workflow/run-state.md`
+("migration is a write-time obligation, not a read-time obligation"), any path that rewrites
+`State` — runtime save **or** a cold-start upgrader — MUST refresh this projection in the same
+transaction. The map/active-work computation is extracted into one shared helper used by both
+`StageRunAsync` and the backfill upgrader (D4) so there is a single author; a future
+`State`-rewriting migration calls the same helper instead of leaving the projection stale.
+
 **Trade-off:** every `State` save now rewrites N tiny map rows. This is acceptable: writes
 (state transitions) are far less frequent than the high-frequency log/status reads this removes,
 map rows are three short strings, and N (tasks per run) is small. Diffing instead of
 replace-on-save was considered and rejected as premature complexity.
 
-### D3 — Read API on `WorkflowRunQuerier`
+### D3 — Read API behind a narrow `IWorkflowRunWorkProjection` abstraction
 
-Add projection reads to `WorkflowRunQuerier` (the existing execution-plane read surface,
-already a `TaskLogService` dependency), none of which deserialize `State`:
+`TaskLogService` currently depends on the **concrete** `WorkflowRunQuerier`
+(`TaskLogService.cs:34,41`), whose `LoadAsync` deserializes `State`. To make the no-`State`
+invariant both structural and testable, introduce a narrow
+`IWorkflowRunWorkProjection` interface carrying only the projection reads — **no** `LoadAsync`:
 
 - `ResolveWorkIdAsync(workflowRunId, taskId)` → `string?` (map table).
 - `ResolveTaskIdAsync(workflowRunId, workId)` → `string?` (map table).
 - `IsActiveWorkAsync(workflowRunId, workId, runnerId)` → `bool` (run-row active-work columns).
-- publish-scope `projectId` via the existing `MetadataProjectId` column (a small
-  `GetProjectIdAsync`, or folded into the active-work read to keep upload to one run-row read +
-  one map read).
+- `GetProjectIdAsync(workflowRunId)` → `string?` (existing `MetadataProjectId` column), or fold
+  `projectId` into the active-work read to keep upload to one run-row read + one map read.
 
-`TaskLogService`'s three private methods are rewritten to call these instead of `LoadAsync`;
-the public `AppendAsync` / `QueryByTaskIdAsync` signatures and behavior are unchanged. This also
+The concrete implementation lives in `Infrastructure.Data.Workflow` (on or beside
+`WorkflowRunQuerier`, registered in DI). `TaskLogService`'s dependency swaps from
+`WorkflowRunQuerier` to `IWorkflowRunWorkProjection`. Because the interface exposes no
+`State`-deserializing member, `State` deserialize becomes **structurally unreachable** from the
+task-log service — the invariant is enforced by the type system, not by a test hoping a call
+wasn't made. `TaskLogService`'s three private methods are rewritten to call these members; the
+public `AppendAsync` / `QueryByTaskIdAsync` signatures and behavior are unchanged. This also
 removes the upload's double-`State`-load redundancy (two full deserializations → two indexed
 lookups for the same run).
 
@@ -137,18 +162,25 @@ ordered after #536's State-format upgrader. It runs before the server accepts re
 
 ### D5 — Testing the no-`State`-deserialize invariant
 
-Spec tests for `TaskLogService` inject a fake `WorkflowRunQuerier` that records (or throws on)
-any call to the `State`-deserializing `LoadAsync`, then drive upload (active + inactive work)
-and query (hit + miss) and assert `LoadAsync` is never invoked — encoding the spec's
-"State-free end to end" requirement directly. Separate unit tests cover projection
+Because `TaskLogService` depends only on `IWorkflowRunWorkProjection` (D3), which has no
+`State`-deserializing member, the invariant is structural at the service boundary: a spec test
+substitutes a **fake `IWorkflowRunWorkProjection`** and drives upload (active + inactive work)
+and query (hit + miss), asserting acceptance, publish-scope stamping, null-taskId no-fan-out,
+and empty-page-on-miss behavior — with `State` deserialize unreachable by construction. (The
+existing `TaskLogService*Specs` that built a real `WorkflowRunQuerier` over a migrated test DB
+move onto the fake; no concrete-querier faking is required.) Separately, the concrete projection
+implementation gets a unit test asserting its reads consult only projection columns (e.g. a
+deserialization spy/counter on the `JSON.Deserialize<WorkflowRun>` path is not invoked), covering
+the implementation layer the service fake does not reach. Further unit tests cover projection
 write-maintenance (given an in-memory run with tasks across stages + an active task, after
 `StageRunAsync`+`Save` the map rows and active-work columns match) and the backfill upgrader's
 idempotence.
 
 ## Risks / Trade-offs
 
-- [Projection drift from `State`] -> Single write funnel (`StageRunAsync`) + same-transaction
-  commit, both derived from the same in-memory `run`; no second author of the projection.
+- [Projection drift from `State`] -> Every `State`-writing path refreshes the projection in the
+  same transaction (runtime `StageRunAsync` **and** cold-start upgraders), all via one shared
+  map/active-work helper; no second author of the projection.
 - [Write amplification on the hot write path] -> Tiny rows, small N, writes ≪ reads; net cost
   reduction. Optimize with diffing only if measured.
 - [Backfill misses/corrupts legacy or in-flight rows] -> Cold-start upgrader is idempotent with
