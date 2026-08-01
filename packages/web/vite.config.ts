@@ -35,7 +35,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    setupFiles: ['./tests/setup.ts'],
+    setupFiles: ['./tests/setup-act-env.ts', './tests/setup.ts'],
     globals: true,
     // 根配置与 inline projects 必须一致，确保 setup 和测试共享同一组进程级单例。
     isolate: false,
