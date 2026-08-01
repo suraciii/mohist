@@ -65,6 +65,7 @@ public class MohistDbContext : DbContext
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
+    public DbSet<WorkflowRunTaskMapRow> WorkflowRunTaskMaps { get; set; } = null!;
     public DbSet<WorkflowVariablesRow> WorkflowVariables { get; set; } = null!;
     public DbSet<WorkflowRunProfileRow> WorkflowRunProfiles { get; set; } = null!;
     public DbSet<WorkflowStageLockRow> WorkflowStageLocks { get; set; } = null!;
@@ -902,6 +903,8 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql(
                     "CAST(COALESCE(json_extract(State, '$.metadata.issueNumber'), json_extract(State, '$.Metadata.IssueNumber')) AS INTEGER)",
                     stored: true);
+            entity.Property(e => e.ActiveWorkId).HasMaxLength(128);
+            entity.Property(e => e.ActiveWorkerId).HasMaxLength(128);
             entity.HasIndex(e => e.MetadataProjectId);
             entity.HasIndex(e => e.AssignedWorkerId);
             entity.HasIndex(e => new { e.MetadataProjectId, e.AssignedWorkerId, e.CreatedAt });
@@ -934,6 +937,23 @@ public class MohistDbContext : DbContext
                 .HasForeignKey(e => new { e.MetadataProjectId, e.WorkflowProfileIdKey })
                 .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkflowRunTaskMapRow>(entity =>
+        {
+            entity.ToTable("WorkflowRunTaskMap");
+            entity.HasKey(e => new { e.WorkflowRunId, e.TaskId });
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.TaskId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.HasIndex(e => new { e.WorkflowRunId, e.TaskId })
+                .HasDatabaseName("IX_WorkflowRunTaskMap_WorkflowRunId_TaskId");
+            entity.HasIndex(e => new { e.WorkflowRunId, e.WorkId })
+                .HasDatabaseName("IX_WorkflowRunTaskMap_WorkflowRunId_WorkId");
+            entity.HasOne<WorkflowRunRow>()
+                .WithMany()
+                .HasForeignKey(e => e.WorkflowRunId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<WorkflowDispatchSnapshotRow>(entity =>

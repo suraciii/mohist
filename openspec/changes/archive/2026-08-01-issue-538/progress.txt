@@ -1,0 +1,34 @@
+## Codebase Patterns
+
+- `WorkflowRunStore.StageRunAsync` is the runtime funnel for both run save overloads. Projection writes must stay on its `DbContext` so `State`, active-work columns, and task-map rows share the `SaveChangesAsync` transaction.
+- `WorkflowRunWorkProjectionBuilder.Build` is the single calculation point for all-stage task membership and active-work identity. A future state upgrader should call this builder rather than reproduce the traversal.
+- Projection reads use `AsNoTracking` plus scalar `Select` expressions. Loading `WorkflowRunRow` is not suitable for projection reads because it also selects the large `State` column.
+- Migration tests that intentionally roll back to an older schema must use explicit column reads instead of materializing the current `WorkflowRunRow` model.
+
+## T-001
+
+- Added `WorkflowRunTaskMap`, nullable `WorkflowRuns.ActiveWorkId` and `ActiveWorkerId`, and migration `20260801140000_AddWorkflowRunWorkProjection`.
+- `WorkId` is normalized from null or whitespace to the task id. Active task work uses the same normalization; checks use their existing `checks-<stage>` work id and the run assignment worker.
+- Existing legacy state can contain duplicate task identities across stages. The identity projection de-duplicates equal `(TaskId, WorkId)` entries so those runs remain writable under the run-scoped task-id key.
+- `dotnet-ef` is not installed in this workspace, so the migration and model snapshot were added in the repository's existing generated-file shape by hand and verified through the migrated SQLite test template.
+- Verification: `npm test` passed all .NET, Web, Runner, and Slack suites after `npm ci` installed the workspace dependencies.
+
+## T-002
+
+- Added `WorkflowRunWorkProjectionDataUpgrader`: it preflights every WorkflowRun with the current model and shared `WorkflowRunWorkProjectionBuilder`, compares both projection shapes, then writes only mismatches in one transaction using 500-row query batches.
+- Projection backfill updates only `ActiveWorkId`/`ActiveWorkerId` and `WorkflowRunTaskMap`; it leaves `State` and shadow `ETag` unchanged. Terminal runs with historical tasks and empty projections are included; a second run has no candidates.
+- Database initialization invokes the backfill after `WorkflowRunStateDataUpgrader`, before the remaining initialization work, so projection reads are available before service startup.
+- Verification: server and SpecTests build cleanly; the two new upgrader specs pass, including idempotence/correctness and preflight no-write behavior; `npm test` passes all server, Web, Runner, and Slack suites.
+
+## T-003
+
+- `TaskLogService` now depends only on `IWorkflowRunWorkProjection`; workflow upload active-work checks, workId-to-taskId publish scope, projectId lookup, and taskId-to-workId queries no longer expose or load `WorkflowRun.State`.
+- Publish scope is created only after `ResolveTaskIdAsync` succeeds, so checks and other unmappable workIds carry null taskId and projectId and remain no-fan-out envelopes. Agent-job ownership still uses `IAgentJobStore` unchanged.
+- `TaskLogServicePersistThenPublishSpecs` uses a fake projection for workflow upload and query behavior, including active/inactive work, remapping, projection stamping, unmappable work, and query hit/miss. Existing SignalR coverage continues to assert null-taskId no fan-out.
+- Verification: SpecTests build cleanly and pass all 3637 tests after the projection switch.
+
+## Review fixes
+
+- F1: removed the now-closed "日志路径把整载读当廉价查询" gap bullet from `design/workflow/run-state.md` (the log path no longer deserializes State; the bullet misdescribed current state).
+- F2: `WorkflowRunWorkProjection.ResolveTaskIdAsync` now uses `FirstOrDefaultAsync` instead of `SingleOrDefaultAsync`, matching the old `ResolvePublishScopeAsync` first-match semantics and removing a latent throw if two map rows ever share a WorkId.
+- Verification: `npm test` green (Server UnitTests 1736, SpecTests 3637, ArchTests 51, Cli 1509, Runner 1510, Slack 8); `TreatWarningsAsErrors` clean.
