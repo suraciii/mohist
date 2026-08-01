@@ -9,7 +9,6 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Services;
@@ -25,7 +24,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     private readonly FakeTimeProvider _timeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
     private readonly TaskLogStore _store;
     private readonly IAgentJobStore _agentJobs;
-    private readonly WorkflowRunQuerier _runQuerier;
+    private readonly FakeWorkflowRunWorkProjection _workProjection = new();
 
     public TaskLogServicePersistThenPublishSpecs()
     {
@@ -33,7 +32,6 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         var factory = new TestDbContextFactory(_database.Options);
         _store = new TaskLogStore(factory, _timeProvider);
         _agentJobs = new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _timeProvider);
-        _runQuerier = new WorkflowRunQuerier(factory);
     }
 
     public ValueTask InitializeAsync() => ValueTask.CompletedTask;
@@ -165,7 +163,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_StampsTaskIdFromWorkflowRunState_OnWorkflowOwner()
+    public async Task AppendAsync_StampsTaskIdAndProjectIdFromWorkProjection_OnWorkflowOwner()
     {
         // When the work item is owned by a workflow run, the
         // publisher's envelope must carry the resolved taskId
@@ -188,7 +186,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AppendAsync_ResolvesTaskIdFromCurrentWorkflowRunState_WhenWorkMappingChanges()
+    public async Task AppendAsync_ResolvesTaskIdFromCurrentWorkProjection_WhenWorkMappingChanges()
     {
         await SeedWorkflowRunAsync("wf-remap", "task-old", "w-reused");
 
@@ -266,6 +264,51 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         Assert.Null(envelope.TaskId);
     }
 
+    [Theory]
+    [InlineData("checks-build")]
+    [InlineData("unmapped-work")]
+    public async Task AppendAsync_UnmappableWorkflowWork_PersistsWithoutPublishScope(string workId)
+    {
+        _workProjection.SetActiveWorkflow("wf-unmapped", workId, "runner-A", "proj-1");
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        var ok = await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-unmapped", workId,
+            NewEntries(1, 1), truncated: false);
+
+        Assert.True(ok);
+        var envelope = Assert.Single(publisher.Published);
+        Assert.Null(envelope.TaskId);
+        Assert.Null(envelope.ProjectId);
+        Assert.Equal(0, _workProjection.ProjectIdLookups);
+
+        var page = await _store.QueryAsync(
+            TaskLogOwnershipKinds.Workflow, "wf-unmapped", workId,
+            afterSeq: null, limit: null, default);
+        Assert.Single(page.Lines);
+    }
+
+    [Fact]
+    public async Task QueryByTaskIdAsync_UsesWorkProjection_AndReturnsNullForMiss()
+    {
+        await SeedWorkflowRunAsync("wf-query", "task-query", "work-query");
+        var publisher = new RecordingPublisher();
+        var service = NewService(publisher);
+
+        await service.AppendAsync(
+            "runner-A", TaskLogOwnershipKinds.Workflow, "wf-query", "work-query",
+            NewEntries(1, 2), truncated: true);
+
+        var page = await service.QueryByTaskIdAsync("wf-query", "task-query", null, null);
+        Assert.NotNull(page);
+        Assert.Equal(2, page.Lines.Count);
+        Assert.True(page.Truncated);
+
+        Assert.Null(await service.QueryByTaskIdAsync("wf-query", "missing-task", null, null));
+        Assert.Null(await service.QueryByTaskIdAsync("missing-run", "task-query", null, null));
+    }
+
     [Fact]
     public async Task AppendAsync_RejectsBatchOverEntryLimit_BeforeAnyPublishAttempt()
     {
@@ -291,7 +334,7 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
         return new TaskLogService(
             _store,
             _agentJobs,
-            _runQuerier,
+            _workProjection,
             publisher,
             NullLogger<TaskLogService>.Instance);
     }
@@ -319,57 +362,10 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             InitialTurnId: null));
     }
 
-    private async Task SeedWorkflowRunAsync(string workflowRunId, string taskId, string workId)
+    private Task SeedWorkflowRunAsync(string workflowRunId, string taskId, string workId)
     {
-        var now = _timeProvider.GetUtcNow();
-        var run = new WorkflowRun
-        {
-            Id = workflowRunId,
-            Metadata = new WorkflowRunMetadata(Name: null, CreatedAt: now, ProjectId: "proj-1"),
-            Status = WorkflowRunStatus.Running,
-            Assignment = new WorkflowAssignment("runner-A", now),
-            CurrentStageId = "stage-1",
-            Stages = new List<StageRun>
-            {
-                new()
-                {
-                    Id = "stage-1",
-                    Attempt = 1,
-                    RequiresApproval = false,
-                    Status = StageRunStatus.Running,
-                    Initialized = true,
-                    Tasks = new List<TaskRun>
-                    {
-                        new()
-                        {
-                            Id = taskId,
-                            DefinitionId = "def-1",
-                            Attempt = 1,
-                            Title = "do thing",
-                            Status = TaskRunStatus.Running,
-                            WorkerId = "runner-A",
-                            WorkId = workId,
-                        },
-                    },
-                },
-            },
-        };
-
-        await using var db = new MohistDbContext(_database.Options);
-        var row = await db.WorkflowRuns.FirstOrDefaultAsync(r => r.WorkflowRunId == workflowRunId);
-        if (row is null)
-        {
-            db.WorkflowRuns.Add(new WorkflowRunRow
-            {
-                WorkflowRunId = workflowRunId,
-                State = JSON.Serialize(run),
-            });
-        }
-        else
-        {
-            row.State = JSON.Serialize(run);
-        }
-        await db.SaveChangesAsync();
+        _workProjection.SetWorkflow(workflowRunId, taskId, workId, "runner-A", "proj-1");
+        return Task.CompletedTask;
     }
 
     private static IReadOnlyList<TaskLogLine> NewEntries(long startSeq, int count)
@@ -391,6 +387,51 @@ public class TaskLogServicePersistThenPublishSpecs : IAsyncLifetime
             _published.Add(envelope);
             if (ThrowOnPublish is not null) throw ThrowOnPublish;
             return Task.CompletedTask;
+        }
+    }
+
+    private sealed class FakeWorkflowRunWorkProjection : IWorkflowRunWorkProjection
+    {
+        private readonly Dictionary<(string RunId, string TaskId), string> _taskToWork = [];
+        private readonly Dictionary<(string RunId, string WorkId), string> _workToTask = [];
+        private readonly Dictionary<string, (string WorkId, string RunnerId)> _active = [];
+        private readonly Dictionary<string, string?> _projectIds = [];
+
+        public int ProjectIdLookups { get; private set; }
+
+        public void SetWorkflow(string runId, string taskId, string workId, string runnerId, string projectId)
+        {
+            foreach (var key in _taskToWork.Keys.Where(key => key.RunId == runId).ToList())
+                _taskToWork.Remove(key);
+            foreach (var key in _workToTask.Keys.Where(key => key.RunId == runId).ToList())
+                _workToTask.Remove(key);
+
+            _taskToWork[(runId, taskId)] = workId;
+            _workToTask[(runId, workId)] = taskId;
+            SetActiveWorkflow(runId, workId, runnerId, projectId);
+        }
+
+        public void SetActiveWorkflow(string runId, string workId, string runnerId, string projectId)
+        {
+            _active[runId] = (workId, runnerId);
+            _projectIds[runId] = projectId;
+        }
+
+        public Task<string?> ResolveWorkIdAsync(string workflowRunId, string taskId, CancellationToken ct = default) =>
+            Task.FromResult(_taskToWork.TryGetValue((workflowRunId, taskId), out var workId) ? workId : null);
+
+        public Task<string?> ResolveTaskIdAsync(string workflowRunId, string workId, CancellationToken ct = default) =>
+            Task.FromResult(_workToTask.TryGetValue((workflowRunId, workId), out var taskId) ? taskId : null);
+
+        public Task<bool> IsActiveWorkAsync(string workflowRunId, string workId, string runnerId, CancellationToken ct = default) =>
+            Task.FromResult(_active.TryGetValue(workflowRunId, out var active)
+                && active.WorkId == workId
+                && active.RunnerId == runnerId);
+
+        public Task<string?> GetProjectIdAsync(string workflowRunId, CancellationToken ct = default)
+        {
+            ProjectIdLookups++;
+            return Task.FromResult(_projectIds.TryGetValue(workflowRunId, out var projectId) ? projectId : null);
         }
     }
 }

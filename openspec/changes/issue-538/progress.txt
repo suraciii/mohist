@@ -19,3 +19,10 @@
 - Projection backfill updates only `ActiveWorkId`/`ActiveWorkerId` and `WorkflowRunTaskMap`; it leaves `State` and shadow `ETag` unchanged. Terminal runs with historical tasks and empty projections are included; a second run has no candidates.
 - Database initialization invokes the backfill after `WorkflowRunStateDataUpgrader`, before the remaining initialization work, so projection reads are available before service startup.
 - Verification: server and SpecTests build cleanly; the two new upgrader specs pass, including idempotence/correctness and preflight no-write behavior; `npm test` passes all server, Web, Runner, and Slack suites.
+
+## T-003
+
+- `TaskLogService` now depends only on `IWorkflowRunWorkProjection`; workflow upload active-work checks, workId-to-taskId publish scope, projectId lookup, and taskId-to-workId queries no longer expose or load `WorkflowRun.State`.
+- Publish scope is created only after `ResolveTaskIdAsync` succeeds, so checks and other unmappable workIds carry null taskId and projectId and remain no-fan-out envelopes. Agent-job ownership still uses `IAgentJobStore` unchanged.
+- `TaskLogServicePersistThenPublishSpecs` uses a fake projection for workflow upload and query behavior, including active/inactive work, remapping, projection stamping, unmappable work, and query hit/miss. Existing SignalR coverage continues to assert null-taskId no fan-out.
+- Verification: SpecTests build cleanly and pass all 3637 tests after the projection switch.
