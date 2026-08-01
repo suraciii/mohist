@@ -272,7 +272,14 @@ public class AgentJobTerminalDeliverySpecs : AgentJobGrainTestSupport
             AgentSessionId: sessionId,
             AgentId: "agent-test"));
 
-        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(6));
+        // Stay below the configured DispatchRetryBound (5s): a leaked
+        // runner from a parallel test can admit this job via the global
+        // registry (ListEligibleRunnersAsync is project-agnostic) and
+        // set ReadySince, after which advancing past the bound would
+        // trip the readiness timeout into Failed(runner-unavailable).
+        // The no-runner case never sets ReadySince, so the bound is
+        // never reached regardless of how far time advances.
+        _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(4));
         await job.CheckTimeoutsAsync();
 
         // Issue-520 D4: dispatch retry bound exceeded no longer drives the
