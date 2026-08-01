@@ -126,6 +126,12 @@ function renderUnifiedHook(
   }
 }
 
+function renderWithSummary(overrides: Partial<UnifiedSessionSummaryDto>, initialEntry?: string) {
+  return renderUnifiedHook(makeDependencies({
+    useUnifiedSessionSummary: (() => ({ data: makeSummary(overrides), isLoading: false, isError: false })) as never,
+  }), initialEntry)
+}
+
 beforeEach(() => {
   followupSequence = []
   followupCalls.length = 0
@@ -284,19 +290,10 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
 
 describe('useUnifiedSessionDataSource — turn control availability', () => {
   it('exposes cancel only when the current turn is queued and suppresses stop', () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'active',
-          currentTurnId: 'turn-queued',
-          turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
+    const { result } = renderWithSummary({
+      activity: 'active', currentTurnId: 'turn-queued',
+      turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
-    const { result } = renderUnifiedHook(deps)
-
     expect(result.current.cancel).not.toBeNull()
     expect(result.current.cancel?.state).toBe('queued')
     expect(result.current.cancel?.turnId).toBe('turn-queued')
@@ -304,40 +301,21 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
   })
 
   it('exposes cancel for a queued turn even when the activity field is idle', () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'idle',
-          recoveryAvailable: false,
-          currentTurnId: 'turn-queued',
-          turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
+    const { result } = renderWithSummary({
+      activity: 'idle', recoveryAvailable: false, currentTurnId: 'turn-queued',
+      turns: [{ id: 'turn-queued', sequence: 1, inputIds: [], status: 'queued' }],
     })
-    const { result } = renderUnifiedHook(deps)
-
     expect(result.current.cancel?.turnId).toBe('turn-queued')
     expect(result.current.stop).toBeNull()
     expect(result.current.recoveryAvailable).toBe(false)
   })
 
   it('exposes stop only when the current turn is executing and suppresses cancel', () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'active',
-          currentTurnId: 'turn-running',
-          turns: [{ id: 'turn-running', sequence: 1, inputIds: ['input-1'], status: 'executing' }],
-          inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
+    const { result } = renderWithSummary({
+      activity: 'active', currentTurnId: 'turn-running',
+      turns: [{ id: 'turn-running', sequence: 1, inputIds: ['input-1'], status: 'executing' }],
+      inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
     })
-    const { result } = renderUnifiedHook(deps)
-
     expect(result.current.stop).not.toBeNull()
     expect(result.current.stop?.state).toBe('executing')
     expect(result.current.stop?.turnId).toBe('turn-running')
@@ -345,44 +323,20 @@ describe('useUnifiedSessionDataSource — turn control availability', () => {
   })
 
   it('keeps cancel and stop null while the Session is idle or in an unknown state', () => {
-    const idleDeps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({ activity: 'idle', currentTurnId: null }),
-        isLoading: false,
-        isError: false,
-      })) as never,
-    })
-    const { result: idleResult } = renderUnifiedHook(idleDeps)
+    const { result: idleResult } = renderWithSummary({ activity: 'idle', currentTurnId: null })
     expect(idleResult.current.cancel).toBeNull()
     expect(idleResult.current.stop).toBeNull()
 
-    const unknownDeps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({ activity: 'unknown', currentTurnId: 'turn-stale' }),
-        isLoading: false,
-        isError: false,
-      })) as never,
-    })
-    const { result: unknownResult } = renderUnifiedHook(unknownDeps)
+    const { result: unknownResult } = renderWithSummary({ activity: 'unknown', currentTurnId: 'turn-stale' })
     expect(unknownResult.current.cancel).toBeNull()
     expect(unknownResult.current.stop).toBeNull()
   })
 
   it('keeps recovery actions gated off when the Session has a queued or executing turn', () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'active',
-          currentTurnId: 'turn-running',
-          recoveryAvailable: false,
-          turns: [{ id: 'turn-running', sequence: 1, inputIds: [], status: 'executing' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
+    const { result } = renderWithSummary({
+      activity: 'active', currentTurnId: 'turn-running', recoveryAvailable: false,
+      turns: [{ id: 'turn-running', sequence: 1, inputIds: [], status: 'executing' }],
     })
-    const { result } = renderUnifiedHook(deps)
-
     expect(result.current.recoveryAvailable).toBe(false)
     expect(result.current.stop).not.toBeNull()
     expect(result.current.cancel).toBeNull()
