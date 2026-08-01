@@ -15,6 +15,7 @@ import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { agentInputAttachmentContentPath, getAgentLaunchObservationMeaning } from '../../../entities/agent'
+import type { AgentTurnObservation, SessionInputObservation, SessionRecoveryObservation } from '../../../entities/coder-session'
 import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
 import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
@@ -193,11 +194,14 @@ export function SessionDetailShell({
     contextUsagePercent,
     healthStatus,
     hasRecoveryActions,
+    recoveryAvailable,
     recoverySessionName,
     recoverySessionId,
     handleRecoverySuccess,
+    recoveryHistory,
     issueNumber,
     cancel,
+    stop,
     emptyStateKind,
     launchObservation,
     projectId,
@@ -253,8 +257,11 @@ export function SessionDetailShell({
               issueNumber={issueNumber}
               sessionName={recoverySessionName ?? ''}
               genericSessionId={recoverySessionId ?? undefined}
-               activity={meta?.activity}
-              onSuccess={handleRecoverySuccess}
+              runtimeSessionId={meta?.runtimeSessionId}
+              runtime={meta?.runtime}
+              activity={meta?.activity}
+              recoveryAvailable={recoveryAvailable}
+              onSettled={handleRecoverySuccess}
               bare
             />
           </div>
@@ -438,6 +445,7 @@ export function SessionDetailShell({
       turnCount={displayTurnCount}
       siblingNav={siblingNav}
       cancel={cancel}
+      stop={stop}
       headerRef={headerRef}
     />
   )
@@ -462,21 +470,24 @@ export function SessionDetailShell({
             turnCount={displayTurnCount}
           />
           <SessionUsageSummary usage={meta.usage} />
-          {errorsEvidence}
-          {observationGuidance && (
-            <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
-              {observationGuidance}
-            </div>
-          )}
-          {recoveryBarContent && (
-            <div
-              data-testid="session-recovery-bar"
-              data-sticky="true"
-              className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
-            >
-              {recoveryBarContent}
-            </div>
-          )}
+           {errorsEvidence}
+           {observationGuidance && (
+             <div className="border-b border-border px-4 py-2 text-xs text-muted-foreground" data-testid="launch-observation-guidance">
+               {observationGuidance}
+             </div>
+           )}
+            <SessionInputTurnEvidence inputs={meta.inputs} turns={meta.turns} />
+            <SessionRecoveryHistory history={recoveryHistory} />
+           {recoveryBarContent && (
+             <div
+               data-testid="session-recovery-bar"
+               data-sticky="true"
+               className="sticky top-9 z-20 border-b border-border bg-background px-4 py-2 md:py-3"
+             >
+               {recoveryBarContent}
+             </div>
+           )}
+
           {hasTurns ? (
             <SessionTranscriptLayout
               turns={displayTurns}
@@ -589,6 +600,7 @@ function SessionHeader({
   turnCount,
   siblingNav,
   cancel,
+  stop,
   headerRef,
 }: {
   backPath: string
@@ -601,12 +613,16 @@ function SessionHeader({
   turnCount: number
   siblingNav?: React.ReactNode
   cancel: SessionDataSourceResult['cancel']
+  stop: SessionDataSourceResult['stop']
   headerRef: RefObject<HTMLDivElement | null>
 }) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false)
-  const [controlOperation, setControlOperation] = useState<'cancel' | 'stop'>('stop')
+  const [controlOperation, setControlOperation] = useState<'cancel' | 'stop'>('cancel')
   const [cancelState, setCancelState] = useState<string | null>(null)
   const showCancelControl = cancel != null
+  const showStopControl = stop != null
+  const activeControl = controlOperation === 'cancel' ? cancel : stop
+  const activeControlIsPending = activeControl?.isPending ?? false
 
   const changedFiles = meta?.changedFiles
   const fileSummary = changedFiles && changedFiles.length > 0
@@ -667,7 +683,20 @@ function SessionHeader({
       </div>
 
       <div
+        data-testid="session-source-context"
+        className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
+      >
+        <span className="font-medium text-foreground">
+          {meta.source === 'workflow' ? 'Workflow Session' : 'Agent Session'}
+        </span>
+        {meta.agentName && <span>Agent: {meta.agentName}</span>}
+        {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
+        {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}
+      </div>
+
+      <div
         data-testid="session-header-metadata-row"
+
         className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground min-w-0"
       >
         <h1
@@ -730,41 +759,49 @@ function SessionHeader({
         )}
       </div>
 
-      {showCancelControl && (
+      {(showCancelControl || showStopControl) && (
         <div
           data-testid="session-header-secondary-actions"
-          className="mt-1 flex justify-end"
+          className="mt-1 flex justify-end gap-1"
         >
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setControlOperation('cancel'); setCancelDialogOpen(true) }}
-            data-testid="session-cancel-trigger"
-            aria-label="Cancel Turn"
-            type="button"
-          >
-            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Cancel Turn
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => { setControlOperation('stop'); setCancelDialogOpen(true) }}
-            data-testid="session-stop-trigger"
-            aria-label="Stop Turn"
-            type="button"
-          >
-            <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
-            Stop Turn
-          </Button>
+          {showCancelControl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setControlOperation('cancel'); setCancelDialogOpen(true) }}
+              data-testid="session-cancel-trigger"
+              data-control-operation="cancel"
+              data-turn-state="queued"
+              aria-label="Cancel Turn"
+              type="button"
+            >
+              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              Cancel Turn
+            </Button>
+          )}
+          {showStopControl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => { setControlOperation('stop'); setCancelDialogOpen(true) }}
+              data-testid="session-stop-trigger"
+              data-control-operation="stop"
+              data-turn-state="executing"
+              aria-label="Stop Turn"
+              type="button"
+            >
+              <CircleStopIcon className="h-3.5 w-3.5" aria-hidden="true" />
+              Stop Turn
+            </Button>
+          )}
         </div>
       )}
 
-      {showCancelControl && cancel && (
+      {(showCancelControl || showStopControl) && activeControl && (
         <AlertDialog
           open={cancelDialogOpen}
           onOpenChange={(open) => {
-            if (cancel.isPending) return
+            if (activeControlIsPending) return
             setCancelDialogOpen(open)
           }}
           title={controlOperation === 'cancel' ? 'Cancel this Turn?' : 'Stop this Turn?'}
@@ -774,9 +811,9 @@ function SessionHeader({
           confirmLabel={controlOperation === 'cancel' ? 'Cancel Turn' : 'Stop Turn'}
           cancelLabel="Keep running"
           tone="destructive"
-          loading={cancel.isPending}
+          loading={activeControlIsPending}
           onConfirm={() => {
-            cancel.mutate(controlOperation, {
+            activeControl.mutate({
               onSuccess: (result) => {
                 setCancelState(result.state)
                 setCancelDialogOpen(false)
@@ -784,12 +821,14 @@ function SessionHeader({
             })
           }}
           data-testid="session-cancel-alert"
+          data-control-operation={controlOperation}
         />
       )}
       {cancelState && (
         <div className="px-4 pt-2 text-xs text-muted-foreground" role="status" data-testid="session-cancel-result">
           Turn result: {cancelState}
           {cancelState === 'unknown' && <span> Verification: Session view</span>}
+          {cancelState === 'stop-requested' && <span> Verification: Session view (Runtime will report terminal result)</span>}
         </div>
       )}
 
@@ -934,6 +973,102 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
         </span>
       )}
     </span>
+  )
+}
+
+function SessionInputTurnEvidence({
+  inputs,
+  turns,
+}: {
+  inputs?: SessionInputObservation[] | null
+  turns?: AgentTurnObservation[] | null
+}) {
+  if (!inputs?.length && !turns?.length) return null
+  const inputById = new Map((inputs ?? []).map((input) => [input.id, input]))
+  const groupedInputIds = new Set((turns ?? []).flatMap((turn) => turn.inputIds))
+  const orderedInputs = [...(inputs ?? [])].sort((a, b) => a.sequence - b.sequence)
+
+  return (
+    <section
+      data-testid="session-input-turn-evidence"
+      className="border-b border-border bg-muted/20 px-4 py-3"
+      aria-label="Session inputs and turns"
+    >
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Inputs and turns</div>
+      <div className="space-y-2">
+        {(turns ?? []).map((turn) => (
+          <div key={turn.id} data-testid={`session-turn-evidence-${turn.id}`} className="rounded border border-border bg-background px-3 py-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+              <span className="font-medium text-foreground">Turn {turn.sequence}</span>
+              <span className="font-mono text-muted-foreground">{turn.id}</span>
+              <span data-testid={`session-turn-status-${turn.id}`} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{turn.status}</span>
+            </div>
+            {turn.result && (
+              <div data-testid={`session-turn-result-${turn.id}`} className="mt-2 space-y-1 border-t border-border pt-2 text-xs">
+                <div className="font-medium text-foreground">Terminal result</div>
+                {turn.result.message && <div data-testid={`session-turn-result-message-${turn.id}`}>{turn.result.message}</div>}
+                {turn.result.output && (
+                  <pre data-testid={`session-turn-result-output-${turn.id}`} className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">
+                    {turn.result.output}
+                  </pre>
+                )}
+                {turn.result.failureCategory && <div>Category: {turn.result.failureCategory}</div>}
+                {turn.result.failureReason && <div>Failure: {turn.result.failureReason}</div>}
+                {turn.result.exitCode != null && <div>Exit code: {turn.result.exitCode}</div>}
+              </div>
+            )}
+            <div className="mt-2 space-y-1">
+              {turn.inputIds.map((inputId) => {
+                const input = inputById.get(inputId)
+                return (
+                  <div key={inputId} data-testid={`session-input-evidence-${inputId}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <span>Input {input?.sequence ?? '?'}</span>
+                    <span className="font-mono">{inputId}</span>
+                    <span data-testid={`session-input-acceptance-${inputId}`}>accepted: {input?.acceptance ?? 'unknown'}</span>
+                    <span data-testid={`session-input-delivery-${inputId}`}>delivered: {turn.status}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ))}
+        {orderedInputs.filter((input) => !groupedInputIds.has(input.id)).map((input) => (
+          <div key={input.id} data-testid={`session-input-evidence-${input.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
+            <span>Input {input.sequence}</span>
+            <span className="font-mono">{input.id}</span>
+            <span data-testid={`session-input-acceptance-${input.id}`}>accepted: {input.acceptance}</span>
+            <span data-testid={`session-input-delivery-${input.id}`}>delivered: unknown</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function SessionRecoveryHistory({ history }: { history?: SessionRecoveryObservation[] | null }) {
+  if (!history?.length) return null
+
+  return (
+    <section
+      data-testid="session-recovery-history"
+      className="border-b border-border bg-muted/20 px-4 py-3"
+      aria-label="Session recovery history"
+    >
+      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recovery history</div>
+      <div className="space-y-1.5">
+        {history.map((entry, index) => (
+          <div key={`${entry.type}-${entry.recordedAt}-${index}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">
+              {entry.type === 'reset' ? 'Runtime context reset' : entry.type === 'compaction' ? 'Context compacted' : entry.type}
+            </span>
+            <span>{entry.recordedAt}</span>
+            {entry.reason && <span>Reason: {entry.reason}</span>}
+            {entry.strategy && <span>Strategy: {entry.strategy}</span>}
+            {entry.runtimeSessionId && <span className="font-mono">Runtime: {entry.runtimeSessionId}</span>}
+          </div>
+        ))}
+      </div>
+    </section>
   )
 }
 

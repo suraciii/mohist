@@ -13,13 +13,19 @@ export {
   getAgentSessionEvents,
   getAgentSessionMetadata,
   getAgentSessionTranscript,
+  getCoderSessions,
+  getUnifiedSessionSummary,
+  getUnifiedSessionTranscript,
+  unifiedSessionSummaryQueryOptions,
+  unifiedSessionTranscriptQueryOptions,
   getWorkflowRunSessions,
-  postFollowup,
+  useUnifiedSessionSummary,
+  useUnifiedSessionTranscript,
   resetSession,
   resetGenericSession,
 } from './api/client'
 export type { SessionCancelResult, SessionRecoveryResult, SessionFollowupResult, SessionAttachment, SessionAttachmentRejection } from './api/client'
-export type { AgentTurnObservation, FollowupOutcome, FollowupStatus, SessionInputObservation } from './model/types'
+export type { AgentTurnObservation, FollowupOutcome, FollowupStatus, SessionInputObservation, UnifiedSessionContextRefsDto, UnifiedSessionSummaryDto } from './model/types'
 export { clampPercent, isContextHealthStatus } from './lib/context-health'
 export type { ContextHealthStatus } from './lib/context-health'
 export { ContextHealthIndicator } from './ui/ContextHealthIndicator'

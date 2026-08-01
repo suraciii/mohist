@@ -99,6 +99,7 @@ function makeIssue(issue: IssueFixture): Record<string, unknown> {
 
 const sessions = [
   {
+    id: 'session-coder-1',
     sessionName: 'coder-1',
     status: 'completed',
     startedAt: '2026-07-01T01:00:00Z',
@@ -108,6 +109,7 @@ const sessions = [
     projectId: project.id,
   },
   {
+    id: 'session-coder-2',
     sessionName: 'coder-2',
     status: 'running',
     startedAt: '2026-07-01T02:00:00Z',
@@ -423,7 +425,7 @@ test.describe('Issue decision surface browser layout', () => {
     await expect(transcript).toBeVisible()
     await expect(transcript).not.toHaveAttribute('aria-disabled', 'true')
     const transcriptHref = await transcript.getAttribute('href')
-    expect(transcriptHref).toContain(`/issues/${issue.number}/workflow/sessions/coder-2`)
+     expect(transcriptHref).toContain('/sessions/session-coder-2')
 
     const stopBox = await box(surface.getByTestId('decision-action-stop'))
     const transcriptBox = await box(transcript)
@@ -674,7 +676,7 @@ test.describe('Issue decision surface browser layout', () => {
     await page.goto(`/${project.name}/issues/${issue.number}`)
     await page.getByRole('button', { name: 'More actions' }).click()
     await page.getByTestId('approval-more-action-view-transcript').click()
-    await expect(page).toHaveURL(new RegExp(`/issues/${issue.number}/workflow/sessions/coder-2$`))
+     await expect(page).toHaveURL(new RegExp('/sessions/session-coder-2$'))
   })
 
   test('phone width keeps the launcher enabled even when the primary action itself is currently disabled', async ({ page }) => {

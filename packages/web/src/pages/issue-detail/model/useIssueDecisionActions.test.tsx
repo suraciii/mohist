@@ -224,8 +224,8 @@ describe('runControllerAction', () => {
     const navigate = vi.fn()
     runControllerAction(makeCtx({ navigate }), makeAction('ask-agent', { to: '/agent-sessions/new?issue=14' }))
     expect(navigate).toHaveBeenCalledWith('/agent-sessions/new?issue=14')
-    runControllerAction(makeCtx({ navigate }), makeAction('view-transcript', { to: '/issues/14/workflow/sessions/review-1' }))
-    expect(navigate).toHaveBeenCalledWith('/issues/14/workflow/sessions/review-1')
+    runControllerAction(makeCtx({ navigate }), makeAction('view-transcript', { to: '/sessions/review-1' }))
+    expect(navigate).toHaveBeenCalledWith('/sessions/review-1')
   })
 
   it('does not navigate for ask-agent / view-transcript when no target is set', () => {

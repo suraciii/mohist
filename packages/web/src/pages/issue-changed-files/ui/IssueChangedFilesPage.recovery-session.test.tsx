@@ -27,7 +27,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     fireEvent.click(sessionLink)
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent)
-        .toBe('/Test%20Project/issues/123/workflow/sessions/s-wr-1')
+        .toBe('/Test%20Project/sessions/session-1')
     })
     expect(screen.getByTestId('session-page-stub')).toBeTruthy()
   })
@@ -45,7 +45,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     fireEvent.click(sessionLink)
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent)
-        .toBe('/Test%20Project/issues/123/workflow/sessions/session%20with%20spaces%20%26%20symbols%2Fabc')
+        .toBe('/Test%20Project/sessions/session-1')
     })
   })
 
@@ -99,7 +99,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     fireEvent.click(await screen.findByTestId('issue-files-recovery-session'))
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent)
-        .toBe(`/Test%20Project/issues/123/workflow/sessions/${status}-session`)
+        .toBe(`/Test%20Project/sessions/session-1`)
     })
     expect(screen.getByTestId('session-page-stub')).toBeTruthy()
   })
@@ -128,7 +128,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     fireEvent.click(await screen.findByTestId('issue-files-recovery-session'))
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent)
-        .toBe('/Test%20Project/issues/123/workflow/sessions/live-session')
+        .toBe('/Test%20Project/sessions/session-2')
     })
   })
 
@@ -154,7 +154,7 @@ describe('IssueChangedFilesPage related-session recovery', () => {
     fireEvent.click(await screen.findByTestId('issue-files-recovery-session'))
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent)
-        .toBe('/Test%20Project/issues/123/workflow/sessions/earlier-session')
+        .toBe('/Test%20Project/sessions/session-2')
     })
   })
 })

@@ -196,8 +196,10 @@ export function IssueDetailPage({
         blocker: issue.blocker,
       },
       agentStatus: agentStatus ?? null,
-      workflowSessions: workflowSessions.map((s) => ({
-        sessionName: s.sessionName,
+       workflowSessions: workflowSessions.map((s) => ({
+         id: s.id,
+         sessionName: s.sessionName,
+
         activity: s.activity,
         startedAt: s.startedAt,
         createdAt: s.createdAt,
@@ -506,7 +508,7 @@ export function IssueDetailPage({
 
               {showWorkflowSections && (
                 <div id="workflow" className="scroll-mt-20" data-testid="workflow-view-frame">
-                  <WorkflowView issue={issue} readOnly />
+                  <WorkflowView issue={issue} readOnly dependencies={{ workflowSessionsHook: useWorkflowRunSessions }} />
                 </div>
               )}
 

@@ -1,0 +1,69 @@
+{
+  "project": "mohist-local",
+  "description": "Unify the Web AgentSession detail surface across Agent-launch and Workflow sources, then expose authoritative Session tracking and controls through its stable ID.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Complete the unified AgentSession read projection",
+      "spec": "specs/agent-session-web-tracking/spec.md#session-context-and-current-state",
+      "description": "Extend the source-agnostic Session summary and transcript read contract so a stable Session ID supplies all context, current-turn, input/turn, runtime-binding, usage, failure, recovery, and command-gating facts required by the Web. Keep source-specific associations absent when inapplicable and preserve project isolation; do not add persisted Session state or a new command path.",
+      "acceptanceCriteria": [
+        "`GET /api/projects/{projectRef}/sessions/{sessionId}` returns the complete shared page projection for both `agent-launch` and `workflow` Session sources, including current-turn and input/turn observations, terminal/failure evidence, model/usage, recovery availability, and runtime binding.",
+        "The projection supplies only Agent identity for Agent-launch Sessions and only Workflow identity for Workflow Sessions; it does not serialize fabricated source associations.",
+        "Summary and transcript reads return not found for a Session in another Project or an unsupported source kind.",
+        "Server spec coverage verifies both sources, project isolation, absent source fields, current-turn observations, and transcript retrieval by stable Session ID.",
+        "`npm test` passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended unified Session read DTO, querier, and route contract with source-aware Server spec coverage.",
+      "dependsOn": [],
+      "passes": true,
+      "notes": "Build on `UnifiedSessionSummaryDto`, `AgentSessionQuerier.GetUnifiedSessionSummaryAsync`, and `UnifiedSessionRoutes`; the Session domain remains the only owner of activity, turns, and bindings."
+    },
+    {
+      "id": "T-002",
+      "title": "Deliver the stable-ID Web AgentSession tracking page",
+      "spec": "specs/agent-session-web-tracking/spec.md#input-turn-and-transcript-evidence",
+      "description": "Add a typed unified Session API client and `useUnifiedSessionDataSource`, then route all Session detail entry points through `/sessions/:sessionId`. Reuse `SessionDetailShell` and the transcript widget to show source-aware navigation, chronological inputs, turns, transcript/tool evidence, usage, context health, empty states, and live authoritative convergence; remove the duplicate source-specific detail data sources and routes after call sites move.",
+      "acceptanceCriteria": [
+        "Agent history, Workflow Session lists, and Issue transcript actions navigate to `/sessions/:sessionId` using the stable logical Session ID.",
+        "One shared data source renders both Agent-launch and Workflow Sessions without resolving a Workflow Session through an Issue-scoped session name.",
+        "The page presents source context before the transcript, groups each SessionInput with its AgentTurn, and displays input acceptance/delivery, tool or execution failures, resolved model, usage, and context health.",
+        "Active-without-content, idle-without-content, and unknown activity remain distinct; unknown observations never enable unsafe controls or fabricate accepted/terminal state.",
+        "Live terminal events and recovery-driven binding changes reconcile the unified summary and transcript while excluding stale runtime content.",
+        "Focused Web tests cover both sources, source-aware navigation, input/turn grouping, empty/unknown states, failure evidence, and live convergence.",
+        "`npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, and `npm run check:fsd -w packages/web` pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "A single stable-ID Web Session detail route and shared tracking data source with source-agnostic read behavior.",
+      "dependsOn": ["T-001"],
+      "passes": true,
+      "notes": "Keep presentation dependencies downward under the Web FSD rules. Existing `SessionDetailShell` and `useSessionTranscript` remain the shared rendering and live-event primitives."
+    },
+    {
+      "id": "T-003",
+      "title": "Operate AgentSessions from the unified Web page",
+      "spec": "specs/agent-session-web-operations/spec.md#continue-a-session-with-follow-up-input",
+      "description": "Connect follow-up, queued-turn cancellation, active-turn stop, Compact, and Reset to the unified Session page through the canonical Session-ID APIs. Derive availability from the authoritative unified observation, retain a follow-up idempotency key only for unknown results, and invalidate or reconcile the shared summary and transcript after every command.",
+      "acceptanceCriteria": [
+        "An accepted follow-up creates a SessionInput and AgentTurn on the existing logical Session without creating another Session or AgentJob; unknown follow-up results expose retry with the original idempotency key.",
+        "Cancel is available only for a queued current turn and reports terminal cancellation; stop is available only for an executing current turn and remains `stop-requested` or `unknown` until the Session reports a terminal result.",
+        "Compact and Reset are unavailable while a turn is queued or executing. Reset requires confirmation and, when accepted, retains the logical Session history while presenting the new empty runtime context.",
+        "Rejected, failed, and unknown command outcomes remain explicit, and every command refreshes the unified summary/transcript and relevant Session lists rather than locally fabricating success.",
+        "Focused Web tests cover idle and active follow-up, unknown retry identity, queued cancel, unconfirmed stop, active recovery gating, confirmed reset, and command-state reconciliation for both Session sources.",
+        "`npm run typecheck -w packages/web`, `npm run test:run -w packages/web`, and `npm run check:fsd -w packages/web` pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Unified Web Session controls with authoritative outcomes and regression coverage for follow-up, turn control, Compact, and Reset.",
+      "dependsOn": ["T-002"],
+      "passes": true,
+      "notes": "Reuse the canonical `/agent-sessions/{sessionId}` command APIs and Session-domain decision rules; do not branch command dispatch by Session source."
+    }
+  ]
+}

@@ -789,7 +789,7 @@ export function IssueChangedFilesPage() {
   const { sessions: workflowSessions } = useWorkflowRunSessions(workflowRunId)
   const relatedSession = selectRelatedSession(workflowSessions)
   const sessionHref = relatedSession
-    ? toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(relatedSession.sessionName)}`)
+    ? toProjectPath(`/sessions/${encodeURIComponent(relatedSession.id)}`)
     : undefined
 
   if (!issueNumber || isNaN(issueNumber) || issueNumber === 0) {

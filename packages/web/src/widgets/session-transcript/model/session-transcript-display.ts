@@ -93,7 +93,7 @@ export interface DisplayErrorPart {
   id: string
   partType: 'error'
   message: string
-  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery'
+  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery' | 'context-reset' | 'compaction'
   at: string
 }
 

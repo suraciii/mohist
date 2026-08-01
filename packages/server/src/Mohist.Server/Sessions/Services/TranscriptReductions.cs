@@ -24,7 +24,9 @@ internal static class TranscriptReductions
         var summaries = loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
-            .OrderBy(e => e.Sequence)
+            .OrderBy(e => turnSequenceByTurnId.GetValueOrDefault(e.TurnId, long.MaxValue))
+            .ThenBy(e => e.Sequence)
+            .ThenBy(e => e.Id)
             .GroupBy(e => e.SessionId, StringComparer.Ordinal)
             .ToDictionary(
                 group => group.Key,

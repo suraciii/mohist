@@ -264,10 +264,10 @@ export function useIssueChangedFilesPageFixture() {
     return (
       <Routes>
         <Route path="/:projectName/issues/:number/files" element={<IssueChangedFilesPage />} />
-        <Route path="/:projectName/issues/:number/workflow/sessions/:sessionName" element={<div data-testid="session-page-stub">Session Page</div>} />
+        <Route path="/:projectName/sessions/:sessionId" element={<div data-testid="session-page-stub">Session Page</div>} />
         <Route path="/:projectName/issues/:number" element={<div>Issue Detail Page</div>} />
         <Route path="/issues/:number/files" element={<IssueChangedFilesPage />} />
-        <Route path="/issues/:number/workflow/sessions/:sessionName" element={<div data-testid="session-page-stub">Session Page</div>} />
+        <Route path="/sessions/:sessionId" element={<div data-testid="session-page-stub">Session Page</div>} />
         <Route path="/issues/:number" element={<div>Issue Detail Page</div>} />
       </Routes>
     )

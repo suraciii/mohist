@@ -1,4 +1,4 @@
-import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
+import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionRecoveryObservation, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
 import type { DisplayTurn } from '../../../widgets/session-transcript'
 
@@ -8,6 +8,22 @@ export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-
 export interface SessionCancelOptions {
   onSuccess?: (result: { state: string }) => void
   onSettled?: () => void
+}
+
+/**
+ * Authoritative handle for one turn-control operation against the
+ * canonical Session-ID API. `cancel` is present only when the current
+ * turn is queued; `stop` is present only when the current turn is
+ * executing. Mutating either dispatches the matching Server command
+ * (deterministic cancellation for queued, interrupt request for
+ * executing) and invalidates the unified summary, transcript, and
+ * Session-list queries through the data source.
+ */
+export interface SessionTurnControlHandle {
+  turnId: string
+  state: 'queued' | 'executing'
+  mutate: (options?: SessionCancelOptions) => void
+  isPending: boolean
 }
 
 export interface SessionDataSourceResult {
@@ -37,11 +53,8 @@ export interface SessionDataSourceResult {
   supportsInputAttachments?: boolean
   projectId?: string | null
 
-  cancel: {
-    turnId?: string
-    mutate: (operation?: 'cancel' | 'stop', options?: SessionCancelOptions) => void
-    isPending: boolean
-  } | null
+  cancel: SessionTurnControlHandle | null
+  stop: SessionTurnControlHandle | null
 
   contextWindowUsed: number | null
   contextWindowSize: number | null
@@ -49,8 +62,10 @@ export interface SessionDataSourceResult {
   healthStatus: string | null
 
   hasRecoveryActions: boolean
+  recoveryAvailable?: boolean
   recoverySessionName: string | null
   recoverySessionId?: string | null
+  recoveryHistory?: SessionRecoveryObservation[] | null
 
   metadataQueryKey: readonly unknown[]
   transcriptQueryKey: readonly unknown[]
