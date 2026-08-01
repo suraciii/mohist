@@ -34,3 +34,9 @@
 - Channel control accepts an inbox route for active, no-active, and already-ended cases. On redelivery, the existing stored route and Turn id are reused instead of resolving the current Turn again; this prevents a stale gesture from controlling a later Turn in the same session.
 - Unauthorized control returns the actionable rejection before inbox acceptance. Normal follow-up still goes through the access decider and session follow-up dispatcher.
 - `SlackChannelTurnControlSpecs` covers Owner stop, initiator stop, allowed non-initiator rejection without Runner interruption, stale control redelivery, no-active/already-ended replies, and allowed non-initiator follow-up. The stale redelivery assertion checks the later Turn remains executing; the original outbox reply is intentionally unchanged by dispatch-ref deduplication.
+
+## Verification follow-up
+
+- The first `npm run verify` reproduction exceeded the command timeout after ArchTests started and before SpecTests reported completion; it produced no test failure output and left no Git-visible changes.
+- A standalone `npm test` then passed all Server, Web, Runner, and Slack workspace checks, and a second complete `npm run verify` passed the build plus the same test suites. The initial timeout was a transient verification-run hang rather than an implementation or test defect; no code workaround was needed.
+- The focused `SlackChannelTurnControlSpecs` run also passed all 8 cases; the repository remains clean apart from this progress record.
