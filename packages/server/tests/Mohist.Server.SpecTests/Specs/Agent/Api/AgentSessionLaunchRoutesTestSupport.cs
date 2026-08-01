@@ -44,14 +44,15 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string expectedSessionId)
     {
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
-        var dispatch = await PollDispatchOnceAsync(runnerId, expectedSessionId)
-            ?? await PollDispatchOnceAsync(runnerId, expectedSessionId);
-        if (dispatch is null)
-        {
-            throw new XunitException(
-                $"Runner '{runnerId}' did not return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'.\n" +
-            $"Runner registry:\n{await _fixture.DescribeRunnerRegistryAsync()}");
-        }
+        // Assignment-prepared does not guarantee the dispatch has propagated to
+        // the runner's poll endpoint; retry over a window (as PollAgentJobDispatchAsync
+        // does) instead of a fixed two attempts, which flaked on slower CI runners.
+        var dispatch = (await TestWait.ForAsync(
+            () => PollDispatchOnceAsync(runnerId, expectedSessionId),
+            candidate => candidate is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'"))!;
 
         Assert.Equal(agentJobId, dispatch.AgentJobId);
         return dispatch;
