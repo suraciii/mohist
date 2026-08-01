@@ -258,6 +258,7 @@ export function SessionDetailShell({
               sessionName={recoverySessionName ?? ''}
               genericSessionId={recoverySessionId ?? undefined}
               runtimeSessionId={meta?.runtimeSessionId}
+              runtime={meta?.runtime}
               activity={meta?.activity}
               recoveryAvailable={recoveryAvailable}
               onSettled={handleRecoverySuccess}

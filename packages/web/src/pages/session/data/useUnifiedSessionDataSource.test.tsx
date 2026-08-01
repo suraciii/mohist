@@ -7,6 +7,7 @@ import { ProjectProvider } from '../../../entities/project'
 import { useUnifiedSessionDataSource, type UnifiedSessionDataSourceDependencies } from './useUnifiedSessionDataSource'
 import type { AgentSessionTranscriptResponse, SessionFollowupResult, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
 import type { TurnControlResult } from '../../../entities/agent'
+import { ApiError } from '../../../shared/api/client'
 
 const TEST_PROJECT = {
   id: 'proj-1',
@@ -201,6 +202,50 @@ describe('useUnifiedSessionDataSource — follow-up commands', () => {
     })
     expect(followupCalls).toHaveLength(2)
     expect(followupCalls[1].idempotencyKey).toBe(originalKey)
+  })
+
+  it('discards the idempotency key after a known 4xx rejection so retry uses a fresh key', async () => {
+    const mutateAsync = vi.fn()
+      .mockRejectedValueOnce(new ApiError('Conflict', 409))
+      .mockResolvedValueOnce({ status: 'accepted', inputId: 'input-z', turnId: 'turn-z' })
+    const deps = makeDependencies({
+      useGenericFollowup: (() => ({ mutateAsync, isPending: false })) as never,
+    })
+    const { result } = renderUnifiedHook(deps)
+
+    await act(async () => {
+      await expect(result.current.sendFollowup('Retry after conflict')).rejects.toThrow('Conflict')
+    })
+    expect(mutateAsync).toHaveBeenCalledTimes(1)
+    const rejectedKey = (mutateAsync.mock.calls[0][0] as { idempotencyKey: string }).idempotencyKey
+
+    await act(async () => {
+      await result.current.sendFollowup('Retry after conflict')
+    })
+    expect(mutateAsync).toHaveBeenCalledTimes(2)
+    expect((mutateAsync.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).not.toBe(rejectedKey)
+  })
+
+  it('retains the idempotency key after a network error with an ambiguous outcome', async () => {
+    const mutateAsync = vi.fn()
+      .mockRejectedValueOnce(new ApiError('Internal error', 503))
+      .mockResolvedValueOnce({ status: 'accepted', inputId: 'input-z', turnId: 'turn-z' })
+    const deps = makeDependencies({
+      useGenericFollowup: (() => ({ mutateAsync, isPending: false })) as never,
+    })
+    const { result } = renderUnifiedHook(deps)
+
+    await act(async () => {
+      await expect(result.current.sendFollowup('Retry after 503')).rejects.toThrow('Internal error')
+    })
+    expect(mutateAsync).toHaveBeenCalledTimes(1)
+    const originalKey = (mutateAsync.mock.calls[0][0] as { idempotencyKey: string }).idempotencyKey
+
+    await act(async () => {
+      await result.current.sendFollowup('Retry after 503')
+    })
+    expect(mutateAsync).toHaveBeenCalledTimes(2)
+    expect((mutateAsync.mock.calls[1][0] as { idempotencyKey: string }).idempotencyKey).toBe(originalKey)
   })
 
   it('reconciles authoritative reads when a follow-up request is rejected', async () => {

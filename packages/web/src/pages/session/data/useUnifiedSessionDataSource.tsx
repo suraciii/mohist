@@ -14,6 +14,7 @@ import type { SessionFollowupResult, SessionMetadata, SessionTurn, UnifiedSessio
 import { projectTurn, useSessionTranscript } from '../../../widgets/session-transcript'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
+import { ApiError } from '../../../shared/api/client'
 import { resolveFollowupStatus } from './followupStatus'
 import type { EmptyStateKind, SessionCancelOptions, SessionDataSourceResult, SessionTurnControlHandle } from './SessionDataSource'
 
@@ -161,7 +162,10 @@ export function useUnifiedSessionDataSource(
     try {
       result = (await followup.mutateAsync({ sessionId, text, attachments: attachmentIds, idempotencyKey })) as SessionFollowupResult
     } catch (error) {
-      followupKeys.current.set(retryKey, idempotencyKey)
+      const isDefinitiveError = error instanceof ApiError && error.status >= 400 && error.status < 500
+      if (isDefinitiveError) {
+        followupKeys.current.delete(retryKey)
+      }
       reconcileUnifiedQueries()
       throw error
     }

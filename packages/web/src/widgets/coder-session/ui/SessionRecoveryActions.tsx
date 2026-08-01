@@ -76,6 +76,7 @@ export interface SessionRecoveryActionsProps {
   sessionName: string
   genericSessionId?: string
   runtimeSessionId?: string | null
+  runtime?: string | null
   activity?: AgentSessionActivity | string | null | undefined
   status?: string | null | undefined
   recoveryAvailable?: boolean
@@ -119,6 +120,7 @@ export function SessionRecoveryActions({
   sessionName,
   genericSessionId,
   runtimeSessionId,
+  runtime,
   activity,
   recoveryAvailable,
   onSuccess,
@@ -183,10 +185,11 @@ export function SessionRecoveryActions({
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending
-  const hasRuntimeSession = typeof runtimeSessionId === 'string' && runtimeSessionId.trim().length > 0
+  const hasRuntimeBinding = typeof runtimeSessionId === 'string' && runtimeSessionId.trim().length > 0
+    && typeof runtime === 'string' && runtime.trim().length > 0
   const compactDisabledReason = active
     ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
-    : !hasRuntimeSession
+    : !hasRuntimeBinding
       ? { title: COMPACT_BINDING_TITLE, body: COMPACT_BINDING_BODY }
     : anyPending
       ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
@@ -198,7 +201,7 @@ export function SessionRecoveryActions({
       : null
 
   function handleCompact() {
-    if (active || !hasRuntimeSession || anyPending) return
+    if (active || !hasRuntimeBinding || anyPending) return
     const idempotencyKey = compactIdempotencyKey ?? crypto.randomUUID()
     setCompactIdempotencyKey(idempotencyKey)
     compactMutation.mutate(idempotencyKey)

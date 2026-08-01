@@ -50,10 +50,11 @@ function renderActions(props: Partial<React.ComponentProps<typeof SessionRecover
         repositories: [],
       }]}>
         <SessionRecoveryActions
-           issueNumber={110}
-           sessionName="session-abc"
-           runtimeSessionId="runtime-abc"
-           activity="idle"
+          issueNumber={110}
+          sessionName="session-abc"
+          runtimeSessionId="runtime-abc"
+          runtime="opencode"
+          activity="idle"
           clients={recoveryClients}
           {...props}
         />
@@ -147,6 +148,13 @@ describe('SessionRecoveryActions — visibility and enabled/disabled states', ()
 
     fireEvent.focus(screen.getByTestId('session-recovery-compact').parentElement as HTMLElement)
     expect(screen.getByRole('tooltip')).toHaveTextContent('Runtime session unavailable')
+  })
+
+  it('disables Compact when runtimeSessionId is present but runtime name is missing', () => {
+    renderActions({ runtimeSessionId: 'rt-1', runtime: null })
+
+    expect(screen.getByTestId('session-recovery-compact')).toBeDisabled()
+    expect(screen.getByTestId('session-recovery-reset')).not.toBeDisabled()
   })
 })
 
@@ -439,6 +447,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
             issueNumber={110}
             sessionName="session-abc"
             runtimeSessionId="runtime-abc"
+            runtime="opencode"
             activity="idle"
             clients={recoveryClients}
           />
@@ -465,6 +474,7 @@ describe('SessionRecoveryActions — reset action and confirmation dialog', () =
             issueNumber={110}
             sessionName="session-abc"
             runtimeSessionId="runtime-abc"
+            runtime="opencode"
             activity="active"
             clients={recoveryClients}
           />
