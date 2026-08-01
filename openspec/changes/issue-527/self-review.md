@@ -1,66 +1,53 @@
-# Self-Review — issue-527 (Slack files as Agent input)
+# Self-Review (round 2) — issue-527 (Slack files as Agent input)
 
 ## Verdict summary
 
-The proposal/specs capture the issue's intent and acceptance criteria faithfully, the spec format is correct, and the task graph is a valid DAG. **However, the design's idempotency model (D5) contains a correctness gap that would cause duplicate or lost attachments on Slack redelivery, and a spec scenario rests on reasoning that is unsound.** This must be fixed in `design.md` before build.
+Round 1 failed the plan on a single blocker (F1: unsound redelivery idempotency for attachments). The fix adopted **message-scoped deterministic attachment ids + insert-if-absent/fetch-if-absent ingest + a stated ack-timing assumption**. This round verifies the fix is sound — including the ack-timing assumption, which is now **confirmed against the adapter code**, not merely asserted — and finds no new blocking issues. Minor implementation reminders are noted below but are build-time details, not plan gaps.
 
-**Promise: FAIL**
-
----
-
-## What is solid
-
-- **Spec format** — `specs/slack-attachment-entry/spec.md` uses exactly `### Requirement` / `#### Scenario` (4 hashtags), normative SHALL language throughout, and every requirement has ≥1 scenario (9/9). Verified by grep.
-- **Issue coverage** — all six acceptance criteria map to spec requirements; the four Non-Goals are honored (thread-history text, URL scraping, artifact upload, cross-session library).
-- **Capability discipline** — the new spec correctly confines itself to Slack-specific *entry* behavior and does not re-state the provider-agnostic invariants issue-513 already governs (`session-input-attachments`, `attachment-input-lifecycle`, `agent-attachment-delivery`).
-- **Task graph** — valid JSON, acyclic, every `dependsOn` points to a strictly lower-priority task, each task has verifiable acceptance criteria including test coverage. T-001/T-002 parallel; T-003 fans in; T-004 follows.
-- **Reuse claim is accurate** — verified that `EnsureInitialLaunchCommand.Attachments` (`IAgentSessionGrain.cs:335`), `AcceptFollowupCommand.Attachments`/`PreMintedInputId`/`AttachmentResults` (`:229`–`253`), and `AgentLaunchCoordinatorCommandEnvelope.Attachments`/`PreMintedInputId` (`AgentLaunchCoordinatorGrain.cs:481`–`498`) already carry the fields; the grains need no shape change. The runner `openAgentInputAttachment` is genuinely owner-scoped and provider-agnostic.
-- **`Source = "upload"` hardcode** — confirmed at `AttachmentService.cs:520`; D4's column approach is the right fix.
+**Promise: PASS**
 
 ---
 
-## Findings
+## Round-1 findings — status
 
-### F1 (BLOCKER) — D5's redelivery idempotency is unsound for attachments; causes duplicate or lost attachments
+### F1 (was BLOCKER) — RESOLVED and verified
 
-D5 asserts: *"the preminted `{sessionId}/{inputId}` owner is deterministic … so even if a bind is reached twice, the second pass re-validates rows already owned by that owner … rather than colliding."* This is **false** for the proposed per-message ingest model, and it breaks a spec scenario.
+The corrected D5 model is sound:
 
-What the code actually does (verified, `SlackConnectionRoutes.cs:1128`–`1174`):
+- **Idempotent ingest.** D3's `IngestProviderFileAsync` now takes a caller-supplied deterministic id and is insert-if-absent; the route fetches only when the row is absent. This makes redelivery a storage-level no-op (no re-fetch, no duplicate row/bytes) — directly satisfying spec scenario *"A redelivered message does not duplicate attachments"* (`spec.md:121`–`125`).
+- **Message-scoped id is the right key.** `att_{StableToken(teamId/conversationId/messageTs/slackFileId)}` is stable across redelivery of the same message, yet differs for the same physical file in a different message — so it gains redelivery idempotency without introducing the cross-session `AlreadyBound` that the rejected bare `att_slack_{fileId}` would cause. The previously-rejected alternative is now adopted in its correct, scoped form.
+- **Same-owner re-validation is real.** Verified `AttachmentService.cs:418`–`423` + `:443`–`450`: a row already owned by the target owner takes neither the `AlreadyBound` branch nor the newly-claimed path; it is reported accepted with an empty `newlyBoundIds`. So `ValidateAndBindAgentInputAsync` needs no change.
+- **Ack-timing assumption — VERIFIED, not assumed.** D5's load-bearing claim ("the adapter does not ack Slack until the Server responds") is confirmed at `packages/mohist-slack/src/adapter.ts:106`–`108`: the handler `await`s `transport.ingress(...)` (the Server HTTP POST) and only then calls `ack()`. Therefore a Server crash before its HTTP response → no adapter ack → Slack redelivers → the route re-runs against the same deterministic owner and ids → idempotent completion. This substantiates spec scenario *"A restart does not lose pending file binding"* (`spec.md:127`–`130`) via Slack redelivery, with no need for a Server-side inbox sweep.
 
-1. The provider inbox is accepted and `AlreadyExisted` is computed **before** the launch block.
-2. The launch block re-runs whenever `route.SessionId` is null (`:1133` `if (string.IsNullOrWhiteSpace(sessionId))`) — **regardless of `AlreadyExisted`**. `SetRouteSessionIdAsync` (`:1142`) only runs *after* a successful launch, so a crash between inbox-accept and `:1142` leaves `sessionId` null on redelivery → the block re-executes.
-3. If attachment fetch+ingest+bind is placed before the launch (as D1 prescribes, mirroring Web), redelivery runs it **again**, minting **fresh** `att_{guid}` ids (D5 explicitly chose per-message ingest, rejecting deterministic ids). `ValidateAndBindAgentInputAsync` then claims these *new* pending rows under the same owner — so the same `SessionInput` ends up with **two** bound copies of the same Slack file. D5's "re-validates rather than collides" only holds if the second pass presents the *same* attachment ids, which fresh ingest guarantees it will not.
+The launch-block re-execution window that round 1 identified (`SlackConnectionRoutes.cs:1133` re-runs when `route.SessionId` is null, regardless of `AlreadyExisted`) is now harmless because every per-file side effect is idempotent under the deterministic id.
 
-Two downstream consequences, both bad:
+### F2 (consistency) — RESOLVED
+`proposal.md:23` now states the provider inbox is unchanged (dedups by message identity) and the deterministic id is re-derivable on every delivery; the contradictory "inbox carries file references" claim is gone. Proposal ↔ design ↔ tasks are consistent on this point.
 
-- **If no idempotency fingerprint includes attachment ids** → silent duplicate attachments bound to one input.
-- **If a fingerprint does include attachment ids** (as Web launch does, `AgentSessionLaunchRoutes.cs:102`–`116`) → every redelivery conflicts, because the ids are non-deterministic. The Slack path would need a stable fingerprint it currently cannot produce.
+### F3 (minor) — RESOLVED
+T-003 now instructs including the deterministic attachment ids in the launch idempotency fingerprint (mirroring `AgentSessionLaunchRoutes.cs:102`–`137`). Because the ids are stable across redelivery, this will not falsely conflict on replay.
 
-This also defeats spec scenario *"A restart does not lose pending file binding"* (`spec.md:127`–`130`): there is no specified re-driver for a post-accept/pre-bind crash, and D5's claim that *"Slack redelivers the unacked message"* is not substantiated — the design never states the Slack-ack timing the whole argument hinges on.
-
-**Must be fixed in `design.md`.** The clean resolution D5 rejected without considering: **deterministic attachment ids scoped to (Slack message identity, file id)**, e.g. `att_slack_{messageTs}_{fileId}`, ingested insert-if-absent. This makes redelivery re-ingest a no-op (same row) and re-bind a true no-op (already owned by the deterministic preminted owner), while a *different* message carrying the same physical Slack file gets a different id (no cross-session `AlreadyBound` — the exact property D5 wanted). D5's rejected alternative conflated "deterministic by file id" with "global single-owner"; a message-scoped key separates the two concerns. Either adopt this, or specify an alternative that makes attachment binding idempotent across the inbox-accept → launch-complete window, and state the Slack-ack timing assumption explicitly.
-
-### F2 (consistency) — Proposal Impact contradicts Design D5 on the inbox schema
-
-`proposal.md:23` states the `SlackProviderInboxDraft` *shall carry file references so redelivery resolves to the same bound attachments*. Design D5 states the opposite — redelivery is handled by identity dedup + re-fetch, implying **no** inbox schema change. These cannot both be true. Given F1, the inbox may indeed need to carry a stable key (or the message-scoped attachment ids) to support correct redelivery binding. Reconcile proposal ↔ design; whichever direction is chosen, the other document must be updated to match.
-
-### F3 (minor) — T-003 omits the Web launch resume/fingerprint step
-
-T-003's notes cite `AgentSessionLaunchRoutes.cs:182`–`256` (premint + prebind + rollback) but not the preceding `ResumeIdempotentAsync` + attachment-id fingerprint step (`:102`–`137`). For Slack the attachment set is derived from the message, so the conflict case is less acute — but the builder needs to decide explicitly whether to include attachment ids in the coordinator fingerprint, and that decision is coupled to F1's resolution (stable ids → stable fingerprint). Add a note so the builder doesn't silently skip it.
-
-### F4 (minor/clarity) — "Slack file identifier" must stay out of the stored record
-
-`spec.md:154` requires the stored record to contain *no Slack file identifier*. Design D2 has the envelope carry the Slack file id transiently (needed to fetch). These are consistent today (envelope ≠ stored record), but if F1's fix persists any key derived from the Slack file/message identity, take care that the raw Slack file id itself does not land in `AttachmentRow`/observation. Worth a one-line guard in the design to keep the spec invariant unambiguous.
+### F4 (minor) — RESOLVED
+D2 notes the Slack file id is transient (consumed to compute the opaque id, then discarded); D5 layer 1 specifies the id is an opaque `StableToken` output that does not embed the raw Slack file id, preserving the `spec.md:151`–`154` invariant.
 
 ---
 
-## Format / mechanical checks (all pass)
+## New check — no blocking issues found
 
-- Spec headings: 9 `### Requirement`, all scenarios at `####` (verified).
-- `tasks.json`: valid JSON; 4 tasks; DAG; `dependsOn` → strictly lower priority; all `mode=AFK`, `type=WRITE`, `passes=false`, ≥1 acceptance criterion each.
+- **Concurrent same-message delivery.** Two concurrent POSTs of the same Slack event could both pass into the launch block. The deterministic-id insert-if-absent must therefore be **atomic** — backed by the existing `AttachmentRow.Id` primary key (insert-or-catch-unique-violation / upsert), not a check-then-insert TOCTOU. This is a build-time implementation requirement; the design's "insert-if-absent" wording implies it, but T-002 should make the atomicity explicit. Flagged as a minor reminder below, not a blocker (the PK constraint is the safety net either way).
+- **Spec ↔ design alignment.** The two redelivery/restart spec scenarios are now substantiated by the verified mechanism; no spec change is required.
+- **Format/mechanical.** `tasks.json` remains valid JSON, acyclic DAG, all `dependsOn` → strictly lower priority. Spec headings unchanged (9 requirements, all scenarios at `####`).
+
+---
+
+## Minor implementation reminders (non-blocking, for the builder)
+
+1. **T-002:** implement `IngestProviderFileAsync`'s insert-if-absent atomically against the `AttachmentRow.Id` uniqueness constraint (upsert or catch-duplicate-key), so concurrent same-message deliveries collapse to one row.
+2. **T-003:** confirm the connection-launch envelope populates `AgentLaunchCoordinatorRequest.AttachmentIds` with the deterministic ids so the coordinator's conflict fingerprint is attachment-aware and stable across redelivery.
+3. **Open Question (unchanged):** `files:read` scope handling — advertise at setup, degrade at runtime. Not a plan blocker.
 
 ## Recommendation
 
-Resolve F1 (and the coupled F2/F3) in `design.md` — specify an idempotent attachment-binding strategy for the redelivery window and state the Slack-ack timing assumption. F4 is a one-line clarification. With those fixes the plan is ready to build.
+The plan is ready to build. Round 1's blocker is resolved with a verified mechanism; the artifacts are internally consistent; the task graph is sound.
 
-<promise>FAIL</promise>
+<promise>PASS</promise>
