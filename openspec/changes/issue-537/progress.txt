@@ -121,3 +121,14 @@ new DispatchSnapshotPersistenceSpecs).
 - Duplicate extracted `(WorkflowRunId, WorkId)` keys are deduplicated when snapshots match and block startup during preflight when payloads conflict. A Running embedded snapshot without a usable `WorkId` or task `Id` also blocks startup instead of being silently lost.
 - Orphan deletes are chunked at 500 WorkIds per statement. Active keys use `task.WorkId ?? task.Id`, matching runtime redelivery lookup.
 - Verification: all 3,624 Server specs, 1,726 Server unit tests, and 51 architecture tests passed; full solution build passed with 0 warnings and 0 errors. `npm test` encountered one unrelated Web retry-count flake in `IssueChangedFilesPage.recovery.test.tsx`; the exact 20-test file passed immediately on rerun. Runner and Slack suites passed.
+
+## Re-verification (post-fix-ci task)
+
+- Full `npm test` re-run on the final tree: 0 build warnings, 0 build errors.
+  - Server: 1726 unit + 3624 spec + 51 arch all pass.
+  - CLI: 1497 pass.
+  - Workflow Definition: 175 pass.
+  - Web: 5091 pass across 384 files.
+  - Runner: 1510 pass across 134 files.
+  - Slack: 8 pass across 2 files.
+- Working tree clean; no Git-visible changes produced by verification. No further code changes required; both T-001 and T-002 acceptance criteria hold on the final commit graph (8 commits ahead of `origin/master`).
