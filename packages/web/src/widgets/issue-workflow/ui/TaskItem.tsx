@@ -109,10 +109,13 @@ function RequiredFileEntry({
   )
 }
 
-function TaskSessionChip({ issueNumber, sessionName }: { issueNumber: number; sessionName: string }) {
+function TaskSessionChip({ sessionName, sessionId }: { sessionName: string; sessionId?: string }) {
   const toProjectPath = useProjectPath()
-  const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(sessionName)}`)
+  const transcriptPath = sessionId
+    ? toProjectPath(`/sessions/${encodeURIComponent(sessionId)}`)
+    : null
 
+  if (!transcriptPath) return <span className="text-muted-foreground">{sessionName}</span>
   return (
     <Link
       to={transcriptPath}
@@ -240,6 +243,10 @@ export function TaskItem({
   const originLabel = formatOriginLabel(task.origin)
   const originTitle = formatOriginTitle(task.origin)
   const sessionName = task.sessionName?.trim()
+  const workflowSessions = workflowSessionsHook?.(workflowRunId).sessions ?? []
+  const sessionId = sessionName
+    ? workflowSessions.find((session) => session.sessionName === sessionName)?.id
+    : undefined
   const detailsId = `task-details-${issueNumber}-${encodeURIComponent(task.taskId)}`
 
   const primaryContent = (
@@ -290,7 +297,8 @@ export function TaskItem({
           ))}
           {hasReason && <span className="text-warning" title={taskReason ?? undefined}>reason</span>}
           {originLabel && <span className="break-all font-mono text-[11px]" title={originTitle}>{originLabel}</span>}
-          {sessionName && <TaskSessionChip issueNumber={issueNumber} sessionName={sessionName} />}
+           {sessionName && <TaskSessionChip sessionName={sessionName} sessionId={sessionId} />}
+
           {task.attempts > 1 && <span>{task.attempts} attempts</span>}
           <TaskLifecycleTime task={task} />
         </div>

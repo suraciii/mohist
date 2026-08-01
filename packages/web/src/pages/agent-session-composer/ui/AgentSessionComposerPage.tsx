@@ -293,7 +293,7 @@ export function AgentSessionComposerPage({
       {
         onSuccess: (data) => {
           const jobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath = `/agent-sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`
+          const sessionPath = `/sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`
           const accepted = data.attachments ?? []
           const rejected = data.rejectedAttachments ?? []
           launchKeyRef.current = null

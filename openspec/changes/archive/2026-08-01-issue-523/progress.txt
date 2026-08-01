@@ -1,0 +1,255 @@
+## T-001: Complete the unified AgentSession read projection
+
+### What changed
+
+Server (`packages/server`):
+
+- `Sessions/AgentSessionReadModels.cs:341` — extended `UnifiedSessionSummaryDto`
+  with `FailureCategory`, `FailureReason`, `ToolCallCount`,
+  `ToolErrorCount`, `RecoveryAvailable`, and `CurrentTurnId` so the DTO
+  carries every fact the Web session detail page consumes (current-turn
+  observation, terminal/failure evidence, recovery gate, runtime binding).
+  Source-specific identity (AgentId/AgentName vs WorkflowRunId/SessionName)
+  remains absent-when-empty via the existing `WhenWritingNull` JSON
+  setting.
+- `Sessions/Services/AgentSessionQuerier.cs:497` — reworked
+  `GetUnifiedSessionSummaryAsync` to load the session's transcript scoped
+  to the current `AgentRuntimeSessionId` binding via
+  `TranscriptPartLoader` + `TranscriptEventSummaryProjector.Summarize`,
+  resolving the full transcript summary (resolvedModel, failure category /
+  reason, tool counts). Recovery availability is sourced from
+  `session.Status.Activity == Idle`. The previous `ResolveModelAsync`
+  helper is replaced by the new `ResolveTranscriptSummaryAsync` helper
+  (file scope `UnifiedTranscriptSummary`).
+- Cross-source guards and source-specific absent-when-empty remain
+  unchanged: `agent-launch` rows expose AgentId/AgentName only, `workflow`
+  rows expose WorkflowRunId/SessionName only; an unsupported source kind
+  returns null → 404.
+
+CLI (`packages/cli`):
+
+- `Mohist.Cli/ResourceOutput.cs:86` — `SessionShow` field catalog now
+  advertises the six new fields (`failureCategory`, `failureReason`,
+  `toolCallCount`, `toolErrorCount`, `recoveryAvailable`,
+  `currentTurnId`) so the contract test
+  `CliFieldContractTests.MappedCatalogsMatchServerSerializationFields`
+  stays in lockstep with the server DTO.
+
+Tests (`packages/server/tests/Mohist.Server.SpecTests`):
+
+- New file `Specs/Sessions/UnifiedSessionSummarySpecs.cs` (size ratchet
+  needs the 26000-byte allowance below). Spec coverage:
+  - `Show_*_CarriesEnrichedFieldsFromTranscriptAndState` for both sources
+    (failure category/reason, tool counts, currentTurnId, recovery,
+    runtime binding, inputs/turns observations).
+  - `Show_*_RecoveryAvailable{True,False}_*WhenActivity*` for both
+    sources — recovery gate flips with activity, currentTurnId is absent
+    when idle.
+  - `Show_AgentLaunchSession_FailureEvidenceScopedToCurrentRuntimeBinding`
+    — prior-runtime failure evidence does not leak into the current
+    runtime view (the same `IsApplicableToCurrentRuntime` filter the
+    generic-session route uses).
+  - `Show_*_CarriesUsageFromSession` — usage block surfaces from session
+    state.
+  - `Show_/Transcript_UnsupportedSourceKind_Returns404` — unsupported
+    source kinds return 404 for both endpoints.
+  - `Show_AgentLaunchSession_OmitsNullableFailureFields_*` — nullable
+    failure fields are absent on the wire when no transcript event
+    populates them.
+- The original `UnifiedSessionRoutesSpecs.cs` keeps the existing source
+  / project isolation / transcript / list coverage; nothing regressed.
+  File size dropped to 20108 bytes (under the 24k budget).
+
+ArchTests (`packages/server/tests/Mohist.Server.ArchTests`):
+
+- `spec-file-size-baseline.json` — added `UnifiedSessionSummarySpecs.cs`
+  entry with 26000-byte allowance (next bucket over the actual 25051
+  bytes) per the established ratchet policy. The original file
+  `UnifiedSessionRoutesSpecs.cs` is back under the 24000-byte absolute
+  budget and needs no baseline entry.
+
+### Verification run
+
+- `dotnet build Mohist.sln -p:SkipWebBuild=true` → 0 warnings / 0 errors.
+- `UnifiedSessionRoutesSpecs` (16) + `UnifiedSessionSummarySpecs` (10)
+  pass.
+- Server-side session namespace tests (404 total) pass.
+- `Mohist.Server.UnitTests` (1679), `Mohist.Server.ArchTests` (51),
+  `Mohist.Cli.Tests` (1484), `Mohist.Workflow.Definition.Tests` (175)
+  pass.
+- Web / Runner / Slack vitest suites pass (1461 + 5 tests).
+- `npm test` overall: 1 pre-existing flaky failure in
+  `Mohist.Server.SpecTests.Specs.Agent.Api.AgentLaunchObservationRoutesSpecs.Observation_DuringTerminalState_ReportsJobResultAndTurnResult`
+  (passes in isolation, unrelated to this task — verifies the HTTP
+  request path on a shared port). Reproduces without my changes.
+
+### Gotchas / decisions
+
+- The transcript events that carry terminal failure facts use
+  `TranscriptPartTypes.SessionActivity` (i.e. type `"session.activity"`),
+  not `"session.closed"` — the projector only recognises the former for
+  failure-category / failure-reason selection. The seed helper must emit
+  that type.
+- `AgentSessionActivity` JSON deserialisation requires the
+  `JsonStringEnumConverter` with camelCase (already wired in `JSON.Options`);
+  seeding `"executing"` rather than `AgentTurnStatus.Executing.ToString()`
+  keeps the seed independent of enum-string drift.
+- The CLI `SessionShow` resource descriptor had to be updated alongside
+  the DTO; `CliFieldContractTests` enforces parity and the failure mode is
+  silent (CLI dropping fields, not erroring).
+- File-size ratchet: keep the new spec file under 26000 bytes by
+  parameterising the seed helpers and inlining the bare-session seeds;
+  the actual size is 25051 bytes (next 1000-byte bucket = 26000).
+
+## T-002: Deliver the stable-ID Web AgentSession tracking page
+
+### What changed
+
+Web (`packages/web`):
+
+- Added the typed unified Session read client and query hooks for `/api/projects/{projectRef}/sessions/{sessionId}` and its runtime-scoped transcript endpoint.
+- Added `useUnifiedSessionDataSource` and `UnifiedSessionPage`; both Agent-launch and Workflow sessions now map through the stable logical Session ID and reuse `SessionDetailShell` plus `useSessionTranscript`.
+- Added source context and chronological input/turn evidence to the shared shell, including acceptance, delivery/turn status, model resolution, usage/context health, tool failures, and distinct active/idle/unknown empty states.
+- Moved Agent history, Workflow Session rows, Issue transcript actions, changed-file recovery links, activity targets, task session chips, and launch completion to `/sessions/:sessionId`.
+- Live invalidation now targets unified summary/transcript keys. Transcript events remain filtered by stable Session ID and current runtime binding, so reset/recovery binding changes discard stale runtime content through the existing shared primitive.
+- Removed the duplicate source-specific detail routes, pages, data sources, and their legacy test slices.
+
+### Verification run
+
+- Focused migration and unified-page suites: 196 tests pass.
+- `npm run typecheck -w packages/web` passes.
+- `npm run check:fsd -w packages/web` passes.
+- Full `npm run test:run -w packages/web` passes after navigation expectation updates.
+
+### Gotchas / decisions
+
+- Workflow navigation uses `WorkflowRunSession.id`; `sessionName` remains display/context data only. The issue decision test helper still accepts name-only fixtures as a compatibility fallback, while production workflow rows always carry the stable id.
+- The unified transcript query key includes the current runtime binding. Summary invalidation uses the stable Session key and transcript invalidation uses the stable prefix so a new binding refetches without retaining the prior runtime view.
+
+## T-003: Operate AgentSessions from the unified Web page
+
+### What changed
+
+Web (`packages/web`):
+
+- `pages/session/data/SessionDataSource.ts` — replaced the single
+  `cancel` handle with two independent handles (`cancel` for queued
+  current turn, `stop` for executing current turn). Introduced
+  `SessionTurnControlHandle` so availability and dispatch come from
+  one source of truth.
+- `pages/session/data/useUnifiedSessionDataSource.tsx`:
+  - Resolves the current turn from `summary.turns` and only enables
+    `cancel` when `currentTurn.status === 'queued'` (and `stop` when
+    `=== 'executing'`). Both handles share one underlying mutation
+    call with the matching operation.
+  - Adds `reconcileUnifiedQueries` that invalidates the unified
+    summary, transcript prefix (all runtime bindings), agent-session
+    list, workflow-run list, agent and workflow-run-session caches.
+    `handleRecoverySuccess` now routes through this helper, and the
+    follow-up mutation as well as the turn-control mutation both
+    invoke it on settle so rejected, failed, and unknown outcomes
+    still refresh the authoritative view.
+  - Follow-up retains the original idempotency key only when the
+    Server reports `unknown`; the composer reuses the same key when
+    the user retries the identical text/attachments payload.
+- `pages/session/ui/SessionDetailShell.tsx` — the header now exposes
+  a single Cancel Turn button (queued) and a single Stop Turn button
+  (executing), each with `data-turn-state` so tests can assert
+  availability. The confirmation dialog adopts `data-control-operation`
+  and Stop surfaces a `stop-requested` acknowledgement that defers to
+  the Session view for the terminal result.
+- `widgets/coder-session/ui/SessionRecoveryActions` continues to
+  dispatch through `compactGenericSession` / `resetGenericSession`
+  keyed on the unified `recoverySessionId`, so Compact and Reset
+  reuse the canonical Session-ID API for both agent-launch and
+  Workflow Sessions and require an explicit confirmation.
+- `tests/SessionDetailShell.followup-queue.spec.tsx` and
+  `tests/SessionDetailShell.sibling-nav-dedup.spec.tsx` updated to
+  supply the new `stop: null` field on the synthesized
+  `SessionDataSourceResult` fixture.
+
+New tests:
+
+- `pages/session/data/useUnifiedSessionDataSource.test.tsx` (13 tests):
+  follow-up accepts without spawning a Session/AgentJob, unknown
+  outcome retains the original idempotency key, follow-up reconciles
+  the unified queries, cancel exposes only for queued turn, stop
+  exposes only for executing turn, idle/unknown activity keeps both
+  null, recovery actions gate off during an active turn, cancel
+  dispatches with the queued operation, stop surfaces the
+  stop-requested acknowledgement, recovery success invalidates the
+  same queries, and both `agent-launch` and `workflow` Sessions
+  drive the follow-up/turn-control flows through the same canonical
+  APIs.
+- `pages/session/ui/UnifiedSessionPage.test.tsx` (extended):
+  cancel/stop button visibility for queued/executing turns,
+  confirmation dialog text and dispatch for both operations,
+  stop-requested acknowledgement, and recovery gating per the
+  unified `recoveryAvailable` flag.
+
+### Verification run
+
+- `npm run typecheck -w packages/web` passes.
+- `npm run check:fsd -w packages/web` passes.
+- `npm run test:run -w packages/web` passes — 5082 tests, 384 files.
+- No new module enters a new FSD layer; all edits stay within the
+  `pages/session` slice and the existing entities/widgets.
+
+### Gotchas / decisions
+
+- The shared turn-control mutation now receives its operation via a
+  captured closure (`cancelSession('cancel' | 'stop', options)`),
+  removing the older pattern where the UI dispatched the operation
+  to a single shared mutate. This makes the data source shape a
+  honest mirror of the Session-domain decision rules.
+- Cancellation that lands on an executing turn still falls through to
+  the Stop behaviour on the Server side (`TurnControlResultKind.Executing`
+  ⇒ `state = executing, action = stop`), and the page surfaces the
+  Server reply verbatim rather than relabelling it.
+- The unknown-idempotency-key retention key is scoped to the
+  identical text/attachment payload; a follow-up with new text
+  always receives a fresh key. The composer reads the same
+  `followupStatus` label (`Outcome unknown — retry with the same
+  key`) so retry UX is unchanged from T-002.
+
+## Final verification (issue-523 close)
+
+Re-ran the full verify suite against the committed T-001/T-002/T-003 work
+to confirm the issue is ready to close. No source changes were needed.
+
+- `git status` → working tree clean; branch 8 commits ahead of
+  `origin/master` with T-001, T-002, T-003 already committed.
+- `npm run build` → `dotnet build Mohist.sln -p:SkipWebBuild=true` clean,
+  Web Vite bundle emitted, runner/slack `tsc` builds clean, `assert-web-build.mjs`
+  exits 0.
+- `dotnet test Mohist.sln -p:SkipWebBuild=true` →
+  - `Mohist.Workflow.Definition.Tests`: 175/175
+  - `Mohist.Cli.Tests`: 1484/1484
+  - `Mohist.Server.UnitTests`: 1679/1679
+  - `Mohist.Server.ArchTests`: 51/51
+  - `Mohist.Server.SpecTests`: 3529/3529 (incl. `UnifiedSessionRoutesSpecs`
+    and `UnifiedSessionSummarySpecs`)
+- `npm run typecheck -w packages/web` → passes.
+- `npm run check:fsd -w packages/web` → 498 production modules checked,
+  no boundary violations.
+- `npm run test:run -w packages/web` → 5082/5082, 384/384 files in 15.48s.
+
+`git status --porcelain` after each step shows only ignored build outputs
+(`bin/`, `obj/`, `dist/`, `node_modules/`). The worktree stays clean, and
+nothing was committed or reverted to suppress a failure.
+
+## Continuation verification
+
+The review-fix implementation is present but not yet committed. `review.md`
+was not edited and remains intentionally excluded from the commit.
+
+- Server focused specs: 60/60 pass, including unified summary/routes,
+  recovery, and runtime-filter coverage.
+- Server focused unit tests: 8/8 pass.
+- Web typecheck, FSD checks, test-boundary checks, and Vitest: 5087/5087
+  tests pass across 384 files.
+- Browser rerun for Activity, compact Session, and workflow Session fixtures:
+  17/17 pass after migrating stale route/control/response-shape assertions.
+- `npm test` is not green yet: `Mohist.Server.UnitTests` 1680/1681,
+  `Mohist.Server.ArchTests` 50/51, and `Mohist.Server.SpecTests` 3533/3534.
+  Failure details still need investigation in a later continuation.

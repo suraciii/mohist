@@ -91,60 +91,6 @@ function makeCompactViewportSession(): WorkflowRunSession {
   }
 }
 
-function makeCompactViewportMetadata(status = 'failed') {
-  const isRunning = status === 'active' || status === 'running' || status === 'probing'
-  const statusKind = status === 'failed'
-    ? 'failed'
-    : status === 'completed'
-      ? 'completed'
-      : status === 'probing'
-        ? 'probing'
-        : 'live'
-
-  return {
-    id: `session-${sessionName}`,
-    sessionName,
-    runtimeSessionId: `runtime-${sessionName}`,
-    runtime: 'opencode',
-    status,
-    statusKind,
-    model: 'minimax/MiniMax-M3',
-    stage: 'integrate',
-    title: 'Integrate session',
-    createdAt: '2026-06-12T10:00:00.000Z',
-    completedAt: isRunning ? null : '2026-06-12T10:05:00.000Z',
-    lastActivityAt: '2026-06-12T10:05:00.000Z',
-    lastDataAt: '2026-06-12T10:05:00.000Z',
-    probeSentAt: null,
-    probeDeadlineAt: null,
-    failureReason: status === 'failed' ? 'context window exceeded' : null,
-    turnCount: 3,
-    changedFiles: [
-      { path: 'src/index.ts', operation: 'modified', additions: 12, deletions: 3 },
-    ],
-    metadata: { eventCount: 9, toolCount: 4, partCount: 6 },
-    usage: {
-      totalTokens: 31_200,
-      inputTokens: 28_000,
-      outputTokens: 3_200,
-      cachedReadTokens: 1_200,
-      thoughtTokens: 600,
-      costAmount: 0.42,
-      costCurrency: 'USD',
-      contextWindowUsed: 30_000,
-      contextWindowSize: 32_000,
-      contextUsagePercent: 94,
-      healthStatus: 'red',
-    },
-    eventSummary: {
-      resolvedModel: 'minimax/MiniMax-M3',
-      failureCategory: 'context_limit',
-      toolCallCount: 12,
-      toolErrorCount: 1,
-    },
-  }
-}
-
 function makeCompactViewportTranscript() {
   const at = '2026-06-12T10:05:00.000Z'
   const turns = Array.from({ length: 12 }, (_, index) => {
@@ -206,16 +152,67 @@ function makeGenericRunningSession() {
   }
 }
 
+function makeUnifiedWorkflowSummary(session: WorkflowRunSession) {
+  const isActive = session.status === 'active' || session.status === 'running' || session.status === 'probing'
+  return {
+    id: session.id,
+    source: 'workflow',
+    runtimeSessionId: session.runtimeSessionId,
+    runtime: 'opencode',
+    activity: isActive ? 'active' : 'idle',
+    createdAt: session.createdAt,
+    lastActivityAt: session.lastDataAt,
+    model: session.model,
+    resolvedModel: session.eventSummary?.resolvedModel ?? null,
+    failureCategory: session.eventSummary?.failureCategory ?? null,
+    failureReason: session.failureReason,
+    toolCallCount: session.eventSummary?.toolCallCount ?? null,
+    toolErrorCount: session.eventSummary?.toolErrorCount ?? null,
+    workflowRunId: session.workflowRunId,
+    sessionName: session.sessionName,
+    contextRefs: { issueNumber },
+    usage: session.usage,
+    recoveryAvailable: !isActive,
+    currentTurnId: isActive ? 'turn-active' : null,
+    inputs: null,
+    turns: isActive ? [{ id: 'turn-active', sequence: 1, inputIds: [], status: 'executing' }] : null,
+  }
+}
+
+function makeUnifiedGenericSummary(session: ReturnType<typeof makeGenericRunningSession>) {
+  return {
+    id: session.sessionId,
+    source: 'agent-launch',
+    runtimeSessionId: session.runtimeSessionId,
+    runtime: session.runtime,
+    activity: 'active',
+    createdAt: session.createdAt,
+    lastActivityAt: session.lastActivityAt,
+    model: null,
+    resolvedModel: session.resolvedModel,
+    failureCategory: session.failureCategory,
+    failureReason: null,
+    toolCallCount: session.toolCallCount,
+    toolErrorCount: session.toolErrorCount,
+    agentId: session.agentId,
+    agentName: session.agentName,
+    contextRefs: null,
+    usage: session.usage,
+    recoveryAvailable: false,
+    currentTurnId: 'turn-generic',
+    inputs: null,
+    turns: [{ id: 'turn-generic', sequence: 1, inputIds: [], status: 'executing' }],
+  }
+}
+
 interface CoderSessionFixture {
   session?: WorkflowRunSession
-  metadata?: ReturnType<typeof makeCompactViewportMetadata>
   compactError?: string
   genericSession?: ReturnType<typeof makeGenericRunningSession>
 }
 
 async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}) {
   const session = fixture.session ?? makeCompactViewportSession()
-  const metadata = fixture.metadata ?? makeCompactViewportMetadata(session.status)
 
   await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
@@ -238,10 +235,10 @@ async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/coder-sessions`) {
       return route.fulfill({ json: apiResponse([session]) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}`) {
-      return route.fulfill({ json: apiResponse(metadata) })
+    if (method === 'GET' && path === `/projects/${project.id}/sessions/${session.id}`) {
+      return route.fulfill({ json: apiResponse(makeUnifiedWorkflowSummary(session)) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}/transcript`) {
+    if (method === 'GET' && path === `/projects/${project.id}/sessions/${session.id}/transcript`) {
       return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/diff`) {
@@ -262,7 +259,13 @@ async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}
     if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/transcript`) {
       return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
     }
-    if (fixture.compactError && method === 'POST' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${sessionName}/compact`) {
+    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/sessions/${genericSessionId}`) {
+      return route.fulfill({ json: apiResponse(makeUnifiedGenericSummary(fixture.genericSession)) })
+    }
+    if (fixture.genericSession && method === 'GET' && path === `/projects/${project.id}/sessions/${genericSessionId}/transcript`) {
+      return route.fulfill({ json: apiResponse(makeCompactViewportTranscript()) })
+    }
+    if (fixture.compactError && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${session.id}/compact`) {
       return route.fulfill({ status: 409, json: { success: false, error: fixture.compactError } })
     }
     if (fixture.genericSession && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/cancel`) {
@@ -294,7 +297,7 @@ const compactViewports = [
 async function openIssueSession(page: Page, viewport: { width: number; height: number }, fixture?: CoderSessionFixture) {
   await page.setViewportSize(viewport)
   await mockCoderSessionApi(page, fixture)
-  await page.goto(`/${project.name}/issues/${issueNumber}/workflow/sessions/${sessionName}`)
+  await page.goto(`/${project.name}/sessions/session-${sessionName}`)
 }
 
 async function expectReachableAboveMobileNav(page: Page, locator: Locator, label: string) {
@@ -408,14 +411,14 @@ test.describe('Coder Session compact viewport pixel verification', () => {
       await expectReachableAboveMobileNav(page, page.getByTestId('session-transcript-scroll-container'), 'transcript')
     })
 
-    test(`keeps the generic session cancel control reachable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    test(`keeps the generic session stop control reachable at ${viewport.width}x${viewport.height}`, async ({ page }) => {
       await page.setViewportSize(viewport)
       await mockCoderSessionApi(page, { genericSession: makeGenericRunningSession() })
-      await page.goto(`/${project.name}/agent-sessions/${genericSessionId}`)
+       await page.goto(`/${project.name}/sessions/${genericSessionId}`)
 
-      const cancel = page.getByTestId('session-cancel-trigger')
-      await expectReachableAboveMobileNav(page, cancel, 'cancel session')
-      await cancel.click()
+      const stop = page.getByTestId('session-stop-trigger')
+      await expectReachableAboveMobileNav(page, stop, 'stop session')
+      await stop.click()
       await expect(page.getByTestId('session-cancel-alert')).toBeVisible()
     })
   }

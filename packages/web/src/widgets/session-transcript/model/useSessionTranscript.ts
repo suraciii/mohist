@@ -71,12 +71,6 @@ function matchesSessionEvent(
 
   if (hasPageRsid && !hasEventRsid) return false
 
-  if (!hasPageRsid) {
-    if (!isNonEmptyStr(eventSid)) return false
-    if (pageRuntime != null && eventRt != null && eventRt !== pageRuntime) return false
-    return true
-  }
-
   return false
 }
 

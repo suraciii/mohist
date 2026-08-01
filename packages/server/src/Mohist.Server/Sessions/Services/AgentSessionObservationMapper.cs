@@ -24,7 +24,15 @@ internal static class AgentSessionObservationMapper
             turn.Id,
             turn.Sequence,
             turn.InputIds,
-            TurnStatus(turn.Status))).ToArray();
+            TurnStatus(turn.Status),
+            turn.Result is null
+                ? null
+                : new AgentTurnResultObservationDto(
+                    turn.Result.Message,
+                    turn.Result.Output,
+                    turn.Result.FailureReason,
+                    turn.Result.FailureCategory,
+                    turn.Result.ExitCode))).ToArray();
 
     public static string InputAcceptance(AgentSessionInputAcceptance acceptance) => acceptance switch
     {

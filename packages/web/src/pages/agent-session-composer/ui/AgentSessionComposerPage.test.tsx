@@ -113,7 +113,7 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {
       expect(state.launchCalls).toHaveLength(1)
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
@@ -129,7 +129,7 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {
       expect(state.launchCalls).toHaveLength(1)
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
     })
     expect(state.launchCalls[0]).toMatchObject({
       agentRef: 'agent-1',
@@ -170,7 +170,7 @@ describe('AgentSessionComposerPage', () => {
     fireEvent.change(textarea, { target: { value: 'Hello' } })
     fireEvent.click(screen.getByTestId('launch-button'))
     await waitFor(() => {
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/agent-sessions/sess-123')
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
     })
   })
 

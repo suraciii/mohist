@@ -25,7 +25,10 @@ internal static class TranscriptEventSummaryProjector
         var failedToolCallIds = new HashSet<string>(StringComparer.Ordinal);
 
         TranscriptSummaryEvent? latestTerminalActivity = null;
-        foreach (var e in events)
+        foreach (var e in events
+            .OrderBy(e => e.TurnSequence)
+            .ThenBy(e => e.Sequence)
+            .ThenBy(e => e.PartId, StringComparer.Ordinal))
         {
             if (e.Type == TranscriptPartTypes.Model)
             {

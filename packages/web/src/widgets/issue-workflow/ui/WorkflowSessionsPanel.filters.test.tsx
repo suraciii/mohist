@@ -143,9 +143,9 @@ describe('WorkflowSessionsPanel filters', () => {
     await user.click(await screen.findByRole('option', { name: 'Tokens' }))
 
     expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual([
-      '/Test%20Project/issues/55/workflow/sessions/compile-assets',
-      '/Test%20Project/issues/55/workflow/sessions/review-repair',
-      '/Test%20Project/issues/55/workflow/sessions/proposal-draft',
+      '/Test%20Project/sessions/s-build',
+      '/Test%20Project/sessions/s-check',
+      '/Test%20Project/sessions/s-plan',
     ])
   })
 

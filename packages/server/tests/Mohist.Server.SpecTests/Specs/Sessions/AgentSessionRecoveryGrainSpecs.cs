@@ -60,6 +60,7 @@ public sealed class AgentSessionRecoveryGrainSpecs : IClassFixture<AgentSessionG
             _fixture.TranscriptStore.Flushes,
             flush => flush.Turn.SessionId == sessionId);
         Assert.Equal("session.context_reset", resetTranscript.Parts.Single().Type);
+        Assert.Equal("runtime-after-reset", resetTranscript.Turn.RuntimeSessionId);
         using var payload = JsonDocument.Parse(resetTranscript.Parts.Single().PayloadJson);
         Assert.Equal("reset", payload.RootElement.GetProperty("reason").GetString());
         Assert.True(payload.RootElement.GetProperty("observedAt").GetString() is not null);

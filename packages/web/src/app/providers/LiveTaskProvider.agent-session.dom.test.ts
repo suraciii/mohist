@@ -45,11 +45,11 @@ describe('LiveTaskProvider AgentSession realtime routing', () => {
       })
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', TEST_PROJECT.id, 'session-1'], exact: true })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', TEST_PROJECT.id, 'session-1', 'transcript'], exact: true })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['unified-session', TEST_PROJECT.id, 'session-1'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['unified-session', TEST_PROJECT.id, 'session-1', 'transcript'] })
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agents', TEST_PROJECT.id, 'agent-1', 'sessions'] })
     expect(invalidateSpy).not.toHaveBeenCalledWith(expect.objectContaining({
-      queryKey: ['agent-session', TEST_PROJECT.id, 'wrong-session'],
+      queryKey: ['unified-session', TEST_PROJECT.id, 'wrong-session'],
     }))
   })
 
@@ -70,7 +70,7 @@ describe('LiveTaskProvider AgentSession realtime routing', () => {
       })
     })
 
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', TEST_PROJECT.id, 'session-1'], exact: true })
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['agent-session', TEST_PROJECT.id, 'session-1', 'transcript'], exact: true })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['unified-session', TEST_PROJECT.id, 'session-1'] })
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['unified-session', TEST_PROJECT.id, 'session-1', 'transcript'] })
   })
 })

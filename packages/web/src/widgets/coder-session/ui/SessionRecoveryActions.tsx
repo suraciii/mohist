@@ -24,6 +24,8 @@ import { useProject } from '../../../entities/project'
 const DISABLED_REASON_TITLE = 'Session is running'
 const DISABLED_REASON_BODY =
   'Finish or cancel the session before compacting or resetting.'
+const COMPACT_BINDING_TITLE = 'Runtime session unavailable'
+const COMPACT_BINDING_BODY = 'Compact requires an available runtime session.'
 const PENDING_REASON_TITLE = 'Recovery action in progress'
 const PENDING_REASON_BODY =
   'Wait for the current recovery action to finish before starting another one.'
@@ -73,10 +75,13 @@ export interface SessionRecoveryActionsProps {
   issueNumber: number
   sessionName: string
   genericSessionId?: string
+  runtimeSessionId?: string | null
+  runtime?: string | null
   activity?: AgentSessionActivity | string | null | undefined
   status?: string | null | undefined
   recoveryAvailable?: boolean
   onSuccess?: () => void
+  onSettled?: () => void
   className?: string
   compactLabel?: string
   resetLabel?: string
@@ -114,9 +119,12 @@ export function SessionRecoveryActions({
   issueNumber,
   sessionName,
   genericSessionId,
+  runtimeSessionId,
+  runtime,
   activity,
   recoveryAvailable,
   onSuccess,
+  onSettled,
   className,
   compactLabel = 'Compact',
   resetLabel = 'Reset',
@@ -152,6 +160,7 @@ export function SessionRecoveryActions({
     onError: (err) => {
       setInlineError(resolveErrorMessage(err))
     },
+    onSettled,
   })
 
   const resetMutation = useMutation({
@@ -172,17 +181,27 @@ export function SessionRecoveryActions({
     onError: (err) => {
       setInlineError(resolveErrorMessage(err))
     },
+    onSettled,
   })
 
   const anyPending = compactMutation.isPending || resetMutation.isPending
-  const disabledReason = active
+  const hasRuntimeBinding = typeof runtimeSessionId === 'string' && runtimeSessionId.trim().length > 0
+    && typeof runtime === 'string' && runtime.trim().length > 0
+  const compactDisabledReason = active
+    ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
+    : !hasRuntimeBinding
+      ? { title: COMPACT_BINDING_TITLE, body: COMPACT_BINDING_BODY }
+    : anyPending
+      ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
+      : null
+  const resetDisabledReason = active
     ? { title: DISABLED_REASON_TITLE, body: DISABLED_REASON_BODY }
     : anyPending
       ? { title: PENDING_REASON_TITLE, body: PENDING_REASON_BODY }
       : null
 
   function handleCompact() {
-    if (active || anyPending) return
+    if (active || !hasRuntimeBinding || anyPending) return
     const idempotencyKey = compactIdempotencyKey ?? crypto.randomUUID()
     setCompactIdempotencyKey(idempotencyKey)
     compactMutation.mutate(idempotencyKey)
@@ -218,8 +237,8 @@ export function SessionRecoveryActions({
       variant="outline"
       size="sm"
       onClick={handleCompact}
-      disabled={active || anyPending}
-      aria-disabled={disabledReason !== null}
+      disabled={compactDisabledReason !== null}
+      aria-disabled={compactDisabledReason !== null}
       data-testid="session-recovery-compact"
       data-active={active ? 'true' : 'false'}
     >
@@ -233,8 +252,8 @@ export function SessionRecoveryActions({
       variant="destructive"
       size="sm"
       onClick={openResetDialog}
-      disabled={active || anyPending}
-      aria-disabled={disabledReason !== null}
+      disabled={resetDisabledReason !== null}
+      aria-disabled={resetDisabledReason !== null}
       data-testid="session-recovery-reset"
       data-active={active ? 'true' : 'false'}
     >
@@ -245,13 +264,13 @@ export function SessionRecoveryActions({
   const content = (
     <>
       <div className="flex items-center gap-2">
-        {disabledReason ? (
-          <DisabledReasonTooltip {...disabledReason}>{compactButton}</DisabledReasonTooltip>
+        {compactDisabledReason ? (
+          <DisabledReasonTooltip {...compactDisabledReason}>{compactButton}</DisabledReasonTooltip>
         ) : (
           compactButton
         )}
-        {disabledReason ? (
-          <DisabledReasonTooltip {...disabledReason}>{resetButton}</DisabledReasonTooltip>
+        {resetDisabledReason ? (
+          <DisabledReasonTooltip {...resetDisabledReason}>{resetButton}</DisabledReasonTooltip>
         ) : (
           resetButton
         )}

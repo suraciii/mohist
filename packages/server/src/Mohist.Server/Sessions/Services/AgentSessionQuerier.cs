@@ -48,7 +48,7 @@ public class AgentSessionQuerier : IScopedService
         if (session is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, null, ct);
+        var transcript = await LoadTranscriptAsync(db, session.Session.Id, session.Session.Status.AgentRuntimeSessionId, ct);
         return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript));
     }
 
@@ -417,7 +417,11 @@ public class AgentSessionQuerier : IScopedService
         var session = await FindReadableSessionAsync(db, projectId, issueNumber, sessionName, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            session.Session.Id,
+            runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -499,7 +503,7 @@ public class AgentSessionQuerier : IScopedService
         TranscriptPartLoaderResult loaded)
     {
         _ = turnSequenceByTurnId;
-        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return true;
+        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return false;
         var turn = loaded.Turns.FirstOrDefault(t => t.Id == projection.TurnId);
         return turn is not null
             && string.Equals(turn.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal);
@@ -515,7 +519,11 @@ public class AgentSessionQuerier : IScopedService
         var session = await FindGenericSessionAsync(projectId, sessionId, ct);
         if (session is null) return null;
 
-        var transcript = await LoadTranscriptAsync(db, session.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            session.Session.Id,
+            runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -527,7 +535,11 @@ public class AgentSessionQuerier : IScopedService
     /// <see cref="FindGenericSessionAsync"/> — a workflow-originated session
     /// resolves here by the same stable id as an agent-launch session. The
     /// cross-project guard matches <see cref="ResolveCanonicalFollowupTargetAsync"/>
-    /// so the caller never observes a session from a different project.
+    /// so the caller never observes a session from a different project. The
+    /// DTO carries every fact the Web session detail page consumes — source
+    /// and current state, current-turn and input/turn observations,
+    /// terminal/failure evidence, model/usage, recovery availability, and
+    /// the runtime binding.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -538,6 +550,15 @@ public class AgentSessionQuerier : IScopedService
     /// <c>workflowRunId</c> / <c>sessionName</c>. The absent-when-empty idiom
     /// (<see cref="Infrastructure.JSON.Options"/>) omits the unused branch's
     /// fields from the wire rather than nulling them.
+    /// </para>
+    /// <para>
+    /// Failure evidence (category, reason, tool counts) and the resolved
+    /// model are computed from the session's transcript scoped to the
+    /// current <see cref="AgentSessionStatusSnapshot.AgentRuntimeSessionId"/>
+    /// binding so a prior Runtime Session's terminal facts do not leak into
+    /// the current view. The same total order
+    /// (<c>(turn sequence, part sequence, part id)</c>) used by
+    /// <see cref="GetGenericSessionSummaryAsync"/> is preserved.
     /// </para>
     /// <para>
     /// Returns <c>null</c> when the session id does not resolve, when the
@@ -557,7 +578,7 @@ public class AgentSessionQuerier : IScopedService
         if (!isWorkflow && !isAgentLaunch) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var resolvedModel = await ResolveModelAsync(db, session.Id, session, ct);
+        var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
 
         var activity = ResolveAgentSessionActivity(record);
         var usage = AgentSessionJsonHelper.Usage(session);
@@ -571,15 +592,22 @@ public class AgentSessionQuerier : IScopedService
             CreatedAt: session.Status.CreatedAt.ToString("o"),
             LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
             Model: session.Settings.Model,
-            ResolvedModel: resolvedModel,
+            ResolvedModel: transcriptSummary.ResolvedModel,
+            FailureCategory: transcriptSummary.FailureCategory,
+            FailureReason: transcriptSummary.FailureReason,
+            ToolCallCount: transcriptSummary.ToolCallCount,
+            ToolErrorCount: transcriptSummary.ToolErrorCount,
             AgentId: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
             AgentName: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
             WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
             SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
             ContextRefs: BuildUnifiedContextRefs(record),
             Usage: AgentSessionDtoMapper.ToUsageDto(usage),
+            RecoveryAvailable: IsRecoveryAvailable(session),
+            CurrentTurnId: CurrentTurnId(session),
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
-            Turns: AgentSessionObservationMapper.Turns(session.Status));
+            Turns: AgentSessionObservationMapper.Turns(session.Status),
+            RecoveryHistory: transcriptSummary.RecoveryHistory);
     }
 
     /// <summary>
@@ -601,7 +629,11 @@ public class AgentSessionQuerier : IScopedService
         if (record is null) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var transcript = await LoadTranscriptAsync(db, record.Session.Id, runtimeSessionId, ct);
+        var transcript = await LoadTranscriptAsync(
+            db,
+            record.Session.Id,
+            runtimeSessionId ?? record.Session.Status.AgentRuntimeSessionId,
+            ct);
         return SessionTranscriptBuilder.Build(transcript);
     }
 
@@ -629,12 +661,18 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
-    /// Resolves the model name for a unified summary. For sessions with a
-    /// transcript-persisted resolved model, prefers the latest transcript
-    /// model event; otherwise falls back to the session's declared
-    /// <see cref="AgentSessionSettings.Model"/>.
+    /// Resolves the full transcript summary for the unified session read —
+    /// resolved model, failure category/reason, and tool call/error counts
+    /// — scoped to the session's current
+    /// <see cref="AgentSessionStatusSnapshot.AgentRuntimeSessionId"/>
+    /// binding so prior-runtime facts do not leak into the current view.
+    /// For sessions with a transcript-persisted resolved model, prefers the
+    /// latest transcript <c>model</c> event; falls back to the session's
+    /// declared <see cref="AgentSessionSettings.Model"/> when no
+    /// transcript-persisted resolved model exists, so the unified read
+    /// surfaces a model name even on a freshly-opened session.
     /// </summary>
-    private async Task<string?> ResolveModelAsync(
+    private async Task<UnifiedTranscriptSummary> ResolveTranscriptSummaryAsync(
         MohistDbContext db,
         string sessionId,
         AgentSession session,
@@ -642,14 +680,63 @@ public class AgentSessionQuerier : IScopedService
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var projections = ToTranscriptProjectionsInSequenceOrder(loaded);
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(t => t.Id, t => t.Sequence);
+        var runtimeSessionId = session.Status.AgentRuntimeSessionId;
         var summary = TranscriptEventSummaryProjector.Summarize(
-            projections.Select(e => new TranscriptSummaryEvent(
-                TurnSequence: 0,
-                Sequence: e.Sequence,
-                PartId: e.Id.ToString(),
-                Type: e.Type,
-                PayloadJson: e.PayloadJson)));
-        return summary.ResolvedModel ?? session.Settings.Model;
+            projections
+                .Where(e => IsApplicableToCurrentRuntime(e, turnSequenceByTurnId, runtimeSessionId, loaded))
+                .Select(e => new TranscriptSummaryEvent(
+                    TurnSequence: turnSequenceByTurnId.GetValueOrDefault(e.TurnId, 0),
+                    Sequence: e.Sequence,
+                    PartId: e.Id.ToString(),
+                    Type: e.Type,
+                    PayloadJson: e.PayloadJson)));
+        return new UnifiedTranscriptSummary(
+            summary.ResolvedModel ?? session.Settings.Model,
+            summary.FailureCategory,
+            summary.FailureReason,
+            summary.ToolCallCount,
+            summary.ToolErrorCount,
+            BuildRecoveryHistory(loaded));
+    }
+
+    private static IReadOnlyList<AgentSessionRecoveryObservationDto>? BuildRecoveryHistory(
+        TranscriptPartLoaderResult loaded)
+    {
+        var turnById = loaded.Turns.ToDictionary(turn => turn.Id);
+        var recoveryParts = loaded.Parts
+            .Where(part => part.Type is TranscriptPartTypes.SessionContextReset
+                or TranscriptPartTypes.Compaction
+                or RuntimeEventTypes.CompactionEvent)
+            .OrderBy(part => turnById.TryGetValue(part.TurnId, out var turn) ? turn.Sequence : long.MaxValue)
+            .ThenBy(part => part.Sequence)
+            .ThenBy(part => part.Id)
+            .ToList();
+        if (recoveryParts.Count == 0) return null;
+
+        var seenCompactions = new HashSet<string>(StringComparer.Ordinal);
+        var history = new List<AgentSessionRecoveryObservationDto>(recoveryParts.Count);
+        foreach (var part in recoveryParts)
+        {
+            var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(part.PayloadJson);
+            var isReset = part.Type == TranscriptPartTypes.SessionContextReset;
+            if (!isReset && !seenCompactions.Add(part.PayloadJson)) continue;
+
+            history.Add(new AgentSessionRecoveryObservationDto(
+                Type: isReset ? "reset" : "compaction",
+                RecordedAt: AgentSessionJsonHelper.GetStringProp(payload, "recordedAt")
+                    ?? AgentSessionJsonHelper.GetStringProp(payload, "observedAt")
+                    ?? part.FirstSeenAt.ToString("o"),
+                RuntimeSessionId: turnById.GetValueOrDefault(part.TurnId)?.RuntimeSessionId,
+                Reason: isReset ? AgentSessionJsonHelper.GetStringProp(payload, "reason") : null,
+                Strategy: isReset ? null : AgentSessionJsonHelper.GetStringProp(payload, "strategy"),
+                Summary: isReset ? null : AgentSessionJsonHelper.GetStringProp(payload, "summary"),
+                ContextWindowUsedBefore: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedBefore"),
+                ContextWindowUsedAfter: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowUsedAfter"),
+                ContextWindowSize: isReset ? null : AgentSessionJsonHelper.GetLongProp(payload, "contextWindowSize")));
+        }
+
+        return history.ToArray();
     }
 
     /// <summary>
@@ -733,9 +820,17 @@ public class AgentSessionQuerier : IScopedService
     }
 
     private static string? CurrentTurnId(AgentSession session) =>
-        session.Status.Turns?
-            .LastOrDefault(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing)
-            ?.Id;
+        session.Status.Turns?.FirstOrDefault(turn => turn.Status == AgentTurnStatus.Executing)?.Id
+        ?? session.Status.Turns?.LastOrDefault(turn => turn.Status == AgentTurnStatus.Queued)?.Id;
+
+    private static bool IsRecoveryAvailable(AgentSession session) =>
+        session.Status.Activity == AgentSessionActivity.Idle
+        && session.Status.PendingReset is null
+        && session.Status.PendingStop is null
+        && session.Status.PendingFollowup is null
+        && (session.Status.PendingFollowups is null || session.Status.PendingFollowups.Count == 0)
+        && !(session.Status.Turns ?? [])
+            .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
 
     private async Task<AgentSessionRecord?> FindCurrentSessionAsync(
         MohistDbContext db,
@@ -870,8 +965,8 @@ public class AgentSessionQuerier : IScopedService
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var turns = loaded.Turns
-            .Where(turn => string.IsNullOrWhiteSpace(runtimeSessionId)
-                || string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
+            .Where(turn => !string.IsNullOrWhiteSpace(runtimeSessionId)
+                && string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();
@@ -884,13 +979,17 @@ public class AgentSessionQuerier : IScopedService
         return new AgentSessionTranscriptData(turns, parts);
     }
 
-    private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded) =>
-        loaded.Parts
+    private static IReadOnlyList<TranscriptEventProjection> ToTranscriptProjectionsInSequenceOrder(TranscriptPartLoaderResult loaded)
+    {
+        var turnSequenceByTurnId = loaded.Turns.ToDictionary(turn => turn.Id, turn => turn.Sequence);
+        return loaded.Parts
             .Where(part => loaded.SessionByTurnId.ContainsKey(part.TurnId))
-            .OrderBy(part => part.Sequence)
+            .OrderBy(part => turnSequenceByTurnId.GetValueOrDefault(part.TurnId, long.MaxValue))
+            .ThenBy(part => part.Sequence)
             .ThenBy(part => part.Id)
             .Select(part => AgentSessionDtoMapper.ToProjection(loaded.SessionByTurnId[part.TurnId], part))
             .ToList();
+    }
 }
 
 internal sealed record TranscriptEventProjection
@@ -947,3 +1046,11 @@ public sealed record SessionCancelTarget(
     string? Runtime,
     string? RuntimeSessionId,
     string? WorkDir);
+
+internal sealed record UnifiedTranscriptSummary(
+    string? ResolvedModel,
+    string? FailureCategory,
+    string? FailureReason,
+    int? ToolCallCount,
+    int? ToolErrorCount,
+    IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory);

@@ -172,7 +172,7 @@ function renderJourneyPage() {
               path="/:projectName/agent-sessions/new"
               element={<AgentSessionComposerPage components={composerComponents} dataHook={composerDataHook} />}
             />
-            <Route path="/:projectName/agent-sessions/:sessionId" element={<div data-testid="created-session" />} />
+            <Route path="/:projectName/sessions/:sessionId" element={<div data-testid="created-session" />} />
           </Routes>
         </MemoryRouter>
       </ProjectProvider>

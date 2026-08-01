@@ -166,6 +166,63 @@ public class UnifiedSessionRoutesSpecs
     }
 
     [Fact]
+    public async Task Transcript_WithoutRuntimeQuery_UsesTheSessionCurrentBinding()
+    {
+        var db = await BuildDbAsync();
+        await using (var context = db.Factory.CreateDbContext())
+        {
+            var current = await context.AgentSessionTranscriptTurns
+                .SingleAsync(turn => turn.SessionId == AgentLaunchSession);
+            current.Sequence = 2;
+            current.PromptText = "current runtime prompt";
+            current.RuntimeSessionId = "rt-agent";
+            context.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = current.Id,
+                Sequence = 2,
+                Type = TranscriptPartTypes.Text,
+                CorrelationKey = "current-text",
+                Text = "current runtime output",
+                PayloadJson = JsonSerializer.Serialize(new { text = "current runtime output" }, JSON.Options),
+                FirstSeenAt = CreatedAt.AddMinutes(6),
+                LastSeenAt = CreatedAt.AddMinutes(6),
+            });
+            var prior = new AgentSessionTranscriptTurnRow
+            {
+                SessionId = AgentLaunchSession,
+                RuntimeSessionId = "rt-old",
+                Sequence = 1,
+                PromptText = "old runtime prompt",
+                StartedAt = CreatedAt.AddMinutes(-5),
+                UpdatedAt = CreatedAt.AddMinutes(-4),
+            };
+            context.AgentSessionTranscriptTurns.Add(prior);
+            await context.SaveChangesAsync();
+            context.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
+            {
+                TurnId = prior.Id,
+                Sequence = 1,
+                Type = TranscriptPartTypes.Text,
+                CorrelationKey = "old-text",
+                Text = "old runtime output",
+                PayloadJson = JsonSerializer.Serialize(new { text = "old runtime output" }, JSON.Options),
+                FirstSeenAt = CreatedAt.AddMinutes(-4),
+                LastSeenAt = CreatedAt.AddMinutes(-4),
+            });
+            await context.SaveChangesAsync();
+        }
+
+        var result = await UnifiedSessionRoutes.HandleTranscriptAsync(
+            ProjectAInfo, AgentLaunchSession, runtimeSessionId: null, CreateQuerier(db), CancellationToken.None);
+
+        var data = await OkDataAsync(result);
+        var turns = data.GetProperty("turns");
+        Assert.Single(turns.EnumerateArray());
+        Assert.Equal("current runtime prompt", turns[0].GetProperty("user").GetProperty("text").GetString());
+        Assert.Contains("current runtime output", turns[0].GetProperty("assistant")[0].GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task Transcript_UnknownSessionId_Returns404()
     {
         var db = await BuildDbAsync();
@@ -308,7 +365,7 @@ public class UnifiedSessionRoutesSpecs
         await SeedAgentLaunchSessionAsync(factory);
         await SeedWorkflowSessionAsync(factory, WorkflowSession, ProjectA, WorkflowRunId, WorkflowSessionName, WorkflowIssueNumber);
         await SeedTranscriptAsync(factory, AgentLaunchSession, "rt-agent");
-        await SeedTranscriptAsync(factory, WorkflowSession, "rt-workflow");
+        await SeedTranscriptAsync(factory, WorkflowSession, "rt-" + WorkflowSession);
 
         if (seedCrossProjectRun)
         {

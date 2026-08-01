@@ -13,8 +13,7 @@ import { RuntimeToastHost } from '../shared/ui/toast'
 
 const IssueDetailPage = lazy(() => import('../pages/issue-detail').then(({ IssueDetailPage }) => ({ default: IssueDetailPage })))
 const IssueChangedFilesPage = lazy(() => import('../pages/issue-changed-files').then(({ IssueChangedFilesPage }) => ({ default: IssueChangedFilesPage })))
-const GenericSessionPage = lazy(() => import('../pages/session').then(({ GenericSessionPage }) => ({ default: GenericSessionPage })))
-const SessionPage = lazy(() => import('../pages/session').then(({ SessionPage }) => ({ default: SessionPage })))
+const UnifiedSessionPage = lazy(() => import('../pages/session').then(({ UnifiedSessionPage }) => ({ default: UnifiedSessionPage })))
 const CreateIssueDialog = lazy(() => import('../features/create-issue').then(({ CreateIssueDialog }) => ({ default: CreateIssueDialog })))
 const SettingsPage = lazy(() => import('../pages/settings').then(({ SettingsPage }) => ({ default: SettingsPage })))
 const ActivityPage = lazy(() => import('../pages/activity').then(({ ActivityPage }) => ({ default: ActivityPage })))
@@ -69,13 +68,11 @@ export function AppContent() {
                   <Route path="issues" element={<IssuesPage />} />
                   <Route path="issues/:number" element={<IssueDetailPage />} />
                   <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
-                  <Route path="issues/:number/session/:sessionId" element={<SessionPage />} />
-                  <Route path="issues/:number/workflow/sessions/:sessionName" element={<SessionPage />} />
+                  <Route path="sessions/:sessionId" element={<UnifiedSessionPage />} />
                   <Route path="agents" element={<AgentListPage />} />
                   <Route path="agents/:agentId" element={<AgentDetailPage />} />
                   <Route path="connections/:connectionId" element={<ConnectionDiagnosticPage />} />
                   <Route path="agent-sessions/new" element={<AgentSessionComposerPage />} />
-                  <Route path="agent-sessions/:sessionId" element={<GenericSessionPage />} />
                   <Route path="activity" element={<ActivityPage />} />
                   <Route path="runners" element={<RunnersPage />} />
                   <Route path="settings" element={<LegacySettingsRedirect />} />

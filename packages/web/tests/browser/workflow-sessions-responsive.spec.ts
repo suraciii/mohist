@@ -56,9 +56,11 @@ function makeSession() {
     workflowRunId,
     sessionName: longSessionName,
     runtimeSessionId: 'runtime-responsive',
+    runtime: 'opencode',
     projectId: project.id,
     issueNumber,
     runnerId: 'runner-responsive',
+    activity: 'idle',
     status: 'failed',
     stage: 'check',
     model: 'configured/provider-name-with-long-model',
@@ -104,29 +106,6 @@ function makeTranscriptSession() {
   }
 }
 
-function makeTranscriptMetadata() {
-  return {
-    id: 'session-responsive-code',
-    sessionName: transcriptSessionName,
-    runtimeSessionId: 'runtime-responsive-code',
-    status: 'completed',
-    statusKind: 'completed',
-    model: 'configured/provider-name-with-long-model',
-    stage: 'check',
-    title: 'Responsive transcript code block',
-    createdAt: '2026-06-12T10:00:00.000Z',
-    completedAt: '2026-06-12T10:05:00.000Z',
-    lastActivityAt: '2026-06-12T10:05:00.000Z',
-    lastDataAt: '2026-06-12T10:05:00.000Z',
-    metadata: {
-      partCount: 1,
-      eventCount: 1,
-      toolCount: 0,
-      promptCount: 1,
-    },
-  }
-}
-
 function makeTranscriptResponse() {
   const at = '2026-06-12T10:05:00.000Z'
   return {
@@ -157,6 +136,31 @@ function makeTranscriptResponse() {
   }
 }
 
+function makeUnifiedSummary(session: ReturnType<typeof makeTranscriptSession>) {
+  return {
+    id: session.id,
+    source: 'workflow',
+    runtimeSessionId: session.runtimeSessionId,
+    runtime: session.runtime,
+    activity: 'idle',
+    createdAt: session.createdAt,
+    lastActivityAt: session.lastDataAt,
+    model: session.model,
+    resolvedModel: session.eventSummary?.resolvedModel ?? null,
+    failureCategory: session.eventSummary?.failureCategory ?? null,
+    failureReason: session.failureReason,
+    toolCallCount: session.eventSummary?.toolCallCount ?? null,
+    toolErrorCount: session.eventSummary?.toolErrorCount ?? null,
+    workflowRunId: session.workflowRunId,
+    sessionName: session.sessionName,
+    contextRefs: { issueNumber },
+    usage: session.usage,
+    recoveryAvailable: true,
+    inputs: null,
+    turns: null,
+  }
+}
+
 async function mockWorkflowSessionsApi(page: Page, sessions = [makeSession()]) {
   await page.route('**/hubs/events**', route => route.fulfill({ status: 204, body: '' }))
   await page.route('**/api/**', async (route) => {
@@ -176,10 +180,10 @@ async function mockWorkflowSessionsApi(page: Page, sessions = [makeSession()]) {
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/coder-sessions`) {
       return route.fulfill({ json: apiResponse([]) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${transcriptSessionName}`) {
-      return route.fulfill({ json: apiResponse(makeTranscriptMetadata()) })
+    if (method === 'GET' && path === `/projects/${project.id}/sessions/session-responsive-code`) {
+      return route.fulfill({ json: apiResponse(makeUnifiedSummary(makeTranscriptSession())) })
     }
-    if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/sessions/${transcriptSessionName}/transcript`) {
+    if (method === 'GET' && path === `/projects/${project.id}/sessions/session-responsive-code/transcript`) {
       return route.fulfill({ json: apiResponse(makeTranscriptResponse()) })
     }
     if (method === 'GET' && path === `/projects/${project.id}/issues/${issueNumber}/diff`) {
@@ -244,7 +248,7 @@ test('workflow session rows do not overflow a narrow panel in the real app', asy
   await expect(panel).toBeVisible()
   await expect(row).toBeVisible()
   await expect(row.getByText(longSessionName)).toBeVisible()
-  await expect(row.getByText('Failed')).toBeVisible()
+  await expect(row.getByText('Idle')).toBeVisible()
   await expect(row.getByText(/27 tools.*3 errors/)).toBeVisible()
   await expect(row.getByText(longFailureReason)).toBeVisible()
 
@@ -269,7 +273,7 @@ test.describe('Workflow session transcript mobile overflow', () => {
       const transcriptRow = page.getByTestId('workflow-session-row').filter({ hasText: transcriptSessionName })
       await expect(transcriptRow).toBeVisible()
       await transcriptRow.click()
-      await expect(page).toHaveURL(new RegExp(`/issues/${issueNumber}/workflow/sessions/${transcriptSessionName}$`))
+       await expect(page).toHaveURL(new RegExp('/sessions/session-responsive-code$'))
 
       const codeBlock = page.locator('.transcript-md pre')
       const horizontalScrollOwner = codeBlock.locator(
@@ -280,7 +284,6 @@ test.describe('Workflow session transcript mobile overflow', () => {
       await expectNoDocumentHorizontalOverflow(page)
       await expectBoxInsideViewport(page, codeBlock, 'Transcript code block')
       await expectBoxInsideViewport(page, horizontalScrollOwner, 'Transcript horizontal scroll owner')
-      await expectBoxInsideViewport(page, page.getByTestId('session-sibling-navigation-slot'), 'Sibling session navigation')
 
       const overflowX = await horizontalScrollOwner.evaluate((node) => getComputedStyle(node).overflowX)
       expect(['auto', 'scroll']).toContain(overflowX)

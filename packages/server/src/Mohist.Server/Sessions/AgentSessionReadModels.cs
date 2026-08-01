@@ -276,7 +276,26 @@ public sealed record AgentTurnObservationDto(
     string Id,
     long Sequence,
     IReadOnlyList<string> InputIds,
-    string Status);
+    string Status,
+    [property: JsonPropertyName("result")] AgentTurnResultObservationDto? Result = null);
+
+public sealed record AgentTurnResultObservationDto(
+    string? Message,
+    string? Output,
+    string? FailureReason,
+    string? FailureCategory,
+    int? ExitCode);
+
+public sealed record AgentSessionRecoveryObservationDto(
+    string Type,
+    string RecordedAt,
+    string? RuntimeSessionId,
+    string? Reason,
+    string? Strategy,
+    string? Summary,
+    long? ContextWindowUsedBefore,
+    long? ContextWindowUsedAfter,
+    long? ContextWindowSize);
 
 /// <summary>
 /// Lightweight association entry returned by the issue/epic agent-session
@@ -320,7 +339,11 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c> route,
 /// which resolves the row by id without the
 /// <c>source-kind == agent-launch</c> gate that the generic-session route
-/// applies.
+/// applies. The summary is the single shared read contract consumed by the
+/// Web session detail page — it carries every fact the page needs to
+/// explain source and current state, current-turn and input/turn
+/// observations, terminal/failure evidence, model/usage, recovery
+/// availability, and the runtime binding.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -339,6 +362,25 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 ///   <see cref="UnifiedSessionSummaryDto.AgentName"/> absent.</description></item>
 /// </list>
 /// </para>
+/// <para>
+/// Terminal/failure evidence (<see cref="UnifiedSessionSummaryDto.FailureCategory"/>,
+/// <see cref="UnifiedSessionSummaryDto.FailureReason"/>,
+/// <see cref="UnifiedSessionSummaryDto.ToolCallCount"/>,
+/// <see cref="UnifiedSessionSummaryDto.ToolErrorCount"/>) and
+/// <see cref="UnifiedSessionSummaryDto.CurrentTurnId"/> are computed by
+/// <see cref="Sessions.Services.AgentSessionQuerier.GetUnifiedSessionSummaryAsync"/>
+/// from the session's transcript scoped to the current
+/// <see cref="UnifiedSessionSummaryDto.RuntimeSessionId"/> binding so
+/// prior-runtime evidence does not leak into the current view. Fields are
+/// <c>null</c> when no transcript or no terminal fact is recorded; the
+/// absent-when-empty idiom keeps the wire shape free of empty objects.
+/// </para>
+/// <para>
+/// <see cref="UnifiedSessionSummaryDto.RecoveryAvailable"/> reflects whether
+/// the Session is safely idle (<c>activity == idle</c>) and is the single
+/// gate for the Web's Compact and Reset controls. <c>false</c> for any
+/// active, queued, executing, or unknown state.
+/// </para>
 /// </remarks>
 public sealed record UnifiedSessionSummaryDto(
     string Id,
@@ -350,14 +392,21 @@ public sealed record UnifiedSessionSummaryDto(
     string? LastActivityAt,
     string? Model,
     string? ResolvedModel,
+    string? FailureCategory,
+    string? FailureReason,
+    int? ToolCallCount,
+    int? ToolErrorCount,
     string? AgentId,
     string? AgentName,
     string? WorkflowRunId,
     string? SessionName,
     [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs,
     [property: JsonPropertyName("usage")] AgentUsageDto Usage,
+    [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable,
+    [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
-    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered

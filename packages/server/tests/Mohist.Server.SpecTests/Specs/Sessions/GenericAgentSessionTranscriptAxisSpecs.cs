@@ -382,9 +382,9 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
             .GetProperty("user").GetProperty("text").GetString());
         Assert.Equal("runtime-first", firstPayload.GetProperty("data").GetProperty("turns")[0]
             .GetProperty("user").GetProperty("runtimeSessionId").GetString());
-        Assert.Equal("second runtime turn", Assert.Single(secondPayload.GetProperty("data").GetProperty("turns").EnumerateArray())
-            .GetProperty("user").GetProperty("text").GetString());
-        Assert.Equal("runtime-second", secondPayload.GetProperty("data").GetProperty("turns")[0]
+        var secondTurn = FindTurnByUserText(secondPayload.GetProperty("data"), "second runtime turn");
+        Assert.Equal("second runtime turn", secondTurn.GetProperty("user").GetProperty("text").GetString());
+        Assert.Equal("runtime-second", secondTurn
             .GetProperty("user").GetProperty("runtimeSessionId").GetString());
     }
 

@@ -74,7 +74,7 @@ export function ReasoningPartView({ text, startedAt }: ReasoningPartViewProps) {
 
 interface ErrorPartViewProps {
   message: string
-  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery'
+  kind: 'timeout' | 'failed' | 'cancelled' | 'recovery' | 'context-reset' | 'compaction'
   at: string
 }
 
@@ -84,6 +84,8 @@ export function ErrorPartView({ message, kind, at }: ErrorPartViewProps) {
     failed: '✗ Execution failed',
     cancelled: '⊘ Execution cancelled',
     recovery: '↻ Recovery in progress',
+    'context-reset': '↻ Context reset',
+    compaction: '↻ Context compacted',
   }
 
   return (

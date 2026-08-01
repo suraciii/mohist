@@ -127,9 +127,9 @@ function summarizePeakContext(sessions: WorkflowRunSession[]): string | null {
   return peak ? `peak ${peak.pct}% ${peak.sessionName}` : null
 }
 
-function WorkflowSessionRow({ issueNumber, session }: { issueNumber: number; session: WorkflowRunSession }) {
+function WorkflowSessionRow({ session }: { session: WorkflowRunSession }) {
   const toProjectPath = useProjectPath()
-  const transcriptPath = toProjectPath(`/issues/${issueNumber}/workflow/sessions/${encodeURIComponent(session.sessionName)}`)
+  const transcriptPath = toProjectPath(`/sessions/${encodeURIComponent(session.id)}`)
   const context = contextText(session)
   const cost = formatCost(session.usage?.costAmount, session.usage?.costCurrency)
   const model = modelLabel(session)
@@ -269,7 +269,7 @@ function SessionFilterControls({
   )
 }
 
-export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSessionsPanelProps) {
+export function WorkflowSessionsPanel({ issueNumber: _issueNumber, workflowRunId }: WorkflowSessionsPanelProps) {
   const { sessions, isLoading } = useWorkflowRunSessions(workflowRunId)
   const filtering = useWorkflowSessionFiltering(sessions)
 
@@ -327,7 +327,7 @@ export function WorkflowSessionsPanel({ issueNumber, workflowRunId }: WorkflowSe
             ) : (
               <div className="divide-y divide-border/60">
                 {filtering.sessions.map((session) => (
-                  <WorkflowSessionRow key={session.id} issueNumber={issueNumber} session={session} />
+                  <WorkflowSessionRow key={session.id} session={session} />
                 ))}
               </div>
             )}

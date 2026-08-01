@@ -145,8 +145,8 @@ function agentSessionHandler(ctx: HandlerContext): void {
   workflowRunHandler(ctx)
   const { sessionId, agentId } = ctx.parsed as { sessionId?: string, agentId?: string }
   if (typeof sessionId !== 'string' || !sessionId) return
-  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId], exact: true })
-  ctx.queryClient.invalidateQueries({ queryKey: ['agent-session', ctx.projectId, sessionId, 'transcript'], exact: true })
+  ctx.queryClient.invalidateQueries({ queryKey: ['unified-session', ctx.projectId, sessionId] })
+  ctx.queryClient.invalidateQueries({ queryKey: ['unified-session', ctx.projectId, sessionId, 'transcript'] })
   if (typeof agentId === 'string' && agentId) {
     ctx.queryClient.invalidateQueries({ queryKey: ['agents', ctx.projectId, agentId, 'sessions'] })
   }

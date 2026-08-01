@@ -166,8 +166,8 @@ function eventIdentity(event: ProjectEventDto): string {
 
 function sessionPath(sessionId: string, issueNumber: number | null, isGeneric: boolean): string {
   return isGeneric || issueNumber == null
-    ? fromActivity(`/agent-sessions/${encodeURIComponent(sessionId)}`)
-    : fromActivity(`/issues/${issueNumber}/session/${encodeURIComponent(sessionId)}`)
+    ? fromActivity(`/sessions/${encodeURIComponent(sessionId)}`)
+    : fromActivity(`/sessions/${encodeURIComponent(sessionId)}`)
 }
 
 function issueTarget(issueNumber: number): { number: number; label: string; path: string } {

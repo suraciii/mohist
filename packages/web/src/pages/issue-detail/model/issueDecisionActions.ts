@@ -37,9 +37,12 @@ export interface IssueDecisionAction {
 }
 
 export interface IssueDecisionSessionSelection {
+  sessionId: string
   sessionName: string
   transcriptPath: string
 }
+
+type TranscriptSession = Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { id?: string; status?: string }
 
 export interface IssueDecisionContextInput {
   decision: RuntimeDecision | null
@@ -59,7 +62,7 @@ export interface IssueDecisionContextInput {
     | 'blocker'
   >
   agentStatus: Pick<AgentStatus, 'runnerAvailable' | 'runnerMessage' | 'capacity' | 'activeAgents'> | null
-  workflowSessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }>
+  workflowSessions: ReadonlyArray<TranscriptSession>
   projectPath: (path: string) => string
 }
 
@@ -98,10 +101,10 @@ function activePriority(activity: WorkflowRunSession['activity'] | undefined): n
 }
 
 export function selectTranscriptSession(
-  sessions: ReadonlyArray<Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }>,
-): Pick<WorkflowRunSession, 'sessionName'> | null {
+  sessions: ReadonlyArray<TranscriptSession>,
+): TranscriptSession | null {
   if (sessions.length === 0) return null
-  let best: { session: Pick<WorkflowRunSession, 'sessionName' | 'activity' | 'startedAt' | 'createdAt'> & { status?: string }; activeRank: number; ts: number } | null = null
+  let best: { session: TranscriptSession; activeRank: number; ts: number } | null = null
   for (const session of sessions) {
     const activeRank = activePriority(session.activity)
     const ts = sessionTimestamp(session)
@@ -123,7 +126,7 @@ export function selectTranscriptSession(
       }
     }
   }
-  return best ? { sessionName: best.session.sessionName } : null
+  return best ? best.session : null
 }
 
 function isAgentRunningOnThis(issue: IssueDecisionContextInput['issue'], agentStatus: IssueDecisionContextInput['agentStatus']): boolean {
@@ -308,6 +311,7 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
       : null
 
   if (transcriptSession) {
+    const transcriptSessionId = transcriptSession.id ?? transcriptSession.sessionName
     actions.push({
       kind: 'view-transcript',
       label: `${TRANSCRIPT_DEFAULT_LABEL} · ${transcriptSession.sessionName}`,
@@ -317,8 +321,9 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
       primary: false,
       destructive: false,
       mode: 'navigation',
-      to: input.projectPath(`/issues/${issue.number}/workflow/sessions/${encodeURIComponent(transcriptSession.sessionName)}`),
-      order: order++,
+       to: input.projectPath(`/sessions/${encodeURIComponent(transcriptSessionId)}`),
+       order: order++,
+
     })
   }
 
@@ -348,6 +353,8 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
     }
   }
 
+  const selectedTranscriptSessionId = transcriptSession?.id ?? transcriptSession?.sessionName ?? null
+
   const sortedActions = [...actions].sort((a, b) => a.order - b.order)
   const primary = sortedActions.find((action) => action.primary && action.enabled)
     ?? sortedActions.find((action) => action.primary)
@@ -357,12 +364,14 @@ export function deriveIssueDecisionActions(input: IssueDecisionContextInput): {
   return {
     actions: sortedActions,
     primary,
-    transcript: transcriptSession
-      ? {
-          sessionName: transcriptSession.sessionName,
-          transcriptPath: input.projectPath(`/issues/${issue.number}/workflow/sessions/${encodeURIComponent(transcriptSession.sessionName)}`),
-        }
-      : null,
+     transcript: transcriptSession
+       ? {
+           sessionId: selectedTranscriptSessionId!,
+           sessionName: transcriptSession.sessionName,
+           transcriptPath: input.projectPath(`/sessions/${encodeURIComponent(selectedTranscriptSessionId!)}`),
+         }
+       : null,
+
   }
 }
 

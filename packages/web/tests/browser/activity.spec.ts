@@ -104,7 +104,7 @@ test('Activity renders evidence zones and project-scoped navigation at desktop w
   await expect(page.getByTestId('activity-routine-zone')).toBeVisible()
   await expect(page.getByTestId('activity-event-entry')).toHaveCount(3)
   await expect(page.getByTestId('activity-event-primary-link').first()).toHaveAttribute('href', `/${project.name}/issues/42?from=activity`)
-  await expect(page.getByTestId('activity-event-session-link')).toHaveAttribute('href', `/${project.name}/issues/42/session/session-42?from=activity`)
+  await expect(page.getByTestId('activity-event-session-link')).toHaveAttribute('href', `/${project.name}/sessions/session-42?from=activity`)
   await expect(page.getByTestId('activity-event-runner-link')).toHaveAttribute('href', `/${project.name}/runners/runner-42?from=activity`)
 
   await page.getByTestId('activity-event-primary-link').first().click()
@@ -112,7 +112,7 @@ test('Activity renders evidence zones and project-scoped navigation at desktop w
   await page.goBack()
 
   await page.getByTestId('activity-event-session-link').click()
-  await expect(page).toHaveURL(`/${project.name}/issues/42/session/session-42?from=activity`)
+  await expect(page).toHaveURL(`/${project.name}/sessions/session-42?from=activity`)
   await page.goBack()
 
   await page.getByTestId('activity-event-runner-link').click()

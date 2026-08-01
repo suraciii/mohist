@@ -19,7 +19,7 @@ const taskLogHook: TaskLogDataHook = ({ enabled }) => ({
   isError: false,
 })
 
-const workflowSessionsHook: WorkflowRunSessionsHook = () => ({ sessions: [], isLoading: false })
+const workflowSessionsHook: WorkflowRunSessionsHook = () => ({ sessions: [{ id: 'build-session-id', sessionName: 'build-session' } as never], isLoading: false })
 
 function makeTask(overrides: Partial<StageTaskState> = {}): StageTaskState {
   return {

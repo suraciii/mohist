@@ -43,7 +43,7 @@ function renderPage() {
           <Routes>
             <Route path="/issues/:number" element={<IssueDetailPage />} />
             <Route path="/agent-sessions/new" element={<div data-testid="agent-composer-target">agent composer</div>} />
-            <Route path="/issues/14/workflow/sessions/:sessionName" element={<div data-testid="transcript-target">transcript</div>} />
+            <Route path="/sessions/:sessionId" element={<div data-testid="transcript-target">transcript</div>} />
           </Routes>
         </ProjectProvider>
       </MemoryRouter>

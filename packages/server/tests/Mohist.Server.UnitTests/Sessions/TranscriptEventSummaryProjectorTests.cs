@@ -49,6 +49,20 @@ public class TranscriptEventSummaryProjectorTests
     }
 
     [Fact]
+    public void Summarize_OrdersModelPartsByTurnBeforePartSequence()
+    {
+        var events = new[]
+        {
+            ModelPart(turnSequence: 2, sequence: 1, partId: "model-new", payload: new { resolvedModel = "new-model" }),
+            ModelPart(turnSequence: 1, sequence: 99, partId: "model-old", payload: new { resolvedModel = "old-model" }),
+        };
+
+        var summary = TranscriptEventSummaryProjector.Summarize(events);
+
+        Assert.Equal("new-model", summary.ResolvedModel);
+    }
+
+    [Fact]
     public void Summarize_NoModelParts_LeavesResolvedModelNull()
     {
         var events = new[]

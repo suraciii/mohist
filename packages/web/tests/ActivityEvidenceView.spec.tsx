@@ -247,7 +247,7 @@ describe('Activity evidence view', () => {
     expect(workflow).toBeDefined()
 
     const genericLink = within(generic!).getByTestId('activity-event-primary-link')
-    expect(genericLink).toHaveAttribute('href', expect.stringContaining('/agent-sessions/generic-session-1'))
+    expect(genericLink).toHaveAttribute('href', expect.stringContaining('/sessions/generic-session-1'))
     expect(genericLink).toHaveAttribute('href', expect.stringContaining('from=activity'))
     expect(within(generic!).getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
   })
@@ -273,7 +273,7 @@ describe('Activity evidence view', () => {
 
     expect(screen.getByTestId('activity-event-primary-link')).toHaveAttribute(
       'href',
-      `/${encodeURIComponent(TEST_PROJECT.name)}/issues/42/session/session-42?from=activity`,
+      `/${encodeURIComponent(TEST_PROJECT.name)}/sessions/session-42?from=activity`,
     )
   })
 
@@ -297,7 +297,7 @@ describe('Activity evidence view', () => {
     await waitFor(() => {
       expect(screen.getByTestId('activity-event-session-link')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('activity-event-session-link')).toHaveAttribute('href', expect.stringContaining('/agent-sessions/agent-session-42'))
+    expect(screen.getByTestId('activity-event-session-link')).toHaveAttribute('href', expect.stringContaining('/sessions/agent-session-42'))
     expect(screen.getByTestId('activity-event-issue-link')).toHaveAttribute('href', expect.stringContaining('/issues/42?from=activity'))
   })
 

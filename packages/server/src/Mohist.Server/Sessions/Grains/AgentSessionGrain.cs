@@ -907,10 +907,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
         var pending = GetPendingFollowups(session);
-        if (pending.Count > 0 || session.Status.Activity != AgentSessionActivity.Idle)
+        var hasNonTerminalTurn = (session.Status.Turns ?? [])
+            .Any(turn => turn.Status is AgentTurnStatus.Queued or AgentTurnStatus.Executing);
+        if (pending.Count > 0
+            || hasNonTerminalTurn
+            || session.Status.PendingStop is not null
+            || session.Status.Activity != AgentSessionActivity.Idle)
             throw new InvalidOperationException(
                 $"AgentSession {session.Id} is currently active; Compact and Reset require an idle session. "
-                + $"Activity={session.Status.Activity}, PendingFollowups={pending.Count}.");
+                + $"Activity={session.Status.Activity}, PendingFollowups={pending.Count}, NonTerminalTurns={hasNonTerminalTurn}.");
     }
 
     private IReadOnlyList<RuntimeEventEnvelope> BuildContextResetTranscriptEntries(
@@ -922,7 +927,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         {
             Id = -(_realtimeSequence + 1),
             SessionId = session.Id,
-            AgentSessionId = null,
+            AgentSessionId = session.Status.AgentRuntimeSessionId,
             Sequence = ++_realtimeSequence,
             Type = RuntimeEventTypes.SessionContextReset,
             PayloadJson = JSON.Serialize(new Dictionary<string, object?>

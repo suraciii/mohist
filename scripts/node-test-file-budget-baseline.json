@@ -34,6 +34,5 @@
   "packages/web/src/widgets/session-transcript/model/transcript-state.test.ts": 620,
   "packages/web/src/widgets/session-transcript/model/useTurnKeyboardNav.test.tsx": 573,
   "packages/web/tests/IssueDetailPage.spec.tsx": 1180,
-  "packages/web/tests/SessionLiveUpdates.spec.tsx": 913,
-  "packages/web/tests/SessionPageHeader.spec.tsx": 1006
+  "packages/web/tests/SessionLiveUpdates.spec.tsx": 913
 }

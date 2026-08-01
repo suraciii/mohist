@@ -34,6 +34,7 @@ function makeData(sessionKey: string): SessionDataSourceResult {
     followupIsPending: false,
     sendFollowup: vi.fn(async () => {}),
     cancel: null,
+    stop: null,
     contextWindowUsed: null,
     contextWindowSize: null,
     contextUsagePercent: null,

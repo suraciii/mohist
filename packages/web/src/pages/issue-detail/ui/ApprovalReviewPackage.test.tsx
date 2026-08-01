@@ -14,7 +14,7 @@ const action = (kind: IssueDecisionAction['kind'], order: number, enabled = true
   primary: kind === 'approve',
   destructive: kind === 'send-back',
   mode: kind === 'send-back' ? 'feedback' : kind === 'ask-agent' || kind === 'view-transcript' ? 'navigation' : 'immediate',
-  to: kind === 'ask-agent' ? '/agent-sessions/new' : kind === 'view-transcript' ? '/issues/455/workflow/sessions/session-1' : null,
+  to: kind === 'ask-agent' ? '/agent-sessions/new' : kind === 'view-transcript' ? '/sessions/session-1' : null,
   order,
 })
 
