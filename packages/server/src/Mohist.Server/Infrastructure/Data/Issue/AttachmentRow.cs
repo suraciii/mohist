@@ -13,4 +13,5 @@ public class AttachmentRow
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? ExpiresAt { get; set; }
     public int? OwnerIssueNumber { get; set; }
+    public string? Source { get; set; }
 }

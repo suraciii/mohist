@@ -368,6 +368,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ContentType).HasMaxLength(128);
             entity.Property(e => e.StoragePath).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.Source).HasMaxLength(32);
             entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerId })
                 .HasDatabaseName("IX_Attachments_ProjectId_Owner");
             entity.HasIndex(e => new { e.ProjectId, e.OwnerKind, e.OwnerIssueNumber })
