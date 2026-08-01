@@ -3,7 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ConnectionDiagnostic } from '../../../entities/agent-connection'
-import { ConnectionDiagnosticPage, type ConnectionDiagnosticPageDataHook } from './ConnectionDiagnosticPage'
+import {
+  ConnectionDiagnosticPage,
+  type ConnectionDiagnosticPageDataHook,
+  useReadOnlyOperations,
+} from './ConnectionDiagnosticPage'
 
 const diagnostic: ConnectionDiagnostic = {
   primaryState: 'owner_unavailable',
@@ -34,7 +38,10 @@ function renderPage(dataHook: ConnectionDiagnosticPageDataHook) {
   return render(
     <MemoryRouter initialEntries={['/test/connections/connection-1']}>
       <Routes>
-        <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage dataHook={dataHook} />} />
+        <Route
+          path="/:projectName/connections/:connectionId"
+          element={<ConnectionDiagnosticPage dataHook={dataHook} operationsHook={useReadOnlyOperations} />}
+        />
       </Routes>
     </MemoryRouter>,
   )
@@ -67,7 +74,15 @@ describe('ConnectionDiagnosticPage', () => {
     rerender(
       <MemoryRouter initialEntries={['/test/connections/connection-1']}>
         <Routes>
-          <Route path="/:projectName/connections/:connectionId" element={<ConnectionDiagnosticPage dataHook={() => ({ data: undefined, isLoading: false, error: new Error('Request failed') })} />} />
+          <Route
+            path="/:projectName/connections/:connectionId"
+            element={
+              <ConnectionDiagnosticPage
+                dataHook={() => ({ data: undefined, isLoading: false, error: new Error('Request failed') })}
+                operationsHook={useReadOnlyOperations}
+              />
+            }
+          />
         </Routes>
       </MemoryRouter>,
     )

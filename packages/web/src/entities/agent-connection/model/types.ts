@@ -66,3 +66,20 @@ export interface AgentConnectionCreateResponse {
   appDescription: string
   slackAppCreationReference: string
 }
+
+export interface AgentConnectionDetailResponse {
+  connection: AgentConnectionDto
+  botName: string
+  appDescription: string
+  slackAppCreationReference: string
+}
+
+export interface AgentConnectionConfigureRequest {
+  appToken: string
+  botToken: string
+}
+
+export interface AgentConnectionClaimOwnerResponse {
+  code: string
+  expiresAt: string
+}

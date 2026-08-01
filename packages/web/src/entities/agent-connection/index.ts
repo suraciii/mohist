@@ -1,20 +1,33 @@
 export {
+  claimAgentConnectionOwner,
+  configureAgentConnection,
   createAgentConnection,
+  getAgentConnection,
   getConnectionDiagnostic,
   listAgentConnections,
 } from './api/client'
 export {
+  agentConnectionDetailQueryKey,
+  agentConnectionDetailQueryOptions,
   agentConnectionsQueryKey,
   agentConnectionsQueryOptions,
+  claimAgentConnectionOwnerMutationOptions,
+  configureAgentConnectionMutationOptions,
   connectionDiagnosticQueryOptions,
   createAgentConnectionMutationOptions,
+  useAgentConnection,
   useAgentConnections,
+  useClaimAgentConnectionOwner,
+  useConfigureAgentConnection,
   useConnectionDiagnostic,
   useCreateAgentConnection,
 } from './api/queries'
 export type {
+  AgentConnectionClaimOwnerResponse,
+  AgentConnectionConfigureRequest,
   AgentConnectionCreateRequest,
   AgentConnectionCreateResponse,
+  AgentConnectionDetailResponse,
   AgentConnectionDto,
   ConnectionDiagnostic,
   ConnectionDiagnosticFacts,

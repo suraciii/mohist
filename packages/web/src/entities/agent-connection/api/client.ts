@@ -1,7 +1,10 @@
 import { projectApiPath, request } from '@/shared/api/client'
 import type {
+  AgentConnectionClaimOwnerResponse,
+  AgentConnectionConfigureRequest,
   AgentConnectionCreateRequest,
   AgentConnectionCreateResponse,
+  AgentConnectionDetailResponse,
   AgentConnectionDto,
   ConnectionDiagnostic,
 } from '../model/types'
@@ -24,4 +27,37 @@ export function createAgentConnection(
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+export function getAgentConnection(
+  projectId: string | null | undefined,
+  connectionId: string,
+) {
+  return request<AgentConnectionDetailResponse>(
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}`),
+  )
+}
+
+export function configureAgentConnection(
+  projectId: string | null | undefined,
+  connectionId: string,
+  data: AgentConnectionConfigureRequest,
+) {
+  return request<AgentConnectionDto>(
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/configure`),
+    {
+      method: 'POST',
+      body: JSON.stringify(data),
+    },
+  )
+}
+
+export function claimAgentConnectionOwner(
+  projectId: string | null | undefined,
+  connectionId: string,
+) {
+  return request<AgentConnectionClaimOwnerResponse>(
+    projectApiPath(projectId, `/slack-connections/${encodeURIComponent(connectionId)}/claim-owner`),
+    { method: 'POST' },
+  )
 }
