@@ -128,6 +128,10 @@ public class WorkflowRunStore : IWorkflowRunStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.WorkflowRuns.FindAsync([workflowRunId], ct);
         if (row is null) return;
+        var taskMapRows = await db.WorkflowRunTaskMaps
+            .Where(map => map.WorkflowRunId == workflowRunId)
+            .ToListAsync(ct);
+        db.WorkflowRunTaskMaps.RemoveRange(taskMapRows);
         db.WorkflowRuns.Remove(row);
         await db.SaveChangesAsync(ct);
         await _dispatchSnapshotStore.DeleteForRunAsync(workflowRunId, ct);
@@ -139,6 +143,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         int? epicNumber,
         CancellationToken ct)
     {
+        var projection = WorkflowRunWorkProjectionBuilder.Build(run);
         var entity = await db.WorkflowRuns.FindAsync([run.Id], ct);
 
         if (entity is null)
@@ -148,22 +153,58 @@ public class WorkflowRunStore : IWorkflowRunStore
                 WorkflowRunId = run.Id,
                 State = JSON.Serialize(run),
                 EpicNumber = epicNumber,
+                ActiveWorkId = projection.ActiveWorkId,
+                ActiveWorkerId = projection.ActiveWorkerId,
                 WorkflowProfileIdKey = run.Status.IsTerminal()
                     ? null
                     : WorkflowProfileBindingKey.For(run.WorkflowProfileId),
             };
             db.WorkflowRuns.Add(newEntity);
             db.Entry(newEntity).Property<long>("ETag").CurrentValue = 1;
+            await StageTaskMapAsync(db, projection, ct);
             return;
         }
 
         entity.EpicNumber = epicNumber;
         entity.State = JSON.Serialize(run);
+        entity.ActiveWorkId = projection.ActiveWorkId;
+        entity.ActiveWorkerId = projection.ActiveWorkerId;
         entity.WorkflowProfileIdKey = run.Status.IsTerminal()
             ? null
             : WorkflowProfileBindingKey.For(run.WorkflowProfileId);
         var entry = db.Entry(entity);
         entry.Property<long>("ETag").CurrentValue = entry.Property<long>("ETag").OriginalValue + 1;
+        await StageTaskMapAsync(db, projection, ct);
+    }
+
+    private static async Task StageTaskMapAsync(
+        MohistDbContext db,
+        WorkflowRunWorkProjectionData projection,
+        CancellationToken ct)
+    {
+        var existing = await db.WorkflowRunTaskMaps
+            .Where(map => map.WorkflowRunId == projection.WorkflowRunId)
+            .ToListAsync(ct);
+        var expected = projection.TaskMap.ToDictionary(entry => entry.TaskId, StringComparer.Ordinal);
+
+        foreach (var row in existing)
+        {
+            if (expected.Remove(row.TaskId, out var entry))
+            {
+                row.WorkId = entry.WorkId;
+            }
+            else
+            {
+                db.WorkflowRunTaskMaps.Remove(row);
+            }
+        }
+
+        db.WorkflowRunTaskMaps.AddRange(expected.Values.Select(entry => new WorkflowRunTaskMapRow
+        {
+            WorkflowRunId = projection.WorkflowRunId,
+            TaskId = entry.TaskId,
+            WorkId = entry.WorkId,
+        }));
     }
 
     private static WorkflowRun? Deserialize(string json)

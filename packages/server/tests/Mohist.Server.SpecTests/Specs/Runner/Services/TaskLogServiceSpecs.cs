@@ -26,7 +26,7 @@ public class TaskLogServiceSpecs : IAsyncLifetime
         _service = new TaskLogService(
             new TaskLogStore(factory, _timeProvider),
             new AgentJobStore(factory, NullLogger<AgentJobStore>.Instance, _timeProvider),
-            new WorkflowRunQuerier(factory),
+            new WorkflowRunWorkProjection(factory),
             new NoopTaskLogDeltaPublisher(),
             NullLogger<TaskLogService>.Instance);
     }

@@ -30,7 +30,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
         await using (var db = database.CreateContext())
         {
-            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_migration");
+            var row = await ReadWorkflowRunAsync(db, "wr_migration");
             using var json = JsonDocument.Parse(row.State);
             var metadata = json.RootElement.GetProperty("metadata");
             var annotations = metadata.GetProperty("annotations");
@@ -56,7 +56,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
         await using (var db = database.CreateContext())
         {
-            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_migration");
+            var row = await ReadWorkflowRunAsync(db, "wr_migration");
             using var json = JsonDocument.Parse(row.State);
             var annotations = json.RootElement.GetProperty("metadata").GetProperty("annotations");
             Assert.Equal("proj_1", annotations.GetProperty("projectId").GetString());
@@ -86,7 +86,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
         await using (var db = database.CreateContext())
         {
-            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_malformed");
+            var row = await ReadWorkflowRunAsync(db, "wr_malformed");
             using var json = JsonDocument.Parse(row.State);
             var metadata = json.RootElement.GetProperty("metadata");
             var annotations = metadata.GetProperty("annotations");
@@ -120,7 +120,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
         await using (var db = database.CreateContext())
         {
-            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_legacy_integer");
+            var row = await ReadWorkflowRunAsync(db, "wr_legacy_integer");
             using var json = JsonDocument.Parse(row.State);
             var metadata = json.RootElement.GetProperty("metadata");
             var annotations = metadata.GetProperty("annotations");
@@ -151,7 +151,7 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
 
         await using (var db = database.CreateContext())
         {
-            var row = await db.WorkflowRuns.SingleAsync(x => x.WorkflowRunId == "wr_blank_project");
+            var row = await ReadWorkflowRunAsync(db, "wr_blank_project");
             using var json = JsonDocument.Parse(row.State);
             var metadata = json.RootElement.GetProperty("metadata");
             var annotations = metadata.GetProperty("annotations");
@@ -173,6 +173,25 @@ public sealed class TypedWorkflowRunLineageMigrationSpecs
             values.Add(reader.GetString(0));
         return values;
     }
+
+    private static async Task<WorkflowRunColumns> ReadWorkflowRunAsync(DbContext db, string workflowRunId)
+    {
+        await db.Database.OpenConnectionAsync();
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = "SELECT \"State\", \"MetadataProjectId\", \"IssueNumber\" FROM \"WorkflowRuns\" WHERE \"WorkflowRunId\" = $id";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$id";
+        parameter.Value = workflowRunId;
+        command.Parameters.Add(parameter);
+        await using var reader = await command.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        return new WorkflowRunColumns(
+            reader.GetString(0),
+            reader.IsDBNull(1) ? null : reader.GetString(1),
+            reader.IsDBNull(2) ? null : reader.GetInt32(2));
+    }
+
+    private sealed record WorkflowRunColumns(string State, string? MetadataProjectId, int? IssueNumber);
 
     private static string LegacyAnnotationState(string issueNumber) =>
         "{\"id\":\"wr_malformed\",\"metadata\":{\"createdAt\":\"2026-01-01T00:00:00Z\",\"annotations\":{\"projectId\":\"proj_1\",\"issueNumber\":" + JsonSerializer.Serialize(issueNumber) + "}},\"status\":\"Running\",\"stages\":[]}";

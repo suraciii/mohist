@@ -1,0 +1,66 @@
+{
+  "project": "mohist-local",
+  "description": "Eliminate WorkflowRun State full-load reads on the task-log path via a write-maintained run-work projection (taskId<->workId map + active-work identity).",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Run-work projection read-model (schema, write maintenance, read API)",
+      "spec": "specs/run-work-projection/spec.md#run-work-projection-content",
+      "description": "Add the WorkflowRunTaskMap child table (WorkflowRunId, TaskId, WorkId) with (runId,TaskId) and (runId,WorkId) indexes, plus nullable ActiveWorkId/ActiveWorkerId columns on WorkflowRunRow, via an EF Core migration. Maintain both in WorkflowRunStore.StageRunAsync via a single shared map/active-work helper (rebuilt from all TaskRuns across all stages, WorkId = TaskRun.WorkId ?? Id; active-work columns from the run's current active work), committed in the same transaction as State; clear map rows in DeleteAsync. Expose the State-free reads through a new narrow IWorkflowRunWorkProjection interface (ResolveWorkIdAsync(runId,taskId), ResolveTaskIdAsync(runId,workId), IsActiveWorkAsync(runId,workId,runnerId), GetProjectIdAsync(runId) via existing MetadataProjectId), with a concrete implementation registered in DI. Include unit tests for write-maintenance correctness and a read-API test asserting the implementation reads only projection columns.",
+      "acceptanceCriteria": [
+        "EF migration adds WorkflowRunTaskMap (indexed both directions) and nullable WorkflowRuns.ActiveWorkId/ActiveWorkerId; dotnet build is clean (TreatWarningsAsErrors).",
+        "After StageRunAsync saves a run with tasks across multiple stages plus a running task, the persisted map rows equal (runId, task.Id, task.WorkId ?? task.Id) for every task in every stage, and ActiveWorkId/ActiveWorkerId match the run's single current active work (null when none).",
+        "Deleting a WorkflowRun removes its WorkflowRunTaskMap rows.",
+        "IWorkflowRunWorkProjection is defined and registered in DI; its concrete implementation returns correct results reading only projection columns (unit test asserts the State-deserializing JSON.Deserialize<WorkflowRun> path is not invoked).",
+        "The map/active-work computation is a single shared helper reused by StageRunAsync (and later the backfill upgrader), so there is one author of the projection.",
+        "Server test suite (npm test) passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Projection schema + EF migration + shared map/active-work helper + StageRunAsync/DeleteAsync maintenance + IWorkflowRunWorkProjection interface + DI registration + concrete read implementation + unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "ActiveWorkId holds either a task workId or the checks workId (checks-<stage>); ActiveWorkerId is the assigned worker. WorkId stored as the effective work id (WorkId ?? Id); note taskId<->workId is identity today (claimed tasks set WorkId = logicalTaskId = Id), so the table's real job is run-scoped task membership, with WorkId carried for robustness. Maintenance is derived from the in-memory run, never by deserializing State on read."
+    },
+    {
+      "id": "T-002",
+      "title": "Backfill existing WorkflowRuns projection (cold-start data upgrader)",
+      "spec": "specs/run-work-projection/spec.md#projection-is-maintained-on-every-run-write",
+      "description": "Add a cold-start C# data upgrader in the database-initialization flow that populates WorkflowRunTaskMap and the active-work columns for every existing WorkflowRuns row by deserializing State once, computing the same map/active-work as StageRunAsync. Make it idempotent (skip already-populated rows), preflight every candidate (deserialize via the current model; abort with no writes if any row fails), batch writes in a single transaction, and order it after the #536 State-format upgrader. Existing terminal runs must end up queryable. Include an idempotence/correctness unit test.",
+      "acceptanceCriteria": [
+        "On a database with pre-existing WorkflowRuns rows, the upgrader populates the map and active-work columns for every row, including terminal runs, so historical log queries remain resolvable.",
+        "Re-running the upgrader produces no additional changes (idempotent) and does not rewrite State or advance ETag for rows already populated.",
+        "Preflight: a row whose State cannot be deserialized/mapped aborts the upgrader before any write (no partial population); the server does not enter service until migration completes.",
+        "Upgrader is ordered after the #536 State-format upgrader in the init flow.",
+        "Idempotence + correctness unit test passes; npm test passes."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "Cold-start data upgrader + idempotence/correctness unit test",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Follow design/workflow/run-state.md migration discipline: ordered, idempotent, single-transaction, preflight before service. Reuses the shared map/active-work helper extracted in T-001 (single author). This upgrader is itself a State-writing path and must refresh the projection in the same transaction it reads State, per the write-time obligation in design D2."
+    },
+    {
+      "id": "T-003",
+      "title": "Switch TaskLogService to the projection (remove all State loads)",
+      "spec": "specs/task-log-stateless-read/spec.md#the-task-log-read-path-never-deserializes-workflowrun-state",
+      "description": "Swap TaskLogService's dependency from the concrete WorkflowRunQuerier to IWorkflowRunWorkProjection, and rewrite ResolveWorkIdAsync, IsActiveWorkAsync, and ResolvePublishScopeAsync to call the projection reads, removing all three State deserializations. Publish scope resolves workId->taskId from the map and projectId (only when taskId resolves) from MetadataProjectId; an unmappable workId yields a null scope (no fan-out). The agent-job ownership branch is untouched. Add a spec test using a fake IWorkflowRunWorkProjection to drive upload (active + inactive work) and query (hit + miss), asserting acceptance, publish-scope stamping, null-scope no-fan-out, and empty-page-on-miss behavior are preserved. Because the interface exposes no State-deserializing member, State deserialize is structurally unreachable from TaskLogService.",
+      "acceptanceCriteria": [
+        "TaskLogService depends on IWorkflowRunWorkProjection (not the concrete WorkflowRunQuerier); no State-deserializing member is reachable from the task-log upload or query paths.",
+        "Spec test uses a fake IWorkflowRunWorkProjection to verify upload (active->persist, inactive/unknown->4xx) and query (hit->page, miss->empty page) behavior, plus publish-scope stamping (taskId + projectId) for task workIds and a null scope (no fan-out) for unmappable/checks workIds — all identical to the prior contract.",
+        "Task-log HTTP/wire contract is unchanged.",
+        "Server test suite (npm test) passes."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Rewritten TaskLogService read methods + no-State-deserialize spec test",
+      "dependsOn": ["T-001", "T-002"],
+      "passes": false,
+      "notes": "Must follow T-002: switching over before backfill would make log queries for existing terminal runs return empty pages. This also removes the upload's double-State-load redundancy (two full deserializations -> two indexed lookups for the same run)."
+    }
+  ]
+}

@@ -82,9 +82,6 @@ State 格式变化是数据库升级的一部分，必须在新 Server 接受请
 - 读取路径每次调用都做全量 `JSON.Deserialize<WorkflowRun>`；叠加 `mo run watch` 3s
   轮询与 runner 高频上报，构成 Server LOH 分配风暴（实测 LOH 分配的 95%+ 来自该路径的
   STJ 字符串转码），进程 RSS 峰值达 2 GB。
-- 日志路径把整载读当廉价查询：日志上传单次请求对同一 run 做两次整载读（活跃校验与
-  publish scope 解析各一次），日志查询每次轮询再做一次整载读，而所需信息只是
-  taskId ↔ workId 映射与活跃 work 判定（`TaskLogService`）。
 - `WorkflowRunStore.MigrateLegacyWorkflowRunJson` 在每次读取时对整个 State 做
   `JsonDocument.Parse` 迁移探测，违反"迁移是写入时义务"。issue #536 实测 364 行中有
   254 行仍需转换（completed 221、failed 26、stopped 7）；兼容调用分布在 7 个生产文件，

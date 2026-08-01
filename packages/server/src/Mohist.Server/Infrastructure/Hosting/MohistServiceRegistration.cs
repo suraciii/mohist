@@ -130,6 +130,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IStateStore<Mohist.Server.Agent.Domain.Agent>, AgentStore>();
         services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
         services.AddScoped<WorkflowRunQuerier>();
+        services.AddScoped<IWorkflowRunWorkProjection, WorkflowRunWorkProjection>();
         services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<AgentSessionReconcileQuerier>();

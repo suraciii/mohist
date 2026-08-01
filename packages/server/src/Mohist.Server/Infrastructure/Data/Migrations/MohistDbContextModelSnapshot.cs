@@ -2715,6 +2715,14 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ActiveWorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ActiveWorkerId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AssignedWorkerId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -2786,6 +2794,32 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkflowRuns");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunTaskMapRow", b =>
+                {
+                    b.Property<string>("WorkflowRunId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaskId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("WorkflowRunId", "TaskId");
+
+                    b.HasIndex("WorkflowRunId", "TaskId")
+                        .HasDatabaseName("IX_WorkflowRunTaskMap_WorkflowRunId_TaskId");
+
+                    b.HasIndex("WorkflowRunId", "WorkId")
+                        .HasDatabaseName("IX_WorkflowRunTaskMap_WorkflowRunId_WorkId");
+
+                    b.ToTable("WorkflowRunTaskMap");
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowStageLockRow", b =>
                 {
                     b.Property<string>("Key")
@@ -2847,6 +2881,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .WithMany()
                         .HasForeignKey("MetadataProjectId", "WorkflowProfileIdKey")
                         .OnDelete(DeleteBehavior.Restrict);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunTaskMapRow", b =>
+                {
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Workflow.WorkflowRunRow", null)
+                        .WithMany()
+                        .HasForeignKey("WorkflowRunId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

@@ -5,7 +5,6 @@ using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Workflow.Domain.Run;
 
 namespace Mohist.Server.Runner.Services;
 
@@ -31,20 +30,20 @@ public sealed class TaskLogService : IScopedService
 {
     private readonly TaskLogStore _store;
     private readonly IAgentJobStore _agentJobs;
-    private readonly WorkflowRunQuerier _runQuerier;
+    private readonly IWorkflowRunWorkProjection _workProjection;
     private readonly ITaskLogDeltaPublisher _publisher;
     private readonly ILogger<TaskLogService> _log;
 
     public TaskLogService(
         TaskLogStore store,
         IAgentJobStore agentJobs,
-        WorkflowRunQuerier runQuerier,
+        IWorkflowRunWorkProjection workProjection,
         ITaskLogDeltaPublisher publisher,
         ILogger<TaskLogService> log)
     {
         _store = store;
         _agentJobs = agentJobs;
-        _runQuerier = runQuerier;
+        _workProjection = workProjection;
         _publisher = publisher;
         _log = log;
     }
@@ -129,8 +128,8 @@ public sealed class TaskLogService : IScopedService
     /// <summary>
     /// Cursor-paginated query over a work item's captured lines,
     /// resolved from a timeline task id (<c>TaskRun.Id</c>) to a
-    /// <c>WorkId</c> via the persisted workflow-run state (no grain
-    /// call). Returns <c>null</c> when the run, task, or work id
+    /// <c>WorkId</c> via the persisted workflow-run work projection
+    /// (no grain call). Returns <c>null</c> when the run, task, or work id
     /// cannot be located — the API surfaces that as an empty page
     /// (never an error, per the spec's no-log scenario).
     /// </summary>
@@ -159,19 +158,7 @@ public sealed class TaskLogService : IScopedService
 
     private async Task<string?> ResolveWorkIdAsync(string workflowRunId, string taskId, CancellationToken ct)
     {
-        var run = await _runQuerier.LoadAsync(workflowRunId, ct);
-        if (run is null) return null;
-
-        foreach (var stage in run.Stages)
-        {
-            foreach (var task in stage.Tasks)
-            {
-                if (string.Equals(task.Id, taskId, StringComparison.Ordinal) && !string.IsNullOrEmpty(task.WorkId))
-                    return task.WorkId;
-            }
-        }
-
-        return null;
+        return await _workProjection.ResolveWorkIdAsync(workflowRunId, taskId, ct);
     }
 
     private async Task<bool> IsActiveWorkAsync(
@@ -182,10 +169,7 @@ public sealed class TaskLogService : IScopedService
         CancellationToken ct)
     {
         if (string.Equals(ownerKind, TaskLogOwnershipKinds.Workflow, StringComparison.Ordinal))
-        {
-            var run = await _runQuerier.LoadAsync(ownerId, ct);
-            return run?.FindActiveWork(workId, runnerId) is not null;
-        }
+            return await _workProjection.IsActiveWorkAsync(ownerId, workId, runnerId, ct);
 
         return (await _agentJobs.ListRunningForRunnerAsync(runnerId, ct))
             .Any(work => string.Equals(work.JobKey, ownerId, StringComparison.Ordinal)
@@ -196,8 +180,8 @@ public sealed class TaskLogService : IScopedService
     /// Resolve <paramref name="workId"/> → <c>taskId</c> for the
     /// publish-time envelope stamp. Returns <c>null</c> when the
     /// work item isn't owned by a workflow run (e.g. an agent-job
-    /// owner kind with no task mapping) or the workflow-run
-    /// state can't be loaded; the publisher treats a null
+    /// owner kind with no task mapping) or the work projection has no
+    /// mapping; the publisher treats a null
     /// <c>taskId</c> as "no scope can match, no fan-out" (its
     /// <see cref="ConnectionSubscriptionRegistry.ShouldNotifyTaskLog"/>
     /// gate short-circuits to false).
@@ -214,27 +198,12 @@ public sealed class TaskLogService : IScopedService
         if (string.IsNullOrWhiteSpace(ownerId) || string.IsNullOrWhiteSpace(workId))
             return null;
 
-        var run = await _runQuerier.LoadAsync(ownerId, ct);
-        if (run is null)
-        {
+        var taskId = await _workProjection.ResolveTaskIdAsync(ownerId, workId, ct);
+        if (taskId is null)
             return null;
-        }
 
-        var projectId = run.Metadata.ProjectId;
-
-        foreach (var stage in run.Stages)
-        {
-            foreach (var task in stage.Tasks)
-            {
-                if (string.Equals(task.WorkId, workId, StringComparison.Ordinal)
-                    && !string.IsNullOrEmpty(task.Id))
-                {
-                    return new TaskLogPublishScope(task.Id, projectId);
-                }
-            }
-        }
-
-        return null;
+        var projectId = await _workProjection.GetProjectIdAsync(ownerId, ct);
+        return new TaskLogPublishScope(taskId, projectId);
     }
 
     private static void ValidateBatchCaps(IReadOnlyList<TaskLogLine> entries)

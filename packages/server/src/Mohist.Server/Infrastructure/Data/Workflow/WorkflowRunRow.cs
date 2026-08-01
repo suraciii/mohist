@@ -52,6 +52,10 @@ public class WorkflowRunRow
     [DatabaseGenerated(DatabaseGeneratedOption.Computed)]
     public int? IssueNumber { get; set; }
 
+    public string? ActiveWorkId { get; set; }
+
+    public string? ActiveWorkerId { get; set; }
+
     /// <summary>
     /// nullable custom-Profile backing key used by the
     /// restrictive foreign key that protects active WorkflowRun bindings
