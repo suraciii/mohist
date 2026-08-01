@@ -634,6 +634,8 @@ public sealed class DispatcherFixture : IAsyncLifetime
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.Services.AddDbContextFactory<MohistDbContext>(o => o.UseSqlite(connectionString));
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
+        siloBuilder.Services.AddScoped<DispatchSnapshotStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Issue.IIssueStore, Mohist.Server.Infrastructure.Data.Issue.IssueStore>();
         siloBuilder.Services.AddScoped<Mohist.Server.Infrastructure.Data.Sessions.IAgentSessionStore, Mohist.Server.Infrastructure.Data.Sessions.AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();

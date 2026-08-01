@@ -45,7 +45,7 @@ public class TransactionalEventAppendSpecs : IAsyncLifetime
     }
 
     private WorkflowRunStore CreateStore(IEventStore? eventStore = null) =>
-        new(_dbFactory, eventStore ?? _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks);
+        new(_dbFactory, eventStore ?? _eventStore, _grainFactory, NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks, new DispatchSnapshotStore(_dbFactory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
     public async ValueTask InitializeAsync()
     {

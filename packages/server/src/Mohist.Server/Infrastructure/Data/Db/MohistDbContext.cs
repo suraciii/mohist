@@ -72,6 +72,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicCounterRow> EpicCounters { get; set; } = null!;
     public DbSet<WorkflowArtifactRow> WorkflowArtifacts { get; set; } = null!;
     public DbSet<WorkflowArtifactPendingUploadRow> WorkflowArtifactPendingUploads { get; set; } = null!;
+    public DbSet<WorkflowDispatchSnapshotRow> WorkflowDispatchSnapshots { get; set; } = null!;
     public DbSet<LabelDefinitionRow> LabelDefinitions { get; set; } = null!;
     public DbSet<ProjectIssueTemplateRow> ProjectIssueTemplates { get; set; } = null!;
     public DbSet<RunnerRow> Runners { get; set; } = null!;
@@ -923,6 +924,15 @@ public class MohistDbContext : DbContext
                 .HasForeignKey(e => new { e.MetadataProjectId, e.WorkflowProfileIdKey })
                 .HasPrincipalKey(e => new { e.ProjectId, e.ProfileId })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<WorkflowDispatchSnapshotRow>(entity =>
+        {
+            entity.ToTable("WorkflowDispatchSnapshots");
+            entity.HasKey(e => new { e.WorkflowRunId, e.WorkId });
+            entity.Property(e => e.WorkflowRunId).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.WorkId).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.SnapshotJson).IsRequired();
         });
 
         modelBuilder.Entity<WorkflowVariablesRow>(entity =>

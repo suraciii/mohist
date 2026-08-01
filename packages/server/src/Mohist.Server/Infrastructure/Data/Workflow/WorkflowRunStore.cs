@@ -26,19 +26,22 @@ public class WorkflowRunStore : IWorkflowRunStore
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<WorkflowRunStore> _log;
     private readonly IBackgroundTaskLauncher _backgroundTasks;
+    private readonly IDispatchSnapshotStore _dispatchSnapshotStore;
 
     public WorkflowRunStore(
         IDbContextFactory<MohistDbContext> dbFactory,
         IEventStore eventStore,
         IGrainFactory grainFactory,
         ILogger<WorkflowRunStore> log,
-        IBackgroundTaskLauncher backgroundTasks)
+        IBackgroundTaskLauncher backgroundTasks,
+        IDispatchSnapshotStore dispatchSnapshotStore)
     {
         _dbFactory = dbFactory;
         _eventStore = eventStore;
         _grainFactory = grainFactory;
         _log = log;
         _backgroundTasks = backgroundTasks;
+        _dispatchSnapshotStore = dispatchSnapshotStore;
     }
 
     public async Task SaveAsync(WorkflowRun run, CancellationToken ct = default)
@@ -127,6 +130,7 @@ public class WorkflowRunStore : IWorkflowRunStore
         if (row is null) return;
         db.WorkflowRuns.Remove(row);
         await db.SaveChangesAsync(ct);
+        await _dispatchSnapshotStore.DeleteForRunAsync(workflowRunId, ct);
     }
 
     private static async Task StageRunAsync(

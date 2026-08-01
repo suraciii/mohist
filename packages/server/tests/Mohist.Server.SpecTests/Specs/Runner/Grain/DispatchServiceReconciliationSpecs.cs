@@ -54,9 +54,10 @@ public class DispatchServiceReconciliationSpecs : Mohist.Server.SpecTests.Specs.
         var runnerId = _runnerId!;
         var first = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);
 
-        var persisted = await LoadRunAsync(_workflowId!);
-        var task = Assert.Single(persisted.CurrentStage().Tasks);
-        Assert.Equal(first, task.DispatchSnapshot);
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
+        var snapshotStore = scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>();
+        var stored = await snapshotStore.LoadAsync(_workflowId!, first.WorkId);
+        Assert.Equal(first, stored);
 
         await TestLifecycle.Deactivate(workflow);
         var redelivery = Assert.Single((await Dispatch.PollAsync(runnerId, new RunnerPollRequest([], []))).Dispatches);

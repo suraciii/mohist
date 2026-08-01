@@ -233,6 +233,8 @@ public static class GrainTestConfig
         siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
         siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();
         siloBuilder.Services.AddScoped<IWorkflowRunStore, WorkflowRunStore>();
+        siloBuilder.Services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
+        siloBuilder.Services.AddScoped<DispatchSnapshotStore>();
         siloBuilder.Services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore, AgentSessionTranscriptStore>();
         siloBuilder.Services.AddScoped<IAgentJobStore, AgentJobStore>();

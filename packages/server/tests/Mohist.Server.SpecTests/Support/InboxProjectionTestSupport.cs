@@ -33,7 +33,7 @@ internal static class InboxProjectionTestSupport
     public static WorkflowRunStore CreateRunStore(
         IDbContextFactory<MohistDbContext> factory,
         IEventStore eventStore) =>
-        new(factory, eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks);
+        new(factory, eventStore, new NullEventDispatchGrainFactory(), NullLogger<WorkflowRunStore>.Instance, TestServices.BackgroundTasks, new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore);
 
     public static InboxProjectionHandler CreateHandler(TestSqliteDatabase database) =>
         CreateHandler(database, new NoopEventPublisher());
@@ -292,7 +292,11 @@ internal static class InboxProjectionTestSupport
                     factory,
                     new NoopEventStore(),
                     new NullDispatchGrainFactory(),
-                    NullLogger<WorkflowRunStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher()));
+                    NullLogger<WorkflowRunStore>.Instance,
+                    new Mohist.Server.Infrastructure.BackgroundTaskLauncher(),
+                    new DispatchSnapshotStore(
+                        factory,
+                        NullLogger<DispatchSnapshotStore>.Instance) as IDispatchSnapshotStore));
                 services.AddScoped<IIssueStore>(sp => new IssueStore(factory, new NoopEventStore(), new NullDispatchGrainFactory(), NullLogger<IssueStore>.Instance, new Mohist.Server.Infrastructure.BackgroundTaskLauncher()));
                 services.AddScoped<IStateStore<DomainIssue>>(sp => sp.GetRequiredService<IIssueStore>());
                 configureServices?.Invoke(services);

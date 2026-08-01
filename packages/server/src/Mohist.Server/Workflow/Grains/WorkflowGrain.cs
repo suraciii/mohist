@@ -25,6 +25,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     private bool _runDirty;
     private bool _runReloadRequired;
     private readonly IWorkflowRunStore _runStore;
+    private readonly IDispatchSnapshotStore _dispatchSnapshotStore;
     private readonly WorkflowDefinitionResolver _definitionResolver;
     private readonly WorkflowVariableResolver _variableResolver;
     private readonly TimeProvider _timeProvider;
@@ -38,6 +39,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         Orleans.Runtime.IGrainContext context,
         Orleans.Runtime.IGrainRuntime runtime,
         IWorkflowRunStore runStore,
+        IDispatchSnapshotStore dispatchSnapshotStore,
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
@@ -45,6 +47,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         : base(context, runtime)
     {
         _runStore = runStore;
+        _dispatchSnapshotStore = dispatchSnapshotStore;
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _timeProvider = timeProvider;
@@ -59,12 +62,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
     public WorkflowGrain(
         IWorkflowRunStore runStore,
+        IDispatchSnapshotStore dispatchSnapshotStore,
         WorkflowDefinitionResolver definitionResolver,
         WorkflowVariableResolver variableResolver,
         TimeProvider timeProvider,
         ILogger<WorkflowGrain> log)
     {
         _runStore = runStore;
+        _dispatchSnapshotStore = dispatchSnapshotStore;
         _definitionResolver = definitionResolver;
         _variableResolver = variableResolver;
         _timeProvider = timeProvider;
@@ -82,6 +87,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
     WorkflowVariableResolver IWorkflowGrainContext.VariableResolver => _variableResolver;
     IGrainFactory IWorkflowGrainContext.Grains => GrainFactory;
     ILogger IWorkflowGrainContext.Log => _log;
+    IDispatchSnapshotStore IWorkflowGrainContext.DispatchSnapshotStore => _dispatchSnapshotStore;
     DateTimeOffset IWorkflowGrainContext.Now() => Now();
     void IWorkflowGrainContext.CacheAssignedWorkerId(string? workerId) => _cachedAssignedWorkerId = workerId;
     Task IWorkflowGrainContext.SaveAsync() => SaveRunAsync();
@@ -281,11 +287,14 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
 
         var stopEvents = _run.Stop();
 
+        var abandonedWorkId = _run.CurrentStage().RunningTask?.WorkId;
         var abandonedEvents = await _workLifecycle.AbandonRunningWorkAsync(_run!, reason ?? "stopped");
         var events = abandonedEvents.Concat(stopEvents).ToArray();
 
         _log.LogInformation("Workflow {Id} stopped: {Reason}", GrainKey, reason);
         await CommitAsync(events);
+        if (abandonedWorkId is not null)
+            await DeleteSnapshotBestEffortAsync(abandonedWorkId);
     }
 
     public async Task ApproveAsync(string? decidedBy = null)
@@ -489,13 +498,11 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             || !string.Equals(dispatch.OwnerKind, WorkDispatchOwnerKinds.Workflow, StringComparison.Ordinal)
             || dispatch.AgentJobId is not null)
             return null;
-        if (active.DispatchSnapshot is not null) return active.DispatchSnapshot;
 
         var task = _run.CurrentStage().RunningTask;
         if (task is null || !string.Equals(task.WorkId, workId, StringComparison.Ordinal)) return null;
-        task.DispatchSnapshot = dispatch;
-        await SaveRunAsync();
-        return dispatch;
+
+        return await _dispatchSnapshotStore.SaveFirstAsync(GrainKey, workId, dispatch);
     }
 
     public async Task<AddTasksBatchResult> AddTasksAsync(AddTasksBatchRequest request)

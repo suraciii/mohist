@@ -80,6 +80,7 @@ public sealed class WorkflowGrainProductionContractSpecs
             identity.Context,
             identity.Runtime,
             store,
+            scope.ServiceProvider.GetRequiredService<IDispatchSnapshotStore>(),
             definitionResolver,
             variableResolver,
             TimeProvider,
