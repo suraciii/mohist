@@ -365,6 +365,29 @@ public static partial class AgentSessionExtensions
         /// raises a conflict (the launch identity is immutable once
         /// accepted).
         /// </param>
+        /// <param name="provenance">
+        /// Per-input provenance describing the upstream source the
+        /// caller attached (provider kind, workspace id,
+        /// conversation id, thread id, member id, message id,
+        /// connection id). Persisted on the input record so a
+        /// later observer can attribute the accepted input back to
+        /// its source. Replays must supply an equivalent provenance
+        /// record; a mismatch raises a conflict (the launch identity
+        /// is immutable once accepted).
+        /// </param>
+        /// <param name="startupContext">
+        /// Optional bounded external discussion the caller attaches as
+        /// first-launch-only background. Persisted verbatim on the
+        /// input record (including the truncation attestation) so the
+        /// audit is inspectable and a recovery replay observes the
+        /// same first-accepted snapshot. <c>prompt</c> stays
+        /// task-only — the background is composed into the dispatched
+        /// agent input at <c>BuildDispatch</c> time, not at the
+        /// SessionInput layer. Null when no startup context was
+        /// supplied. Replays with the same input id must supply an
+        /// equivalent record (value equality); a mismatch raises a
+        /// conflict.
+        /// </param>
         public IReadOnlyList<AgentSessionEvent> EnsureInitialLaunch(
             string inputId,
             string turnId,
@@ -373,7 +396,8 @@ public static partial class AgentSessionExtensions
             string jobId,
             DateTime now,
             IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
-            AgentSessionInputProvenance? provenance = null)
+            AgentSessionInputProvenance? provenance = null,
+            AgentStartupContext? startupContext = null)
         {
             if (string.IsNullOrWhiteSpace(inputId))
                 throw new ArgumentException("Input id is required.", nameof(inputId));
@@ -399,7 +423,8 @@ public static partial class AgentSessionExtensions
                     || !string.Equals(existing.Source, source, StringComparison.Ordinal)
                     || !string.Equals(existing.JobId, jobId, StringComparison.Ordinal)
                     || !AttachmentDescriptorsEquivalent(existing.Attachments, normalizedAttachments)
-                    || !Equals(existing.Provenance, provenance))
+                    || !Equals(existing.Provenance, provenance)
+                    || !Equals(existing.StartupContext, startupContext))
                 {
                     throw new InvalidOperationException(
                         $"AgentSession {session.Id} already has input '{inputId}' with different content/source/job/attachments.");
@@ -416,7 +441,8 @@ public static partial class AgentSessionExtensions
                     RecordedAt: now,
                     JobId: jobId,
                     Attachments: normalizedAttachments,
-                    Provenance: provenance));
+                    Provenance: provenance,
+                    StartupContext: startupContext));
             }
 
             var turns = (session.Status.Turns ?? []).ToList();

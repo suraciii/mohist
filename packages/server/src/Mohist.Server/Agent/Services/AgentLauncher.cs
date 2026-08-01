@@ -201,6 +201,7 @@ public async Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
+        AgentStartupContext? startupContext = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(agent);
@@ -236,8 +237,11 @@ public async Task<AgentLaunchResult> LaunchConnectionAsync(
             EpicNumber: null,
             Repository: null,
             Title: null,
-            Request: new AgentLaunchCoordinatorRequest(trimmedPrompt, agent.Id, null, null, null, null, null, null, null),
-            ConnectionOrigin: origin));
+            Request: new AgentLaunchCoordinatorRequest(
+                trimmedPrompt, agent.Id, null, null, null, null, null, null, null,
+                StartupContext: startupContext),
+            ConnectionOrigin: origin,
+            StartupContext: startupContext));
 
         return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
     }

@@ -305,7 +305,9 @@ Bot 可以读取它在 Slack 中有权访问、且在本次消息或 thread 中�
   重复发送已经确认的回复。
 
 > **当前实装差距：** 频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、重复投递保护和
-> Owner-only 频道权限已经可用。Allowlist/Anyone、已有 thread 历史和文件、频道控制操作，以及
+> Owner-only 频道权限已经可用。已有 thread 历史作为首次启动背景导入也已经可用——导入是
+> 按 bot 可见的 thread 消息、按 ts 早于本次提及的整条消息删除的方式来截断，超出大小时同时
+> 在 Slack 确认回复和 Agent 输入里标出。Allowlist/Anyone、文件、频道控制操作，以及
 > 不同 Mohist Server 之间的多 Bot 协调仍未提供。
 
 ## 权限

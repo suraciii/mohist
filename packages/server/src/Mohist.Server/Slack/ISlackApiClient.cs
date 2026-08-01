@@ -13,6 +13,12 @@ public interface ISlackApiClient
     Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default);
     Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default);
     Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default);
+    Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+        string conversationId,
+        string threadTs,
+        string? cursor,
+        string botToken,
+        CancellationToken ct = default);
 }
 
 public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
@@ -37,6 +43,25 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
 
     public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) =>
         PostAsync<SlackUsersListResponse>("users.list", cursor is null ? new { } : new { cursor }, botToken, ct);
+
+    public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+        string conversationId,
+        string threadTs,
+        string? cursor,
+        string botToken,
+        CancellationToken ct = default) =>
+        PostAsync<SlackConversationsRepliesPage>(
+            "conversations.replies",
+            new
+            {
+                channel = conversationId,
+                ts = threadTs,
+                cursor,
+                limit = 200,
+                inclusive = false,
+            },
+            botToken,
+            ct);
 
     private async Task<T> PostAsync<T>(string method, object body, string token, CancellationToken ct)
     {
@@ -92,3 +117,17 @@ public sealed record SlackConversationInfoResponse(bool Ok, string? Error, Slack
 public sealed record SlackConversationInfo(string? Id, string? Name, string? Creator, bool IsIm, bool IsMember);
 public sealed record SlackUsersListResponse(bool Ok, string? Error, IReadOnlyList<SlackUserInfo>? Members, SlackResponseMetadata? ResponseMetadata);
 public sealed record SlackResponseMetadata(string? NextCursor);
+public sealed record SlackConversationsRepliesPage(
+    bool Ok,
+    string? Error,
+    [property: JsonPropertyName("messages")] IReadOnlyList<SlackConversationMessage>? Messages,
+    [property: JsonPropertyName("response_metadata")] SlackResponseMetadata? ResponseMetadata);
+public sealed record SlackConversationMessage(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("subtype")] string? Subtype,
+    [property: JsonPropertyName("ts")] string? Ts,
+    [property: JsonPropertyName("user")] string? User,
+    [property: JsonPropertyName("text")] string? Text,
+    [property: JsonPropertyName("bot_id")] string? BotId,
+    [property: JsonPropertyName("thread_ts")] string? ThreadTs,
+    [property: JsonPropertyName("parent_user_id")] string? ParentUserId);

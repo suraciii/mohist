@@ -64,6 +64,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 TimeProvider,
                 Persistence);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
+            siloBuilder.Services.AddSingleton<IAgentLaunchParticipantProbe>(
+                NoopAgentLaunchParticipantProbe.Instance);
             siloBuilder.Services.AddSingleton(SessionPersistence);
             siloBuilder.Services.RemoveAll<IAgentSessionTranscriptStore>();
             siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore>(provider =>

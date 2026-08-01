@@ -119,5 +119,13 @@ public sealed class ConnectionDiagnosticSpecs
 
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) =>
             Task.FromResult(new SlackUsersListResponse(false, null, [], null));
+
+        public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+            string conversationId,
+            string threadTs,
+            string? cursor,
+            string botToken,
+            CancellationToken ct = default) =>
+            Task.FromResult(new SlackConversationsRepliesPage(false, null, [], null));
     }
 }

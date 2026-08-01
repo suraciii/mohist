@@ -140,7 +140,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 AgentRef: command.Request.AgentRef,
                 Completed: false,
                 ConnectionOrigin: command.ConnectionOrigin,
-                Attachments: command.Attachments);
+                Attachments: command.Attachments,
+                StartupContext: command.StartupContext);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -261,7 +262,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             EpicNumber: plan.EpicNumber,
             WorkflowRunId: null,
             ConnectionOrigin: plan.ConnectionOrigin,
-            Attachments: plan.Attachments));
+            Attachments: plan.Attachments,
+            StartupContext: plan.StartupContext));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
@@ -357,7 +359,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                     MemberId: provenanceOrigin.SlackUserId,
                     MessageId: provenanceOrigin.MessageTs,
                     ConnectionId: provenanceOrigin.ConnectionId)
-                : null));
+                : null,
+            StartupContext: plan.StartupContext));
         await _participantProbe.OnEnsureInitialLaunchAsync(plan.SessionId, commandId);
 
         _state.State.Plan = plan with
@@ -493,4 +496,17 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     /// field id (next free after <see cref="PreMintedTurnId"/>).
     /// </summary>
     [property: Id(19)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
-    [property: Id(20)] string? PreMintedSessionId = null);
+    [property: Id(20)] string? PreMintedSessionId = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches to
+    /// the first launch as read-only background. Carried verbatim
+    /// onto the durable plan (<see cref="StartupContext"/>) so a
+    /// recovery replay returns the first-accepted snapshot rather
+    /// than recomputing it. Composed at dispatch time as an
+    /// explicit read-only block prepended to the task prompt;
+    /// <see cref="AgentJobInput.Prompt"/> and the SessionInput text
+    /// stay task-only so the work label stays clean. Append-only
+    /// Orleans field id (next free after
+    /// <see cref="PreMintedSessionId"/>).
+    /// </summary>
+    [property: Id(21)] AgentStartupContext? StartupContext = null);

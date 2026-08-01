@@ -79,7 +79,25 @@ public sealed record AgentLaunchCoordinatorPlan(
     /// the AgentJob dispatch envelope. Append-only Orleans field id
     /// (next free after <see cref="ConnectionOrigin"/>).
     /// </summary>
-    [property: Id(24)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null);
+    [property: Id(24)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches to
+    /// the first launch as read-only background. Persisted on the
+    /// plan so a recovery replay returns the original snapshot
+    /// rather than recomputing it (the background is volatile by
+    /// definition; the first-accepted snapshot is the authoritative
+    /// source of truth on replays). Composed into the dispatched
+    /// agent input as an explicit read-only block prepended to the
+    /// task prompt at <c>BuildDispatch</c> time; never folded into
+    /// <see cref="RequestFingerprint"/> (background is a volatile
+    /// snapshot, unlike <see cref="Attachments"/> which the caller
+    /// validates and binds before launch). Null for launches that
+    /// carry no startup context — a launch that omits it is
+    /// observationally identical to before this capability existed.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="Attachments"/>).
+    /// </summary>
+    [property: Id(25)] AgentStartupContext? StartupContext = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -106,7 +124,23 @@ public sealed record AgentLaunchCoordinatorRequest(
     [property: Id(5)] int? EpicNumber,
     [property: Id(6)] string? Repository,
     [property: Id(7)] string? Title,
-    [property: Id(8)] IReadOnlyList<string>? AttachmentIds = null);
+    [property: Id(8)] IReadOnlyList<string>? AttachmentIds = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches as
+    /// first-launch-only background. Carried on the request so it
+    /// threads through the launch chain, but
+    /// <strong>deliberately excluded</strong> from
+    /// <see cref="AgentLaunchCoordinatorCodec.Fingerprint"/>: the
+    /// background is a volatile snapshot, the mention-message
+    /// identity is the dedup boundary, and a recovery replay must
+    /// return the first-accepted snapshot rather than conflict on
+    /// history drift. A request that omits this field is
+    /// observationally identical to a pre-capability launch (same
+    /// fingerprint, same dispatched prompt, same session-input text).
+    /// Append-only Orleans field id (next free after
+    /// <see cref="AttachmentIds"/>).
+    /// </summary>
+    [property: Id(9)] AgentStartupContext? StartupContext = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -180,6 +214,20 @@ public static class AgentLaunchCoordinatorCodec
     /// trimming whitespace so two clients sending the same logical
     /// intent get the same fingerprint.
     /// </summary>
+    /// <remarks>
+    /// The fingerprint <strong>deliberately excludes</strong>
+    /// <see cref="AgentLaunchCoordinatorRequest.StartupContext"/>:
+    /// the background is a volatile snapshot read at processing
+    /// time, so two launches that differ only in background must
+    /// hash to the same fingerprint. The dedup boundary is the
+    /// mention-message identity (or the caller-supplied
+    /// <c>Idempotency-Key</c>) — a plain redelivery never reaches
+    /// the coordinator with drifted content because the provider
+    /// inbox dedups on <c>(ConnectionId, SlackMessageIdentity)</c>.
+    /// For recovery/replay robustness the first-accepted snapshot
+    /// is persisted on the plan rather than re-deriving equality
+    /// from volatile content.
+    /// </remarks>
     public static string Fingerprint(AgentLaunchCoordinatorRequest request)
         => Fingerprint(request, null);
 

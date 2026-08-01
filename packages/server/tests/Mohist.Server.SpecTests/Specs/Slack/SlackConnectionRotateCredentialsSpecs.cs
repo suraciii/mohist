@@ -203,5 +203,13 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
             Task.FromResult(new SlackConversationInfoResponse(true, null, null));
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) =>
             Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+
+        public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
+            string conversationId,
+            string threadTs,
+            string? cursor,
+            string botToken,
+            CancellationToken ct = default) =>
+            Task.FromResult(new SlackConversationsRepliesPage(true, null, [], null));
     }
 }

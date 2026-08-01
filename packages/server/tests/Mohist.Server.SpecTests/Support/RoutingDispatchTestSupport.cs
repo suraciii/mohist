@@ -490,6 +490,7 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
+        AgentStartupContext? startupContext = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the connection launch path.");
 

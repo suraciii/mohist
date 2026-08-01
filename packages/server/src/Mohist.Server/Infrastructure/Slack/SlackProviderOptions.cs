@@ -44,6 +44,24 @@ public sealed class SlackProviderOptions
 
     public int DispatcherBatchSize { get; set; } = 100;
 
+    /// <summary>
+    /// Character budget for the rendered thread-history background on a
+    /// first-mention launch. When the bounded range exceeds the budget
+    /// the oldest whole messages are dropped first; a stable marker
+    /// surfaces in both the Slack acceptance reply and the agent input.
+    /// Approximately a few paragraphs of plaintext; the budget is
+    /// deterministic and avoids a tokenizer dependency for v1.
+    /// </summary>
+    public int StartupContextCharacterBudget { get; set; } = 8_000;
+
+    /// <summary>
+    /// Maximum number of <c>conversations.replies</c> pages fetched for
+    /// one first-mention launch. Bounds cost/latency on huge threads
+    /// independently of the character budget. Pages are 200 messages
+    /// each, so the default reads at most 2000 messages.
+    /// </summary>
+    public int StartupContextPaginationDepthCap { get; set; } = 10;
+
     public void Bind(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -60,5 +78,7 @@ public sealed class SlackProviderOptions
         OutboxUncertainTimeout = section.GetValue(nameof(OutboxUncertainTimeout), OutboxUncertainTimeout);
         DispatcherBatchSize = section.GetValue(nameof(DispatcherBatchSize), DispatcherBatchSize);
         OutboxReminderPeriod = section.GetValue(nameof(OutboxReminderPeriod), OutboxReminderPeriod);
+        StartupContextCharacterBudget = section.GetValue(nameof(StartupContextCharacterBudget), StartupContextCharacterBudget);
+        StartupContextPaginationDepthCap = section.GetValue(nameof(StartupContextPaginationDepthCap), StartupContextPaginationDepthCap);
     }
 }

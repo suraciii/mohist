@@ -550,7 +550,20 @@ public sealed record AgentSessionInputRecord(
     [property: Id(6)] string? JobId = null,
     [property: Id(7)] string? IdempotencyKey = null,
     [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
-    [property: Id(9)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(9)] AgentSessionInputProvenance? Provenance = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches as
+    /// first-launch-only background. The audit record carries the
+    /// first-accepted snapshot verbatim (including the truncation
+    /// attestation) so a later observer is not misled about what
+    /// was or was not read. <see cref="Text"/> stays task-only;
+    /// the background is composed into the dispatched agent input
+    /// at <c>BuildDispatch</c> time and is otherwise invisible to
+    /// the Session's downstream turn-status machinery. Null when
+    /// no startup context was supplied. Append-only Orleans field
+    /// id (next free after <see cref="Provenance"/>).
+    /// </summary>
+    [property: Id(10)] AgentStartupContext? StartupContext = null);
 
 public enum AgentSessionInputAcceptance
 {

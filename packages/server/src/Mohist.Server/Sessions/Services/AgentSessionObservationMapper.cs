@@ -1,3 +1,4 @@
+using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Services;
@@ -17,7 +18,17 @@ internal static class AgentSessionObservationMapper
                 attachment.Size,
                 attachment.Source,
                 attachment.Availability)).ToArray(),
-            input.Provenance)).ToArray();
+            input.Provenance,
+            StartupContextObservation(input.StartupContext))).ToArray();
+
+    private static AgentStartupContextObservationDto? StartupContextObservation(AgentStartupContext? context) =>
+        context is null
+            ? null
+            : new AgentStartupContextObservationDto(
+                Source: context.Provenance.Source,
+                Truncated: context.Provenance.Truncated,
+                TruncationMarker: context.Provenance.TruncationMarker,
+                OmittedOldestMessageCount: context.Provenance.OmittedOldestMessageCount);
 
     public static IReadOnlyList<AgentTurnObservationDto>? Turns(AgentSessionStatusSnapshot status) =>
         status.Turns?.Select(turn => new AgentTurnObservationDto(

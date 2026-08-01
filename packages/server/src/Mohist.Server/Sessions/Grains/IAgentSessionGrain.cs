@@ -333,7 +333,21 @@ public sealed record EnsureInitialLaunchCommand(
     /// Append-only Orleans field id (next free after WorkDir).
     /// </summary>
     [property: Id(8)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
-    [property: Id(9)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(9)] AgentSessionInputProvenance? Provenance = null,
+    /// <summary>
+    /// Optional bounded external discussion the caller attaches as
+    /// first-launch-only background. Persisted verbatim on the
+    /// input record so the audit observation is inspectable and
+    /// so a recovery replay observes the same snapshot. The
+    /// background is composed into the dispatched agent input at
+    /// <c>BuildDispatch</c> time; <see cref="Prompt"/> and the
+    /// SessionInput <c>Text</c> stay task-only. Null when no
+    /// startup context was supplied — the absence is
+    /// observationally identical to before this capability existed.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="Provenance"/>).
+    /// </summary>
+    [property: Id(10)] AgentStartupContext? StartupContext = null);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(

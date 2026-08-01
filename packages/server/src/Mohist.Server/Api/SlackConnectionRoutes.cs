@@ -3,7 +3,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
@@ -277,6 +279,9 @@ public static class SlackConnectionRoutes
              AgentSessionQuerier sessions,
              IHubContext<RunnerHub> runnerHub,
              RunnerConnectionTracker runnerConnections,
+             ISecretStore secrets,
+             SlackThreadHistoryReader threadHistory,
+             IOptions<SlackProviderOptions> slackProviderOptions,
              OperatorCredential credential,
             CancellationToken ct) =>
         {
@@ -313,6 +318,7 @@ public static class SlackConnectionRoutes
                         sessions, agents, claims, inbox, outbox,
                         launcher, grains, followupDispatcher,
                         runnerHub, runnerConnections,
+                        secrets, threadHistory, slackProviderOptions,
                         http.RequestServices),
                     ct);
 
@@ -399,6 +405,38 @@ public static class SlackConnectionRoutes
         });
 
         return app;
+    }
+
+    private static async Task<SlackThreadHistoryReadResult> ReadThreadHistoryIfAnyAsync(
+        HandleChannelIngressRequest req,
+        string rootTs,
+        CancellationToken ct)
+    {
+        var body = req.Body;
+        return await req.ThreadHistory.ReadAsync(
+            req.ProjectId,
+            req.Connection.Id,
+            body.ConversationId,
+            rootTs,
+            body.MessageTs,
+            ct);
+    }
+
+    private static AgentStartupContext BuildStartupContext(
+        HandleChannelIngressRequest req,
+        IReadOnlyList<SlackConversationMessage> messages)
+    {
+        var budget = Math.Max(1, req.SlackProviderOptions.Value.StartupContextCharacterBudget);
+        var (text, marker, omitted) = SlackThreadHistoryReader.ApplyBudget(
+            messages,
+            budget);
+        return new AgentStartupContext(
+            Text: text,
+            Provenance: new AgentStartupContextProvenance(
+                Source: "slack-thread-history",
+                Truncated: marker is not null,
+                TruncationMarker: marker,
+                OmittedOldestMessageCount: omitted));
     }
 
     private static async Task EnqueueReplyAsync(
@@ -1002,7 +1040,8 @@ public static class SlackConnectionRoutes
                     isRoutedNewTask ? newTaskPrompt : prompt,
                     new ConnectionLaunchOrigin(
                         connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
-                    ct);
+                    startupContext: null,
+                    ct: ct);
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
             }
 
@@ -1155,7 +1194,7 @@ public static class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
             }
 
             if (otherBotsInThread)
@@ -1166,7 +1205,7 @@ public static class SlackConnectionRoutes
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                     return ApiResults.Ok(new { kind = "rejected", reason });
                 }
-                return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+                return await LaunchChannelRootAsync(req, prompt, rootTs, null, ct);
             }
 
             var reconciled = await ReconcileSessionIdAsync(
@@ -1180,7 +1219,19 @@ public static class SlackConnectionRoutes
                 await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
                 return ApiResults.Ok(new { kind = "rejected", reason });
             }
-            return await LaunchChannelRootAsync(req, prompt, rootTs, ct);
+
+            var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
+            if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
+            {
+                const string reason = "I couldn't read the full thread discussion; please re-mention me in a moment and I'll try again.";
+                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
+                return ApiResults.Ok(new { kind = "rejected", reason });
+            }
+
+            var startupContext = historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Imported
+                ? BuildStartupContext(req, historyOutcome.Messages)
+                : null;
+            return await LaunchChannelRootAsync(req, prompt, rootTs, startupContext, ct);
         }
 
         if (threadBindings.Count >= 2)
@@ -1449,6 +1500,7 @@ public static class SlackConnectionRoutes
         HandleChannelIngressRequest req,
         string prompt,
         string rootTs,
+        AgentStartupContext? startupContext,
         CancellationToken ct)
     {
         var body = req.Body;
@@ -1526,7 +1578,8 @@ public static class SlackConnectionRoutes
                 prompt,
                 new ConnectionLaunchOrigin(
                     connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
-                ct);
+                startupContext: startupContext,
+                ct: ct);
             sessionId = launch.SessionId;
         }
 
@@ -1551,9 +1604,7 @@ public static class SlackConnectionRoutes
                 ct);
         }
 
-        var acknowledgement = accepted.AlreadyExisted
-            ? "This task was already accepted; execution is being resumed."
-            : "Task accepted and queued for execution.";
+        var acknowledgement = BuildLaunchAck(startupContext, accepted.AlreadyExisted);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             acknowledgement, dispatchRef, ct, rootTs);
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1566,6 +1617,18 @@ public static class SlackConnectionRoutes
             turnId = launch?.TurnId,
             threadRoot = rootTs,
         });
+    }
+
+    private static string BuildLaunchAck(AgentStartupContext? startupContext, bool alreadyExisted)
+    {
+        if (alreadyExisted)
+            return "This task was already accepted; execution is being resumed.";
+        if (startupContext is null)
+            return "Task accepted and queued for execution.";
+        var detail = startupContext.Provenance.Truncated
+            ? "Prior thread discussion is being used as background; the oldest messages were omitted to fit the bound."
+            : "Prior thread discussion is being used as background.";
+        return "Task accepted and queued for execution. " + detail;
     }
 
     private static async Task<IResult> DispatchChannelFollowupAsync(
@@ -1707,6 +1770,9 @@ internal sealed record HandleChannelIngressRequest(
     AgentSessionFollowupDispatcher FollowupDispatcher,
     IHubContext<RunnerHub> RunnerHub,
     RunnerConnectionTracker RunnerConnections,
+    ISecretStore Secrets,
+    SlackThreadHistoryReader ThreadHistory,
+    IOptions<SlackProviderOptions> SlackProviderOptions,
     IServiceProvider Services)
 {
     public static HandleChannelIngressRequest From(
@@ -1729,11 +1795,15 @@ internal sealed record HandleChannelIngressRequest(
         AgentSessionFollowupDispatcher followupDispatcher,
         IHubContext<RunnerHub> runnerHub,
         RunnerConnectionTracker runnerConnections,
+        ISecretStore secrets,
+        SlackThreadHistoryReader threadHistory,
+        IOptions<SlackProviderOptions> slackProviderOptions,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, inbox, outbox,
-            launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
+            launcher, grains, followupDispatcher, runnerHub, runnerConnections,
+            secrets, threadHistory, slackProviderOptions, services);
 }
 
 public sealed class SlackConnectionCreateBody
