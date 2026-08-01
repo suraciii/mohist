@@ -1002,7 +1002,8 @@ public static class SlackConnectionRoutes
                     isRoutedNewTask ? newTaskPrompt : prompt,
                     new ConnectionLaunchOrigin(
                         connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
-                    ct);
+                    startupContext: null,
+                    ct: ct);
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
             }
 
@@ -1526,7 +1527,8 @@ public static class SlackConnectionRoutes
                 prompt,
                 new ConnectionLaunchOrigin(
                     connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
-                ct);
+                startupContext: null,
+                ct: ct);
             sessionId = launch.SessionId;
         }
 

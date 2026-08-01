@@ -1,0 +1,84 @@
+# Issue 516 T-001 — Agent API startup-context channel
+
+## Status
+Implementation complete; spec/unit tests pass. Wrapping up due to interruption.
+
+## What landed
+- New `AgentStartupContext` + `AgentStartupContextProvenance` records
+  (`Contracts/AgentStartupContextContracts.cs`) — bounded external discussion
+  + caller-stated truncation attestation (source / truncated / marker /
+  omitted-oldest-count).
+- New `AgentStartupContextComposer.ComposePrompt` helper
+  (`Agent/Services/AgentStartupContextComposer.cs`) — renders the
+  read-only background block prepended to the task prompt. Mirrors the
+  runner's `composeOpencodePrompt` framing so background cannot be
+  mistaken for instructions.
+- `StartupContext` field threaded as append-only `[Id(n)]` through:
+  - `AgentLaunchCoordinatorRequest` (Id 9)
+  - `AgentLaunchCoordinatorPlan` (Id 25)
+  - `AgentLaunchCoordinatorCommandEnvelope` (Id 21)
+  - `PrepareManualLaunchCommand` (Id 17)
+  - `EnsureInitialLaunchCommand` (Id 10)
+  - `AgentSessionInputRecord` (Id 10)
+  - `AgentJobInput` (Id 17)
+- `AgentLauncher.LaunchConnectionAsync` signature gains optional
+  `AgentStartupContext? startupContext`; SlackConnectionRoutes call
+  sites pass `null` (T-002 wires the real history).
+- Coordinator fingerprint **excludes** StartupContext (volatile
+  snapshot — recovery/replay robustness rationale documented in the
+  `Fingerprint` XML comment + design D2).
+- `BuildDispatch` composes the read-only background into the
+  dispatched `with.prompt` via `AgentStartupContextComposer`; resolves
+  Instructions / Runtime / Model / Variant / Skills remain
+  unchanged.
+- `AgentSessionObservationMapper` exposes an
+  `AgentStartupContextObservationDto` (source/truncated/marker/omitted
+  count) so the audit is inspectable; record-equality on
+  `AgentSessionInputRecord.StartupContext` enforces replay conflict.
+- `EquivalentInput`/`PlansEquivalent`/transition conflict checks
+  include StartupContext equality so a divergent replay raises
+  `InvalidOperationException`.
+
+## Tests
+- Unit:
+  `AgentStartupContextFingerprintTests` (4),
+  `AgentStartupContextComposerTests` (5).
+- Spec: `AgentStartupContextLaunchSpecs` (6),
+  `AgentStartupContextAuditSpecs` (4).
+- Fixture change: `AgentJobGrainFixture` registers
+  `NoopAgentLaunchParticipantProbe` so the coordinator can be
+  exercised end-to-end from the lightweight test silo.
+
+## Test runs
+- `dotnet test Mohist.Server.UnitTests` — 1704/1704 pass.
+- `dotnet test Mohist.Server.SpecTests` filtered to
+  `~AgentStartupContext` — 3576/3576 pass (13 tests in 8 new cases).
+- The broader spec sweep hit one pre-existing flake
+  (`AgentSessionLaunchValidationRoutesSpecs.Launch_CompletedAgentJob…`)
+  unrelated to this change; re-ran in isolation and it passes.
+
+## Acceptance criteria status
+All 8 from T-001 met:
+1. Observationally identical when StartupContext is null (fingerprint,
+   dispatched prompt, session-input text, job refs unchanged).
+2. Fingerprint unchanged across varying background; existing
+   prompt/attachment/origin folding preserved.
+3. Plan persists StartupContext snapshot (recovery returns original
+   snapshot, not a recompute).
+4. Dispatch composes read-only background; Instructions / Runtime /
+   Model / Variant / Skills are unchanged.
+5. Truncation marker reaches both composed agent input and session
+   input audit; observation DTO surfaces source/truncated/marker.
+6. Follow-up `RecordFollowupTurnCommand` has no StartupContext
+   parameter — first-launch-only is structurally enforced
+   (test asserts via reflection).
+7. Spec/unit coverage covers all five required cases.
+8. `npm test` (server) green — unit + relevant spec slices pass.
+
+## Open notes for T-002 (next task)
+- The two SlackConnectionRoutes.cs LaunchConnectionAsync call sites
+  still pass `startupContext: null` — T-002 will plumb the
+  bounded thread history through these.
+- `ISlackApiClient.ConversationsRepliesAsync` and
+  `SlackProviderOptions` budget/depth-cap settings are still
+  pending T-002.

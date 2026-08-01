@@ -735,7 +735,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             WorkflowRunId: command.WorkflowRunId,
             InitialInputId: command.InputId,
             InitialTurnId: command.TurnId,
-            Attachments: command.Attachments);
+            Attachments: command.Attachments,
+            StartupContext: command.StartupContext);
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -801,7 +802,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.AgentSessionId, right.AgentSessionId, StringComparison.Ordinal)
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
-        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments);
+        && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
+        && Equals(left.StartupContext, right.StartupContext);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
     {
@@ -1100,7 +1102,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             : JSON.Serialize(payload);
 
         var with = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        with["prompt"] = JSON.SerializeToElement(input.Prompt);
+        with["prompt"] = JSON.SerializeToElement(
+            AgentStartupContextComposer.ComposePrompt(input.Prompt, input.StartupContext));
         if (!string.IsNullOrWhiteSpace(input.AgentInstructions))
             with["instructions"] = JSON.SerializeToElement(input.AgentInstructions);
         if (!string.IsNullOrWhiteSpace(input.Model))

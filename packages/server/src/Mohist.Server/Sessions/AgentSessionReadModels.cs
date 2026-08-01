@@ -262,7 +262,25 @@ public sealed record AgentSessionInputObservationDto(
     string Source,
     string Acceptance,
     IReadOnlyList<AgentSessionInputAttachmentObservationDto>? Attachments = null,
-    [property: JsonPropertyName("provenance")] AgentSessionInputProvenance? Provenance = null);
+    [property: JsonPropertyName("provenance")] AgentSessionInputProvenance? Provenance = null,
+    /// <summary>
+    /// First-launch-only startup-context attestation the caller
+    /// attached to this input. Surfaced verbatim so the audit is
+    /// inspectable: a later observer can see exactly what was or
+    /// was not read (whether the bounded range was captured
+    /// completely or oldest-first truncation occurred). Null when
+    /// the launch carried no startup context. The background
+    /// itself is not exposed here — only its presence and
+    /// truncation attestation, so the observation does not echo
+    /// the full transcript back to the read path.
+    /// </summary>
+    [property: JsonPropertyName("startupContext")] AgentStartupContextObservationDto? StartupContext = null);
+
+public sealed record AgentStartupContextObservationDto(
+    [property: JsonPropertyName("source")] string Source,
+    [property: JsonPropertyName("truncated")] bool Truncated,
+    [property: JsonPropertyName("truncationMarker")] string? TruncationMarker,
+    [property: JsonPropertyName("omittedOldestMessageCount")] int OmittedOldestMessageCount);
 
 public sealed record AgentSessionInputAttachmentObservationDto(
     string Id,
