@@ -1,83 +1,70 @@
-# Self-Review — issue-536 plan
+# Self-Review — issue-536 plan (round 2)
 
-Reviewed: `proposal.md`, `design.md`, `tasks.json`, `specs/workflow-run-state-startup-migration/spec.md`,
-`specs/canonical-state-read-path/spec.md` against the issue body and the current tree.
+Re-reviewed `proposal.md`, `design.md`, `tasks.json`, and both specs against the issue and the current
+tree, after the round-1 fixes.
 
-Overall the plan is coherent, maps cleanly to the issue's Behavior Contract and Done When, the two
-capabilities match the two spec directories, and the task graph is a valid DAG (T-002 → T-001). The
-specs largely track the already-shipped implementation in `d3f992f00`. Two problems block a clean
-build, both concentrated in the read-path spec.
+## Round-1 findings — verified fixed
 
-## Blocking problems
+- **B1 (was blocking):** `canonical-state-read-path` no longer claims deserialization "surfaces the
+  inconsistency." Requirement 2 is now "Read paths do not convert un-migrated legacy rows"; its scenario
+  asserts only non-conversion (no converter call, no rewrite, no legacy-shape branching). `design.md`
+  Decision H documents the real STJ behavior (`JSON.Options` has no `UnmappedMemberHandling.Disallow`, so
+  legacy fields are silently ignored), and `tasks.json` T-002 criterion 3 mirrors the corrected claim.
+  Fixed.
+- **A1:** "control-plane status queries" replaced with "control-plane queries that load WorkflowRun State"
+  across proposal/design/tasks/spec; the shared `IWorkflowRunDeserializer` and the #538 status-cache note
+  are referenced. Fixed.
+- **A2:** Reconciled as **6 files / 7 call sites** (`WorkflowRunQuerier` has two) in proposal Impact,
+  design Migration Plan, and tasks. Matches the `d3f992f00~1` call-site grep (7 call sites across 6 files).
+  Fixed.
 
-### B1. `canonical-state-read-path` spec asserts deserialization behavior that contradicts the configured serializer
+## New blocking problem
 
-`specs/canonical-state-read-path/spec.md`, requirement "Read paths do not mask un-migrated legacy rows"
-and its scenario state:
+### N1. T-001 acceptance criterion contradicts T-001's own notes
 
-- "...encountering one in the service phase is a defect **signaled by failed deserialization**..."
-- "...deserialization against the current model **SHALL surface the inconsistency rather than mask it**"
+`tasks.json`, T-001, final acceptance criterion:
 
-This is factually wrong for the configured options. `JSON.Options`
-(`packages/server/src/Mohist.Server/Infrastructure/JSON.cs:11`) is built from
-`JsonSerializerDefaults.Web` with `PropertyNameCaseInsensitive = true` and **no**
-`UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow`. System.Text.Json therefore **silently
-ignores** unmapped legacy fields (`claim`, task-level `runnerId`, `dispatchActivated`, annotation-only
-`workflowProfileId`, legacy recovery without `recoveryRemaining`) and returns a degraded `WorkflowRun`
-(null assignment/workerId, defaulted recovery) instead of throwing. A scenario that mandates "surface
-the inconsistency via failed deserialization" is not testable as written — the existing code does not
-satisfy it and cannot without an out-of-scope global serializer change.
+> "Server builds with TreatWarningsAsErrors (C# lint); **the converter is reachable only from
+> DatabaseInitializer, not from any service-phase read path.**"
 
-**Fix direction:** keep the correct, testable claim ("a read entry point SHALL NOT convert, rewrite, or
-otherwise normalize a legacy-shaped row; zero converter invocations on the read path") and drop the
-"signaled by failed deserialization / surface the inconsistency" assertion. The real safety property is
-that startup migration blocks the service phase (T-001), so a legacy row never reaches a read path; the
-read-path obligation is non-conversion, not detection.
+T-001's own `notes` (same task) say:
 
-## Accuracy problems (should fix)
+> "The read path **still calls the converter until T-002**, so the system stays correct (just redundant)
+> after this task alone."
 
-### A1. Read-entry-point enumeration and the "status query" example are stale post-#538
+These are mutually exclusive. By the task split, T-001 relocates the converter and keeps the system
+correct by leaving the read paths calling it (repointed to its new home); T-002 is what removes those
+calls. So at T-001 completion the converter **is** still reachable from service-phase read paths, and the
+criterion as written would fail its own verification. The "reachable only from DatabaseInitializer, not
+from any service-phase read path" obligation is T-002's deliverable (it is already captured in T-002
+criterion 2 and in `canonical-state-read-path` requirement 3).
 
-`proposal.md` (Impact), `design.md` (Context), `tasks.json` (T-002 description) and the
-`canonical-state-read-path` requirement 1 all describe **"control-plane status queries"** as a
-State-deserializing read path and list six entry points. After issue #538 landed:
+**Fix direction:** drop the "the converter is reachable only from DatabaseInitializer, not from any
+service-phase read path" clause from T-001's acceptance criteria, leaving T-001's build criterion as just
+"Server builds with TreatWarningsAsErrors (C# lint)." The confinement claim stays where it belongs — T-002
+and the read-path spec. (Equivalently: if T-001 is meant to also delete the read-path calls, then the
+two-task split collapses into one and T-002's existence is the contradiction — but the split is sound, so
+the criterion is the part to remove.)
 
-- `WorkflowQuerier.GetStatusAsync` (`Workflow/Services/WorkflowQuerier.cs:41`) no longer deserializes
-  State on every call — it is ETag-gated through `WorkflowRunStatusCache` (line 51) and only deserializes
-  on a cache miss.
-- A central `IWorkflowRunDeserializer` (`Workflow/Services/WorkflowRunDeserializer.cs:12`,
-  injected at `WorkflowQuerier.cs:23,75`) now performs the canonical deserialize.
+## Otherwise sound (checked)
 
-For #536's own scope (commit `d3f992f00`) the six-file enumeration is correct; the staleness is only in
-the spec's example wording. **Fix direction:** in the read-path spec, reword "control-plane status
-queries" to "control-plane queries that load WorkflowRun State" and reference the central deserializer,
-so the target behavior matches the current tree rather than the pre-#538 shape.
-
-### A2. "7 production files" (issue) vs "6 entry points" (plan)
-
-The issue states conversion calls were spread across 7 production files; the plan lists 6
-(`WorkflowRunStore`, `WorkflowRunQuerier`, `WorkflowQuerier`, `IssueMetricsQuerier`,
-`IssueReadModelLoader`, `ActiveSessionReconciler`), matching the actual `d3f992f00~1` call-site grep
-(six distinct files; `WorkflowRunQuerier` has two call sites). Not buildability-blocking, but the plan
-should either reconcile the count or note that the issue's "7" likely counts a duplicate call site / the
-converter host. Verify before build.
-
-## Non-blocking observations
-
-- **Implementation pre-exists the plan.** T-001 and T-002 are already shipped (`d3f992f00` relocated the
-  converter and removed the read-path calls; the current tree confirms zero `MigrateLegacyWorkflowRunJson`
-  callers outside `WorkflowRunStateDataUpgrader.cs:37,182`). The build phase is therefore largely
-  verification-against-spec — except that, because of B1, the existing code does **not** satisfy the
-  read-path "surface the inconsistency" scenario as written, so the spec fix must precede/ accompany
-  build.
-- Spec→task traceability, idempotency/preflight/backup/atomic-commit coverage, the `failed`-run rerun
-  scenario, and the "no SchemaVersion / no SQL duplication" decisions all check out against the code and
-  tests (`WorkflowRunStateDataUpgraderSpecs`, `WorkflowRunRerunMigrationSpecs`,
-  `WorkflowRunLegacyBindingSpecs`).
+- Spec↔task traceability, scenario hashtag levels (3×`### Requirement`, 4×`#### Scenario`), and "every
+  requirement has ≥1 scenario" hold for both spec files.
+- Startup-migration spec scenarios match the shipped upgrader and its tests: no-write preflight naming the
+  run, clean-DB short-circuits without backup, online-backup + `PRAGMA integrity_check`, in-memory source
+  rejected without altering open state, single-transaction commit with one ETag bump per rewritten row,
+  >500-candidate batching still one transaction, canonical rows byte-stable, repeat-run no-op, `failed`
+  rerun preserved (`WorkflowRunRerunMigrationSpecs`).
+- `tasks.json` is valid JSON; DAG is valid (T-002 → T-001, strictly lower priority); every task has a spec
+  ref and ≥1 acceptance criterion.
+- Design Decisions A–H each carry rationale + a rejected alternative; Risks are in `[Risk] -> Mitigation`
+  form; Migration Plan + Rollback are present and consistent with the WAL/online-backup constraint.
+- The "254 / 110" figures appear only in the design's first-deployment narrative (evidence, not a
+  migration precondition), consistent with the issue's "不写死为其它安装的迁移条件."
 
 ## Verdict
 
-B1 is a spec defect (a scenario asserts behavior the configured serializer does not provide), so the
-plan is not ready to build as-is. A1/A2 are accuracy fixes that should land in the same pass.
+N1 is a self-contradictory, verifiable acceptance criterion inside T-001. The plan is not ready to build
+until it is removed/relocated to T-002.
 
 <promise>FAIL</promise>
