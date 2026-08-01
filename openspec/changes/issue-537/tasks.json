@@ -1,0 +1,55 @@
+{
+  "project": "mohist",
+  "description": "Externalize WorkflowRun dispatch snapshots into a separate table, drop them on terminal, and slim State; migrate existing/in-flight State at cold start.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Externalize dispatch snapshots into a separate store and slim WorkflowRun State",
+      "spec": "specs/dispatch-snapshot-persistence/spec.md#Dispatch snapshot is stored separately from WorkflowRun State",
+      "description": "Add a WorkflowDispatchSnapshots table (EF entity + migration) and an IDispatchSnapshotStore (Load/Save-first-write-wins/Delete/DeleteForRun). Rewrite WorkflowGrain.StoreActiveWorkDispatchAsync to write the store instead of TaskRun.DispatchSnapshot, and DispatchService.RenderActiveWorkflowAsync to load the snapshot from the store by (runId, workId) instead of from State. Remove the DispatchSnapshot field from TaskRun and WorkflowActiveWork. Add best-effort snapshot deletion after every terminal transition (Complete/Fail/Reject/Stop), skip on save failure, and cascade-delete snapshots when a run is deleted. Register the store in DI.",
+      "acceptanceCriteria": [
+        "An EF migration creates the WorkflowDispatchSnapshots table with PK (WorkflowRunId, WorkId).",
+        "After a task is dispatched and its State persisted, the serialized TaskRun carries output/status but NO WorkDispatch or dispatchSnapshot; the snapshot is retrievable from the separate store keyed by the attempt.",
+        "Redelivery for a Running task loads the snapshot from the separate store (not by deserializing State) and returns it verbatim; changing an effective variable after first dispatch does not alter the redelivered snapshot.",
+        "Storing a snapshot twice for the same Running attempt returns the first stored snapshot unchanged (first-write-wins).",
+        "A task reporting Completed or Failed no longer has a retained snapshot; a retried attempt's superseded failed-attempt snapshot is gone.",
+        "Checks dispatch never writes to the snapshot store and redelivery reconstructs via TranslateToDispatchAsync.",
+        "Deleting a WorkflowRun removes all of its snapshot rows.",
+        "An in-memory terminal transition whose State save fails (MarkRunReloadRequired) does NOT delete the snapshot (task is still Running in persisted State).",
+        "Existing workflow dispatch / retry / recovery / redelivery spec tests and unit tests pass green (safety net).",
+        "Server builds with TreatWarningsAsErrors (C# lint)."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "WorkflowDispatchSnapshotRow entity + EF migration, IDispatchSnapshotStore + SQLite impl, grain/DispatchService switchover, TaskRun/WorkflowActiveWork DispatchSnapshot removal, terminal-delete + run-delete cascade, DI registration, green spec + unit tests",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Touches both capabilities (dispatch-snapshot-persistence: store separation, first-write-wins, verbatim redelivery, terminal drop, checks-never-persist; run-state-content-boundary: TaskRun no longer embeds payload, no duplication, volume budget). Correctness of terminal-drop does not depend on delete success: CurrentActiveWorkFor only returns RunningTask, so an orphaned snapshot is invisible. The snapshot key WorkId equals the attempt's TaskRunId (set by StartTask)."
+    },
+    {
+      "id": "T-002",
+      "title": "Cold-start upgrader: externalize in-flight snapshots and strip DispatchSnapshot from existing State",
+      "spec": "specs/dispatch-snapshot-persistence/spec.md#Upgrade preserves in-flight attempt redelivery",
+      "description": "Add a WorkflowDispatchSnapshotDataUpgrader step to DatabaseInitializer (after the #536 legacy-format upgrader) that, for each WorkflowRun row, extracts dispatchSnapshot from Running-task attempts into the new table and strips all dispatchSnapshot fields from State. Use the established pattern: no-write preflight validating every row deserializes after stripping, a verified SQLite backup (online backup + PRAGMA integrity_check), a single transaction writing all stripped States (ETag +1) and externalized snapshots (INSERT OR IGNORE), and byte-level idempotency. Add a startup orphan sweep that deletes snapshot rows whose task is no longer Running.",
+      "acceptanceCriteria": [
+        "A run with an embedded Running-task snapshot at upgrade time has its snapshot externalized to WorkflowDispatchSnapshots; after upgrade, redelivery returns that snapshot verbatim until the attempt reports terminal.",
+        "Every dispatchSnapshot field is stripped from all State rows after the upgrader runs (terminal and Running alike).",
+        "The upgrader is idempotent: a second run writes zero rows, leaves canonical State byte-for-byte unchanged with ETag unchanged.",
+        "Preflight validates all rows before writing; any row that fails to deserialize after stripping blocks startup with no State or snapshot writes.",
+        "A verified SQLite backup (WAL-inclusive, integrity_check passes) is produced before the write transaction.",
+        "Externalized snapshots use INSERT OR IGNORE so a re-run or a pre-existing row is not overwritten.",
+        "The orphan sweep deletes snapshot rows whose corresponding task is not Running, without touching active snapshots.",
+        "Upgrader unit tests pass: transform correctness (active externalized, all stripped), idempotency (re-run is no-op), preflight-failure-aborts, and backup verification.",
+        "Server builds with TreatWarningsAsErrors (C# lint)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "MIGRATE",
+      "output": "WorkflowDispatchSnapshotDataUpgrader.ExternalizeAsync wired into DatabaseInitializer after the #536 upgrader, startup orphan sweep, green upgrader unit tests",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Orthogonal to #536's upgrader: both transform State JSON but on different paths (dispatchSnapshot vs claim/runnerId/recovery). Ordered after #536 so it operates on canonical-format State. Reuses WorkflowRunStateDataUpgrader.CreateAndVerifyBackupAsync for the backup. STJ ignores the now-removed DispatchSnapshot member when loading unstripped rows, so reads are safe during the window before the upgrader runs."
+    }
+  ]
+}
