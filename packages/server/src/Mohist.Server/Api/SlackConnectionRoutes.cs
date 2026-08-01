@@ -1237,13 +1237,13 @@ public static class SlackConnectionRoutes
                 .Select(bot => bot.ConnectionId)
                 .FirstOrDefault();
             var currentConnectionIsMentioned = mentionedConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
-            var senderOwnsCurrentConnection = decision.Allowed;
+            var senderAuthorizedForCurrentConnection = decision.Allowed;
             if (!currentConnectionIsMentioned
                 || (ownerClaimantConnectionId is not null
-                    && !senderOwnsCurrentConnection
+                    && !senderAuthorizedForCurrentConnection
                     && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
-            if (!senderOwnsCurrentConnection)
+            if (!senderAuthorizedForCurrentConnection)
                 return await HandleAmbiguousNonOwnerAsync(req, mentionedConnectionIds, ct);
             return await HandleAmbiguousPromptAsync(
                 req,
@@ -1336,13 +1336,13 @@ public static class SlackConnectionRoutes
                     && string.Equals(bot.OwnerSlackUserId, req.SenderSlackUserId, StringComparison.Ordinal))?.ConnectionId)
                 .FirstOrDefault(connectionId => connectionId is not null);
             var currentConnectionIsBound = bindingConnectionIds.Contains(connection.Id, StringComparer.Ordinal);
-            var senderOwnsCurrentConnection = decision.Allowed;
+            var senderAuthorizedForCurrentConnection = decision.Allowed;
             if (!currentConnectionIsBound
                 || (ownerClaimantConnectionId is not null
-                    && !senderOwnsCurrentConnection
+                    && !senderAuthorizedForCurrentConnection
                     && !string.Equals(ownerClaimantConnectionId, connection.Id, StringComparison.Ordinal)))
                 return ApiResults.Ok(new { kind = "ignored" });
-            if (!senderOwnsCurrentConnection)
+            if (!senderAuthorizedForCurrentConnection)
                 return await HandleAmbiguousNonOwnerAsync(req, bindingConnectionIds, ct);
             var botLookup = workspaceBots.ToDictionary(b => b.ConnectionId, b => b.BotUserId, StringComparer.Ordinal);
             var botLabels = threadBindings
