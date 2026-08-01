@@ -17,6 +17,7 @@ public class CliOtelCommandSpecs
         var text = output.ToString();
         Assert.Contains("query", text);
         Assert.Contains("status", text);
+        Assert.Contains("traces", text);
         Assert.Contains("through the Server", text, StringComparison.Ordinal);
         Assert.DoesNotContain("otel.db directly", text, StringComparison.Ordinal);
     }
@@ -46,6 +47,7 @@ public class CliOtelCommandSpecs
         Assert.Equal(0, exitCode);
         Assert.Contains("query", output.ToString());
         Assert.Contains("status", output.ToString());
+        Assert.Contains("traces", output.ToString());
     }
 
     [Fact]
@@ -456,6 +458,235 @@ public class CliOtelCommandSpecs
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains("boom", error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelTraces_PopulatedResponse_RendersCompactTableFromServer()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new object[]
+                {
+                    new
+                    {
+                        trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        service_name = "checkout-api",
+                        start_time = "2026-07-21T10:00:00+00:00",
+                        end_time = "2026-07-21T10:00:01+00:00",
+                        span_count = 4L,
+                    },
+                    new
+                    {
+                        trace_id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        service_name = "auth-api",
+                        start_time = "2026-07-21T09:59:50+00:00",
+                        end_time = "2026-07-21T09:59:51+00:00",
+                        span_count = 2L,
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("trace_id", text);
+        Assert.Contains("service", text);
+        Assert.Contains("spans", text);
+        Assert.Contains("checkout-api", text);
+        Assert.Contains("auth-api", text);
+        Assert.Contains("aaaa", text);
+        Assert.Contains("bbbb", text);
+        Assert.Empty(error.ToString());
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/otel/api/traces", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task OtelTraces_EmptyResponse_ReportsNoTracesAndExitsZero()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = Array.Empty<object>(),
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("No traces", output.ToString());
+        Assert.Empty(error.ToString());
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("/otel/api/traces", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task OtelTraces_ServiceAndLimit_ForwardAsQueryParameters()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = Array.Empty<object>(),
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--service", "checkout-api", "--limit", "10"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        var query = request.RequestUri?.Query ?? "";
+        Assert.Contains("service=checkout-api", query);
+        Assert.Contains("limit=10", query);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelTraces_NoFilters_OmitsQueryParameters()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = Array.Empty<object>(),
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("/otel/api/traces", request.RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task OtelTraces_BareJson_ListsSelectableFieldsWithoutHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(handler.Requests);
+        var fields = JsonNode.Parse(output.ToString()) as JsonArray;
+        Assert.NotNull(fields);
+        var names = fields!.Select(n => n!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(
+            new HashSet<string>(StringComparer.Ordinal) { "trace_id", "service_name", "start_time", "end_time", "span_count" },
+            names);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelTraces_InvalidJsonField_RejectedLocallyWithExitTwo()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--json", "nonexistent"], output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("nonexistent", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(output.ToString());
+    }
+
+    [Fact]
+    public async Task OtelTraces_SelectedJson_ProjectsOnlyChosenFields()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new object[]
+                {
+                    new
+                    {
+                        trace_id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        service_name = "checkout-api",
+                        start_time = "2026-07-21T10:00:00+00:00",
+                        end_time = "2026-07-21T10:00:01+00:00",
+                        span_count = 4L,
+                    },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--json", "trace_id,span_count"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var stdout = output.ToString();
+        Assert.Contains("\"trace_id\"", stdout, StringComparison.Ordinal);
+        Assert.Contains("\"span_count\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"service_name\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"start_time\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"end_time\"", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"success\"", stdout, StringComparison.Ordinal);
+        Assert.Empty(error.ToString());
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task OtelTraces_ServerUnreachable_SurfacesStandardServerUnavailableMessage()
+    {
+        var handler = new ThrowingHttpHandler();
+        var http = new HttpClient(handler) { BaseAddress = new Uri(CliTestFactory.BaseAddress) };
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var fs = new FakeFileSystem();
+        var executor = new FakeCommandExecutor();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Equal(MohistCliApi.ServerUnavailableMessage + Environment.NewLine, error.ToString());
+        Assert.DoesNotContain("ECONNREFUSED", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Connection refused", error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(output.ToString());
+        Assert.Equal(1, handler.CallCount);
+    }
+
+    [Fact]
+    public async Task OtelTraces_Help_NamesOptionsAndReferencesQuery()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var text = output.ToString();
+        Assert.Contains("--service", text, StringComparison.Ordinal);
+        Assert.Contains("--limit", text, StringComparison.Ordinal);
+        Assert.Contains("mo otel query", text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task OtelTraces_DbOption_RejectedAsUnknownOption()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(
+            (_, _) => throw new InvalidOperationException("API must not be called"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["otel", "traces", "--db", "/tmp/otel.db"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(handler.Requests);
     }
 
     private int Run(string[] args, out StringWriter output, out StringWriter error)

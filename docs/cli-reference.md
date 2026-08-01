@@ -402,7 +402,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `agent connection` 命令组与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
 - Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
-- 新增 `otel traces` 类型化列表（issue #530）。
 
 ### 已闭合
 

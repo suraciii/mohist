@@ -180,6 +180,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.ActivityList:
                 RenderActivityList(data);
                 break;
+            case MohistCliApi.TableShape.OtelTracesList:
+                RenderOtelTracesList(data);
+                break;
             case MohistCliApi.TableShape.IssueWatchList:
                 RenderIssueWatchList(data);
                 break;

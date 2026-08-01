@@ -47,7 +47,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RunList or
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
-            MohistCliApi.TableShape.SessionList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.SessionList or
+            MohistCliApi.TableShape.OtelTracesList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -114,6 +115,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RunnerList or MohistCliApi.TableShape.RunnerShow =>
                 ["id", "kind", "hostname", "scope", "status", "registeredAt", "lastHeartbeatAt", "connectionState", "capabilities", "coderModels", "coderModelCount", "capacity", "activeWorks", "buildGitHash"],
             MohistCliApi.TableShape.SystemInfo => ["running", "source", "install", "update", "services", "paths", "degraded", "cliVersion"],
+            MohistCliApi.TableShape.OtelTracesList => ["trace_id", "service_name", "start_time", "end_time", "span_count"],
             _ => throw new ArgumentOutOfRangeException(nameof(tableShape), shape, "Resource output shape has no field catalog."),
         };
 

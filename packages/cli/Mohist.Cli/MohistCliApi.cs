@@ -1078,6 +1078,7 @@ internal sealed class MohistCliApi
         SessionTranscript,
         SessionFollowup,
         SessionCancel,
+        OtelTracesList,
     }
 
     internal static TableShape ParseTableShape(string? shape)
