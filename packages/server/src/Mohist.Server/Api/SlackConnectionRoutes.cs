@@ -294,6 +294,49 @@ public static class SlackConnectionRoutes
             }
         });
 
+        management.MapPost("/{connectionId}/manage-access", async (HttpContext context, string connectionId, SlackConnectionManageAccessBody body, AgentConnectionStore connections, SlackConnectionAccessManager access, CancellationToken ct) =>
+        {
+            if (body is null)
+                return ApiResults.BadRequest("accessPolicy and allowMembers are required.");
+            var projectId = context.GetResolvedProject().Id;
+            try
+            {
+                var replaced = await access.ReplaceAsync(
+                    projectId, connectionId, body.AccessPolicy, body.AllowMembers, ct);
+                if (!replaced)
+                    return ApiResults.NotFound("Slack Connection was not found.");
+            }
+            catch (SlackConnectionAccessValidationException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, ex.Code);
+            }
+
+            var detail = await connections.GetAsync(projectId, connectionId, ct);
+            if (detail is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+
+            var allowMembers = await access.ListMembersAsync(projectId, connectionId, ct);
+            return ApiResults.Ok(new
+            {
+                connection = detail,
+                accessPolicy = detail.AccessPolicy,
+                allowMembers,
+                anyoneDisclosure = SlackConnectionAccessContract.AnyoneDisclosure,
+            });
+        });
+
+        management.MapGet("/{connectionId}/members", async (HttpContext context, string connectionId, string? q, int? limit, AgentConnectionStore connections, SlackMemberSearchService search, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+            if (string.IsNullOrWhiteSpace(connection.WorkspaceTeamId))
+                return ApiResults.Ok(new { members = Array.Empty<SlackMemberSearchEntry>() });
+            var members = await search.SearchAsync(projectId, connectionId, q, limit, ct);
+            return ApiResults.Ok(new { members });
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
@@ -1856,6 +1899,12 @@ public sealed class SlackConnectionEditBody
 {
     public string? BotName { get; init; }
     public string? AvatarHash { get; init; }
+}
+
+public sealed class SlackConnectionManageAccessBody
+{
+    public string? AccessPolicy { get; init; }
+    public IReadOnlyList<string>? AllowMembers { get; init; }
 }
 
 public sealed class SlackCredentialsBody

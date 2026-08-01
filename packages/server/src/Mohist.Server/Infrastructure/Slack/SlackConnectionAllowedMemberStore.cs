@@ -43,6 +43,24 @@ public sealed class SlackConnectionAllowedMemberStore : IScopedService, IAgentCo
             .ExecuteDeleteAsync(ct);
     }
 
+    public async Task<IReadOnlyList<string>> ListAsync(
+        string projectId,
+        string connectionId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(connectionId))
+            throw new ArgumentException("ConnectionId is required.", nameof(connectionId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.SlackConnectionAllowedMembers.AsNoTracking()
+            .Where(row => row.ProjectId == projectId && row.ConnectionId == connectionId)
+            .OrderBy(row => row.SlackUserId)
+            .Select(row => row.SlackUserId)
+            .ToListAsync(ct);
+    }
+
     /// <summary>
     /// Adds one member to the allowlist. Idempotent on the unique
     /// <c>(ProjectId, ConnectionId, SlackUserId)</c> index — a duplicate

@@ -13,6 +13,8 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
         ["team"] = ["users:read"],
     });
     public SlackUserInfoResponse DefaultUsersInfo { get; set; } = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
+    public Queue<SlackUsersListResponse> UsersListPages { get; } = new();
+    public Func<string, SlackUsersListResponse>? UsersListResolver { get; set; }
     public SlackUserInfoResponse UsersInfo
     {
         get => DefaultUsersInfo;
@@ -50,7 +52,14 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
             return Task.FromResult(ConversationsInfoResponses.Dequeue());
         return Task.FromResult(DefaultConversationsInfo);
     }
-    public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+    public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default)
+    {
+        if (UsersListResolver is not null)
+            return Task.FromResult(UsersListResolver(cursor ?? string.Empty));
+        if (UsersListPages.Count > 0)
+            return Task.FromResult(UsersListPages.Dequeue());
+        return Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+    }
     public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,
         string threadTs,
