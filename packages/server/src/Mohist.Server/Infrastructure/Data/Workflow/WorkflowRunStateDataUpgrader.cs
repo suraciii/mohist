@@ -179,7 +179,7 @@ public static class WorkflowRunStateDataUpgrader
         }
     }
 
-    public static string MigrateLegacyWorkflowRunJson(string json)
+    internal static string MigrateLegacyWorkflowRunJson(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;

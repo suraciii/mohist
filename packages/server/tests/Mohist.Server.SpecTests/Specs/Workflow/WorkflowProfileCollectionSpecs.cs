@@ -505,8 +505,10 @@ public class WorkflowProfileCollectionSpecs : IAsyncLifetime
         await using var db = new MohistDbContext(_database.Options);
         var state = JsonSerializer.Serialize(new
         {
+            id = runId,
             status,
-            metadata = new { projectId, issueNumber = 1, annotations = new { workflowProfileId = (string?)selectedProfile } },
+            workflowProfileId = (string?)selectedProfile,
+            metadata = new { projectId, issueNumber = 1 },
         });
         db.WorkflowRuns.Add(new WorkflowRunRow
         {

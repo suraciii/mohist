@@ -179,6 +179,13 @@ public class WorkflowStageSpecs : WorkflowDefinitionResolverTestFactory
             }
             """);
 
+        await using (var upgradeDb = new MohistDbContext(Database.Options))
+        {
+            await WorkflowRunStateDataUpgrader.UpgradeAsync(
+                upgradeDb,
+                backup: static (_, _) => Task.FromResult("test-backup"));
+        }
+
         await using (var db = new MohistDbContext(Database.Options))
         {
             var issue = await db.Issues.SingleAsync(x => x.WorkflowRunId == runId);

@@ -94,23 +94,10 @@ public sealed class WorkflowProfileDeletionBlockerQuery : IScopedService
             if (root.ValueKind != JsonValueKind.Object)
                 return null;
 
-            if (root.TryGetProperty("workflowProfileId", out var profileId)
-                && profileId.ValueKind == JsonValueKind.String)
-            {
-                return profileId.GetString();
-            }
-
-            if (root.TryGetProperty("metadata", out var metadata)
-                && metadata.ValueKind == JsonValueKind.Object
-                && metadata.TryGetProperty("annotations", out var annotations)
-                && annotations.ValueKind == JsonValueKind.Object
-                && annotations.TryGetProperty("workflowProfileId", out var legacyProfileId)
-                && legacyProfileId.ValueKind == JsonValueKind.String)
-            {
-                return legacyProfileId.GetString();
-            }
-
-            return null;
+            return root.TryGetProperty("workflowProfileId", out var profileId)
+                && profileId.ValueKind == JsonValueKind.String
+                    ? profileId.GetString()
+                    : null;
         }
         catch (JsonException)
         {
