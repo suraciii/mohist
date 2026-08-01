@@ -31,13 +31,13 @@ Stakeholders: Web (FSD-enforced, `npm run check:fsd`), Server Agent/Slack contex
 
 Add `widgets/agent-connections` with a `ConnectionsSection` component, structured exactly like `widgets/agent-subscriptions` (`SubscriptionsSection.tsx`): a card with a header, an **Add Slack** button, a list of the Agent's Connections, and an injectable `operationsHook` for testability. Add `ConnectionsSection` to `AgentDetailPageComponents` (`AgentDetailPage.tsx:42-45`) and render it in the right rail next to `SubscriptionsSection` (`:584`).
 
-The section lists Connections from the existing `GET /slack-connections` (project-scoped list, already returns `AgentId` per row), filtered client-side by the Agent id. Each row shows lightweight state from the list response (`setupProgress`, `connectionHealth`) and links into the per-Connection surface (Decision B). It does **not** fetch a diagnostic per row — that is the detail surface's job.
+The section lists Connections from the existing `GET /slack-connections` (project-scoped list, already returns `AgentId` per row), filtered client-side by the Agent id. Each row shows lightweight state from the list response (`setupProgress`, `connectionHealth`) and links into the per-Connection surface (Decision B). It does **not** fetch a diagnostic per row — that is the detail surface's job. **Add Slack** POSTs create and navigates to the connection page; the identity preview and **Create in Slack** entry are rendered on the connection page (Decision B) as the first setup step, not as a transient view shown only before navigation, so they remain visible and resumable after close/refresh/device switch.
 
 **Alternative considered:** inline expand each Connection's full wizard inside the section. Rejected: setup is multi-step, resumable, and must be deep-linkable across devices; a stable URL (Decision B) serves "resume on another device" better than an inline accordion.
 
 ### B. The setup/resume surface extends the existing `/connections/:connectionId` page
 
-The existing route `connections/:connectionId` (`App.tsx:74`) already renders `ConnectionDiagnosticPage`, which shows `primaryState`/`reason`/`nextAction` + the four-fact supporting panel (`ConnectionDiagnosticPage.tsx:77-106`). Extend that page from read-only diagnostic into the Setup surface: when the diagnostic's next action is "configure credentials", render the protected form (Decision E); when it is "claim owner", render the one-time-code generator (Decision F). Add Slack (Decision A) creates the Connection and navigates here.
+The existing route `connections/:connectionId` (`App.tsx:74`) already renders `ConnectionDiagnosticPage`, which shows `primaryState`/`reason`/`nextAction` + the four-fact supporting panel (`ConnectionDiagnosticPage.tsx:77-106`). Extend that page from read-only diagnostic into the Setup surface: it renders the first setup step — the derived identity preview and the **Create in Slack** entry (Decision C/G) — when `setupProgress` is `create_app_credentials`; renders the protected credential form (Decision E) when the next action is configure; and renders the one-time-code generator (Decision F) when the next action is claim owner. Add Slack (Decision A) creates the Connection and navigates here.
 
 This reuses the server-driven summary the page already renders, needs no new route, and gives setup a stable, resumable URL.
 
@@ -47,7 +47,7 @@ This reuses the server-driven summary the page already renders, needs no new rou
 
 ### C. Server-side Agent identity derivation, single author for Web + CLI
 
-Introduce a pure derivation that, given the bound Agent, produces a Slack Bot identity preview: a `botName` (sanitized to Slack's display-name constraints; when the Agent name is empty or violates the rules, a **stable suffix** derived deterministically from the Agent id is appended so re-derivation is idempotent) and an `appDescription` (the Agent description, or a generated non-empty generic fallback when blank). Wire it into `POST /slack-connections`: when the caller omits `BotName`, default the persisted `BotName` to the derived value, and add the derived preview (`botName`, `appDescription`) to the create response alongside the existing `slackAppCreationReference`.
+Introduce a pure derivation that, given the bound Agent, produces a Slack Bot identity preview: a `botName` (sanitized to Slack's display-name constraints; when the Agent name is empty or violates the rules, a **stable suffix** derived deterministically from the Agent id is appended so re-derivation is idempotent) and an `appDescription` (the Agent description, or a generated non-empty generic fallback when blank). Wire it into `POST /slack-connections`: when the caller omits `BotName`, default the persisted `BotName` to the derived value, and add the derived preview (`botName`, `appDescription`) plus the existing `slackAppCreationReference` to the create response. Also expose the same derived preview (`botName`, `appDescription`, `slackAppCreationReference`) on `GET /slack-connections/{id}` so the connection page can render the first setup step resumably from any entry point (the create-response cache is gone after a refresh or on another device).
 
 The derivation lives in the Server so Web and CLI share one author and one rule set. It is additive and non-destructive to the immutable binding fields (`WorkspaceTeamId`/`AppId`/`BotUserId` are still confirmed only at verification, `SlackSetupVerifier.cs`).
 
@@ -81,11 +81,11 @@ The masked input has **no reveal toggle** — stricter than a typical password f
 
 ### G. Create in Slack keeps the link, with the derived preview beside it
 
-The create response's `slackAppCreationReference` remains the **Create in Slack** entry. Because Slack does not deep-prefill App name/description/avatar via URL, the surface shows the derived identity preview (Decision C) next to the link so the operator knows what to enter on Slack's side. A downloadable App manifest is a possible future enhancement, not v1.
+The `slackAppCreationReference` remains the **Create in Slack** entry, surfaced on the connection page (Decision B) from the derived preview exposed by `GET /slack-connections/{id}` (Decision C). Because Slack does not deep-prefill App name/description/avatar via URL, the connection page shows the derived identity preview (name + description) next to the link so the operator knows what to enter on Slack's side, and directs avatar configuration to the Slack App settings. A downloadable App manifest is a possible future enhancement, not v1.
 
 ## Risks / Trade-offs
 
-- **Agent has no avatar** → the identity preview cannot show a real avatar. *Mitigation:* preview shows name + description and directs avatar configuration to Slack (consistent with the product spec); documented here so the spec's "avatar derived from the Agent" is read as name+description only.
+- **Agent has no avatar** → the identity preview shows name + description only and directs avatar configuration to the Slack App settings (the Agent has no avatar field; the spec requires no avatar derivation).
 - **Token exists transiently in browser component state** → *Mitigation:* masked, never rendered/persisted/logged, cleared on success; the form surface loads no third-party scripts. Within the app's existing trust boundary this is the same exposure any in-browser secret has.
 - **`GET /diagnostic` probes Slack live (owner availability, heartbeat)** → can be slow when Slack is unreachable. *Mitigation:* the diagnostic already degrades to `unknown` (`ConnectionDiagnostic.cs:112`) and still derives the next action from persisted facts; refetch cadence stays modest.
 - **Server derivation changes the create default** (omitted `BotName` is now derived, not empty) → *Mitigation:* deterministic, non-destructive, and gives Web/CLI parity; CLI callers who pass `--bot-name` are unaffected.
@@ -103,7 +103,6 @@ This change is additive on both sides and needs **no database migration**:
 
 ## Open Questions
 
-- **Avatar preview wording:** confirm the preview is name + description only and directs avatar configuration to Slack (Agent has no avatar field). This reconciles the spec's "avatar derived from the bound Agent".
 - **Token format hint:** add a non-blocking `xapp-`/`xoxb-` prefix hint in the form, or rely solely on Slack's authoritative verification?
 - **Create-in-Slack prefill:** ship a downloadable App manifest in v1 to avoid transcription, or defer?
 - **Refetch cadence:** is focus-refetch + a 5s interval the right balance for CLI-parity "immediately", or should the existing SignalR `ConnectionSubscriptionGrain` stream be wired now?
