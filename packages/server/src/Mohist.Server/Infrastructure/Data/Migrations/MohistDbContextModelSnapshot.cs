@@ -242,6 +242,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("RoutingRules", (string)null);
                 });
 
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Agent.WatchEntryRow", b =>
                 {
                     b.Property<string>("ProjectId")
@@ -2759,11 +2760,25 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Webhooks.WebhookSubscriptionRow", b =>
                 {
-                    b.Property<string>("Id")
-                        .HasMaxLength(256)
+                    b.Property<string>("AuthType")
+                        .IsRequired()
+                        .HasMaxLength(16)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventSelectionMode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventTypes")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Match")
