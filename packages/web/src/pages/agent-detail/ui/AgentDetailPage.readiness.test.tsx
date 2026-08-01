@@ -21,6 +21,7 @@ const state: {
 const components: AgentDetailPageComponents = {
   AgentProfileEditor: () => null,
   SubscriptionsSection: () => null,
+  ConnectionsSection: () => null,
 }
 
 const dataHook: AgentDetailPageDataHook = () => ({

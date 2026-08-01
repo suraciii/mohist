@@ -1,9 +1,23 @@
+import { useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { AlertCircleIcon, CheckCircle2Icon, CircleOffIcon, Settings2Icon } from 'lucide-react'
-import { useConnectionDiagnostic } from '../../../entities/agent-connection'
-import type { ConnectionDiagnostic } from '../../../entities/agent-connection'
+import {
+  useAgentConnection,
+  useClaimAgentConnectionOwner,
+  useConfigureAgentConnection,
+  useConnectionDiagnostic,
+} from '../../../entities/agent-connection'
+import type {
+  AgentConnectionClaimOwnerResponse,
+  AgentConnectionDetailResponse,
+  ConnectionDiagnostic,
+} from '../../../entities/agent-connection'
 import { CardSection } from '@/shared/ui/components/card-section'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
+import { SetupStepList } from './setup-step-list'
+import { IdentityPreviewStep } from './identity-preview-step'
+import { CredentialFormStep } from './credential-form-step'
+import { ClaimOwnerCodeStep } from './claim-owner-code-step'
 
 export interface ConnectionDiagnosticPageData {
   data: ConnectionDiagnostic | undefined
@@ -17,6 +31,74 @@ const useDefaultData: ConnectionDiagnosticPageDataHook = (connectionId) => {
   const { data, isLoading, error } = useConnectionDiagnostic(connectionId)
   return { data, isLoading, error: error instanceof Error ? error : null }
 }
+
+export interface ConnectionDiagnosticPageOperations {
+  connectionDetailQuery: {
+    data: AgentConnectionDetailResponse | undefined
+    isLoading: boolean
+  }
+  configureMutation: {
+    mutate: (input: { appToken: string; botToken: string }) => void
+    isPending: boolean
+    error: Error | null
+    reset: () => void
+  }
+  claimOwnerMutation: {
+    mutate: () => void
+    isPending: boolean
+    error: Error | null
+    data: AgentConnectionClaimOwnerResponse | undefined
+    reset: () => void
+  }
+}
+
+export type ConnectionDiagnosticPageOperationsHook = (
+  connectionId: string | undefined,
+) => ConnectionDiagnosticPageOperations
+
+const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connectionId) => {
+  const detailQuery = useAgentConnection(connectionId)
+  const configure = useConfigureAgentConnection(connectionId)
+  const claim = useClaimAgentConnectionOwner(connectionId)
+  return {
+    connectionDetailQuery: {
+      data: detailQuery.data,
+      isLoading: detailQuery.isLoading,
+    },
+    configureMutation: {
+      mutate: configure.mutate,
+      isPending: configure.isPending,
+      error: configure.error instanceof Error ? configure.error : null,
+      reset: configure.reset,
+    },
+    claimOwnerMutation: {
+      mutate: claim.mutate,
+      isPending: claim.isPending,
+      error: claim.error instanceof Error ? claim.error : null,
+      data: claim.data,
+      reset: claim.reset,
+    },
+  }
+}
+
+export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
+  connectionDetailQuery: { data: undefined, isLoading: false },
+  configureMutation: {
+    mutate: () => undefined,
+    isPending: false,
+    error: null,
+    reset: () => undefined,
+  },
+  claimOwnerMutation: {
+    mutate: () => undefined,
+    isPending: false,
+    error: null,
+    data: undefined,
+    reset: () => undefined,
+  },
+}
+
+export const useReadOnlyOperations: ConnectionDiagnosticPageOperationsHook = () => readOnlyOperations
 
 function label(value: string | null | undefined) {
   if (!value) return 'Unknown'
@@ -46,12 +128,28 @@ function FactRow({ name, value }: { name: string; value: string | boolean | null
 
 export function ConnectionDiagnosticPage({
   dataHook = useDefaultData,
+  operationsHook = useDefaultOperations,
 }: {
   dataHook?: ConnectionDiagnosticPageDataHook
+  operationsHook?: ConnectionDiagnosticPageOperationsHook
 } = {}) {
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
+  const ops = operationsHook(connectionId)
+  const { connectionDetailQuery, configureMutation, claimOwnerMutation } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
+
+  const configureResetRef = useRef<() => void>(() => undefined)
+  configureResetRef.current = configureMutation.reset
+  const claimResetRef = useRef<() => void>(() => undefined)
+  claimResetRef.current = claimOwnerMutation.reset
+
+  useEffect(() => {
+    return () => {
+      claimResetRef.current()
+      configureResetRef.current()
+    }
+  }, [])
 
   if (isLoading) {
     return <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading connection...</div>
@@ -66,6 +164,14 @@ export function ConnectionDiagnosticPage({
   }
 
   const { facts } = data
+  const setupProgress = facts.setupProgress
+  const detail = connectionDetailQuery.data
+  const previewBotName = detail?.botName ?? facts.identity.botName
+  const previewAppDescription = detail?.appDescription ?? ''
+  const previewSlackAppCreationReference = detail?.slackAppCreationReference ?? ''
+
+  const isSetupComplete = setupProgress === 'complete'
+
   return (
     <main className="flex-1 min-w-0 overflow-y-auto" data-testid="connection-diagnostic-page">
       <div className="mx-auto max-w-3xl space-y-5 px-4 py-6 sm:px-6">
@@ -83,6 +189,86 @@ export function ConnectionDiagnosticPage({
             </div>
           </div>
         </CardSection>
+
+        {!isSetupComplete && (
+          <CardSection title="Setup progress" tone="amber">
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Setup is owned by the server. Closing, refreshing, or returning on another device resumes at
+                the current step.
+              </p>
+              <SetupStepList setupProgress={setupProgress} />
+            </div>
+          </CardSection>
+        )}
+
+        {setupProgress === 'create_app_credentials' && (
+          <CardSection title="Step 1 — Create app & add credentials">
+            <div className="space-y-4">
+              {connectionDetailQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground" data-testid="connection-setup-identity-loading">
+                  Loading identity preview...
+                </p>
+              ) : (
+                <IdentityPreviewStep
+                  botName={previewBotName}
+                  appDescription={previewAppDescription}
+                  slackAppCreationReference={previewSlackAppCreationReference}
+                />
+              )}
+              <div className="border-t border-border pt-4">
+                <p className="mb-2 text-sm font-medium text-foreground">Add credentials</p>
+                <CredentialFormStep
+                  onSubmit={(input) => {
+                    configureMutation.reset()
+                    configureMutation.mutate(input)
+                  }}
+                  isSubmitting={configureMutation.isPending}
+                  errorMessage={configureMutation.error?.message ?? null}
+                />
+              </div>
+            </div>
+          </CardSection>
+        )}
+
+        {setupProgress === 'waiting_for_slack_service' && (
+          <CardSection title="Step 2 — Waiting for Slack service" tone="amber">
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="connection-setup-waiting-for-service"
+            >
+              Credentials are saved. Mohist is waiting for the Slack service (mohist-slack) to come online and
+              verify the tokens. Progress is preserved; no action is needed here.
+            </p>
+          </CardSection>
+        )}
+
+        {setupProgress === 'fix_slack_setup' && (
+          <CardSection title="Step 3 — Fix Slack setup" tone="amber">
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="connection-setup-fix-step"
+            >
+              The Slack service reported a problem with this Connection. Re-check the credentials and the
+              workspace install, then wait for the service to re-verify.
+            </p>
+          </CardSection>
+        )}
+
+        {setupProgress === 'claim_owner' && (
+          <CardSection title="Step 4 — Claim owner">
+            <ClaimOwnerCodeStep
+              code={claimOwnerMutation.data?.code ?? null}
+              expiresAt={claimOwnerMutation.data?.expiresAt ?? null}
+              onGenerate={() => {
+                claimOwnerMutation.reset()
+                claimOwnerMutation.mutate()
+              }}
+              isGenerating={claimOwnerMutation.isPending}
+              errorMessage={claimOwnerMutation.error?.message ?? null}
+            />
+          </CardSection>
+        )}
 
         <details className="border-y border-border py-3" data-testid="connection-diagnostic-facts">
           <summary className="cursor-pointer text-sm font-medium text-foreground">Supporting facts</summary>

@@ -26,3 +26,60 @@ export interface ConnectionDiagnostic {
   nextAction: string
   facts: ConnectionDiagnosticFacts
 }
+
+export interface AgentConnectionDto {
+  id: string
+  projectId: string
+  agentId: string
+  providerKind: string
+  workspaceTeamId: string
+  appId: string
+  botUserId: string
+  botName: string
+  avatarHash: string | null
+  verifiedBotName: string | null
+  verifiedBotIconUrl: string | null
+  setupProgress: string
+  desiredState: string
+  connectionHealth: string
+  healthReason: string | null
+  agentReadiness: string
+  ownerSlackUserId: string | null
+  lastHeartbeatAt: string | null
+  createdAt: string
+  updatedAt: string
+  deletedAt: string | null
+}
+
+export interface AgentConnectionCreateRequest {
+  agentId: string
+  workspaceTeamId?: string
+  appId?: string
+  botUserId?: string
+  botName?: string | null
+  avatarHash?: string | null
+}
+
+export interface AgentConnectionCreateResponse {
+  connection: AgentConnectionDto
+  botName: string
+  appDescription: string
+  slackAppCreationReference: string
+}
+
+export interface AgentConnectionDetailResponse {
+  connection: AgentConnectionDto
+  botName: string
+  appDescription: string
+  slackAppCreationReference: string
+}
+
+export interface AgentConnectionConfigureRequest {
+  appToken: string
+  botToken: string
+}
+
+export interface AgentConnectionClaimOwnerResponse {
+  code: string
+  expiresAt: string
+}

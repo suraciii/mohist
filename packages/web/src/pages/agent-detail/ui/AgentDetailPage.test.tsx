@@ -50,6 +50,7 @@ const components: AgentDetailPageComponents = {
       data-agent-status={agent.status}
     />
   ),
+  ConnectionsSection: () => null,
 }
 
 const composerComponents: AgentSessionComposerPageComponents = {

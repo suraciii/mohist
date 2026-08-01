@@ -1,0 +1,90 @@
+{
+  "project": "mohist-local",
+  "description": "Make the Web a parity entry point for creating and taking over a Slack Connection: a server-derived Bot identity preview on create, a protected masked credential input, a Connections widget with Add Slack on the Agent detail page, and a server-driven resumable Setup surface (configure credentials + claim owner) that shares one progress with the CLI.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Server: Agent-derived Bot identity preview on create",
+      "spec": "specs/web-connection-setup/spec.md#Creating a Connection presents a Bot identity preview derived from the bound Agent",
+      "description": "Add a pure derivation that, given the bound Agent, produces a Slack Bot identity preview: a `botName` sanitized to Slack's display-name constraints (when the Agent name is empty or violates the rules, append a deterministic stable suffix derived from the Agent id so re-derivation is idempotent) and an `appDescription` (the Agent description, or a generated non-empty generic fallback when blank). Wire it into `POST /slack-connections` (`Api/SlackConnectionRoutes.cs:33-64`): when the caller omits `BotName`, default the persisted `BotName` to the derived value, and add the derived `botName`/`appDescription` plus the existing `slackAppCreationReference` to the create response. Also expose the same derived preview (`botName`, `appDescription`, `slackAppCreationReference`) on `GET /slack-connections/{id}` so the connection page can render the first setup step resumably from any entry point (the create-response cache is gone after a refresh or on another device). Avatar is not derived (the Agent has no avatar field, `Agent/Domain/Agent.cs:9-10`; it is configured in Slack). Keep the immutable binding fields (WorkspaceTeamId/AppId/BotUserId) confirmed only at verification, unchanged.",
+      "acceptanceCriteria": [
+        "Create with no BotName derives a non-empty Slack-acceptable bot name, persists it as BotName, and the 201 response includes botName, appDescription, and slackAppCreationReference.",
+        "GET /slack-connections/{id} returns the derived identity preview (botName, appDescription) and slackAppCreationReference alongside the connection, so the first setup step is renderable and resumable from the connection page after a refresh or on another device.",
+        "An Agent name that violates Slack's naming rules yields a bot name carrying a stable suffix; re-derivation is deterministic and idempotent; the Agent record itself is not modified.",
+        "An empty Agent description yields a non-empty generic app description; a non-empty description is used as-is.",
+        "The derivation is a pure function unit-tested with injected Agent inputs (no Slack calls, no DB).",
+        "The configure/claim-owner/diagnostic routes and the immutable binding behavior are unchanged; a CLI create that passes BotName is unaffected.",
+        "Server tests (e.g. SlackConnectionApiSpecs) with fake Agent data cover derivation, stable suffix, description fallback, and the create-response shape; npm test passes."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Identity-derivation pure type + deriver + POST /slack-connections defaulting/persistence + create-response preview fields.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design Decision C. Single author (Server) so Web and CLI derive the same preview and the same stable-suffix rule. Additive: no DB migration, no schema change to the immutable binding."
+    },
+    {
+      "id": "T-002",
+      "title": "Web: protected masked credential input primitive",
+      "spec": "specs/web-credential-input/spec.md#Credentials are captured through masked inputs and never displayed in cleartext",
+      "description": "Add a reusable masked input component to `shared/ui` (none exists today; only the plain `shared/ui/components/input.tsx`). It masks the value while typing, exposes NO reveal/show toggle (no cleartext path), and never persists its value to the URL, sessionStorage, or localStorage. Export it via the slice public API. This is the primitive the credential form in T-004 builds on.",
+      "acceptanceCriteria": [
+        "The component renders a masked field; characters typed into it are not displayed in cleartext anywhere on the page.",
+        "No reveal/show toggle or other code path renders the value in cleartext.",
+        "The component does not write its value to localStorage, sessionStorage, or the URL.",
+        "A colocated unit test asserts masking, the absence of any cleartext render path, and no storage writes.",
+        "npm run typecheck -w packages/web, npm run test:run -w packages/web, and npm run check:fsd -w packages/web pass."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "shared/ui masked credential input component + public export + unit test.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Design Decision E (primitive half). An independent security boundary with a single consumer today (T-004) but reusable. Body-only transmission, clear-on-success, and never-read-back belong to the credential form (T-004), not this primitive."
+    },
+    {
+      "id": "T-003",
+      "title": "Web: Connections widget on Agent detail with Add Slack and identity preview",
+      "spec": "specs/web-connection-setup/spec.md#The Agent detail page exposes a Connections entry that creates a recoverable Connection",
+      "description": "Add `widgets/agent-connections` with a `ConnectionsSection` mirroring `widgets/agent-subscriptions` (`SubscriptionsSection.tsx`): a card listing the Agent's Connections (from the existing `GET /slack-connections`, filtered client-side by AgentId) with per-row state, and an **Add Slack** button that POSTs create and navigates to the connection page. The identity preview and Create-in-Slack entry are rendered on the connection page (T-004) as the first setup step, not as a transient view shown only before navigation. Add `ConnectionsSection` to `AgentDetailPageComponents` (`AgentDetailPage.tsx:42-45`) and render it in the right rail next to `SubscriptionsSection` (`:584`). Extend the `entities/agent-connection` data layer with the create client function, TanStack Query mutation options, and request/response types consumed by this widget. Disable Add Slack for archived agents (parity with subscriptions).",
+      "acceptanceCriteria": [
+        "The Agent detail page renders a Connections section that lists the Agent's Connections and offers Add Slack.",
+        "Add Slack POSTs create and immediately creates a persistent Connection bound to the Agent, then navigates to that Connection's page (usable even if the Agent detail page is closed before any step).",
+        "ConnectionsSection is injectable via the AgentDetailPage `components` prop and uses an injectable operations/data hook, matching the SubscriptionsSection testability pattern.",
+        "Web tests use MSW handlers for create/list with no real network; npm run typecheck/test:run/check:fsd -w packages/web pass."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "widgets/agent-connections + ConnectionsSection + entity create client/hook/types + AgentDetailPage injection + MSW tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Design Decisions A + G (list/create/navigate). Depends on T-001 because the create response carries the connection id used for navigation. The identity preview and Create-in-Slack rendering live on the connection page (T-004) so they are resumable, not a transient pre-navigation view. Setup advancement (configure credentials, claim owner, resumable steps) is also T-004."
+    },
+    {
+      "id": "T-004",
+      "title": "Web: resumable Setup surface — protected credential form, owner claim, server-driven steps",
+      "spec": "specs/web-connection-setup/spec.md#Setup progress is owned by the server and is resumable across sessions and devices",
+      "description": "Extend the existing `/connections/:connectionId` page (`ConnectionDiagnosticPage.tsx`) from read-only diagnostic into the Setup/resume surface. Render setup solely from the server diagnostic (`primaryState`/`nextAction`/`facts`) with NO client step machine; derive an ordered step view (done/current/pending) from `facts.setupProgress` reusing the `ProgressStages` derivation pattern (`entities/settings/ui/ProgressStages.tsx:17-48`); refetch on focus + a modest interval so steps completed via the CLI or by async adapter-session verification are reflected. Render the first setup step — the derived identity preview (botName/appDescription from `GET /slack-connections/{id}`, T-001) and the Create-in-Slack entry — when `setupProgress` is `create_app_credentials`, so it is resumable after close/refresh/device switch. When the next action is configure, render a protected credential form built on the T-002 masked input that POSTs App/Bot tokens in the request body to `POST /{id}/configure` (body-only; never URL/path), clears local state on success, and never reads tokens back (the view exposes only credentialStatus). When the next action is claim owner, render the one-time-code generator (POST `/{id}/claim-owner`) shown once in local state; regenerating re-POSTs and the server supersedes prior codes. Service offline, invalid token, or Agent not Ready surface the single next action without losing progress. Extend `entities/agent-connection` with the connection-detail, configure, and claim-owner client functions, mutation options, and types.",
+      "acceptanceCriteria": [
+        "Closing, refreshing, or returning on another device resumes at the current server SetupProgress step; the Web holds no divergent client step state.",
+        "When setupProgress is create_app_credentials, the page renders the first setup step — the derived identity preview (botName, appDescription) and the Create-in-Slack entry from GET /slack-connections/{id}; Mohist does not create or install the Slack App.",
+        "The credential form submits tokens only in the request body to /configure (absent from URL query/path), uses the masked input with no cleartext and no reveal toggle, clears state on success, and never reads or echoes tokens back; the view shows credentialStatus only.",
+        "Tokens are never written to the URL, sessionStorage, or localStorage.",
+        "claim-owner shows the code once in local state; regenerating re-POSTs and the prior unused code is invalidated (server-side); leaving the page discards the displayed code.",
+        "Service offline, invalid token, or Agent not Ready retain setup progress and surface the single actionable next step; the summary highlights one current state and one next action while the four facts remain separately readable (no covering Connected status).",
+        "A step completed via the CLI (simulated by changing server state between renders) is reflected in the Web on the next refetch.",
+        "Web tests are MSW-based and cover configure (body-only, masked, clear-on-success, no read-back), claim-owner (shown once, regenerate-supersedes), resume across remount, and the single-next-step rendering for each blocker; npm run typecheck/test:run/check:fsd -w packages/web pass."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Extended ConnectionDiagnosticPage (Setup surface) + configure/claim-owner entity client/hooks/types + credential form + one-time claim-code UI + ordered step view.",
+      "dependsOn": ["T-002", "T-003"],
+      "passes": false,
+      "notes": "Design Decisions B, D, E (form half), F + G (first-step preview/Create-in-Slack). Reuses the existing GET /{id}/diagnostic endpoint and ConnectionDiagnostic.Compute (no server change in this task); the identity preview for the first step comes from GET /slack-connections/{id} exposed by T-001. The Web never issues a read that returns a token. Also satisfies web-credential-input 'Tokens are transmitted only in the request body' and 'Tokens are never persisted client-side and are never read back', and web-connection-setup 'The create result provides an external Create in Slack entry Mohist does not perform' and 'The owner claim step generates a one-time code claimed through the Bot'."
+    }
+  ]
+}
