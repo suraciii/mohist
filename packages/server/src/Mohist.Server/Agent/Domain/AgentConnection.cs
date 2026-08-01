@@ -19,6 +19,7 @@ public sealed class AgentConnection
     public string? HealthReason { get; set; }
     public string AgentReadiness { get; set; } = AgentReadinessKind.Unknown;
     public string? OwnerSlackUserId { get; set; }
+    public string AccessPolicy { get; set; } = AccessPolicyKind.OwnerOnly;
     public DateTimeOffset? LastHeartbeatAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
@@ -57,4 +58,11 @@ public static class AgentReadinessKind
     public const string Unknown = "unknown";
     public const string NeedsSetup = "needs_setup";
     public const string Ready = "ready";
+}
+
+public static class AccessPolicyKind
+{
+    public const string OwnerOnly = "owner_only";
+    public const string Allowlist = "allowlist";
+    public const string Anyone = "anyone";
 }

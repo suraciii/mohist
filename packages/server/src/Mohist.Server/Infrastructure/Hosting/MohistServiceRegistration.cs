@@ -113,6 +113,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackThreadSessionMappingStore>());
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackThreadLaunchReservationStore>());
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackOwnerClaimService>());
+        services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackConnectionAllowedMemberStore>());
 
         var connectionString = ResolveSqliteConnectionString(configuration);
 

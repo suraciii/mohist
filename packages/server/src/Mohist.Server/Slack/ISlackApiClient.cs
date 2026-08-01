@@ -112,7 +112,19 @@ public sealed record SlackBotIcons(
 }
 public sealed record SlackPermissionsScopesListResponse(bool Ok, string? Error, IReadOnlyDictionary<string, IReadOnlyList<string>>? Scopes);
 public sealed record SlackUserInfoResponse(bool Ok, string? Error, SlackUserInfo? User);
-public sealed record SlackUserInfo(string? Id, string? TeamId, bool IsBot, bool Deleted, bool IsRestricted, bool IsUltraRestricted, bool IsGuest, IReadOnlyList<string>? TeamIds = null);
+public sealed record SlackUserInfo(
+    string? Id,
+    string? TeamId,
+    bool IsBot,
+    bool Deleted,
+    bool IsRestricted,
+    bool IsUltraRestricted,
+    bool IsGuest,
+    IReadOnlyList<string>? TeamIds = null,
+    string? DisplayName = null,
+    string? RealName = null,
+    string? Email = null,
+    string? AvatarUrl = null);
 public sealed record SlackConversationInfoResponse(bool Ok, string? Error, SlackConversationInfo? Channel);
 public sealed record SlackConversationInfo(string? Id, string? Name, string? Creator, bool IsIm, bool IsMember);
 public sealed record SlackUsersListResponse(bool Ok, string? Error, IReadOnlyList<SlackUserInfo>? Members, SlackResponseMetadata? ResponseMetadata);
