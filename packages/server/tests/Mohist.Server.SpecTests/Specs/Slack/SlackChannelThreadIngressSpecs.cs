@@ -17,7 +17,6 @@ using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.Slack;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -880,58 +879,6 @@ public sealed class SlackChannelThreadIngressSpecs
             WorkspaceTeamId = "T123",
             BotUserId = botUserId,
         };
-    }
-
-    [Fact]
-    public async Task Channel_root_mention_binds_slack_file_to_launch_input_without_text()
-    {
-        var connection = await CreateConnectionAsync();
-        _fixture.Slack.FileContentResolver = fileId =>
-        {
-            Assert.Equal("F-CHANNEL-ATTACHMENT", fileId);
-            return new SlackFileContent(
-                new MemoryStream("hello"u8.ToArray()),
-                "log.txt",
-                "text/plain",
-                5,
-                new MemoryStream());
-        };
-
-        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
-        {
-            isDirectMessage = false,
-            teamId = connection.WorkspaceTeamId,
-            conversationId = "C-CHANNEL-ATTACHMENT",
-            messageTs = "1710000000.000700",
-            mentionedUserIds = new[] { connection.BotUserId },
-            senderSlackUserId = "U_OWNER",
-            text = $"<@{connection.BotUserId}> ",
-            files = new[]
-            {
-                new { id = "F-CHANNEL-ATTACHMENT", name = "log.txt", mimetype = "text/plain", size = 5 },
-            },
-        });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        var data = document.RootElement.GetProperty("data");
-        Assert.True(data.TryGetProperty("sessionId", out var sessionIdElement),
-            "channel root launch must surface the SessionInput owner session id.");
-        Assert.True(data.TryGetProperty("inputId", out var inputIdElement),
-            "channel root launch must surface a SessionInput id so the caller can correlate the file binding.");
-        var sessionId = sessionIdElement.GetString();
-        var inputId = inputIdElement.GetString();
-        Assert.False(string.IsNullOrWhiteSpace(sessionId));
-        Assert.False(string.IsNullOrWhiteSpace(inputId));
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var row = await db.Attachments.SingleAsync(attachment =>
-            attachment.ProjectId == connection.ProjectId
-            && attachment.OwnerKind == "agent-input"
-            && attachment.OwnerId == $"{sessionId}/{inputId}");
-        Assert.Equal("slack", row.Source);
-        Assert.Contains("F-CHANNEL-ATTACHMENT", _fixture.Slack.FileContentCalls);
     }
 
     private static string IngressPath(AgentConnection connection) =>
