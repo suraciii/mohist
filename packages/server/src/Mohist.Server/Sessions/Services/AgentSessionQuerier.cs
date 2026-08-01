@@ -965,8 +965,8 @@ public class AgentSessionQuerier : IScopedService
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var turns = loaded.Turns
-            .Where(turn => string.IsNullOrWhiteSpace(runtimeSessionId)
-                || string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
+            .Where(turn => !string.IsNullOrWhiteSpace(runtimeSessionId)
+                && string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();
