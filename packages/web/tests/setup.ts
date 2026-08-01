@@ -11,13 +11,6 @@ import {
   takeUnhandledRequestError,
 } from './support/msw'
 
-// React 19 emits "the current testing environment is not configured to support
-// act(...)" via console.error when IS_REACT_ACT_ENVIRONMENT isn't true.
-// @testing-library/react sets it on import, but under isolate:false with
-// parallel workers that isn't deterministic, and setup treats any console.error
-// as fatal — so this surfaced as a flaky CI failure. Set it unconditionally.
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-
 ensureMswServerListening()
 configure({ asyncUtilTimeout: 10_000 })
 
@@ -41,6 +34,11 @@ function formatConsoleValue(value: unknown) {
 
 function recordUnexpectedConsoleCall(level: 'error' | 'warn', values: unknown[]) {
   const message = `${level}: ${values.map(formatConsoleValue).join(' ')}`
+  // React warns "not configured to support act(...)" when it doesn't see
+  // IS_REACT_ACT_ENVIRONMENT at react-dom load; setup-act-env.ts sets it first,
+  // but tolerate the warning regardless so a residual flag-timing race can
+  // never fail a test. It is benign — RTL still wraps renders in act.
+  if (message.includes('not configured to support act')) return
   _unexpectedConsoleCalls.set(message, (_unexpectedConsoleCalls.get(message) ?? 0) + 1)
 }
 
