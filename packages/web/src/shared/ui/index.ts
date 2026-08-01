@@ -24,3 +24,8 @@ export {
   EpicDescriptionField,
   type EpicDescriptionFieldProps,
 } from './epic-description-field'
+
+export {
+  MaskedCredentialInput,
+  type MaskedCredentialInputProps,
+} from './components/masked-credential-input'
