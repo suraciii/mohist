@@ -200,3 +200,54 @@ All 9 from T-002 met:
 - The `AgentStartupContext.TruncationMarker` ("N oldest messages omitted")
   is the same string the router puts in the Slack acceptance reply, so the
   two attestations cannot drift.
+# Issue 516 — review fixes
+
+Addresses every finding in `openspec/changes/issue-516/review.md`.
+
+## F1+F4 — Reader now keeps prior messages; post-mention messages excluded
+- `SlackThreadHistoryReader.ReadAsync` replaced the exact-ts-equality stop
+  (which discarded collected messages via `return Empty(...)`) with a
+  timestamp boundary: a message is collected when `ts < mentionTs` and the
+  read stops at the first message with `ts >= mentionTs`. Prior discussion
+  now survives; messages at or after the mention are excluded even when the
+  mention itself is absent from the fetched pages.
+- Added `TryReadMessageTs` helper (shared by `ApplyBudget`) for tolerant
+  Slack-ts parsing; unparseable timestamps are skipped rather than throwing.
+
+## F2 — Depth-cap exhaustion now refuses
+- The reader tracks `paginationComplete` separately from `reachedMention`.
+  When the pagination depth cap is exhausted without reaching the mention
+  and without Slack signaling end-of-pagination, the read returns `Refused`
+  ("pagination depth cap reached before the mention") — no `AgentJob`,
+  consistent with D5. A thread that ends (nextCursor empty) before the
+  mention still imports the visible prior set.
+
+## F3 — Removed dead refuse-path release
+- `ReadThreadHistoryIfAnyAsync` no longer calls
+  `SlackThreadLaunchReservationStore.ReleaseAsync`: the reservation is
+  created later inside `LaunchChannelRootAsync`, after the read, so on the
+  refuse path no reservation exists to release. Removed the now-unused
+  `ReleaseAsync` store method. Renamed the two spec tests whose names
+  implied a reservation was being released.
+
+## F5 — Indentation regression fixed
+- `AgentSessionGrain.cs` replay-conflict block restored to method-body
+  indentation.
+
+## Test updates
+- Unit `SlackThreadHistoryReaderTests`: `StopsAtMentionMessage` →
+  `KeepsPriorMessages_StopsAtMention` (now asserts `Imported` with the
+  prior message); added `MentionExcluded_PostMentionMessagesDropped`;
+  `PaginationDepthCap_StopsAtCap` → `PaginationDepthCap_RefusesWhenMentionBeyondCap`
+  (asserts `Refused`); added `PaginationCompletes_ImportsWhenThreadEndsBeforeMention`.
+- Spec `SlackThreadContextSpecs`: every existing-thread fake `replies`
+  page now includes the mention message (mirrors real Slack); the
+  OverBudget case was reordered so the retained "newest message" is the
+  newest message *before* the mention.
+
+## Test runs
+- `npm run build` green.
+- `npm test`: Unit 1717/1717, SpecTests 3585/3585, ArchTests 51/51,
+  Cli.Tests 1487/1487, Workflow.Definition.Tests 175/175. (One spec sweep
+  showed 3 transient flakes from the pre-existing
+  `AgentSessionLaunchValidationRoutesSpecs` family; re-ran clean.)
