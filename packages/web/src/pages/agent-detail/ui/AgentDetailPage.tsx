@@ -38,10 +38,12 @@ import { Badge } from '@/shared/ui/components/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
 import { AgentProfileEditor as DefaultAgentProfileEditor } from '../../../widgets/agent-profile-editor'
 import { SubscriptionsSection as DefaultSubscriptionsSection } from '../../../widgets/agent-subscriptions'
+import { ConnectionsSection as DefaultConnectionsSection } from '../../../widgets/agent-connections'
 
 export interface AgentDetailPageComponents {
   AgentProfileEditor: ComponentType<ComponentProps<typeof DefaultAgentProfileEditor>>
   SubscriptionsSection: ComponentType<ComponentProps<typeof DefaultSubscriptionsSection>>
+  ConnectionsSection: ComponentType<ComponentProps<typeof DefaultConnectionsSection>>
 }
 
 export interface AgentDetailPageData {
@@ -78,6 +80,7 @@ const useDefaultData: AgentDetailPageDataHook = (agentId) => {
 const defaultComponents: AgentDetailPageComponents = {
   AgentProfileEditor: DefaultAgentProfileEditor,
   SubscriptionsSection: DefaultSubscriptionsSection,
+  ConnectionsSection: DefaultConnectionsSection,
 }
 
 function formatTime(iso: string | null | undefined): string {
@@ -321,7 +324,7 @@ export function AgentDetailPage({
   components?: Partial<AgentDetailPageComponents>
   dataHook?: AgentDetailPageDataHook
 } = {}) {
-  const { AgentProfileEditor, SubscriptionsSection } = { ...defaultComponents, ...components }
+  const { AgentProfileEditor, SubscriptionsSection, ConnectionsSection } = { ...defaultComponents, ...components }
   const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
@@ -582,6 +585,8 @@ export function AgentDetailPage({
             </div>
 
             <SubscriptionsSection agent={agent} />
+
+            <ConnectionsSection agent={agent} />
 
             <div className="rounded-lg border border-border bg-card p-4">
               <h3 className="text-sm font-medium text-foreground mb-3">Actions</h3>
