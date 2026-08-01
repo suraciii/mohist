@@ -2576,6 +2576,25 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("WorkflowArtifacts", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowDispatchSnapshotRow", b =>
+                {
+                    b.Property<string>("WorkflowRunId")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("WorkId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("WorkflowRunId", "WorkId");
+
+                    b.ToTable("WorkflowDispatchSnapshots", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workflow.WorkflowProfileRecordRow", b =>
                 {
                     b.Property<string>("ProjectId")
