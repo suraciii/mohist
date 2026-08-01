@@ -12,3 +12,10 @@
 - Existing legacy state can contain duplicate task identities across stages. The identity projection de-duplicates equal `(TaskId, WorkId)` entries so those runs remain writable under the run-scoped task-id key.
 - `dotnet-ef` is not installed in this workspace, so the migration and model snapshot were added in the repository's existing generated-file shape by hand and verified through the migrated SQLite test template.
 - Verification: `npm test` passed all .NET, Web, Runner, and Slack suites after `npm ci` installed the workspace dependencies.
+
+## T-002
+
+- Added `WorkflowRunWorkProjectionDataUpgrader`: it preflights every WorkflowRun with the current model and shared `WorkflowRunWorkProjectionBuilder`, compares both projection shapes, then writes only mismatches in one transaction using 500-row query batches.
+- Projection backfill updates only `ActiveWorkId`/`ActiveWorkerId` and `WorkflowRunTaskMap`; it leaves `State` and shadow `ETag` unchanged. Terminal runs with historical tasks and empty projections are included; a second run has no candidates.
+- Database initialization invokes the backfill after `WorkflowRunStateDataUpgrader`, before the remaining initialization work, so projection reads are available before service startup.
+- Verification: server and SpecTests build cleanly; the two new upgrader specs pass, including idempotence/correctness and preflight no-write behavior; `npm test` passes all server, Web, Runner, and Slack suites.
