@@ -43,6 +43,7 @@ public static class MohistApiRegistration
         app.MapSlackConnectionRoutes();
         app.MapAgentLaunchObservationRoutes();
         app.MapRoutingRulesRoutes();
+        app.MapWebhookSubscriptionsRoutes();
         app.MapRoutingTestRoutes();
         app.MapAgentSessionListRoutes();
         app.MapAgentSessionContextAssociationRoutes();

@@ -41,6 +41,7 @@ using Mohist.Server.Notifications;
 using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Webhooks;
 
 namespace Mohist.Server.Infrastructure.Hosting;
 
@@ -143,6 +144,8 @@ public static class MohistServiceRegistration
         services.AddSingleton<HermesIssueNotificationRenderer>();
         services.AddSingleton<IHermesIssueNotificationDispatcher, BackgroundHermesIssueNotificationDispatcher>();
         services.AddHttpClient<IHermesWebhookClient, HermesWebhookClient>();
+        services.AddSingleton<WebhookPayloadRenderer>();
+        services.AddHttpClient<IWebhookHttpClient, WebhookHttpClient>();
          services.AddHttpClient<ISlackApiClient, SlackApiClient>(client =>
          {
              client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");

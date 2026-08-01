@@ -45,6 +45,9 @@ internal static class CommandPresentations
         AttachToArea(root, "routing", CommandCapability.Automation,
             summary: "Manage routing rules and event targets",
             boundary: "Routing rules bind an event pattern to an Agent and a response prompt; they always live inside one Project.");
+        AttachToArea(root, "webhook", CommandCapability.Automation,
+            summary: "Manage outbound webhook subscriptions",
+            boundary: "Webhook subscriptions are Project-scoped event filters that deliver CloudEvents to configured downstream URLs.");
         AttachToArea(root, "runner", CommandCapability.Operations,
             summary: "Inspect and operate Runners",
             boundary: "Runners are the execution plane; commands here read or steer them but do not own issue or run state.");
@@ -126,6 +129,7 @@ internal static class CommandPresentations
             "epic" => EpicLeaves.Instance,
             "label" => LabelLeaves.Instance,
             "routing" => RoutingLeaves.Instance,
+            "webhook" => WebhookLeaves.Instance,
             "skill" => SkillLeaves.Instance,
             "runner" => RunnerLeaves.Instance,
             "server" => ServerLeaves.Instance,
@@ -454,6 +458,29 @@ internal static class CommandPresentations
                     CommandCapability.Automation, "Dry-run recent project events through the routing table"));
             }
         }
+        private sealed class WebhookLeaves : ILeafPresenter
+        {
+            public static readonly WebhookLeaves Instance = new();
+
+            public void Attach(Command group)
+            {
+                var subscription = Find(group, "subscription");
+                CommandPresentationCatalog.Attach(subscription, new CommandPresentation(
+                    CommandCapability.Automation, "Manage project outbound webhook subscriptions"));
+                if (subscription is null) return;
+                var output = ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WebhookSubscription));
+                var listOutput = ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WebhookSubscriptionList));
+                var failuresOutput = ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.WebhookDeliveryFailureList));
+                foreach (var action in new[] { "create", "view", "edit", "enable", "disable", "delete", "rotate-secret" })
+                    CommandPresentationCatalog.Attach(Find(subscription, action), new CommandPresentation(
+                        CommandCapability.Automation, $"{action} a webhook subscription", JsonFields: output.Fields));
+                CommandPresentationCatalog.Attach(Find(subscription, "list"), new CommandPresentation(
+                    CommandCapability.Automation, "List webhook subscriptions", JsonFields: listOutput.Fields));
+                CommandPresentationCatalog.Attach(Find(subscription, "failures"), new CommandPresentation(
+                    CommandCapability.Automation, "List webhook delivery failures", JsonFields: failuresOutput.Fields));
+            }
+        }
+
 
         private sealed class SkillLeaves : ILeafPresenter
         {

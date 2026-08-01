@@ -235,6 +235,7 @@ public class ArchitectureRules
             ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs"],
             ["Inbox"] = ["InboxProjectionHandler.cs"],
             ["Notifications"] = ["HermesIssueNotificationHandler.cs"],
+            ["Webhooks"] = ["WebhookDispatchHandler.cs"],
         };
 
         var inventory = assigned.SelectMany(pair => pair.Value.Select(file => (file, pair.Key)))
