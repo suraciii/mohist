@@ -26,3 +26,9 @@
 - Publish scope is created only after `ResolveTaskIdAsync` succeeds, so checks and other unmappable workIds carry null taskId and projectId and remain no-fan-out envelopes. Agent-job ownership still uses `IAgentJobStore` unchanged.
 - `TaskLogServicePersistThenPublishSpecs` uses a fake projection for workflow upload and query behavior, including active/inactive work, remapping, projection stamping, unmappable work, and query hit/miss. Existing SignalR coverage continues to assert null-taskId no fan-out.
 - Verification: SpecTests build cleanly and pass all 3637 tests after the projection switch.
+
+## Review fixes
+
+- F1: removed the now-closed "日志路径把整载读当廉价查询" gap bullet from `design/workflow/run-state.md` (the log path no longer deserializes State; the bullet misdescribed current state).
+- F2: `WorkflowRunWorkProjection.ResolveTaskIdAsync` now uses `FirstOrDefaultAsync` instead of `SingleOrDefaultAsync`, matching the old `ResolvePublishScopeAsync` first-match semantics and removing a latent throw if two map rows ever share a WorkId.
+- Verification: `npm test` green (Server UnitTests 1736, SpecTests 3637, ArchTests 51, Cli 1509, Runner 1510, Slack 8); `TreatWarningsAsErrors` clean.

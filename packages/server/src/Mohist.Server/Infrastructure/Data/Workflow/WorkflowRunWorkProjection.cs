@@ -87,7 +87,7 @@ public sealed class WorkflowRunWorkProjection : IWorkflowRunWorkProjection
             .AsNoTracking()
             .Where(row => row.WorkflowRunId == workflowRunId && row.WorkId == workId)
             .Select(row => row.TaskId)
-            .SingleOrDefaultAsync(ct);
+            .FirstOrDefaultAsync(ct);
     }
 
     public async Task<bool> IsActiveWorkAsync(
