@@ -82,3 +82,121 @@ All 8 from T-001 met:
 - `ISlackApiClient.ConversationsRepliesAsync` and
   `SlackProviderOptions` budget/depth-cap settings are still
   pending T-002.
+# Issue 516 T-002 — Slack first-mention thread-history import
+
+## Status
+Code complete and tests green. Wrapping up due to interruption warning.
+
+## What landed
+- `ISlackApiClient.ConversationsRepliesAsync` (and `SlackConversationsRepliesPage` /
+  `SlackConversationMessage` records) on the real `SlackApiClient` and on all
+  fakes (unit `RecordingSlackApiClient`, spec `RecordingSlackApiClient`, plus
+  the 5 inline fakes in ConnectionDiagnosticSpecs / SlackOwner*Specs /
+  SlackSetupVerifierSpecs / SlackConnectionRotateCredentialsSpecs).
+  The HTTP call posts `conversations.replies` with channel/thread/cursor/limit
+  200/inclusive=false, mirroring the other 7 read APIs the Server already
+  issues.
+- `SlackProviderOptions`:
+  - `StartupContextCharacterBudget` (default 8000)
+  - `StartupContextPaginationDepthCap` (default 10 pages × 200 msgs)
+  Both bind via `Configuration.GetSection("SlackProvider")`.
+- `SlackThreadHistoryReader` (Server-side, `IScopedService`):
+  - `ReadAsync(... mentionTs)` paginates `conversations.replies` (depth-capped),
+    stops at the mention ts (returns Empty), refuses on Slack error or
+    transport failure (returns Refused + reason), returns Empty when no
+    messages were collected, otherwise Imported with the ordered visible set.
+  - `ApplyBudget(messages, characterBudget)` renders the chronological
+    transcript (oldest→newest), drops whole oldest messages first when over
+    budget, and surfaces a stable `"N oldest messages omitted"` marker via
+    `AgentStartupContextProvenance.TruncationMarker`.
+- `SlackThreadLaunchReservationStore.ReleaseAsync(...)` — releases the
+  unbound reservation owned by the supplied launch message so a failed
+  read followed by a re-mention can proceed (no stale-reservation wait).
+- `SlackConnectionRoutes`:
+  - New `HandleChannelIngressRequest` fields: `ISecretStore Secrets`,
+    `SlackThreadHistoryReader ThreadHistory`, `IOptions<SlackProviderOptions>
+    SlackProviderOptions`. The ingress handler injects them and passes them
+    through the existing `From(...)` factory.
+  - `LaunchChannelRootAsync` takes an additional `AgentStartupContext?
+    startupContext` and threads it into `AgentLauncher.LaunchConnectionAsync`
+    (which was already wired in T-001 to forward the value to the launch
+    chain).
+  - The first-mention-in-existing-thread branch (after the existing
+    ownBinding / otherBots / reconcile checks) calls
+    `ReadThreadHistoryIfAnyAsync`; on Refused it releases the reservation
+    and asks the user to re-mention; on Imported it builds the
+    `AgentStartupContext` (via `BuildStartupContext`, which uses
+    `SlackProviderOptions.StartupContextCharacterBudget`) and passes it as
+    the launch startup context; on Empty it launches with `null` (root
+    mention path is unchanged).
+  - `BuildLaunchAck` emits the dual-marked acceptance reply: imports report
+    "Prior thread discussion is being used as background"; truncated imports
+    add "the oldest messages were omitted to fit the bound"; the existing
+    "Task accepted and queued for execution." / redelivery acks are
+    preserved.
+  - Empty-mention rejection is preserved on the thread-context path (the
+    existing check now sits before the read in the same branch).
+  - Root-mention, other-bots-in-thread, and reconcile-match paths still
+    launch with `startupContext: null` (no chat-history import on those
+    paths).
+- Docs `docs/agent-connections.md` and `design/slack-agent-connection.md`
+  实装差距 paragraphs updated to mark thread-history import as provided.
+
+## Tests
+- Unit: `SlackThreadHistoryReaderTests` (11 cases) covers empty / read /
+  stop-at-mention / Slack error / transport failure / pagination honor +
+  depth cap / missing bot token / ApplyBudget under / over / out-of-order.
+- Spec: `SlackThreadContextSpecs` in `MohistIntegration` collection (9 cases):
+  - `FirstMentionInExistingThread_ImportsThreadHistory_AsStartupContext`
+  - `RootMention_BrandNewThread_ImportsNoStartupContext`
+  - `OverBudget_TruncatesOldestFirst_AndDualMarkedInReplyAndInput`
+  - `SlackRejection_RefusesLaunch_ReleasesReservation_AndNoAgentJobCreated`
+  - `RateLimitedError_RefusesLaunch_NoAgentJob`
+  - `ReadFailureThenReMention_ReLaunchesAfterReservationReleased`
+  - `EmptyMentionInExistingThread_RejectsBeforeInboxAcceptance`
+  - `BoundThreadMention_IsFollowup_AndReadsNoHistory`
+  - `FirstMentionAcceptanceReply_NotesImportedBackground`
+- ArchTests rename: file is `SlackThreadContextSpecs` (suffix `Specs`).
+- All test helpers/fakes updated to implement the new interface method.
+
+## Test runs
+- `Mohist.Server.UnitTests` — 1715/1715 pass.
+- `Mohist.Server.SpecTests` — 3585/3585 pass (the new spec adds 9 cases).
+- `Mohist.Server.ArchTests` — 51/51 pass.
+- `Mohist.Cli.Tests` — 1487/1487 pass.
+- `Mohist.Workflow.Definition.Tests` — 175/175 pass.
+
+## Acceptance criteria status
+All 9 from T-002 met:
+1. Server reads bounded thread history via the new `conversations.replies`
+   method using the decrypted bot token (`SecretStoreAddress(projectId,
+   connectionId, SecretKind.BotToken)`); mention text minus the bot mention
+   is the task.
+2. Root mention imports nothing; bound-threads go to follow-up.
+3. Over-limit drops oldest-first with the stable marker; the marker appears
+   in both the Slack acceptance reply and the composed agent input via
+   `AgentStartupContextComposer`.
+4. Refuse path: no AgentJob/AgentSession, no history imported, reservation
+   released, user asked to re-mention.
+5. Empty mention on the thread-context path still rejects with the same
+   "Please send a task for the Agent to perform." text.
+6. Edit/delete immutability: SlackConnectionRoutes has no edit/delete
+   handler at all (prior to and after this change), so accepted input and
+   audit are preserved by default.
+7. Acceptance reply reports "prior thread discussion is being used as
+   background" and adds the truncation suffix when applicable.
+8. Spec/unit tests cover all required scenarios via fakes.
+9. `npm test` is green (server unit + spec + arch + CLI + workflow).
+
+## Notes for future readers
+- The `SlackThreadHistoryReader` is wired through the `IScopedService`
+  convention, so any new assembly with that marker will auto-register.
+- The read is intentionally called before the launch reservation so the
+  reservation can be released cleanly on refusal — keeps the inbound Slack
+  surface stateless about partial work.
+- The character budget is configurable so a noisy Slack thread with a
+  long-running peer bot does not inflate the Agent's input; the depth cap
+  keeps the read bounded even on adversarial workloads.
+- The `AgentStartupContext.TruncationMarker` ("N oldest messages omitted")
+  is the same string the router puts in the Slack acceptance reply, so the
+  two attestations cannot drift.
