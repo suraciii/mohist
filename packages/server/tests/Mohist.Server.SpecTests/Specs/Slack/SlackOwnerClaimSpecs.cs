@@ -46,7 +46,7 @@ public sealed class SlackOwnerClaimSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", _connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes("bot-token"));
         var factory = new TestDbContextFactory(_database.Options);
-        _claims = new SlackOwnerClaimService(factory, _secrets, _slack, _time, new SlackConnectionAccessDecider(factory, new SlackConnectionAllowedMemberStore(factory, _time)));
+        _claims = new SlackOwnerClaimService(factory, _secrets, _slack, _time, new SlackConnectionAccessDecider(factory, new SlackConnectionAllowedMemberStore(factory, _time), _slack, _secrets));
     }
 
     public ValueTask DisposeAsync()

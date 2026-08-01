@@ -12,16 +12,44 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
         ["im"] = ["chat:write", "im:history"],
         ["team"] = ["users:read"],
     });
-    public SlackUserInfoResponse UsersInfo { get; set; } = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
+    public SlackUserInfoResponse DefaultUsersInfo { get; set; } = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
+    public SlackUserInfoResponse UsersInfo
+    {
+        get => DefaultUsersInfo;
+        set => DefaultUsersInfo = value;
+    }
+    public Dictionary<string, SlackUserInfoResponse> UsersInfoByUser { get; } = new(StringComparer.Ordinal);
+    public Func<string, SlackUserInfoResponse>? UsersInfoResolver { get; set; }
+    public Queue<SlackConversationInfoResponse> ConversationsInfoResponses { get; } = new();
+    public Func<string, SlackConversationInfoResponse>? ConversationsInfoResolver { get; set; }
+    public SlackConversationInfoResponse DefaultConversationsInfo { get; set; } = new(true, null, new("C-default", null, null, false, true));
     public Queue<SlackConversationsRepliesPage> ConversationsRepliesPages { get; } = new();
     public SlackConversationsRepliesPage? ConversationsRepliesError { get; set; }
+    public List<string> UsersInfoCalls { get; } = new();
+    public List<string> ConversationsInfoCalls { get; } = new();
 
     public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) => Task.FromResult(AppsConnectionOpen);
     public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) => Task.FromResult(AuthTest);
     public Task<SlackBotInfoResponse> BotsInfoAsync(string botId, string botToken, CancellationToken ct = default) => Task.FromResult(BotsInfo);
     public Task<SlackPermissionsScopesListResponse> PermissionsScopesListAsync(string botToken, CancellationToken ct = default) => Task.FromResult(PermissionsScopesList);
-    public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) => Task.FromResult(UsersInfo);
-    public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackConversationInfoResponse(true, null, null));
+    public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default)
+    {
+        UsersInfoCalls.Add(userId);
+        if (UsersInfoResolver is not null)
+            return Task.FromResult(UsersInfoResolver(userId));
+        if (UsersInfoByUser.TryGetValue(userId, out var configured))
+            return Task.FromResult(configured);
+        return Task.FromResult(DefaultUsersInfo);
+    }
+    public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default)
+    {
+        ConversationsInfoCalls.Add(conversationId);
+        if (ConversationsInfoResolver is not null)
+            return Task.FromResult(ConversationsInfoResolver(conversationId));
+        if (ConversationsInfoResponses.Count > 0)
+            return Task.FromResult(ConversationsInfoResponses.Dequeue());
+        return Task.FromResult(DefaultConversationsInfo);
+    }
     public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));
     public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,

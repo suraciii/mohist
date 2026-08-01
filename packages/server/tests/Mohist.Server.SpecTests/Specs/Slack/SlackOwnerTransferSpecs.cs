@@ -51,7 +51,7 @@ public sealed class SlackOwnerTransferSpecs : IAsyncLifetime
         }
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", _connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes("bot-token"));
         var factory = new TestDbContextFactory(_database.Options);
-        _claims = new SlackOwnerClaimService(factory, _secrets, _slack, _time, new SlackConnectionAccessDecider(factory, new SlackConnectionAllowedMemberStore(factory, _time)));
+        _claims = new SlackOwnerClaimService(factory, _secrets, _slack, _time, new SlackConnectionAccessDecider(factory, new SlackConnectionAllowedMemberStore(factory, _time), _slack, _secrets));
     }
 
     public ValueTask DisposeAsync()
@@ -291,7 +291,7 @@ public sealed class SlackOwnerTransferSpecs : IAsyncLifetime
             await db.SaveChangesAsync();
         }
 
-        _claims = new SlackOwnerClaimService(new TestDbContextFactory(_database.Options), _secrets, _slack, _time, new SlackConnectionAccessDecider(new TestDbContextFactory(_database.Options), new SlackConnectionAllowedMemberStore(new TestDbContextFactory(_database.Options), _time)));
+        _claims = new SlackOwnerClaimService(new TestDbContextFactory(_database.Options), _secrets, _slack, _time, new SlackConnectionAccessDecider(new TestDbContextFactory(_database.Options), new SlackConnectionAllowedMemberStore(new TestDbContextFactory(_database.Options), _time), _slack, _secrets));
 
         var code = await _claims.GenerateAsync("project-1", _connectionId);
         _slack.UsersInfo = new(true, null, new("U_CLAIMER", "T1", false, false, false, false, false));
