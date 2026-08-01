@@ -45,6 +45,7 @@ export interface AgentConnectionDto {
   healthReason: string | null
   agentReadiness: string
   ownerSlackUserId: string | null
+  accessPolicy: string
   lastHeartbeatAt: string | null
   createdAt: string
   updatedAt: string
@@ -82,4 +83,35 @@ export interface AgentConnectionConfigureRequest {
 export interface AgentConnectionClaimOwnerResponse {
   code: string
   expiresAt: string
+}
+
+export const ACCESS_POLICY_VALUES = ['owner_only', 'allowlist', 'anyone'] as const
+export type AccessPolicyKind = (typeof ACCESS_POLICY_VALUES)[number]
+
+export interface AccessPolicyState {
+  accessPolicy: string
+  allowMembers: string[]
+  anyoneDisclosure: string
+}
+
+export interface AccessPolicyManageRequest {
+  accessPolicy: AccessPolicyKind
+  allowMembers: string[]
+}
+
+export interface AccessPolicyManageResponse {
+  connection: AgentConnectionDto
+  accessPolicy: string
+  allowMembers: string[]
+  anyoneDisclosure: string
+}
+
+export interface SlackMemberSearchEntry {
+  slackUserId: string
+  displayName: string | null
+  avatarUrl: string | null
+}
+
+export interface SlackMemberSearchResponse {
+  members: SlackMemberSearchEntry[]
 }

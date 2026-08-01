@@ -119,6 +119,12 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
       http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
         HttpResponse.json({ success: true, data: makeDetail() }),
       ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/access', () =>
+        HttpResponse.json({
+          success: true,
+          data: { accessPolicy: 'owner_only', allowMembers: [], anyoneDisclosure: 'disclosure' },
+        }),
+      ),
     )
   })
 

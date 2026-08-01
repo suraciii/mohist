@@ -363,3 +363,65 @@ describe('ConnectionDiagnosticPage — configure & claim-owner actions (MSW)', (
     expect(screen.getByTestId('connection-diagnostic-facts')).toHaveTextContent(/credential status/i)
   })
 })
+
+describe('ConnectionDiagnosticPage — access policy (MSW)', () => {
+  beforeEach(() => {
+    server.use(
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/diagnostic', () =>
+        HttpResponse.json({
+          success: true,
+          data: makeDiagnostic({ facts: makeFacts({ setupProgress: 'complete' }) }),
+        }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId', () =>
+        HttpResponse.json({ success: true, data: makeDetail() }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/access', () =>
+        HttpResponse.json({
+          success: true,
+          data: {
+            accessPolicy: 'allowlist',
+            allowMembers: ['U_EXISTING'],
+            anyoneDisclosure: 'Invoking this Bot grants the Agent authority.',
+          },
+        }),
+      ),
+    )
+  })
+
+  it('loads access state and POSTs the replaced allowlist to /manage-access', async () => {
+    const manageCalls: Array<{ method: string; pathname: string; body: unknown }> = []
+    server.use(
+      http.post(
+        '*/api/projects/:projectId/slack-connections/:connectionId/manage-access',
+        async ({ request }) => {
+          const text = await request.text()
+          let parsed: unknown = text
+          try { parsed = JSON.parse(text) } catch { /* keep raw */ }
+          const url = new URL(request.url)
+          manageCalls.push({ method: request.method, pathname: url.pathname, body: parsed })
+          return HttpResponse.json({
+            success: true,
+            data: { ...makeDetail().connection, accessPolicy: 'owner_only' },
+          })
+        },
+      ),
+    )
+
+    const user = userEvent.setup()
+    renderPage()
+
+    const section = await screen.findByTestId('connection-access-policy-section')
+    expect(section).toBeInTheDocument()
+    expect(await screen.findByTestId('connection-access-policy-radio-allowlist')).toBeChecked()
+    expect(screen.getByTestId('connection-access-policy-chip')).toHaveAttribute('data-slack-user-id', 'U_EXISTING')
+
+    await user.click(screen.getByTestId('connection-access-policy-radio-owner_only'))
+    await user.click(screen.getByTestId('connection-access-policy-submit'))
+
+    await waitFor(() => expect(manageCalls).toHaveLength(1))
+    expect(manageCalls[0].method).toBe('POST')
+    expect(manageCalls[0].pathname).toBe('/api/projects/proj-1/slack-connections/conn-1/manage-access')
+    expect(manageCalls[0].body).toEqual({ accessPolicy: 'owner_only', allowMembers: [] })
+  })
+})

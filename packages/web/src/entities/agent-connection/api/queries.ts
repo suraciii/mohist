@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -8,7 +9,10 @@ import {
   createAgentConnection,
   getAgentConnection,
   getConnectionDiagnostic,
+  getAgentConnectionAccess,
   listAgentConnections,
+  manageAgentConnectionAccess,
+  searchSlackConnectionMembers,
 } from './client'
 import type {
   AgentConnectionClaimOwnerResponse,
@@ -17,6 +21,11 @@ import type {
   AgentConnectionCreateResponse,
   AgentConnectionDetailResponse,
   AgentConnectionDto,
+  AccessPolicyManageRequest,
+  AccessPolicyManageResponse,
+  AccessPolicyState,
+  SlackMemberSearchEntry,
+  SlackMemberSearchResponse,
 } from '../model/types'
 
 export function connectionDiagnosticQueryOptions(
@@ -164,5 +173,84 @@ export function useClaimAgentConnectionOwner(connectionId: string | null | undef
   const { projectId } = useProject()
   return useMutation(
     claimAgentConnectionOwnerMutationOptions(projectId, connectionId ?? '', queryClient),
+  )
+}
+
+export const agentConnectionAccessQueryKey = (
+  projectId: string | null | undefined,
+  connectionId: string | null | undefined,
+) => ['agent-connection-access', projectId, connectionId] as const
+
+export function agentConnectionAccessQueryOptions(
+  projectId: string | null | undefined,
+  connectionId: string | null | undefined,
+  enabled = true,
+) {
+  return {
+    queryKey: agentConnectionAccessQueryKey(projectId, connectionId),
+    queryFn: () => getAgentConnectionAccess(projectId, connectionId!),
+    enabled: !!projectId && !!connectionId && enabled,
+  }
+}
+
+export function useAgentConnectionAccess(
+  connectionId: string | null | undefined,
+  enabled = true,
+) {
+  const { projectId } = useProject()
+  return useQuery<AccessPolicyState>(agentConnectionAccessQueryOptions(projectId, connectionId, enabled))
+}
+
+export function manageAgentConnectionAccessMutationOptions(
+  projectId: string | null | undefined,
+  connectionId: string,
+  queryClient: InvalidationClient,
+) {
+  return {
+    mutationFn: (data: AccessPolicyManageRequest) =>
+      manageAgentConnectionAccess(projectId, connectionId, data),
+    onSuccess: (_updated: AccessPolicyManageResponse) => {
+      invalidateAgentConnectionQueries(queryClient, projectId, connectionId)
+      queryClient.invalidateQueries({
+        queryKey: agentConnectionAccessQueryKey(projectId, connectionId),
+      })
+      toast.success('Access policy saved')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to save access policy')
+    },
+  }
+}
+
+export function useManageAgentConnectionAccess(connectionId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(
+    manageAgentConnectionAccessMutationOptions(projectId, connectionId ?? '', queryClient),
+  )
+}
+
+export function useSearchSlackMembers(
+  connectionId: string | null | undefined,
+  query: string,
+  enabled: boolean,
+) {
+  const { projectId } = useProject()
+  return useQuery<SlackMemberSearchResponse>({
+    queryKey: ['slack-member-search', projectId, connectionId, query],
+    queryFn: () => searchSlackConnectionMembers(projectId, connectionId!, query),
+    enabled: !!projectId && !!connectionId && enabled && query.trim().length > 0,
+    staleTime: 30_000,
+  })
+}
+
+export function useSlackMemberSearchFn(connectionId: string | null | undefined) {
+  const { projectId } = useProject()
+  return useCallback(
+    async (query: string): Promise<SlackMemberSearchEntry[]> => {
+      const res = await searchSlackConnectionMembers(projectId, connectionId ?? '', query)
+      return res.members
+    },
+    [projectId, connectionId],
   )
 }

@@ -294,6 +294,22 @@ public static class SlackConnectionRoutes
             }
         });
 
+        management.MapGet("/{connectionId}/access", async (HttpContext context, string connectionId, AgentConnectionStore connections, SlackConnectionAccessManager access, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var detail = await connections.GetAsync(projectId, connectionId, ct);
+            if (detail is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+
+            var allowMembers = await access.ListMembersAsync(projectId, connectionId, ct);
+            return ApiResults.Ok(new
+            {
+                accessPolicy = detail.AccessPolicy,
+                allowMembers,
+                anyoneDisclosure = SlackConnectionAccessContract.AnyoneDisclosure,
+            });
+        });
+
         management.MapPost("/{connectionId}/manage-access", async (HttpContext context, string connectionId, SlackConnectionManageAccessBody body, AgentConnectionStore connections, SlackConnectionAccessManager access, CancellationToken ct) =>
         {
             if (body is null)
