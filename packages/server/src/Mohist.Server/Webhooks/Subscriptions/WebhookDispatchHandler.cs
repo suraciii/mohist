@@ -2,7 +2,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Events.Matching;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Webhooks.Domain;
 using Mohist.Server.Webhooks.Services;
 
@@ -13,8 +12,6 @@ namespace Mohist.Server.Webhooks.Subscriptions;
     Identity = "Mohist.Server.Events.Subscriptions.WebhookDispatchHandler")]
 public sealed class WebhookDispatchHandler : ICloudEventHandler
 {
-    private const int ErrorSummaryMaxLength = 1024;
-
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<WebhookDispatchHandler> _log;
@@ -48,24 +45,28 @@ public sealed class WebhookDispatchHandler : ICloudEventHandler
         if (subscriptions.Count == 0)
             return;
 
-        var secretStore = services.GetRequiredService<ISecretStore>();
         var client = services.GetRequiredService<IWebhookHttpClient>();
         var renderer = services.GetRequiredService<WebhookPayloadRenderer>();
         byte[]? payload = null;
 
         foreach (var subscription in subscriptions)
         {
-            var compileResult = EventMatchExpression.Compile(subscription.Match);
-            if (!compileResult.IsSuccess || !compileResult.Expression!.Matches(new CloudEventEventMatchInput(evt)))
+            if (!ShouldDeliver(subscription, evt))
                 continue;
 
             try
             {
-                var secret = await secretStore.LoadAsync(
-                    new SecretStoreAddress(projectId, subscription.Id, SecretKind.WebhookSecret),
-                    ct);
                 payload ??= renderer.Render(evt);
-                await client.SendAsync(subscription.TargetUrl, payload, secret, ct);
+                var auth = await store.ResolveAuthMaterialAsync(subscription, ct);
+                var signingSecret = await store.LoadSigningSecretAsync(projectId, subscription.Id, ct);
+                var result = await client.SendAsync(subscription.TargetUrl, payload, auth, signingSecret, ct);
+                if (!result.Success)
+                {
+                    _log.LogWarning(
+                        "Webhook delivery to {SubscriptionId} failed for event {EventId}: {Error}",
+                        subscription.Id, evt.Id, result.Error);
+                    await RecordFailureAsync(store, projectId, subscription, evt, result, ct);
+                }
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -74,9 +75,27 @@ public sealed class WebhookDispatchHandler : ICloudEventHandler
                     "Webhook delivery failed for subscription {SubscriptionId} and event {EventId}",
                     subscription.Id,
                     evt.Id);
-                await RecordFailureAsync(store, projectId, subscription, evt, ex, ct);
+                await RecordFailureAsync(store, projectId, subscription, evt, new WebhookDeliveryResult(false, null, null, ex.Message, 0), ct);
             }
         }
+    }
+
+    private static bool ShouldDeliver(WebhookSubscription subscription, CloudEvent evt)
+    {
+        // Event-type selection: "selected" means only the chosen types are delivered.
+        if (subscription.EventSelectionMode == WebhookEventSelectionMode.Selected
+            && !subscription.EventTypes.Contains(evt.Type))
+        {
+            return false;
+        }
+
+        // CEL is an optional advanced filter applied in addition to the selected events.
+        if (string.IsNullOrWhiteSpace(subscription.Match))
+            return true;
+        var compiled = EventMatchExpression.Compile(subscription.Match);
+        if (!compiled.IsSuccess)
+            return false;
+        return compiled.Expression!.Matches(new CloudEventEventMatchInput(evt));
     }
 
     private async Task RecordFailureAsync(
@@ -84,11 +103,12 @@ public sealed class WebhookDispatchHandler : ICloudEventHandler
         string projectId,
         WebhookSubscription subscription,
         CloudEvent evt,
-        Exception exception,
+        WebhookDeliveryResult result,
         CancellationToken ct)
     {
         try
         {
+            var summary = string.IsNullOrWhiteSpace(result.Error) ? "delivery failed" : result.Error;
             await store.RecordFailureAsync(new WebhookDeliveryFailure
             {
                 Id = Guid.NewGuid().ToString("N"),
@@ -97,7 +117,9 @@ public sealed class WebhookDispatchHandler : ICloudEventHandler
                 EventId = evt.Id,
                 EventType = evt.Type,
                 TargetUrl = subscription.TargetUrl,
-                ErrorSummary = Summarize(exception),
+                ResponseStatus = result.StatusCode,
+                DurationMs = result.DurationMs > 0 ? (int)result.DurationMs : null,
+                ErrorSummary = Truncate(summary, 1024),
                 OccurredAt = _timeProvider.GetUtcNow(),
             }, ct);
         }
@@ -111,11 +133,5 @@ public sealed class WebhookDispatchHandler : ICloudEventHandler
         }
     }
 
-    private static string Summarize(Exception exception)
-    {
-        var message = string.IsNullOrWhiteSpace(exception.Message)
-            ? exception.GetType().Name
-            : exception.Message;
-        return message.Length <= ErrorSummaryMaxLength ? message : message[..ErrorSummaryMaxLength];
-    }
+    private static string Truncate(string value, int max) => value.Length <= max ? value : value[..max];
 }

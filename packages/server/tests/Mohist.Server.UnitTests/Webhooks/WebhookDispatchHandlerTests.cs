@@ -60,7 +60,7 @@ public sealed class WebhookDispatchHandlerTests
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("https://hooks.test/signed", request.Uri);
-        Assert.Equal("application/json", request.ContentType);
+        Assert.Equal("application/cloudevents+json", request.ContentType);
         using var payload = JsonDocument.Parse(request.Body);
         Assert.Equal("1.0", payload.RootElement.GetProperty("specversion").GetString());
         Assert.Equal("evt-1", payload.RootElement.GetProperty("id").GetString());
@@ -135,8 +135,51 @@ public sealed class WebhookDispatchHandlerTests
         Assert.Equal("evt-1", failure.EventId);
         Assert.Equal("com.mohist.issue.completed", failure.EventType);
         Assert.Equal("https://hooks.test/fails", failure.TargetUrl);
+        Assert.Equal(500, failure.ResponseStatus);
         Assert.Equal(Now, failure.OccurredAt);
-        Assert.Equal("Response status code does not indicate success: 500 (Internal Server Error).", failure.ErrorSummary);
+        Assert.Equal("endpoint responded 500", failure.ErrorSummary);
+    }
+
+    [Fact]
+    public async Task HandleAsyncDeliversOnlySelectedEventTypes()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await database.AddSubscriptionAsync("selected", "", "https://hooks.test/selected",
+            eventSelectionMode: "selected", eventTypes: ["com.mohist.issue.created"]);
+        await database.AddSubscriptionAsync("all", "", "https://hooks.test/all");
+        var handler = new RecordingHttpMessageHandler();
+        using var http = new HttpClient(handler);
+        using var services = CreateServices(database, new FakeSecretStore(), new WebhookHttpClient(http));
+        var dispatch = CreateHandler(services);
+
+        await dispatch.HandleAsync(Event(), CancellationToken.None); // Event is com.mohist.issue.completed
+
+        // "selected" subscribes to issue.created only, so a .completed event is not delivered to it.
+        var delivered = handler.Requests.Select(r => r.Uri).Order();
+        Assert.Equal(["https://hooks.test/all"], delivered);
+    }
+
+    [Fact]
+    public async Task HandleAsyncAppliesCustomHeaderAuthFromSecretStore()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        var subscription = await database.AddSubscriptionAsync(
+            "buzz", "", "https://hooks.test/buzz",
+            authType: "custom");
+        var secrets = new FakeSecretStore();
+        // Custom-header credential stored under the v1 auth address (subscriptionId + ":auth").
+        secrets.Set("proj-1", subscription + ":auth",
+            Encoding.UTF8.GetBytes("{\"X-Webhook-Secret\":\"buzz-secret-value\"}"));
+        var handler = new RecordingHttpMessageHandler();
+        using var http = new HttpClient(handler);
+        using var services = CreateServices(database, secrets, new WebhookHttpClient(http));
+        var dispatch = CreateHandler(services);
+
+        await dispatch.HandleAsync(Event(), CancellationToken.None);
+
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal("buzz-secret-value", request.CustomHeader);
+        Assert.Null(request.Signature); // v1 does not sign unless a legacy signing secret is present
     }
 
     private static WebhookDispatchHandler CreateHandler(ServiceProvider services, TimeProvider? time = null) =>
@@ -188,7 +231,9 @@ public sealed class WebhookDispatchHandlerTests
             return new TestDatabase(connection, options);
         }
 
-        public async Task AddSubscriptionAsync(string id, string match, string targetUrl)
+        public async Task<string> AddSubscriptionAsync(
+            string id, string match, string targetUrl,
+            string eventSelectionMode = "all", string[]? eventTypes = null, string authType = "none")
         {
             await using var context = await Factory.CreateDbContextAsync();
             context.WebhookSubscriptions.Add(new WebhookSubscriptionRow
@@ -199,10 +244,14 @@ public sealed class WebhookDispatchHandlerTests
                 Match = match,
                 TargetUrl = targetUrl,
                 Status = WebhookSubscriptionStatus.Active,
+                EventSelectionMode = eventSelectionMode,
+                EventTypes = System.Text.Json.JsonSerializer.Serialize(eventTypes ?? []),
+                AuthType = authType,
                 CreatedAt = Now,
                 UpdatedAt = Now,
             });
             await context.SaveChangesAsync();
+            return id;
         }
 
         public ValueTask DisposeAsync() => connection.DisposeAsync();
@@ -253,7 +302,8 @@ public sealed class WebhookDispatchHandlerTests
                 uri,
                 request.Content?.Headers.ContentType?.MediaType,
                 body,
-                request.Headers.TryGetValues(WebhookHttpClient.SignatureHeader, out var values) ? values.SingleOrDefault() : null));
+                request.Headers.TryGetValues(WebhookHttpClient.SignatureHeader, out var values) ? values.SingleOrDefault() : null,
+                request.Headers.TryGetValues("X-Webhook-Secret", out var custom) ? custom.SingleOrDefault() : null));
             return new HttpResponseMessage(responseStatus?.Invoke(uri) ?? HttpStatusCode.NoContent);
         }
     }
@@ -263,5 +313,6 @@ public sealed class WebhookDispatchHandlerTests
         string Uri,
         string? ContentType,
         string Body,
-        string? Signature);
+        string? Signature,
+        string? CustomHeader);
 }

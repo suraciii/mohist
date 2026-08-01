@@ -36,9 +36,23 @@ internal sealed partial class TableRenderer
 
         _out.WriteLine($"{StringOf(subscription, "name")} ({StringOf(subscription, "id")})");
         _out.WriteLine($"status: {StringOf(subscription, "status")}");
-        _out.WriteLine($"match: {StringOf(subscription, "match")}");
         _out.WriteLine($"targetUrl: {StringOf(subscription, "targetUrl")}");
+        _out.WriteLine($"events: {DescribeEvents(subscription)}");
+        _out.WriteLine($"auth: {StringOf(subscription, "authType")}");
+        _out.WriteLine($"match (advanced): {StringOf(subscription, "match")}");
         _out.WriteLine($"hasSecret: {BoolOf(subscription, "hasSecret")}");
+    }
+
+    private static string DescribeEvents(JsonObject subscription)
+    {
+        var mode = StringOf(subscription, "eventSelectionMode");
+        if (string.IsNullOrWhiteSpace(mode)) mode = "all";
+        if (mode != "selected" || subscription["eventTypes"] is not JsonNode types)
+            return mode == "all" ? "all events" : mode;
+        var list = types is JsonArray arr
+            ? arr.Select(t => t?.GetValue<string>() ?? string.Empty).Where(s => !string.IsNullOrWhiteSpace(s))
+            : Enumerable.Empty<string>();
+        return "selected: " + string.Join(", ", list);
     }
 
     private void RenderWebhookDeliveryFailureList(JsonNode? data)
@@ -51,12 +65,13 @@ internal sealed partial class TableRenderer
         }
 
         WriteTable(
-            ["occurred at", "event type", "error summary"],
-            [30, 42, 60],
+            ["occurred at", "event type", "status", "error summary"],
+            [30, 38, 8, 60],
             failures.OfType<JsonObject>().Select(failure => new[]
             {
                 Truncate(StringOf(failure, "occurredAt"), 30),
-                Truncate(StringOf(failure, "eventType"), 42),
+                Truncate(StringOf(failure, "eventType"), 38),
+                StringOf(failure, "responseStatus"),
                 Truncate(StringOf(failure, "errorSummary"), 60),
             }).ToList());
     }

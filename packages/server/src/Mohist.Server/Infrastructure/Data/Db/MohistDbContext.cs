@@ -499,6 +499,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Match).IsRequired();
             entity.Property(e => e.TargetUrl).HasMaxLength(2048).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.EventSelectionMode).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.EventTypes).IsRequired();
+            entity.Property(e => e.AuthType).HasMaxLength(16).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.Name })
@@ -520,6 +523,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.EventId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.EventType).HasMaxLength(256).IsRequired();
             entity.Property(e => e.TargetUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(e => e.ResponseStatus);
+            entity.Property(e => e.DurationMs);
             entity.Property(e => e.ErrorSummary).HasMaxLength(1024).IsRequired();
             entity.Property(e => e.OccurredAt).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.SubscriptionId })

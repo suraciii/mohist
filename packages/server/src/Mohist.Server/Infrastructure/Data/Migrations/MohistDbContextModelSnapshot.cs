@@ -333,7 +333,21 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Webhooks.WebhookSubscriptionRow", b =>
                 {
+                    b.Property<string>("AuthType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventSelectionMode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventTypes")
+                        .IsRequired()
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Id")
@@ -384,6 +398,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Webhooks.WebhookDeliveryFailureRow", b =>
                 {
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("ErrorSummary")
                         .IsRequired()
                         .HasMaxLength(1024)
@@ -410,6 +427,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ResponseStatus")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SubscriptionId")
                         .IsRequired()
