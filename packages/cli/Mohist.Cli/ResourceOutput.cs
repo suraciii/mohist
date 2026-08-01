@@ -48,7 +48,9 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
             MohistCliApi.TableShape.SessionList or
-            MohistCliApi.TableShape.OtelTracesList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.OtelTracesList or
+            MohistCliApi.TableShape.WebhookSubscriptionList or
+            MohistCliApi.TableShape.WebhookDeliveryFailureList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -106,6 +108,10 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfile => ["issueNumber", "projectId", "sourceTemplateId", "hasCustomTemplate", "yaml", "workflowRunId", "profileId", "updateMode", "variables", "updatedAt", "templateSource"],
             MohistCliApi.TableShape.WorkflowProfileList => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.WebhookSubscription or MohistCliApi.TableShape.WebhookSubscriptionList =>
+                ["id", "projectId", "name", "match", "targetUrl", "status", "hasSecret", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.WebhookDeliveryFailureList =>
+                ["id", "projectId", "subscriptionId", "eventId", "eventType", "targetUrl", "errorSummary", "occurredAt"],
             MohistCliApi.TableShape.DeadLetterList => ["id", "origin", "sourceId", "source", "eventId", "type", "time", "subject", "dataContentType", "data", "extensions", "handler", "error", "attempts", "deadLetteredAt", "status", "redeliveryAttemptedAt"],
             MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "delivered", "attempts", "error"],
             MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],

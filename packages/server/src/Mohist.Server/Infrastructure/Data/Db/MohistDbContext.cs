@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Webhooks;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Data.Events;
@@ -52,6 +53,8 @@ public class MohistDbContext : DbContext
     public DbSet<IssueRow> Issues { get; set; } = null!;
     public DbSet<AgentRow> Agents { get; set; } = null!;
     public DbSet<RoutingRuleRow> RoutingRules { get; set; } = null!;
+    public DbSet<WebhookSubscriptionRow> WebhookSubscriptions { get; set; } = null!;
+    public DbSet<WebhookDeliveryFailureRow> WebhookDeliveryFailures { get; set; } = null!;
     public DbSet<WatchEntryRow> WatchEntries { get; set; } = null!;
     public DbSet<AgentConnectionRow> AgentConnections { get; set; } = null!;
     public DbSet<IssueEventRow> IssueEvents { get; set; } = null!;
@@ -480,6 +483,45 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
             entity.HasIndex(e => e.ProjectId)
                 .HasDatabaseName("IX_RoutingRules_ProjectId");
+        });
+
+        modelBuilder.Entity<WebhookSubscriptionRow>(entity =>
+        {
+            entity.ToTable("WebhookSubscriptions");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Match).IsRequired();
+            entity.Property(e => e.TargetUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.Name })
+                .IsUnique()
+                .HasDatabaseName("UX_WebhookSubscriptions_ProjectId_Name");
+            entity.HasIndex(e => new { e.ProjectId, e.Status })
+                .HasDatabaseName("IX_WebhookSubscriptions_ProjectId_Status");
+            entity.HasIndex(e => e.ProjectId)
+                .HasDatabaseName("IX_WebhookSubscriptions_ProjectId");
+        });
+
+        modelBuilder.Entity<WebhookDeliveryFailureRow>(entity =>
+        {
+            entity.ToTable("WebhookDeliveryFailures");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.SubscriptionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.EventId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.EventType).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.TargetUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(e => e.ErrorSummary).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.OccurredAt).IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.SubscriptionId })
+                .HasDatabaseName("IX_WebhookDeliveryFailures_ProjectId_SubscriptionId");
+            entity.HasIndex(e => e.ProjectId)
+                .HasDatabaseName("IX_WebhookDeliveryFailures_ProjectId");
         });
 
         modelBuilder.Entity<WatchEntryRow>(entity =>
@@ -1182,7 +1224,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_ConnectionSecrets_Kind",
-                "\"Kind\" IN ('appToken', 'botToken')"));
+                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret')"));
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
                 .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
         });
