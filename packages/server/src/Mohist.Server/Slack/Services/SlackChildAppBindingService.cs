@@ -32,11 +32,14 @@ public sealed class SlackChildAppBindingService : IScopedService
     public async Task<IReadOnlyList<SlackChildAppBindingResult>> ProcessPendingAsync(CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var childIds = await db.SlackChildAppBindingObligations.AsNoTracking()
+        var pending = await db.SlackChildAppBindingObligations.AsNoTracking()
             .Where(item => item.Status != SlackChildAppBindingObligationStatus.Bound)
+            .Select(item => new { item.ChildAppId, item.UpdatedAt })
+            .ToListAsync(ct);
+        var childIds = pending
             .OrderBy(item => item.UpdatedAt)
             .Select(item => item.ChildAppId)
-            .ToListAsync(ct);
+            .ToList();
         var results = new List<SlackChildAppBindingResult>(childIds.Count);
         foreach (var childId in childIds)
             results.Add(await ReconcileAsync(childId, ct));

@@ -345,6 +345,31 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Pending_binding_processing_orders_in_memory_for_sqlite_date_compatibility()
+    {
+        var oldest = await SeedChildAsync(
+            lifecycle: SlackAppLifecycle.Created,
+            authorization: SlackAuthorizationState.Authorized,
+            appId: "A_OLDEST",
+            botUserId: "U_OLDEST");
+        var newest = await SeedChildAsync(
+            lifecycle: SlackAppLifecycle.Created,
+            authorization: SlackAuthorizationState.Authorized,
+            appId: "A_NEWEST",
+            botUserId: "U_NEWEST");
+        await SeedBindingObligationAsync(oldest, SlackChildAppBindingObligationStatus.Pending, _time.GetUtcNow().AddMinutes(-1));
+        await SeedBindingObligationAsync(newest, SlackChildAppBindingObligationStatus.Pending, _time.GetUtcNow());
+
+        var port = new RecordingBindingPort();
+        var binding = new SlackChildAppBindingService(_factory, port, _time);
+
+        var results = await binding.ProcessPendingAsync();
+
+        Assert.Equal([oldest.AgentConnectionId, newest.AgentConnectionId], port.ConnectionIds);
+        Assert.All(results, result => Assert.Equal(SlackChildAppBindingStatus.Bound, result.Status));
+    }
+
+    [Fact]
     public async Task Database_constraints_protect_active_enrollment_child_app_and_staged_binding()
     {
         var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_UNIQUE", botUserId: "U_UNIQUE");
@@ -506,17 +531,21 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
-    private async Task SeedBindingObligationAsync(ManagedSlackChildAppRow child, string status)
+    private async Task SeedBindingObligationAsync(
+        ManagedSlackChildAppRow child,
+        string status,
+        DateTimeOffset? updatedAt = null)
     {
         await using var db = _factory.CreateDbContext();
+        var now = updatedAt ?? _time.GetUtcNow();
         db.SlackChildAppBindingObligations.Add(new SlackChildAppBindingObligationRow
         {
             Id = $"obligation-{Guid.NewGuid():N}",
             ChildAppId = child.Id,
             AgentConnectionId = child.AgentConnectionId,
             Status = status,
-            CreatedAt = _time.GetUtcNow(),
-            UpdatedAt = _time.GetUtcNow(),
+            CreatedAt = now,
+            UpdatedAt = now,
         });
         await db.SaveChangesAsync();
     }
@@ -552,5 +581,24 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) => Task.FromResult<byte[]?>(null);
         public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) => Task.FromResult(true);
         public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
+    }
+
+    private sealed class RecordingBindingPort : ISlackChildAppBindingPort
+    {
+        public List<string> ConnectionIds { get; } = [];
+
+        public Task<AgentConnection?> BindSlackIdentityAsync(
+            string projectId,
+            string id,
+            string workspaceTeamId,
+            string appId,
+            string botUserId,
+            string? botName,
+            CancellationToken ct = default,
+            string? claimToken = null)
+        {
+            ConnectionIds.Add(id);
+            return Task.FromResult<AgentConnection?>(new AgentConnection { Id = id });
+        }
     }
 }
