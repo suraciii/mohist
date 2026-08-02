@@ -581,6 +581,7 @@ public class MohistDbContext : DbContext
                 .HasDefaultValue(AccessPolicyKind.OwnerOnly)
                 .HasConversion<string>();
             entity.Property(e => e.LastHeartbeatAt);
+            entity.Property(e => e.OfflineGapAt);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.Property(e => e.DeletedAt);

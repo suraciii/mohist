@@ -21,6 +21,7 @@ public sealed class AgentConnection
     public string? OwnerSlackUserId { get; set; }
     public string AccessPolicy { get; set; } = AccessPolicyKind.OwnerOnly;
     public DateTimeOffset? LastHeartbeatAt { get; set; }
+    public DateTimeOffset? OfflineGapAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
@@ -51,6 +52,15 @@ public static class ConnectionHealthKind
     public const string Healthy = "healthy";
     public const string Degraded = "degraded";
     public const string Unhealthy = "unhealthy";
+}
+
+public static class SlackConnectionBackpressureReasons
+{
+    public const string OutboxOverflow = "slack_outbox_backpressured";
+    public const string InboxOverflow = "slack_inbox_backpressured";
+
+    public static bool IsBackpressureReason(string? reason) =>
+        reason is OutboxOverflow or InboxOverflow;
 }
 
 public static class AgentReadinessKind

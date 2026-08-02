@@ -91,6 +91,31 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
     }
 
     /// <summary>
+    /// Enumerates Slack Connections currently in
+    /// <see cref="ConnectionHealthKind.Degraded"/> on a Slack provider
+    /// backpressure reason, that are still
+    /// <see cref="DesiredStateKind.Enabled"/> and not soft-deleted. Used
+    /// by the Slack outbox dispatcher's recovery sweep to drive the
+    /// reason-guarded flip back to Healthy. Returns a lightweight id
+    /// projection (no full entity hydration) so the sweep does not
+    /// pay for fields it never reads.
+    /// </summary>
+    public async Task<IReadOnlyList<BackpressuredConnection>> ListBackpressuredAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentConnections.AsNoTracking()
+            .Where(connection => connection.DeletedAt == null
+                && connection.DesiredState == DesiredStateKind.Enabled
+                && connection.ConnectionHealth == ConnectionHealthKind.Degraded
+                && (connection.HealthReason == SlackConnectionBackpressureReasons.InboxOverflow
+                    || connection.HealthReason == SlackConnectionBackpressureReasons.OutboxOverflow))
+            .OrderBy(connection => connection.ProjectId)
+            .ThenBy(connection => connection.Id)
+            .Select(connection => new BackpressuredConnection(connection.ProjectId, connection.Id, connection.HealthReason!))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// Workspace-scoped projection of the active, identity-bound Mohist
     /// Bots in this workspace. Each row pairs the Slack <c>BotUserId</c>
     /// with the owning <see cref="AgentConnection"/> so the channel
@@ -192,6 +217,8 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
         string? ownerSlackUserId = null,
         string? accessPolicy = null,
         DateTimeOffset? lastHeartbeatAt = null,
+        DateTimeOffset? offlineGapAt = null,
+        bool clearOfflineGapAt = false,
         CancellationToken ct = default)
     {
         var immutableField = fields.FirstOrDefault(ImmutableBindingFields.Contains);
@@ -219,6 +246,8 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
         if (fields.Contains(nameof(ownerSlackUserId))) row.OwnerSlackUserId = ownerSlackUserId;
         if (fields.Contains(nameof(accessPolicy))) row.AccessPolicy = accessPolicy ?? existing.AccessPolicy;
         if (fields.Contains(nameof(lastHeartbeatAt))) row.LastHeartbeatAt = lastHeartbeatAt;
+        if (clearOfflineGapAt) row.OfflineGapAt = null;
+        else if (fields.Contains(nameof(offlineGapAt))) row.OfflineGapAt = offlineGapAt;
 
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
@@ -312,6 +341,30 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
         return ToDomain(bound);
     }
 
+    /// <summary>
+    /// Clears <see cref="AgentConnection.OfflineGapAt"/> when set. Returns
+    /// the affected row count. The diagnostic notice hangs around only
+    /// until the first new ingress is accepted (proven liveness) or the
+    /// operator explicitly acknowledges; the column is otherwise additive
+    /// and a no-op on a Connection that never had the gap stamped.
+    /// </summary>
+    public async Task<int> ClearOfflineGapIfSetAsync(string projectId, string id, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentConnections
+            .Where(row => row.ProjectId == projectId
+                && row.Id == id
+                && row.DeletedAt == null
+                && row.OfflineGapAt != null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.OfflineGapAt, (DateTimeOffset?)null)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+    }
+
     public async Task<AgentConnection?> DeleteAsync(string projectId, string id, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -376,6 +429,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
         OwnerSlackUserId = row.OwnerSlackUserId,
         AccessPolicy = string.IsNullOrEmpty(row.AccessPolicy) ? AccessPolicyKind.OwnerOnly : row.AccessPolicy,
         LastHeartbeatAt = row.LastHeartbeatAt,
+        OfflineGapAt = row.OfflineGapAt,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
         DeletedAt = row.DeletedAt,
@@ -402,6 +456,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
         OwnerSlackUserId = connection.OwnerSlackUserId,
         AccessPolicy = string.IsNullOrEmpty(connection.AccessPolicy) ? AccessPolicyKind.OwnerOnly : connection.AccessPolicy,
         LastHeartbeatAt = connection.LastHeartbeatAt,
+        OfflineGapAt = connection.OfflineGapAt,
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,
         DeletedAt = connection.DeletedAt,
@@ -422,6 +477,8 @@ public sealed class AgentConnectionDuplicateException(string projectId, string a
 }
 
 public sealed record SlackAdapterConnection(string ProjectId, string ConnectionId);
+
+public sealed record BackpressuredConnection(string ProjectId, string ConnectionId, string HealthReason);
 
 /// <summary>
 /// Workspace-scoped projection of the identity-bound Mohist Bots in

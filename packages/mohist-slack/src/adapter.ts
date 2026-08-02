@@ -1,4 +1,4 @@
-import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, IngressResult, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -105,12 +105,29 @@ export class SlackAdapter {
     try {
       const envelope = normalizeSocketEvent(body)
       const result = await this.options.transport.ingress(runtime.ref, envelope, signal)
+      await this.renderUserFacingRejection(runtime, envelope, result, signal)
       await ack()
       await this.drain(runtime, signal)
-      void result
     } finally {
       this.inFlight -= 1
     }
+  }
+
+  private async renderUserFacingRejection(
+    runtime: ConnectionRuntime,
+    envelope: SlackEnvelope,
+    result: IngressResult,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (result.kind !== "backpressured") return
+    if (runtime.draining || this.stopped || !runtime.web) return
+    const reason = result.reason ?? "This Slack Connection is backpressured; retry after pending deliveries drain."
+    const message: { channel: string; text: string; thread_ts?: string } = {
+      channel: envelope.conversationId,
+      text: reason,
+    }
+    if (envelope.threadTs) message.thread_ts = envelope.threadTs
+    await runtime.web.chat.postMessage(message)
   }
 
   private async drain(runtime: ConnectionRuntime, signal: AbortSignal) {
@@ -120,6 +137,7 @@ export class SlackAdapter {
       while (!signal.aborted) {
         const delivery = await this.options.transport.claimDelivery(runtime.ref, this.options.adapterId, signal)
         if (!delivery) return
+        let response: { ok?: boolean; error?: string } | undefined
         try {
           const payload = JSON.parse(delivery.payloadJson) as unknown
           const text = readText(payload)
@@ -129,12 +147,16 @@ export class SlackAdapter {
             text,
           }
           if (delivery.threadTs) message.thread_ts = delivery.threadTs
-          const response = await runtime.web.chat.postMessage(message)
-          if (response.ok === false) throw new Error(response.error ?? "Slack chat.postMessage failed")
-          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
+          response = await runtime.web.chat.postMessage(message)
         } catch (error) {
           await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
+          continue
         }
+        if (response.ok === false) {
+          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }, signal)
+          continue
+        }
+        await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
       }
     } finally {
       runtime.draining = false

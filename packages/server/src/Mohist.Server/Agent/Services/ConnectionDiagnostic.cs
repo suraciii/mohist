@@ -7,6 +7,7 @@ public static class ConnectionDiagnosticState
     public const string SetupIncomplete = "setup_incomplete";
     public const string CredentialsInvalid = "credentials_invalid";
     public const string ServiceOffline = "service_offline";
+    public const string Backpressured = "backpressured";
     public const string OwnerUnavailable = "owner_unavailable";
     public const string AgentNeedsSetup = "agent_needs_setup";
     public const string Disabled = "disabled";
@@ -50,9 +51,11 @@ public sealed record ConnectionDiagnosticFacts(
     bool AdapterOnline,
     string OwnerAvailability,
     string AgentReadiness,
-    ConnectionIdentityFacts Identity)
+    ConnectionIdentityFacts Identity,
+    DateTimeOffset? OfflineGapAt = null)
 {
     public bool IdentityDrift => Identity.HasDrift;
+    public bool HasOfflineGap => OfflineGapAt is not null;
 }
 
 public sealed record ConnectionIdentityFacts(
@@ -84,7 +87,8 @@ public static class ConnectionDiagnostic
             inputs.AdapterOnline,
             inputs.OwnerAvailability,
             inputs.AgentReadiness,
-            identity);
+            identity,
+            connection.OfflineGapAt);
 
         if (!string.Equals(connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal))
             return new(
@@ -107,6 +111,13 @@ public static class ConnectionDiagnostic
                     ? connection.HealthReason ?? "Slack service could not be reached."
                     : "The Slack adapter heartbeat is stale.",
                 "Start mohist-slack / check Slack connectivity.",
+                facts);
+
+        if (IsBackpressured(connection))
+            return new(
+                ConnectionDiagnosticState.Backpressured,
+                DescribeBackpressure(connection.HealthReason),
+                "Wait for the backlog to drain / retry input shortly.",
                 facts);
 
         if (string.Equals(inputs.OwnerAvailability, OwnerAvailabilityKind.Unavailable, StringComparison.Ordinal))
@@ -159,6 +170,17 @@ public static class ConnectionDiagnostic
     private static bool IsServiceFailure(AgentConnection connection) =>
         connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
         && ContainsAny(connection.HealthReason, "could not be reached", "unreachable", "service offline", "mohist-slack");
+
+    private static bool IsBackpressured(AgentConnection connection) =>
+        connection.ConnectionHealth == ConnectionHealthKind.Degraded
+        && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
+
+    private static string DescribeBackpressure(string? reason) =>
+        reason == SlackConnectionBackpressureReasons.InboxOverflow
+            ? "The provider inbox is at capacity; new Slack input is being refused until the backlog drains."
+            : reason == SlackConnectionBackpressureReasons.OutboxOverflow
+                ? "The provider outbox is at capacity; new Slack input is being refused until the backlog drains."
+                : "The Connection is backpressured; new Slack input is being refused until the backlog drains.";
 
     private static bool ContainsAny(string? value, params string[] needles) =>
         value is not null && needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));

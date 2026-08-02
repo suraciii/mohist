@@ -24,6 +24,13 @@ public sealed class ConnectionDiagnosticTests
             ("service", ConnectionDiagnosticState.ServiceOffline, "Start mohist-slack / check Slack connectivity.",
                 HealthyConnection(),
                 new DiagnosticInputs(AdapterOnline: false)),
+            ("backpressured", ConnectionDiagnosticState.Backpressured, "Wait for the backlog to drain / retry input shortly.",
+                Configure(connection =>
+                {
+                    connection.ConnectionHealth = ConnectionHealthKind.Degraded;
+                    connection.HealthReason = SlackConnectionBackpressureReasons.OutboxOverflow;
+                }),
+                new DiagnosticInputs()),
             ("owner", ConnectionDiagnosticState.OwnerUnavailable, "Transfer ownership.",
                 HealthyConnection(),
                 new DiagnosticInputs(OwnerAvailability: OwnerAvailabilityKind.Unavailable)),
@@ -46,6 +53,59 @@ public sealed class ConnectionDiagnosticTests
         Assert.Equal(cases.Select(test => test.Item2), results.Select(test => test.Result.PrimaryState));
         Assert.Equal(cases.Select(test => test.Item3), results.Select(test => test.Result.NextAction));
         Assert.Equal(results.Length, results.Select(test => test.Result.NextAction).Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void Compute_treats_inbox_and_outbox_backpressure_as_the_same_diagnostic_state()
+    {
+        var inboxBackpressured = Configure(connection =>
+        {
+            connection.ConnectionHealth = ConnectionHealthKind.Degraded;
+            connection.HealthReason = SlackConnectionBackpressureReasons.InboxOverflow;
+        });
+        var outboxBackpressured = Configure(connection =>
+        {
+            connection.ConnectionHealth = ConnectionHealthKind.Degraded;
+            connection.HealthReason = SlackConnectionBackpressureReasons.OutboxOverflow;
+        });
+
+        var inboxResult = ConnectionDiagnostic.Compute(inboxBackpressured, new DiagnosticInputs());
+        var outboxResult = ConnectionDiagnostic.Compute(outboxBackpressured, new DiagnosticInputs());
+
+        Assert.Equal(ConnectionDiagnosticState.Backpressured, inboxResult.PrimaryState);
+        Assert.Equal(ConnectionDiagnosticState.Backpressured, outboxResult.PrimaryState);
+        Assert.Equal(inboxResult.NextAction, outboxResult.NextAction);
+        Assert.Contains("inbox", inboxResult.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("outbox", outboxResult.Reason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Compute_does_not_report_a_backpressured_connection_as_healthy()
+    {
+        var backpressured = Configure(connection =>
+        {
+            connection.ConnectionHealth = ConnectionHealthKind.Degraded;
+            connection.HealthReason = SlackConnectionBackpressureReasons.OutboxOverflow;
+        });
+
+        var result = ConnectionDiagnostic.Compute(backpressured, new DiagnosticInputs());
+
+        Assert.NotEqual(ConnectionDiagnosticState.Healthy, result.PrimaryState);
+        Assert.Equal(ConnectionDiagnosticState.Backpressured, result.PrimaryState);
+    }
+
+    [Fact]
+    public void Compute_does_not_treat_a_non_backpressure_degraded_reason_as_backpressured()
+    {
+        var connection = Configure(connection =>
+        {
+            connection.ConnectionHealth = ConnectionHealthKind.Degraded;
+            connection.HealthReason = "rotating credentials";
+        });
+
+        var result = ConnectionDiagnostic.Compute(connection, new DiagnosticInputs());
+
+        Assert.NotEqual(ConnectionDiagnosticState.Backpressured, result.PrimaryState);
     }
 
     [Fact]

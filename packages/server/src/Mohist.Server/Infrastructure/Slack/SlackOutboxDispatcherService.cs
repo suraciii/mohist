@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Events;
@@ -13,10 +14,10 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// <summary>
 /// Cluster-singleton safety net for the Slack outbound outbox. The
 /// <see cref="ISlackOutboxDispatcherGrain"/> Orleans reminder drives
-/// <see cref="DispatchAsync"/>; this service runs three independent
-/// sweeps that together enforce the spec's "Delivery uncertain" and
-/// "DeadLettered" guarantees without overriding AgentJob/AgentTurn
-/// authority:
+/// <see cref="DispatchAsync"/>; this service runs four independent
+/// sweeps that together enforce the spec's "Delivery uncertain",
+/// "DeadLettered", and "Backpressure is reversible" guarantees
+/// without overriding AgentJob/AgentTurn authority:
 /// <list type="number">
 ///   <item>
 ///     <b>Retry budget cutoff</b>: Pending rows whose
@@ -37,11 +38,24 @@ namespace Mohist.Server.Infrastructure.Slack;
 ///     <see cref="SlackProviderOptions.OutboxUncertainTimeout"/> has
 ///     passed without an operator action are dead-lettered.
 ///   </item>
+///   <item>
+///     <b>Backpressure recovery sweep</b>: Degraded(Backpressured)
+///     Connections whose pending inbox AND pending outbox counts have
+///     dropped strictly below their per-Connection capacity are
+///     reason-guarded-flipped back to Healthy via
+///     <see cref="ISlackConnectionHealthBackpressurer.RecoverBackpressuredAsync"/>.
+///     The reason guard on the flip ensures we only recover rows whose
+///     HealthReason is an inbox or outbox overflow reason — a Degraded
+///     row with a different reason is not touched.
+///   </item>
 /// </list>
 /// </summary>
 public sealed class SlackOutboxDispatcherService : IDisposable
 {
     private readonly SlackOutboxStore _store;
+    private readonly SlackProviderInboxStore _inboxStore;
+    private readonly AgentConnectionStore _connectionStore;
+    private readonly ISlackConnectionHealthBackpressurer _healthBackpressurer;
     private readonly IDeadLetterStore _deadLetters;
     private readonly TimeProvider _timeProvider;
     private readonly IOptions<SlackProviderOptions> _options;
@@ -53,12 +67,18 @@ public sealed class SlackOutboxDispatcherService : IDisposable
 
     public SlackOutboxDispatcherService(
         SlackOutboxStore store,
+        SlackProviderInboxStore inboxStore,
+        AgentConnectionStore connectionStore,
+        ISlackConnectionHealthBackpressurer healthBackpressurer,
         IDeadLetterStore deadLetters,
         TimeProvider timeProvider,
         IOptions<SlackProviderOptions> options,
         ILogger<SlackOutboxDispatcherService> log)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
+        _inboxStore = inboxStore ?? throw new ArgumentNullException(nameof(inboxStore));
+        _connectionStore = connectionStore ?? throw new ArgumentNullException(nameof(connectionStore));
+        _healthBackpressurer = healthBackpressurer ?? throw new ArgumentNullException(nameof(healthBackpressurer));
         _deadLetters = deadLetters ?? throw new ArgumentNullException(nameof(deadLetters));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -74,6 +94,7 @@ public sealed class SlackOutboxDispatcherService : IDisposable
             await DeadLetterRetryExhaustedAsync(batch, ct).ConfigureAwait(false);
             await SurfaceClaimedTimeoutAsync(batch, ct).ConfigureAwait(false);
             await DeadLetterUncertainTimeoutAsync(batch, ct).ConfigureAwait(false);
+            await RecoverBackpressureAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -125,6 +146,35 @@ public sealed class SlackOutboxDispatcherService : IDisposable
             _log.LogInformation(
                 "Slack outbox row {RowId} (ConnectionId={ConnectionId}, DeliveryUncertainAt={DeliveryUncertainAt}) dead-lettered: uncertain timeout",
                 row.Id, row.ConnectionId, row.DeliveryUncertainAt);
+        }
+    }
+
+    private async Task RecoverBackpressureAsync(CancellationToken ct)
+    {
+        var candidates = await _connectionStore.ListBackpressuredAsync(ct).ConfigureAwait(false);
+        if (candidates.Count == 0)
+            return;
+
+        var options = _options.Value;
+        var inboxCapacity = options.InboxCapacityPerConnection;
+        var outboxCapacity = options.OutboxCapacityPerConnection;
+
+        foreach (var candidate in candidates)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var pendingInbox = await _inboxStore.CountPendingAsync(candidate.ProjectId, candidate.ConnectionId, ct).ConfigureAwait(false);
+            var pendingOutbox = await _store.CountPendingAsync(candidate.ProjectId, candidate.ConnectionId, ct).ConfigureAwait(false);
+            if (pendingInbox >= inboxCapacity || pendingOutbox >= outboxCapacity)
+                continue;
+
+            var updated = await _healthBackpressurer.RecoverBackpressuredAsync(candidate.ProjectId, candidate.ConnectionId, ct).ConfigureAwait(false);
+            if (updated == 0)
+                continue;
+
+            _log.LogInformation(
+                "Slack Connection {ProjectId}/{ConnectionId} recovered from backpressure (reason={Reason}); pendingInbox={PendingInbox} pendingOutbox={PendingOutbox} inboxCapacity={InboxCapacity} outboxCapacity={OutboxCapacity}",
+                candidate.ProjectId, candidate.ConnectionId, candidate.HealthReason, pendingInbox, pendingOutbox, inboxCapacity, outboxCapacity);
         }
     }
 

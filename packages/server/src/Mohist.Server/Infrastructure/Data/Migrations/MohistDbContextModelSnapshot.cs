@@ -87,6 +87,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("LastHeartbeatAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<DateTimeOffset?>("OfflineGapAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("OwnerSlackUserId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");

@@ -62,6 +62,18 @@ public sealed class SlackProviderOptions
     /// </summary>
     public int StartupContextPaginationDepthCap { get; set; } = 10;
 
+    /// <summary>
+    /// Conservative Slack event retention window. When the adapter
+    /// reconnects after an outage of at least this duration, the
+    /// Connection's <c>OfflineGapAt</c> is stamped so the diagnostic
+    /// surface can warn that Slack may have discarded events from the
+    /// outage window. The default is short on purpose: Slack's Socket
+    /// Mode redelivery is brief unless Delayed Events is enabled, and
+    /// only outages plausibly past the window warrant the notice.
+    /// Operators tune this to match their retention posture.
+    /// </summary>
+    public TimeSpan SlackEventRetentionWindow { get; set; } = TimeSpan.FromMinutes(30);
+
     public void Bind(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
@@ -80,5 +92,6 @@ public sealed class SlackProviderOptions
         OutboxReminderPeriod = section.GetValue(nameof(OutboxReminderPeriod), OutboxReminderPeriod);
         StartupContextCharacterBudget = section.GetValue(nameof(StartupContextCharacterBudget), StartupContextCharacterBudget);
         StartupContextPaginationDepthCap = section.GetValue(nameof(StartupContextPaginationDepthCap), StartupContextPaginationDepthCap);
+        SlackEventRetentionWindow = section.GetValue(nameof(SlackEventRetentionWindow), SlackEventRetentionWindow);
     }
 }
