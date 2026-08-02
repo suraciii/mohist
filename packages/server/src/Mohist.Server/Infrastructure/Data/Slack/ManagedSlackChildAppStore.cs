@@ -42,6 +42,22 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         if (string.IsNullOrWhiteSpace(childApp.EnrollmentId)) throw new ArgumentException("Enrollment id is required.", nameof(childApp));
         if (string.IsNullOrWhiteSpace(childApp.WorkspaceTeamId)) throw new ArgumentException("Workspace team id is required.", nameof(childApp));
         if (string.IsNullOrWhiteSpace(childApp.AgentConnectionId)) throw new ArgumentException("Agent connection id is required.", nameof(childApp));
+        SlackStateTransitions.RequireChildAppLifecycleTransition(childApp.AppLifecycle, childApp.AppLifecycle);
+        SlackStateTransitions.RequireAuthorizationTransition(childApp.Authorization, childApp.Authorization);
+        SlackStateTransitions.RequireTransportKind(childApp.TransportKind);
+        SlackStateTransitions.RequireBindingTransition(childApp.BindingState, childApp.BindingState);
+        if (childApp.AppLifecycle != SlackAppLifecycle.NotCreated)
+            throw new InvalidOperationException("A new Child App must start not_created.");
+        if (childApp.Authorization != SlackAuthorizationState.NotStarted)
+            throw new InvalidOperationException("A new Child App must start not_started.");
+        if (childApp.BindingState != SlackChildAppBindingState.Pending)
+            throw new InvalidOperationException("A new Child App must start with a pending binding.");
+        if (!string.IsNullOrEmpty(childApp.AppId) || !string.IsNullOrEmpty(childApp.BotUserId))
+            throw new InvalidOperationException("A new Child App cannot have a partially bound Slack identity.");
+        if (childApp.DesiredManifestVersion <= 0 || string.IsNullOrWhiteSpace(childApp.DesiredManifestHash))
+            throw new InvalidOperationException("A new Child App requires a versioned desired manifest.");
+        if (childApp.AppliedManifestVersion is not null || !string.IsNullOrWhiteSpace(childApp.AppliedManifestHash))
+            throw new InvalidOperationException("A new Child App cannot have an applied manifest.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var enrollmentExists = await db.SlackWorkspaceEnrollments.AnyAsync(item =>
@@ -58,20 +74,46 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         return childApp;
     }
 
-    public async Task<ManagedSlackChildApp?> UpdateAsync(
+    public Task<ManagedSlackChildApp?> TransitionAppLifecycleAsync(
         string id,
-        Func<ManagedSlackChildAppRow, bool> mutate,
-        CancellationToken ct = default)
+        string nextLifecycle,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, childApp => childApp.TransitionAppLifecycle(nextLifecycle), ct);
+
+    public Task<ManagedSlackChildApp?> TransitionAuthorizationAsync(
+        string id,
+        string nextAuthorization,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, childApp => childApp.TransitionAuthorization(nextAuthorization), ct);
+
+    public Task<ManagedSlackChildApp?> SetTransportKindAsync(
+        string id,
+        string transportKind,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, childApp => childApp.SetTransportKind(transportKind), ct);
+
+    public Task<ManagedSlackChildApp?> TransitionBindingStateAsync(
+        string id,
+        string nextBindingState,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, childApp => childApp.TransitionBindingState(nextBindingState), ct);
+
+    private async Task<ManagedSlackChildApp?> UpdateAsync(
+        string id,
+        Action<ManagedSlackChildApp> transition,
+        CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
-        ArgumentNullException.ThrowIfNull(mutate);
+        ArgumentNullException.ThrowIfNull(transition);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.ManagedSlackChildApps.SingleOrDefaultAsync(item => item.Id == id, ct);
         if (row is null) return null;
-        if (!mutate(row)) return ToDomain(row);
+        var childApp = ToDomain(row);
+        transition(childApp);
+        Apply(childApp, row);
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return ToDomain(row);
+        return childApp;
     }
 
     private static ManagedSlackChildApp ToDomain(ManagedSlackChildAppRow row) => new()
@@ -149,4 +191,13 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         UpdatedAt = childApp.UpdatedAt,
         DeletedAt = childApp.DeletedAt,
     };
+    private static void Apply(ManagedSlackChildApp childApp, ManagedSlackChildAppRow row)
+    {
+        row.AppLifecycle = childApp.AppLifecycle;
+        row.Authorization = childApp.Authorization;
+        row.TransportKind = childApp.TransportKind;
+        row.BindingState = childApp.BindingState;
+        row.DeletedAt = childApp.DeletedAt;
+    }
+
 }

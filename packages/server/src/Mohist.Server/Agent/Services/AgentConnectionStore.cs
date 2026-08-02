@@ -2,12 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.Agent.Services;
 
-public sealed class AgentConnectionStore : IScopedService
+public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBindingPort
 {
     private static readonly HashSet<string> ImmutableBindingFields = new(StringComparer.Ordinal)
     {
@@ -231,7 +232,8 @@ public sealed class AgentConnectionStore : IScopedService
         string appId,
         string botUserId,
         string? botName,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? claimToken = null)
     {
         if (string.IsNullOrWhiteSpace(workspaceTeamId)
             || string.IsNullOrWhiteSpace(appId)
@@ -267,14 +269,22 @@ public sealed class AgentConnectionStore : IScopedService
             throw new AgentConnectionDuplicateException(projectId, current.AgentId, workspaceTeamId);
 
         var now = _timeProvider.GetUtcNow();
-        var changed = await db.AgentConnections
+        var update = db.AgentConnections
             .Where(c => c.ProjectId == projectId
                 && c.Id == id
                 && c.DeletedAt == null
                 && (workspaceWasUnreserved || c.WorkspaceTeamId == workspaceTeamId)
                 && c.AppId == string.Empty
-                && c.BotUserId == string.Empty)
-            .ExecuteUpdateAsync(setters => setters
+                && c.BotUserId == string.Empty);
+        if (claimToken is not null)
+        {
+            update = update.Where(connection => db.SlackChildAppBindingObligations.Any(obligation =>
+                obligation.AgentConnectionId == connection.Id
+                && obligation.Status == "in_progress"
+                && obligation.ClaimToken == claimToken));
+        }
+
+        var changed = await update.ExecuteUpdateAsync(setters => setters
                 .SetProperty(c => c.WorkspaceTeamId, workspaceTeamId)
                 .SetProperty(c => c.AppId, appId)
                 .SetProperty(c => c.BotUserId, botUserId)
@@ -288,6 +298,13 @@ public sealed class AgentConnectionStore : IScopedService
                 && afterRace.AppId == appId
                 && afterRace.BotUserId == botUserId)
                 return ToDomain(afterRace);
+            if (claimToken is not null && !await db.SlackChildAppBindingObligations.AnyAsync(obligation =>
+                    obligation.AgentConnectionId == id
+                    && obligation.Status == "in_progress"
+                    && obligation.ClaimToken == claimToken, ct))
+                throw new AgentConnectionValidationException(
+                    "The Slack binding claim is no longer current.",
+                    "stale_binding_claim");
             throw new AgentConnectionValidationException("Slack identity was bound by another operation and cannot be changed.", "immutable_binding");
         }
 
