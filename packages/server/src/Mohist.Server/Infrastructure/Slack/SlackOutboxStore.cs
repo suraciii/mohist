@@ -386,6 +386,38 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Transitions a DeliveryUncertain row back to Pending for an
+    /// operator-initiated resend. The duplicate warning is the client's
+    /// responsibility; this method is the single transition. Reusing
+    /// <see cref="ScheduleRetryAsync"/>'s effect (Pending state, attempt
+    /// budget still applies via <see cref="SlackProviderOptions.OutboxMaxAttempts"/>)
+    /// keeps one retry path and one attempt budget so a resent uncertain
+    /// row is still dead-lettered if it keeps failing — it cannot live
+    /// forever. State is guarded to DeliveryUncertain only; any other
+    /// state returns 0 so the route can surface a 409.
+    /// </summary>
+    public async Task<int> ResendUncertainAsync(string projectId, string id, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(id))
+            throw new ArgumentException("Id is required.", nameof(id));
+
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
+            ?? throw new SlackOutboxRowNotFoundException(id);
+        if (row.State != SlackOutboxStates.DeliveryUncertain)
+            return 0;
+        row.State = SlackOutboxStates.Pending;
+        row.AttemptCount++;
+        row.NextAttemptAt = now;
+        row.DeliveryUncertainAt = null;
+        row.UpdatedAt = now;
+        return await db.SaveChangesAsync(ct);
+    }
+
     public async Task<SlackOutboxList> ListAsync(string projectId, string connectionId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))

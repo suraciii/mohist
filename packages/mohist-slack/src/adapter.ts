@@ -137,6 +137,7 @@ export class SlackAdapter {
       while (!signal.aborted) {
         const delivery = await this.options.transport.claimDelivery(runtime.ref, this.options.adapterId, signal)
         if (!delivery) return
+        let response: { ok?: boolean; error?: string } | undefined
         try {
           const payload = JSON.parse(delivery.payloadJson) as unknown
           const text = readText(payload)
@@ -146,12 +147,16 @@ export class SlackAdapter {
             text,
           }
           if (delivery.threadTs) message.thread_ts = delivery.threadTs
-          const response = await runtime.web.chat.postMessage(message)
-          if (response.ok === false) throw new Error(response.error ?? "Slack chat.postMessage failed")
-          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
+          response = await runtime.web.chat.postMessage(message)
         } catch (error) {
           await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
+          continue
         }
+        if (response.ok === false) {
+          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }, signal)
+          continue
+        }
+        await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
       }
     } finally {
       runtime.draining = false

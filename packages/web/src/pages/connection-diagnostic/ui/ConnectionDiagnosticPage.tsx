@@ -8,7 +8,9 @@ import {
   useConfigureAgentConnection,
   useConnectionDiagnostic,
   useManageAgentConnectionAccess,
+  useResendSlackOutboxDelivery,
   useSlackMemberSearchFn,
+  useSlackOutboxDeliveries,
 } from '../../../entities/agent-connection'
 import type {
   AgentConnectionClaimOwnerResponse,
@@ -24,6 +26,7 @@ import { IdentityPreviewStep } from './identity-preview-step'
 import { CredentialFormStep } from './credential-form-step'
 import { ClaimOwnerCodeStep } from './claim-owner-code-step'
 import { AccessPolicySection } from './access-policy-section'
+import { UncertainDeliveriesSection } from './uncertain-deliveries-section'
 
 export interface ConnectionDiagnosticPageData {
   data: ConnectionDiagnostic | undefined
@@ -66,6 +69,17 @@ export interface ConnectionDiagnosticPageOperations {
     reset: () => void
   }
   searchMembers: (query: string) => Promise<SlackMemberSearchEntry[]>
+  deliveriesQuery: {
+    data: ReadonlyArray<import('../../../entities/agent-connection').SlackOutboxEntry> | undefined
+    isLoading: boolean
+    error: Error | null
+  }
+  resendDeliveryMutation: {
+    mutate: (deliveryId: string) => void
+    isPending: boolean
+    error: Error | null
+    reset: () => void
+  }
 }
 
 export type ConnectionDiagnosticPageOperationsHook = (
@@ -80,6 +94,8 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
   const accessStateQuery = useAgentConnectionAccess(connectionId, setupComplete ?? false)
   const manageAccess = useManageAgentConnectionAccess(connectionId)
   const searchMembers = useSlackMemberSearchFn(connectionId)
+  const deliveriesQuery = useSlackOutboxDeliveries(connectionId, setupComplete ?? false)
+  const resendDelivery = useResendSlackOutboxDelivery(connectionId)
   return {
     connectionDetailQuery: {
       data: detailQuery.data,
@@ -106,6 +122,17 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
       reset: manageAccess.reset,
     },
     searchMembers,
+    deliveriesQuery: {
+      data: deliveriesQuery.data?.entries,
+      isLoading: deliveriesQuery.isLoading,
+      error: deliveriesQuery.error instanceof Error ? deliveriesQuery.error : null,
+    },
+    resendDeliveryMutation: {
+      mutate: resendDelivery.mutate,
+      isPending: resendDelivery.isPending,
+      error: resendDelivery.error instanceof Error ? resendDelivery.error : null,
+      reset: resendDelivery.reset,
+    },
   }
 }
 
@@ -132,6 +159,13 @@ export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
     reset: () => undefined,
   },
   searchMembers: async () => [],
+  deliveriesQuery: { data: undefined, isLoading: false, error: null },
+  resendDeliveryMutation: {
+    mutate: () => undefined,
+    isPending: false,
+    error: null,
+    reset: () => undefined,
+  },
 }
 
 export const useReadOnlyOperations: ConnectionDiagnosticPageOperationsHook = () => readOnlyOperations
@@ -172,7 +206,7 @@ export function ConnectionDiagnosticPage({
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation } = ops
+  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
   const configureResetRef = useRef<() => void>(() => undefined)
@@ -181,12 +215,15 @@ export function ConnectionDiagnosticPage({
   claimResetRef.current = claimOwnerMutation.reset
   const accessResetRef = useRef<() => void>(() => undefined)
   accessResetRef.current = manageAccessMutation.reset
+  const resendDeliveryResetRef = useRef<() => void>(() => undefined)
+  resendDeliveryResetRef.current = resendDeliveryMutation.reset
 
   useEffect(() => {
     return () => {
       claimResetRef.current()
       configureResetRef.current()
       accessResetRef.current()
+      resendDeliveryResetRef.current()
     }
   }, [])
 
@@ -322,6 +359,19 @@ export function ConnectionDiagnosticPage({
             isSubmitting={manageAccessMutation.isPending}
             errorMessage={manageAccessMutation.error?.message ?? null}
             searchMembers={ops.searchMembers}
+          />
+        )}
+
+        {isSetupComplete && (
+          <UncertainDeliveriesSection
+            entries={deliveriesQuery.data ?? []}
+            isLoading={deliveriesQuery.isLoading}
+            errorMessage={deliveriesQuery.error?.message ?? null}
+            isResending={resendDeliveryMutation.isPending}
+            onResend={(deliveryId) => {
+              resendDeliveryMutation.reset()
+              resendDeliveryMutation.mutate(deliveryId)
+            }}
           />
         )}
 

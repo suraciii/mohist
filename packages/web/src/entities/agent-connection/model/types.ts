@@ -115,3 +115,35 @@ export interface SlackMemberSearchEntry {
 export interface SlackMemberSearchResponse {
   members: SlackMemberSearchEntry[]
 }
+
+export interface SlackOutboxEntry {
+  id: string
+  projectId: string
+  connectionId: string
+  workspaceTeamId: string
+  conversationId: string
+  threadTs: string | null
+  kind: string
+  state: string
+  dispatchRef: string | null
+  payloadJson: string
+  attemptCount: number
+  nextAttemptAt: string | null
+  claimedAt: string | null
+  claimedByAdapterId: string | null
+  deliveredAt: string | null
+  deliveryUncertainAt: string | null
+  deadLetteredAt: string | null
+  lastError: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SlackOutboxListResponse {
+  entries: SlackOutboxEntry[]
+}
+
+export interface SlackOutboxResendResponse {
+  id: string
+  state: string
+}

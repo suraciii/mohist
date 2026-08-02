@@ -6,7 +6,9 @@ export {
   getAgentConnectionAccess,
   getConnectionDiagnostic,
   listAgentConnections,
+  listSlackOutboxDeliveries,
   manageAgentConnectionAccess,
+  resendSlackOutboxDelivery,
   searchSlackConnectionMembers,
 } from './api/client'
 export {
@@ -21,6 +23,9 @@ export {
   connectionDiagnosticQueryOptions,
   createAgentConnectionMutationOptions,
   manageAgentConnectionAccessMutationOptions,
+  resendSlackOutboxDeliveryMutationOptions,
+  slackOutboxDeliveriesQueryKey,
+  slackOutboxDeliveriesQueryOptions,
   useAgentConnection,
   useAgentConnectionAccess,
   useAgentConnections,
@@ -29,8 +34,10 @@ export {
   useConnectionDiagnostic,
   useCreateAgentConnection,
   useManageAgentConnectionAccess,
+  useResendSlackOutboxDelivery,
   useSearchSlackMembers,
   useSlackMemberSearchFn,
+  useSlackOutboxDeliveries,
 } from './api/queries'
 export { ACCESS_POLICY_VALUES } from './model/types'
 export type {
@@ -49,4 +56,7 @@ export type {
   ConnectionIdentityFacts,
   SlackMemberSearchEntry,
   SlackMemberSearchResponse,
+  SlackOutboxEntry,
+  SlackOutboxListResponse,
+  SlackOutboxResendResponse,
 } from './model/types'

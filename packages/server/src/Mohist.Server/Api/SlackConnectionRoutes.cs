@@ -354,6 +354,43 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { members });
         });
 
+        management.MapGet("/{connectionId}/deliveries", async (HttpContext context, string connectionId, AgentConnectionStore connections, SlackOutboxStore outbox, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+            var list = await outbox.ListAsync(projectId, connectionId, ct);
+            return ApiResults.Ok(list);
+        });
+
+        management.MapPost("/{connectionId}/deliveries/{deliveryId}/resend", async (HttpContext context, string connectionId, string deliveryId, AgentConnectionStore connections, SlackOutboxStore outbox, CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+            if (string.IsNullOrWhiteSpace(deliveryId))
+                return ApiResults.BadRequest("deliveryId is required.");
+            try
+            {
+                var updated = await outbox.ResendUncertainAsync(projectId, deliveryId, ct);
+                if (updated == 0)
+                    return ApiResults.Conflict(
+                        "Only Delivery uncertain rows can be resent.",
+                        "delivery_not_uncertain");
+                return ApiResults.Ok(new { id = deliveryId, state = SlackOutboxStates.Pending });
+            }
+            catch (SlackOutboxRowNotFoundException)
+            {
+                return ApiResults.NotFound("Delivery was not found.");
+            }
+            catch (SlackOutboxStateException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "delivery_state_conflict");
+            }
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 

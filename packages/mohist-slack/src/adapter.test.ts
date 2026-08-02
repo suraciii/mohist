@@ -63,10 +63,12 @@ class FakeTransport implements AdapterTransport {
 
 class FakeWeb implements SlackWebClient {
   readonly posted: Array<{ channel: string; text: string; thread_ts?: string }> = []
+  nextResponses: Array<{ ok?: boolean; error?: string }> = []
   readonly chat = {
     postMessage: async (input: { channel: string; text: string; thread_ts?: string }) => {
       this.posted.push(input)
-      return { ok: true }
+      const next = this.nextResponses.shift()
+      return next ?? { ok: true }
     },
   }
 }
@@ -389,6 +391,69 @@ describe("mohist-slack adapter", () => {
     expect(web.posted).toEqual([
       { channel: "D1", text: "retry shortly" },
     ])
+    controller.abort()
+  })
+
+  it("acks explicit Slack rejections as retry so the same post can be re-sent without duplicating", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries = [{ id: "delivery-rejected", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "ok?" }) }]
+    transport.deliveries.push({ id: "delivery-accepted", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "ok?" }) })
+    const web = new FakeWeb()
+    web.nextResponses = [
+      { ok: false, error: "channel_not_found" },
+      { ok: true },
+    ]
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await vi.waitFor(() => expect(web.posted.length).toBe(2))
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p", connectionId: "c" }, id: "delivery-rejected", outcome: "retry" },
+      { ref: { projectId: "p", connectionId: "c" }, id: "delivery-accepted", outcome: "delivered" },
+    ])
+    expect(web.posted).toEqual([
+      { channel: "D1", text: "ok?" },
+      { channel: "D1", text: "ok?" },
+    ])
+    controller.abort()
+  })
+
+  it("acks transport or payload errors as uncertain so the row is held for operator action", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries = [
+      { id: "delivery-bad-json", conversationId: "D1", threadTs: null, payloadJson: "not-json" },
+      { id: "delivery-no-text", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: null }) },
+    ]
+    const web = new FakeWeb()
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await vi.waitFor(() => expect(transport.acks.length).toBe(2))
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p", connectionId: "c" }, id: "delivery-bad-json", outcome: "uncertain" },
+      { ref: { projectId: "p", connectionId: "c" }, id: "delivery-no-text", outcome: "uncertain" },
+    ])
+    expect(web.posted).toEqual([])
     controller.abort()
   })
 

@@ -11,7 +11,9 @@ import {
   getConnectionDiagnostic,
   getAgentConnectionAccess,
   listAgentConnections,
+  listSlackOutboxDeliveries,
   manageAgentConnectionAccess,
+  resendSlackOutboxDelivery,
   searchSlackConnectionMembers,
 } from './client'
 import type {
@@ -26,6 +28,8 @@ import type {
   AccessPolicyState,
   SlackMemberSearchEntry,
   SlackMemberSearchResponse,
+  SlackOutboxListResponse,
+  SlackOutboxResendResponse,
 } from '../model/types'
 
 export function connectionDiagnosticQueryOptions(
@@ -252,5 +256,61 @@ export function useSlackMemberSearchFn(connectionId: string | null | undefined) 
       return res.members
     },
     [projectId, connectionId],
+  )
+}
+
+export const slackOutboxDeliveriesQueryKey = (
+  projectId: string | null | undefined,
+  connectionId: string | null | undefined,
+) => ['agent-connection-deliveries', projectId, connectionId] as const
+
+export function slackOutboxDeliveriesQueryOptions(
+  projectId: string | null | undefined,
+  connectionId: string | null | undefined,
+  enabled = true,
+) {
+  return {
+    queryKey: slackOutboxDeliveriesQueryKey(projectId, connectionId),
+    queryFn: () => listSlackOutboxDeliveries(projectId, connectionId!),
+    enabled: !!projectId && !!connectionId && enabled,
+    refetchInterval: 5000,
+    refetchOnWindowFocus: true,
+  }
+}
+
+export function useSlackOutboxDeliveries(
+  connectionId: string | null | undefined,
+  enabled = true,
+) {
+  const { projectId } = useProject()
+  return useQuery<SlackOutboxListResponse>(
+    slackOutboxDeliveriesQueryOptions(projectId, connectionId, enabled),
+  )
+}
+
+export function resendSlackOutboxDeliveryMutationOptions(
+  projectId: string | null | undefined,
+  connectionId: string,
+  queryClient: InvalidationClient,
+) {
+  return {
+    mutationFn: (deliveryId: string) => resendSlackOutboxDelivery(projectId, connectionId, deliveryId),
+    onSuccess: (_response: SlackOutboxResendResponse) => {
+      queryClient.invalidateQueries({
+        queryKey: slackOutboxDeliveriesQueryKey(projectId, connectionId),
+      })
+      toast.success('Delivery re-queued')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to resend delivery')
+    },
+  }
+}
+
+export function useResendSlackOutboxDelivery(connectionId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(
+    resendSlackOutboxDeliveryMutationOptions(projectId, connectionId ?? '', queryClient),
   )
 }

@@ -283,6 +283,9 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
           },
         }),
       ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/deliveries', () =>
+        HttpResponse.json({ success: true, data: { entries: [] } }),
+      ),
     )
 
     renderPage()

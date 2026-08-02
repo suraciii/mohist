@@ -15,7 +15,7 @@ public sealed class CliAgentConnectionCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "edit", "delete" })
+        foreach (var command in new[] { "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "deliveries", "resend-delivery", "edit", "delete" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
@@ -406,5 +406,143 @@ public sealed class CliAgentConnectionCommandSpecs
         for (var index = 0; (index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0; index += value.Length)
             count++;
         return count;
+    }
+
+    [Fact]
+    public async Task Deliveries_ListsRowsWithStateAndReason()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    entries = new object[]
+                    {
+                        new { id = "slkout_uncertain_1", state = "delivery_uncertain", kind = "terminal_result", attemptCount = 2, lastError = "claim timeout" },
+                        new { id = "slkout_pending_1", state = "pending", kind = "terminal_result", attemptCount = 0, lastError = (string?)null },
+                    },
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "deliveries", "connection_1"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var text = output.ToString();
+        Assert.Contains("slkout_uncertain_1", text, StringComparison.Ordinal);
+        Assert.Contains("delivery_uncertain", text, StringComparison.Ordinal);
+        Assert.Contains("claim timeout", text, StringComparison.Ordinal);
+        Assert.Contains("slkout_pending_1", text, StringComparison.Ordinal);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/deliveries", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task Deliveries_OnlyUncertain_RestrictsRows()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    entries = new object[]
+                    {
+                        new { id = "slkout_uncertain_1", state = "delivery_uncertain", kind = "terminal_result", attemptCount = 2, lastError = "claim timeout" },
+                        new { id = "slkout_pending_1", state = "pending", kind = "terminal_result", attemptCount = 0, lastError = (string?)null },
+                    },
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "deliveries", "connection_1", "--only-uncertain"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var text = output.ToString();
+        Assert.Contains("slkout_uncertain_1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("slkout_pending_1", text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResendDelivery_PrintsDuplicateWarningBeforePosting()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    entries = new object[]
+                    {
+                        new { id = "slkout_uncertain_1", state = "delivery_uncertain", kind = "terminal_result", dispatchRef = "agentjob_42", lastError = "claim timeout" },
+                    },
+                },
+            })));
+
+        var stdin = new StringReader("y" + Environment.NewLine);
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
+            standardInput: stdin);
+
+        Assert.Equal(0, exit);
+        var stderr = error.ToString();
+        var stdout = output.ToString();
+        Assert.Contains("duplicate", stderr, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("agentjob_42", stdout, StringComparison.Ordinal);
+        Assert.Contains("claim timeout", stdout, StringComparison.Ordinal);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/deliveries", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/deliveries/slkout_uncertain_1/resend", handler.Requests[1].RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ResendDelivery_RejectsNonUncertainRowBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    entries = new object[]
+                    {
+                        new { id = "slkout_pending_1", state = "pending", kind = "terminal_result", lastError = (string?)null },
+                    },
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "resend-delivery", "connection_1", "slkout_pending_1"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Single(handler.Requests);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/deliveries", handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("only Delivery uncertain", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ResendDelivery_NonInteractiveWithoutYes_FailsWithDisclosure()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    entries = new object[]
+                    {
+                        new { id = "slkout_uncertain_1", state = "delivery_uncertain", kind = "terminal_result", lastError = "claim timeout" },
+                    },
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["agent", "connection", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
+            terminalOverride: new CliTerminal(false));
+
+        Assert.NotEqual(0, exit);
+        Assert.Single(handler.Requests);
+        Assert.Contains("--yes", error.ToString(), StringComparison.Ordinal);
     }
 }

@@ -118,3 +118,44 @@
 - `void result` was removed from `handleEvent`; the rendered helper is the only place that touches
   the result. `runtime.draining` / `!runtime.web` guards mirror `drain()` so a stop during render
   does not throw.
+
+## T-003 patterns
+
+- The drain now branches on `response.ok === false` to ack `retry` (safe — Slack never accepted,
+  so re-posting cannot duplicate). All other failure paths (JSON parse, missing text, transport
+  exceptions, response.ok undefined) ack `uncertain` and are not blindly resent. Restructured
+  the try/catch into a narrow error block around `postMessage`; the `retry` branch sits outside
+  the catch so a definitive Slack rejection does not look like an unknown outcome.
+- Adapter types: `DeliveryAck.outcome: "delivered" | "uncertain" | "retry"` was already in
+  `types.ts` from #514 (server ack route maps `else → ScheduleRetryAsync`). Only the adapter
+  needed to learn to emit `retry` for explicit failures. Reusing `ScheduleRetryAsync` keeps one
+  retry path and one attempt budget (design D5).
+- Server added `SlackOutboxStore.ResendUncertainAsync` — transitions DeliveryUncertain → Pending
+  with bumped AttemptCount and cleared `DeliveryUncertainAt`. Returns 0 for any other state so
+  the route surfaces a 409 (vs. throwing) without re-checking row state outside the transition.
+  `NextAttemptAt = now` (not backed-off) — resend is operator-initiated, not the adapter's
+  automatic retry, so the operator picks the timing.
+- New routes: `GET /api/projects/{ref}/slack-connections/{id}/deliveries` (lists outbox rows via
+  `SlackOutboxStore.ListAsync`) and `POST /api/projects/{ref}/slack-connections/{id}/deliveries/{deliveryId}/resend`
+  (calls `ResendUncertainAsync`, returns 409 with `delivery_not_uncertain` for non-uncertain
+  rows, 404 for unknown row). Both live in the management group (no operator credential — user
+  action). The deliveries list path deliberately sits under `/{id}/deliveries` so the existing
+  adapter-side `/deliveries/{claim,ack}` endpoints keep the operator credential requirement
+  without sharing the route surface.
+- Web FSD: new types in `entities/agent-connection/model/types.ts`, queries + client in
+  `entities/agent-connection/api/`, page rendering in
+  `pages/connection-diagnostic/ui/uncertain-deliveries-section.tsx`. The deliveries query is
+  gated on `setupComplete` (mirrors `useAgentConnectionAccess(..., setupComplete)`) so
+  setup-incomplete flows don't issue an unhandled GET.
+- The resend flow warns in two places: the page renders an inline confirmation (warns about
+  possible duplication + points at the authoritative execution result) before the POST; the
+  CLI prints the dispatch ref and last error to stdout + a duplicate-warning paragraph to
+  stderr, then prompts (or refuses without `--yes` in non-interactive mode).
+- Test coverage: adapter test adds two cases — explicit `{ok:false,error}` acks `retry`,
+  payload/JSON failures ack `uncertain`. Spec tests (`SlackDeliveryOutcomesSpecs`) cover:
+  `ScheduleRetryAsync` re-pending on explicit failure; `ResendUncertainAsync` only advancing
+  DeliveryUncertain rows (Pending→0 updates); GET deliveries listing rows with state + reason;
+  resend endpoint transitioning the row and NOT changing the AgentJob row's Status column;
+  resend endpoint returning 409 for non-uncertain rows. CLI tests cover deliveries list,
+  `--only-uncertain` filter, resend prompt flow + duplicate warning, non-uncertain rejection,
+  and non-interactive `--yes` requirement.
