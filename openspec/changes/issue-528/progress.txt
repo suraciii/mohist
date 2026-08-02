@@ -163,4 +163,5 @@
 
 - Full `npm test` reproduced the failure: T-004 added `OfflineGapAt` to the model without an EF migration, causing pending model changes and SQLite missing-column failures.
 - Added the additive `AddOfflineGapAt` migration and updated the model snapshot. Server build passes.
-- Some remaining spec failures report the unavailable external OTLP endpoint at `localhost:4318`; the repository test runner ignores VSTest filters under Microsoft Testing Platform, so focused filtering cannot isolate those tests.
+- The initial migration fix still left spec fixtures built from a pre-T-004 schema template without `AgentConnections.OfflineGapAt`; added an idempotent test-schema DDL in `GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix`.
+- The first DDL attempt had incorrect escaping and was reproduced as SQLite `unrecognized token`; corrected it to valid quoted SQL. A subsequent full SpecTests run exceeded 180 seconds before reporting completion.
