@@ -73,10 +73,15 @@ time in tests (`design/testing.md`).
 The `ISlackOutboxDispatcherGrain` is already the cluster-singleton reliability cadence, driven by a
 persistent reminder (`SlackOutboxDispatcherGrain.cs:59`), serialized by the dispatch gate
 (`SlackOutboxDispatcherService.cs:69`). Add a `RecoverBackpressureAsync` sweep alongside the existing
-three, run from the same `DispatchAsync`. It queries Degraded(Backpressured), Enabled, non-deleted
-Connections; for each, reads `SlackProviderInboxStore.CountPendingAsync` and
-`SlackOutboxStore.CountPendingAsync`; when both are strictly below `InboxCapacityPerConnection` and
-`OutboxCapacityPerConnection`, calls a new `RecoverBackpressuredAsync`.
+three, run from the same `DispatchAsync`. It enumerates Degraded(Backpressured), Enabled, non-deleted
+Connections via a new `AgentConnectionStore.ListBackpressuredAsync` query (the dispatcher service has
+no Connection-enumeration ability today); for each, reads `SlackProviderInboxStore.CountPendingAsync`
+and `SlackOutboxStore.CountPendingAsync`; when both are strictly below `InboxCapacityPerConnection`
+and `OutboxCapacityPerConnection`, calls a new `RecoverBackpressuredAsync`. This requires injecting
+`SlackProviderInboxStore` and `AgentConnectionStore` (or a narrow
+`ISlackBackpressureRecoveryQuery`) into `SlackOutboxDispatcherService` alongside its existing
+`SlackOutboxStore`/`IDeadLetterStore`/time/options; the grain's DI is unchanged because it resolves
+the service from the scoped container.
 
 - *Alternative — recover inline at ingress/claim time:* rejected. Ingress is refused while
   backpressured, so recovery cannot be gated on ingress. Recovery must proceed independently of whether

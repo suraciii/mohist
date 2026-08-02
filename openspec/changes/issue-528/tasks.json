@@ -6,13 +6,14 @@
       "id": "T-001",
       "title": "Reversible backpressure and Backpressured diagnostic state",
       "spec": "specs/slack-capacity-backpressure/spec.md#backpressure-is-reversible-without-operator-intervention",
-      "description": "Add a reason-guarded RecoverBackpressuredAsync to ISlackConnectionHealthBackpressurer that flips a Connection from Degraded to Healthy and clears the reason only when the current reason is inbox/outbox overflow. Add a fourth sweep to SlackOutboxDispatcherService (driven by the existing dispatcher grain reminder) that, for each Degraded(Backpressured) Enabled Connection, recovers when pending inbox and pending outbox counts are both strictly below their capacity thresholds. Add a Backpressured branch to ConnectionDiagnostic.Compute (priority just below service-offline) naming inbox-vs-outbox and a wait/retry next action, plus ConnectionDiagnosticState.Backpressured, so a backpressured Connection no longer falls through to Healthy. Web/CLI consume the new state through the existing diagnostic summary.",
+      "description": "Add a reason-guarded RecoverBackpressuredAsync to ISlackConnectionHealthBackpressurer that flips a Connection from Degraded to Healthy and clears the reason only when the current reason is inbox/outbox overflow. Add a fourth sweep to SlackOutboxDispatcherService (driven by the existing dispatcher grain reminder): inject SlackProviderInboxStore and a new AgentConnectionStore.ListBackpressuredAsync query (the dispatcher service cannot enumerate Connections today), then for each Degraded(Backpressured) Enabled Connection recover when pending inbox and pending outbox counts are both strictly below their capacity thresholds. Add a Backpressured branch to ConnectionDiagnostic.Compute (priority just below service-offline) naming inbox-vs-outbox and a wait/retry next action, plus ConnectionDiagnosticState.Backpressured, so a backpressured Connection no longer falls through to Healthy. Web/CLI consume the new state through the existing diagnostic summary.",
       "acceptanceCriteria": [
         "After a Connection is flipped Degraded(Backpressured) on outbox overflow, advancing fake time past the dispatcher reminder and draining pending outbox rows below OutboxCapacityPerConnection flips ConnectionHealth back to Healthy and clears HealthReason with no operator action (spec test, fake time + fake store).",
         "The same recovery holds for inbox overflow once pending inbox entries drop below InboxCapacityPerConnection; while either side remains at capacity the Connection stays Degraded and ingress stays rejected.",
         "Recovery preserves every accepted inbox entry, SessionInput, and terminal/explicit-failure/user-action outbox row — none are deleted or altered by the flip to Healthy.",
         "RecoverBackpressuredAsync only clears a Connection whose HealthReason is SlackProviderBackpressureReasons.InboxOverflow or OutboxOverflow; a Degraded Connection with a different reason is not touched.",
-        "ConnectionDiagnostic.Compute returns the Backpressured state (with inbox-or-outbox reason and a single wait/retry next action) for a Degraded(Backpressured) Connection, distinct from Disabled and from Healthy; the Web Connection page and CLI view render this state."
+        "ConnectionDiagnostic.Compute returns the Backpressured state (with inbox-or-outbox reason and a single wait/retry next action) for a Degraded(Backpressured) Connection, distinct from Disabled and from Healthy; the Web Connection page and CLI view render this state.",
+        "A replaceable-progress outbox row still merges into the latest state for the same dispatch across a backpressure episode, and terminal/explicit-failure/user-action rows are neither merged nor silently dropped — regression covering the issue's AC3 (spec test, fake store)."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -29,14 +30,14 @@
       "description": "Replace the HTTP 409 backpressure response in the ingress route with a success response carrying a structured IngressResult of kind 'backpressured' plus a retry-later reason, mirroring existing 'rejected' results. In the mohist-slack adapter handleEvent, stop discarding the result: for user-facing rejection kinds (backpressured, and any future can't-enqueue kind), post the reason to the originating conversation/thread via the already-held runtime.web before ack, so the refusal is visible even when the outbox itself is full. Acceptance is unchanged (ack without accepting; no SessionInput created).",
       "acceptanceCriteria": [
         "Ingress to a backpressured Connection returns a success IngressResult { kind: 'backpressured', reason } instead of HTTP 409, and creates no SessionInput (spec test).",
-        "The adapter, on receiving a backpressured (or rejected) result, posts the reason to the originating Slack conversation/thread via runtime.web, so a fake Slack web client observes the retry-later message (adapter unit test, no real Slack).",
+        "The adapter, on receiving a backpressured result (only), posts the reason to the originating Slack conversation/thread via runtime.web, so a fake Slack web client observes the retry-later message; existing server-enqueued 'rejected' kinds are NOT rendered by the adapter, so no Slack reply is duplicated (adapter unit test, no real Slack).",
         "The sender can distinguish a backpressure refusal (not accepted, retry) from a message accepted just before the backpressure episode whose result is still pending.",
         "When outbox overflow is the pressure (server cannot enqueue a reply), the rejection is still surfaced via the adapter-rendered path."
       ],
       "priority": 2,
       "mode": "AFK",
       "type": "WRITE",
-      "output": "Server ingress route returning a structured backpressured IngressResult; mohist-slack adapter rendering rejection kinds; passing spec + adapter unit tests.",
+      "output": "Server ingress route returning a structured backpressured IngressResult; mohist-slack adapter rendering the backpressured kind only (existing 'rejected' kinds keep their server-enqueued path); passing spec + adapter unit tests.",
       "dependsOn": ["T-001"],
       "passes": false,
       "notes": "Server-side rejections that CAN be enqueued keep their existing enqueue path; only the can't-enqueue (backpressure) case is rendered by the adapter. The kind discriminator is the single source of truth to avoid double rendering (design D4)."
@@ -56,9 +57,9 @@
       "mode": "AFK",
       "type": "WRITE",
       "output": "Adapter retry-vs-uncertain split; server deliveries list + resend endpoints; Web/CLI uncertain-delivery rendering and resend-with-warning; passing spec + unit tests.",
-      "dependsOn": [],
+      "dependsOn": ["T-002"],
       "passes": false,
-      "notes": "The server ack route already branches delivered/uncertain/else->ScheduleRetryAsync (SlackConnectionRoutes.cs:497-502); only the adapter needs to emit 'retry' for explicit failures. Reusing ScheduleRetryAsync keeps one retry path and one attempt budget (design D5)."
+      "notes": "The server ack route already branches delivered/uncertain/else->ScheduleRetryAsync (SlackConnectionRoutes.cs:497-502); only the adapter needs to emit 'retry' for explicit failures. Reusing ScheduleRetryAsync keeps one retry path and one attempt budget (design D5). T-003 depends on T-002 because both edit packages/mohist-slack/src/adapter.ts (handleEvent vs drain)."
     },
     {
       "id": "T-004",
