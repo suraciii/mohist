@@ -25,22 +25,25 @@ Manager、或让某个 Slack 成员成为 Owner，都不会自动获得 Mohist �
 ### 两条安装路径
 
 每个 Agent App 在创建后都要和 Slack 建立一条事件通道。根据 Mohist 部署能否暴露公共
-入站地址，Manager 在创建 Agent App 时选择其中一条：
+入站地址，Manager 在创建 Agent App 时选择其中一条。两条路径都需要安装者完成 Slack
+安装授权；工作区策略要求时同样要过管理员审批，托管路径也不能绕过这一步。
 
-- **托管路径（HTTPS）**：Mohist 部署有公共入站地址。Manager 自动完成 App 创建、引导
-  安装授权，并直接取得该 App 运行所需的全部凭据；用户不需要复制任何子 App 运行凭据。
-  安装最自动化。
+- **托管路径（HTTPS）**：Mohist 部署有公共入站地址。Manager 自动完成 App 创建，引导
+  安装者完成 Slack 安装授权，并在授权返回后直接接收并保存该 App 运行所需的全部凭据；
+  安装者无需复制任何子 App 运行凭据。
 - **本机路径（Socket Mode）**：Mohist 部署不需要暴露公共入站地址，由本机服务主动向外
-  建立 Slack 连接。Manager 仍自动完成 App 创建和安装授权，但 Slack 不经接口返回这一类
-  App 的 App-level token；因此用户需要**在该 Agent App 的设置页生成一次 App-level token
-  并粘贴回 Mohist**。这是本机路径上每个 Agent 一次性的人工步骤。
+  建立 Slack 连接。Manager 同样自动完成 App 创建并引导安装授权，但 Slack 不经接口返回
+  这一类 App 的 App-level token；因此安装者需要**在该 Agent App 的设置页生成一次
+  App-level token 并粘贴回 Mohist**。这是本机路径在同样的授权与可能审批之外，每个 Agent
+  多出的一次性人工步骤。
 
 两条路径都保证：同一个 Agent 在一个工作区只产生一个 App、一个 Bot；中断或失败的安装可以
 恢复到同一个 App，不会重复创建 Bot。
 
 > **为什么本机路径多一步：** Slack 的 App 创建接口不会把 App-level token 交给调用方，公开
 > 接口也没有生成或读取它的能力。这是 Slack 平台的限制，不是 Mohist 的选择。托管路径用
-> 公共入站地址的签名校验替代了对这个 token 的依赖，所以可以做到全自动。
+> 公共入站地址的签名校验替代了对这个 token 的依赖，因此省去这一步手工 token；但它仍需要
+> 安装者完成 Slack 安装授权，也不绕过工作区要求的管理员审批。
 
 ## 第一版产品边界
 
@@ -180,7 +183,7 @@ mo agent connection transfer-owner <connection-id>
 | Slack workspace | Bot 所在工作区；由 Manager 安装结果确认，不靠用户手填名称判断 |
 | Bot identity | 创建时以 Agent 名称与头像初始化、之后由 Slack 管理并由 Mohist 核对的外部身份 |
 | Slack 说明 | 从 Agent Description 生成的 App 短说明；空描述时 Mohist 生成非空通用说明 |
-| 安装路径 | 托管（HTTPS，全自动）或本机（Socket Mode，每 Agent 一次手工 App-level token） |
+| 安装路径 | 托管（HTTPS，无需复制子 App 运行凭据）或本机（Socket Mode，每 Agent 一次手工 App-level token） |
 | Owner | 首次认领或后续转移时验证的 Slack 成员；默认唯一调用者，也是 Allowlist 的固定成员 |
 | Access policy | 谁可以在频道中发起工作或继续会话；默认 Owner only |
 | Allowed members | Allowlist 模式下通过成员选择器添加、可在频道调用的 Slack 成员；私聊仍只有 Owner |
@@ -430,8 +433,9 @@ Connection 的生命周期有三个**互相独立、各自需要显式确认**�
 - 第一版不协调由不同 Mohist Server 管理、但位于同一 Slack 工作区中的 Bot。
 - 第一版不支持 Slack group DM。
 - 第一版不把 Mohist artifact 自动上传为 Slack 文件。
-- 本机路径不承诺「一句话零步骤全自动」：每个 Agent App 仍需一次手工生成并粘贴 App-level
-  token，除非使用托管路径。
+- 两条路径都不承诺「一句话零步骤全自动」：安装者都要完成 Slack 安装授权，工作区策略要求
+  时同样要过管理员审批；本机路径在此基础上每个 Agent App 还需一次手工生成并粘贴 App-level
+  token。
 
 ## 实装差距
 
