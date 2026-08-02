@@ -391,6 +391,20 @@ public static class SlackConnectionRoutes
             }
         });
 
+        management.MapPost("/{connectionId}/clear-gap", async (
+            HttpContext context,
+            string connectionId,
+            AgentConnectionStore connections,
+            CancellationToken ct) =>
+        {
+            var projectId = context.GetResolvedProject().Id;
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+            var cleared = await connections.ClearOfflineGapIfSetAsync(projectId, connectionId, ct);
+            return ApiResults.Ok(new { cleared = cleared > 0 });
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
@@ -461,7 +475,7 @@ public static class SlackConnectionRoutes
             return await HandleDmIngressAsync(
                 HandleDmIngressRequest.From(
                     projectId, connection, identity, senderSlackUserId, body,
-                    mapping, sessions, agents, claims, inbox, outbox,
+                    connections, mapping, sessions, agents, claims, inbox, outbox,
                     launcher, attachmentBinder, grains, followupDispatcher,
                     runnerHub, runnerConnections,
                     http.RequestServices),
@@ -1152,6 +1166,9 @@ public static class SlackConnectionRoutes
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
 
+        if (!accepted.AlreadyExisted)
+            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+
         var route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
 
         if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
@@ -1768,6 +1785,9 @@ public static class SlackConnectionRoutes
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
 
+        if (!accepted.AlreadyExisted)
+            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+
         var route = accepted.AlreadyExisted
             ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
             : new SlackProviderInboxRoute(routeDraft.Kind, routeDraft.SessionId, routeDraft.TurnId);
@@ -1914,6 +1934,9 @@ public static class SlackConnectionRoutes
         {
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
+
+        if (!accepted.AlreadyExisted)
+            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
 
         AgentLaunchResult? launch = null;
         SlackAttachmentBinding? attachmentBinding = null;
@@ -2097,6 +2120,9 @@ public static class SlackConnectionRoutes
             return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
         }
 
+        if (!accepted.AlreadyExisted)
+            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
+
         var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
         var followupResult = await RouteFollowupAsync(
             projectId,
@@ -2144,6 +2170,7 @@ internal sealed record HandleDmIngressRequest(
     SlackMessageIdentity Identity,
     string SenderSlackUserId,
     SlackIngressBody Body,
+    AgentConnectionStore Connections,
     SlackDmSessionMappingStore DmMapping,
     AgentSessionQuerier Sessions,
     AgentQuerier Agents,
@@ -2164,6 +2191,7 @@ internal sealed record HandleDmIngressRequest(
         SlackMessageIdentity identity,
         string senderSlackUserId,
         SlackIngressBody body,
+        AgentConnectionStore connections,
         SlackDmSessionMappingStore dmMapping,
         AgentSessionQuerier sessions,
         AgentQuerier agents,
@@ -2178,7 +2206,7 @@ internal sealed record HandleDmIngressRequest(
         RunnerConnectionTracker runnerConnections,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
-            dmMapping, sessions, agents, claims, inbox, outbox,
+            connections, dmMapping, sessions, agents, claims, inbox, outbox,
             launcher, attachmentBinder, grains, followupDispatcher, runnerHub, runnerConnections, services);
 
 }
