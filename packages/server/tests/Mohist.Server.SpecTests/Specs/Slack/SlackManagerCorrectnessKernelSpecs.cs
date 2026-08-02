@@ -16,7 +16,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
+public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
 {
     private readonly FakeTimeProvider _time = new(TestTime.UtcNow);
     private TestSqliteDatabase _database = null!;
@@ -243,6 +243,20 @@ public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             "https://mohist.example", "capability-1", new SlackManifestIdentitySnapshot("c", "a", "T")));
         Assert.Contains("request_url", https.CanonicalJson, StringComparison.Ordinal);
         Assert.Contains("https://mohist.example/slack/events", https.CanonicalJson, StringComparison.Ordinal);
+
+        using var socketJson = JsonDocument.Parse(first.CanonicalJson);
+        var socketRoot = socketJson.RootElement;
+        Assert.Equal(["display_information", "features", "oauth_config", "settings"],
+            socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
+        var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
+        Assert.Equal(["app_mention"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.False(socketEvents.TryGetProperty("request_url", out _));
+        Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
+
+        using var httpsJson = JsonDocument.Parse(https.CanonicalJson);
+        var httpsEvents = httpsJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions");
+        Assert.Equal(["app_mention"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Equal("https://mohist.example/slack/events", httpsEvents.GetProperty("request_url").GetString());
     }
 
     [Fact]
@@ -298,7 +312,7 @@ public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         Assert.Single(sink.Tokens);
         await using var db = _factory.CreateDbContext();
         var row = await db.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
-        Assert.Equal($"slack-child:{child.Id}:bot-token", row.BotTokenRef);
+        Assert.StartsWith("slack-oauth-attempt:", row.BotTokenRef, StringComparison.Ordinal);
         Assert.DoesNotContain("xoxb-secret", JsonSerializer.Serialize(row), StringComparison.Ordinal);
     }
 
@@ -413,7 +427,8 @@ public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         string lifecycle,
         string authorization = SlackAuthorizationState.NotStarted,
         string appId = "",
-        string botUserId = "")
+        string botUserId = "",
+        string bindingState = SlackChildAppBindingState.Pending)
     {
         var suffix = Guid.NewGuid().ToString("N");
         var enrollmentId = $"enrollment-{suffix}";
@@ -472,7 +487,7 @@ public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             SigningSecretRef = "signing-secret-ref",
             AppLevelTokenRef = "app-token-ref",
             BotTokenRef = string.IsNullOrEmpty(botUserId) ? string.Empty : "bot-token-ref",
-            BindingState = SlackChildAppBindingState.Pending,
+            BindingState = bindingState,
             AuditJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,
@@ -488,6 +503,21 @@ public sealed class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         var row = await db.AgentConnections.SingleAsync(item => item.Id == connectionId);
         row.DeletedAt = _time.GetUtcNow();
         row.UpdatedAt = _time.GetUtcNow();
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedBindingObligationAsync(ManagedSlackChildAppRow child, string status)
+    {
+        await using var db = _factory.CreateDbContext();
+        db.SlackChildAppBindingObligations.Add(new SlackChildAppBindingObligationRow
+        {
+            Id = $"obligation-{Guid.NewGuid():N}",
+            ChildAppId = child.Id,
+            AgentConnectionId = child.AgentConnectionId,
+            Status = status,
+            CreatedAt = _time.GetUtcNow(),
+            UpdatedAt = _time.GetUtcNow(),
+        });
         await db.SaveChangesAsync();
     }
 

@@ -12,10 +12,19 @@ public static class ManagedSlackChildAppStatusDeriver
     public static ManagedSlackChildAppStatus Derive(ManagedSlackChildApp child)
     {
         ArgumentNullException.ThrowIfNull(child);
+        ValidateKnownState(child);
         var manifestState = DeriveManifestState(child);
         var transportReadiness = DeriveTransportReadiness(child);
         var nextAction = DeriveNextAction(child, manifestState, transportReadiness);
         return new(child.AppLifecycle, child.Authorization, manifestState, transportReadiness, nextAction);
+    }
+
+    private static void ValidateKnownState(ManagedSlackChildApp child)
+    {
+        SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, child.AppLifecycle);
+        SlackStateTransitions.RequireAuthorizationTransition(child.Authorization, child.Authorization);
+        SlackStateTransitions.RequireTransportKind(child.TransportKind);
+        SlackStateTransitions.RequireBindingTransition(child.BindingState, child.BindingState);
     }
 
     public static string DeriveManifestState(ManagedSlackChildApp child) => DeriveManifestState(
@@ -122,6 +131,16 @@ public static class ManagedSlackChildAppStatusDeriver
 public static class SlackChildAppBindingState
 {
     public const string Pending = "pending";
+    public const string InProgress = "in_progress";
+    public const string Bound = "bound";
+    public const string ConnectionDeleted = "connection_deleted";
+    public const string Conflict = "conflict";
+}
+
+public static class SlackChildAppBindingObligationStatus
+{
+    public const string Pending = "pending";
+    public const string InProgress = "in_progress";
     public const string Bound = "bound";
     public const string ConnectionDeleted = "connection_deleted";
     public const string Conflict = "conflict";

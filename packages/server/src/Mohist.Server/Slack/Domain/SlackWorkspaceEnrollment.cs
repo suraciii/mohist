@@ -16,6 +16,31 @@ public sealed class SlackWorkspaceEnrollment
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
+
+    public void TransitionLifecycle(string nextLifecycle, DateTimeOffset? removedAt = null)
+    {
+        SlackStateTransitions.RequireEnrollmentLifecycleTransition(Lifecycle, nextLifecycle);
+        Lifecycle = nextLifecycle;
+        if (nextLifecycle == SlackEnrollmentLifecycle.Removed)
+            DeletedAt ??= removedAt ?? throw new ArgumentNullException(nameof(removedAt));
+    }
+
+    public void SetManagerCapability(string managerCapability, string? capabilityReason, DateTimeOffset? lastVerifiedAt)
+    {
+        SlackStateTransitions.RequireKnownManagerCapability(managerCapability);
+        ManagerCapability = managerCapability;
+        CapabilityReason = capabilityReason;
+        LastVerifiedAt = lastVerifiedAt;
+    }
+
+    public void UpdatePlan(string planCode, int managedAppLimit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(planCode);
+        if (managedAppLimit < 0)
+            throw new ArgumentOutOfRangeException(nameof(managedAppLimit));
+        PlanCode = planCode;
+        ManagedAppLimit = managedAppLimit;
+    }
 }
 
 public static class SlackEnrollmentLifecycle

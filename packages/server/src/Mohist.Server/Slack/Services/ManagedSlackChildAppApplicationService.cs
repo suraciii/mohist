@@ -77,6 +77,8 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
             return ManagedSlackChildAppOperationResult.NotAllowed(child.AppLifecycle, child.ErrorClass);
 
         var operationId = $"{operation.ToString().ToLowerInvariant()}_{Guid.NewGuid():N}";
+        var nextLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
+        SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, nextLifecycle);
         var nextFence = child.OperationFence + 1;
         var now = _timeProvider.GetUtcNow();
         var changed = await db.ManagedSlackChildApps
@@ -119,6 +121,8 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
             return ManagedSlackChildAppOperationResult.NotAllowed(child.AppLifecycle, child.ErrorClass);
 
         var operationId = $"reconcile_{operation.ToString().ToLowerInvariant()}_{Guid.NewGuid():N}";
+        var nextLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
+        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, nextLifecycle);
         var nextFence = child.OperationFence + 1;
         var now = _timeProvider.GetUtcNow();
         var changed = await db.ManagedSlackChildApps
@@ -157,6 +161,9 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
         var lifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Created : SlackAppLifecycle.Deleted;
         var unknownLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown;
         var failedLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.NotCreated : SlackAppLifecycle.Created;
+        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, lifecycle);
+        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, unknownLifecycle);
+        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, failedLifecycle);
         var query = db.ManagedSlackChildApps
             .Where(item => item.Id == childAppId
                 && item.OperationFence == fence
@@ -237,6 +244,7 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
                 await query.ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.Deleted)
                     .SetProperty(item => item.AppId, string.Empty)
+                    .SetProperty(item => item.BotUserId, string.Empty)
                     .SetProperty(item => item.UnknownOutcome, (string?)null)
                     .SetProperty(item => item.ErrorClass, (string?)null)
                     .SetProperty(item => item.UpdatedAt, now), ct),

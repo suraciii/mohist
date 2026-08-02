@@ -48,6 +48,30 @@ public sealed class ManagedSlackChildApp
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }
+
+    public void TransitionAppLifecycle(string nextLifecycle)
+    {
+        SlackStateTransitions.RequireChildAppLifecycleTransition(AppLifecycle, nextLifecycle);
+        AppLifecycle = nextLifecycle;
+    }
+
+    public void TransitionAuthorization(string nextAuthorization)
+    {
+        SlackStateTransitions.RequireAuthorizationTransition(Authorization, nextAuthorization);
+        Authorization = nextAuthorization;
+    }
+
+    public void SetTransportKind(string transportKind)
+    {
+        SlackStateTransitions.RequireTransportKind(transportKind);
+        TransportKind = transportKind;
+    }
+
+    public void TransitionBindingState(string nextBindingState)
+    {
+        SlackStateTransitions.RequireBindingTransition(BindingState, nextBindingState);
+        BindingState = nextBindingState;
+    }
 }
 
 public static class SlackAppLifecycle
