@@ -1,0 +1,83 @@
+{
+  "project": "mohist-local",
+  "description": "Make Slack Connections honest under backlog and delivery uncertainty: reversible backpressure, a visible Backpressured diagnostic, sender-visible ingress rejection, safe retry on explicit failure with user-visible Delivery uncertain, and an offline gap notice after long outages.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Reversible backpressure and Backpressured diagnostic state",
+      "spec": "specs/slack-capacity-backpressure/spec.md#backpressure-is-reversible-without-operator-intervention",
+      "description": "Add a reason-guarded RecoverBackpressuredAsync to ISlackConnectionHealthBackpressurer that flips a Connection from Degraded to Healthy and clears the reason only when the current reason is inbox/outbox overflow. Add a fourth sweep to SlackOutboxDispatcherService (driven by the existing dispatcher grain reminder) that, for each Degraded(Backpressured) Enabled Connection, recovers when pending inbox and pending outbox counts are both strictly below their capacity thresholds. Add a Backpressured branch to ConnectionDiagnostic.Compute (priority just below service-offline) naming inbox-vs-outbox and a wait/retry next action, plus ConnectionDiagnosticState.Backpressured, so a backpressured Connection no longer falls through to Healthy. Web/CLI consume the new state through the existing diagnostic summary.",
+      "acceptanceCriteria": [
+        "After a Connection is flipped Degraded(Backpressured) on outbox overflow, advancing fake time past the dispatcher reminder and draining pending outbox rows below OutboxCapacityPerConnection flips ConnectionHealth back to Healthy and clears HealthReason with no operator action (spec test, fake time + fake store).",
+        "The same recovery holds for inbox overflow once pending inbox entries drop below InboxCapacityPerConnection; while either side remains at capacity the Connection stays Degraded and ingress stays rejected.",
+        "Recovery preserves every accepted inbox entry, SessionInput, and terminal/explicit-failure/user-action outbox row — none are deleted or altered by the flip to Healthy.",
+        "RecoverBackpressuredAsync only clears a Connection whose HealthReason is SlackProviderBackpressureReasons.InboxOverflow or OutboxOverflow; a Degraded Connection with a different reason is not touched.",
+        "ConnectionDiagnostic.Compute returns the Backpressured state (with inbox-or-outbox reason and a single wait/retry next action) for a Degraded(Backpressured) Connection, distinct from Disabled and from Healthy; the Web Connection page and CLI view render this state."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server: reason-guarded RecoverBackpressuredAsync, the recovery sweep in SlackOutboxDispatcherService, and the Backpressured diagnostic branch; Web/CLI rendering of the new state; passing spec + unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Recovery threshold is strictly-below capacity to mirror the >= capacity overflow trigger (design D1). The sweep reuses the cluster-singleton dispatcher grain/reminder and its dispatch gate; no new reminder."
+    },
+    {
+      "id": "T-002",
+      "title": "Sender-visible backpressure ingress rejection",
+      "spec": "specs/slack-capacity-backpressure/spec.md#backpressure-ingress-rejection-is-visible-to-the-sender",
+      "description": "Replace the HTTP 409 backpressure response in the ingress route with a success response carrying a structured IngressResult of kind 'backpressured' plus a retry-later reason, mirroring existing 'rejected' results. In the mohist-slack adapter handleEvent, stop discarding the result: for user-facing rejection kinds (backpressured, and any future can't-enqueue kind), post the reason to the originating conversation/thread via the already-held runtime.web before ack, so the refusal is visible even when the outbox itself is full. Acceptance is unchanged (ack without accepting; no SessionInput created).",
+      "acceptanceCriteria": [
+        "Ingress to a backpressured Connection returns a success IngressResult { kind: 'backpressured', reason } instead of HTTP 409, and creates no SessionInput (spec test).",
+        "The adapter, on receiving a backpressured (or rejected) result, posts the reason to the originating Slack conversation/thread via runtime.web, so a fake Slack web client observes the retry-later message (adapter unit test, no real Slack).",
+        "The sender can distinguish a backpressure refusal (not accepted, retry) from a message accepted just before the backpressure episode whose result is still pending.",
+        "When outbox overflow is the pressure (server cannot enqueue a reply), the rejection is still surfaced via the adapter-rendered path."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Server ingress route returning a structured backpressured IngressResult; mohist-slack adapter rendering rejection kinds; passing spec + adapter unit tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "Server-side rejections that CAN be enqueued keep their existing enqueue path; only the can't-enqueue (backpressure) case is rendered by the adapter. The kind discriminator is the single source of truth to avoid double rendering (design D4)."
+    },
+    {
+      "id": "T-003",
+      "title": "Safe retry on explicit failure, visible Delivery uncertain, and manual resend",
+      "spec": "specs/slack-delivery-outcomes/spec.md#explicit-delivery-failure-retries-safely-without-duplicating",
+      "description": "In the mohist-slack adapter drain, distinguish an explicit Slack rejection (response.ok === false, a definitive Slack error) from an unknown/transport error: ack 'retry' for explicit failures (safe — Slack never accepted, so re-posting cannot duplicate) and keep 'uncertain' only for genuinely unknown results. The server ack route already maps 'retry' to ScheduleRetryAsync. Add a GET deliveries route backed by SlackOutboxStore.ListAsync and a manual-resend endpoint that transitions a DeliveryUncertain row back to Pending via ScheduleRetryAsync. Web Connection page and CLI render delivery_uncertain rows and their reason, and warn about possible duplication before triggering a resend.",
+      "acceptanceCriteria": [
+        "An explicit Slack rejection in the adapter drain acks 'retry' and the row returns to Pending (bounded by OutboxMaxAttempts, then dead-lettered by the existing sweep) without producing a second Slack message; an unknown/transport error acks 'uncertain' and is not blindly resent (adapter unit test, fake Slack).",
+        "A GET .../slack-connections/{id}/deliveries route returns outbox rows with state and reason; delivery_uncertain rows and their LastError are visible on the Web Connection page and CLI.",
+        "A manual resend of a DeliveryUncertain row transitions it to Pending and the Web/CLI flow warns about possible duplication and offers the authoritative execution result before committing.",
+        "Retrying, holding uncertain, or dead-lettering a delivery does not change the AgentJob/AgentTurn authoritative result (spec test)."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Adapter retry-vs-uncertain split; server deliveries list + resend endpoints; Web/CLI uncertain-delivery rendering and resend-with-warning; passing spec + unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "The server ack route already branches delivered/uncertain/else->ScheduleRetryAsync (SlackConnectionRoutes.cs:497-502); only the adapter needs to emit 'retry' for explicit failures. Reusing ScheduleRetryAsync keeps one retry path and one attempt budget (design D5)."
+    },
+    {
+      "id": "T-004",
+      "title": "Offline gap notice after long adapter outages",
+      "spec": "specs/slack-offline-gap-notice/spec.md#offline-duration-past-the-retention-window-is-detected",
+      "description": "Add a nullable AgentConnection.OfflineGapAt column via an EF migration and a configurable SlackProviderOptions.SlackEventRetentionWindow. In RecordAdapterHeartbeatAsync, before overwriting LastHeartbeatAt, set OfflineGapAt = now when an existing heartbeat exists and (now - existing) >= SlackEventRetentionWindow. Surface OfflineGapAt as a non-blocking diagnostic notice ('messages may have been missed; resend critical delegations') on the Web Connection page, CLI, and Owner diagnostic surface. Clear OfflineGapAt when the first new ingress is accepted after the gap (proven liveness) or on operator acknowledge. Do not synthesize or replay events.",
+      "acceptanceCriteria": [
+        "A heartbeat arriving after a gap >= SlackEventRetentionWindow stamps OfflineGapAt; a heartbeat after a shorter gap does not (spec test, fake time).",
+        "While OfflineGapAt is set, the Web Connection page, CLI, and Owner diagnostic surface show a possible-gap notice asking the user to resend critical delegations; after the first accepted ingress post-gap (or operator acknowledge) OfflineGapAt is cleared and the notice disappears.",
+        "No events are fabricated or replayed to fill the gap; the notice is the only remedy surfaced.",
+        "The additive nullable OfflineGapAt migration applies cleanly and rollback is dropping the column (no existing read depends on it)."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "EF migration + OfflineGapAt field; heartbeat gap capture in RecordAdapterHeartbeatAsync; SlackEventRetentionWindow option; diagnostic notice + clear-on-liveness; Web/CLI rendering; passing spec + migration tests.",
+      "dependsOn": ["T-001"],
+      "passes": false,
+      "notes": "The gap must be captured at the reconnect moment because LastHeartbeatAt is overwritten on reconnect; OfflineGapAt persists it for reads (design D6). Default SlackEventRetentionWindow is conservative (e.g. 30 min) and tunable."
+    }
+  ]
+}
