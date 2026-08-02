@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
@@ -330,10 +331,11 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
         await SeedAgentAsync("proj-17b", "agent-17b", AgentStatus.Active);
         var created = await _store.CreateAsync(new AgentConnection
         {
-            Id = "conn-unbound",
+            Id = "conn-staged",
             ProjectId = "proj-17b",
             AgentId = "agent-17b",
             ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "team-17b",
         });
 
         var bound = await _store.BindSlackIdentityAsync("proj-17b", created.Id, "team-17b", "app-17b", "bot-17b", "Mohist");
@@ -342,7 +344,120 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
 
         Assert.NotNull(bound);
         Assert.Equal("team-17b", bound.WorkspaceTeamId);
+        Assert.Equal("team_mismatch", exception.Code);
+    }
+
+    [Fact]
+    public async Task CreateRejectsMissingWorkspaceReservation()
+    {
+        await SeedAgentAsync("proj-staged-empty", "agent-staged-empty", AgentStatus.Active);
+
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(() =>
+            _store.CreateStagedAsync(new AgentConnection
+            {
+                Id = "conn-missing-team",
+                ProjectId = "proj-staged-empty",
+                AgentId = "agent-staged-empty",
+                ProviderKind = ConnectionProviderKind.Slack,
+            }));
+
+        Assert.Equal("workspace_required", exception.Code);
+    }
+
+    [Fact]
+    public async Task CreateRejectsHalfBoundIdentity()
+    {
+        await SeedAgentAsync("proj-staged-half-create", "agent-staged-half-create", AgentStatus.Active);
+
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(() =>
+            _store.CreateAsync(new AgentConnection
+            {
+                Id = "conn-half-create",
+                ProjectId = "proj-staged-half-create",
+                AgentId = "agent-staged-half-create",
+                ProviderKind = ConnectionProviderKind.Slack,
+                WorkspaceTeamId = "team-half-create",
+                AppId = "app-half-create",
+            }));
+
+        Assert.Equal("invalid_staged_binding", exception.Code);
+    }
+
+    [Fact]
+    public async Task StagedBindingRejectsHalfBoundPersistedIdentityWithoutWriting()
+    {
+        await SeedAgentAsync("proj-staged-half", "agent-staged-half", AgentStatus.Active);
+        var created = await _store.CreateAsync(new AgentConnection
+        {
+            Id = "conn-half",
+            ProjectId = "proj-staged-half",
+            AgentId = "agent-staged-half",
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "team-half",
+        });
+        await using (var db = _factory.CreateDbContext())
+        {
+            await db.Database.OpenConnectionAsync();
+            await db.Database.ExecuteSqlRawAsync("PRAGMA ignore_check_constraints = ON");
+            var row = await db.AgentConnections.SingleAsync(item => item.Id == created.Id);
+            row.AppId = "app-half";
+            await db.SaveChangesAsync();
+        }
+
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(() =>
+            _store.BindSlackIdentityAsync("proj-staged-half", created.Id, "team-half", "app-next", "bot-next", "Next"));
+
+        Assert.Equal("invalid_staged_binding", exception.Code);
+        await using var verify = _factory.CreateDbContext();
+        var persisted = await verify.AgentConnections.SingleAsync(item => item.Id == created.Id);
+        Assert.Equal("app-half", persisted.AppId);
+        Assert.Equal(string.Empty, persisted.BotUserId);
+    }
+
+    [Fact]
+    public async Task StagedBindingIsIdempotentOnlyForTheSameCompleteIdentity()
+    {
+        await SeedAgentAsync("proj-staged-idempotent", "agent-staged-idempotent", AgentStatus.Active);
+        var created = await _store.CreateAsync(new AgentConnection
+        {
+            Id = "conn-idempotent",
+            ProjectId = "proj-staged-idempotent",
+            AgentId = "agent-staged-idempotent",
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "team-idempotent",
+        });
+
+        var first = await _store.BindSlackIdentityAsync("proj-staged-idempotent", created.Id, "team-idempotent", "app-idempotent", "bot-idempotent", "Mohist");
+        var replay = await _store.BindSlackIdentityAsync("proj-staged-idempotent", created.Id, "team-idempotent", "app-idempotent", "bot-idempotent", "Mohist");
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(() =>
+            _store.BindSlackIdentityAsync("proj-staged-idempotent", created.Id, "team-idempotent", "app-other", "bot-other", "Other"));
+
+        Assert.Equal("app-idempotent", first!.AppId);
+        Assert.Equal("app-idempotent", replay!.AppId);
         Assert.Equal("immutable_binding", exception.Code);
+    }
+
+    [Fact]
+    public async Task StagedBindingRejectsTeamMismatchWithoutWriting()
+    {
+        await SeedAgentAsync("proj-staged-team", "agent-staged-team", AgentStatus.Active);
+        var created = await _store.CreateAsync(new AgentConnection
+        {
+            Id = "conn-team-mismatch",
+            ProjectId = "proj-staged-team",
+            AgentId = "agent-staged-team",
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "team-fixed",
+        });
+
+        var exception = await Assert.ThrowsAsync<AgentConnectionValidationException>(() =>
+            _store.BindSlackIdentityAsync("proj-staged-team", created.Id, "team-other", "app-other", "bot-other", "Other"));
+
+        Assert.Equal("team_mismatch", exception.Code);
+        var persisted = await _store.GetAsync("proj-staged-team", created.Id);
+        Assert.Equal("team-fixed", persisted!.WorkspaceTeamId);
+        Assert.Equal(string.Empty, persisted.AppId);
+        Assert.Equal(string.Empty, persisted.BotUserId);
     }
 
     [Fact]
@@ -416,8 +531,8 @@ public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
         AgentId = agentId,
         ProviderKind = ConnectionProviderKind.Slack,
         WorkspaceTeamId = teamId,
-        AppId = $"A{ Guid.NewGuid():N}",
-        BotUserId = $"B{Guid.NewGuid():N}",
+        AppId = string.Empty,
+        BotUserId = string.Empty,
         BotName = "Test Bot",
     };
 
