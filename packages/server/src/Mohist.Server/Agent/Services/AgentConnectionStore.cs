@@ -2,12 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.Agent.Services;
 
-public sealed class AgentConnectionStore : IScopedService
+public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBindingPort
 {
     private static readonly HashSet<string> ImmutableBindingFields = new(StringComparer.Ordinal)
     {
@@ -153,6 +154,31 @@ public sealed class AgentConnectionStore : IScopedService
     public async Task<AgentConnection> CreateAsync(AgentConnection connection, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (!string.IsNullOrWhiteSpace(connection.AppId) || !string.IsNullOrWhiteSpace(connection.BotUserId))
+            throw new AgentConnectionValidationException("App and Bot identities must both be empty until the Connection is bound.", "invalid_staged_binding");
+
+        return await CreateCoreAsync(connection, requireWorkspaceReservation: false, ct);
+    }
+
+    public async Task<AgentConnection> CreateStagedAsync(AgentConnection connection, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        if (string.IsNullOrWhiteSpace(connection.WorkspaceTeamId))
+            throw new AgentConnectionValidationException("A Slack workspace team is required when creating a staged Connection.", "workspace_required");
+        if (!string.IsNullOrWhiteSpace(connection.AppId) || !string.IsNullOrWhiteSpace(connection.BotUserId))
+            throw new AgentConnectionValidationException("App and Bot identities must both be empty until the Connection is bound.", "invalid_staged_binding");
+
+        return await CreateCoreAsync(connection, requireWorkspaceReservation: true, ct);
+    }
+
+    private async Task<AgentConnection> CreateCoreAsync(
+        AgentConnection connection,
+        bool requireWorkspaceReservation,
+        CancellationToken ct)
+    {
+        if (requireWorkspaceReservation && string.IsNullOrWhiteSpace(connection.WorkspaceTeamId))
+            throw new AgentConnectionValidationException("A Slack workspace team is required when creating a staged Connection.", "workspace_required");
+
         await ValidateActiveAgentAsync(connection.ProjectId, connection.AgentId, ct);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -235,7 +261,8 @@ public sealed class AgentConnectionStore : IScopedService
         string appId,
         string botUserId,
         string? botName,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? claimToken = null)
     {
         if (string.IsNullOrWhiteSpace(workspaceTeamId)
             || string.IsNullOrWhiteSpace(appId)
@@ -243,30 +270,75 @@ public sealed class AgentConnectionStore : IScopedService
             throw new AgentConnectionValidationException("Slack workspace, App, and Bot identity are required.", "invalid_slack_identity");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.AgentConnections.FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
-        if (row is null) return null;
+        var current = await db.AgentConnections.FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
+        if (current is null) return null;
 
-        if (HasBoundIdentity(row)
-            && (!string.Equals(row.WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal)
-                || !string.Equals(row.AppId, appId, StringComparison.Ordinal)
-                || !string.Equals(row.BotUserId, botUserId, StringComparison.Ordinal)))
-            throw new AgentConnectionValidationException("Slack identity is already bound and cannot be changed.", "immutable_binding");
+        var currentAppBound = !string.IsNullOrWhiteSpace(current.AppId);
+        var currentBotBound = !string.IsNullOrWhiteSpace(current.BotUserId);
+        if (currentAppBound != currentBotBound)
+            throw new AgentConnectionValidationException("The Connection contains a half-bound Slack identity.", "invalid_staged_binding");
+        var workspaceWasUnreserved = string.IsNullOrWhiteSpace(current.WorkspaceTeamId);
+        if (!workspaceWasUnreserved && !string.Equals(current.WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal))
+            throw new AgentConnectionValidationException("The Slack workspace cannot be changed after Connection creation.", "team_mismatch");
+        if (currentAppBound)
+        {
+            if (string.Equals(current.AppId, appId, StringComparison.Ordinal)
+                && string.Equals(current.BotUserId, botUserId, StringComparison.Ordinal))
+                return ToDomain(current);
+            throw new AgentConnectionValidationException("Slack App and Bot identity are already bound and cannot be changed.", "immutable_binding");
+        }
 
         var duplicate = await db.AgentConnections.AnyAsync(c => c.ProjectId == projectId
             && c.Id != id
-            && c.AgentId == row.AgentId
+            && c.AgentId == current.AgentId
             && c.WorkspaceTeamId == workspaceTeamId
-            && c.DeletedAt == null, ct);
+            && c.DeletedAt == null
+            && (!string.IsNullOrEmpty(c.AppId) || !string.IsNullOrEmpty(c.BotUserId)), ct);
         if (duplicate)
-            throw new AgentConnectionDuplicateException(projectId, row.AgentId, workspaceTeamId);
+            throw new AgentConnectionDuplicateException(projectId, current.AgentId, workspaceTeamId);
 
-        row.WorkspaceTeamId = workspaceTeamId;
-        row.AppId = appId;
-        row.BotUserId = botUserId;
-        row.BotName = botName?.Trim() ?? row.BotName;
-        row.UpdatedAt = _timeProvider.GetUtcNow();
-        await db.SaveChangesAsync(ct);
-        return ToDomain(row);
+        var now = _timeProvider.GetUtcNow();
+        var update = db.AgentConnections
+            .Where(c => c.ProjectId == projectId
+                && c.Id == id
+                && c.DeletedAt == null
+                && (workspaceWasUnreserved || c.WorkspaceTeamId == workspaceTeamId)
+                && c.AppId == string.Empty
+                && c.BotUserId == string.Empty);
+        if (claimToken is not null)
+        {
+            update = update.Where(connection => db.SlackChildAppBindingObligations.Any(obligation =>
+                obligation.AgentConnectionId == connection.Id
+                && obligation.Status == "in_progress"
+                && obligation.ClaimToken == claimToken));
+        }
+
+        var changed = await update.ExecuteUpdateAsync(setters => setters
+                .SetProperty(c => c.WorkspaceTeamId, workspaceTeamId)
+                .SetProperty(c => c.AppId, appId)
+                .SetProperty(c => c.BotUserId, botUserId)
+                .SetProperty(c => c.BotName, botName?.Trim() ?? current.BotName)
+                .SetProperty(c => c.UpdatedAt, now), ct);
+        if (changed == 0)
+        {
+            var afterRace = await db.AgentConnections.AsNoTracking().FirstOrDefaultAsync(c => c.ProjectId == projectId && c.Id == id, ct);
+            if (afterRace is not null
+                && afterRace.WorkspaceTeamId == workspaceTeamId
+                && afterRace.AppId == appId
+                && afterRace.BotUserId == botUserId)
+                return ToDomain(afterRace);
+            if (claimToken is not null && !await db.SlackChildAppBindingObligations.AnyAsync(obligation =>
+                    obligation.AgentConnectionId == id
+                    && obligation.Status == "in_progress"
+                    && obligation.ClaimToken == claimToken, ct))
+                throw new AgentConnectionValidationException(
+                    "The Slack binding claim is no longer current.",
+                    "stale_binding_claim");
+            throw new AgentConnectionValidationException("Slack identity was bound by another operation and cannot be changed.", "immutable_binding");
+        }
+
+        var bound = await db.AgentConnections.AsNoTracking().SingleAsync(c => c.ProjectId == projectId && c.Id == id, ct);
+        return ToDomain(bound);
     }
 
     /// <summary>
@@ -329,13 +401,11 @@ public sealed class AgentConnectionStore : IScopedService
     }
 
     public static bool HasBoundIdentity(AgentConnection connection) =>
-        !string.IsNullOrWhiteSpace(connection.WorkspaceTeamId)
-        || !string.IsNullOrWhiteSpace(connection.AppId)
+        !string.IsNullOrWhiteSpace(connection.AppId)
         || !string.IsNullOrWhiteSpace(connection.BotUserId);
 
     public static bool HasBoundIdentity(AgentConnectionRow row) =>
-        !string.IsNullOrWhiteSpace(row.WorkspaceTeamId)
-        || !string.IsNullOrWhiteSpace(row.AppId)
+        !string.IsNullOrWhiteSpace(row.AppId)
         || !string.IsNullOrWhiteSpace(row.BotUserId);
 
     private static AgentConnection ToDomain(AgentConnectionRow row, string? derivedReadiness = null) => new()
