@@ -1,4 +1,4 @@
-import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -173,7 +173,22 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
     senderSlackUserId,
     senderKind: normalizeSenderKind(event),
     text: typeof event.text === "string" ? event.text : null,
+    files: parseFiles(event.files),
   }
+}
+
+function parseFiles(value: unknown): readonly SlackFileRef[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((candidate) => {
+    if (!isRecord(candidate)) return []
+    const id = stringValue(candidate.id)
+    const name = stringValue(candidate.name)
+    const mimetype = stringValue(candidate.mimetype)
+    const size = candidate.size
+    return id && name && mimetype && typeof size === "number" && Number.isSafeInteger(size) && size >= 0
+      ? [{ id, name, mimetype, size }]
+      : []
+  })
 }
 
 function normalizeSenderKind(event: Record<string, unknown>): SlackSenderKind {

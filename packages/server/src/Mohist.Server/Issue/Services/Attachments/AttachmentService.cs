@@ -20,6 +20,7 @@ public sealed class AttachmentService : IScopedService
     public const string OwnerKindAgentInput = "agent-input";
     public static readonly TimeSpan PendingTtl = TimeSpan.FromHours(24);
     public const string AgentInputOwnerIdSeparator = "/";
+    public const string DefaultUploadSource = "upload";
 
     private static readonly Regex AttachmentReferenceRegex = new(
         @"!?\[[^\]]*\]\(att:(?<id>att_[A-Za-z0-9_\-]+)\)",
@@ -105,12 +106,135 @@ public sealed class AttachmentService : IScopedService
             StoragePath = write.StoragePath,
             CreatedAt = now,
             ExpiresAt = now.Add(PendingTtl),
+            Source = DefaultUploadSource,
         };
 
         await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
         db.Attachments.Add(row);
         await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return ToUploadResult(row);
+    }
+
+    /// <summary>
+    /// Server-side analog of <see cref="UploadAsync"/> for provider-sourced
+    /// streams (e.g. Slack files fetched Server-side via the Connection's
+    /// bot token). Writes the bytes into <see cref="IAttachmentStorage"/>
+    /// under a caller-supplied <paramref name="deterministicId"/>, creating
+    /// a pending <see cref="AttachmentRow"/> stamped with the supplied
+    /// <paramref name="source"/>. Insert-if-absent on the id: when a row
+    /// with that id already exists it is returned unchanged and nothing
+    /// is written, so redelivery is a storage-level no-op.
+    /// </summary>
+    public async Task<AttachmentUploadResult> IngestProviderFileAsync(
+        string projectId,
+        string deterministicId,
+        string source,
+        string fileName,
+        string? contentType,
+        long size,
+        Stream content,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(deterministicId))
+            throw new ArgumentException("Deterministic attachment id is required.", nameof(deterministicId));
+        if (string.IsNullOrWhiteSpace(source))
+            throw new ArgumentException("Attachment source is required.", nameof(source));
+        ArgumentNullException.ThrowIfNull(content);
+        if (size < 0)
+            throw new AttachmentValidationException("Attachment size is invalid.");
+        if (size > _options.MaxFileBytes)
+            throw new AttachmentLimitException($"Attachment upload exceeds the configured size limit of {_options.MaxFileBytes} bytes.");
+
+        var now = _time.GetUtcNow();
+        var sanitizedFileName = SanitizeFileName(fileName);
+        var normalizedContentType = NormalizeContentType(contentType);
+        var storagePath = _storage.GenerateStoragePath(projectId, deterministicId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        var existing = await db.Attachments
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == deterministicId, cancellationToken)
+            .ConfigureAwait(false);
+        if (existing is not null)
+        {
+            await content.DisposeAsync().ConfigureAwait(false);
+            return ToUploadResult(existing);
+        }
+
+        AttachmentStorageWriteResult write;
+        try
+        {
+            write = await _storage.WriteFileAsync(
+                storagePath,
+                content,
+                new AttachmentFileWrite
+                {
+                    OriginalFileName = sanitizedFileName,
+                    ContentType = normalizedContentType,
+                    Size = size,
+                    MaxSize = _options.MaxFileBytes,
+                },
+                now,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (AttachmentStorageLimitException ex)
+        {
+            await content.DisposeAsync().ConfigureAwait(false);
+            throw new AttachmentLimitException(ex.Message);
+        }
+
+        var row = new AttachmentRow
+        {
+            Id = deterministicId,
+            ProjectId = projectId,
+            OwnerKind = null,
+            OwnerId = null,
+            OriginalFileName = sanitizedFileName,
+            ContentType = normalizedContentType,
+            Size = write.Size,
+            StoragePath = write.StoragePath,
+            CreatedAt = now,
+            ExpiresAt = now.Add(PendingTtl),
+            Source = source,
+        };
+
+        db.Attachments.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent ingest for the same deterministic id won the row.
+            // The bytes were written to the same content-addressed path the
+            // winner occupies (GenerateStoragePath is deterministic on the id),
+            // so there is nothing of ours to delete — removing the path would
+            // destroy the winner's content. Just adopt the winning row.
+            var winning = await LoadRowAsync(deterministicId, cancellationToken).ConfigureAwait(false)
+                ?? throw new InvalidOperationException($"Attachment row '{deterministicId}' disappeared between insert and conflict resolution.");
+            return ToUploadResult(winning);
+        }
+
+        return ToUploadResult(row);
+    }
+
+    public async Task<bool> ExistsAsync(
+        string projectId,
+        string attachmentId,
+        CancellationToken cancellationToken = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.Attachments.AsNoTracking().AnyAsync(
+            row => row.ProjectId == projectId && row.Id == attachmentId,
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<AttachmentRow?> LoadRowAsync(string id, CancellationToken cancellationToken)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+        return await db.Attachments.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task BindIssueAsync(
@@ -517,7 +641,7 @@ public sealed class AttachmentService : IScopedService
             ContentType: row.ContentType,
             Size: row.Size,
             AcceptedAt: acceptedAt,
-            Source: "upload",
+            Source: string.IsNullOrWhiteSpace(row.Source) ? DefaultUploadSource : row.Source,
             Availability: "usable");
 
     private async Task<bool> IsReadableAsync(AttachmentRow row, CancellationToken cancellationToken)
@@ -537,14 +661,9 @@ public sealed class AttachmentService : IScopedService
         }
     }
 
-    private static bool IsAcceptableAgentInputContentType(string? contentType)
+    public static bool IsAcceptableAgentInputContentType(string? contentType)
     {
         if (string.IsNullOrWhiteSpace(contentType)) return true;
-        // The runtime honors text, image, application/pdf, and common
-        // document types as Agent-readable content. Anything outside this
-        // set is rejected with a clear reason at acceptance time. The
-        // set is intentionally conservative; broadening is a future
-        // capability, not a silent default.
         if (contentType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)) return true;
         if (contentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
         if (contentType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return true;

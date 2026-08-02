@@ -269,8 +269,10 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
             .SingleAsync(row => row.ProjectId == "proj_alpha" && row.IssueNumber == 42);
         var artifact = await context.WorkflowArtifacts.AsNoTracking()
             .SingleAsync(row => row.ArtifactId == "artifact_alpha");
-        var attachment = await context.Attachments.AsNoTracking()
-            .SingleAsync(row => row.Id == "att_alpha");
+        var attachmentOwnerIssueNumber = await context.Attachments.AsNoTracking()
+            .Where(row => row.Id == "att_alpha")
+            .Select(row => row.OwnerIssueNumber)
+            .SingleAsync();
         var run = await context.WorkflowRuns.AsNoTracking()
             .Where(row => row.WorkflowRunId == "run_alpha")
             .Select(row => new { row.MetadataProjectId, row.IssueNumber })
@@ -279,7 +281,7 @@ public abstract class CanonicalIssueReferenceMigrationTestSupport
             profile.ProjectId,
             profile.IssueNumber,
             artifact.IssueNumber,
-            attachment.OwnerIssueNumber,
+            attachmentOwnerIssueNumber,
             run.MetadataProjectId,
             run.IssueNumber);
     }

@@ -85,7 +85,48 @@ describe("mohist-slack adapter", () => {
       senderSlackUserId: "U1",
       senderKind: "human",
       text: "do work",
+      files: [],
     })
+  })
+
+  it("forwards file metadata without Slack secrets or raw payload", () => {
+    const envelope = normalizeSocketEvent({
+      team_id: "T1",
+      bot_token: "xoxb-secret",
+      event: {
+        type: "message",
+        subtype: "file_share",
+        channel: "D1",
+        ts: "123.456",
+        user: "U1",
+        text: "read these",
+        files: [
+          {
+            id: "F1",
+            name: "report.txt",
+            mimetype: "text/plain",
+            size: 42,
+            url_private: "https://files.slack.com/secret",
+            url_private_download: "https://files.slack.com/download-secret",
+          },
+          {
+            id: "F2",
+            name: "image.png",
+            mimetype: "image/png",
+            size: 2048,
+            permalink: "https://workspace.slack.com/files/F2",
+          },
+        ],
+      },
+    })
+
+    expect(envelope.files).toEqual([
+      { id: "F1", name: "report.txt", mimetype: "text/plain", size: 42 },
+      { id: "F2", name: "image.png", mimetype: "image/png", size: 2048 },
+    ])
+    expect(JSON.stringify(envelope)).not.toContain("url_private")
+    expect(JSON.stringify(envelope)).not.toContain("xoxb-secret")
+    expect(envelope).not.toHaveProperty("event")
   })
 
   it("normalizes channel threads, all mentions, bot senders, and unknown senders", () => {
