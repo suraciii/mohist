@@ -87,3 +87,34 @@
   regression. The two diagnostic-shape tests (Backpressured != Disabled, inbox-vs-outbox reason
   text) are pure-function tests and live in the same file because they share the connection
   fixtures.
+
+## T-002 patterns
+
+- The 3 ingress call sites that used to `return ApiResults.Conflict("…", "slack_backpressured")`
+  (DM `HandleDmIngressAsync`, channel `LaunchChannelRootAsync`, channel
+  `DispatchChannelFollowupAsync`) now return `ApiResults.Ok(new { kind = "backpressured",
+  reason = "…" })`. The `slack_backpressured` error code is gone from these sites — the success
+  body is the only signal. `IsBackpressured` keeps matching on
+  `ConnectionHealth==Degraded && HealthReason.Contains("backpressured")` so it is consistent with
+  the diagnostic branch.
+- The new test in `SlackChannelThreadIngressSpecs` also asserts no outbox row was enqueued under
+  the backpressured branch (the reason must be rendered by the adapter, not pushed into the
+  outbox). The matching DM test mirrors the same assertion.
+- `IngressResult` was narrowed in `packages/mohist-slack/src/types.ts` from `{ kind: string; reason?: string }`
+  to a discriminated union that includes `backpressured` with a required `reason`. The trailing
+  `{ kind: string; reason?: string }` arm keeps source-compat for any future unknown kind. Adapter
+  code reads `result.kind === "backpressured"` against the narrowed type.
+- Adapter rendering is a tiny new helper `renderUserFacingRejection` called between
+  `transport.ingress` and `ack()`. It only fires for `kind === "backpressured"`, so the
+  server-enqueued `rejected` (empty prompt / agent needs setup / non-owner) is NOT re-posted by the
+  adapter — no double render (the design D4 kind-discriminator invariant).
+- The render uses the conversation/thread from the normalized envelope, not the connection or a
+  session — the originating Slack user always gets the refusal in the same place they typed.
+- Fake `IngressResult` returns: `FakeTransport` now has a `nextIngressResults: IngressResult[]`
+  queue, consumed in order; absent that, the test falls back to `{ kind: "accepted" }` (existing
+  default). The new tests cover: (a) backpressured → Slack post in originating thread;
+  (b) server-enqueued `rejected` → no Slack post; (c) sequential accept then backpressure → only
+  the backpressure message is posted, accepted event acks without a web post.
+- `void result` was removed from `handleEvent`; the rendered helper is the only place that touches
+  the result. `runtime.draining` / `!runtime.web` guards mirror `drain()` so a stop during render
+  does not throw.

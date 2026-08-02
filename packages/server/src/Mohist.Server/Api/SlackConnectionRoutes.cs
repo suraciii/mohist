@@ -1051,9 +1051,11 @@ public static class SlackConnectionRoutes
         }
 
         if (IsBackpressured(connection))
-            return ApiResults.Conflict(
-                "This Slack Connection is backpressured; retry after pending deliveries drain.",
-                "slack_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
 
         var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
         if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
@@ -1817,9 +1819,11 @@ public static class SlackConnectionRoutes
         var dispatchRef = $"slack-thread:{body.TeamId}:{body.ConversationId}:{rootTs}";
 
         if (IsBackpressured(connection))
-            return ApiResults.Conflict(
-                "This Slack Connection is backpressured; retry after pending deliveries drain.",
-                "slack_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
 
         var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
         if (agent is null)
@@ -2030,9 +2034,11 @@ public static class SlackConnectionRoutes
         var dispatchRef = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
 
         if (IsBackpressured(connection))
-            return ApiResults.Conflict(
-                "This Slack Connection is backpressured; retry after pending deliveries drain.",
-                "slack_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
 
         if (string.IsNullOrWhiteSpace(prompt))
         {
