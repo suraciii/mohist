@@ -374,7 +374,7 @@ public static class SlackConnectionRoutes
                 return ApiResults.BadRequest("deliveryId is required.");
             try
             {
-                var updated = await outbox.ResendUncertainAsync(projectId, deliveryId, ct);
+                var updated = await outbox.ResendUncertainAsync(projectId, connectionId, deliveryId, ct);
                 if (updated == 0)
                     return ApiResults.Conflict(
                         "Only Delivery uncertain rows can be resent.",
@@ -1161,9 +1161,13 @@ public static class SlackConnectionRoutes
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
                 projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
         }
-        catch (SlackProviderInboxCapacityExceededException ex)
+        catch (SlackProviderInboxCapacityExceededException)
         {
-            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
         }
 
         if (!accepted.AlreadyExisted)
@@ -1780,9 +1784,13 @@ public static class SlackConnectionRoutes
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
                 projectId, connection.Id, req.Identity, senderSlackUserId, body.ThreadTs), routeDraft, ct);
         }
-        catch (SlackProviderInboxCapacityExceededException ex)
+        catch (SlackProviderInboxCapacityExceededException)
         {
-            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
         }
 
         if (!accepted.AlreadyExisted)
@@ -1861,7 +1869,7 @@ public static class SlackConnectionRoutes
 
     private static bool IsBackpressured(AgentConnection connection) =>
         connection.ConnectionHealth == Agent.Domain.ConnectionHealthKind.Degraded
-        && connection.HealthReason?.Contains("backpressured", StringComparison.OrdinalIgnoreCase) == true;
+        && SlackConnectionBackpressureReasons.IsBackpressureReason(connection.HealthReason);
 
     private static async Task<IResult> LaunchChannelRootAsync(
         HandleChannelIngressRequest req,
@@ -1930,9 +1938,13 @@ public static class SlackConnectionRoutes
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
                 projectId, connection.Id, req.Identity, req.SenderSlackUserId, rootTs), routeDraft, ct);
         }
-        catch (SlackProviderInboxCapacityExceededException ex)
+        catch (SlackProviderInboxCapacityExceededException)
         {
-            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
         }
 
         if (!accepted.AlreadyExisted)
@@ -2115,9 +2127,13 @@ public static class SlackConnectionRoutes
             accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
                 projectId, connection.Id, req.Identity, req.SenderSlackUserId, body.ThreadTs), routeDraft, ct);
         }
-        catch (SlackProviderInboxCapacityExceededException ex)
+        catch (SlackProviderInboxCapacityExceededException)
         {
-            return ApiResults.Conflict(ex.Message, "slack_inbox_backpressured");
+            return ApiResults.Ok(new
+            {
+                kind = "backpressured",
+                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
+            });
         }
 
         if (!accepted.AlreadyExisted)

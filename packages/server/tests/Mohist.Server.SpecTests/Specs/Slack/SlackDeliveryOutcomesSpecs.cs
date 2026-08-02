@@ -71,10 +71,10 @@ public sealed class SlackDeliveryOutcomesSpecs
             "{\"text\":\"uncertain\"}"));
         await outbox.MarkDeliveryUncertainAsync(connection.ProjectId, uncertain.Id, "claim timeout");
 
-        var resendResult = await outbox.ResendUncertainAsync(connection.ProjectId, uncertain.Id);
+        var resendResult = await outbox.ResendUncertainAsync(connection.ProjectId, connection.Id, uncertain.Id);
         Assert.Equal(1, resendResult);
 
-        var notUncertainResult = await outbox.ResendUncertainAsync(connection.ProjectId, pending.Id);
+        var notUncertainResult = await outbox.ResendUncertainAsync(connection.ProjectId, connection.Id, pending.Id);
         Assert.Equal(0, notUncertainResult);
 
         await using var verifyScope = _fixture.Services.CreateAsyncScope();

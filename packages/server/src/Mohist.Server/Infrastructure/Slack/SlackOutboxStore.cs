@@ -397,16 +397,18 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
     /// forever. State is guarded to DeliveryUncertain only; any other
     /// state returns 0 so the route can surface a 409.
     /// </summary>
-    public async Task<int> ResendUncertainAsync(string projectId, string id, CancellationToken ct = default)
+    public async Task<int> ResendUncertainAsync(string projectId, string connectionId, string id, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(connectionId))
+            throw new ArgumentException("ConnectionId is required.", nameof(connectionId));
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Id is required.", nameof(id));
 
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
+        var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.ConnectionId == connectionId && r.Id == id, ct)
             ?? throw new SlackOutboxRowNotFoundException(id);
         if (row.State != SlackOutboxStates.DeliveryUncertain)
             return 0;
