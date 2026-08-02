@@ -41,6 +41,7 @@ function makeFacts(overrides: Partial<ConnectionDiagnosticFacts> = {}): Connecti
       avatarHash: null,
       driftKinds: [],
     },
+    offlineGapAt: null,
     ...overrides,
   }
 }

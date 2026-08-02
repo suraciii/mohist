@@ -1,5 +1,6 @@
 export {
   claimAgentConnectionOwner,
+  clearOfflineGap,
   configureAgentConnection,
   createAgentConnection,
   getAgentConnection,
@@ -19,6 +20,7 @@ export {
   agentConnectionsQueryKey,
   agentConnectionsQueryOptions,
   claimAgentConnectionOwnerMutationOptions,
+  clearOfflineGapMutationOptions,
   configureAgentConnectionMutationOptions,
   connectionDiagnosticQueryOptions,
   createAgentConnectionMutationOptions,
@@ -30,6 +32,7 @@ export {
   useAgentConnectionAccess,
   useAgentConnections,
   useClaimAgentConnectionOwner,
+  useClearOfflineGap,
   useConfigureAgentConnection,
   useConnectionDiagnostic,
   useCreateAgentConnection,

@@ -129,3 +129,16 @@ export function resendSlackOutboxDelivery(
     { method: 'POST' },
   )
 }
+
+export function clearOfflineGap(
+  projectId: string | null | undefined,
+  connectionId: string,
+) {
+  return request<{ cleared: boolean }>(
+    projectApiPath(
+      projectId,
+      `/slack-connections/${encodeURIComponent(connectionId)}/clear-gap`,
+    ),
+    { method: 'POST' },
+  )
+}

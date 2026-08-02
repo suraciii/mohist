@@ -18,6 +18,7 @@ export interface ConnectionDiagnosticFacts {
   ownerAvailability: string
   agentReadiness: string
   identity: ConnectionIdentityFacts
+  offlineGapAt: string | null
 }
 
 export interface ConnectionDiagnostic {

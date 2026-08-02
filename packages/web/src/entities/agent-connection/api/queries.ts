@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import {
   claimAgentConnectionOwner,
+  clearOfflineGap,
   configureAgentConnection,
   createAgentConnection,
   getAgentConnection,
@@ -312,5 +313,29 @@ export function useResendSlackOutboxDelivery(connectionId: string | null | undef
   const { projectId } = useProject()
   return useMutation(
     resendSlackOutboxDeliveryMutationOptions(projectId, connectionId ?? '', queryClient),
+  )
+}
+
+export function clearOfflineGapMutationOptions(
+  projectId: string | null | undefined,
+  connectionId: string,
+  queryClient: InvalidationClient,
+) {
+  return {
+    mutationFn: () => clearOfflineGap(projectId, connectionId),
+    onSuccess: () => {
+      invalidateAgentConnectionQueries(queryClient, projectId, connectionId)
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to clear gap notice')
+    },
+  }
+}
+
+export function useClearOfflineGap(connectionId: string | null | undefined) {
+  const queryClient = useQueryClient()
+  const { projectId } = useProject()
+  return useMutation(
+    clearOfflineGapMutationOptions(projectId, connectionId ?? '', queryClient),
   )
 }

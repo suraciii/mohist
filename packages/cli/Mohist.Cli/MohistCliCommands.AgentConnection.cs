@@ -21,6 +21,7 @@ internal static class AgentConnectionCommands
         group.Subcommands.Add(BuildList(api));
         group.Subcommands.Add(BuildListDeliveries(api));
         group.Subcommands.Add(BuildResendDelivery(api));
+        group.Subcommands.Add(BuildClearGap(api));
         group.Subcommands.Add(BuildEdit(api));
         group.Subcommands.Add(BuildDelete(api));
         return group;
@@ -326,6 +327,25 @@ internal static class AgentConnectionCommands
         return null;
     }
 
+    private static Command BuildClearGap(MohistCliApi api)
+    {
+        var command = new Command("clear-gap", "Dismiss a possible-messages-missed notice after a long adapter outage");
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+
+            return await api.PrintPostAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/clear-gap"),
+                new { });
+        });
+        return command;
+    }
+
     private static int RenderDiagnostic(TextWriter output, JsonNode? data)
     {
         if (data is not JsonObject diagnostic)
@@ -339,6 +359,18 @@ internal static class AgentConnectionCommands
         WriteValue(output, "  reason", ValueOf(diagnostic, "reason"));
         WriteValue(output, "  next action", ValueOf(diagnostic, "nextAction"));
 
+        if (diagnostic["facts"] is JsonObject factsForGap
+            && factsForGap["offlineGapAt"] is JsonValue gapNode
+            && gapNode.TryGetValue<string>(out var gapValue)
+            && !string.IsNullOrEmpty(gapValue))
+        {
+            output.WriteLine();
+            output.WriteLine("Possible messages missed");
+            output.WriteLine("  The Slack adapter was offline long enough that Slack may have discarded");
+            output.WriteLine("  events from the outage window. Resend any critical delegations.");
+            WriteValue(output, "  offline gap at", gapValue);
+        }
+
         output.WriteLine();
         output.WriteLine("Supporting facts");
         if (diagnostic["facts"] is not JsonObject facts)
@@ -351,6 +383,7 @@ internal static class AgentConnectionCommands
         {
             "setupProgress", "desiredState", "connectionHealth", "healthReason",
             "credentialStatus", "adapterOnline", "ownerAvailability", "agentReadiness",
+            "offlineGapAt",
         })
             WriteValue(output, $"  {key}", ValueOf(facts, key));
 

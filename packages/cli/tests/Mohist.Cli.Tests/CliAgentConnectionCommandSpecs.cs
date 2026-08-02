@@ -15,7 +15,7 @@ public sealed class CliAgentConnectionCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "deliveries", "resend-delivery", "edit", "delete" })
+        foreach (var command in new[] { "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "deliveries", "resend-delivery", "clear-gap", "edit", "delete" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }

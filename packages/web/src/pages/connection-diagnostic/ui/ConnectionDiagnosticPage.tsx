@@ -5,6 +5,7 @@ import {
   useAgentConnection,
   useAgentConnectionAccess,
   useClaimAgentConnectionOwner,
+  useClearOfflineGap,
   useConfigureAgentConnection,
   useConnectionDiagnostic,
   useManageAgentConnectionAccess,
@@ -80,6 +81,10 @@ export interface ConnectionDiagnosticPageOperations {
     error: Error | null
     reset: () => void
   }
+  clearOfflineGapMutation: {
+    mutate: () => void
+    isPending: boolean
+  }
 }
 
 export type ConnectionDiagnosticPageOperationsHook = (
@@ -96,6 +101,7 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
   const searchMembers = useSlackMemberSearchFn(connectionId)
   const deliveriesQuery = useSlackOutboxDeliveries(connectionId, setupComplete ?? false)
   const resendDelivery = useResendSlackOutboxDelivery(connectionId)
+  const clearOfflineGap = useClearOfflineGap(connectionId)
   return {
     connectionDetailQuery: {
       data: detailQuery.data,
@@ -133,6 +139,10 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
       error: resendDelivery.error instanceof Error ? resendDelivery.error : null,
       reset: resendDelivery.reset,
     },
+    clearOfflineGapMutation: {
+      mutate: clearOfflineGap.mutate,
+      isPending: clearOfflineGap.isPending,
+    },
   }
 }
 
@@ -165,6 +175,10 @@ export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
     isPending: false,
     error: null,
     reset: () => undefined,
+  },
+  clearOfflineGapMutation: {
+    mutate: () => undefined,
+    isPending: false,
   },
 }
 
@@ -206,7 +220,7 @@ export function ConnectionDiagnosticPage({
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation } = ops
+  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation, clearOfflineGapMutation } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
   const configureResetRef = useRef<() => void>(() => undefined)
@@ -265,6 +279,32 @@ export function ConnectionDiagnosticPage({
             </div>
           </div>
         </CardSection>
+
+        {facts.offlineGapAt && (
+          <CardSection title="Possible messages missed" tone="amber">
+            <div className="space-y-2" data-testid="offline-gap-notice">
+              <p className="text-sm text-foreground">
+                The Slack adapter was offline long enough that Slack may have discarded events
+                from the outage window. Some messages may have been missed.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Resend any critical delegations — Mohist cannot guarantee all events from the
+                outage were received.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  className="rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+                  data-testid="offline-gap-dismiss"
+                  disabled={clearOfflineGapMutation.isPending}
+                  onClick={() => clearOfflineGapMutation.mutate()}
+                >
+                  {clearOfflineGapMutation.isPending ? 'Dismissing…' : 'Dismiss'}
+                </button>
+              </div>
+            </div>
+          </CardSection>
+        )}
 
         {!isSetupComplete && (
           <CardSection title="Setup progress" tone="amber">
@@ -393,6 +433,7 @@ export function ConnectionDiagnosticPage({
             <FactRow name="Connection avatar" value={facts.identity.avatarHash} />
             <FactRow name="Identity drift" value={facts.identity.driftKinds.map(label).join(', ') || 'None'} />
             {facts.healthReason && <FactRow name="Health reason" value={facts.healthReason} />}
+            {facts.offlineGapAt && <FactRow name="Offline gap at" value={facts.offlineGapAt} />}
           </dl>
         </details>
       </div>
