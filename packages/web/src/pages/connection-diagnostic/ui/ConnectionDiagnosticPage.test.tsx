@@ -31,6 +31,7 @@ const diagnostic: ConnectionDiagnostic = {
       avatarHash: 'avatar-hash',
       driftKinds: ['presentation_name', 'avatar'],
     },
+    offlineGapAt: null,
   },
 }
 

@@ -19,6 +19,9 @@ internal static class AgentConnectionCommands
         group.Subcommands.Add(BuildEnable(api));
         group.Subcommands.Add(BuildView(api));
         group.Subcommands.Add(BuildList(api));
+        group.Subcommands.Add(BuildListDeliveries(api));
+        group.Subcommands.Add(BuildResendDelivery(api));
+        group.Subcommands.Add(BuildClearGap(api));
         group.Subcommands.Add(BuildEdit(api));
         group.Subcommands.Add(BuildDelete(api));
         return group;
@@ -207,6 +210,142 @@ internal static class AgentConnectionCommands
         return command;
     }
 
+    private static Command BuildListDeliveries(MohistCliApi api)
+    {
+        var command = new Command("deliveries", "List outbound Slack deliveries for a Connection (delivery_uncertain rows are surfaced with their LastError)");
+        var id = new Argument<string>("connection-id");
+        var onlyUncertain = new Option<bool>("--only-uncertain")
+        {
+            Description = "Restrict output to rows in the Delivery uncertain state.",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(onlyUncertain);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            var result = await api.GetDataOrPrintErrorAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/deliveries"));
+            if (result.ExitCode != 0) return result.ExitCode;
+            RenderDeliveries(api.Output, result.Data, ctx.GetValue(onlyUncertain));
+            return 0;
+        });
+        return command;
+    }
+
+    private static Command BuildResendDelivery(MohistCliApi api)
+    {
+        var command = new Command("resend-delivery", "Re-queue a Delivery uncertain row for another send attempt (warns about possible duplication; inspect the authoritative execution result before committing)");
+        var id = new Argument<string>("connection-id");
+        var deliveryId = new Argument<string>("delivery-id")
+        {
+            Description = "Outbox row id returned by `mo connection deliveries` (state: delivery_uncertain).",
+        };
+        var yes = new Option<bool>("--yes", "-y")
+        {
+            Description = "Skip the duplicate-warning prompt in non-interactive mode.",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Arguments.Add(deliveryId);
+        command.Options.Add(yes);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+
+            var connectionPath = Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}");
+            var lookup = await api.GetDataOrPrintErrorAsync(connectionPath + "/deliveries");
+            if (lookup.ExitCode != 0) return lookup.ExitCode;
+            var row = FindDelivery(lookup.Data, ctx.GetValue(deliveryId)!);
+            if (row is null)
+            {
+                api.Error.WriteLine($"Delivery '{ctx.GetValue(deliveryId)}' not found on Connection '{ctx.GetValue(id)}'.");
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
+            var state = ValueOf(row, "state");
+            if (!string.Equals(state, "delivery_uncertain", StringComparison.Ordinal))
+            {
+                api.Error.WriteLine(
+                    $"Delivery '{ctx.GetValue(deliveryId)}' is in state '{state}'; only Delivery uncertain rows can be resent.");
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
+
+            var lastError = ValueOf(row, "lastError");
+            var dispatchRef = ValueOf(row, "dispatchRef");
+            var kind = ValueOf(row, "kind");
+
+            api.Output.WriteLine("Manual resend of Delivery uncertain row");
+            WriteValue(api.Output, "  delivery id", ctx.GetValue(deliveryId)!);
+            WriteValue(api.Output, "  kind", kind);
+            WriteValue(api.Output, "  dispatch ref", dispatchRef);
+            WriteValue(api.Output, "  reason held", lastError);
+
+            api.Error.WriteLine("Slack may have already delivered this reply silently. Resending can produce a duplicate Slack message even though the underlying AgentJob/AgentTurn result is unchanged.");
+            api.Error.WriteLine("Inspect the authoritative execution result for the dispatch ref before committing.");
+
+            if (!ctx.GetValue(yes))
+            {
+                if (!api.Invocation.PromptsEnabled)
+                {
+                    api.Error.WriteLine("--yes is required to confirm this resend in non-interactive mode.");
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+
+                api.Error.Write("Resend anyway? [y/N] ");
+                var line = await api.Invocation.Input
+                    .ReadLineAsync(api.Invocation.CancellationToken).ConfigureAwait(false);
+                var confirmed = !string.IsNullOrEmpty(line)
+                    && line.TrimStart().StartsWith("y", StringComparison.OrdinalIgnoreCase);
+                if (!confirmed)
+                {
+                    api.Error.WriteLine("Aborted.");
+                    return CliExitCode.For(CliExitOutcome.OperationFailure);
+                }
+            }
+
+            return await api.PrintPostAsync(
+                $"{connectionPath}/deliveries/{Uri.EscapeDataString(ctx.GetValue(deliveryId)!)}/resend",
+                new { });
+        });
+        return command;
+    }
+
+    private static JsonObject? FindDelivery(JsonNode? data, string deliveryId)
+    {
+        if (data is not JsonObject obj) return null;
+        var entries = obj["entries"] as JsonArray;
+        if (entries is null) return null;
+        foreach (var candidate in entries.OfType<JsonObject>())
+        {
+            if (string.Equals(ValueOf(candidate, "id"), deliveryId, StringComparison.Ordinal))
+                return candidate;
+        }
+        return null;
+    }
+
+    private static Command BuildClearGap(MohistCliApi api)
+    {
+        var command = new Command("clear-gap", "Dismiss a possible-messages-missed notice after a long adapter outage");
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+
+            return await api.PrintPostAsync(
+                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/clear-gap"),
+                new { });
+        });
+        return command;
+    }
+
     private static int RenderDiagnostic(TextWriter output, JsonNode? data)
     {
         if (data is not JsonObject diagnostic)
@@ -220,6 +359,18 @@ internal static class AgentConnectionCommands
         WriteValue(output, "  reason", ValueOf(diagnostic, "reason"));
         WriteValue(output, "  next action", ValueOf(diagnostic, "nextAction"));
 
+        if (diagnostic["facts"] is JsonObject factsForGap
+            && factsForGap["offlineGapAt"] is JsonValue gapNode
+            && gapNode.TryGetValue<string>(out var gapValue)
+            && !string.IsNullOrEmpty(gapValue))
+        {
+            output.WriteLine();
+            output.WriteLine("Possible messages missed");
+            output.WriteLine("  The Slack adapter was offline long enough that Slack may have discarded");
+            output.WriteLine("  events from the outage window. Resend any critical delegations.");
+            WriteValue(output, "  offline gap at", gapValue);
+        }
+
         output.WriteLine();
         output.WriteLine("Supporting facts");
         if (diagnostic["facts"] is not JsonObject facts)
@@ -232,6 +383,7 @@ internal static class AgentConnectionCommands
         {
             "setupProgress", "desiredState", "connectionHealth", "healthReason",
             "credentialStatus", "adapterOnline", "ownerAvailability", "agentReadiness",
+            "offlineGapAt",
         })
             WriteValue(output, $"  {key}", ValueOf(facts, key));
 
@@ -247,6 +399,40 @@ internal static class AgentConnectionCommands
         }
 
         return 0;
+    }
+
+    private static void RenderDeliveries(TextWriter output, JsonNode? data, bool onlyUncertain)
+    {
+        if (data is not JsonObject root || root["entries"] is not JsonArray entries || entries.Count == 0)
+        {
+            output.WriteLine(onlyUncertain ? "No deliveries are in Delivery uncertain." : "No deliveries.");
+            return;
+        }
+
+        var rows = entries.OfType<JsonObject>()
+            .Where(row => !onlyUncertain || string.Equals(ValueOf(row, "state"), "delivery_uncertain", StringComparison.Ordinal))
+            .ToList();
+        if (rows.Count == 0)
+        {
+            output.WriteLine("No deliveries are in Delivery uncertain.");
+            return;
+        }
+
+        var headers = new[] { "id", "state", "kind", "attempts", "reason" };
+        var widths = new[] { 32, 18, 22, 9, 60 };
+        output.WriteLine(string.Join("  ", headers.Select((header, index) => header.PadRight(widths[index]))).TrimEnd());
+        foreach (var row in rows)
+        {
+            var cells = new[]
+            {
+                Truncate(ValueOf(row, "id"), widths[0]),
+                Truncate(ValueOf(row, "state"), widths[1]),
+                Truncate(ValueOf(row, "kind"), widths[2]),
+                Truncate(ValueOf(row, "attemptCount"), widths[3]),
+                Truncate(ValueOf(row, "lastError"), widths[4]),
+            };
+            output.WriteLine(string.Join("  ", cells.Select((cell, index) => cell.PadRight(widths[index]))).TrimEnd());
+        }
     }
 
     private static void RenderConnectionList(TextWriter output, JsonNode? data)
@@ -288,6 +474,10 @@ internal static class AgentConnectionCommands
 
         if (string.Equals(health, "unhealthy", StringComparison.Ordinal))
             return ("service_offline", "Start mohist-slack / check Slack connectivity.");
+
+        if (string.Equals(health, "degraded", StringComparison.Ordinal)
+            && (ContainsAny(reason, "slack_outbox_backpressured", "slack_inbox_backpressured", "backpressured")))
+            return ("backpressured", "Wait for the backlog to drain / retry input shortly.");
 
         if (string.Equals(ValueOf(connection, "agentReadiness"), "needs_setup", StringComparison.Ordinal))
             return ("agent_needs_setup", "Configure Agent runtime/model.");

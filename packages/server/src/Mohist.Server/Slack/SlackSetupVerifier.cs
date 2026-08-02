@@ -1,6 +1,8 @@
+using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Slack;
 
@@ -22,13 +24,20 @@ public sealed class SlackSetupVerifier
     private readonly ISecretStore _secrets;
     private readonly AgentConnectionStore _connections;
     private readonly TimeProvider _time;
+    private readonly IOptions<SlackProviderOptions> _slackOptions;
 
-    public SlackSetupVerifier(ISlackApiClient slack, ISecretStore secrets, AgentConnectionStore connections, TimeProvider time)
+    public SlackSetupVerifier(
+        ISlackApiClient slack,
+        ISecretStore secrets,
+        AgentConnectionStore connections,
+        TimeProvider time,
+        IOptions<SlackProviderOptions> slackOptions)
     {
         _slack = slack;
         _secrets = secrets;
         _connections = connections;
         _time = time;
+        _slackOptions = slackOptions;
     }
 
     public async Task<SlackSetupVerificationResult> VerifyAsync(string projectId, string connectionId, CancellationToken ct = default)
@@ -156,7 +165,25 @@ public sealed class SlackSetupVerifier
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)
     {
-        return await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "lastHeartbeatAt" }, lastHeartbeatAt: _time.GetUtcNow(), ct: ct);
+        var now = _time.GetUtcNow();
+        var existing = await _connections.GetAsync(projectId, connectionId, ct);
+        if (existing is null) return null;
+
+        var retention = _slackOptions.Value.SlackEventRetentionWindow;
+        var fields = new HashSet<string>(StringComparer.Ordinal) { "lastHeartbeatAt" };
+        DateTimeOffset? offlineGapAt = null;
+        if (existing.LastHeartbeatAt is { } previous && retention > TimeSpan.Zero && now - previous >= retention)
+            offlineGapAt = now;
+
+        if (offlineGapAt is not null) fields.Add("offlineGapAt");
+
+        return await _connections.UpdateAsync(
+            projectId,
+            connectionId,
+            fields,
+            lastHeartbeatAt: now,
+            offlineGapAt: offlineGapAt,
+            ct: ct);
     }
 
     public bool IsAdapterOnline(AgentConnection connection, TimeSpan freshness = default)

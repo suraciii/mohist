@@ -32,10 +32,14 @@ export interface SlackEnvelope {
 
 export type SlackSenderKind = "human" | "bot" | "unknown"
 
-export interface IngressResult {
-  readonly kind: string
-  readonly reason?: string
-}
+export type IngressResult =
+  | { readonly kind: "accepted" }
+  | { readonly kind: "rejected"; readonly reason?: string }
+  | { readonly kind: "claimed" }
+  | { readonly kind: "transferred" }
+  | { readonly kind: "ignored" }
+  | { readonly kind: "backpressured"; readonly reason: string }
+  | { readonly kind: string; readonly reason?: string }
 
 export interface Delivery {
   readonly id: string

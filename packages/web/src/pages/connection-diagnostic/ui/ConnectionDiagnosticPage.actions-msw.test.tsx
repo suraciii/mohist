@@ -43,6 +43,7 @@ function makeFacts(overrides: Partial<ConnectionDiagnosticFacts> = {}): Connecti
       avatarHash: null,
       driftKinds: [],
     },
+    offlineGapAt: null,
     ...overrides,
   }
 }
@@ -385,6 +386,9 @@ describe('ConnectionDiagnosticPage — access policy (MSW)', () => {
             anyoneDisclosure: 'Invoking this Bot grants the Agent authority.',
           },
         }),
+      ),
+      http.get('*/api/projects/:projectId/slack-connections/:connectionId/deliveries', () =>
+        HttpResponse.json({ success: true, data: { entries: [] } }),
       ),
     )
   })

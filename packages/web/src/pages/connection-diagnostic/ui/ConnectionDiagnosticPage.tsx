@@ -5,10 +5,13 @@ import {
   useAgentConnection,
   useAgentConnectionAccess,
   useClaimAgentConnectionOwner,
+  useClearOfflineGap,
   useConfigureAgentConnection,
   useConnectionDiagnostic,
   useManageAgentConnectionAccess,
+  useResendSlackOutboxDelivery,
   useSlackMemberSearchFn,
+  useSlackOutboxDeliveries,
 } from '../../../entities/agent-connection'
 import type {
   AgentConnectionClaimOwnerResponse,
@@ -24,6 +27,7 @@ import { IdentityPreviewStep } from './identity-preview-step'
 import { CredentialFormStep } from './credential-form-step'
 import { ClaimOwnerCodeStep } from './claim-owner-code-step'
 import { AccessPolicySection } from './access-policy-section'
+import { UncertainDeliveriesSection } from './uncertain-deliveries-section'
 
 export interface ConnectionDiagnosticPageData {
   data: ConnectionDiagnostic | undefined
@@ -66,6 +70,21 @@ export interface ConnectionDiagnosticPageOperations {
     reset: () => void
   }
   searchMembers: (query: string) => Promise<SlackMemberSearchEntry[]>
+  deliveriesQuery: {
+    data: ReadonlyArray<import('../../../entities/agent-connection').SlackOutboxEntry> | undefined
+    isLoading: boolean
+    error: Error | null
+  }
+  resendDeliveryMutation: {
+    mutate: (deliveryId: string) => void
+    isPending: boolean
+    error: Error | null
+    reset: () => void
+  }
+  clearOfflineGapMutation: {
+    mutate: () => void
+    isPending: boolean
+  }
 }
 
 export type ConnectionDiagnosticPageOperationsHook = (
@@ -80,6 +99,9 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
   const accessStateQuery = useAgentConnectionAccess(connectionId, setupComplete ?? false)
   const manageAccess = useManageAgentConnectionAccess(connectionId)
   const searchMembers = useSlackMemberSearchFn(connectionId)
+  const deliveriesQuery = useSlackOutboxDeliveries(connectionId, setupComplete ?? false)
+  const resendDelivery = useResendSlackOutboxDelivery(connectionId)
+  const clearOfflineGap = useClearOfflineGap(connectionId)
   return {
     connectionDetailQuery: {
       data: detailQuery.data,
@@ -106,6 +128,21 @@ const useDefaultOperations: ConnectionDiagnosticPageOperationsHook = (connection
       reset: manageAccess.reset,
     },
     searchMembers,
+    deliveriesQuery: {
+      data: deliveriesQuery.data?.entries,
+      isLoading: deliveriesQuery.isLoading,
+      error: deliveriesQuery.error instanceof Error ? deliveriesQuery.error : null,
+    },
+    resendDeliveryMutation: {
+      mutate: resendDelivery.mutate,
+      isPending: resendDelivery.isPending,
+      error: resendDelivery.error instanceof Error ? resendDelivery.error : null,
+      reset: resendDelivery.reset,
+    },
+    clearOfflineGapMutation: {
+      mutate: clearOfflineGap.mutate,
+      isPending: clearOfflineGap.isPending,
+    },
   }
 }
 
@@ -132,6 +169,17 @@ export const readOnlyOperations: ConnectionDiagnosticPageOperations = {
     reset: () => undefined,
   },
   searchMembers: async () => [],
+  deliveriesQuery: { data: undefined, isLoading: false, error: null },
+  resendDeliveryMutation: {
+    mutate: () => undefined,
+    isPending: false,
+    error: null,
+    reset: () => undefined,
+  },
+  clearOfflineGapMutation: {
+    mutate: () => undefined,
+    isPending: false,
+  },
 }
 
 export const useReadOnlyOperations: ConnectionDiagnosticPageOperationsHook = () => readOnlyOperations
@@ -172,7 +220,7 @@ export function ConnectionDiagnosticPage({
   const { connectionId } = useParams<{ connectionId: string }>()
   const { data, isLoading, error } = dataHook(connectionId)
   const ops = operationsHook(connectionId, data?.facts.setupProgress === 'complete')
-  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation } = ops
+  const { connectionDetailQuery, configureMutation, claimOwnerMutation, accessStateQuery, manageAccessMutation, deliveriesQuery, resendDeliveryMutation, clearOfflineGapMutation } = ops
   useDocumentTitle(data ? `Connection ${connectionId ?? ''} - Mohist` : 'Connection - Mohist')
 
   const configureResetRef = useRef<() => void>(() => undefined)
@@ -181,12 +229,15 @@ export function ConnectionDiagnosticPage({
   claimResetRef.current = claimOwnerMutation.reset
   const accessResetRef = useRef<() => void>(() => undefined)
   accessResetRef.current = manageAccessMutation.reset
+  const resendDeliveryResetRef = useRef<() => void>(() => undefined)
+  resendDeliveryResetRef.current = resendDeliveryMutation.reset
 
   useEffect(() => {
     return () => {
       claimResetRef.current()
       configureResetRef.current()
       accessResetRef.current()
+      resendDeliveryResetRef.current()
     }
   }, [])
 
@@ -228,6 +279,32 @@ export function ConnectionDiagnosticPage({
             </div>
           </div>
         </CardSection>
+
+        {facts.offlineGapAt && (
+          <CardSection title="Possible messages missed" tone="amber">
+            <div className="space-y-2" data-testid="offline-gap-notice">
+              <p className="text-sm text-foreground">
+                The Slack adapter was offline long enough that Slack may have discarded events
+                from the outage window. Some messages may have been missed.
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Resend any critical delegations — Mohist cannot guarantee all events from the
+                outage were received.
+              </p>
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  className="rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+                  data-testid="offline-gap-dismiss"
+                  disabled={clearOfflineGapMutation.isPending}
+                  onClick={() => clearOfflineGapMutation.mutate()}
+                >
+                  {clearOfflineGapMutation.isPending ? 'Dismissing…' : 'Dismiss'}
+                </button>
+              </div>
+            </div>
+          </CardSection>
+        )}
 
         {!isSetupComplete && (
           <CardSection title="Setup progress" tone="amber">
@@ -325,6 +402,19 @@ export function ConnectionDiagnosticPage({
           />
         )}
 
+        {isSetupComplete && (
+          <UncertainDeliveriesSection
+            entries={deliveriesQuery.data ?? []}
+            isLoading={deliveriesQuery.isLoading}
+            errorMessage={deliveriesQuery.error?.message ?? null}
+            isResending={resendDeliveryMutation.isPending}
+            onResend={(deliveryId) => {
+              resendDeliveryMutation.reset()
+              resendDeliveryMutation.mutate(deliveryId)
+            }}
+          />
+        )}
+
         <details className="border-y border-border py-3" data-testid="connection-diagnostic-facts">
           <summary className="cursor-pointer text-sm font-medium text-foreground">Supporting facts</summary>
           <dl className="mt-3 divide-y divide-border">
@@ -343,6 +433,7 @@ export function ConnectionDiagnosticPage({
             <FactRow name="Connection avatar" value={facts.identity.avatarHash} />
             <FactRow name="Identity drift" value={facts.identity.driftKinds.map(label).join(', ') || 'None'} />
             {facts.healthReason && <FactRow name="Health reason" value={facts.healthReason} />}
+            {facts.offlineGapAt && <FactRow name="Offline gap at" value={facts.offlineGapAt} />}
           </dl>
         </details>
       </div>
