@@ -1,11 +1,13 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
@@ -48,7 +50,7 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", "conn-1", SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-token"));
         var factory = new TestDbContextFactory(_database.Options);
         var connections = new AgentConnectionStore(factory, new AgentQuerier(factory), _secrets, [], _time);
-        _verifier = new SlackSetupVerifier(_slack, _secrets, connections, _time);
+        _verifier = new SlackSetupVerifier(_slack, _secrets, connections, _time, Options.Create(new SlackProviderOptions()));
     }
 
     public ValueTask DisposeAsync()

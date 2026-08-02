@@ -21,6 +21,7 @@ public sealed class AgentConnection
     public string? OwnerSlackUserId { get; set; }
     public string AccessPolicy { get; set; } = AccessPolicyKind.OwnerOnly;
     public DateTimeOffset? LastHeartbeatAt { get; set; }
+    public DateTimeOffset? OfflineGapAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
     public DateTimeOffset? DeletedAt { get; set; }

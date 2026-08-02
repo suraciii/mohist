@@ -51,9 +51,11 @@ public sealed record ConnectionDiagnosticFacts(
     bool AdapterOnline,
     string OwnerAvailability,
     string AgentReadiness,
-    ConnectionIdentityFacts Identity)
+    ConnectionIdentityFacts Identity,
+    DateTimeOffset? OfflineGapAt = null)
 {
     public bool IdentityDrift => Identity.HasDrift;
+    public bool HasOfflineGap => OfflineGapAt is not null;
 }
 
 public sealed record ConnectionIdentityFacts(
@@ -85,7 +87,8 @@ public static class ConnectionDiagnostic
             inputs.AdapterOnline,
             inputs.OwnerAvailability,
             inputs.AgentReadiness,
-            identity);
+            identity,
+            connection.OfflineGapAt);
 
         if (!string.Equals(connection.SetupProgress, SetupProgressKind.Complete, StringComparison.Ordinal))
             return new(
