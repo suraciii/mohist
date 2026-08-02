@@ -11,8 +11,8 @@ using Mohist.Server.Infrastructure.Data.Db;
 namespace Mohist.Server.Infrastructure.Data.Migrations
 {
     [DbContext(typeof(MohistDbContext))]
-    [Migration("20260802124623_AddSlackOAuthRecoveryAndBindingObligations")]
-    partial class AddSlackOAuthRecoveryAndBindingObligations
+    [Migration("20260802161045_AddSlackManagerCorrectnessKernel")]
+    partial class AddSlackManagerCorrectnessKernel
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -83,6 +83,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("LastHeartbeatAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("OfflineGapAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("OwnerSlackUserId")
@@ -1988,6 +1991,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ClaimToken")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -1996,11 +2004,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<DateTimeOffset?>("LastAttemptAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ClaimToken")
-                        .IsRequired()
-                        .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Status")
