@@ -151,11 +151,16 @@
   possible duplication + points at the authoritative execution result) before the POST; the
   CLI prints the dispatch ref and last error to stdout + a duplicate-warning paragraph to
   stderr, then prompts (or refuses without `--yes` in non-interactive mode).
-- Test coverage: adapter test adds two cases — explicit `{ok:false,error}` acks `retry`,
-  payload/JSON failures ack `uncertain`. Spec tests (`SlackDeliveryOutcomesSpecs`) cover:
+- Test coverage: adapter test adds two cases — explicit `{ok:false,error}` acks `retry`, payload/JSON failures ack `uncertain`. Spec tests (`SlackDeliveryOutcomesSpecs`) cover:
   `ScheduleRetryAsync` re-pending on explicit failure; `ResendUncertainAsync` only advancing
   DeliveryUncertain rows (Pending→0 updates); GET deliveries listing rows with state + reason;
   resend endpoint transitioning the row and NOT changing the AgentJob row's Status column;
   resend endpoint returning 409 for non-uncertain rows. CLI tests cover deliveries list,
   `--only-uncertain` filter, resend prompt flow + duplicate warning, non-uncertain rejection,
   and non-interactive `--yes` requirement.
+
+## Verification repair
+
+- Full `npm test` reproduced the failure: T-004 added `OfflineGapAt` to the model without an EF migration, causing pending model changes and SQLite missing-column failures.
+- Added the additive `AddOfflineGapAt` migration and updated the model snapshot. Server build passes.
+- Some remaining spec failures report the unavailable external OTLP endpoint at `localhost:4318`; the repository test runner ignores VSTest filters under Microsoft Testing Platform, so focused filtering cannot isolate those tests.
