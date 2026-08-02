@@ -282,7 +282,7 @@ Manager 控制面的 create/delete 同样是 at-least-once 外部副作用：重
 - 不在 Slack 中复制 Agent 编辑器、Workflow 看板或完整诊断工作台。
 - 不让共享 Bot 根据自然语言猜测目标 Agent。
 - 第一版不做 Slack 原生 Agent 体验（Agent Messages、Agent Home、流式回复）。
-- 不承诺本机路径「零步骤全自动」——每个子 App 仍需一次手工 App-level token，除非走托管路径。
+- 两条路径都不承诺「零步骤全自动」：安装者都要完成 Slack 安装授权，工作区策略要求时同样要过管理员审批；Socket Mode 在此基础上每个子 App 还需一次手工 App-level token。hosted 路径省去的是手工 token，不是授权或审批。
 - 本文不固定 API 路径、存储字段、锁和租约、Slack SDK 版本或精确重试时间。
 
 ## P0.1 实施规格（correctness kernel）
