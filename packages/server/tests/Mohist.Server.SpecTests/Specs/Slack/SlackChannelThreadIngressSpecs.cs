@@ -434,7 +434,7 @@ public sealed class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Backpressured_channel_rejects_before_accepting_work()
+    public async Task Backpressured_channel_returns_visible_rejection_without_accepting_work()
     {
         var connection = await CreateConnectionAsync();
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -460,7 +460,12 @@ public sealed class SlackChannelThreadIngressSpecs
             text = "<@U123> do work",
         });
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("backpressured", data.GetProperty("kind").GetString());
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("reason").GetString()));
+
         await using var verify = _fixture.Services.CreateAsyncScope();
         var dbVerify = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.Empty(await dbVerify.SlackProviderInboxRows
@@ -470,6 +475,92 @@ public sealed class SlackChannelThreadIngressSpecs
         Assert.Empty(await dbVerify.AgentSessions
             .Where(row => row.LabelConnectionId == connection.Id)
             .ToListAsync());
+        Assert.Empty(await dbVerify.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "C-channel-backpressured")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Backpressured_dm_returns_visible_rejection_without_accepting_work()
+    {
+        var connection = await CreateConnectionAsync();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            await db.AgentConnections
+                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(row => row.ConnectionHealth, ConnectionHealthKind.Degraded)
+                    .SetProperty(row => row.HealthReason, SlackProviderBackpressureReasons.InboxOverflow));
+        }
+
+        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-channel-backpressured",
+            messageTs = "1710000000.000455",
+            threadTs = (string?)null,
+            mentionedUserIds = Array.Empty<string>(),
+            senderSlackUserId = "U_OWNER",
+            senderKind = "human",
+            text = "do work",
+        });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        var data = doc.RootElement.GetProperty("data");
+        Assert.Equal("backpressured", data.GetProperty("kind").GetString());
+        Assert.False(string.IsNullOrEmpty(data.GetProperty("reason").GetString()));
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var dbVerify = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await dbVerify.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "D-channel-backpressured")
+            .ToListAsync());
+        Assert.Empty(await dbVerify.AgentSessions
+            .Where(row => row.LabelConnectionId == connection.Id)
+            .ToListAsync());
+        Assert.Empty(await dbVerify.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id
+                && row.ConversationId == "D-channel-backpressured")
+            .ToListAsync());
+    }
+
+    [Fact]
+    public async Task Accepted_ingress_clears_offline_gap_after_reconnect()
+    {
+        var connection = await CreateConnectionAsync();
+        var gapAt = _fixture.TimeProvider.GetUtcNow();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            await db.AgentConnections
+                .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id)
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.OfflineGapAt, gapAt));
+        }
+
+        using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), new
+        {
+            isDirectMessage = true,
+            teamId = connection.WorkspaceTeamId,
+            conversationId = "D-gap-clear",
+            messageTs = "1710000000.000600",
+            threadTs = (string?)null,
+            mentionedUserIds = Array.Empty<string>(),
+            senderSlackUserId = "U_OWNER",
+            senderKind = "human",
+            text = "first message after reconnect",
+        });
+        response.EnsureSuccessStatusCode();
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var verifyDb = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var reloaded = await verifyDb.AgentConnections.AsNoTracking()
+            .SingleAsync(row => row.Id == connection.Id);
+        Assert.Null(reloaded.OfflineGapAt);
     }
 
     [Fact]

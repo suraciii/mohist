@@ -206,11 +206,18 @@ public sealed class SlackProviderReliabilityStoreSpecs
     private sealed class RecordingHealthBackpressurer : ISlackConnectionHealthBackpressurer
     {
         public List<string> Reasons { get; } = [];
+        public List<(string ProjectId, string ConnectionId)> Recoveries { get; } = [];
 
         public Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default)
         {
             Reasons.Add(reason);
             return Task.CompletedTask;
+        }
+
+        public Task<int> RecoverBackpressuredAsync(string projectId, string connectionId, CancellationToken ct = default)
+        {
+            Recoveries.Add((projectId, connectionId));
+            return Task.FromResult(1);
         }
     }
 }
