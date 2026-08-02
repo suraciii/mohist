@@ -120,6 +120,9 @@ public sealed class ConnectionDiagnosticSpecs
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) =>
             Task.FromResult(new SlackUsersListResponse(false, null, [], null));
 
+        public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
             string conversationId,
             string threadTs,

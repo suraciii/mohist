@@ -304,6 +304,7 @@ public sealed class SlackThreadHistoryReaderTests
         public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class FakeSecretStore : ISecretStore

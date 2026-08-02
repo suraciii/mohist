@@ -171,6 +171,7 @@ public sealed class SlackOwnerClaimSpecs : IAsyncLifetime
         public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) => Task.FromResult(UsersInfo);
         public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackConversationInfoResponse(true, null, null));
         public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) => Task.FromResult(new SlackUsersListResponse(true, null, [], null));
+        public Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
             string conversationId,
             string threadTs,

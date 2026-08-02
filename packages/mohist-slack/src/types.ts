@@ -9,6 +9,13 @@ export interface AdapterSession {
   readonly botToken: string
 }
 
+export interface SlackFileRef {
+  readonly id: string
+  readonly name: string
+  readonly mimetype: string
+  readonly size: number
+}
+
 export interface SlackEnvelope {
   readonly eventType: string
   readonly isDirectMessage: boolean
@@ -20,6 +27,7 @@ export interface SlackEnvelope {
   readonly senderSlackUserId: string | null
   readonly senderKind: SlackSenderKind
   readonly text: string | null
+  readonly files: readonly SlackFileRef[]
 }
 
 export type SlackSenderKind = "human" | "bot" | "unknown"

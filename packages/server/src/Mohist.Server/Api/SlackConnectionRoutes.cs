@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -370,16 +371,17 @@ public static class SlackConnectionRoutes
             SlackThreadLaunchReservationStore threadLaunchReservations,
             SlackAmbiguousPromptStore ambiguousPrompts,
             AgentQuerier agents,
-             IAgentLauncher launcher,
-             IGrainFactory grains,
-             AgentSessionFollowupDispatcher followupDispatcher,
-             AgentSessionQuerier sessions,
-             IHubContext<RunnerHub> runnerHub,
-             RunnerConnectionTracker runnerConnections,
-             ISecretStore secrets,
-             SlackThreadHistoryReader threadHistory,
-             IOptions<SlackProviderOptions> slackProviderOptions,
-             OperatorCredential credential,
+            IAgentLauncher launcher,
+            SlackAttachmentInputBinder attachmentBinder,
+            IGrainFactory grains,
+            AgentSessionFollowupDispatcher followupDispatcher,
+            AgentSessionQuerier sessions,
+            IHubContext<RunnerHub> runnerHub,
+            RunnerConnectionTracker runnerConnections,
+            ISecretStore secrets,
+            SlackThreadHistoryReader threadHistory,
+            IOptions<SlackProviderOptions> slackProviderOptions,
+            OperatorCredential credential,
             CancellationToken ct) =>
         {
             if (!credential.Authorizes(http.Request.Headers))
@@ -413,7 +415,7 @@ public static class SlackConnectionRoutes
                         projectId, connection, identity, senderSlackUserId, body,
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
-                        launcher, grains, followupDispatcher,
+                        launcher, attachmentBinder, grains, followupDispatcher,
                         runnerHub, runnerConnections,
                         secrets, threadHistory, slackProviderOptions,
                         http.RequestServices),
@@ -423,7 +425,7 @@ public static class SlackConnectionRoutes
                 HandleDmIngressRequest.From(
                     projectId, connection, identity, senderSlackUserId, body,
                     mapping, sessions, agents, claims, inbox, outbox,
-                    launcher, grains, followupDispatcher,
+                    launcher, attachmentBinder, grains, followupDispatcher,
                     runnerHub, runnerConnections,
                     http.RequestServices),
                 ct);
@@ -649,7 +651,8 @@ public static class SlackConnectionRoutes
         string Status,
         string SessionId,
         string InputId,
-        string TurnId);
+        string TurnId,
+        SlackAttachmentBinding? AttachmentBinding = null);
 
     /// <summary>
     /// Routes a normal DM into the current session of the conversation
@@ -663,14 +666,36 @@ public static class SlackConnectionRoutes
     /// </summary>
     private static async Task<FollowupRouteResult> RouteFollowupAsync(
         string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity identity,
+        IReadOnlyList<SlackIngressFile> files,
         string currentSessionId,
         string prompt,
         string idempotencyKey,
         AgentSessionInputProvenance provenance,
+        SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         CancellationToken ct)
     {
+        var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken(
+            $"{currentSessionId}\n{idempotencyKey}\nfollowup-input");
+        var attachmentBinding = await attachmentBinder.PrepareAsync(
+            projectId,
+            connection,
+            identity,
+            currentSessionId,
+            preMintedInputId,
+            files,
+            ct);
+        if (string.IsNullOrWhiteSpace(prompt) && attachmentBinding.AcceptedCount == 0)
+        {
+            await attachmentBinder.RollbackAsync(
+                projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult(
+                "followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
+        }
+
         var grain = grains.GetGrain<IAgentSessionGrain>(currentSessionId);
         AgentSessionFollowupAcceptResult accept;
         try
@@ -679,47 +704,57 @@ public static class SlackConnectionRoutes
                 Text: prompt,
                 Source: "agent-session-followup",
                 IdempotencyKey: idempotencyKey,
+                Attachments: attachmentBinding.AcceptedDescriptors,
+                PreMintedInputId: preMintedInputId,
+                AttachmentResults: attachmentBinding.Results,
                 Provenance: provenance));
         }
         catch (RuntimeSessionMissingException)
         {
-            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("runtime_session_missing", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (RecoveryOperationInProgressException)
         {
-            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("recovery_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (AgentSessionFollowupCapacityExceededException)
         {
-            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("capacity_exceeded", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (StopOperationInProgressException)
         {
-            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("stop_in_progress", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (SessionActivityUnknownException)
         {
-            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("session_activity_unknown", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (FollowupConcurrencyLimitException)
         {
-            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("concurrency_limit", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
         catch (InvalidOperationException)
         {
-            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty);
+            await attachmentBinder.RollbackAsync(projectId, currentSessionId, preMintedInputId, attachmentBinding, CancellationToken.None);
+            return new FollowupRouteResult("followup_rejected", "rejected", currentSessionId, string.Empty, string.Empty, attachmentBinding);
         }
 
         await followupDispatcher.DispatchNextAsync(projectId, currentSessionId, ct);
 
         if (accept.AlreadyAccepted)
-            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId);
+            return new FollowupRouteResult("already_accepted", "already_accepted", currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
         var status = accept.TurnStatus switch
         {
             AgentTurnStatus.Executing => "executing",
             _ => "queued",
         };
-        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId);
+        return new FollowupRouteResult("accepted", status, currentSessionId, accept.InputId, accept.TurnId, attachmentBinding);
     }
 
     /// <summary>
@@ -1021,7 +1056,7 @@ public static class SlackConnectionRoutes
                 "slack_backpressured");
 
         var prompt = RemoveBotMention(body.Text ?? string.Empty, connection.BotUserId);
-        if (string.IsNullOrWhiteSpace(prompt))
+        if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
         {
             const string reason = "Please send a task for the Agent to perform.";
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
@@ -1029,7 +1064,7 @@ public static class SlackConnectionRoutes
         }
 
         var isNewTask = TryStripNewTaskMarker(prompt, out var newTaskPrompt);
-        if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt))
+        if (isNewTask && string.IsNullOrWhiteSpace(newTaskPrompt) && body.Files.Count == 0)
         {
             const string reason = "Please send a task for the Agent to perform.";
             await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
@@ -1130,15 +1165,57 @@ public static class SlackConnectionRoutes
             var isRoutedNewTask = route.Kind == SlackProviderInboxRouteKinds.NewTaskLaunch;
             var sessionId = route.SessionId;
             AgentLaunchResult? launch = null;
+            SlackAttachmentBinding? attachmentBinding = null;
             if (string.IsNullOrWhiteSpace(sessionId))
             {
-                launch = await req.Launcher.LaunchConnectionAsync(
-                    agent!,
-                    isRoutedNewTask ? newTaskPrompt : prompt,
-                    new ConnectionLaunchOrigin(
-                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
-                    startupContext: null,
-                    ct: ct);
+                var launchIds = PreMintSlackLaunchIds(projectId, req.Identity);
+                attachmentBinding = await req.AttachmentBinder.PrepareAsync(
+                    projectId,
+                    connection,
+                    req.Identity,
+                    launchIds.SessionId,
+                    launchIds.InputId,
+                    body.Files,
+                    ct);
+                var launchPrompt = isRoutedNewTask ? newTaskPrompt : prompt;
+                if (string.IsNullOrWhiteSpace(launchPrompt) && attachmentBinding.AcceptedCount == 0)
+                {
+                    await req.AttachmentBinder.RollbackAsync(
+                        projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
+                    var rejection = BuildAttachmentAck(
+                        "No usable file was accepted, so the task was not started.",
+                        body.Files,
+                        attachmentBinding);
+                    await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                        rejection,
+                        $"slack-ack:{req.Identity.AsKey()}",
+                        ct,
+                        body.ThreadTs);
+                    await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                    return ApiResults.Ok(new { kind = "rejected", reason = rejection });
+                }
+
+                try
+                {
+                    launch = await req.Launcher.LaunchConnectionAsync(
+                        agent!,
+                        launchPrompt,
+                        new ConnectionLaunchOrigin(
+                            connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
+                        startupContext: null,
+                        attachments: attachmentBinding.AcceptedDescriptors,
+                        attachmentIds: attachmentBinding.AttachmentIds,
+                        preMintedSessionId: launchIds.SessionId,
+                        preMintedInputId: launchIds.InputId,
+                        preMintedTurnId: launchIds.TurnId,
+                        ct: ct);
+                }
+                catch
+                {
+                    await req.AttachmentBinder.RollbackAsync(
+                        projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
+                    throw;
+                }
                 sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, launch.SessionId, ct);
             }
 
@@ -1156,6 +1233,7 @@ public static class SlackConnectionRoutes
                 : accepted.AlreadyExisted
                     ? "This task was already accepted; execution is being resumed."
                     : dispatchDecision!.Reason ?? "Task accepted and queued for execution.";
+            acknowledgement = BuildAttachmentAck(acknowledgement, body.Files, attachmentBinding);
             await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
                 acknowledgement,
                 $"slack-ack:{req.Identity.AsKey()}",
@@ -1176,14 +1254,21 @@ public static class SlackConnectionRoutes
         var idempotencyKey = $"slack:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
         var followupResult = await RouteFollowupAsync(
             projectId,
+            connection,
+            req.Identity,
+            body.Files,
             route.SessionId!,
             prompt,
             idempotencyKey,
             BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+            req.AttachmentBinder,
             req.Grains,
             req.FollowupDispatcher,
             ct);
-        var followupAck = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+        var followupAck = BuildAttachmentAck(
+            BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
+            body.Files,
+            followupResult.AttachmentBinding);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             followupAck,
             $"slack-ack:{req.Identity.AsKey()}",
@@ -1294,7 +1379,7 @@ public static class SlackConnectionRoutes
 
             if (isRootMention)
             {
-                if (string.IsNullOrWhiteSpace(prompt))
+                if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
                 {
                     const string reason = "Please send a task for the Agent to perform.";
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
@@ -1305,7 +1390,7 @@ public static class SlackConnectionRoutes
 
             if (otherBotsInThread)
             {
-                if (string.IsNullOrWhiteSpace(prompt))
+                if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
                 {
                     const string reason = "Please send a task for the Agent to perform.";
                     await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
@@ -1319,7 +1404,7 @@ public static class SlackConnectionRoutes
             if (reconciled is not null)
                 return await DispatchChannelFollowupAsync(req, reconciled, prompt, ct);
 
-            if (string.IsNullOrWhiteSpace(prompt))
+            if (string.IsNullOrWhiteSpace(prompt) && body.Files.Count == 0)
             {
                 const string reason = "Please send a task for the Agent to perform.";
                 await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
@@ -1327,6 +1412,7 @@ public static class SlackConnectionRoutes
             }
 
             var historyOutcome = await ReadThreadHistoryIfAnyAsync(req, rootTs, ct);
+
             if (historyOutcome.Outcome == SlackThreadHistoryReadOutcome.Refused)
             {
                 const string reason = "I couldn't read the full thread discussion; please re-mention me in a moment and I'll try again.";
@@ -1789,21 +1875,60 @@ public static class SlackConnectionRoutes
         }
 
         AgentLaunchResult? launch = null;
+        SlackAttachmentBinding? attachmentBinding = null;
         var existingRoute = accepted.AlreadyExisted
             ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
             : null;
         var sessionId = existingRoute?.SessionId ?? reservation.SessionId;
         if (string.IsNullOrWhiteSpace(sessionId))
         {
-            launch = await req.Launcher.LaunchConnectionAsync(
-                agent,
-                prompt,
-                new ConnectionLaunchOrigin(
-                    connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
-                startupContext: startupContext,
-                ct: ct);
+            var launchIds = PreMintSlackLaunchIds(projectId, req.Identity);
+            attachmentBinding = await req.AttachmentBinder.PrepareAsync(
+                projectId,
+                connection,
+                req.Identity,
+                launchIds.SessionId,
+                launchIds.InputId,
+                body.Files,
+                ct);
+            if (string.IsNullOrWhiteSpace(prompt) && attachmentBinding.AcceptedCount == 0)
+            {
+                await req.AttachmentBinder.RollbackAsync(
+                    projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
+                var rejection = BuildAttachmentAck(
+                    "No usable file was accepted, so the task was not started.",
+                    body.Files,
+                    attachmentBinding);
+                await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                    rejection, dispatchRef, ct, rootTs);
+                await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
+                return ApiResults.Ok(new { kind = "rejected", reason = rejection });
+            }
+
+            try
+            {
+                launch = await req.Launcher.LaunchConnectionAsync(
+                    agent,
+                    prompt,
+                    new ConnectionLaunchOrigin(
+                        connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
+                    startupContext: startupContext,
+                    attachments: attachmentBinding.AcceptedDescriptors,
+                    attachmentIds: attachmentBinding.AttachmentIds,
+                    preMintedSessionId: launchIds.SessionId,
+                    preMintedInputId: launchIds.InputId,
+                    preMintedTurnId: launchIds.TurnId,
+                    ct: ct);
+            }
+            catch
+            {
+                await req.AttachmentBinder.RollbackAsync(
+                    projectId, launchIds.SessionId, launchIds.InputId, attachmentBinding, CancellationToken.None);
+                throw;
+            }
             sessionId = launch.SessionId;
         }
+
 
         if (existingRoute?.SessionId is null)
             sessionId = await req.Inbox.SetRouteSessionIdAsync(projectId, accepted.Id, sessionId!, ct);
@@ -1826,7 +1951,11 @@ public static class SlackConnectionRoutes
                 ct);
         }
 
-        var acknowledgement = BuildLaunchAck(startupContext, accepted.AlreadyExisted);
+        var acknowledgement = BuildAttachmentAck(
+            BuildLaunchAck(startupContext, accepted.AlreadyExisted),
+            body.Files,
+            attachmentBinding);
+
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             acknowledgement, dispatchRef, ct, rootTs);
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1839,6 +1968,42 @@ public static class SlackConnectionRoutes
             turnId = launch?.TurnId,
             threadRoot = rootTs,
         });
+    }
+
+    private static (string SessionId, string InputId, string TurnId) PreMintSlackLaunchIds(
+        string projectId,
+        SlackMessageIdentity identity)
+    {
+        var ownershipIdentity = $"{projectId}\nslack:{identity.WorkspaceTeamId}:{identity.ConversationId}:{identity.MessageTs}";
+        return (
+            $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}",
+            AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput"),
+            AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nturn"));
+    }
+
+    internal static string BuildAttachmentAck(
+        string acknowledgement,
+        IReadOnlyList<SlackIngressFile> files,
+        SlackAttachmentBinding? binding)
+    {
+        if (binding is null || binding.Results.Count == 0)
+            return acknowledgement;
+
+        var accepted = binding.Results
+            .Where(result => result.IsAccepted && result.Descriptor is not null)
+            .Select(result => result.Descriptor!.OriginalFileName)
+            .ToArray();
+        var rejected = binding.Results
+            .Select((result, index) => (Result: result, File: files[index]))
+            .Where(item => !item.Result.IsAccepted)
+            .Select(item => $"{item.File.Name} ({item.Result.RejectionReason}: {item.Result.RejectionMessage})")
+            .ToArray();
+        var parts = new List<string> { acknowledgement };
+        if (accepted.Length > 0)
+            parts.Add($"Files received: {string.Join(", ", accepted)}.");
+        if (rejected.Length > 0)
+            parts.Add($"Files not used: {string.Join("; ", rejected)}.");
+        return string.Join(' ', parts);
     }
 
     private static string BuildLaunchAck(AgentStartupContext? startupContext, bool alreadyExisted)
@@ -1892,14 +2057,21 @@ public static class SlackConnectionRoutes
         var idempotencyKey = $"slack-thread-followup:{body.TeamId}:{body.ConversationId}:{body.MessageTs}";
         var followupResult = await RouteFollowupAsync(
             projectId,
+            connection,
+            req.Identity,
+            body.Files,
             sessionId,
             prompt,
             idempotencyKey,
             BuildSlackInputProvenance(connection.Id, body, body.ThreadTs),
+            req.AttachmentBinder,
             req.Grains,
             req.FollowupDispatcher,
             ct);
-        var ack = BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted);
+        var ack = BuildAttachmentAck(
+            BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
+            body.Files,
+            followupResult.AttachmentBinding);
         await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
             ack, dispatchRef, ct, body.ThreadTs);
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1936,6 +2108,7 @@ internal sealed record HandleDmIngressRequest(
     SlackProviderInboxStore Inbox,
     SlackOutboxStore Outbox,
     IAgentLauncher Launcher,
+    SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
     IHubContext<RunnerHub> RunnerHub,
@@ -1955,6 +2128,7 @@ internal sealed record HandleDmIngressRequest(
         SlackProviderInboxStore inbox,
         SlackOutboxStore outbox,
         IAgentLauncher launcher,
+        SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         IHubContext<RunnerHub> runnerHub,
@@ -1962,7 +2136,8 @@ internal sealed record HandleDmIngressRequest(
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
             dmMapping, sessions, agents, claims, inbox, outbox,
-            launcher, grains, followupDispatcher, runnerHub, runnerConnections, services);
+            launcher, attachmentBinder, grains, followupDispatcher, runnerHub, runnerConnections, services);
+
 }
 
 /// <summary>
@@ -1989,6 +2164,7 @@ internal sealed record HandleChannelIngressRequest(
     SlackProviderInboxStore Inbox,
     SlackOutboxStore Outbox,
     IAgentLauncher Launcher,
+    SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
     IHubContext<RunnerHub> RunnerHub,
@@ -2015,6 +2191,7 @@ internal sealed record HandleChannelIngressRequest(
         SlackProviderInboxStore inbox,
         SlackOutboxStore outbox,
         IAgentLauncher launcher,
+        SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
         IHubContext<RunnerHub> runnerHub,
@@ -2026,7 +2203,7 @@ internal sealed record HandleChannelIngressRequest(
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, accessDecider, inbox, outbox,
-            launcher, grains, followupDispatcher, runnerHub, runnerConnections,
+            launcher, attachmentBinder, grains, followupDispatcher, runnerHub, runnerConnections,
             secrets, threadHistory, slackProviderOptions, services);
 }
 
@@ -2070,7 +2247,9 @@ public sealed class SlackIngressBody
     public string? SenderSlackUserId { get; init; }
     public string? SenderKind { get; init; }
     public string? Text { get; init; }
+    public IReadOnlyList<SlackIngressFile> Files { get; init; } = Array.Empty<SlackIngressFile>();
 }
+
 
 public sealed class AdapterSessionBody
 {

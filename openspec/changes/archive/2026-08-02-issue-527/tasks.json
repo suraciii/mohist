@@ -1,0 +1,95 @@
+{
+  "project": "mohist-local",
+  "description": "Make Slack files explicitly attached to the current inbound message become SessionInput attachments via the existing provider-agnostic attachment boundary, fetched Server-side with honest per-file verdicts.",
+  "tasks": [
+    {
+      "id": "T-001",
+      "title": "Slack file read primitives: adapter envelope + Server-side fetch",
+      "spec": "specs/slack-attachment-entry/spec.md#file-content-is-fetched-by-the-server-not-by-the-adapter",
+      "description": "Add a `files` array (each `{id,name,mimetype,size}`) to the `mohist-slack` adapter's `SlackEnvelope`, parsed from the inbound Slack event without downloading content and without carrying `url_private`, bot token, or raw event payload. Add `ISlackApiClient.OpenFileContentAsync(fileId, botToken, ct)` that performs `files.info` + bearer-authenticated content download Server-side, returning a `SlackFileContent` (stream, filename, content-type, size). The adapter stays stateless and capped at `chat.postMessage`.",
+      "acceptanceCriteria": [
+        "`SlackEnvelope.files` carries `{id,name,mimetype,size}` parsed from a Slack `message`/`file_share` event and contains no `url_private`, no bot token, and no raw event payload.",
+        "The adapter makes no Slack API call to fetch file content (unchanged `chat.postMessage`-only surface).",
+        "`ISlackApiClient.OpenFileContentAsync` returns content + authoritative metadata using the Connection's bot token; a 403/404/transport failure raises a not-readable error rather than returning partial data.",
+        "Unit tests cover adapter file extraction (including omission of secrets) and the API client against a faked HTTP handler for success, authorization failure (403), and not-found (404).",
+        "The 8 existing `ISlackApiClient` methods and existing adapter event handling are unchanged."
+      ],
+      "priority": 1,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `packages/mohist-slack/src/types.ts` + `adapter.ts`; updated `packages/server/src/Mohist.Server/Slack/ISlackApiClient.cs` (+ response models) and `SlackApiClient.cs`; unit tests for both.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Issue-516 precedent: Server owns all Slack reads via decrypted bot token; the download is a bearer-auth GET variant of the existing PostAsync auth path."
+    },
+    {
+      "id": "T-002",
+      "title": "Provider-file ingest + source provenance in the attachment boundary",
+      "spec": "specs/slack-attachment-entry/spec.md#accepted-slack-files-record-a-slack-source-and-bind-exclusively-to-one-input",
+      "description": "Add a nullable `Source` column to `AttachmentRow` (default `\"upload\"`) with an EF Core migration + backfill, add `AttachmentService.IngestProviderFileAsync(projectId, deterministicId, source, fileName, contentType, size, stream, ct)` as the Server-side analog of `UploadAsync` that writes a provider stream into a pending `AttachmentRow` under the caller-supplied deterministic id and stamps its `Source`, and have `ToAgentInputDescriptor` read `row.Source` so accepted attachments expose their provenance. The ingest is insert-if-absent: when a row with the given `deterministicId` already exists it returns that descriptor and writes nothing (idempotent across redelivery).",
+      "acceptanceCriteria": [
+        "EF migration adds `Attachments.Source` (nullable string); existing rows backfill to `\"upload\"`; the existing `UploadAsync` path stamps `\"upload\"`.",
+        "`IngestProviderFileAsync` writes bytes to `IAttachmentStorage`, creates a pending `AttachmentRow` (`OwnerKind=null`, `ExpiresAt=now+PendingTtl`) with the supplied `Source` and the caller-supplied `deterministicId`, and enforces `MaxFileBytes` (rejects oversized before writing).",
+        "`IngestProviderFileAsync` is idempotent on id: a second call with the same `deterministicId` returns the existing descriptor and performs no write.",
+        "`ToAgentInputDescriptor` reads `row.Source`; an accepted attachment descriptor exposes the persisted source.",
+        "Unit tests verify ingest (pending row created with correct source + stored bytes), `MaxFileBytes` enforcement, idempotent re-ingest (same id → no duplicate row/bytes), and that the existing Web/CLI upload path still yields `Source = \"upload\"` with no regression.",
+        "Server build is warning-clean (`TreatWarningsAsErrors`)."
+      ],
+      "priority": 2,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `AttachmentRow.cs`, new EF migration, `AttachmentService.cs` (new method + descriptor source read); unit tests.",
+      "dependsOn": [],
+      "passes": false,
+      "notes": "Provider-agnostic primitive — takes a stream, not Slack-specific. No production caller yet; T-003 is its first consumer."
+    },
+    {
+      "id": "T-003",
+      "title": "Wire Slack files into connection launch + shared ingest-for-input helper + honest reply",
+      "spec": "specs/slack-attachment-entry/spec.md#files-are-accepted-on-every-inbound-slack-dispatch-path",
+      "description": "Build the shared \"Slack message -> accepted attachment descriptors\" pipeline and wire it into the DM-launch and channel-root-launch sites. Per file the helper: computes a message-scoped deterministic attachment id (`att_{StableToken(teamId/conversationId/messageTs/slackFileId)}`, opaque — no raw Slack id embedded), pre-verdicts size/type from the envelope, then fetch-if-absent (reuse the existing deterministic-id row without a Slack API call; otherwise fetch via `OpenFileContentAsync` and ingest via `IngestProviderFileAsync`), and finally `ValidateAndBindAgentInputAsync` against the preminted owner. Extend `AgentLauncher.LaunchConnectionAsync` to accept attachment descriptors + preminted ids and remove the empty-prompt guard (delegate to `EnsureInitialLaunch`'s text-or-attachment rule). Add `files` to `SlackIngressBody` and render the per-file verdict into the Bot acceptance reply via the existing outbox. Include the deterministic attachment ids in the launch idempotency fingerprint (mirroring Web launch `AgentSessionLaunchRoutes.cs:102-137`) — they are stable across redelivery, so a replay does not falsely conflict.",
+      "acceptanceCriteria": [
+        "`LaunchConnectionAsync` accepts optional attachment descriptors + preminted session/input/turn ids and no longer rejects empty-prompt inputs; an input with neither text nor an accepted attachment is rejected by `EnsureInitialLaunch`.",
+        "A DM or channel-root message carrying a usable file and no text launches a new AgentSession with the file bound to the first SessionInput and `Source = \"slack\"`; no prompt is fabricated.",
+        "An oversized or unsupported file is rejected with its reason without any Slack content fetch; a file the Bot cannot read (403/download failure) is rejected `NotReadable`; each rejected file is reported, not silently dropped.",
+        "Redelivery of the same Slack launch message resolves to the same SessionInput and the same bound attachments with no duplicate fetch, no duplicate row/bytes, and no duplicate binding (deterministic id + fetch-if-absent + same-owner re-validation); a crash between inbox-accept and session-recorded re-runs idempotently on redelivery.",
+        "The Bot acceptance reply names the accepted files and each rejected file with its concrete reason.",
+        "Spec tests cover DM-launch-files, channel-launch-files, attachment-only launch, per-file rejection (oversized/unsupported/Bot-unauthorized), launch redelivery idempotency (incl. the inbox-accepted/session-not-yet-recorded window), and Instructions/reply/transcript free of bot token, `url_private`, raw event payload, and raw Slack file identifier.",
+        "Server + runner build and the existing Web/CLI attachment spec tests remain green."
+      ],
+      "priority": 3,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `AgentLauncher.cs`, `SlackConnectionRoutes.cs` (DM-launch + channel-launch sites + `SlackIngressBody`), shared ingest-for-input helper, Bot reply rendering; spec + unit tests.",
+      "dependsOn": [
+        "T-001",
+        "T-002"
+      ],
+      "passes": false,
+      "notes": "Mirror `AgentSessionLaunchRoutes.cs:182-256` (premint + prebind + rollback). The launch coordinator envelope already has Attachments/PreMintedInputId/PreMintedTurnId slots. Build the helper here so T-004 reuses it."
+    },
+    {
+      "id": "T-004",
+      "title": "Wire Slack files into connection follow-up (DM follow-up + thread reply)",
+      "spec": "specs/slack-attachment-entry/spec.md#slack-redelivery-resolves-to-the-same-bound-attachments",
+      "description": "Reuse the shared pipeline from T-003 to populate `RouteFollowupAsync` and the DM-follow-up / thread-reply-follow-up sites: premint the follow-up input id, fetch+ingest+bind Slack files via the helper, and pass accepted descriptors + preminted input id + per-file verdicts into `AcceptFollowupAsync` (its command already carries Attachments/PreMintedInputId/AttachmentResults). Render the per-file result in the follow-up Bot reply.",
+      "acceptanceCriteria": [
+        "A DM follow-up or thread reply carrying a usable file and no text is accepted as a SessionInput with the file bound (`Source = \"slack\"`) and assigned to a Turn, with no fabricated prompt.",
+        "Per-file rejection (oversized/unsupported/Bot-unauthorized) is reported individually on the follow-up path; rejected files are not given to the Agent.",
+        "Redelivery of the same follow-up message resolves to the same SessionInput and bound attachments with no duplicate fetch/row/binding; after a restart that follows a durable accept, the message re-binds to the same preminted owner via the deterministic id (no duplicate, no loss).",
+        "The Bot follow-up reply names accepted files and each rejected file with its reason.",
+        "Spec tests cover DM-followup-files, thread-reply-files, attachment-only follow-up, follow-up redelivery/restart idempotency, and honest per-file reply.",
+        "Server + runner build and all prior attachment spec tests remain green."
+      ],
+      "priority": 4,
+      "mode": "AFK",
+      "type": "WRITE",
+      "output": "Updated `SlackConnectionRoutes.cs` (`RouteFollowupAsync` + DM-follow-up + thread-follow-up sites), follow-up Bot reply rendering; spec + unit tests.",
+      "dependsOn": [
+        "T-003"
+      ],
+      "passes": false,
+      "notes": "Mirror `AgentSessionFollowupRoutes.cs:146-195` (premint input id + prebind + AcceptFollowupAsync + rollback). Reuses the helper and reply renderer from T-003."
+    }
+  ]
+}

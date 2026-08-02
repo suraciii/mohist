@@ -13,6 +13,7 @@ public interface ISlackApiClient
     Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default);
     Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default);
     Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default);
+    Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default);
     Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,
         string threadTs,
@@ -44,6 +45,37 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
     public Task<SlackUsersListResponse> UsersListAsync(string? cursor, string botToken, CancellationToken ct = default) =>
         PostAsync<SlackUsersListResponse>("users.list", cursor is null ? new { } : new { cursor }, botToken, ct);
 
+    public async Task<SlackFileContent> OpenFileContentAsync(string fileId, string botToken, CancellationToken ct = default)
+    {
+        try
+        {
+            var info = await PostAsync<SlackFileInfoResponse>("files.info", new { file = fileId }, botToken, ct).ConfigureAwait(false);
+            var file = info.Ok ? info.File : null;
+            if (file is null
+                || string.IsNullOrWhiteSpace(file.Name)
+                || string.IsNullOrWhiteSpace(file.Mimetype)
+                || string.IsNullOrWhiteSpace(file.UrlPrivate)
+                || file.Size < 0)
+                throw new SlackFileNotReadableException(fileId);
+
+            var response = await GetAsync(file.UrlPrivate, botToken, ct).ConfigureAwait(false);
+            return new SlackFileContent(
+                await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false),
+                file.Name,
+                file.Mimetype,
+                file.Size,
+                response);
+        }
+        catch (SlackFileNotReadableException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException or NotSupportedException or InvalidOperationException)
+        {
+            throw new SlackFileNotReadableException(fileId, exception);
+        }
+    }
+
     public Task<SlackConversationsRepliesPage> ConversationsRepliesAsync(
         string conversationId,
         string threadTs,
@@ -62,6 +94,23 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
             },
             botToken,
             ct);
+
+    private async Task<HttpResponseMessage> GetAsync(string url, string token, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        try
+        {
+            response.EnsureSuccessStatusCode();
+            return response;
+        }
+        catch
+        {
+            response.Dispose();
+            throw;
+        }
+    }
 
     private async Task<T> PostAsync<T>(string method, object body, string token, CancellationToken ct)
     {
@@ -128,6 +177,38 @@ public sealed record SlackUserInfo(
 public sealed record SlackConversationInfoResponse(bool Ok, string? Error, SlackConversationInfo? Channel);
 public sealed record SlackConversationInfo(string? Id, string? Name, string? Creator, bool IsIm, bool IsMember);
 public sealed record SlackUsersListResponse(bool Ok, string? Error, IReadOnlyList<SlackUserInfo>? Members, SlackResponseMetadata? ResponseMetadata);
+public sealed record SlackFileInfoResponse(bool Ok, string? Error, SlackFileInfo? File);
+public sealed record SlackFileInfo(
+    string? Id,
+    string? Name,
+    string? Mimetype,
+    long Size,
+    [property: JsonPropertyName("url_private")] string? UrlPrivate);
+public sealed class SlackFileContent(Stream stream, string fileName, string contentType, long size, IDisposable response) : IDisposable
+{
+    public Stream Stream { get; } = stream;
+    public string FileName { get; } = fileName;
+    public string ContentType { get; } = contentType;
+    public long Size { get; } = size;
+
+    public void Dispose()
+    {
+        Stream.Dispose();
+        response.Dispose();
+    }
+}
+public sealed class SlackFileNotReadableException : Exception
+{
+    public SlackFileNotReadableException(string fileId)
+        : base($"Slack file '{fileId}' is not readable.")
+    {
+    }
+
+    public SlackFileNotReadableException(string fileId, Exception innerException)
+        : base($"Slack file '{fileId}' is not readable.", innerException)
+    {
+    }
+}
 public sealed record SlackResponseMetadata(string? NextCursor);
 public sealed record SlackConversationsRepliesPage(
     bool Ok,

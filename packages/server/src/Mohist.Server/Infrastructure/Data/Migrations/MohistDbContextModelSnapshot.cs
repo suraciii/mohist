@@ -1672,6 +1672,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<long>("Size")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Source")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("StoragePath")
                         .IsRequired()
                         .HasMaxLength(1024)

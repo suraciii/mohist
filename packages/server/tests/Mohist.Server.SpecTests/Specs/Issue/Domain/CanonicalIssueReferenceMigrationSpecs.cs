@@ -99,12 +99,16 @@ public class CanonicalIssueReferenceMigrationSpecs : CanonicalIssueReferenceMigr
             row => Assert.Equal(("proj_alpha", 42), (row.ProjectId, row.IssueNumber)),
             row => Assert.Equal(("proj_beta", 42), (row.ProjectId, row.IssueNumber)));
 
-        var issueAttachment = await verify.Attachments.AsNoTracking()
-            .SingleAsync(row => row.Id == "att_alpha_issue");
-        var commentAttachment = await verify.Attachments.AsNoTracking()
-            .SingleAsync(row => row.Id == "att_alpha_comment");
-        Assert.Equal(42, issueAttachment.OwnerIssueNumber);
-        Assert.Null(commentAttachment.OwnerIssueNumber);
+        var issueAttachmentOwnerIssueNumber = await verify.Attachments.AsNoTracking()
+            .Where(row => row.Id == "att_alpha_issue")
+            .Select(row => row.OwnerIssueNumber)
+            .SingleAsync();
+        var commentAttachmentOwnerIssueNumber = await verify.Attachments.AsNoTracking()
+            .Where(row => row.Id == "att_alpha_comment")
+            .Select(row => row.OwnerIssueNumber)
+            .SingleAsync();
+        Assert.Equal(42, issueAttachmentOwnerIssueNumber);
+        Assert.Null(commentAttachmentOwnerIssueNumber);
 
         var runs = await verify.WorkflowRuns.AsNoTracking()
             .OrderBy(row => row.WorkflowRunId)
