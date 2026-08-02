@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
@@ -113,6 +114,13 @@ public static class SlackOAuthStateOutcome
 {
     public const string Accepted = "accepted";
     public const string Expired = "expired";
+}
+
+public static class SlackSecretRedactor
+{
+    private static readonly Regex TokenPattern = new(@"(?i)(?:xoxb|xapp|xoxe|xoxp|xoxs)-[A-Za-z0-9._-]+", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    public static string Redact(string value) => TokenPattern.Replace(value, "[REDACTED]");
 }
 
 public interface ISlackOAuthCredentialSink

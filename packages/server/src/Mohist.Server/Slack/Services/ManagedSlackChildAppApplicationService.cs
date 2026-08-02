@@ -150,44 +150,58 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
         CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.ManagedSlackChildApps.SingleOrDefaultAsync(item =>
-            item.Id == childAppId && item.OperationFence == fence && item.OperationId == operationId, ct);
-        if (row is null) return ManagedSlackChildAppOperationResult.Stale;
-
         var now = _timeProvider.GetUtcNow();
+        var expectedLifecycle = operation == SlackChildAppOperation.Create
+            ? SlackAppLifecycle.Creating
+            : SlackAppLifecycle.Deleting;
         var lifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Created : SlackAppLifecycle.Deleted;
         var unknownLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown;
         var failedLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.NotCreated : SlackAppLifecycle.Created;
+        var query = db.ManagedSlackChildApps
+            .Where(item => item.Id == childAppId
+                && item.OperationFence == fence
+                && item.OperationId == operationId
+                && item.AppLifecycle == expectedLifecycle);
+        int changed;
         if (result.Outcome == SlackAppManagementOutcome.Succeeded)
         {
-            row.AppLifecycle = lifecycle;
-            row.AppId = operation == SlackChildAppOperation.Create ? result.AppId ?? string.Empty : string.Empty;
-            row.BotUserId = string.Empty;
-            row.DeletedAt = operation == SlackChildAppOperation.Delete ? now : null;
-            row.UnknownOutcome = null;
-            row.ErrorClass = null;
+            changed = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.AppLifecycle, lifecycle)
+                .SetProperty(item => item.AppId, operation == SlackChildAppOperation.Create ? result.AppId ?? string.Empty : string.Empty)
+                .SetProperty(item => item.BotUserId, string.Empty)
+                .SetProperty(item => item.DeletedAt, operation == SlackChildAppOperation.Delete ? now : (DateTimeOffset?)null)
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, (string?)null)
+                .SetProperty(item => item.UpdatedAt, now), ct);
         }
         else if (result.Outcome == SlackAppManagementOutcome.Unknown)
         {
-            row.AppLifecycle = unknownLifecycle;
-            row.UnknownOutcome = result.ErrorMessage ?? result.ErrorClass ?? "unknown";
-            row.ErrorClass = result.ErrorClass;
+            changed = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.AppLifecycle, unknownLifecycle)
+                .SetProperty(item => item.UnknownOutcome, SlackSecretRedactor.Redact(result.ErrorMessage ?? result.ErrorClass ?? "unknown"))
+                .SetProperty(item => item.ErrorClass, result.ErrorClass)
+                .SetProperty(item => item.UpdatedAt, now), ct);
         }
         else
         {
-            row.AppLifecycle = failedLifecycle;
-            row.UnknownOutcome = null;
-            row.ErrorClass = result.ErrorClass ?? "definite_failure";
+            changed = await query.ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.AppLifecycle, failedLifecycle)
+                .SetProperty(item => item.UnknownOutcome, (string?)null)
+                .SetProperty(item => item.ErrorClass, result.ErrorClass ?? "definite_failure")
+                .SetProperty(item => item.UpdatedAt, now), ct);
         }
+        if (changed == 0)
+            return ManagedSlackChildAppOperationResult.Stale;
 
         if (actor is not null)
         {
+            var row = await db.ManagedSlackChildApps.SingleAsync(item =>
+                item.Id == childAppId && item.OperationFence == fence && item.OperationId == operationId, ct);
             var audit = JsonSerializer.Deserialize<List<ManagedSlackAuditEntry>>(row.AuditJson) ?? [];
             audit.Add(new ManagedSlackAuditEntry("permanent_delete", actor, result.Outcome.ToString().ToLowerInvariant(), now));
             row.AuditJson = JsonSerializer.Serialize(audit);
+            await db.SaveChangesAsync(ct);
         }
-        row.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
         return ManagedSlackChildAppOperationResult.Completed(result.Outcome, result.AppId, result.ErrorClass);
     }
 
