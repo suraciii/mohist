@@ -1,0 +1,89 @@
+# Progress — issue-528
+
+## Codebase Patterns
+
+- Backpressure is currently one-way: `SlackConnectionHealthBackpressurer.FlipBackpressuredAsync` writes
+  `ConnectionHealth=Degraded, HealthReason=<overflow reason>`, no inverse path.
+- Capacity triggers: `>=` on both `SlackProviderInboxStore.AcceptAsync` (line 87) and
+  `SlackOutboxStore.EnqueueAsync` (line 85). Recovery uses strictly `<` per D1.
+- `ConnectionDiagnostic.Compute` falls through to `Healthy` when none of the existing branches match
+  (line 140) — a Degraded(Backpressured) Connection with valid setup/creds/online service lands there
+  today (the spec's "exactly the deception this issue must remove").
+- `SlackOutboxDispatcherService.DispatchAsync` runs three sweeps behind `_dispatchGate`. Adding a
+  fourth sweep needs:
+  1. `SlackProviderInboxStore` injection (currently not present) for `CountPendingAsync`.
+  2. A new `AgentConnectionStore.ListBackpressuredAsync` query — dispatcher service cannot enumerate
+     Connections today.
+- The dispatcher service's DI is registered with `AddScoped` (Hosting/MohistServiceRegistration:208).
+  Adding ctor params to the service requires the new deps to also be `AddScoped`/resolvable; no change
+  to the grain's DI (it resolves the service from scoped).
+- `IsBackpressured` in `SlackConnectionRoutes` matches by `ConnectionHealth==Degraded` + reason
+  containing "backpressured". Use the same matcher pattern for the diagnostic branch to stay
+  consistent with existing ingress gate.
+
+## Gotchas
+
+- The new recovery sweep must run AFTER the outbox/inbox counting (so rows drained by the dead-letter
+  sweep and adapter claim contribute to "drained below capacity"). Order in `DispatchAsync`:
+  existing 3 sweeps first, then `RecoverBackpressureAsync` — so a sweep that just dead-lettered a
+  retry-exhausted row reduces the count the recovery sweep sees.
+- `MarkDeliveredAsync` / `MarkDeadLetteredAsync` / `MarkDeliveryUncertainAsync` don't reset
+  `ConnectionHealth`. The recovery sweep's reason-guard ensures we only flip when the reason matches;
+  a dead-lettered retry-burst Connection whose outbox is now empty would have `Degraded(Backpressured)`
+  until the sweep clears it. That's the intended behavior.
+- The `RecordingHealthBackpressurer` test double only records `FlipBackpressuredAsync` calls; needs
+  to also record (or no-op) the new `RecoverBackpressuredAsync` calls, otherwise existing tests
+  fail to compile.
+- Web page renders the primary state generically (`label(data.primaryState)` shows
+  `backpressured` directly) and the `SummaryIcon` falls through to `AlertCircleIcon` for unknown
+  states — no Web change strictly needed beyond ensuring the new state flows through. CLI list
+  (`StoredPrimaryState`) needs a `degraded+backpressured` branch before falling through to healthy.
+- The merge-during-backpressure AC regression needs to verify: replaceable progress merges,
+  terminal/explicit-failure/user-action neither merge across different dispatchRefs nor silently
+  drop. The existing `EnqueueAsync` (replaceable) and `EnqueueRequiredAsync` (terminal) provide this
+  behavior; the test confirms it holds when the Connection is in Degraded(Backpressured).
+
+## Layering note (Slack layer → Agent domain)
+
+- `SlackProviderBackpressureReasons` (in `Mohist.Server.Infrastructure.Slack`) referenced
+  constants in the Agent layer (`Mohist.Server.Agent.Domain`) — the original strings lived in
+  SlackProviderModels.cs. To let `AgentConnectionStore.ListBackpressuredAsync` filter by reason
+  without depending on the Slack layer (which is below it), the constants moved to
+  `SlackConnectionBackpressureReasons` in `AgentConnection.cs` (Agent domain). The Slack layer
+  re-exports them under their old name as string-constant aliases for source compatibility.
+
+## DI / wiring notes
+
+- `SlackOutboxDispatcherService` ctor now takes `SlackProviderInboxStore`, `AgentConnectionStore`,
+  and `ISlackConnectionHealthBackpressurer` alongside its existing `SlackOutboxStore`,
+  `IDeadLetterStore`, `TimeProvider`, `IOptions<SlackProviderOptions>`, and
+  `ILogger<SlackOutboxDispatcherService>`. Both new stores are auto-resolved from the
+  `IScopedService`-marked pool (`AddMohistConventionalServices` scans for `IScopedService`).
+  `SlackOutboxDispatcherGrain` ctor is unchanged: it resolves the service from the scoped
+  container so the new deps flow through.
+- The grain's `DispatchAsync` is `Task` (no CancellationToken parameter) so the dispatcher service
+  is what enforces the dispatch gate. All four sweeps run under one gate.
+- Two test doubles (`NoopSlackConnectionHealthBackpressurer` and `NoopHealthBackpressurer`) and
+  the `RecordingHealthBackpressurer` had to be updated to implement the new
+  `RecoverBackpressuredAsync` member, otherwise the new interface would break the existing
+  Slack reliability + terminal delivery spec tests.
+
+## Diagnostic branch placement
+
+- The `Backpressured` branch sits AFTER the `ServiceOffline` branch (line ~108 of
+  ConnectionDiagnostic.cs) and BEFORE `OwnerUnavailable`. Rationale: a backpressured Connection
+  with a stale adapter heartbeat should still surface `ServiceOffline` first (the operator needs
+  to restart `mohist-slack` before the recovery sweep can do anything useful). With adapter
+  online and creds valid, `Backpressured` wins over configuration states (owner, agent-needs-setup,
+  disabled, identity drift) because the user can't act on those until the backlog drains.
+
+## Test data
+
+- Spec tests use a real `SlackConnectionHealthBackpressurer` (not a recording stub) so the
+  "did the row actually flip to Healthy?" assertion is meaningful — a recording stub would have
+  reported `Recoveries.Count == 1` while the DB row was still `Degraded(Backpressured)`.
+- The `SlackOutboxBackpressureRecoverySpecs` covers: outbox-drained, inbox-drained, both-full,
+  non-backpressure Degraded reason, disabled Connection, no-drop on recovery, replaceable-merge
+  regression. The two diagnostic-shape tests (Backpressured != Disabled, inbox-vs-outbox reason
+  text) are pure-function tests and live in the same file because they share the connection
+  fixtures.

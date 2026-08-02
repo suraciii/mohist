@@ -289,6 +289,10 @@ internal static class AgentConnectionCommands
         if (string.Equals(health, "unhealthy", StringComparison.Ordinal))
             return ("service_offline", "Start mohist-slack / check Slack connectivity.");
 
+        if (string.Equals(health, "degraded", StringComparison.Ordinal)
+            && (ContainsAny(reason, "slack_outbox_backpressured", "slack_inbox_backpressured", "backpressured")))
+            return ("backpressured", "Wait for the backlog to drain / retry input shortly.");
+
         if (string.Equals(ValueOf(connection, "agentReadiness"), "needs_setup", StringComparison.Ordinal))
             return ("agent_needs_setup", "Configure Agent runtime/model.");
 

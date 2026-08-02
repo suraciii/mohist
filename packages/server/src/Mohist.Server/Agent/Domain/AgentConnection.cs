@@ -53,6 +53,15 @@ public static class ConnectionHealthKind
     public const string Unhealthy = "unhealthy";
 }
 
+public static class SlackConnectionBackpressureReasons
+{
+    public const string OutboxOverflow = "slack_outbox_backpressured";
+    public const string InboxOverflow = "slack_inbox_backpressured";
+
+    public static bool IsBackpressureReason(string? reason) =>
+        reason is OutboxOverflow or InboxOverflow;
+}
+
 public static class AgentReadinessKind
 {
     public const string Unknown = "unknown";

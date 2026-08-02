@@ -1,5 +1,7 @@
 namespace Mohist.Server.Infrastructure.Slack;
 
+using Mohist.Server.Agent.Domain;
+
 /// <summary>
 /// Stable Slack message identity. Slack guarantees <c>MessageTs</c>
 /// uniqueness within a channel, so <c>(WorkspaceTeamId, ConversationId,
@@ -71,6 +73,6 @@ public static class SlackOutboxStates
 
 public static class SlackProviderBackpressureReasons
 {
-    public const string OutboxOverflow = "slack_outbox_backpressured";
-    public const string InboxOverflow = "slack_inbox_backpressured";
+    public const string OutboxOverflow = SlackConnectionBackpressureReasons.OutboxOverflow;
+    public const string InboxOverflow = SlackConnectionBackpressureReasons.InboxOverflow;
 }

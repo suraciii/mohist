@@ -317,5 +317,7 @@ public static class GrainTestConfig
     private sealed class NoopSlackConnectionHealthBackpressurer : ISlackConnectionHealthBackpressurer
     {
         public Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<int> RecoverBackpressuredAsync(string projectId, string connectionId, CancellationToken ct = default) => Task.FromResult(0);
     }
 }

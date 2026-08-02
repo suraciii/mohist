@@ -90,6 +90,31 @@ public sealed class AgentConnectionStore : IScopedService
     }
 
     /// <summary>
+    /// Enumerates Slack Connections currently in
+    /// <see cref="ConnectionHealthKind.Degraded"/> on a Slack provider
+    /// backpressure reason, that are still
+    /// <see cref="DesiredStateKind.Enabled"/> and not soft-deleted. Used
+    /// by the Slack outbox dispatcher's recovery sweep to drive the
+    /// reason-guarded flip back to Healthy. Returns a lightweight id
+    /// projection (no full entity hydration) so the sweep does not
+    /// pay for fields it never reads.
+    /// </summary>
+    public async Task<IReadOnlyList<BackpressuredConnection>> ListBackpressuredAsync(CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.AgentConnections.AsNoTracking()
+            .Where(connection => connection.DeletedAt == null
+                && connection.DesiredState == DesiredStateKind.Enabled
+                && connection.ConnectionHealth == ConnectionHealthKind.Degraded
+                && (connection.HealthReason == SlackConnectionBackpressureReasons.InboxOverflow
+                    || connection.HealthReason == SlackConnectionBackpressureReasons.OutboxOverflow))
+            .OrderBy(connection => connection.ProjectId)
+            .ThenBy(connection => connection.Id)
+            .Select(connection => new BackpressuredConnection(connection.ProjectId, connection.Id, connection.HealthReason!))
+            .ToListAsync(ct);
+    }
+
+    /// <summary>
     /// Workspace-scoped projection of the active, identity-bound Mohist
     /// Bots in this workspace. Each row pairs the Slack <c>BotUserId</c>
     /// with the owning <see cref="AgentConnection"/> so the channel
@@ -352,6 +377,8 @@ public sealed class AgentConnectionDuplicateException(string projectId, string a
 }
 
 public sealed record SlackAdapterConnection(string ProjectId, string ConnectionId);
+
+public sealed record BackpressuredConnection(string ProjectId, string ConnectionId, string HealthReason);
 
 /// <summary>
 /// Workspace-scoped projection of the identity-bound Mohist Bots in
