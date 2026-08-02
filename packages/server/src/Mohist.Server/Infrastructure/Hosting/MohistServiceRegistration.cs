@@ -42,6 +42,7 @@ using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
 using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Webhooks;
 
@@ -160,6 +161,11 @@ public static class MohistServiceRegistration
          });
          services.AddScoped<SlackAttachmentInputBinder>();
 
+        services.AddScoped<ISlackAppManagementPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
+        services.AddScoped<ISlackAppManagementFactPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
+        services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
+        services.AddScoped<ISlackChildAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
+
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
@@ -207,6 +213,7 @@ public static class MohistServiceRegistration
             sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
         services.AddScoped<SlackOutboxDispatcherService>();
         services.AddHostedService<SlackOutboxDispatcherActivationService>();
+        services.AddHostedService<SlackChildAppBindingObligationWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();
