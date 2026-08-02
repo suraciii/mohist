@@ -21,6 +21,7 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     private readonly FakeSecretStore _secrets = new();
     private readonly RecordingSlackApiClient _slack = new();
     private TestSqliteDatabase _database = null!;
+    private AgentConnectionStore _connections = null!;
     private SlackSetupVerifier _verifier = null!;
 
     public async ValueTask InitializeAsync()
@@ -49,8 +50,8 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
 
         await _secrets.StoreAsync(new SecretStoreAddress("project-1", "conn-1", SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-token"));
         var factory = new TestDbContextFactory(_database.Options);
-        var connections = new AgentConnectionStore(factory, new AgentQuerier(factory), _secrets, [], _time);
-        _verifier = new SlackSetupVerifier(_slack, _secrets, connections, _time, Options.Create(new SlackProviderOptions()));
+        _connections = new AgentConnectionStore(factory, new AgentQuerier(factory), _secrets, [], _time);
+        _verifier = new SlackSetupVerifier(_slack, _secrets, _connections, _time, Options.Create(new SlackProviderOptions()));
     }
 
     public ValueTask DisposeAsync()
@@ -120,6 +121,67 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         Assert.Equal(string.Empty, connection.WorkspaceTeamId);
         Assert.Equal(string.Empty, connection.AppId);
         Assert.Equal(string.Empty, connection.BotUserId);
+    }
+
+    [Fact]
+    public async Task Heartbeat_after_gap_beyond_retention_window_stamps_offline_gap()
+    {
+        await SetLastHeartbeatAtAsync(Now - TimeSpan.FromMinutes(31));
+
+        await _verifier.RecordAdapterHeartbeatAsync("project-1", "conn-1");
+
+        var connection = await GetConnectionAsync();
+        Assert.NotNull(connection.OfflineGapAt);
+        Assert.Equal(Now, connection.OfflineGapAt);
+    }
+
+    [Fact]
+    public async Task Heartbeat_after_short_gap_does_not_stamp_offline_gap()
+    {
+        await SetLastHeartbeatAtAsync(Now - TimeSpan.FromMinutes(29));
+
+        await _verifier.RecordAdapterHeartbeatAsync("project-1", "conn-1");
+
+        var connection = await GetConnectionAsync();
+        Assert.Null(connection.OfflineGapAt);
+    }
+
+    [Fact]
+    public async Task Heartbeat_without_prior_heartbeat_does_not_stamp_offline_gap()
+    {
+        await _verifier.RecordAdapterHeartbeatAsync("project-1", "conn-1");
+
+        var connection = await GetConnectionAsync();
+        Assert.Null(connection.OfflineGapAt);
+    }
+
+    [Fact]
+    public async Task ClearOfflineGap_resets_the_flag()
+    {
+        await SetLastHeartbeatAtAsync(Now - TimeSpan.FromMinutes(31));
+        await _verifier.RecordAdapterHeartbeatAsync("project-1", "conn-1");
+
+        var cleared = await _connections.ClearOfflineGapIfSetAsync("project-1", "conn-1");
+
+        Assert.Equal(1, cleared);
+        var connection = await GetConnectionAsync();
+        Assert.Null(connection.OfflineGapAt);
+    }
+
+    [Fact]
+    public async Task ClearOfflineGap_is_a_noop_when_no_gap_is_set()
+    {
+        var cleared = await _connections.ClearOfflineGapIfSetAsync("project-1", "conn-1");
+
+        Assert.Equal(0, cleared);
+    }
+
+    private async Task SetLastHeartbeatAtAsync(DateTimeOffset heartbeat)
+    {
+        await using var db = _database.CreateContext();
+        var row = await db.AgentConnections.SingleAsync();
+        row.LastHeartbeatAt = heartbeat;
+        await db.SaveChangesAsync();
     }
 
     private async Task<AgentConnectionRow> GetConnectionAsync()
