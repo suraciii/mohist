@@ -9,19 +9,54 @@ Slack 不运行模型，不保存另一份 Instructions、Runtime、Model 或 Sk
 Agent 接入与 Hermes 通知不同：通知只把变化单向推送到聊天工具；Agent 接入允许用户发起
 工作、继续会话、停止当前执行并收到结果。
 
+## 安装模型
+
+一个 Slack 工作区只需要安装一次 **Mohist Manager**。Manager 是这个工作区的安装与运维
+入口：它把工作区与一个 Mohist 部署安全绑定，之后每个要接入的 Agent 都由 Manager 创建
+出**属于它自己的 Slack App 与独立 Bot 身份**，而不是多个 Agent 共用一个 Bot。
+
+因此用户看到谁，就确定调用谁：每个 Agent 仍是原生可 `@` 的独立身份，Agent 的回复也始终
+由它自己的 Bot 发出，绝不由 Manager 代发。Manager 只负责发现、安装、续装、诊断、停用和
+卸载这些 Agent 身份，不代替 Agent 执行工作，也不扩大或削减 Agent 已配置的能力。
+
+Slack 仍是交互入口，Mohist 仍是 Agent、工作、会话和调用权限的事实来源。把工作区连接到
+Manager、或让某个 Slack 成员成为 Owner，都不会自动获得 Mohist 管理权限。
+
+### 两条安装路径
+
+每个 Agent App 在创建后都要和 Slack 建立一条事件通道。根据 Mohist 部署能否暴露公共
+入站地址，Manager 在创建 Agent App 时选择其中一条：
+
+- **托管路径（HTTPS）**：Mohist 部署有公共入站地址。Manager 自动完成 App 创建、引导
+  安装授权，并直接取得该 App 运行所需的全部凭据；用户不需要复制任何子 App 运行凭据。
+  安装最自动化。
+- **本机路径（Socket Mode）**：Mohist 部署不需要暴露公共入站地址，由本机服务主动向外
+  建立 Slack 连接。Manager 仍自动完成 App 创建和安装授权，但 Slack 不经接口返回这一类
+  App 的 App-level token；因此用户需要**在该 Agent App 的设置页生成一次 App-level token
+  并粘贴回 Mohist**。这是本机路径上每个 Agent 一次性的人工步骤。
+
+两条路径都保证：同一个 Agent 在一个工作区只产生一个 App、一个 Bot；中断或失败的安装可以
+恢复到同一个 App，不会重复创建 Bot。
+
+> **为什么本机路径多一步：** Slack 的 App 创建接口不会把 App-level token 交给调用方，公开
+> 接口也没有生成或读取它的能力。这是 Slack 平台的限制，不是 Mohist 的选择。托管路径用
+> 公共入站地址的签名校验替代了对这个 token 的依赖，所以可以做到全自动。
+
 ## 第一版产品边界
 
 - 一个 Agent 接入只绑定一个 Project 中的一个 Mohist Agent。
-- 一个接入对应一个 Slack 工作区中的一个 Bot 身份。
+- 一个接入对应一个 Slack 工作区中的一个 Bot 身份；这个 Bot 由 Manager 为该 Agent 创建的
+  独立 Slack App 产生。
 - 同一个 Mohist Agent 可以有多个接入，例如分别加入个人与团队工作区；每个接入的权限、
   状态和历史线程映射彼此独立。
 - 同一个 Agent 在一个 Slack 工作区最多有一个未删除接入；一个 Bot 可以加入多个频道，
   不用为每个频道复制接入。
 - 第一版为每个接入使用独立 Bot 身份，不用一个共享的 `@mohist` Bot 在消息里临时选择
-  Agent。这样用户看到谁，就能确定调用谁。
-- 第一版面向 self-host 的私有 Slack App，不以公开应用市场和多租户托管为目标。
-- Slack 由独立的 `mohist-slack` 本机服务收发消息；它只做协议翻译，不保存任何需要恢复的数据，
-  Agent、会话、消息接收进度、会话归属和待发消息都在 Mohist 中。
+  Agent。Manager 是管理入口，不是共享执行身份。
+- 第一版面向私有 Slack App。是否需要公共应用市场、多租户托管，作为独立产品阶段评估。
+- Slack 由独立的 `mohist-slack` 本机服务收发消息；它只做协议翻译，不保存任何需要恢复的
+  数据，Agent、会话、消息接收进度、会话归属和待发消息都在 Mohist 中。托管路径的事件
+  入站由 Mohist 自己校验签名后进入同一套处理流程。
 - 第一版使用普通 Slack Bot：私聊、频道提及和 thread。Slack 原生的 Agent 入口是后续
   阶段，它只改变 Slack 中的呈现，不改变 Agent 能力。
 - 第一版私聊入口只支持成员与 Bot 的一对一 DM，不处理 group DM；团队讨论使用 Bot 已加入的
@@ -29,13 +64,18 @@ Agent 接入与 Hermes 通知不同：通知只把变化单向推送到聊天工
 
 ## 接入前的条件与建议
 
-创建接入的硬条件有两个：Agent 处于 active，以及配置者有权在目标 Slack 工作区创建和安装
-App。**很多工作区默认禁止成员自行安装 App**，这时每个接入都要过一次管理员审批；由于每个
-Agent 使用独立 Bot，这个成本会随 Agent 数量线性增加。先确认工作区的 App 安装策略，再决定
-要把哪几个 Agent 接进来。
+把一个工作区连接到 Manager 需要一个有权在该工作区创建和安装 App 的 Slack 成员完成一次
+授权。**很多工作区默认禁止成员自行安装 App**，这时 Manager 的安装本身要过一次管理员审批；
+之后 Manager 为各 Agent 创建的子 App，以及这些子 App 的安装授权，仍可能各自需要审批。
+先确认工作区的 App 安装策略与 plan 是否支持 Manager，再决定要把哪几个 Agent 接进来。
 
-`mohist-slack` 服务可以稍后安装或恢复；Connection 会保留在 **Waiting for Slack service**，
-而不是让用户重新开始。Agent Readiness 与 Connection setup 相互独立，因此也可以并行完成。
+每个 Agent 的安装是一个**可恢复的流程**：它有稳定的身份，中断、超时、用户取消或管理员
+待审批后都能回到同一个 Agent App 继续下一步，不会重新创建一个 Bot。Manager 每一步只展示
+一个当前状态和唯一的下一步动作，不让用户自己拼装结论。
+
+`mohist-slack` 服务（本机路径）可以稍后安装或恢复；公共入站地址（托管路径）也可以稍后就绪。
+未就绪时 Connection 保留在对应等待状态，而不是让用户重新开始。Agent Readiness 与 Connection
+安装相互独立，因此可以并行完成。
 
 建议先从 Web UI 或 `mo agent launch` 完成一次真实测试，确认 Agent 行为符合预期，再邀请
 其他人使用。Agent 为 Needs setup 时仍可把 Connection 配到 Connected，但 Slack 中的新委托
@@ -47,119 +87,105 @@ Slack 不会成为 Agent 配置的第二份来源：直接使用失败的 Agent�
 提示词变成可用。接入页会分别显示 Agent Readiness、安装进度和连接健康，不用一个含混的
 “Connected”掩盖配置缺口。
 
-## 配置流程
+## 安装流程
 
-### Web UI
+安装始终从 Manager 开始，并在 Mohist 与 Slack 两边都留下可恢复的进度。下面的步骤对两条
+路径都成立；只有最后取得运行凭据的方式不同。
 
-1. 打开 Agent 详情页，在 **Connections** 中选择 **Add Slack**。Mohist 立即创建一条可恢复的
-   Connection，并展示当前步骤和下一步操作。
-2. Mohist 展示将出现在 Slack 中的名称、头像与说明，并提供 **Create in Slack**。该操作打开
-   已预填完整配置的 Slack 创建页；下载配置文件是备用路径。若 Agent 名称不符合 Slack
-   命名规则，Mohist 只生成并预览一个带稳定后缀的 Slack mention name，不修改 Agent 本身。
-3. 在 Slack 中创建并安装 App，生成只含 `connections:write` 的 **App-level token (xapp-)**，
-   取得 **Bot token (xoxb-)**，再填入 Mohist 的受保护表单。头像需要在 Slack App 设置中手动
-   应用。凭据不出现在 Agent Instructions、消息、日志或 Session transcript 中。
-4. 若 `mohist-slack` 尚未安装，页面进入 **Waiting for Slack service**，给出 `mo install slack`
-   和 `mo service status slack`；已输入内容与进度不会丢失。服务可用后，Mohist 核对工作区、
-   App 与 Bot。
-5. token 无效、App 与 Bot 不属于同一安装或缺少必需权限时，页面进入 **Fix Slack setup**，
-   只列出已确认的问题和重新打开 Slack 设置、替换凭据或重新验证的动作；不会让用户在
-   **Claim owner** 上等待一个永远收不到的私聊。
-6. 身份验证完成后，页面进入 **Claim owner**。配置者选择 **Generate owner code**，Mohist
+### 选择 Agent 并准备安装
+
+1. 在 Manager 中，安装者看到自己**有权管理 Connection** 的 active Agent 列表，每项给出当前
+   Slack 状态：未安装 / 待操作 / 待审批 / 安装中 / 就绪 / 降级 / 已停用 / 已移除。Slack 身份
+   不能让安装者看到或安装其无权管理的 Agent。
+2. 安装者选择一个 Agent，确认将出现在 Slack 的 Bot 名称、头像与说明、该 Agent 需要的 Slack
+   权限与理由、默认调用策略，以及谁将成为这个 Connection 的 Owner。名称是建议值，不是身份
+   键；出现重名时 Manager 先给出一个带稳定后缀的备选，再创建。
+3. Manager 立即建立一个**可恢复的 Connection 与安装记录**：固定目标 Agent 与目标工作区，
+   但此刻还没有 Slack App 或 Bot。之后所有进度都落到这条记录上，中断后回到它继续。
+
+### 创建 Agent App 并完成安装授权
+
+4. Manager 用工作区的 Manager 授权，为这个 Agent 生成一份版本化的 App 配置，并创建一个
+   独立 Slack App。创建可能因超时或网络中断而结果未知；此时 Manager 进入**结果未知**状态，
+   **不会自动再创建一个 App**，必须先与 Slack 核对或由人工裁决，确认同一个 Agent 仍只对应
+   一个 App。
+5. Manager 引导安装者完成这个 Agent App 的 Slack 安装授权。工作区开启审批时，等待管理员
+   批准——这一步不能绕过。用户取消授权、授权过期或待审批时，Manager 都保留同一个 App，
+   下一次继续，不新建 Bot。
+6. 安装授权完成后，Manager 校验返回的工作区、App 与 Bot 身份确实和预期一致；任何不匹配都
+   不保存凭据、不绑定 Connection，并给出明确的下一步。
+
+### 取得运行凭据（两条路径在此分叉）
+
+7. **托管路径**：Manager 直接取得并保存这个 Agent App 运行所需的全部凭据，用户无需复制
+   任何子 App 运行凭据。
+   **本机路径**：Manager 取得 Bot 凭据，但 App-level token 需要安装者在该 Agent App 的
+   设置页 **Basic Information → App-Level Tokens** 生成一次（权限只选 `connections:write`）
+   并粘贴回 Mohist。在它就绪前，Connection 不进入就绪状态。凭据不出现在 Agent Instructions、
+   消息、日志或 Session transcript 中。
+
+### 绑定 Owner 并验证
+
+8. 身份与凭据验证完成后，进入 **Claim owner**。安装者选择 **Generate owner code**，Mohist
    显示一个短时有效、只能使用一次的认领码；离开页面后不再回显，丢失时重新生成会立即使
-   旧码失效。配置者在与 Bot 的私聊中发送该码；只有当前工作区中仍有效的正式成员才能成为
+   旧码失效。安装者在与该 Bot 的私聊中发送该码；只有当前工作区中仍有效的正式成员才能成为
    Owner，外部协作成员、Bot 与已停用成员不能认领。一次成功的私聊认领也证明当前 App 能
    收取私聊并回复。
-7. 选择频道访问策略。默认是 **Owner only**；Allowlist 通过姓名和头像搜索工作区成员，
+9. 选择频道访问策略。默认是 **Owner only**；Allowlist 通过姓名和头像搜索工作区成员，
    不要求用户查找 Slack member ID。Owner 也可以在 Bot 的管理操作中使用 Slack 原生成员
    选择器完成同一设置。Allowlist 和 Anyone 都始终包含 Owner。
    为避免被拉入私聊后形成意外授权，私聊在所有策略下都只接受 Owner。认领完成且连接健康
-   后，状态变为 **Connected**。
-8. 把 Bot 邀请进目标频道，在私聊中发送测试任务，或在频道根消息中 `@Bot`。测试
-   结果同时可从 Agent 详情页的 Jobs 与 Sessions 中核对；Agent 尚未 Ready 时，Slack 明确
-   显示安全的不可用摘要。具体 Runtime 或凭据缺口只向 Owner 以及 Web/CLI 操作者展示，
-   Connection 本身仍保持 Connected。
+   后，状态变为 **就绪**。
+10. 把 Bot 邀请进目标频道，在私聊中发送测试任务，或在频道根消息中 `@Bot`。测试
+    结果同时可从 Agent 详情页的 Jobs 与 Sessions 中核对；Agent 尚未 Ready 时，Slack 明确
+    显示安全的不可用摘要。具体 Runtime 或凭据缺口只向 Owner 以及 Web/CLI 操作者展示，
+    Connection 本身仍保持就绪。
 
-安装进度由已确认事实决定：**Create app & add credentials**、服务离线时的 **Waiting for
-Slack service**、验证失败时的 **Fix Slack setup**、身份验证后的 **Claim owner**，以及
-**Complete**。Mohist 无法知道用户是否在外部 Slack 页面完成了 App 创建，因此不伪造一个
-单独的“App 已创建”状态；没有凭据时，唯一下一步同时包含创建 App 与返回 Mohist 配置凭据。
-已完成步骤可以返回检查，页面和 `connection view` 不能只显示 Setup required。
+安装进度由已确认事实决定，并每次只突出一个当前状态和唯一下一步：未安装 / 待操作（例如
+粘贴 App-level token、重试创建、继续授权）/ 待审批 / 安装中 / 就绪 / 降级 / 已停用。
+Manager 无法知道用户是否在外部 Slack 页面完成了某一步，因此不伪造一个没有凭据或授权
+证据的「就绪」状态。已完成步骤可以返回检查，页面和 `connection view` 不能只显示
+Setup required。
 
 页面允许分别查看 Agent Readiness、安装进度、连接健康和身份同步，但汇总区每次只突出一个
 当前状态和唯一下一步，不让用户自己拼装结论。
 
 ### CLI
 
-先创建可恢复的 Connection：
-
-```bash
-mo agent connection create explorer --provider slack
-```
-
-命令立即输出 Connection ID、Slack 身份预览和预填的 **Create in Slack** 地址，不要求
-`mohist-slack` 已在线。完成 Slack 侧创建后再配置凭据：
-
-```bash
-mo agent connection configure <connection-id>
-```
-
-`configure` 在终端中以隐藏输入读取凭据，不提供把 token 直接写进命令参数的方式。非交互
-环境通过 `--credentials-file` 读取受保护文件。服务离线时命令保存进度并返回 Waiting for
-Slack service；认领不要求该命令持续运行。身份验证完成后，`connection view` 会把下面的命令列为
-唯一下一步：
-
-```bash
-mo agent connection claim-owner <connection-id>
-```
-
-它生成并只显示一次 Owner 认领码、有效期和 Slack DM 步骤；再次运行会使旧码立即失效。
-
-凭据文件是 UTF-8 JSON，格式固定为：
-
-```json
-{
-  "appToken": "xapp-...",
-  "botToken": "xoxb-..."
-}
-```
-
-不接受其它字段。Linux/macOS 上文件必须是普通文件、不能是符号链接，并且只能由当前用户
-读写，例如 `chmod 600 slack-credentials.json`。Mohist 不会自动删除这个用户提供的文件。
+CLI 与 Web 配置的是同一个 Agent 接入，不建立两份本机配置。Manager 安装流程产出的
+Connection 同样可由 CLI 查询和继续：
 
 ```text
 mo agent connection list <agent>
 mo agent connection view <connection-id>
-mo agent connection configure <connection-id> --credentials-file <path>
-mo agent connection claim-owner <connection-id>
 mo agent connection edit <connection-id> --access-policy allowlist --allow-member <slack-member-id>
-mo agent connection rotate-credentials <connection-id>
-mo agent connection transfer-owner <connection-id>
 mo agent connection disable <connection-id>
 mo agent connection enable <connection-id>
-mo agent connection delete <connection-id> --yes
+mo agent connection transfer-owner <connection-id>
 ```
-
-Web 与 CLI 配置的是同一个 Agent 接入，不建立两份本机配置。
 
 `--allow-member` 可以重复；选择 Allowlist 时，它替换除 Owner 外的完整成员列表。Owner 不用
 重复填写，也不能从 Allowlist 中移除。选择 Owner only 或 Anyone 时不能同时传
 `--allow-member`，错误会在修改前返回。member ID 是 CLI 自动化入口；Web 与 Slack 界面都
 使用成员搜索和头像，不把 ID 当作主要交互。
 
+> 本机路径需要补一次 App-level token 的场景，CLI 与 Web 提供同样的受保护输入；凭据不进入
+> 命令参数、Agent Instructions、消息、日志或 Session transcript。
+
 ## 接入配置
 
 | 配置 | 含义 |
 |---|---|
 | Agent | 固定绑定的 Mohist Agent；创建后不能改绑，换 Agent 应新建接入 |
-| Slack workspace | Bot 所在工作区；由安装结果确认，不靠用户手填名称判断 |
+| Slack workspace | Bot 所在工作区；由 Manager 安装结果确认，不靠用户手填名称判断 |
 | Bot identity | 创建时以 Agent 名称与头像初始化、之后由 Slack 管理并由 Mohist 核对的外部身份 |
 | Slack 说明 | 从 Agent Description 生成的 App 短说明；空描述时 Mohist 生成非空通用说明 |
+| 安装路径 | 托管（HTTPS，全自动）或本机（Socket Mode，每 Agent 一次手工 App-level token） |
 | Owner | 首次认领或后续转移时验证的 Slack 成员；默认唯一调用者，也是 Allowlist 的固定成员 |
 | Access policy | 谁可以在频道中发起工作或继续会话；默认 Owner only |
 | Allowed members | Allowlist 模式下通过成员选择器添加、可在频道调用的 Slack 成员；私聊仍只有 Owner |
-| Setup progress | Create app & add credentials / Waiting for Slack service / Fix Slack setup / Claim owner / Complete |
-| Status | Setup required / Connected / Degraded / Disabled；Degraded 必须带一条可行动的原因 |
+| 安装进度 | 未安装 / 待操作 / 待审批 / 安装中 / 就绪 / 降级 / 已停用 |
+| Status | Setup required / 就绪 / Degraded / Disabled；Degraded 必须带一条可行动的原因 |
 | Identity sync | Bot 名称和头像是否仍与当前 Agent 一致 |
 
 Agent 的 Instructions、Runtime、Model、Variant、Skills 和并发限制不属于接入配置。执行
@@ -193,9 +219,11 @@ Mohist 能核对 Bot 身份和已经授予的权限，也能通过真实收发�
 Slack 管理权限的前提下，不能读取 App 的全部配置。因此某项能力真正失败时才报出具体缺口，
 不会仅凭 token 可用就声称所有能力正常。
 
-Socket 接入不要求 Mohist 暴露公网地址，但 Slack 对未确认消息只保留有限的重试窗口。配置页
-应建议在工作区允许时启用 **Delayed Events**；即使启用，Mohist 也不承诺无限期补收。接入
-服务长时间离线后，状态页必须提示可能遗漏消息，并让用户重新发送关键委托。
+本机路径（Socket Mode）不要求 Mohist 暴露公共入站地址，但 Slack 对未确认消息只保留有限
+的重试窗口。配置页应建议在工作区允许时启用 **Delayed Events**；即使启用，Mohist 也不承诺
+无限期补收。接入服务长时间离线后，状态页必须提示可能遗漏消息，并让用户重新发送关键委托。
+托管路径（HTTPS）的入站请求由 Mohist 用该 App 的签名密钥校验时间和正文完整性后再进入处理，
+未知 App 或工作区只返回未绑定，不按名称路由。
 
 ## Slack 中怎么使用
 
@@ -348,6 +376,20 @@ Connection 的 Mohist 操作者发起：系统生成新的单次认领码，新 
 
 ## 生命周期与异常
 
+Connection 的生命周期有三个**互相独立、各自需要显式确认**的动作，不能用一个含混的「删除」
+混在一起：
+
+- **停用（Disable）**：只暂停这个 Connection——立即停止接受 Slack 输入和发送回复，已接受
+  的执行仍在 Mohist 继续。它**不删除 Slack App**，也不动该 Agent App 的管理事实。重新启用
+  后回到原状态。
+- **移除绑定（Remove binding）**：解除 Mohist 与这个 Connection 的绑定，清理消息接收记录、
+  会话映射和待发消息等运行记录，但**保留该 Agent App 的管理事实**，App 仍可被再次绑定或
+  诊断。它不代替用户从 Slack 卸载 App。
+- **永久删除 Slack App（Permanent delete）**：永久删除 Manager 为该 Agent 创建的 Slack App。
+  这需要二次确认、单独权限与完整审计，且要求该 App 当前没有被任何 active Connection 绑定
+  （或先显式移除绑定）。删除 Slack App 的结果可能未知；此时进入**删除结果未知**状态，不伪报
+  已删除，必须先核对或人工裁决。Manager 只能删除它自己创建的 App。
+
 | 情况 | 产品行为 |
 |---|---|
 | Agent 名称或头像被编辑 | Mohist 立即更新 Agent，并把 Bot identity 标为不同步；用户在 Slack App 设置中修改后重新验证 |
@@ -358,10 +400,14 @@ Connection 的 Mohist 操作者发起：系统生成新的单次认领码，新 
 | Agent 变为 Needs setup | 连接健康保持独立；新的根委托在频道中只显示安全摘要，Owner 与 Web/CLI 操作者可查看具体配置缺口；已有 Session 按自己的执行快照继续 |
 | Agent Readiness 为 Unknown | 接受新的根委托并显示“等待 Runner 验证”；确定无法执行后由 AgentJob/Turn 返回明确失败 |
 | 接入 Disabled | 立即停止接受 Slack 输入和发送回复；已接受执行仍在 Mohist 继续。禁用期间到达的消息被确认并丢弃，不让它们积成稍后的任务。重新 Enable 后只补齐缺失的当前/最终结果，不回放过期进度 |
-| 接入 Deleted | 删除 Slack 凭据、Connection、消息接收记录、会话映射、待发消息和未用于输入的临时文件；不删除 Agent、AgentJob、AgentSession 或已接受输入的附件，也不代替用户从 Slack 卸载 App |
-| Slack 凭据失效 | 接入进入 Degraded 并停止接受新输入；替换凭据时必须仍验证为原 workspace、App 与 Bot，否则新建接入 |
-| 同一 Agent 已接入该 Slack workspace | 不覆盖已有 Connection；清除新凭据并指向已有接入，用户删除重复 Connection，并在 Slack 卸载刚创建的重复 App |
-| `mohist-slack` 暂时离线 | 已创建的 Connection 与配置进度保留；新消息由 Slack 在其重试窗口内重投，超出平台保留窗口的消息可能需要用户重新发送 |
+| 移除绑定 | 清理运行记录与该 Connection 的绑定，保留该 Agent App 的管理事实；不卸载 Slack App |
+| 永久删除 Slack App | 需二次确认、无 active 绑定、审计；删除结果未知时不伪报成功，需核对或人工裁决 |
+| 创建子 App 超时或结果未知 | 进入「结果未知」，禁止自动再创建；必须先与 Slack 核对或人工裁决，确认同一 Agent 仍只对应一个 App |
+| OAuth 取消、过期或待审批 | 保留同一个 Agent App，恢复后继续，不新建 Bot |
+| 安装授权返回的身份与预期不符 | 不保存凭据、不绑定 Connection；给出明确下一步 |
+| Slack 凭据失效 | 接入进入 Degraded 并停止接受新输入；修复时必须仍验证为原 workspace、App 与 Bot，否则按新安装处理 |
+| 同一 Agent 已接入该 Slack workspace | 不覆盖已有 Connection；指向已有接入，由用户决定是否删除重复项并在 Slack 卸载多余 App |
+| 入站通道暂时不可用（本机服务离线 / 公共入站不可达） | 已创建的 Connection 与安装进度保留；新消息由 Slack 在其重试窗口内重投，超出平台保留窗口的消息可能需要用户重新发送 |
 | Owner 需要更换 | Mohist 操作者发起新的单次认领；成功前不移除旧 Owner，也不允许 Slack 发送者自行重置 |
 | Owner 离开工作区、被停用或变为 guest | 接入进入 Degraded 并提示 Owner unavailable；不自动把身份转给同名成员。频道中的 Allowlist / Anyone 可继续按原策略使用，私聊和 Owner 管理操作不可用，Mohist 操作者需要发起 Owner 转移 |
 | Slack 重复投递事件 | 返回已有 Job/Session/Input/Turn，不创建第二份输入 |
@@ -375,6 +421,7 @@ Connection 的 Mohist 操作者发起：系统生成新的单次认领码，新 
 
 - Slack Bot 不运行 Agent Runtime，也不读取 Runner 或数据库。
 - Slack Bot 不拥有 Agent 配置，不通过隐藏 prompt 修改 Agent 行为。
+- Manager 不代替 Agent 发送回复，也不是多个 Agent 共享的执行身份。
 - 不在 Slack 中提供 Agent 编辑器、Workflow 看板或完整诊断工作台。
 - 不让一个共享 Bot 根据自然语言猜测用户想调用哪个 Agent。
 - 不把普通频道消息全部发送给 Mohist；只有私聊、明确提及和已绑定 thread 的回复会触发。
@@ -383,10 +430,16 @@ Connection 的 Mohist 操作者发起：系统生成新的单次认领码，新 
 - 第一版不协调由不同 Mohist Server 管理、但位于同一 Slack 工作区中的 Bot。
 - 第一版不支持 Slack group DM。
 - 第一版不把 Mohist artifact 自动上传为 Slack 文件。
+- 本机路径不承诺「一句话零步骤全自动」：每个 Agent App 仍需一次手工生成并粘贴 App-level
+  token，除非使用托管路径。
 
 ## 实装差距
 
-频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、重复投递保护和 Owner-only
-频道权限已经实装。当前仍未提供 Allowlist/Anyone、已有 thread 历史和文件、频道控制操作，
-以及不同 Mohist Server 之间的多 Bot 协调。私聊接入、Agent 执行、结果查询和继续会话仍按
-前文契约工作；尚未完成的能力不应被理解为 Slack 已经支持。
+**Manager 的安装与运维能力（工作区安装、子 App 创建、安装授权编排、托管/本机两路径、
+停用/移除/永久删除三动作）尚未实装**；本文描述的是目标产品 spec，由后续切片落地。
+
+消息收发与 Agent 调用已经落地：频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、
+重复投递保护和 Owner-only 频道权限已经实装；真实 Agent 已可从 Slack 私聊使用。当前安装仍
+走「人工创建 App 并粘贴凭据」的临时路径，Manager 自动安装上线后将作为默认，人工路径保留为
+排障与自动化入口。Allowlist/Anyone、附件、频道控制操作，以及不同 Mohist Server 之间的
+多 Bot 协调仍未提供。尚未完成的能力不应被理解为 Slack 已经支持。
