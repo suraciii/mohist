@@ -14,4 +14,6 @@ namespace Mohist.Server.Infrastructure.Slack;
 public interface ISlackConnectionHealthBackpressurer
 {
     Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default);
+
+    Task<int> RecoverBackpressuredAsync(string projectId, string connectionId, CancellationToken ct = default);
 }

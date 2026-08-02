@@ -1,0 +1,167 @@
+# Progress — issue-528
+
+## Codebase Patterns
+
+- Backpressure is currently one-way: `SlackConnectionHealthBackpressurer.FlipBackpressuredAsync` writes
+  `ConnectionHealth=Degraded, HealthReason=<overflow reason>`, no inverse path.
+- Capacity triggers: `>=` on both `SlackProviderInboxStore.AcceptAsync` (line 87) and
+  `SlackOutboxStore.EnqueueAsync` (line 85). Recovery uses strictly `<` per D1.
+- `ConnectionDiagnostic.Compute` falls through to `Healthy` when none of the existing branches match
+  (line 140) — a Degraded(Backpressured) Connection with valid setup/creds/online service lands there
+  today (the spec's "exactly the deception this issue must remove").
+- `SlackOutboxDispatcherService.DispatchAsync` runs three sweeps behind `_dispatchGate`. Adding a
+  fourth sweep needs:
+  1. `SlackProviderInboxStore` injection (currently not present) for `CountPendingAsync`.
+  2. A new `AgentConnectionStore.ListBackpressuredAsync` query — dispatcher service cannot enumerate
+     Connections today.
+- The dispatcher service's DI is registered with `AddScoped` (Hosting/MohistServiceRegistration:208).
+  Adding ctor params to the service requires the new deps to also be `AddScoped`/resolvable; no change
+  to the grain's DI (it resolves the service from scoped).
+- `IsBackpressured` in `SlackConnectionRoutes` matches by `ConnectionHealth==Degraded` + reason
+  containing "backpressured". Use the same matcher pattern for the diagnostic branch to stay
+  consistent with existing ingress gate.
+
+## Gotchas
+
+- The new recovery sweep must run AFTER the outbox/inbox counting (so rows drained by the dead-letter
+  sweep and adapter claim contribute to "drained below capacity"). Order in `DispatchAsync`:
+  existing 3 sweeps first, then `RecoverBackpressureAsync` — so a sweep that just dead-lettered a
+  retry-exhausted row reduces the count the recovery sweep sees.
+- `MarkDeliveredAsync` / `MarkDeadLetteredAsync` / `MarkDeliveryUncertainAsync` don't reset
+  `ConnectionHealth`. The recovery sweep's reason-guard ensures we only flip when the reason matches;
+  a dead-lettered retry-burst Connection whose outbox is now empty would have `Degraded(Backpressured)`
+  until the sweep clears it. That's the intended behavior.
+- The `RecordingHealthBackpressurer` test double only records `FlipBackpressuredAsync` calls; needs
+  to also record (or no-op) the new `RecoverBackpressuredAsync` calls, otherwise existing tests
+  fail to compile.
+- Web page renders the primary state generically (`label(data.primaryState)` shows
+  `backpressured` directly) and the `SummaryIcon` falls through to `AlertCircleIcon` for unknown
+  states — no Web change strictly needed beyond ensuring the new state flows through. CLI list
+  (`StoredPrimaryState`) needs a `degraded+backpressured` branch before falling through to healthy.
+- The merge-during-backpressure AC regression needs to verify: replaceable progress merges,
+  terminal/explicit-failure/user-action neither merge across different dispatchRefs nor silently
+  drop. The existing `EnqueueAsync` (replaceable) and `EnqueueRequiredAsync` (terminal) provide this
+  behavior; the test confirms it holds when the Connection is in Degraded(Backpressured).
+
+## Layering note (Slack layer → Agent domain)
+
+- `SlackProviderBackpressureReasons` (in `Mohist.Server.Infrastructure.Slack`) referenced
+  constants in the Agent layer (`Mohist.Server.Agent.Domain`) — the original strings lived in
+  SlackProviderModels.cs. To let `AgentConnectionStore.ListBackpressuredAsync` filter by reason
+  without depending on the Slack layer (which is below it), the constants moved to
+  `SlackConnectionBackpressureReasons` in `AgentConnection.cs` (Agent domain). The Slack layer
+  re-exports them under their old name as string-constant aliases for source compatibility.
+
+## DI / wiring notes
+
+- `SlackOutboxDispatcherService` ctor now takes `SlackProviderInboxStore`, `AgentConnectionStore`,
+  and `ISlackConnectionHealthBackpressurer` alongside its existing `SlackOutboxStore`,
+  `IDeadLetterStore`, `TimeProvider`, `IOptions<SlackProviderOptions>`, and
+  `ILogger<SlackOutboxDispatcherService>`. Both new stores are auto-resolved from the
+  `IScopedService`-marked pool (`AddMohistConventionalServices` scans for `IScopedService`).
+  `SlackOutboxDispatcherGrain` ctor is unchanged: it resolves the service from the scoped
+  container so the new deps flow through.
+- The grain's `DispatchAsync` is `Task` (no CancellationToken parameter) so the dispatcher service
+  is what enforces the dispatch gate. All four sweeps run under one gate.
+- Two test doubles (`NoopSlackConnectionHealthBackpressurer` and `NoopHealthBackpressurer`) and
+  the `RecordingHealthBackpressurer` had to be updated to implement the new
+  `RecoverBackpressuredAsync` member, otherwise the new interface would break the existing
+  Slack reliability + terminal delivery spec tests.
+
+## Diagnostic branch placement
+
+- The `Backpressured` branch sits AFTER the `ServiceOffline` branch (line ~108 of
+  ConnectionDiagnostic.cs) and BEFORE `OwnerUnavailable`. Rationale: a backpressured Connection
+  with a stale adapter heartbeat should still surface `ServiceOffline` first (the operator needs
+  to restart `mohist-slack` before the recovery sweep can do anything useful). With adapter
+  online and creds valid, `Backpressured` wins over configuration states (owner, agent-needs-setup,
+  disabled, identity drift) because the user can't act on those until the backlog drains.
+
+## Test data
+
+- Spec tests use a real `SlackConnectionHealthBackpressurer` (not a recording stub) so the
+  "did the row actually flip to Healthy?" assertion is meaningful — a recording stub would have
+  reported `Recoveries.Count == 1` while the DB row was still `Degraded(Backpressured)`.
+- The `SlackOutboxBackpressureRecoverySpecs` covers: outbox-drained, inbox-drained, both-full,
+  non-backpressure Degraded reason, disabled Connection, no-drop on recovery, replaceable-merge
+  regression. The two diagnostic-shape tests (Backpressured != Disabled, inbox-vs-outbox reason
+  text) are pure-function tests and live in the same file because they share the connection
+  fixtures.
+
+## T-002 patterns
+
+- The 3 ingress call sites that used to `return ApiResults.Conflict("…", "slack_backpressured")`
+  (DM `HandleDmIngressAsync`, channel `LaunchChannelRootAsync`, channel
+  `DispatchChannelFollowupAsync`) now return `ApiResults.Ok(new { kind = "backpressured",
+  reason = "…" })`. The `slack_backpressured` error code is gone from these sites — the success
+  body is the only signal. `IsBackpressured` keeps matching on
+  `ConnectionHealth==Degraded && HealthReason.Contains("backpressured")` so it is consistent with
+  the diagnostic branch.
+- The new test in `SlackChannelThreadIngressSpecs` also asserts no outbox row was enqueued under
+  the backpressured branch (the reason must be rendered by the adapter, not pushed into the
+  outbox). The matching DM test mirrors the same assertion.
+- `IngressResult` was narrowed in `packages/mohist-slack/src/types.ts` from `{ kind: string; reason?: string }`
+  to a discriminated union that includes `backpressured` with a required `reason`. The trailing
+  `{ kind: string; reason?: string }` arm keeps source-compat for any future unknown kind. Adapter
+  code reads `result.kind === "backpressured"` against the narrowed type.
+- Adapter rendering is a tiny new helper `renderUserFacingRejection` called between
+  `transport.ingress` and `ack()`. It only fires for `kind === "backpressured"`, so the
+  server-enqueued `rejected` (empty prompt / agent needs setup / non-owner) is NOT re-posted by the
+  adapter — no double render (the design D4 kind-discriminator invariant).
+- The render uses the conversation/thread from the normalized envelope, not the connection or a
+  session — the originating Slack user always gets the refusal in the same place they typed.
+- Fake `IngressResult` returns: `FakeTransport` now has a `nextIngressResults: IngressResult[]`
+  queue, consumed in order; absent that, the test falls back to `{ kind: "accepted" }` (existing
+  default). The new tests cover: (a) backpressured → Slack post in originating thread;
+  (b) server-enqueued `rejected` → no Slack post; (c) sequential accept then backpressure → only
+  the backpressure message is posted, accepted event acks without a web post.
+- `void result` was removed from `handleEvent`; the rendered helper is the only place that touches
+  the result. `runtime.draining` / `!runtime.web` guards mirror `drain()` so a stop during render
+  does not throw.
+
+## T-003 patterns
+
+- The drain now branches on `response.ok === false` to ack `retry` (safe — Slack never accepted,
+  so re-posting cannot duplicate). All other failure paths (JSON parse, missing text, transport
+  exceptions, response.ok undefined) ack `uncertain` and are not blindly resent. Restructured
+  the try/catch into a narrow error block around `postMessage`; the `retry` branch sits outside
+  the catch so a definitive Slack rejection does not look like an unknown outcome.
+- Adapter types: `DeliveryAck.outcome: "delivered" | "uncertain" | "retry"` was already in
+  `types.ts` from #514 (server ack route maps `else → ScheduleRetryAsync`). Only the adapter
+  needed to learn to emit `retry` for explicit failures. Reusing `ScheduleRetryAsync` keeps one
+  retry path and one attempt budget (design D5).
+- Server added `SlackOutboxStore.ResendUncertainAsync` — transitions DeliveryUncertain → Pending
+  with bumped AttemptCount and cleared `DeliveryUncertainAt`. Returns 0 for any other state so
+  the route surfaces a 409 (vs. throwing) without re-checking row state outside the transition.
+  `NextAttemptAt = now` (not backed-off) — resend is operator-initiated, not the adapter's
+  automatic retry, so the operator picks the timing.
+- New routes: `GET /api/projects/{ref}/slack-connections/{id}/deliveries` (lists outbox rows via
+  `SlackOutboxStore.ListAsync`) and `POST /api/projects/{ref}/slack-connections/{id}/deliveries/{deliveryId}/resend`
+  (calls `ResendUncertainAsync`, returns 409 with `delivery_not_uncertain` for non-uncertain
+  rows, 404 for unknown row). Both live in the management group (no operator credential — user
+  action). The deliveries list path deliberately sits under `/{id}/deliveries` so the existing
+  adapter-side `/deliveries/{claim,ack}` endpoints keep the operator credential requirement
+  without sharing the route surface.
+- Web FSD: new types in `entities/agent-connection/model/types.ts`, queries + client in
+  `entities/agent-connection/api/`, page rendering in
+  `pages/connection-diagnostic/ui/uncertain-deliveries-section.tsx`. The deliveries query is
+  gated on `setupComplete` (mirrors `useAgentConnectionAccess(..., setupComplete)`) so
+  setup-incomplete flows don't issue an unhandled GET.
+- The resend flow warns in two places: the page renders an inline confirmation (warns about
+  possible duplication + points at the authoritative execution result) before the POST; the
+  CLI prints the dispatch ref and last error to stdout + a duplicate-warning paragraph to
+  stderr, then prompts (or refuses without `--yes` in non-interactive mode).
+- Test coverage: adapter test adds two cases — explicit `{ok:false,error}` acks `retry`, payload/JSON failures ack `uncertain`. Spec tests (`SlackDeliveryOutcomesSpecs`) cover:
+  `ScheduleRetryAsync` re-pending on explicit failure; `ResendUncertainAsync` only advancing
+  DeliveryUncertain rows (Pending→0 updates); GET deliveries listing rows with state + reason;
+  resend endpoint transitioning the row and NOT changing the AgentJob row's Status column;
+  resend endpoint returning 409 for non-uncertain rows. CLI tests cover deliveries list,
+  `--only-uncertain` filter, resend prompt flow + duplicate warning, non-uncertain rejection,
+  and non-interactive `--yes` requirement.
+
+## Verification repair
+
+- Full `npm test` reproduced the failure: T-004 added `OfflineGapAt` to the model without an EF migration, causing pending model changes and SQLite missing-column failures.
+- Added the additive `AddOfflineGapAt` migration and updated the model snapshot. Server build passes.
+- The initial migration fix still left spec fixtures built from a pre-T-004 schema template without `AgentConnections.OfflineGapAt`; added an idempotent test-schema DDL in `GrainTestConfig.ApplyWorkflowRunsStatusSchemaFix`.
+- The first DDL attempt had incorrect escaping and was reproduced as SQLite `unrecognized token`; corrected it to valid quoted SQL. A subsequent full SpecTests run exceeded 180 seconds before reporting completion.

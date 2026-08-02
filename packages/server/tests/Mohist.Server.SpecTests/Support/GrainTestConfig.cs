@@ -87,6 +87,15 @@ public static class GrainTestConfig
     /// </summary>
     public static void ApplyWorkflowRunsStatusSchemaFix(MohistDbContext db)
     {
+        try
+        {
+            db.Database.ExecuteSqlRaw("ALTER TABLE \"AgentConnections\" ADD COLUMN \"OfflineGapAt\" TEXT NULL;");
+        }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (
+            ex.Message.Contains("duplicate column name", StringComparison.Ordinal))
+        {
+        }
+
         // After T-004 the migration has already added Status as a STORED
         // computed column. The legacy plain-Text + trigger path here
         // only runs against pre-T-004 fixtures (or any test that
@@ -317,5 +326,7 @@ public static class GrainTestConfig
     private sealed class NoopSlackConnectionHealthBackpressurer : ISlackConnectionHealthBackpressurer
     {
         public Task FlipBackpressuredAsync(string projectId, string connectionId, string reason, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<int> RecoverBackpressuredAsync(string projectId, string connectionId, CancellationToken ct = default) => Task.FromResult(0);
     }
 }
