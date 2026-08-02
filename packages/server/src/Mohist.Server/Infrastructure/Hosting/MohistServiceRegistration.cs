@@ -42,6 +42,7 @@ using Mohist.Server.Logging;
 using Mohist.Server.Notifications;
 using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Webhooks;
 
@@ -159,6 +160,10 @@ public static class MohistServiceRegistration
              client.Timeout = TimeSpan.FromSeconds(10);
          });
          services.AddScoped<SlackAttachmentInputBinder>();
+
+        services.AddScoped<ISlackAppManagementPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
+        services.AddScoped<ISlackAppManagementFactPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
+        services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
 
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
