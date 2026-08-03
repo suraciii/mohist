@@ -210,6 +210,23 @@ function FactRow({ name, value }: { name: string; value: string | boolean | null
   )
 }
 
+function ManagedAppStatus({ app }: { app: NonNullable<AgentConnectionDetailResponse['managedApp']> }) {
+  return (
+    <CardSection title="Managed Agent App" tone={app.nextAction === 'ready' ? 'green' : 'default'}>
+      <dl className="divide-y divide-border" data-testid="managed-agent-app-status">
+        <FactRow name="App lifecycle" value={label(app.appLifecycle)} />
+        <FactRow name="Authorization" value={label(app.authorization)} />
+        <FactRow name="Manifest" value={label(app.manifestState)} />
+        <FactRow name="Transport" value={`${label(app.transportKind)} / ${label(app.transportReadiness)}`} />
+        <FactRow name="Binding" value={label(app.bindingState)} />
+        <FactRow name="Next action" value={label(app.nextAction)} />
+        {app.unknownOutcome && <FactRow name="Unknown outcome" value={app.unknownOutcome} />}
+        {app.errorClass && <FactRow name="Error class" value={app.errorClass} />}
+      </dl>
+    </CardSection>
+  )
+}
+
 export function ConnectionDiagnosticPage({
   dataHook = useDefaultData,
   operationsHook = useDefaultOperations,
@@ -279,6 +296,8 @@ export function ConnectionDiagnosticPage({
             </div>
           </div>
         </CardSection>
+
+        {detail?.managedApp && <ManagedAppStatus app={detail.managedApp} />}
 
         {facts.offlineGapAt && (
           <CardSection title="Possible messages missed" tone="amber">

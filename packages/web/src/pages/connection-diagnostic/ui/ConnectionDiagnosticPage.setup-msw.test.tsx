@@ -84,6 +84,24 @@ function makeDetail() {
     botName: 'derived-bot',
     appDescription: 'Derived description for the Agent',
     slackAppCreationReference: 'https://api.slack.com/apps?new_app=1',
+    managedApp: {
+      id: 'child-1',
+      enrollmentId: 'enrollment-1',
+      agentConnectionId: 'conn-1',
+      workspaceTeamId: 'T123',
+      appId: '',
+      botUserId: '',
+      appLifecycle: 'create_unknown',
+      authorization: 'pending_admin',
+      manifestState: 'desired',
+      transportKind: 'socket',
+      transportReadiness: 'not_ready',
+      nextAction: 'reconcile_create',
+      bindingState: 'pending',
+      unknownOutcome: 'timeout',
+      errorClass: 'timeout',
+      deletedAt: null,
+    },
   } as const
 }
 
@@ -141,6 +159,8 @@ describe('ConnectionDiagnosticPage — setup step rendering (MSW)', () => {
     const link = screen.getByTestId('connection-setup-create-in-slack')
     expect(link).toHaveAttribute('href', 'https://api.slack.com/apps?new_app=1')
     expect(link).toHaveAttribute('target', '_blank')
+    expect(await screen.findByTestId('managed-agent-app-status')).toHaveTextContent('reconcile create')
+    expect(screen.getByTestId('managed-agent-app-status')).toHaveTextContent('timeout')
   })
 
   it('renders the waiting-for-service step while preserving setup progress', async () => {

@@ -2672,11 +2672,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ManagerExternalId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("PlanCode")
                         .IsRequired()
                         .HasMaxLength(64)
