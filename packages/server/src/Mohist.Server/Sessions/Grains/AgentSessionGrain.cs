@@ -1296,7 +1296,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                         events.AddRange(session.MarkFollowupTurnTerminal(
                             operationId,
                             ResolveFollowupTurnTerminalStatus(activityPayload),
-                            null,
+                            ResolveFollowupTurnResult(activityPayload),
                             now));
                     }
                     else
@@ -1937,6 +1937,17 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 ? AgentTurnStatus.Unknown
                 : AgentTurnStatus.Completed,
         };
+    }
+
+    private static AgentTurnResult? ResolveFollowupTurnResult(JsonElement payload)
+    {
+        var message = AgentSessionJsonHelper.GetStringProp(payload, "message");
+        var output = AgentSessionJsonHelper.GetStringProp(payload, "output");
+        var failureReason = AgentSessionJsonHelper.GetStringProp(payload, "failureReason");
+        var failureCategory = AgentSessionJsonHelper.GetStringProp(payload, "failureCategory");
+        return message is null && output is null && failureReason is null && failureCategory is null
+            ? null
+            : new AgentTurnResult(message, output, failureReason, failureCategory);
     }
 
     private static void SettleStopClaimFromRuntimeEvent(

@@ -352,12 +352,13 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 /// <summary>
 /// Unified read shape for an AgentSession addressed by its stable
 /// <see cref="UnifiedSessionSummaryDto.Id"/>, regardless of whether the session
-/// originated from an Agent launch (<c>source = agent-launch</c>) or a Workflow
-/// run (<c>source = workflow</c>). Surfaced by the project-scoped
+/// originated from an Agent launch (<c>source = agent-launch</c>), an Agent
+/// Connection (<c>source = agent-connection</c>), or a Workflow run
+/// (<c>source = workflow</c>). Surfaced by the project-scoped
 /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}</c> route,
 /// which resolves the row by id without the
-/// <c>source-kind == agent-launch</c> gate that the generic-session route
-/// applies. The summary is the single shared read contract consumed by the
+/// source gate that the generic-session route applies. The summary is the
+/// single shared read contract consumed by the
 /// Web session detail page — it carries every fact the page needs to
 /// explain source and current state, current-turn and input/turn
 /// observations, terminal/failure evidence, model/usage, recovery
@@ -370,7 +371,7 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
 /// absent-when-empty idiom (<see cref="Infrastructure.JSON.Options"/> sets
 /// <c>DefaultIgnoreCondition = WhenWritingNull</c>):
 /// <list type="bullet">
-///   <item><term>agent-launch</term><description><see cref="UnifiedSessionSummaryDto.AgentId"/> /
+///   <item><term>agent-launch / agent-connection</term><description><see cref="UnifiedSessionSummaryDto.AgentId"/> /
 ///   <see cref="UnifiedSessionSummaryDto.AgentName"/> populated;
 ///   <see cref="UnifiedSessionSummaryDto.WorkflowRunId"/> /
 ///   <see cref="UnifiedSessionSummaryDto.SessionName"/> absent.</description></item>

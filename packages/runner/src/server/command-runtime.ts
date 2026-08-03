@@ -15,6 +15,7 @@ import type {
   RuntimeFollowupRequest,
   RuntimeFollowupResult,
   RuntimeResult,
+  RuntimeTurnObserver,
 } from "../runtime/opencode/index.js"
 import type {
   PiCancelFacts,
@@ -111,10 +112,10 @@ export type CancelCallResult = RuntimeResult<RuntimeCancelResult> | PiResult<PiC
 export function callFollowup(
   handle: CommandRuntimeHandle,
   request: FollowupCallRequest,
-  observer: PiTurnObserver | null,
+  observer: PiTurnObserver | RuntimeTurnObserver | null,
 ): Promise<FollowupCallResult> {
   if (handle.kind === "opencode") {
-    return callOpenCodeFollowup(handle.runtime, request)
+    return callOpenCodeFollowup(handle.runtime, request, observer as RuntimeTurnObserver | null)
   }
   return callPiFollowup(handle.runtime, request, observer)
 }
@@ -188,6 +189,7 @@ export async function callSessionCommand(
 async function callOpenCodeFollowup(
   runtime: OpenCodeRuntime,
   request: FollowupCallRequest,
+  observer: RuntimeTurnObserver | null,
 ): Promise<RuntimeResult<RuntimeFollowupResult>> {
   const opencodeRequest: RuntimeFollowupRequest = {
     target: { runtime: "opencode", runtimeSessionId: request.target.runtimeSessionId, workDir: request.target.workDir },
@@ -199,7 +201,7 @@ async function callOpenCodeFollowup(
       ...(request.options.skills ? { skills: request.options.skills } : {}),
     } } : {}),
   }
-  return await runtime.followup(opencodeRequest)
+  return await runtime.followup(opencodeRequest, observer ?? undefined)
 }
 
 async function callPiFollowup(

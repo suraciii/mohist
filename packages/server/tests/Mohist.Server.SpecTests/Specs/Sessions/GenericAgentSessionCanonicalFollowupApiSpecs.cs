@@ -166,6 +166,77 @@ public class GenericAgentSessionCanonicalFollowupApiSpecs : GenericAgentSessionF
     }
 
     [Fact]
+    public async Task AgentConnectionInitialExecution_BindsRunnerId_AndIdleFollowupIsDelivered()
+    {
+        var project = await CreateProjectAsync("agent-connection-open-followup");
+        var sessionId = $"agent-connection-followup-{project.Id}";
+        var workDir = WorkDirFor(project.Id);
+        var metadata = new AgentSessionMetadata(
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = project.Id,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+                [GenericAgentSessionMetadata.AgentId] = "connection-agent",
+                [GenericAgentSessionMetadata.AgentName] = "Connection Agent",
+            });
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
+        await runner.RegisterAsync(new RunnerInfo(_runnerId, ["spec/*"], $"{_runnerId}-host", project.Id));
+
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "connection-initial-input",
+            TurnId: "connection-initial-turn",
+            Prompt: "initial prompt",
+            Source: "agent-connection",
+            JobId: "connection-initial-job",
+            Metadata: metadata,
+            Runtime: "opencode",
+            WorkDir: workDir));
+
+        using var open = await _client.PostAsJsonAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/open",
+            new { workDir });
+        Assert.Equal(HttpStatusCode.OK, open.StatusCode);
+
+        var opened = await grain.GetAsync() ?? throw new InvalidOperationException("session grain returned null");
+        Assert.Equal(_runnerId, opened.RunnerId);
+
+        using var attach = await _client.PostAsJsonAsync(
+            $"/api/runner/{_runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
+            new { runtimeSessionId = "connection-runtime", workDir });
+        Assert.Equal(HttpStatusCode.OK, attach.StatusCode);
+
+        await grain.MarkInitialTurnExecutingAsync("connection-initial-job");
+        await grain.MarkInitialTurnTerminalAsync("connection-initial-job", AgentTurnStatus.Completed, null);
+
+        var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
+        var runnerHub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+        runnerHub.Clear();
+        runnerHub.SetInvocationResponse("ReceiveFollowup", new RunnerFollowupDeliveryResult(true));
+        tracker.Register(_runnerId, "conn-agent-connection-followup");
+        try
+        {
+            using var response = await PostGenericFollowupAsync(project.Id, sessionId, new { text = "continue" });
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            using var responseDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            Assert.Equal("accepted", responseDoc.RootElement.GetProperty("data").GetProperty("status").GetString());
+
+            var invocation = Assert.Single(runnerHub.Invocations);
+            Assert.Equal("ReceiveFollowup", invocation.Method);
+            var payload = JsonSerializer.SerializeToElement(invocation.Arguments.Single());
+            var binding = payload.GetProperty("target").GetProperty("binding");
+            Assert.Equal(_runnerId, binding.GetProperty("runnerId").GetString());
+            Assert.Equal("connection-runtime", binding.GetProperty("runtimeSessionId").GetString());
+        }
+        finally
+        {
+            tracker.Unregister(_runnerId);
+        }
+    }
+
+    [Fact]
     public async Task CanonicalFollowupRoute_WorkflowSession_UsesWorkflowTarget()
     {
         var (project, _, workflowRunId, sessionName, sessionId) = await CreateWorkflowSessionAsync("canonical-workflow-shape");

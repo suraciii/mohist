@@ -231,6 +231,8 @@ AgentTurn 为实际处理过程提供状态；两者都只能通过所属 Sessio
 
 - **Workflow 来源**：由 `WorkflowRun + session 名称` 寻址；同名 task 可以继续上下文。
 - **Agent launch 来源**：每次启动 Mohist Agent 时创建，并关联该 Agent ID。
+- **Agent 接入来源**：由 Slack 等 Agent Connection 启动，并关联该 Agent ID；它仍是同一个
+  Mohist Agent 的会话，不是接入方自己的会话副本。
 
 来源在 Session 整个生命周期内不改变。模型、prompt、执行后端配置相同，不会让两段
 Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来源。
@@ -241,6 +243,7 @@ Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来�
   读取，不再按来源分两套命令。
 - `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID。
 - `mo session list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，来源只是发现条件。
+  `--agent` 会列出该 Agent 通过直接启动、Agent Connection 或其他受支持入口创建的会话。
 - `mo session cancel` 取消当前 queued 或 active AgentTurn。若它是 launch 的首个 Turn，AgentJob
   以失败类别 `cancelled` 结束；后续 Turn 被取消不修改原 AgentJob。
 

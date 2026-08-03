@@ -35,6 +35,7 @@ describe("AgentJobExecutor attachment delivery", () => {
         contentType: "text/plain",
         contentDisposition: null,
       })),
+      openAgentSession: vi.fn(async () => null),
       attachAgentSession: vi.fn(async () => null),
       agentSessionRuntimeEvents: vi.fn(async () => []),
     }
@@ -107,6 +108,7 @@ describe("AgentJobExecutor attachment delivery", () => {
         contentType: "image/png",
         contentDisposition: null,
       })),
+      openAgentSession: vi.fn(async () => null),
       attachAgentSession: vi.fn(async () => null),
       agentSessionRuntimeEvents: vi.fn(async () => []),
     }

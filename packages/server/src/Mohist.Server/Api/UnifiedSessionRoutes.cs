@@ -10,12 +10,12 @@ namespace Mohist.Server.Api;
 /// <summary>
 /// Source-agnostic AgentSession read surface addressed by the stable session
 /// id. The <c>show</c> / <c>transcript</c>
-/// routes resolve a session by id WITHOUT the <c>source-kind == agent-launch</c>
-/// gate that the generic-session route applies, so an agent-launch session and
-/// a workflow-originated session resolve by the same stable id. The
-/// <c>list</c> route delegates to the existing source-specific querier methods
-/// (<c>?agent=</c>, <c>?issue=</c>, <c>?run=</c>) and maps each result to the
-/// unified <see cref="UnifiedSessionListItemDto"/>.
+/// routes resolve a session by id WITHOUT the generic-session source gate, so
+/// agent-launch, agent-connection, and workflow sessions resolve by the same
+/// stable id. The
+/// <c>list</c> route delegates to source-aware querier methods (<c>?agent=</c>,
+/// <c>?issue=</c>, <c>?run=</c>) and maps each result to the unified
+/// <see cref="UnifiedSessionListItemDto"/>.
 /// </summary>
 /// <remarks>
 /// The older <c>GET .../agent-sessions/{sessionId}</c> route stays for the
@@ -130,30 +130,12 @@ public static class UnifiedSessionRoutes
         if (agent is null)
             return ApiResults.NotFound($"Agent '{agentRef}' not found");
 
-        var items = await sessions.ListAgentSessionsAsync(
+        var items = await sessions.ListUnifiedSessionsByAgentAsync(
             project.Id,
             agent.Id,
-            statusSet: null,
             limit ?? 50,
             ct: ct);
-
-        var unified = items
-            .Select(item => new UnifiedSessionListItemDto(
-                Id: item.SessionId,
-                Source: "agent-launch",
-                RuntimeSessionId: null,
-                Runtime: null,
-                Activity: item.Activity,
-                CreatedAt: item.CreatedAt,
-                LastActivityAt: item.LastActivityAt,
-                Model: null,
-                AgentId: item.AgentId,
-                AgentName: item.AgentName,
-                WorkflowRunId: null,
-                SessionName: null,
-                ContextRefs: MapListContextRefs(item.ContextRefs)))
-            .ToList();
-        return ApiResults.Ok(unified);
+        return ApiResults.Ok(items);
     }
 
     private static async Task<IResult> ListByIssueAsync(
@@ -214,8 +196,4 @@ public static class UnifiedSessionRoutes
             ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null)
             : null;
 
-    private static UnifiedSessionContextRefsDto? MapListContextRefs(AgentSessionListContextRefsDto? refs) =>
-        refs is null
-            ? null
-            : new UnifiedSessionContextRefsDto(refs.IssueNumber, refs.EpicNumber, refs.Repository, refs.WorkspacePath);
 }

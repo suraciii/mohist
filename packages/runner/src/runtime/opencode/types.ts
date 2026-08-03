@@ -130,11 +130,10 @@ export interface RuntimeTurnResult {
 }
 
 /**
- * Inputs for a Follow-up turn on an existing Runtime Session. Wraps
- * `client.session.promptAsync`. The
+ * Inputs for a Follow-up turn on an existing Runtime Session. The
  * runtime verifies the persisted binding still resolves to a live
- * physical Session before dispatching the prompt; a stale binding
- * surfaces as `missing-session` (the existing Reset hint).
+ * physical Session before running the prompt; a stale binding surfaces
+ * as `missing-session` (the existing Reset hint).
  *
  * `options.model` / `options.variant` override the per-turn model on
  * the prompt body (same shape as {@link RuntimeTurnRequest}); the
@@ -151,6 +150,7 @@ export interface RuntimeFollowupRequest {
 export interface RuntimeFollowupFacts {
   readonly runtimeSessionId: string
   readonly workDir: string
+  readonly finalAssistantText?: string | null
 }
 
 export interface RuntimeFollowupResult {

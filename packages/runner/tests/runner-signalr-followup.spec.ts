@@ -245,6 +245,58 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
     })
   })
 
+  it("Followup_EnqueuesAssistantOutputBeforeTerminalActivity", async () => {
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    runtime.runtime.followup = async (_request, observer) => {
+      observer?.onEvent?.({
+        type: "message.delta",
+        runtimeSessionId: "runtime-1",
+        workDir: "/work/project",
+        payload: { text: "RECOVERY_OK LINEN-731 CEDAR-842" },
+      })
+      observer?.onEvent?.({
+        type: "message.delta",
+        runtimeSessionId: "runtime-1",
+        workDir: "/work/project",
+        payload: { text: "RECOVERY_OK LINEN-731 CEDAR-842" },
+      })
+      return {
+        ok: true,
+        value: {
+          facts: {
+            runtimeSessionId: "runtime-1",
+            workDir: "/work/project",
+            finalAssistantText: "RECOVERY_OK LINEN-731 CEDAR-842",
+          },
+          diagnostics: [],
+        },
+        diagnostics: [],
+      }
+    }
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+
+    emitFollowup(lastBuilder(), {
+      target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
+      text: "continue",
+      operationId: "followup-output-order",
+      turnId: "turn-output-order",
+    })
+    await flush()
+    await flush()
+
+    expect(recording.producedFactCalls.map((record) => record.event.type)).toEqual([
+      "message.delta",
+      "message.delta",
+      "session.activity",
+    ])
+    expect(recording.producedFactCalls[0]?.id).not.toBe(recording.producedFactCalls[1]?.id)
+    expect(recording.producedFactCalls[2]?.event.payload).toMatchObject({
+      status: "completed",
+      message: "RECOVERY_OK LINEN-731 CEDAR-842",
+      output: "RECOVERY_OK LINEN-731 CEDAR-842",
+    })
+  })
+
   it("Followup_Failure_RecordsIdleActivity", async () => {
     runtime.setFollowupResult({
       ok: false,

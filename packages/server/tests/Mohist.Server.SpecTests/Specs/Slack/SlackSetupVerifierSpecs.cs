@@ -179,6 +179,26 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task MissingReactionScopesDoNotBlockSetup()
+    {
+        _slack.PermissionsScopesList = new(true, null, new Dictionary<string, IReadOnlyList<string>>
+        {
+            ["im"] = ["chat:write", "im:history"],
+            ["team"] = ["users:read"],
+        });
+
+        var result = await _verifier.VerifyAsync("project-1", "conn-1");
+
+        var connection = await GetConnectionAsync();
+        Assert.True(result.Verified);
+        Assert.Equal(SetupProgressKind.ClaimOwner, result.SetupProgress);
+        Assert.Equal(ConnectionHealthKind.Healthy, connection.ConnectionHealth);
+        Assert.Equal("T123", connection.WorkspaceTeamId);
+        Assert.Equal("A123", connection.AppId);
+        Assert.Equal("U123", connection.BotUserId);
+    }
+
+    [Fact]
     public async Task Heartbeat_after_gap_beyond_retention_window_stamps_offline_gap()
     {
         await SetLastHeartbeatAtAsync(Now - TimeSpan.FromMinutes(31));

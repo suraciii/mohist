@@ -451,11 +451,11 @@ public static class RunnerRoutes
             if (existing is null) return ApiResults.NotFound($"Agent session {sessionId} not found");
             if (!await IsGenericAgentSessionInProjectAsync(sessionQuery, projectId, sessionId, ct))
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
-            // The session was minted up front by the launch endpoint
-            // carrying source-kind=agent-launch + agent id/name
-            // labels. The runner's open call only contributes annotations
+            // The generic AgentSession was pre-created by an Agent launch or
+            // Agent Connection, carrying project/agent/source labels. The
+            // runner's open call only contributes annotations
             // (workId/workType/stage/title/issueNumber) for traceability
-            // — labels are intentionally left untouched so the launch
+            // — labels are intentionally left untouched so the pre-created
             // identity (projectId, agentId, agentName, source-kind) is
             // preserved by AgentSessionMetadata.Merge.
             //
@@ -627,8 +627,8 @@ public static class RunnerRoutes
     /// <summary>
     /// Builds the annotations-only metadata that the runner contributes on
     /// open for a generic AgentSession. Labels are intentionally left null
-    /// so the launch-time labels (source-kind=agent-launch, agent-id,
-    /// agent-name, project-id) are preserved by
+    /// so the pre-created labels (source-kind, agent-id, agent-name,
+    /// project-id) are preserved by
     /// <see cref="AgentSessionMetadata.Merge"/>.
     /// </summary>
     private static AgentSessionMetadata BuildGenericAgentSessionMetadata(GenericAgentSessionOpenRequest req)
