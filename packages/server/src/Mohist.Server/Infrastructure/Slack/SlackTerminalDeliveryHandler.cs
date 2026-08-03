@@ -37,6 +37,24 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var projectId = delivery.ResolveProjectId(evt.Extensions);
+        if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
+        {
+            await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
+                projectId,
+                delivery.ConnectionId,
+                delivery.WorkspaceTeamId,
+                delivery.ConversationId,
+                SlackOutboxKinds.TerminalResult,
+                $"agent-job:{delivery.JobKey}:terminal-delivery",
+                JsonSerializer.Serialize(new SlackDeliveryPayload(
+                    SlackDeliveryOperations.PostMessage,
+                    Render(delivery),
+                    ClientMessageId: $"agent-job:{delivery.JobKey}:terminal-delivery")),
+                delivery.ThreadTs ?? delivery.MessageTs,
+                SlackDeliveryOwnerKinds.Manager), ct);
+            return;
+        }
         var projection = scope.ServiceProvider.GetService<SlackStatusProjection>() ?? new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(
             delivery.WorkspaceTeamId,
@@ -46,7 +64,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             ? $"{delivery.JobKey}:progress"
             : null;
         var result = await projection.EnqueueTerminalAsync(
-            delivery.ResolveProjectId(evt.Extensions),
+            projectId,
             delivery.ConnectionId,
             source,
             delivery.ThreadTs ?? delivery.MessageTs,

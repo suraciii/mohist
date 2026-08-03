@@ -109,6 +109,9 @@ public class AgentGrain : Grain, IAgentGrain
 
     private async Task EnsureNameAvailableAsync(string projectId, string name, string? exceptAgentId)
     {
+        if (BuiltInAgentCatalog.IsReservedName(name))
+            throw new AgentNameConflictException(projectId, name);
+
         var existing = await _querier.GetByNameAsync(projectId, name);
         if (existing is not null && !string.Equals(existing.Id, exceptAgentId, StringComparison.Ordinal))
             throw new AgentNameConflictException(projectId, name);
