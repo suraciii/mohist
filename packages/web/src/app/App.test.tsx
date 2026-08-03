@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ComponentType } from 'react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
@@ -7,10 +8,6 @@ import { http, HttpResponse } from 'msw'
 import { useMswServer } from '../../tests/support/msw'
 import { ProjectProvider } from '../entities/project'
 import { AppContent } from './App'
-
-vi.mock('../pages/session', () => ({
-  UnifiedSessionPage: () => <div data-testid="unified-session-page">Unified session</div>,
-}))
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -192,13 +189,13 @@ beforeEach(() => {
   projectsData = [TEST_PROJECT]
 })
 
-function renderApp() {
+function renderApp({ sessionPage }: { sessionPage?: ComponentType } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={queryClient}>
       <ProjectProvider>
         <BrowserRouter>
-          <AppContent />
+          <AppContent sessionPage={sessionPage} />
         </BrowserRouter>
       </ProjectProvider>
     </QueryClientProvider>,
@@ -280,7 +277,7 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
   it('routes /:projectName/sessions/:sessionId to UnifiedSessionPage', async () => {
     window.history.replaceState({}, '', '/demo/sessions/session-1')
 
-    renderApp()
+    renderApp({ sessionPage: () => <div data-testid="unified-session-page">Unified session</div> })
 
     expect(await screen.findByTestId('unified-session-page')).toHaveTextContent('Unified session')
   })
