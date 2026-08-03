@@ -161,6 +161,25 @@ public sealed class SlackProviderReliabilityStoreSpecs
         await Assert.ThrowsAsync<SlackOutboxStateException>(() => store.MarkDeliveredAsync("proj_a", queued.Id));
     }
 
+    [Fact]
+    public async Task Outbox_ack_rejects_a_stale_adapter_lease()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        await SeedEnabledConnectionAsync(database);
+        var store = NewOutbox(database, new RecordingHealthBackpressurer(), capacity: 3);
+        var queued = await store.EnqueueAsync(OutboxDraft(SlackOutboxKinds.TerminalResult, "done"));
+        var claimed = await store.ClaimAsync("proj_a", "conn_1", "adapter-a");
+
+        Assert.NotNull(claimed);
+        await Assert.ThrowsAsync<SlackOutboxStateException>(() =>
+            store.MarkDeliveredAsync("proj_a", queued.Id, null, "adapter-b"));
+
+        await store.MarkDeliveredAsync("proj_a", queued.Id, null, "adapter-a");
+        Assert.Equal(
+            SlackOutboxStates.Delivered,
+            Assert.Single((await store.ListAsync("proj_a", "conn_1")).Entries).State);
+    }
+
     private static SlackProviderInboxDraft Draft(string messageTs) => new(
         "proj_a", "conn_1", new SlackMessageIdentity("team-1", "D1", messageTs), "U1");
 

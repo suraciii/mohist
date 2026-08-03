@@ -31,6 +31,10 @@ export class HttpAdapterTransport implements AdapterTransport {
     return this.post<Delivery | null>(ref, "deliveries/claim", { adapterId }, signal)
   }
 
+  claimUncertainDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal) {
+    return this.post<Delivery | null>(ref, "deliveries/claim-uncertain", { adapterId }, signal)
+  }
+
   async ackDelivery(ref: SlackConnectionRef, ack: DeliveryAck, signal: AbortSignal) {
     await this.post(ref, "deliveries/ack", ack, signal)
   }

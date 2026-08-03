@@ -49,7 +49,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.True(second.GetProperty("newTask").GetBoolean());
         Assert.NotEqual(firstSessionId, secondSessionId);
         Assert.NotEqual(firstJobKey, secondJobKey);
-        Assert.Contains("Starting a new task", await ReadReplyAsync(connection, "D-DM-NEW", "1710000000.000200"));
+        await AssertReceivedProjectionAsync(connection, "D-DM-NEW", "1710000000.000200");
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
@@ -105,13 +105,15 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.Equal("C-THREAD", session.LabelSlackConversationId);
         Assert.Equal("1710000000.000400", session.LabelSlackThreadTs);
 
-        var reply = await db.SlackOutboxRows
+        var received = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == "C-THREAD"
-                && row.ThreadTs == "1710000000.000400")
+                && row.ThreadTs == "1710000000.000400"
+                && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                    new SlackMessageIdentity("T123", "C-THREAD", "1710000000.000450"), "received"))
             .Select(row => row.PayloadJson)
             .SingleAsync();
-        Assert.Contains("Task accepted", reply, StringComparison.Ordinal);
+        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(received).Operation);
     }
 
     [Fact]
@@ -233,18 +235,18 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         return (assignment.RunnerId, assignment.WorkId);
     }
 
-    private async Task<string> ReadReplyAsync(AgentConnection connection, string conversationId, string messageTs)
+    private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var payload = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
-                && row.Kind == SlackOutboxKinds.UserAction
-                && row.DispatchRef == $"slack-ack:T123/{conversationId}/{messageTs}")
+                && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                    new SlackMessageIdentity("T123", conversationId, messageTs), "received"))
             .Select(row => row.PayloadJson)
             .SingleAsync();
-        return JsonDocument.Parse(payload).RootElement.GetProperty("text").GetString()!;
+        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(payload).Operation);
     }
 
     private async Task<AgentConnection> CreateConnectionAsync()

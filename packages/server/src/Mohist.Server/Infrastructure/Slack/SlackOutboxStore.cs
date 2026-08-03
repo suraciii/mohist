@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Domain;
@@ -128,7 +129,7 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        if (!await IsEnabledConnectionAsync(db, draft.ProjectId, draft.ConnectionId, ct))
+        if (!await IsLiveConnectionAsync(db, draft.ProjectId, draft.ConnectionId, ct))
         {
             await transaction.CommitAsync(ct);
             return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
@@ -191,6 +192,81 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return new SlackOutboxEnqueueResult(row.Id, MergedIntoExisting: false);
     }
 
+    public async Task<SlackOutboxEnqueueResult?> PromotePendingProgressAsync(
+        SlackOutboxDraft terminalDraft,
+        string? progressDispatchRef = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(terminalDraft);
+        ValidateDraft(terminalDraft);
+        if (!SlackOutboxKinds.IsTerminal(terminalDraft.Kind) || string.IsNullOrWhiteSpace(terminalDraft.DispatchRef))
+            throw new ArgumentException("Terminal promotion needs a terminal kind and dispatch reference.", nameof(terminalDraft));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (!await IsLiveConnectionAsync(db, terminalDraft.ProjectId, terminalDraft.ConnectionId, ct))
+            return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
+        var progress = await db.SlackOutboxRows.FirstOrDefaultAsync(row =>
+            row.ProjectId == terminalDraft.ProjectId
+            && row.ConnectionId == terminalDraft.ConnectionId
+            && row.DispatchRef == (progressDispatchRef ?? terminalDraft.DispatchRef)
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.State == SlackOutboxStates.Pending, ct);
+        if (progress is null)
+            return null;
+
+        progress.Kind = terminalDraft.Kind;
+        progress.DispatchRef = terminalDraft.DispatchRef;
+        progress.PayloadJson = terminalDraft.PayloadJson;
+        progress.ThreadTs = terminalDraft.ThreadTs;
+        progress.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return new SlackOutboxEnqueueResult(progress.Id, MergedIntoExisting: true);
+    }
+
+    public async Task<SlackOutboxEnqueueResult> UpsertReplaceableProgressAsync(
+        SlackOutboxDraft draft,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+        ValidateDraft(draft);
+        if (draft.Kind != SlackOutboxKinds.ReplaceableProgress || string.IsNullOrWhiteSpace(draft.DispatchRef))
+            throw new ArgumentException("The draft must be replaceable progress.", nameof(draft));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        if (!await IsLiveConnectionAsync(db, draft.ProjectId, draft.ConnectionId, ct))
+            return new SlackOutboxEnqueueResult(string.Empty, MergedIntoExisting: false, Suppressed: true);
+        var existing = await db.SlackOutboxRows.FirstOrDefaultAsync(row =>
+            row.ConnectionId == draft.ConnectionId
+            && row.DispatchRef == draft.DispatchRef
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress, ct);
+        var now = _timeProvider.GetUtcNow();
+        if (existing is not null)
+        {
+            var previousPayload = SlackDeliveryPayload.Parse(existing.PayloadJson);
+            var nextPayload = SlackDeliveryPayload.Parse(draft.PayloadJson);
+            existing.PayloadJson = System.Text.Json.JsonSerializer.Serialize(
+                nextPayload with
+                {
+                    ProviderMessageIdentity = nextPayload.ProviderMessageIdentity
+                        ?? previousPayload.ProviderMessageIdentity,
+                });
+            existing.ThreadTs = draft.ThreadTs;
+            existing.State = SlackOutboxStates.Pending;
+            existing.NextAttemptAt = now;
+            existing.ClaimedAt = null;
+            existing.ClaimedByAdapterId = null;
+            existing.DeliveredAt = null;
+            existing.DeliveryUncertainAt = null;
+            existing.DeadLetteredAt = null;
+            existing.LastError = null;
+            existing.UpdatedAt = now;
+            await db.SaveChangesAsync(ct);
+            return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
+        }
+
+        return await EnqueueAsync(draft, ct);
+    }
+
     private static bool IsDispatchRefConflict(DbUpdateException ex)
     {
         for (var inner = (Exception?)ex; inner is not null; inner = inner.InnerException)
@@ -201,18 +277,6 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         }
         return false;
     }
-
-    private static Task<bool> IsEnabledConnectionAsync(
-        MohistDbContext db,
-        string projectId,
-        string connectionId,
-        CancellationToken ct) =>
-        db.AgentConnections.AnyAsync(connection =>
-            connection.ProjectId == projectId
-            && connection.Id == connectionId
-            && connection.DeletedAt == null
-            && connection.DesiredState == DesiredStateKind.Enabled,
-            ct);
 
     private async Task<SlackOutboxEnqueueResult?> TryMergeReplaceableAsync(
         MohistDbContext db,
@@ -234,6 +298,17 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         await db.SaveChangesAsync(ct);
         return new SlackOutboxEnqueueResult(existing.Id, MergedIntoExisting: true);
     }
+
+    private static Task<bool> IsLiveConnectionAsync(
+        MohistDbContext db,
+        string projectId,
+        string connectionId,
+        CancellationToken ct) =>
+        db.AgentConnections.AnyAsync(connection =>
+            connection.ProjectId == projectId
+            && connection.Id == connectionId
+            && connection.DeletedAt == null,
+            ct);
 
     /// <summary>
     /// Atomically transitions one Pending row to Claimed for the
@@ -295,31 +370,60 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return ToEntry(candidate);
     }
 
-    public async Task<int> MarkDeliveredAsync(string projectId, string id, CancellationToken ct = default)
+    public async Task<SlackOutboxEntry?> ClaimUncertainAsync(string projectId, string connectionId, string adapterId, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(projectId))
-            throw new ArgumentException("ProjectId is required.", nameof(projectId));
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("Id is required.", nameof(id));
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adapterId);
 
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
-            ?? throw new SlackOutboxRowNotFoundException(id);
-        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending))
-            throw new SlackOutboxStateException(id, expectedState: "claimed|pending", actualState: row.State);
-        if (row.State == SlackOutboxStates.Pending)
-        {
-            row.ClaimedAt = now;
-            row.ClaimedByAdapterId = "direct";
-        }
-        row.State = SlackOutboxStates.Delivered;
-        row.DeliveredAt = now;
-        row.UpdatedAt = now;
-        return await db.SaveChangesAsync(ct);
+        var candidate = await db.SlackOutboxRows
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.State == SlackOutboxStates.DeliveryUncertain
+                && db.AgentConnections.Any(connection =>
+                    connection.ProjectId == projectId
+                    && connection.Id == connectionId
+                    && connection.DeletedAt == null
+                    && connection.DesiredState == DesiredStateKind.Enabled))
+            .OrderBy(row => row.Id)
+            .FirstOrDefaultAsync(ct);
+        if (candidate is null)
+            return null;
+
+        var changed = await db.SlackOutboxRows
+            .Where(row => row.Id == candidate.Id && row.State == SlackOutboxStates.DeliveryUncertain)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.State, SlackOutboxStates.Claimed)
+                .SetProperty(row => row.ClaimedAt, now)
+                .SetProperty(row => row.ClaimedByAdapterId, adapterId)
+                .SetProperty(row => row.UpdatedAt, now), ct);
+        if (changed == 0)
+            return null;
+        candidate.State = SlackOutboxStates.Claimed;
+        candidate.ClaimedAt = now;
+        candidate.ClaimedByAdapterId = adapterId;
+        candidate.UpdatedAt = now;
+        return ToEntry(candidate);
     }
 
-    public async Task<int> MarkDeliveryUncertainAsync(string projectId, string id, string? reason, CancellationToken ct = default)
+    public async Task<int> MarkDeliveredAsync(string projectId, string id, CancellationToken ct = default)
+        => await MarkDeliveredAsync(projectId, id, null, ct);
+
+    public async Task<int> MarkDeliveredAsync(
+        string projectId,
+        string id,
+        SlackProviderMessageIdentity? providerIdentity,
+        CancellationToken ct = default)
+        => await MarkDeliveredAsync(projectId, id, providerIdentity, adapterId: null, ct: ct);
+
+    public async Task<int> MarkDeliveredAsync(
+        string projectId,
+        string id,
+        SlackProviderMessageIdentity? providerIdentity,
+        string? adapterId,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("ProjectId is required.", nameof(projectId));
@@ -332,6 +436,57 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             ?? throw new SlackOutboxRowNotFoundException(id);
         if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending or SlackOutboxStates.DeliveryUncertain))
             throw new SlackOutboxStateException(id, expectedState: "claimed|pending|delivery_uncertain", actualState: row.State);
+        EnsureClaimOwnership(row, adapterId);
+        if (row.State == SlackOutboxStates.DeliveryUncertain && providerIdentity is null)
+            throw new SlackOutboxStateException(id, expectedState: "reconciled provider identity", actualState: row.State);
+        if (row.State == SlackOutboxStates.Pending)
+        {
+            row.ClaimedAt = now;
+            row.ClaimedByAdapterId = "direct";
+        }
+        row.State = SlackOutboxStates.Delivered;
+        row.DeliveryUncertainAt = null;
+        if (providerIdentity is not null)
+            row.PayloadJson = AttachProviderIdentity(row.PayloadJson, providerIdentity.Value);
+        row.DeliveredAt = now;
+        row.UpdatedAt = now;
+        return await db.SaveChangesAsync(ct);
+    }
+
+    private static string AttachProviderIdentity(string payloadJson, SlackProviderMessageIdentity identity)
+    {
+        var payload = SlackDeliveryPayload.Parse(payloadJson);
+        if (payload.Operation is SlackDeliveryOperations.ReactionAdd or SlackDeliveryOperations.ReactionRemove
+            && payload.TargetMessageIdentity is { } target
+            && target == identity)
+        {
+            return payloadJson;
+        }
+        return System.Text.Json.JsonSerializer.Serialize(payload with { ProviderMessageIdentity = identity });
+    }
+
+    public async Task<int> MarkDeliveryUncertainAsync(string projectId, string id, string? reason, CancellationToken ct = default)
+        => await MarkDeliveryUncertainAsync(projectId, id, reason, adapterId: null, ct: ct);
+
+    public async Task<int> MarkDeliveryUncertainAsync(
+        string projectId,
+        string id,
+        string? reason,
+        string? adapterId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(id))
+            throw new ArgumentException("Id is required.", nameof(id));
+
+        var now = _timeProvider.GetUtcNow();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
+            ?? throw new SlackOutboxRowNotFoundException(id);
+        if (row.State is not (SlackOutboxStates.Claimed or SlackOutboxStates.Pending or SlackOutboxStates.DeliveryUncertain))
+            throw new SlackOutboxStateException(id, expectedState: "claimed|pending|delivery_uncertain", actualState: row.State);
+        EnsureClaimOwnership(row, adapterId);
         row.State = SlackOutboxStates.DeliveryUncertain;
         row.DeliveryUncertainAt = now;
         row.LastError = reason;
@@ -368,6 +523,14 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
     /// the next attempt collides with a newer progress.
     /// </summary>
     public async Task<int> ScheduleRetryAsync(string projectId, string id, string? reason, CancellationToken ct = default)
+        => await ScheduleRetryAsync(projectId, id, reason, adapterId: null, ct: ct);
+
+    public async Task<int> ScheduleRetryAsync(
+        string projectId,
+        string id,
+        string? reason,
+        string? adapterId,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(projectId))
             throw new ArgumentException("ProjectId is required.", nameof(projectId));
@@ -378,12 +541,27 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.SlackOutboxRows.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct)
             ?? throw new SlackOutboxRowNotFoundException(id);
+        EnsureClaimOwnership(row, adapterId);
         row.State = SlackOutboxStates.Pending;
         row.AttemptCount++;
         row.NextAttemptAt = now + Backoff(row.AttemptCount);
+        row.DeliveryUncertainAt = null;
         row.LastError = reason;
         row.UpdatedAt = now;
         return await db.SaveChangesAsync(ct);
+    }
+
+    private static void EnsureClaimOwnership(SlackOutboxRow row, string? adapterId)
+    {
+        if (!string.IsNullOrWhiteSpace(adapterId)
+            && (row.State != SlackOutboxStates.Claimed
+                || !string.Equals(row.ClaimedByAdapterId, adapterId, StringComparison.Ordinal)))
+        {
+            throw new SlackOutboxStateException(
+                row.Id,
+                expectedState: $"claimed by adapter '{adapterId}'",
+                actualState: row.State);
+        }
     }
 
     /// <summary>
@@ -469,6 +647,30 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             .ExecuteDeleteAsync(ct);
     }
 
+    public async Task<int> PrunePendingStatusMutationsAsync(
+        string projectId,
+        string connectionId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(connectionId))
+            throw new ArgumentException("ConnectionId is required.", nameof(connectionId));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.SlackOutboxRows
+            .Where(row => row.ProjectId == projectId
+                && row.ConnectionId == connectionId
+                && row.State == SlackOutboxStates.Pending
+                && row.Kind == SlackOutboxKinds.ReactionMutation)
+            .ToListAsync(ct);
+        var stale = rows.Where(row => IsReactionMutation(row.PayloadJson)).ToList();
+        if (stale.Count == 0)
+            return 0;
+        db.SlackOutboxRows.RemoveRange(stale);
+        return await db.SaveChangesAsync(ct);
+    }
+
     /// <summary>
     /// Used by the dispatcher to scan Pending rows whose retry budget
     /// has been exhausted. Bounded by
@@ -550,6 +752,23 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             throw new ArgumentException("PayloadJson is required.", nameof(draft));
         if (draft.Kind == SlackOutboxKinds.ReplaceableProgress && string.IsNullOrWhiteSpace(draft.DispatchRef))
             throw new ArgumentException("DispatchRef is required for ReplaceableProgress.", nameof(draft));
+    }
+
+    private static bool IsReactionMutation(string payloadJson)
+    {
+        try
+        {
+            var operation = SlackDeliveryPayload.Parse(payloadJson).Operation;
+            return operation is SlackDeliveryOperations.ReactionAdd or SlackDeliveryOperations.ReactionRemove;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
     }
 
     private static SlackOutboxEntry ToEntry(SlackOutboxRow row) => new()

@@ -128,18 +128,14 @@ public sealed class SlackThreadContextSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var replies = await db.SlackOutboxRows
+        var status = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
-                && row.ThreadTs == rootTs)
-            .Select(row => new { row.Kind, row.PayloadJson, row.CreatedAt })
-            .ToListAsync();
-        Assert.NotEmpty(replies);
-        var ack = replies.Where(r => r.Kind == SlackOutboxKinds.UserAction).ToList();
-        Assert.NotEmpty(ack);
-        var latest = ack.Last();
-        Assert.Contains("oldest messages", latest.PayloadJson, StringComparison.Ordinal);
-        Assert.Contains("background", latest.PayloadJson, StringComparison.OrdinalIgnoreCase);
+                && row.ThreadTs == rootTs
+                && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                    new SlackMessageIdentity("T123", conversationId, mentionTs), "received"))
+            .SingleAsync();
+        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(status.PayloadJson).Operation);
     }
 
     [Fact]
@@ -333,15 +329,15 @@ public sealed class SlackThreadContextSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var replies = await db.SlackOutboxRows
+        var status = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
                 && row.ThreadTs == rootTs
-                && row.Kind == SlackOutboxKinds.UserAction)
+                && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                    new SlackMessageIdentity("T123", conversationId, mentionTs), "received"))
             .Select(row => row.PayloadJson)
-            .ToListAsync();
-        var latest = replies.Last();
-        Assert.Contains("background", latest, StringComparison.OrdinalIgnoreCase);
+            .SingleAsync();
+        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(status).Operation);
     }
 
     private static SlackConversationMessage Message(string ts, string user, string text) =>
