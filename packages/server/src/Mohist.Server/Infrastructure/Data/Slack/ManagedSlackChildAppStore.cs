@@ -35,6 +35,34 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         return rows.Select(ToDomain).ToList();
     }
 
+    public async Task<ManagedSlackChildApp?> GetByConnectionAsync(string connectionId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.ManagedSlackChildApps.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.AgentConnectionId == connectionId && item.DeletedAt == null, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<bool> HasUndeletedForAgentAndWorkspaceAsync(
+        string projectId,
+        string agentId,
+        string workspaceTeamId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        return await db.ManagedSlackChildApps.AnyAsync(child =>
+            child.DeletedAt == null
+            && child.WorkspaceTeamId == workspaceTeamId
+            && db.AgentConnections.Any(connection =>
+                connection.Id == child.AgentConnectionId
+                && connection.ProjectId == projectId
+                && connection.AgentId == agentId), ct);
+    }
+
     public async Task<ManagedSlackChildApp> CreateAsync(ManagedSlackChildApp childApp, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(childApp);

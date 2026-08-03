@@ -16,6 +16,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.Agent.Domain;
 
 namespace Mohist.Server.Api;
@@ -82,8 +83,17 @@ public static class SlackConnectionRoutes
             }
         });
 
-        management.MapGet("/", async (HttpContext context, AgentConnectionStore connections, CancellationToken ct) =>
-            ApiResults.Ok(await connections.ListAsync(context.GetResolvedProject().Id, ct: ct)));
+        management.MapGet("/", async (
+            HttpContext context,
+            string? agentId,
+            AgentConnectionStore connections,
+            CancellationToken ct) =>
+        {
+            var rows = await connections.ListAsync(context.GetResolvedProject().Id, ct: ct);
+            return ApiResults.Ok(string.IsNullOrWhiteSpace(agentId)
+                ? rows
+                : rows.Where(row => row.AgentId == agentId).ToList());
+        });
 
         app.MapGet("/api/slack-connections/adapter", async (
             HttpContext http,
@@ -101,6 +111,7 @@ public static class SlackConnectionRoutes
             string connectionId,
             AgentConnectionStore connections,
             AgentQuerier agents,
+            SlackManagerApplicationService manager,
             CancellationToken ct) =>
         {
             var projectId = context.GetResolvedProject().Id;
@@ -118,6 +129,7 @@ public static class SlackConnectionRoutes
                 botName = string.IsNullOrWhiteSpace(connection.BotName) ? preview.BotName : connection.BotName,
                 appDescription = preview.AppDescription,
                 slackAppCreationReference = SlackAppCreationReference,
+                managedApp = await manager.GetAsync(projectId, connectionId, ct),
             });
         });
 

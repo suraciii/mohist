@@ -4,7 +4,6 @@ public sealed class SlackWorkspaceEnrollment
 {
     public string Id { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
-    public string ManagerExternalId { get; set; } = string.Empty;
     public string Lifecycle { get; set; } = SlackEnrollmentLifecycle.Active;
     public string ManagerCapability { get; set; } = SlackManagerCapability.Unknown;
     public string? CapabilityReason { get; set; }

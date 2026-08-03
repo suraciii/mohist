@@ -188,6 +188,16 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
                  && c.WorkspaceTeamId == connection.WorkspaceTeamId
                  && c.DeletedAt == null,
             ct);
+        if (!existing && requireWorkspaceReservation)
+        {
+            existing = await db.ManagedSlackChildApps.AnyAsync(child =>
+                child.DeletedAt == null
+                && child.WorkspaceTeamId == connection.WorkspaceTeamId
+                && db.AgentConnections.Any(candidate =>
+                    candidate.Id == child.AgentConnectionId
+                    && candidate.ProjectId == connection.ProjectId
+                    && candidate.AgentId == connection.AgentId), ct);
+        }
         if (existing)
             throw new AgentConnectionDuplicateException(
                 connection.ProjectId, connection.AgentId, connection.WorkspaceTeamId);

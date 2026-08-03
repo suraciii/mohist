@@ -74,6 +74,26 @@ export interface AgentConnectionDetailResponse {
   botName: string
   appDescription: string
   slackAppCreationReference: string
+  managedApp?: ManagedSlackAppProjection | null
+}
+
+export interface ManagedSlackAppProjection {
+  id: string
+  enrollmentId: string
+  agentConnectionId: string
+  workspaceTeamId: string
+  appId: string
+  botUserId: string
+  appLifecycle: string
+  authorization: string
+  manifestState: string
+  transportKind: string
+  transportReadiness: string
+  nextAction: string
+  bindingState: string
+  unknownOutcome: string | null
+  errorClass: string | null
+  deletedAt: string | null
 }
 
 export interface AgentConnectionConfigureRequest {
