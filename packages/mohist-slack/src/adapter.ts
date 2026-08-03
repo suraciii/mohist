@@ -1,4 +1,4 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -103,6 +103,12 @@ export class SlackAdapter {
   private async handleEvent(runtime: ConnectionRuntime, body: unknown, ack: () => Promise<void> | void, signal: AbortSignal): Promise<void> {
     await this.acquire(signal)
     try {
+      if (isSlackInteraction(body)) {
+        await this.options.transport.interaction(runtime.ref, normalizeSlackInteraction(body), signal)
+        await ack()
+        await this.drain(runtime, signal)
+        return
+      }
       const envelope = normalizeSocketEvent(body)
       const result = await this.options.transport.ingress(runtime.ref, envelope, signal)
       await this.renderUserFacingRejection(runtime, envelope, result, signal)
@@ -163,7 +169,12 @@ export class SlackAdapter {
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
-      const response = await web.chat.update?.({ channel: target.conversationId, ts: target.messageTs, text: requiredText(payload) })
+      const response = await web.chat.update?.({
+        channel: target.conversationId,
+        ts: target.messageTs,
+        text: requiredText(payload),
+        ...(payload.blocks ? { blocks: payload.blocks } : {}),
+      })
       if (!response) throw new Error("Slack client does not support chat.update")
       if (response.ok === false)
         return await this.fallbackAfterUpdateFailure(web, delivery, payload, response.error ?? "Slack rejected chat.update")
@@ -211,6 +222,7 @@ export class SlackAdapter {
         channel: existingStatus.conversationId,
         ts: existingStatus.messageTs,
         text,
+        ...(payload.blocks ? { blocks: payload.blocks } : {}),
       })
       if (response.ok === false)
         return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the status update" }
@@ -221,6 +233,7 @@ export class SlackAdapter {
       text,
       ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
       ...(payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
+      ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }
@@ -349,6 +362,53 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
   }
 }
 
+export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelope {
+  const payload = interactionPayload(body)
+  if (!payload || payload.type !== "block_actions") throw new Error("Slack interaction is malformed")
+  const team = isRecord(payload.team) ? stringValue(payload.team.id) : stringValue(payload, "team_id")
+  const user = isRecord(payload.user) ? stringValue(payload.user.id) : null
+  const container = isRecord(payload.container) ? payload.container : undefined
+  const conversationId = stringValue(container?.channel_id)
+  const messageTs = stringValue(container?.message_ts)
+  const actions = Array.isArray(payload.actions) ? payload.actions : []
+  const action = actions.length > 0 && isRecord(actions[0]) ? actions[0] : undefined
+  const interactionId = stringValue(payload.trigger_id) ?? stringValue(action?.action_ts) ?? stringValue(payload, "event_id")
+  const actionId = stringValue(action?.action_id)
+  const actionValue = stringValue(action?.value)
+  if (!team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
+    throw new Error("Slack interaction is missing its stable identity")
+  return {
+    eventType: "block_actions",
+    interactionId,
+    teamId: team,
+    conversationId,
+    messageTs,
+    threadTs: stringValue(container?.thread_ts),
+    actorSlackUserId: user,
+    actionId,
+    actionValue,
+  }
+}
+
+function isSlackInteraction(value: unknown): value is Record<string, unknown> {
+  return interactionPayload(value)?.type === "block_actions"
+}
+
+function interactionPayload(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null
+  if (value.type === "block_actions") return value
+  if (value.type !== "interactive") return null
+  const payload = value.payload
+  if (isRecord(payload)) return payload
+  if (typeof payload !== "string") return null
+  try {
+    const parsed: unknown = JSON.parse(payload)
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 function parseFiles(value: unknown): readonly SlackFileRef[] {
   if (!Array.isArray(value)) return []
   return value.flatMap((candidate) => {
@@ -390,6 +450,7 @@ interface DeliveryPayload {
   readonly fallbackText?: string
   readonly fallbackDispatchRef?: string
   readonly statusDispatchRef?: string
+  readonly blocks?: readonly Record<string, unknown>[]
 }
 
 function parseDeliveryPayload(value: string): DeliveryPayload {

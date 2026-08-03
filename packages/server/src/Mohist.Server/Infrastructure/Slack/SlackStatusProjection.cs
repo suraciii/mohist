@@ -42,6 +42,7 @@ public sealed class SlackStatusProjection : IScopedService
         SlackMessageIdentity source,
         string? threadTs,
         string? progressDispatchRef = null,
+        JsonElement? blocks = null,
         CancellationToken ct = default)
     {
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
@@ -56,7 +57,8 @@ public sealed class SlackStatusProjection : IScopedService
                 "Working...",
                 ClientMessageId: DispatchRef(source, "status"),
                 FallbackDispatchRef: DispatchRef(source, "status"),
-                StatusDispatchRef: DispatchRef(source, "status"))),
+                StatusDispatchRef: DispatchRef(source, "status"),
+                Blocks: blocks)),
             threadTs ?? source.MessageTs), ct);
 
         await EnqueueReactionAsync(

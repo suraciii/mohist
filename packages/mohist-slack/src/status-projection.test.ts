@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { SlackAdapter } from "./adapter.js"
-import type { AdapterSession, AdapterTransport, Delivery, DeliveryAck, SlackConnectionRef, SlackEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import type { AdapterSession, AdapterTransport, Delivery, DeliveryAck, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class Socket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
@@ -17,14 +17,15 @@ class Transport implements AdapterTransport {
   async discoverConnections() { return [this.ref] }
   async lease(): Promise<AdapterSession> { return { adapterId: "a", appToken: "app", botToken: "bot" } }
   async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) { return { kind: "accepted" as const } }
+  async interaction(_ref: SlackConnectionRef, _envelope: SlackInteractionEnvelope) { return { state: "stop_requested" } }
   async claimDelivery() { return this.deliveries.shift() ?? null }
   async claimUncertainDelivery() { return this.uncertain.shift() ?? null }
   async ackDelivery(_ref: SlackConnectionRef, ack: DeliveryAck) { this.acks.push(ack) }
 }
 
 class Web implements SlackWebClient {
-  readonly updated: Array<{ channel: string; ts: string; text: string }> = []
-  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string }> = []
+  readonly updated: Array<{ channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }> = []
+  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }> = []
   reactionError: string | undefined
   reactionThrow: unknown = undefined
   reactionPresent = false
@@ -32,11 +33,11 @@ class Web implements SlackWebClient {
   updateError: string | undefined
   historyMessages: Array<{ ts?: string; client_msg_id?: string; text?: string }> = []
   readonly chat = {
-    postMessage: async (input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string }) => {
+    postMessage: async (input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }) => {
       this.posted.push(input)
       return { ok: true, ts: "200.001" }
     },
-    update: async (input: { channel: string; ts: string; text: string }) => {
+    update: async (input: { channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }) => {
       this.updated.push(input)
       return { ok: this.updateError === undefined, error: this.updateError, ts: input.ts }
     },
@@ -93,6 +94,32 @@ describe("Slack status provider mutations", () => {
       outcome: "delivered",
       adapterId: "a",
       providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+    }])
+  })
+
+  it("sends the Server-provided blocks with a control update", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    const blocks = [{ type: "section", text: { type: "mrkdwn", text: "Stop requested." } }]
+    transport.deliveries.push({
+      id: "control",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "chat_update",
+        text: "Stop requested.",
+        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        blocks,
+      }),
+    })
+
+    await start(transport, web)
+
+    expect(web.updated).toEqual([{
+      channel: "C1",
+      ts: "100.002",
+      text: "Stop requested.",
+      blocks,
     }])
   })
 

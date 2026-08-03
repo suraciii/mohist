@@ -30,6 +30,18 @@ export interface SlackEnvelope {
   readonly files: readonly SlackFileRef[]
 }
 
+export interface SlackInteractionEnvelope {
+  readonly eventType: "block_actions"
+  readonly interactionId: string
+  readonly teamId: string
+  readonly conversationId: string
+  readonly messageTs: string
+  readonly threadTs: string | null
+  readonly actorSlackUserId: string
+  readonly actionId: string
+  readonly actionValue: string
+}
+
 export type SlackSenderKind = "human" | "bot" | "unknown"
 
 export type IngressResult =
@@ -40,6 +52,10 @@ export type IngressResult =
   | { readonly kind: "ignored" }
   | { readonly kind: "backpressured"; readonly reason: string }
   | { readonly kind: string; readonly reason?: string }
+
+export interface InteractionResult {
+  readonly state: string
+}
 
 export interface Delivery {
   readonly id: string
@@ -65,6 +81,7 @@ export interface AdapterTransport {
   discoverConnections(signal: AbortSignal): Promise<readonly SlackConnectionRef[]>
   lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
   ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
+  interaction(ref: SlackConnectionRef, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
   claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
   claimUncertainDelivery?(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
   ackDelivery(ref: SlackConnectionRef, ack: DeliveryAck, signal: AbortSignal): Promise<void>
@@ -83,8 +100,8 @@ export interface SocketClient {
 
 export interface SlackWebClient {
   chat: {
-    postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
-    update?(input: { channel: string; ts: string; text: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+    postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+    update?(input: { channel: string; ts: string; text: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
   }
   reactions?: {
     add(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
@@ -95,6 +112,8 @@ export interface SlackWebClient {
     history(input: { channel: string; latest?: string; oldest?: string; inclusive?: boolean; limit?: number }): Promise<{ ok?: boolean; error?: string; messages?: readonly { ts?: string; client_msg_id?: string; text?: string; thread_ts?: string }[] }>
   }
 }
+
+export type SlackBlock = Record<string, unknown>
 
 export type SocketClientFactory = (appToken: string, ref: SlackConnectionRef) => SocketClient
 export type WebClientFactory = (botToken: string, ref: SlackConnectionRef) => SlackWebClient

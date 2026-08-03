@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { HttpAdapterTransport } from "./transport.js"
 
 describe("HttpAdapterTransport", () => {
-  it("discovers connections and uses the authenticated Connection boundary for lease, ingress, claim, and ack", async () => {
+  it("discovers connections and uses the authenticated Connection boundary for lease, ingress, interactions, claim, and ack", async () => {
     const calls: Array<{ url: string; body: string }> = []
     const transport = new HttpAdapterTransport({
       serverUrl: "http://server/",
@@ -33,15 +33,28 @@ describe("HttpAdapterTransport", () => {
       senderKind: "human",
       text: "task",
     }, signal)
+    await transport.interaction(ref, {
+      eventType: "block_actions",
+      interactionId: "interaction-1",
+      teamId: "T",
+      conversationId: "D",
+      messageTs: "2",
+      threadTs: null,
+      actorSlackUserId: "U",
+      actionId: "mohist_stop_turn",
+      actionValue: "server-signed-value",
+    }, signal)
     await transport.claimDelivery(ref, "a", signal)
     await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered", adapterId: "a" }, signal)
     expect(calls.map((call) => call.url)).toEqual([
       "http://server/api/slack-connections/adapter",
       "http://server/api/projects/p/slack-connections/c/adapter-session",
       "http://server/api/projects/p/slack-connections/c/ingress",
+      "http://server/api/projects/p/slack-connections/c/interactions",
       "http://server/api/projects/p/slack-connections/c/deliveries/claim",
       "http://server/api/projects/p/slack-connections/c/deliveries/ack",
     ])
-    expect(JSON.parse(calls[4]!.body)).toMatchObject({ id: "delivery-1", outcome: "delivered", adapterId: "a" })
+    expect(JSON.parse(calls[3]!.body)).toMatchObject({ actionId: "mohist_stop_turn", actionValue: "server-signed-value" })
+    expect(JSON.parse(calls[5]!.body)).toMatchObject({ id: "delivery-1", outcome: "delivered", adapterId: "a" })
   })
 })

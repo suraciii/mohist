@@ -1,4 +1,4 @@
-import type { AdapterTransport, AdapterSession, Delivery, DeliveryAck, IngressResult, SlackConnectionRef, SlackEnvelope } from "./types.js"
+import type { AdapterTransport, AdapterSession, Delivery, DeliveryAck, IngressResult, InteractionResult, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope } from "./types.js"
 
 export interface HttpTransportOptions {
   readonly serverUrl: string
@@ -25,6 +25,10 @@ export class HttpAdapterTransport implements AdapterTransport {
 
   ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal) {
     return this.post<IngressResult>(ref, "ingress", envelope, signal)
+  }
+
+  interaction(ref: SlackConnectionRef, envelope: SlackInteractionEnvelope, signal: AbortSignal) {
+    return this.post<InteractionResult>(ref, "interactions", envelope, signal)
   }
 
   claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal) {
