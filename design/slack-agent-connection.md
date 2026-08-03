@@ -256,6 +256,69 @@ Slack 到 adapter 是 at-least-once 的外部传输，不能宣称端到端 exac
 Manager 控制面的 create/delete 同样是 at-least-once 外部副作用：重复 attempt 不重复创建/删除 App，
 结果未知时暴露为 unknown，靠 reconcile 或人工裁决收敛，见「四轴状态」。
 
+### 状态投影与消息身份
+
+Server 是 AgentSession/AgentTurn 状态的唯一裁判。Slack provider 与 `mohist-slack` adapter 只把
+Server 已确认的状态和结果投影到 Slack，不能从 Slack API 的成功响应推断工作成功，也不能读取
+Runner 输出来裁定状态。
+
+一个已接受的 Slack 输入使用稳定的 `SlackMessageIdentity` 作为输入身份，并派生一个贯穿整次
+工作的 `DispatchRef`。对每个 `DispatchRef`，Server 只允许以下逻辑结果：
+
+- 最多一个可替换的进度投影。创建后保存 provider message identity（目标 conversation 与 provider
+  message timestamp）；Working、最新阶段和终态更新都指向同一个身份，不创建第二条进度消息。
+- 最多一个终态结果投影。终态结果用稳定的 terminal delivery key 去重；如果已有进度消息，
+  Completed、Needs attention 或 Failed 优先原位替换它，否则在同一 thread 发送唯一最终答案。
+- 快速工作可以跳过进度消息，只投影 Received reaction 和唯一最终答案。平台不支持在用户原消息
+  上加 reaction 时，Received reaction 改投影到唯一进度消息。
+
+Reaction 的默认映射是 `Received=👀`、`Working=⏳`、`Completed=✅`、异常状态 `⚠️`。Reaction
+只是 liveness 提示，不是 Session/Turn 事实；reaction 缺失、延迟或成功都不改变 Server 的状态。
+Reaction mutation 必须带目标的稳定 provider message identity；状态裁判不放入 provider 或 adapter。
+
+### Delivery intent、claim/ack 与未知结果
+
+Server 为每个逻辑投影持久化一个 `DeliveryIntent`。intent 至少包含 Connection、`DispatchRef`、
+目标 conversation/thread、投影类型、稳定去重 key、当前 provider message identity（若已知）和
+可安全重放的内容引用。投影类型只有可替换进度、终态结果/明确失败、用户操作和 reaction mutation；
+工具调用或 Runner 日志不是用户消息。
+
+intent 的生命周期如下：
+
+1. **Pending**：Server 已持久化投影意图，但没有调用 provider。
+2. **Claimed**：一个 adapter 获得该 intent 的短租约。claim 不是发送成功，第二个 adapter 不能同时
+   投影同一个 intent。
+3. **Delivered/Acked**：provider 返回确定成功，并且 Server 保存了 provider message identity 或
+   mutation 已确认。重复 ack 必须幂等。
+4. **Retryable**：provider 明确拒绝且可以重试；回到同一个 intent，不能创建新的进度或最终答案。
+5. **Uncertain**：请求超时、连接中断或响应无法解析，无法判断 provider 是否已经产生副作用。此时
+   禁止盲目再发，必须先用稳定 identity reconcile；只有确认未产生副作用后才允许重试原 intent。
+6. **Dead-letter/Needs attention**：经过明确的不可重试失败或人工介入后，保留原 intent、原因和
+   可行动下一步；不能把 AgentTurn 的已确认结果改写成 provider 失败。
+
+`chat.update`、reaction add/remove 和进度消息创建都遵守同一套 claim/ack/uncertain 语义。更新
+一个已存在的状态消息时，provider message identity 丢失或结果未知，必须先 reconcile；若确认无法
+更新，Server 只允许为该 `DispatchRef` 追加一次同 thread 的最终答案。fallback 也有自己的稳定
+terminal delivery key，故重试、重连和重复入站不会再追加第二条最终答案。
+
+### 切片责任边界
+
+- **P0-B** 拥有 provider projection contract：稳定 provider message identity、投影去重、可替换
+  progress、`chat.update`、reaction add/remove、unknown mutation reconciliation、update failure
+  fallback，以及 outbox 的 claim/ack/uncertain 传输语义。B 不决定 AgentSession/AgentTurn 的状态。
+- **P0-C** 只接收 Server 已确认的成功、部分完成、取消、阻塞或失败结果，渲染结果优先的文本。
+  C 不创建或更新 Slack 消息，不操作 reaction，不重试 provider，也不把 raw tool stream、JSON 或
+  隐藏推理交给用户。
+- **P0-I** 负责 ingress 到 Agent API、Session/Turn、状态投影和最终结果之间的 orchestration，并
+  验证 DM/@mention、thread follow-up、失败、取消、重复投递、update failure fallback、Agent 未就绪
+  和 Connection Disabled。I 不绕过 B 的 provider mutation contract。
+
+Connection Disabled 时，Server 立即拒绝新的 Slack 输入，adapter 也不得 claim 或发送新的 Slack
+回复；已经接受的 Agent 工作继续由 Mohist 裁定。重新启用后只补齐仍有效的当前状态或最终结果，不
+回放禁用期间已经过期的 Working 进度。Remove binding 与 Permanent delete 仍是两个独立、显式确认
+的生命周期动作：前者保留 Agent App 管理事实，后者要求无 active binding、二次确认和审计；两者都
+不删除 Mohist Agent 或 AgentSession。
+
 ## 安全边界
 
 - 本机路径使用 Socket Mode，不要求 Mohist 暴露公共入站端点；托管路径用签名校验替代对 App-level
@@ -360,6 +423,15 @@ row/DTO/audit/log 保存 plaintext secret/OAuth code/state nonce；为 generator
 install）。
 
 ## 实装差距与顺序
+
+### 状态投影实装差距
+
+当前 Server 已有基础 provider inbox、outbound outbox、可替换进度合并和 terminal delivery 状态，
+但 provider mutation 尚未实装：`ISlackApiClient` 与 `mohist-slack` 的 Slack web client 目前只有
+`chat.postMessage` 投影能力，没有 `chat.update`、reaction add/remove、稳定 provider message identity
+持久化与对应的 unknown mutation reconcile/fallback。所以上述状态消息原位更新、reaction 生命周期、
+未知结果核对和单次 fallback 仍是本契约，不是当前运行保证；在 P0-B 完成针对性 provider/fake/spec
+证据前，不得声称真实 Slack 状态投影已完成。
 
 数据面（Epic #61）已落地：AgentConnection 领域对象（Setup progress、Desired state、Connection health、
 Agent Readiness 四类事实分离）、无状态 `mohist-slack` adapter、可恢复 Setup、Server 持有的 provider
