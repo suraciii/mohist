@@ -26,7 +26,6 @@ public sealed class SlackOAuthConcurrencySpecs : IAsyncLifetime
         {
             Id = "enrollment-oauth-concurrency",
             WorkspaceTeamId = "T_OAUTH_CONCURRENCY",
-            ManagerExternalId = "manager-1",
             Lifecycle = SlackEnrollmentLifecycle.Active,
             ManagerCapability = SlackManagerCapability.Available,
             PlanCode = "pro",

@@ -54,7 +54,6 @@ internal static class AgentConnectionCommands
         {
             Description = "Create a Manager-owned Agent App in this Slack workspace.",
         };
-        var managerId = new Option<string?>("--manager-id");
         var accessPolicy = new Option<string>("--access-policy") { DefaultValueFactory = _ => "owner_only" };
         var owner = new Option<string?>("--owner-slack-user-id");
         var transport = new Option<string>("--transport") { DefaultValueFactory = _ => "socket" };
@@ -64,7 +63,6 @@ internal static class AgentConnectionCommands
         command.Options.Add(provider);
         command.Options.Add(botName);
         command.Options.Add(workspaceTeam);
-        command.Options.Add(managerId);
         command.Options.Add(accessPolicy);
         command.Options.Add(owner);
         command.Options.Add(transport);
@@ -85,7 +83,6 @@ internal static class AgentConnectionCommands
                 {
                     agentId,
                     workspaceTeamId = team,
-                    managerExternalId = ctx.GetValue(managerId),
                     accessPolicy = ctx.GetValue(accessPolicy),
                     ownerSlackUserId = ctx.GetValue(owner),
                     botName = ctx.GetValue(botName),

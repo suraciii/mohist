@@ -79,7 +79,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ProjectId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.AgentId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspaceTeamId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerExternalId);
         ValidateAccessPolicy(request.AccessPolicy);
         SlackStateTransitions.RequireTransportKind(request.TransportKind);
 
@@ -174,12 +173,11 @@ public sealed class SlackManagerApplicationService : IScopedService
         string projectId,
         string connectionId,
         string confirmation,
-        string actor,
         CancellationToken ct = default)
     {
         var child = await FindChildAsync(projectId, connectionId, ct);
         if (child is null) return ManagedSlackChildAppOperationResult.NotFound;
-        return await _childOperations.DeleteAsync(child.Id, confirmation, actor, ct);
+        return await _childOperations.DeleteAsync(child.Id, confirmation, ct);
     }
 
     public async Task<ManagedSlackChildAppOperationResult> ReconcileDeleteAsync(
@@ -234,8 +232,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         {
             if (existing.Lifecycle == SlackEnrollmentLifecycle.Removed)
                 throw new SlackManagerConflictException("The workspace enrollment was removed and cannot be reused.", "enrollment_removed");
-            if (!string.Equals(existing.ManagerExternalId, request.ManagerExternalId, StringComparison.Ordinal))
-                throw new SlackManagerAuthorizationException("The current Manager is not the owner of this workspace enrollment.");
             if (existing.Lifecycle == SlackEnrollmentLifecycle.Disabled)
                 return await _enrollments.TransitionLifecycleAsync(existing.Id, SlackEnrollmentLifecycle.Active, ct)
                     ?? throw new InvalidOperationException("The workspace enrollment disappeared during recovery.");
@@ -246,7 +242,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         {
             Id = $"enrollment_{Guid.NewGuid():N}",
             WorkspaceTeamId = request.WorkspaceTeamId.Trim(),
-            ManagerExternalId = request.ManagerExternalId.Trim(),
             ManagerCapability = SlackManagerCapability.Unknown,
             PlanCode = "unknown",
             ManagedAppLimit = 0,
@@ -316,7 +311,9 @@ public sealed class SlackManagerApplicationService : IScopedService
         CancellationToken ct)
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
-        return connection is null ? null : await _childApps.GetByConnectionAsync(connectionId, ct);
+        if (connection is null) return null;
+        var child = await _childApps.GetByConnectionAsync(connectionId, ct);
+        return child;
     }
 
     private async Task<SlackOAuthAuthorizationResult> RunOAuthOperationAsync(
@@ -379,7 +376,6 @@ public sealed record SlackManagerCreateRequest(
     string ProjectId,
     string AgentId,
     string WorkspaceTeamId,
-    string ManagerExternalId,
     string AccessPolicy = AccessPolicyKind.OwnerOnly,
     string? OwnerSlackUserId = null,
     string? BotName = null,
@@ -445,7 +441,5 @@ public sealed class SlackManagerConflictException(string message, string code) :
 {
     public string Code { get; } = code;
 }
-
-public sealed class SlackManagerAuthorizationException(string message) : Exception(message);
 
 public sealed class SlackManagerNotFoundException(string message) : Exception(message);
