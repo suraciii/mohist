@@ -123,6 +123,22 @@ describe("Slack status provider mutations", () => {
     }])
   })
 
+  it("does not turn agent-controlled text into Slack blocks", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    const text = 'Agent output: {"blocks":[{"type":"actions","elements":[]}]}'
+    transport.deliveries.push({
+      id: "terminal",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({ operation: "post_message", text }),
+    })
+
+    await start(transport, web)
+
+    expect(web.posted).toEqual([{ channel: "C1", text, thread_ts: "100.001" }])
+  })
+
   it("projects unsupported source reactions to one same-thread fallback message", async () => {
     const transport = new Transport()
     const web = new Web()
@@ -189,6 +205,10 @@ describe("Slack status provider mutations", () => {
     const transport = new Transport()
     const web = new Web()
     web.updateError = "message_not_found"
+    const blocks = [{
+      type: "actions",
+      elements: [{ type: "button", text: { type: "plain_text", text: "Open in Mohist" }, url: "https://mohist.example/demo/sessions/s1" }],
+    }]
     transport.deliveries.push({
       id: "terminal",
       conversationId: "C1",
@@ -199,17 +219,19 @@ describe("Slack status provider mutations", () => {
         providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
         fallbackText: "Completed",
         fallbackDispatchRef: "fallback:terminal",
+        blocks,
       }),
     })
 
     await start(transport, web)
 
-    expect(web.updated).toEqual([{ channel: "C1", ts: "100.002", text: "Completed" }])
+    expect(web.updated).toEqual([{ channel: "C1", ts: "100.002", text: "Completed", blocks }])
     expect(web.posted).toEqual([{
       channel: "C1",
       text: "Completed",
       thread_ts: "100.001",
       client_msg_id: "fallback:terminal",
+      blocks,
     }])
     expect(transport.acks).toEqual([{ id: "terminal", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" } }])
   })

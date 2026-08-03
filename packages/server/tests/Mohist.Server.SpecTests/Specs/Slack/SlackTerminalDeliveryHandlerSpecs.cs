@@ -7,9 +7,12 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -32,6 +35,13 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
         await using (var db = database.CreateContext())
         {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = "proj-1",
+                Name = "demo",
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
             db.AgentConnections.Add(new AgentConnectionRow
             {
                 Id = "conn-1",
@@ -49,14 +59,26 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
                 CreatedAt = time.GetUtcNow(),
                 UpdatedAt = time.GetUtcNow(),
             });
+            db.AgentJobs.Add(new AgentJobRow { JobKey = "job-1", AgentSessionId = "session-1" });
             await db.SaveChangesAsync();
         }
         var services = new ServiceCollection();
+        var slackOptions = Options.Create(new SlackProviderOptions
+        {
+            OutboxCapacityPerConnection = 1,
+            ExternalWebUrl = "https://mohist.example",
+        });
         services.AddScoped<SlackOutboxStore>(_ => new SlackOutboxStore(
             new TestDbContextFactory(database.Options),
             new NoopHealthBackpressurer(),
             time,
-            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = 1 })));
+            slackOptions));
+        services.AddScoped<IAgentJobStore>(_ => new AgentJobStore(
+            new TestDbContextFactory(database.Options),
+            NullLogger<AgentJobStore>.Instance,
+            time));
+        services.AddSingleton(new ProjectQuerier(new TestDbContextFactory(database.Options)));
+        services.AddScoped(_ => new SlackWebLinkBuilder(slackOptions));
         await using var provider = services.BuildServiceProvider();
         var handler = new SlackTerminalDeliveryHandler(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -95,13 +117,18 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal(expectedKind, row.Kind);
         Assert.Equal("D1", row.ConversationId);
         Assert.Equal("1710000000.000001", row.ThreadTs);
-        var text = JsonDocument.Parse(row.PayloadJson).RootElement.GetProperty("text").GetString()!;
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        var text = payload.Text!;
         Assert.StartsWith("Task: ship the release\n", text, StringComparison.Ordinal);
         Assert.Contains($"Conclusion: {expectedConclusion}", text);
         Assert.Contains("Evidence: ", text);
         Assert.True(text.Contains($"Next step: {expectedNextStep}", StringComparison.Ordinal), text);
         Assert.DoesNotContain("xoxb-secret", text);
         Assert.DoesNotContain("raw tool output", text);
+        Assert.Contains("Session: session-1", text);
+        Assert.True(payload.Blocks.HasValue);
+        var button = payload.Blocks.Value[0].GetProperty("elements")[0];
+        Assert.Equal("https://mohist.example/demo/sessions/session-1", button.GetProperty("url").GetString());
     }
 
     [Fact]

@@ -11,6 +11,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -637,6 +638,39 @@ public static class SlackConnectionRoutes
                 OmittedOldestMessageCount: omitted));
     }
 
+    private static async Task<JsonElement?> BuildSessionStatusBlocksAsync(
+        IServiceProvider services,
+        string projectId,
+        string sessionId,
+        JsonElement? controlBlocks)
+    {
+        var links = services.GetRequiredService<SlackWebLinkBuilder>();
+        if (!links.HasUsableExternalWebUrl)
+            return controlBlocks;
+
+        var project = await services.GetRequiredService<ProjectQuerier>().GetByIdAsync(projectId);
+        var link = project is null
+            ? null
+            : links.BuildOpenSession(project.Name, sessionId);
+        return CombineBlocks(controlBlocks, link?.Blocks);
+    }
+
+    private static JsonElement? CombineBlocks(JsonElement? first, JsonElement? second)
+    {
+        var blocks = new List<JsonElement>();
+        AddBlockArray(blocks, first);
+        AddBlockArray(blocks, second);
+        return blocks.Count == 0 ? null : JsonSerializer.SerializeToElement(blocks);
+    }
+
+    private static void AddBlockArray(List<JsonElement> target, JsonElement? source)
+    {
+        if (source is not { ValueKind: JsonValueKind.Array })
+            return;
+
+        target.AddRange(source.Value.EnumerateArray().Select(block => block.Clone()));
+    }
+
     private static async Task EnqueueReplyAsync(
         SlackOutboxStore outbox,
         string projectId,
@@ -1209,13 +1243,18 @@ public static class SlackConnectionRoutes
                     body.ThreadTs,
                     ct)
                 : null;
+            var blocks = await BuildSessionStatusBlocksAsync(
+                req.Services,
+                projectId,
+                followupResult.SessionId,
+                stopAction?.Blocks);
             await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
                 projectId,
                 connection.Id,
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
-                stopAction?.Blocks,
+                blocks,
                 ct);
         }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1914,13 +1953,18 @@ public static class SlackConnectionRoutes
                     body.ThreadTs,
                     ct)
                 : null;
+            var blocks = await BuildSessionStatusBlocksAsync(
+                req.Services,
+                projectId,
+                followupResult.SessionId,
+                stopAction?.Blocks);
             await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
                 projectId,
                 connection.Id,
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
-                stopAction?.Blocks,
+                blocks,
                 ct);
         }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);

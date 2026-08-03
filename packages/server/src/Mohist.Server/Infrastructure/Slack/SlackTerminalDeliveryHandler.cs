@@ -2,7 +2,9 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
@@ -55,6 +57,9 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
                 SlackDeliveryOwnerKinds.Manager), ct);
             return;
         }
+        var sessionId = await ResolveSessionIdAsync(scope.ServiceProvider, evt, delivery, ct);
+        var text = SlackFinalReplyRenderer.AppendStableReference(Render(delivery), delivery.JobKey, sessionId);
+        var blocks = await ResolveSessionBlocksAsync(scope.ServiceProvider, projectId, sessionId, ct);
         var projection = scope.ServiceProvider.GetService<SlackStatusProjection>() ?? new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(
             delivery.WorkspaceTeamId,
@@ -69,9 +74,10 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             source,
             delivery.ThreadTs ?? delivery.MessageTs,
             delivery.Status,
-            Render(delivery),
+            text,
             $"agent-job:{delivery.JobKey}:terminal-delivery",
             progressDispatchRef,
+            blocks,
             ct);
 
         if (result.Suppressed)
@@ -104,6 +110,56 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
             _ => "Wait for reconciliation, then retry only after the outcome is confirmed.",
         };
         return $"Task: {delivery.WorkLabel}\nConclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
+    }
+
+    private async Task<string?> ResolveSessionIdAsync(
+        IServiceProvider services,
+        CloudEvent evt,
+        SlackTerminalDelivery delivery,
+        CancellationToken ct)
+    {
+        if (string.Equals(evt.Type, EventCatalog.ReverseDns.AgentSessionFollowupDelivery, StringComparison.Ordinal))
+            return string.IsNullOrWhiteSpace(evt.Subject) ? null : evt.Subject;
+
+        var jobs = services.GetService<IAgentJobStore>();
+        if (jobs is null)
+            return null;
+
+        try
+        {
+            return (await jobs.LoadLedgerAsync(delivery.JobKey, ct))?.AgentSessionId;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Could not resolve Session ID for Slack terminal delivery {JobKey}", delivery.JobKey);
+            return null;
+        }
+    }
+
+    private async Task<JsonElement?> ResolveSessionBlocksAsync(
+        IServiceProvider services,
+        string projectId,
+        string? sessionId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+            return null;
+
+        var projects = services.GetService<ProjectQuerier>();
+        var links = services.GetService<SlackWebLinkBuilder>();
+        if (projects is null || links is null || !links.HasUsableExternalWebUrl)
+            return null;
+
+        try
+        {
+            var project = await projects.GetByIdAsync(projectId);
+            return project is null ? null : links.BuildOpenSession(project.Name, sessionId)?.Blocks;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _log.LogWarning(ex, "Could not build Slack session link for Project {ProjectId}", projectId);
+            return null;
+        }
     }
 
     private static string BuildEvidence(SlackTerminalDelivery delivery)

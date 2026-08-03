@@ -252,6 +252,7 @@ export class SlackAdapter {
       text: payload.fallbackText ?? requiredText(payload),
       ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
       client_msg_id: payload.fallbackDispatchRef,
+      ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? reason }

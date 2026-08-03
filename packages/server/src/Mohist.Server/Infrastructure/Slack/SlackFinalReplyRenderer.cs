@@ -89,6 +89,16 @@ public static class SlackFinalReplyRenderer
         return new SlackFinalReplyProjection(Segment(safeLines, maximumSegmentLength));
     }
 
+    public static string AppendStableReference(string text, string jobKey, string? sessionId)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            throw new ArgumentException("The reply text is required.", nameof(text));
+
+        var reference = CleanStableReference(sessionId) ?? CleanRequiredText(jobKey, nameof(jobKey));
+        var label = string.IsNullOrWhiteSpace(sessionId) ? "Job" : "Session";
+        return $"{text.TrimEnd()}\n{NeutralizeSlackControlSyntax($"{label}: {reference}")}";
+    }
+
     private static string BuildConclusion(
         SlackFinalReplyStatus status,
         string workLabel,
@@ -187,6 +197,9 @@ public static class SlackFinalReplyRenderer
         clean = SecretAssignment.Replace(clean, "[REDACTED]");
         return SlackToken.Replace(clean, "[REDACTED]");
     }
+
+    private static string? CleanStableReference(string? value) =>
+        CleanText(value)?.Replace("\n", " ", StringComparison.Ordinal);
 
     private static string? NormalizeText(string? value)
     {

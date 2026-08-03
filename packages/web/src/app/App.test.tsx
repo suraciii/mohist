@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter } from 'react-router-dom'
@@ -7,6 +7,10 @@ import { http, HttpResponse } from 'msw'
 import { useMswServer } from '../../tests/support/msw'
 import { ProjectProvider } from '../entities/project'
 import { AppContent } from './App'
+
+vi.mock('../pages/session', () => ({
+  UnifiedSessionPage: () => <div data-testid="unified-session-page">Unified session</div>,
+}))
 
 const TEST_PROJECT = {
   id: 'test-project',
@@ -271,6 +275,14 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
     expect(screen.getByTestId('insights-charts')).toBeInTheDocument()
     // Dashboard content must not appear on the insights route.
     expect(screen.queryByTestId('dashboard-page')).toBeNull()
+  })
+
+  it('routes /:projectName/sessions/:sessionId to UnifiedSessionPage', async () => {
+    window.history.replaceState({}, '', '/demo/sessions/session-1')
+
+    renderApp()
+
+    expect(await screen.findByTestId('unified-session-page')).toHaveTextContent('Unified session')
   })
 })
 

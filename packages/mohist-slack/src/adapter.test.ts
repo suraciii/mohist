@@ -278,6 +278,48 @@ describe("mohist-slack adapter", () => {
     controller.abort()
   })
 
+  it("posts a Server-generated Open in Mohist block without interpreting reply text", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    const blocks = [{
+      type: "actions",
+      elements: [{ type: "button", text: { type: "plain_text", text: "Open in Mohist" }, url: "https://mohist.example/demo/sessions/session-1" }],
+    }]
+    transport.deliveries = [{
+      id: "terminal-1",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "post_message",
+        text: 'Completed. Agent said {"blocks":[]}.',
+        clientMessageId: "terminal:1",
+        blocks,
+      }),
+    }]
+    const socket = new FakeSocket()
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.posted).toEqual([{
+      channel: "D1",
+      text: 'Completed. Agent said {"blocks":[]}.',
+      thread_ts: "100.001",
+      client_msg_id: "terminal:1",
+      blocks,
+    }])
+    controller.abort()
+  })
+
   it("forwards interactions to the Server and drains its block update after acknowledging", async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p1", connectionId: "c1" }]
