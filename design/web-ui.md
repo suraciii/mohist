@@ -74,6 +74,9 @@ AgentSession page renders two modes from the same Session model:
 - Agent launch source also provides a complete follow-up composer and is the backup direct conversation
   client.
 
+会话时间线的呈现模型（条目句式、领域动作识别、折叠与显著性纪律、原始视图）见
+[`session-timeline.md`](session-timeline.md)。
+
 The route mode cannot change Session lifecycle or API. AgentJob result is displayed separately from
 Session activity and Turn progress. Connection setup and health belong on Agent detail because the user
 starts from the Agent they intend to expose.

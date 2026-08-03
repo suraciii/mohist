@@ -54,6 +54,31 @@ describe('LiveTaskProvider transcript routing', () => {
     expect(unwrapped?.detail).not.toHaveProperty('runtimeSessionId')
   })
 
+  it('keeps transcript headers authoritative while preserving the nested payload', () => {
+    const payload = {
+      text: 'payload text',
+      sequence: 99,
+      createdAt: '2026-06-12T00:00:09.000Z',
+    }
+    const unwrapped = __testing__.unwrapTranscriptEnvelope({
+      id: 'event-12',
+      source: '/sessions/session-1/transcript',
+      type: 'message.delta',
+      sessionId: 'session-1',
+      sequence: 12,
+      createdAt: '2026-06-12T00:00:00.000Z',
+      payload,
+    })
+
+    expect(unwrapped?.detail).toMatchObject({
+      type: 'message.delta',
+      sequence: 12,
+      createdAt: '2026-06-12T00:00:00.000Z',
+      eventId: 'event-12',
+      payload,
+    })
+  })
+
   it('normalizes server transcript metadata into session-scoped detail fields', () => {
     const unwrapped = __testing__.unwrapTranscriptEnvelope({
       type: 'reasoning.delta',

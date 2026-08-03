@@ -63,15 +63,31 @@ type SessionRuntimeBase = {
   runtimeSessionId?: string
   sessionId?: string
   runtime?: string
+  type?: string
+  sequence?: number
+  createdAt?: string
+  payload?: unknown
+}
+
+export interface AgentTranscriptDetail {
+  type: string
+  sequence?: number
+  createdAt?: string
+  payload?: unknown
+  sourceId?: string
+  eventId?: string
+  sessionId?: string
+  runtimeSessionId?: string
+  runtime?: string
 }
 
 export type AgentDetailEventMap = {
   agent_text_chunk: { issueNumber: number; projectId: string; text: string; stepIndex: number }
   main_tool_call: { issueNumber: number; projectId: string; executionId: string; toolName: string; state: 'started' | 'completed' | 'failed'; args?: string; result?: string; error?: string; duration?: number; stepIndex?: number }
-  coder_text_chunk: { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; text: string; sessionId?: string; model?: string }
-  coder_thought_chunk: { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; text: string; sessionId?: string; model?: string }
-  coder_tool_call: { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; toolName: string; state?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; status?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; sessionId?: string; model?: string }
-  'session.input': SessionRuntimeBase & { text: string; kind?: string; sentAt?: string }
+  coder_text_chunk: SessionRuntimeBase & { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; text: string; sessionId?: string; model?: string }
+  coder_thought_chunk: SessionRuntimeBase & { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; text: string; sessionId?: string; model?: string }
+  coder_tool_call: SessionRuntimeBase & { issueNumber: number; projectId: string; executionId?: string; runtimeSessionId: string; runtime?: string; toolName: string; state?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; status?: 'started' | 'completed' | 'failed' | 'timeout' | 'cancelled'; toolCallId: string; title?: string; rawInput?: unknown; rawOutput?: unknown; rawOutputMetadata?: Record<string, unknown>; metadata?: Record<string, unknown>; details?: Record<string, unknown>; normalizedName?: string; displayTitle?: string; displaySubtitle?: string; category?: string; sessionId?: string; model?: string }
+  'session.input': SessionRuntimeBase & { text: string; kind?: string; sentAt?: string; inputId?: string; turnId?: string; acceptance?: string }
   'session.activity': SessionRuntimeBase & {
     activity: 'idle' | 'active' | 'unknown'
     observedAt?: string
@@ -88,7 +104,7 @@ export type AgentDetailEventMap = {
   plan_round_start: PlanRoundStartEvent
   plan_session_update: PlanSessionUpdateEvent
   plan_round_complete: PlanRoundCompleteEvent
-  coder_recovery_status: { issueNumber: number; projectId: string; executionId: string; runtimeSessionId: string; runtime?: string; sessionId?: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
+  coder_recovery_status: SessionRuntimeBase & { issueNumber: number; projectId: string; executionId: string; runtimeSessionId: string; runtime?: string; sessionId?: string; status: 'detected' | 'recovering' | 'recovered' | 'failed'; attempt: number; reason?: string }
   'session.liveness': SessionRuntimeBase & { status: 'probing' | 'running' | 'failed'; lastDataAt: string; lastActivityType?: string; probeSentAt?: string; probeDeadlineAt?: string; probeVersion?: number; dataVersion?: number; postProbeActivity?: boolean; activeProbeVersion?: number; satisfiedProbeVersion?: number; failureReason?: string }
   coder_session_started: { issueNumber: number; projectId: string; workflowRunId?: string; sessionName?: string; sessionId: string; runtimeSessionId: string; executionId?: string; model?: string; runtime?: string; stage?: string; taskDescription?: string; title?: string | null }
   coder_session_completed: { issueNumber: number; projectId: string; sessionId: string; status: 'completed' | 'failed'; duration: number }
@@ -143,9 +159,9 @@ export type AgentDetailEventMap = {
   'com.mohist.agent-session.runtime-bound': { issueNumber: number; projectId: string }
   'com.mohist.agent-session.usage-recorded': { issueNumber: number; projectId: string }
   'com.mohist.agent-session.model-changed': { issueNumber: number; projectId: string }
-  'com.mohist.agent-session.context-compacted': { issueNumber: number; projectId: string; sessionId?: string | null; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
-  'com.mohist.agent-session.context-exhausted': { issueNumber: number; projectId: string; failureCategory?: string | null; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
-  'com.mohist.agent-session.context-health-updated': { issueNumber: number; projectId: string; sessionId?: string | null; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
+  'com.mohist.agent-session.context-compacted': SessionRuntimeBase & { issueNumber: number; projectId: string; sessionId?: string | null; strategy?: string | null; contextWindowUsedBefore?: number | null; contextWindowUsedAfter?: number | null; contextWindowSize?: number | null; summary?: string | null; recordedAt?: string }
+  'com.mohist.agent-session.context-exhausted': SessionRuntimeBase & { issueNumber: number; projectId: string; failureCategory?: string | null; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
+  'com.mohist.agent-session.context-health-updated': SessionRuntimeBase & { issueNumber: number; projectId: string; sessionId?: string | null; healthStatus: string; contextUsagePercent?: number | null; contextWindowUsed?: number | null; contextWindowSize?: number | null; recordedAt?: string }
 }
 
 export interface AgentSessionInfo {

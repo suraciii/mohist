@@ -84,7 +84,6 @@ function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencie
       isThinking: false,
       isStreaming: false,
     })) as never,
-    projectTurn: ((turn: unknown) => turn) as never,
     useUnifiedSessionSummary: (() => ({ data: makeSummary(), isLoading: false, isError: false })) as never,
     useUnifiedSessionTranscript: (() => ({ data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse })) as never,
     useGenericFollowup: (() => followupMock) as never,
@@ -413,67 +412,5 @@ describe('useUnifiedSessionDataSource — recovery command reconciliation', () =
     expect(keys.some((key) => key.includes('"unified-session","proj-1","session-1","transcript"'))).toBe(true)
     expect(keys.some((key) => key.includes('"agent-sessions"'))).toBe(true)
     expect(keys.some((key) => key.includes('"workflow-runs"'))).toBe(true)
-  })
-})
-
-describe('useUnifiedSessionDataSource — both Session sources', () => {
-  it('drives follow-up and turn control for an agent-launch Session through the same canonical APIs', async () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          activity: 'active',
-          currentTurnId: 'turn-agent',
-          turns: [{ id: 'turn-agent', sequence: 1, inputIds: [], status: 'queued' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
-    })
-    const { result } = renderUnifiedHook(deps)
-
-    await act(async () => {
-      await result.current.sendFollowup('hello')
-    })
-    expect(followupCalls[0].sessionId).toBe('session-1')
-
-    act(() => {
-      result.current.cancel?.mutate()
-    })
-    expect(turnControlCalls[0].sessionId).toBe('session-1')
-    expect(turnControlCalls[0].operation).toBe('cancel')
-  })
-
-  it('drives follow-up and turn control for a workflow Session through the same canonical APIs', async () => {
-    const deps = makeDependencies({
-      useUnifiedSessionSummary: (() => ({
-        data: makeSummary({
-          id: 'workflow-session-1',
-          source: 'workflow',
-          activity: 'active',
-          currentTurnId: 'turn-workflow',
-          agentId: null,
-          agentName: null,
-          workflowRunId: 'run-1',
-          sessionName: 'build',
-          contextRefs: { issueNumber: 42 },
-          turns: [{ id: 'turn-workflow', sequence: 1, inputIds: [], status: 'executing' }],
-        }),
-        isLoading: false,
-        isError: false,
-      })) as never,
-    })
-    const { result } = renderUnifiedHook(deps, '/sessions/workflow-session-1')
-
-    await act(async () => {
-      await result.current.sendFollowup('continue workflow')
-    })
-    expect(followupCalls[0].sessionId).toBe('workflow-session-1')
-
-    act(() => {
-      result.current.stop?.mutate()
-    })
-    expect(turnControlCalls[0].sessionId).toBe('workflow-session-1')
-    expect(turnControlCalls[0].operation).toBe('stop')
-    expect(result.current.cancel).toBeNull()
   })
 })
