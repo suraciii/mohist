@@ -2380,6 +2380,39 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackManagerToolExecutionFenceRow", b =>
+                {
+                    b.Property<string>("JobKey")
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SessionId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("State")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("JobKey");
+
+                    b.HasIndex("SessionId")
+                        .HasDatabaseName("IX_SlackManagerToolExecutionFences_SessionId");
+
+                    b.ToTable("SlackManagerToolExecutionFences", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackManagerToolExecutionFences_State", "\"State\" IN ('started', 'completed')");
+                        });
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
                 {
                     b.Property<string>("Id")

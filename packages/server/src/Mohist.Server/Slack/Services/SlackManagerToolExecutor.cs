@@ -207,7 +207,12 @@ public sealed class SlackManagerToolExecutor : IScopedService
         {
             var claim = await _ownerClaims.GenerateAsync(
                 invocation.ProjectId!, invocation.ConnectionId!, kind, ct: ct);
-            return Succeed(invocation.Tool,
+            return new SlackManagerToolExecution(
+                invocation.Tool,
+                true,
+                $"A one-time owner claim was generated and sent as a separate user instruction. "
+                + $"Send it to the target Agent App before {claim.ExpiresAt:O}.",
+                null,
                 $"Send `claim {claim.Value}` to the target Agent App before {claim.ExpiresAt:O}.");
         }
         catch (InvalidOperationException ex)
@@ -227,4 +232,5 @@ public sealed record SlackManagerToolExecution(
     string Tool,
     bool Succeeded,
     string Message,
-    string? Code);
+    string? Code,
+    string? UserVisibleMessage = null);

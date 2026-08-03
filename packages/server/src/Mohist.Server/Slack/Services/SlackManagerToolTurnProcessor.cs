@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Mohist.Server.Api;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Grains;
@@ -11,17 +12,23 @@ public sealed class SlackManagerToolTurnProcessor : IScopedService
 {
     private readonly ManagerActorAccessDecider _access;
     private readonly SlackManagerToolExecutor _tools;
+    private readonly SlackManagerToolExecutionFenceStore _fences;
+    private readonly SlackOutboxStore _outbox;
     private readonly AgentSessionFollowupDispatcher _followups;
     private readonly IGrainFactory _grains;
 
     public SlackManagerToolTurnProcessor(
         ManagerActorAccessDecider access,
         SlackManagerToolExecutor tools,
+        SlackManagerToolExecutionFenceStore fences,
+        SlackOutboxStore outbox,
         AgentSessionFollowupDispatcher followups,
         IGrainFactory grains)
     {
         _access = access;
         _tools = tools;
+        _fences = fences;
+        _outbox = outbox;
         _followups = followups;
         _grains = grains;
     }
@@ -38,10 +45,31 @@ public sealed class SlackManagerToolTurnProcessor : IScopedService
         if (!intent.IsRequested)
             return false;
 
+        if (!await _fences.TryAcquireAsync(delivery.JobKey, sessionId, ct))
+            return true;
+
         var execution = intent.Invocation is null
             ? new SlackManagerToolExecution("unknown", false,
                 intent.Error ?? "manager_tool_request_invalid", intent.Error)
             : await ExecuteAuthorizedAsync(delivery, intent.Invocation, ct);
+
+        if (!string.IsNullOrWhiteSpace(execution.UserVisibleMessage))
+        {
+            var dispatchRef = $"manager-tool:{delivery.JobKey}:user-instruction";
+            await _outbox.EnqueueAsync(new SlackOutboxDraft(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                delivery.ConnectionId,
+                delivery.WorkspaceTeamId,
+                delivery.ConversationId,
+                SlackOutboxKinds.UserAction,
+                dispatchRef,
+                JsonSerializer.Serialize(new SlackDeliveryPayload(
+                    SlackDeliveryOperations.PostMessage,
+                    execution.UserVisibleMessage,
+                    ClientMessageId: dispatchRef)),
+                delivery.ThreadTs ?? delivery.MessageTs,
+                SlackDeliveryOwnerKinds.Manager), ct);
+        }
 
         var resultText = JsonSerializer.Serialize(new
         {
@@ -61,6 +89,7 @@ public sealed class SlackManagerToolTurnProcessor : IScopedService
             Source: "slack-manager-tool",
             IdempotencyKey: $"manager-tool:{delivery.JobKey}"));
         await _followups.DispatchNextAsync(BuiltInAgentCatalog.MohistSlackProjectId, sessionId, ct);
+        await _fences.MarkCompletedAsync(delivery.JobKey, ct);
         return true;
     }
 
