@@ -90,6 +90,81 @@ public sealed class SlackManagerApplicationSpecs
     }
 
     [Fact]
+    public async Task Claimed_manager_creates_a_default_agent_before_mounting_it()
+    {
+        const string team = "T_MANAGER_DEFAULT_AGENT";
+        const string appId = "A_MANAGER_DEFAULT_AGENT";
+        const string owner = "U_MANAGER_DEFAULT_AGENT";
+        var projectId = $"project_manager_default_{Guid.NewGuid():N}";
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            db.Projects.Add(new ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var setupResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
+        {
+            workspaceTeamId = team,
+            managerAppId = appId,
+            managerBotUserId = "U_MANAGER_BOT_DEFAULT_AGENT",
+            managerCredentialRef = "manager-credential-default-agent",
+        });
+        setupResponse.EnsureSuccessStatusCode();
+        var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+
+        using var claimResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId,
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_DEFAULT_AGENT",
+            messageTs = "1710000000.000001",
+            senderSlackUserId = owner,
+            text = $"claim {claimCode}",
+            isDirectMessage = true,
+        });
+        claimResponse.EnsureSuccessStatusCode();
+
+        using var createResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId,
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_DEFAULT_AGENT",
+            messageTs = "1710000000.000002",
+            senderSlackUserId = owner,
+            text = $"create {projectId} release-helper review release changes",
+            isDirectMessage = true,
+        });
+        createResponse.EnsureSuccessStatusCode();
+        Assert.Equal("accepted", (await ReadDataAsync(createResponse)).GetProperty("decision").GetString());
+
+        await using var verify = _fixture.Services.CreateAsyncScope();
+        var database = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var agent = AgentStore.Deserialize(await database.Agents
+            .Where(row => row.ProjectId == projectId && row.Name == "release-helper")
+            .Select(row => row.State)
+            .SingleAsync());
+        Assert.NotNull(agent);
+        Assert.Equal("opencode", agent!.AgentConfig!.Value.GetProperty("runtime").GetString());
+        Assert.Contains("review release changes", agent.Instructions, StringComparison.Ordinal);
+        Assert.NotNull(await database.AgentConnections.SingleOrDefaultAsync(row =>
+            row.ProjectId == projectId
+            && row.AgentId == agent.Id
+            && row.WorkspaceTeamId == team));
+        Assert.Contains(await database.SlackOutboxRows
+            .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Manager)
+            .Select(row => row.PayloadJson)
+            .ToListAsync(), payload => payload.Contains("Agent created and mounted.", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Remove_binding_keeps_child_facts_and_permanent_delete_requires_explicit_confirmation()
     {
         var seeded = await SeedAgentAsync(AgentStatus.Active);

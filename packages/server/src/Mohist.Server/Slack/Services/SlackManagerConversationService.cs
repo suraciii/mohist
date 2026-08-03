@@ -4,8 +4,10 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -21,6 +23,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
     private readonly IGrainFactory _grains;
     private readonly SlackManagerToolAuthorization _authorization;
     private readonly SlackManagerApplicationService _manager;
+    private readonly AgentQuerier _projectAgents;
     private readonly AgentConnectionStore _connections;
     private readonly SlackOwnerClaimService _ownerClaims;
 
@@ -32,6 +35,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         IGrainFactory grains,
         SlackManagerToolAuthorization authorization,
         SlackManagerApplicationService manager,
+        AgentQuerier projectAgents,
         AgentConnectionStore connections,
         SlackOwnerClaimService ownerClaims)
     {
@@ -42,6 +46,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         _grains = grains;
         _authorization = authorization;
         _manager = manager;
+        _projectAgents = projectAgents;
         _connections = connections;
         _ownerClaims = ownerClaims;
     }
@@ -184,13 +189,43 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         ManagerCommand command,
         CancellationToken ct)
     {
+        var agent = await _projectAgents.GetByIdAsync(command.ProjectId!, command.AgentName!, ct)
+            ?? await _projectAgents.GetByNameAsync(command.ProjectId!, command.AgentName!);
+        var created = agent is null;
+        if (agent is null)
+        {
+            if (string.IsNullOrWhiteSpace(command.DailyResponsibility))
+                return "Please provide the Agent's daily responsibility before creating it.";
+
+            var agentId = $"agent_{Guid.NewGuid():N}";
+            var grain = _grains.GetGrain<IAgentGrain>(GrainKey.Agent(command.ProjectId!, agentId));
+            agent = await grain.CreateAsync(new AgentCreateData(
+                command.ProjectId!,
+                command.AgentName!,
+                $"Helps with {command.DailyResponsibility.Trim()}.",
+                $"You are responsible for {command.DailyResponsibility.Trim()}.",
+                DefaultAgentConfig(),
+                Skills: [],
+                MaxConcurrentRuns: null));
+        }
+
         var result = await _manager.CreateAsync(new SlackManagerCreateRequest(
             command.ProjectId!,
-            command.AgentId!,
+            agent.Id,
             request.Actor.WorkspaceTeamId,
             OwnerSlackUserId: request.Actor.SlackUserId), ct);
-        return result.Created ? "Agent mounted. The next action is in the manager status." : "Agent is already mounted.";
+        return created
+            ? "Agent created and mounted. The next action is in the manager status."
+            : result.Created
+                ? "Agent mounted. The next action is in the manager status."
+                : "Agent is already mounted.";
     }
+
+    private static System.Text.Json.JsonElement DefaultAgentConfig() =>
+        System.Text.Json.JsonSerializer.SerializeToElement(new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["runtime"] = AgentConfigSchema.OpenCodeRuntime,
+        });
 
     private async Task<string> EditConnectionAsync(ManagerCommand command, CancellationToken ct)
     {
@@ -272,13 +307,14 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
     private sealed record ManagerCommand(
         string Tool,
         string? ProjectId = null,
-        string? AgentId = null,
+        string? AgentName = null,
         string? ConnectionId = null,
-        string? AccessPolicy = null)
+        string? AccessPolicy = null,
+        string? DailyResponsibility = null)
     {
         public bool IsIncomplete =>
             Tool is SlackManagerAgentTools.View && string.IsNullOrWhiteSpace(ProjectId)
-            || Tool is SlackManagerAgentTools.Create && (string.IsNullOrWhiteSpace(ProjectId) || string.IsNullOrWhiteSpace(AgentId))
+            || Tool is SlackManagerAgentTools.Create && (string.IsNullOrWhiteSpace(ProjectId) || string.IsNullOrWhiteSpace(AgentName))
             || Tool is SlackManagerAgentTools.Edit or SlackManagerAgentTools.Enable or SlackManagerAgentTools.Disable or SlackManagerAgentTools.ClaimOwner
                 && (string.IsNullOrWhiteSpace(ProjectId) || string.IsNullOrWhiteSpace(ConnectionId))
             || Tool is SlackManagerAgentTools.Edit && string.IsNullOrWhiteSpace(AccessPolicy)
@@ -288,7 +324,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         public string? Clarification => Tool switch
         {
             SlackManagerAgentTools.View => "Which Project should I inspect?",
-            SlackManagerAgentTools.Create => "Please provide the Project id and Agent id to mount.",
+            SlackManagerAgentTools.Create => "Please provide the Project id and Agent name to mount or create.",
             SlackManagerAgentTools.Edit or SlackManagerAgentTools.Enable or SlackManagerAgentTools.Disable or SlackManagerAgentTools.ClaimOwner
                 => "Please provide the Project id and Connection id.",
             SlackManagerAgentTools.TransferOwner => "Please provide the Project id and Connection id.",
@@ -298,7 +334,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         public ManagerResourceTarget? Target => Tool switch
         {
             SlackManagerAgentTools.View => new(ManagerResourceKinds.Project, ProjectId ?? string.Empty),
-            SlackManagerAgentTools.Create => new(ManagerResourceKinds.Agent, ProjectId ?? string.Empty, AgentId),
+            SlackManagerAgentTools.Create => new(ManagerResourceKinds.Project, ProjectId ?? string.Empty),
             SlackManagerAgentTools.Edit or SlackManagerAgentTools.Enable or SlackManagerAgentTools.Disable
                 or SlackManagerAgentTools.ClaimOwner
                 or SlackManagerAgentTools.TransferOwner => new(ManagerResourceKinds.Connection, ProjectId ?? string.Empty, ConnectionId),
@@ -316,7 +352,11 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             return parts[0] switch
             {
                 SlackManagerAgentTools.View => new(parts[0], ProjectId: parts.ElementAtOrDefault(1)),
-                SlackManagerAgentTools.Create => new(parts[0], parts.ElementAtOrDefault(1), parts.ElementAtOrDefault(2)),
+                SlackManagerAgentTools.Create => new(
+                    parts[0],
+                    parts.ElementAtOrDefault(1),
+                    parts.ElementAtOrDefault(2),
+                    DailyResponsibility: string.Join(' ', parts.Skip(3))),
                 SlackManagerAgentTools.ClaimOwner => new(parts[0], parts.ElementAtOrDefault(1), ConnectionId: parts.ElementAtOrDefault(2)),
                 SlackManagerAgentTools.Edit => new(parts[0], parts.ElementAtOrDefault(1), ConnectionId: parts.ElementAtOrDefault(2), AccessPolicy: parts.ElementAtOrDefault(3)),
                 SlackManagerAgentTools.Enable or SlackManagerAgentTools.Disable => new(parts[0], parts.ElementAtOrDefault(1), ConnectionId: parts.ElementAtOrDefault(2)),
