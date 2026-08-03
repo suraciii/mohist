@@ -620,7 +620,8 @@ public static class RunnerRoutes
         var record = records.FirstOrDefault();
         if (record is null) return false;
         return string.Equals(record.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
-            && string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal);
+            && (string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-launch", StringComparison.Ordinal)
+                || string.Equals(record.Label(AgentSessionQueryMetadataKeys.SourceKind), "agent-connection", StringComparison.Ordinal));
     }
 
     /// <summary>
