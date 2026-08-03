@@ -1,24 +1,19 @@
-import { useEffect, useRef, useState, useCallback, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, type RefObject } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon } from 'lucide-react'
+import { ChevronLeftIcon, ChevronRightIcon, CircleStopIcon, AlertTriangleIcon, CheckIcon, CopyIcon, ListIcon, BracesIcon } from 'lucide-react'
 import {
   SessionTranscriptLayout as DefaultSessionTranscriptLayout,
-  selectFailedToolCalls,
-  selectToolCallGroupIds,
-  useTranscriptLocate,
 } from '../../../widgets/session-transcript'
-import type { DisplayToolPart } from '../../../widgets/session-transcript'
 import { SessionFollowupComposer as DefaultSessionFollowupComposer, SessionRecoveryActions as DefaultSessionRecoveryActions } from '../../../widgets/coder-session'
 import { ContextHealthBar as DefaultContextHealthBar } from '../../../widgets/coder-session'
 import { Button } from '@/shared/ui/components/button'
 import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
-import { agentInputAttachmentContentPath, getAgentLaunchObservationMeaning } from '../../../entities/agent'
-import type { AgentTurnObservation, SessionInputObservation, SessionRecoveryObservation } from '../../../entities/coder-session'
-import type { StatusKind, EmptyStateKind, SessionDataSourceResult } from '../data/SessionDataSource'
+import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
+import type { TimelineItem } from '../../../entities/session'
+import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
-import type { MarkdownAttachment } from '@/shared/ui/markdown-reader/MarkdownReader'
 
 export interface SessionDetailShellComponents {
   SessionTranscriptLayout: typeof DefaultSessionTranscriptLayout
@@ -39,8 +34,8 @@ interface SessionErrorsEvidenceProps {
   failureCategory: string | null | undefined
   toolErrorCount: number | null | undefined
   failureReason: string | null | undefined
-  failedTools: DisplayToolPart[]
-  locate: (target: { toolCallId?: string; groupId?: string }) => void
+  failedItems: TimelineItem[]
+  locate: (sourceId: string) => void
 }
 const ERROR_SURFACE_CLASS = 'bg-danger-subtle text-danger border-danger-border'
 
@@ -67,34 +62,35 @@ export function SessionErrorsEvidence({
   failureCategory,
   toolErrorCount,
   failureReason,
-  failedTools,
+  failedItems,
   locate,
 }: SessionErrorsEvidenceProps) {
   const hasFailureCategory = failureCategory != null && failureCategory !== ''
   const hasFailureReason = failureReason != null && failureReason !== ''
-  const hasToolErrors = toolErrorCount != null && toolErrorCount > 0
+  const effectiveToolErrorCount = Math.max(toolErrorCount ?? 0, failedItems.length)
+  const hasToolErrors = effectiveToolErrorCount > 0
   const hasFailureEvidence = hasFailureCategory || hasFailureReason
   const executionUnavailable = isExecutionUnavailableCategory(failureCategory)
   const [currentIndex, setCurrentIndex] = useState(0)
   if (!hasFailureEvidence && !hasToolErrors) return null
 
   const activate = () => {
-    const tool = failedTools[currentIndex]
-    if (tool) locate({ toolCallId: tool.toolCallId })
+    const item = failedItems[currentIndex]
+    if (item) locate(item.sourceIds[0] ?? item.id)
   }
   const next = () => {
-    if (failedTools.length === 0) return
-    const nextIndex = (currentIndex + 1) % failedTools.length
+    if (failedItems.length === 0) return
+    const nextIndex = (currentIndex + 1) % failedItems.length
     setCurrentIndex(nextIndex)
-    const tool = failedTools[nextIndex]
-    locate({ toolCallId: tool.toolCallId })
+    const item = failedItems[nextIndex]
+    locate(item.sourceIds[0] ?? item.id)
   }
 
   return (
     <div
       data-testid="session-errors-region"
       data-failure-category={failureCategory ?? ''}
-      data-tool-error-count={toolErrorCount != null ? String(toolErrorCount) : ''}
+      data-tool-error-count={String(effectiveToolErrorCount)}
       className={`border-b border-border px-4 py-2 ${ERROR_SURFACE_CLASS}`}
       onClick={activate}
       onKeyDown={(event) => {
@@ -103,14 +99,14 @@ export function SessionErrorsEvidence({
           activate()
         }
       }}
-      tabIndex={failedTools.length > 0 ? 0 : undefined}
-      role={failedTools.length > 0 ? 'button' : hasFailureEvidence ? 'status' : undefined}
-      aria-live={failedTools.length > 0 ? undefined : 'polite'}
+      tabIndex={failedItems.length > 0 ? 0 : undefined}
+      role={failedItems.length > 0 ? 'button' : hasFailureEvidence ? 'status' : undefined}
+      aria-live={failedItems.length > 0 ? undefined : 'polite'}
     >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1 font-semibold">
           <AlertTriangleIcon className="h-3.5 w-3.5" aria-hidden="true" />
-          {executionUnavailable ? 'Execution unavailable' : hasFailureEvidence ? 'Execution failed' : 'Tool errors detected'}
+          {executionUnavailable ? 'Execution unavailable' : hasFailureEvidence || failedItems.length > 0 ? 'Execution failed' : 'Tool errors detected'}
         </span>
         {hasFailureCategory && (
           <span
@@ -125,8 +121,8 @@ export function SessionErrorsEvidence({
             className="inline-flex items-center gap-1"
             data-testid="session-errors-region-tool-count"
           >
-            <span className="text-danger font-medium">{toolErrorCount}</span>
-            <span>tool {toolErrorCount === 1 ? 'error' : 'errors'}</span>
+            <span className="text-danger font-medium">{effectiveToolErrorCount}</span>
+            <span>tool {effectiveToolErrorCount === 1 ? 'error' : 'errors'}</span>
           </span>
         )}
         {failureReason && (
@@ -139,7 +135,7 @@ export function SessionErrorsEvidence({
             Wait for the configured runtime or provider to recover, then retry the launch from the Agent.
           </span>
         )}
-        {failedTools.length > 1 && (
+        {failedItems.length > 1 && (
           <Button type="button" variant="link" size="sm" data-testid="session-errors-region-next-error" onClick={(event) => { event.stopPropagation(); next() }} className="h-auto p-0 text-xs text-danger">
             Next error
           </Button>
@@ -168,8 +164,12 @@ export function SessionDetailShell({
     statusKind,
     isRunning,
     canFollowup = isRunning,
-    displayTurns,
     sessionTurns: turns,
+    facts,
+    items,
+    entries,
+    currentActivity,
+    resolveTimelineReference,
     siblingNav,
     siblingSidebar,
     backPath,
@@ -180,8 +180,6 @@ export function SessionDetailShell({
     newContentAvailable,
     scrollToBottom,
     setIsNearBottom,
-    isThinking,
-    isStreaming,
     transcriptVersion,
     isLoading,
     isError,
@@ -198,11 +196,9 @@ export function SessionDetailShell({
     recoverySessionName,
     recoverySessionId,
     handleRecoverySuccess,
-    recoveryHistory,
     issueNumber,
     cancel,
     stop,
-    emptyStateKind,
     launchObservation,
     projectId,
     supportsInputAttachments = false,
@@ -212,21 +208,8 @@ export function SessionDetailShell({
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
-  const { locate } = useTranscriptLocate({ scrollContainerRef })
-  const resolveInputAttachment = useCallback((inputId: string, attachmentId: string): MarkdownAttachment | null => {
-    if (!supportsInputAttachments || !projectId) return null
-    const input = meta?.inputs?.find((candidate) => candidate.id === inputId)
-    const attachment = input?.attachments?.find((candidate) => candidate.id === attachmentId)
-    if (!attachment) return null
-    return {
-      url: `/api${agentInputAttachmentContentPath(projectId, sessionKey, inputId, attachmentId)}`,
-      contentType: attachment.contentType || 'application/octet-stream',
-      fileName: attachment.name,
-      size: attachment.size,
-    }
-  }, [meta?.inputs, projectId, sessionKey, supportsInputAttachments])
-  const failedTools = selectFailedToolCalls(displayTurns)
-  const failedGroupIds = selectToolCallGroupIds(displayTurns)
+  const [timelineView, setTimelineView] = useState<'summary' | 'raw'>('summary')
+  const pendingTimelineAnchorRef = useRef<string | null>(null)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
   const initializedAutoScrollSessionRef = useRef<string | null>(null)
@@ -237,6 +220,40 @@ export function SessionDetailShell({
 
   const displayTurnCount = meta?.turnCount ?? turns.length
   const hasContextUsage = contextWindowUsed != null || contextWindowSize != null
+
+  const findVisibleTimelineSourceId = useCallback(() => {
+    const container = scrollContainerRef.current
+    if (!container) return null
+    const containerRect = container.getBoundingClientRect()
+    return Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .find((element) => {
+        if (element.classList.contains('sr-only')) return false
+        const rect = element.getBoundingClientRect()
+        return rect.bottom > containerRect.top && rect.top < containerRect.bottom
+      })
+      ?.dataset.timelineSourceId ?? null
+  }, [])
+
+  const locateTimelineSource = useCallback((sourceId: string) => {
+    const container = scrollContainerRef.current
+    if (!container) return
+    const target = Array.from(container.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .find((element) => element.dataset.timelineSourceId === sourceId)
+    target?.scrollIntoView({ block: 'nearest' })
+  }, [])
+
+  const changeTimelineView = useCallback((nextView: 'summary' | 'raw') => {
+    if (nextView === timelineView) return
+    pendingTimelineAnchorRef.current = findVisibleTimelineSourceId()
+    setTimelineView(nextView)
+  }, [findVisibleTimelineSourceId, timelineView])
+
+  useLayoutEffect(() => {
+    const sourceId = pendingTimelineAnchorRef.current
+    if (!sourceId) return
+    pendingTimelineAnchorRef.current = null
+    locateTimelineSource(sourceId)
+  }, [locateTimelineSource, timelineView])
 
   const recoveryBarContent = hasRecoveryActions ? (
     <div className="flex flex-col gap-2">
@@ -284,8 +301,8 @@ export function SessionDetailShell({
       failureCategory={meta?.eventSummary?.failureCategory ?? null}
       toolErrorCount={meta?.eventSummary?.toolErrorCount ?? null}
       failureReason={meta?.failureReason ?? null}
-      failedTools={failedTools}
-      locate={(target) => locate({ ...target, groupId: target.toolCallId ? failedGroupIds.get(target.toolCallId) : undefined })}
+      failedItems={(items ?? []).filter((item) => item.renderClass === 'error')}
+      locate={locateTimelineSource}
     />
   )
 
@@ -476,8 +493,6 @@ export function SessionDetailShell({
                {observationGuidance}
              </div>
            )}
-            <SessionInputTurnEvidence inputs={meta.inputs} turns={meta.turns} />
-            <SessionRecoveryHistory history={recoveryHistory} />
            {recoveryBarContent && (
              <div
                data-testid="session-recovery-bar"
@@ -487,20 +502,14 @@ export function SessionDetailShell({
                {recoveryBarContent}
              </div>
            )}
-
-          {hasTurns ? (
-            <SessionTranscriptLayout
-              turns={displayTurns}
-              inputIdsByTurn={meta?.turns?.map((turn) => turn.inputIds)}
-              resolveAttachment={resolveInputAttachment}
-              isRunning={isRunning}
-              isThinking={isThinking}
-              isStreaming={isStreaming}
-              scrollContainerRef={scrollContainerRef}
-            />
-          ) : (
-            <SessionEmptyStateView kind={emptyStateKind ?? 'unknown-no-content'} />
-          )}
+          <TimelineViewToggle value={timelineView} onChange={changeTimelineView} />
+          <SessionTranscriptLayout
+            entries={entries}
+            facts={facts}
+            currentActivity={currentActivity}
+            viewMode={timelineView}
+            resolveReference={resolveTimelineReference}
+          />
         </div>
 
         {showFollowupComposer && (
@@ -521,6 +530,46 @@ export function SessionDetailShell({
         {hasTurns && newContentAvailable && <JumpToBottomButton onClick={handleScrollToBottom} />}
       </div>
       {siblingSidebar}
+    </div>
+  )
+}
+
+function TimelineViewToggle({
+  value,
+  onChange,
+}: {
+  value: 'summary' | 'raw'
+  onChange: (value: 'summary' | 'raw') => void
+}) {
+  return (
+    <div
+      className="flex items-center justify-end gap-1 border-b border-border px-4 py-2"
+      data-testid="session-timeline-view-toggle"
+      role="group"
+      aria-label="Timeline view"
+    >
+      <Button
+        type="button"
+        size="sm"
+        variant={value === 'summary' ? 'secondary' : 'ghost'}
+        aria-pressed={value === 'summary'}
+        data-testid="session-timeline-summary-trigger"
+        onClick={() => onChange('summary')}
+      >
+        <ListIcon aria-hidden="true" />
+        Summary
+      </Button>
+      <Button
+        type="button"
+        size="sm"
+        variant={value === 'raw' ? 'secondary' : 'ghost'}
+        aria-pressed={value === 'raw'}
+        data-testid="session-timeline-raw-trigger"
+        onClick={() => onChange('raw')}
+      >
+        <BracesIcon aria-hidden="true" />
+        Raw
+      </Button>
     </div>
   )
 }
@@ -973,135 +1022,6 @@ function SessionIdCopyButton({ sessionId, truncated }: { sessionId: string; trun
         </span>
       )}
     </span>
-  )
-}
-
-function SessionInputTurnEvidence({
-  inputs,
-  turns,
-}: {
-  inputs?: SessionInputObservation[] | null
-  turns?: AgentTurnObservation[] | null
-}) {
-  if (!inputs?.length && !turns?.length) return null
-  const inputById = new Map((inputs ?? []).map((input) => [input.id, input]))
-  const groupedInputIds = new Set((turns ?? []).flatMap((turn) => turn.inputIds))
-  const orderedInputs = [...(inputs ?? [])].sort((a, b) => a.sequence - b.sequence)
-
-  return (
-    <section
-      data-testid="session-input-turn-evidence"
-      className="border-b border-border bg-muted/20 px-4 py-3"
-      aria-label="Session inputs and turns"
-    >
-      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Inputs and turns</div>
-      <div className="space-y-2">
-        {(turns ?? []).map((turn) => (
-          <div key={turn.id} data-testid={`session-turn-evidence-${turn.id}`} className="rounded border border-border bg-background px-3 py-2">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
-              <span className="font-medium text-foreground">Turn {turn.sequence}</span>
-              <span className="font-mono text-muted-foreground">{turn.id}</span>
-              <span data-testid={`session-turn-status-${turn.id}`} className="rounded-full border border-border px-1.5 py-0.5 text-[10px]">{turn.status}</span>
-            </div>
-            {turn.result && (
-              <div data-testid={`session-turn-result-${turn.id}`} className="mt-2 space-y-1 border-t border-border pt-2 text-xs">
-                <div className="font-medium text-foreground">Terminal result</div>
-                {turn.result.message && <div data-testid={`session-turn-result-message-${turn.id}`}>{turn.result.message}</div>}
-                {turn.result.output && (
-                  <pre data-testid={`session-turn-result-output-${turn.id}`} className="max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-2 font-mono text-[11px]">
-                    {turn.result.output}
-                  </pre>
-                )}
-                {turn.result.failureCategory && <div>Category: {turn.result.failureCategory}</div>}
-                {turn.result.failureReason && <div>Failure: {turn.result.failureReason}</div>}
-                {turn.result.exitCode != null && <div>Exit code: {turn.result.exitCode}</div>}
-              </div>
-            )}
-            <div className="mt-2 space-y-1">
-              {turn.inputIds.map((inputId) => {
-                const input = inputById.get(inputId)
-                return (
-                  <div key={inputId} data-testid={`session-input-evidence-${inputId}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                    <span>Input {input?.sequence ?? '?'}</span>
-                    <span className="font-mono">{inputId}</span>
-                    <span data-testid={`session-input-acceptance-${inputId}`}>accepted: {input?.acceptance ?? 'unknown'}</span>
-                    <span data-testid={`session-input-delivery-${inputId}`}>delivered: {turn.status}</span>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        ))}
-        {orderedInputs.filter((input) => !groupedInputIds.has(input.id)).map((input) => (
-          <div key={input.id} data-testid={`session-input-evidence-${input.id}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-border bg-background px-3 py-2 text-xs text-muted-foreground">
-            <span>Input {input.sequence}</span>
-            <span className="font-mono">{input.id}</span>
-            <span data-testid={`session-input-acceptance-${input.id}`}>accepted: {input.acceptance}</span>
-            <span data-testid={`session-input-delivery-${input.id}`}>delivered: unknown</span>
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function SessionRecoveryHistory({ history }: { history?: SessionRecoveryObservation[] | null }) {
-  if (!history?.length) return null
-
-  return (
-    <section
-      data-testid="session-recovery-history"
-      className="border-b border-border bg-muted/20 px-4 py-3"
-      aria-label="Session recovery history"
-    >
-      <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Recovery history</div>
-      <div className="space-y-1.5">
-        {history.map((entry, index) => (
-          <div key={`${entry.type}-${entry.recordedAt}-${index}`} className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {entry.type === 'reset' ? 'Runtime context reset' : entry.type === 'compaction' ? 'Context compacted' : entry.type}
-            </span>
-            <span>{entry.recordedAt}</span>
-            {entry.reason && <span>Reason: {entry.reason}</span>}
-            {entry.strategy && <span>Strategy: {entry.strategy}</span>}
-            {entry.runtimeSessionId && <span className="font-mono">Runtime: {entry.runtimeSessionId}</span>}
-          </div>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function SessionEmptyStateView({ kind }: { kind: EmptyStateKind }) {
-  if (kind === 'active-no-content') {
-    return (
-      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
-        <div className="text-center space-y-3">
-          <div className="text-info text-lg">The session is active but no content has been received</div>
-          <p className="text-muted-foreground text-sm">Waiting for runtime output.</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (kind === 'unknown-no-content') {
-    return (
-      <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
-        <div className="text-center space-y-3">
-          <div className="text-warning text-lg">Session activity is unknown</div>
-          <p className="text-muted-foreground text-sm">Mohist cannot confirm whether execution is still active.</p>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex items-center justify-center flex-1" data-testid="session-empty-state" data-state-kind={kind}>
-      <div className="text-center space-y-3">
-        <div className="text-muted-foreground text-lg">This session is idle</div>
-        <p className="text-muted-foreground text-sm">Send a follow-up to continue the conversation.</p>
-      </div>
-    </div>
   )
 }
 

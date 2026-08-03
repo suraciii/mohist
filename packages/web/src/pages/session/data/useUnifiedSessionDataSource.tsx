@@ -11,7 +11,8 @@ import {
   useUnifiedSessionTranscript,
 } from '../../../entities/coder-session'
 import type { SessionFollowupResult, SessionMetadata, SessionTurn, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
-import { projectTurn, useSessionTranscript } from '../../../widgets/session-transcript'
+import type { TimelineReference } from '../../../entities/session'
+import { projectTurn, useSessionTimeline, useSessionTranscript } from '../../../widgets/session-transcript'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { ApiError } from '../../../shared/api/client'
@@ -149,6 +150,19 @@ export function useUnifiedSessionDataSource(
     isRunning,
     terminalInvalidationKey: metadataQueryKey,
   })
+  const timelineInput = useMemo(() => ({
+    turns: transcript.turns,
+    liveDetails: transcript.liveDetails,
+    summary: summary ? {
+      activity: summary.activity,
+      lastActivityAt: summary.lastActivityAt,
+      currentTurnId: summary.currentTurnId,
+      inputs: summary.inputs,
+      turns: summary.turns,
+      recoveryHistory: summary.recoveryHistory,
+    } : null,
+  }), [summary, transcript.liveDetails, transcript.turns])
+  const timeline = useSessionTimeline(timelineInput)
   const displayTurns = useMemo(
     () => transcript.turns.map((turn) => projectTranscriptTurn(turn)),
     [projectTranscriptTurn, transcript.turns],
@@ -237,6 +251,15 @@ export function useUnifiedSessionDataSource(
   const issueNumber = summary?.contextRefs?.issueNumber ?? 0
   const workflowContextPath = issueNumber > 0 ? toProjectPath(`/issues/${issueNumber}`) : undefined
   const workflowContextLabel = workflowContextPath ? 'Workflow context' : undefined
+  const resolveTimelineReference = useCallback((reference: TimelineReference) => {
+    if (reference.kind === 'issue' && reference.issueNumber && reference.issueNumber > 0) {
+      return toProjectPath(`/issues/${reference.issueNumber}`)
+    }
+    if (reference.kind === 'agent' && reference.agentId) {
+      return toProjectPath(`/agents/${encodeURIComponent(reference.agentId)}`)
+    }
+    return null
+  }, [toProjectPath])
   const backPath = fromActivity
     ? toProjectPath('/activity')
     : summary?.source === 'workflow' && workflowContextPath
@@ -300,6 +323,11 @@ export function useUnifiedSessionDataSource(
     isFinalizing: transcript.isFinalizing,
     isThinking: transcript.isThinking,
     isStreaming: transcript.isStreaming,
+    facts: timeline.facts,
+    items: timeline.items,
+    entries: timeline.entries,
+    currentActivity: timeline.currentActivity,
+    resolveTimelineReference,
     displayTurns,
     emptyStateKind,
     issueNumber,

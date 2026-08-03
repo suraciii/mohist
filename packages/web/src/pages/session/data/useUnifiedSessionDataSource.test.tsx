@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { ProjectProvider } from '../../../entities/project'
 import { useUnifiedSessionDataSource, type UnifiedSessionDataSourceDependencies } from './useUnifiedSessionDataSource'
-import type { AgentSessionTranscriptResponse, SessionFollowupResult, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
+import type { AgentSessionTranscriptResponse, SessionFollowupResult, SessionTurn, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
 import type { TurnControlResult } from '../../../entities/agent'
 import { ApiError } from '../../../shared/api/client'
 
@@ -475,5 +475,62 @@ describe('useUnifiedSessionDataSource — both Session sources', () => {
     expect(turnControlCalls[0].sessionId).toBe('workflow-session-1')
     expect(turnControlCalls[0].operation).toBe('stop')
     expect(result.current.cancel).toBeNull()
+  })
+
+  it('exposes one derived timeline and resolves semantic Issue references through project routing', () => {
+    const transcriptTurn: SessionTurn = {
+      id: 'turn-1',
+      startedAt: '2026-07-31T10:00:00.000Z',
+      completedAt: '2026-07-31T10:01:00.000Z',
+      user: {
+        role: 'mohist',
+        text: 'Review the change',
+        kind: 'task',
+        sentAt: '2026-07-31T10:00:00.000Z',
+      },
+      assistant: [{
+        id: 'part-1',
+        type: 'tool',
+        tool: {
+          toolCallId: 'tool-1',
+          toolName: 'bash',
+          status: 'completed',
+          rawInput: 'mo issue start 42',
+          rawOutput: 'ok',
+          completedAt: '2026-07-31T10:01:00.000Z',
+          startedAt: '2026-07-31T10:00:30.000Z',
+        },
+      }],
+    }
+    const { result } = renderUnifiedHook(makeDependencies({
+      useUnifiedSessionSummary: (() => ({
+        data: makeSummary({
+          activity: 'idle',
+          contextRefs: { issueNumber: 42 },
+          inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
+          turns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'completed' }],
+        }),
+        isLoading: false,
+        isError: false,
+      })) as never,
+      useSessionTranscript: (() => ({
+        turns: [transcriptTurn],
+        liveDetails: [],
+        transcriptVersion: 0,
+        scrollToBottom: vi.fn(),
+        newContentAvailable: false,
+        setIsNearBottom: vi.fn(),
+        isFinalizing: false,
+        isThinking: false,
+        isStreaming: false,
+      })) as never,
+    }))
+
+    expect(result.current.facts?.map((fact) => fact.sourceId)).toEqual(expect.arrayContaining(['input:input-1', 'part:part-1', 'summary:activity']))
+    expect(result.current.items?.some((item) => item.renderClass === 'domain-action')).toBe(true)
+    expect(result.current.entries?.length).toBeGreaterThan(0)
+    expect(result.current.currentActivity).toMatchObject({ state: 'idle', label: '空闲' })
+    expect(result.current.resolveTimelineReference?.({ kind: 'issue', label: 'Issue #42', issueNumber: 42 })).toBe('/Test/issues/42')
+    expect(result.current.resolveTimelineReference?.({ kind: 'workflow', label: 'Workflow', workflowRunId: 'run-1' })).toBeNull()
   })
 })
