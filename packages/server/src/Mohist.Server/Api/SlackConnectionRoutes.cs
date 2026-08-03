@@ -7,8 +7,6 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
@@ -17,7 +15,6 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack;
-using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Agent.Domain;
 
@@ -620,39 +617,27 @@ public static class SlackConnectionRoutes
     {
         app.MapGet("/api/slack-manager/adapter", async (
             HttpContext http,
-            IDbContextFactory<MohistDbContext> dbFactory,
+            SlackManagerAdapterQuerier adapters,
             OperatorCredential credential,
             CancellationToken ct) =>
         {
             if (!credential.Authorizes(http.Request.Headers))
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
 
-            await using var db = await dbFactory.CreateDbContextAsync(ct);
-            var targets = await db.SlackWorkspaceEnrollments.AsNoTracking()
-                .Where(enrollment => enrollment.DeletedAt == null
-                    && enrollment.Lifecycle == SlackEnrollmentLifecycle.Active
-                    && enrollment.ManagerCapability == SlackManagerCapability.Available
-                    && enrollment.ManagerReadiness == SlackManagerReadiness.Ready
-                    && enrollment.ManagerAppId != string.Empty
-                    && enrollment.ManagerBotUserId != string.Empty
-                    && enrollment.ManagerCredentialRef != string.Empty)
-                .OrderBy(enrollment => enrollment.Id)
-                .Select(enrollment => new
-                {
-                    ownerKind = SlackDeliveryOwnerKinds.Manager,
-                    enrollmentId = enrollment.Id,
-                    workspaceTeamId = enrollment.WorkspaceTeamId,
-                })
-                .ToListAsync(ct);
-            return ApiResults.Ok(targets);
+            var targets = await adapters.ListReadyTargetsAsync(ct);
+            return ApiResults.Ok(targets.Select(target => new
+            {
+                ownerKind = SlackDeliveryOwnerKinds.Manager,
+                enrollmentId = target.EnrollmentId,
+                workspaceTeamId = target.WorkspaceTeamId,
+            }).ToArray());
         });
 
         app.MapPost("/api/slack-manager/adapter/{enrollmentId}/session", async (
             HttpContext http,
             string enrollmentId,
             AdapterSessionBody body,
-            SlackWorkspaceEnrollmentStore enrollments,
-            ISecretStore secrets,
+            SlackManagerAdapterQuerier adapters,
             OperatorCredential credential,
             CancellationToken ct) =>
         {
@@ -661,25 +646,21 @@ public static class SlackConnectionRoutes
             if (string.IsNullOrWhiteSpace(body?.AdapterId))
                 return ApiResults.BadRequest("adapterId is required.");
 
-            var enrollment = await enrollments.GetAsync(enrollmentId, ct);
-            if (enrollment is null)
+            var session = await adapters.GetSessionAsync(enrollmentId, ct);
+            if (session.State == SlackManagerAdapterSessionStates.NotFound)
                 return ApiResults.NotFound("Slack Manager enrollment was not found.");
-            if (enrollment.Lifecycle != SlackEnrollmentLifecycle.Active)
+            if (session.State == SlackManagerAdapterSessionStates.Inactive)
                 return ApiResults.Conflict("The Slack Manager enrollment is not active.", "manager_enrollment_inactive");
-            if (enrollment.ManagerReadiness != SlackManagerReadiness.Ready)
+            if (session.State == SlackManagerAdapterSessionStates.NotReady)
                 return ApiResults.Conflict("The Slack Manager adapter is not ready.", "manager_adapter_not_ready");
 
-            var appToken = await secrets.LoadAsync(
-                new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, enrollment.Id, SecretKind.AppToken), ct);
-            var botToken = await secrets.LoadAsync(
-                new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, enrollment.Id, SecretKind.BotToken), ct);
             return ApiResults.Ok(new
             {
                 adapterId = body.AdapterId,
                 ownerKind = SlackDeliveryOwnerKinds.Manager,
-                workspaceTeamId = enrollment.WorkspaceTeamId,
-                appToken = appToken is { Length: > 0 } ? Encoding.UTF8.GetString(appToken) : null,
-                botToken = botToken is { Length: > 0 } ? Encoding.UTF8.GetString(botToken) : null,
+                workspaceTeamId = session.WorkspaceTeamId,
+                appToken = session.AppToken,
+                botToken = session.BotToken,
             });
         });
 

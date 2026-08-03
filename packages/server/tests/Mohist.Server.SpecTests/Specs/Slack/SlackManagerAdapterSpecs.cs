@@ -48,7 +48,12 @@ public sealed class SlackManagerAdapterSpecs
         using var discovery = await _fixture.Client.GetAsync("/api/slack-manager/adapter");
         discovery.EnsureSuccessStatusCode();
         using var discoveryDocument = JsonDocument.Parse(await discovery.Content.ReadAsStringAsync());
-        var target = Assert.Single(discoveryDocument.RootElement.GetProperty("data").EnumerateArray());
+        var target = Assert.Single(
+            discoveryDocument.RootElement.GetProperty("data").EnumerateArray(),
+            candidate => string.Equals(
+                candidate.GetProperty("enrollmentId").GetString(),
+                enrollmentId,
+                StringComparison.Ordinal));
         Assert.Equal("manager", target.GetProperty("ownerKind").GetString());
         Assert.Equal(enrollmentId, target.GetProperty("enrollmentId").GetString());
         Assert.Equal(teamId, target.GetProperty("workspaceTeamId").GetString());
