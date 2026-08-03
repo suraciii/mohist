@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { onAgentEvent } from '../../../entities/agent'
-import type { AgentDetailEventMap } from '../../../entities/agent'
+import type { AgentDetailEventMap, AgentTranscriptDetail } from '../../../entities/agent'
 import type { SessionTurn } from '../../../entities/coder-session'
 import { issueWorkflowKeys } from '../../../entities/issue'
 import {
@@ -76,6 +76,7 @@ function matchesSessionEvent(
 
 export interface UseSessionTranscriptResult {
   turns: SessionTurn[]
+  liveDetails: AgentTranscriptDetail[]
   transcriptVersion: number
   isNearBottom: boolean
   setIsNearBottom: (nearBottom: boolean) => void
@@ -103,6 +104,7 @@ export function useSessionTranscript({
     return initialTurns ?? []
   }, [])
   const [turns, setTurns] = useState<SessionTurn[]>(initialState)
+  const [liveDetails, setLiveDetails] = useState<AgentTranscriptDetail[]>([])
   const [transcriptVersion, setTranscriptVersion] = useState(0)
   const [isNearBottom, setIsNearBottom] = useState(true)
   const [newContentAvailable, setNewContentAvailable] = useState(false)
@@ -121,9 +123,14 @@ export function useSessionTranscript({
   const streamingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isStreamingRef = useRef(false)
   const hasLiveTailRef = useRef(false)
+  const liveDetailOrdinalRef = useRef(0)
+  const liveSourceIdsRef = useRef(new Set<string>())
 
   useEffect(() => {
     hasLiveTailRef.current = false
+    setLiveDetails([])
+    liveDetailOrdinalRef.current = 0
+    liveSourceIdsRef.current.clear()
   }, [issueNumber, sessionId, runtimeSessionId])
 
   const scrollToBottom = useCallback(() => {
@@ -224,8 +231,31 @@ export function useSessionTranscript({
       if (!mountedRef.current) return false
       return matchesSessionEvent(sessionId, runtimeSessionId, runtime, detail)
     }
-    const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started']) => {
-      if (!isCurrentSessionEvent(detail)) return
+    const captureLiveDetail = (eventName: string, detail: Record<string, unknown>) => {
+      const explicitSourceId = detail.sourceId ?? detail.eventId
+      const sourceId = typeof explicitSourceId === 'string' && explicitSourceId.trim().length > 0
+        ? explicitSourceId
+        : typeof detail.sequence === 'number'
+          ? `live:${eventName}:${detail.sequence}`
+          : `live:${eventName}:${++liveDetailOrdinalRef.current}`
+      if (liveSourceIdsRef.current.has(sourceId)) return
+      liveSourceIdsRef.current.add(sourceId)
+      setLiveDetails((previous) => [
+        ...previous,
+        {
+          ...detail,
+          type: typeof detail.type === 'string' ? detail.type : eventName,
+          sourceId,
+        } as AgentTranscriptDetail,
+      ])
+    }
+    const acceptLiveDetail = (eventName: string, detail: Record<string, unknown>) => {
+      if (!isCurrentSessionEvent(detail)) return false
+      captureLiveDetail(eventName, detail)
+      return true
+    }
+    const handleToolDetail = (detail: AgentDetailEventMap['tool_call.started'], eventName = 'tool_call.started') => {
+      if (!acceptLiveDetail(eventName, detail)) return
 
       hasLiveTailRef.current = true
       const now = new Date().toISOString()
@@ -370,7 +400,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('session.input', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('session.input', detail)) return
 
         hasLiveTailRef.current = true
         setTurns((prev) => appendInputTurn(prev, {
@@ -389,7 +419,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('message.delta', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('message.delta', detail)) return
 
         hasLiveTailRef.current = true
         setIsStreaming(true)
@@ -406,7 +436,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('coder_text_chunk', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('coder_text_chunk', detail)) return
 
         hasLiveTailRef.current = true
         setIsStreaming(true)
@@ -423,7 +453,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('reasoning.delta', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('reasoning.delta', detail)) return
 
         hasLiveTailRef.current = true
         setIsStreaming(true)
@@ -441,15 +471,15 @@ export function useSessionTranscript({
     )
 
     unsubs.push(
-      onAgentEvent('tool_call.started', handleToolDetail),
+      onAgentEvent('tool_call.started', (detail) => handleToolDetail(detail, 'tool_call.started')),
     )
 
     unsubs.push(
-      onAgentEvent('tool_call.updated', handleToolDetail),
+      onAgentEvent('tool_call.updated', (detail) => handleToolDetail(detail, 'tool_call.updated')),
     )
 
     unsubs.push(
-      onAgentEvent('tool_call.completed', handleToolDetail),
+      onAgentEvent('tool_call.completed', (detail) => handleToolDetail(detail, 'tool_call.completed')),
     )
 
     unsubs.push(
@@ -457,13 +487,13 @@ export function useSessionTranscript({
         handleToolDetail({
           ...detail,
           state: (detail.state ?? detail.status ?? 'started') as AgentDetailEventMap['tool_call.started']['state'],
-        })
+        }, 'coder_tool_call')
       }),
     )
 
     unsubs.push(
       onAgentEvent('session.activity', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('session.activity', detail)) return
 
         hasLiveTailRef.current = true
         if (detail.activity === 'idle' || detail.activity === 'unknown') {
@@ -479,7 +509,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('coder_recovery_status', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('coder_recovery_status', detail)) return
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
@@ -514,7 +544,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('session.liveness', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('session.liveness', detail)) return
 
         hasLiveTailRef.current = true
         const timestamp = detail.probeSentAt ?? detail.lastDataAt ?? new Date().toISOString()
@@ -544,7 +574,7 @@ export function useSessionTranscript({
 
     unsubs.push(
       onAgentEvent('provider.retry', (detail) => {
-        if (!isCurrentSessionEvent(detail)) return
+        if (!acceptLiveDetail('provider.retry', detail)) return
 
         hasLiveTailRef.current = true
         const now = new Date().toISOString()
@@ -565,6 +595,17 @@ export function useSessionTranscript({
       }),
     )
 
+    unsubs.push(
+      onAgentEvent('compaction', (detail) => { acceptLiveDetail('compaction', detail) }),
+      onAgentEvent('compaction_event', (detail) => { acceptLiveDetail('compaction_event', detail) }),
+      onAgentEvent('context_health_update', (detail) => { acceptLiveDetail('context_health_update', detail) }),
+      onAgentEvent('usage.updated', (detail) => { acceptLiveDetail('usage.updated', detail) }),
+      onAgentEvent('model.resolved', (detail) => { acceptLiveDetail('model.resolved', detail) }),
+      onAgentEvent('com.mohist.agent-session.context-compacted', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-compacted', detail) }),
+      onAgentEvent('com.mohist.agent-session.context-exhausted', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-exhausted', detail) }),
+      onAgentEvent('com.mohist.agent-session.context-health-updated', (detail) => { acceptLiveDetail('com.mohist.agent-session.context-health-updated', detail) }),
+    )
+
     return () => {
       mountedRef.current = false
       if (streamingTimerRef.current !== null) {
@@ -577,6 +618,7 @@ export function useSessionTranscript({
 
   return {
     turns,
+    liveDetails,
     transcriptVersion,
     isNearBottom,
     setIsNearBottom,
