@@ -30,7 +30,6 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
         agent.Subcommands.Add(AgentModelCommands.Build(api));
-        agent.Subcommands.Add(AgentConnectionCommands.Build(api));
 
         return agent;
     }

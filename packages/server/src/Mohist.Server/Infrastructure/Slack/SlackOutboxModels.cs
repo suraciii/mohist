@@ -21,7 +21,8 @@ public sealed record SlackOutboxDraft(
     string Kind,
     string? DispatchRef,
     string PayloadJson,
-    string? ThreadTs = null);
+    string? ThreadTs = null,
+    string OwnerKind = SlackDeliveryOwnerKinds.Connection);
 
 /// <summary>
 /// Result of <see cref="SlackOutboxStore.EnqueueAsync"/>. When
@@ -40,7 +41,8 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("reaction")] string? Reaction = null,
     [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
     [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
-    [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null)
+    [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
+    [property: JsonPropertyName("blocks")] JsonElement? Blocks = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {
@@ -60,6 +62,7 @@ public sealed class SlackOutboxEntry
     public string Id { get; init; } = string.Empty;
     public string ProjectId { get; init; } = string.Empty;
     public string ConnectionId { get; init; } = string.Empty;
+    public string OwnerKind { get; init; } = SlackDeliveryOwnerKinds.Connection;
     public string WorkspaceTeamId { get; init; } = string.Empty;
     public string ConversationId { get; init; } = string.Empty;
     public string? ThreadTs { get; init; }
@@ -80,3 +83,16 @@ public sealed class SlackOutboxEntry
 }
 
 public sealed record SlackOutboxList(IReadOnlyList<SlackOutboxEntry> Entries);
+
+public static class SlackDeliveryOwnerKinds
+{
+    public const string Connection = "connection";
+    public const string Manager = "manager";
+
+    public static bool IsDefined(string? value) => value is Connection or Manager;
+}
+
+public static class SlackDeliveryOwnerIds
+{
+    public const string ManagerProjectId = "__mohist_slack_manager__";
+}

@@ -112,7 +112,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；`connection list/view/create/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`；只读 `model list --runtime` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
@@ -126,6 +126,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
+| `slack` | `setup`、`status`；`list`、`view`、`create`、`configure`、`claim-owner`、`edit`、`rotate-credentials`、`transfer-owner`、`enable`、`disable`、`delete`；`deliveries`、`resend-delivery`、`clear-gap`、`create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、`permanent-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
@@ -228,32 +229,40 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
   停止执行中的 Turn。follow-up 返回新的
   Input ID；已经归入当前 Turn 或新 Turn 时同时返回 Turn ID，否则稍后从 Session 读取归属。
 
-`agent connection` 管理一个 Mohist Agent 与外部交互身份的绑定。第一版 provider 是 Slack：
-
-- `mo agent connection create <agent> --provider slack` 只创建可恢复 Connection，输出
-  Slack identity preview、预填创建地址与 Connection ID；不要求 `mohist-slack` 在线，
-  也不读取凭据。
-- `mo agent connection configure <connection-id>` 使用隐藏输入提交 Slack 凭据，不接受 token
-  literal flag。非交互环境增加 `--credentials-file <path>`；缺少时立即失败，不等待输入。
-  接入服务离线时保存后返回 Waiting for Slack service。
-- `mo agent connection claim-owner <connection-id>` 只在 identity verification 完成后生成并
-  显示一次 setup claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
-- `mo agent connection view <connection-id>` 始终返回 setup progress、status 和唯一
-  next action；命令可以退出，安装与认领不依赖原进程存活。
-- `mo agent connection list <agent>` 读取该 Agent 的所有接入；
-  `view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete <connection-id>` 管理一个
-  接入。`edit --access-policy allowlist` 用可重复的 `--allow-member <slack-member-id>` 原子
-  替换非 Owner 成员；Owner 转移通过新的单次认领完成。
-- `disable` 可恢复并保留 Agent 与全部执行历史；`delete --yes` 删除连接凭据与关系，但不
-  删除 Agent、AgentJob 或 AgentSession，也不代替用户从 Slack 卸载 App。
-
-Connection 只拥有外部身份、权限和连接状态；Agent 配置仍由 `agent edit` 修改。完整产品
-语义见[把 Mohist Agent 接入 Slack](agent-connections.md)。
-
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
 `session cancel` 确定性取消一个排队中的 Turn；它不接触 Runtime。`session stop` 请求 Runtime
 停止一个执行中的 Turn，结果可能是 `stop-requested`、`stopped` 或 `unknown`。未知结果应在
 Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn。
+
+## Slack
+
+`mo slack` 管理 Slack 接入：一个 Mohist Agent 与一个 Slack 工作区中 Bot 身份的绑定，
+以及 workspace 级 Mohist App 的安装。
+
+- `mo slack setup` 用显式参数登记工作区级 Mohist App；完整的路径选择、安装授权与操作者认领
+  向导尚未实装。`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
+- `mo slack create <agent>` 只创建可恢复接入，输出 Slack identity preview、预填创建地址
+  与接入 ID；不要求 `mohist-slack` 在线，也不读取凭据。
+- `mo slack configure <id>` 使用隐藏输入提交 Slack 凭据，不接受 token literal flag。非交互
+  环境增加 `--credentials-file <path>`；缺少时立即失败，不等待输入。接入服务离线时保存后
+  返回 Waiting for Slack service。
+- `mo slack claim-owner <id>` 只在 identity verification 完成后生成并显示一次 setup
+  claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
+- `mo slack view <id>` 始终返回 setup progress、status 和唯一 next action；命令可以退出，
+  安装与认领不依赖原进程存活。
+- `mo slack list <agent>` 读取该 Agent 的所有接入；
+  `view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete <id>`
+  管理一个接入。`edit --access-policy allowlist` 用可重复的 `--allow-member <slack-member-id>`
+  原子替换非 Owner 成员；Owner 转移通过新的单次认领完成。
+- `disable` 可恢复并保留 Agent 与全部执行历史；`delete --yes` 删除连接凭据与关系，但不
+  删除 Agent、AgentJob 或 AgentSession，也不代替用户从 Slack 卸载 App。
+- 受管子 App 与投递诊断：`deliveries`、`resend-delivery`、`clear-gap`、
+  `create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、
+  `permanent-delete`（高危动作要求显式确认，不出现在 Mohist App 对话中）。
+
+接入只拥有外部身份、权限和连接状态；Agent 配置仍由 `agent edit` 修改。日常挂载与调整的
+主路径是在 Slack 中与 Mohist App 对话；CLI 与 Web 操作同一条接入记录。完整产品语义见
+[Slack](slack.md)。
 
 ## Activity、Event 与本机 Service
 
@@ -264,7 +273,7 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
 `runner` 只表示 Server 已注册的执行资源及其 presence、capacity 和状态。`server` 只表示
 当前连接的 Mohist Server 应用。对本机受管进程的启动、停止和日志读取统一使用
 `mo service <action> <server|runner|slack>`；`slack` 是可选的 `mohist-slack` 接入服务，
-不是 Slack Connection 资源。因此 `server logs` 返回应用日志，
+不是 `mo slack` 管理的接入资源。因此 `server logs` 返回应用日志，
 `service logs server` 返回本机服务管理器日志，不用 `--source` 在两种行为间切换。
 
 CLI 不提供泛化的根级 `config`。Project Variables、Prompt、Agent 配置和其它产品设置由各自
@@ -399,9 +408,8 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
-- `agent connection` 命令组与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
-- Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
+- `mo slack setup` 的完整托管或本机安装向导，以及真实 Slack 子 App 的创建、授权和审批流程。
 
 ### 已闭合
 
@@ -418,6 +426,9 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 互斥关系由参数定义声明并写进叶子帮助（`--all/--archived`、`--before/--after`、
   `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
 - 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
+- 根级 `slack` 命令组及其 setup/status 已交付；接入动作只保留 `mo slack` 这一命令面。
+- Agent launch/follow-up 以稳定的 SessionInput 与 AgentTurn 身份返回；Slack 输入进一步保留
+  Server 生成的回复锚点和协作上下文。
 - 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive` 等缺；`issue rebase`
   返回排队应答而非资源，不在此列）。
 - `project repo set-default`（自 `repo set-default` 迁移）。

@@ -1,18 +1,16 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
-using Mohist.Server.Runner.Services.SignalR;
+using Mohist.Server.Project.Services;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -104,8 +102,16 @@ public static class SlackConnectionRoutes
         {
             if (!credential.Authorizes(http.Request.Headers))
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            return ApiResults.Ok(await connections.ListForAdapterAsync(ct));
+            var targets = await connections.ListForAdapterAsync(ct);
+            return ApiResults.Ok(targets.Select(target => new
+            {
+                ownerKind = SlackDeliveryOwnerKinds.Connection,
+                projectId = target.ProjectId,
+                connectionId = target.ConnectionId,
+            }).ToArray());
         });
+
+        MapSlackManagerAdapterRoutes(app);
 
         management.MapGet("/{connectionId}", async (
             HttpContext context,
@@ -442,8 +448,6 @@ public static class SlackConnectionRoutes
             IGrainFactory grains,
             AgentSessionFollowupDispatcher followupDispatcher,
             AgentSessionQuerier sessions,
-            IHubContext<RunnerHub> runnerHub,
-            RunnerConnectionTracker runnerConnections,
             ISecretStore secrets,
             SlackThreadHistoryReader threadHistory,
             IOptions<SlackProviderOptions> slackProviderOptions,
@@ -504,7 +508,6 @@ public static class SlackConnectionRoutes
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, attachmentBinder, grains, followupDispatcher,
-                        runnerHub, runnerConnections,
                         secrets, threadHistory, slackProviderOptions,
                         http.RequestServices),
                     ct);
@@ -512,9 +515,8 @@ public static class SlackConnectionRoutes
             return await HandleDmIngressAsync(
                 HandleDmIngressRequest.From(
                     projectId, connection, identity, senderSlackUserId, body,
-                    connections, mapping, sessions, agents, claims, inbox, outbox,
+                    connections, mapping, agents, claims, inbox, outbox,
                     launcher, attachmentBinder, grains, followupDispatcher,
-                    runnerHub, runnerConnections,
                     http.RequestServices),
                 ct);
         });
@@ -611,6 +613,173 @@ public static class SlackConnectionRoutes
         return app;
     }
 
+    private static void MapSlackManagerAdapterRoutes(WebApplication app)
+    {
+        app.MapGet("/api/slack-manager/adapter", async (
+            HttpContext http,
+            SlackManagerAdapterQuerier adapters,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+
+            var targets = await adapters.ListReadyTargetsAsync(ct);
+            return ApiResults.Ok(targets.Select(target => new
+            {
+                ownerKind = SlackDeliveryOwnerKinds.Manager,
+                enrollmentId = target.EnrollmentId,
+                workspaceTeamId = target.WorkspaceTeamId,
+            }).ToArray());
+        });
+
+        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/session", async (
+            HttpContext http,
+            string enrollmentId,
+            AdapterSessionBody body,
+            SlackManagerAdapterQuerier adapters,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            if (string.IsNullOrWhiteSpace(body?.AdapterId))
+                return ApiResults.BadRequest("adapterId is required.");
+
+            var session = await adapters.GetSessionAsync(enrollmentId, ct);
+            if (session.State == SlackManagerAdapterSessionStates.NotFound)
+                return ApiResults.NotFound("Slack Manager enrollment was not found.");
+            if (session.State == SlackManagerAdapterSessionStates.Inactive)
+                return ApiResults.Conflict("The Slack Manager enrollment is not active.", "manager_enrollment_inactive");
+            if (session.State == SlackManagerAdapterSessionStates.NotReady)
+                return ApiResults.Conflict("The Slack Manager adapter is not ready.", "manager_adapter_not_ready");
+
+            return ApiResults.Ok(new
+            {
+                adapterId = body.AdapterId,
+                ownerKind = SlackDeliveryOwnerKinds.Manager,
+                workspaceTeamId = session.WorkspaceTeamId,
+                appToken = session.AppToken,
+                botToken = session.BotToken,
+            });
+        });
+
+        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/deliveries/claim", async (
+            HttpContext http,
+            string enrollmentId,
+            DeliveryClaimBody body,
+            SlackOutboxStore outbox,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            var entry = await outbox.ClaimAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                enrollmentId,
+                body?.AdapterId ?? string.Empty,
+                ct,
+                SlackDeliveryOwnerKinds.Manager);
+            return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
+        });
+
+        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/deliveries/claim-uncertain", async (
+            HttpContext http,
+            string enrollmentId,
+            DeliveryClaimBody body,
+            SlackOutboxStore outbox,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            var entry = await outbox.ClaimUncertainAsync(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                enrollmentId,
+                body?.AdapterId ?? string.Empty,
+                ct,
+                SlackDeliveryOwnerKinds.Manager);
+            return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
+        });
+
+        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/deliveries/ack", async (
+            HttpContext http,
+            string enrollmentId,
+            DeliveryAckBody body,
+            SlackOutboxStore outbox,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            if (body is null || string.IsNullOrWhiteSpace(body.Id))
+                return ApiResults.BadRequest("id is required.");
+            if (string.IsNullOrWhiteSpace(body.AdapterId))
+                return ApiResults.BadRequest("adapterId is required.");
+
+            var managerDelivery = (await outbox.ListManagerAsync(enrollmentId, ct)).Entries
+                .FirstOrDefault(entry => string.Equals(entry.Id, body.Id, StringComparison.Ordinal));
+            if (managerDelivery is null)
+                return ApiResults.NotFound("Manager delivery was not found.");
+
+            if (string.Equals(body.Outcome, "delivered", StringComparison.OrdinalIgnoreCase))
+                await outbox.MarkDeliveredAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.ProviderMessageIdentity, body.AdapterId, ct);
+            else if (string.Equals(body.Outcome, "uncertain", StringComparison.OrdinalIgnoreCase))
+                await outbox.MarkDeliveryUncertainAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.Reason, body.AdapterId, ct);
+            else
+                await outbox.ScheduleRetryAsync(SlackDeliveryOwnerIds.ManagerProjectId, body.Id, body.Reason, body.AdapterId, ct);
+            return ApiResults.Ok(new { id = body.Id, outcome = body.Outcome, ownerKind = SlackDeliveryOwnerKinds.Manager });
+        });
+    }
+
+    private static async Task EnqueueInitialLaunchStatusAsync(
+        IServiceProvider services,
+        IGrainFactory grains,
+        string projectId,
+        Agent.Domain.AgentConnection connection,
+        SlackMessageIdentity source,
+        string? threadTs,
+        AgentLaunchResult launch,
+        string actorSlackUserId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(launch.SessionId) || string.IsNullOrWhiteSpace(launch.TurnId))
+            return;
+
+        var turn = await grains.GetGrain<IAgentSessionGrain>(launch.SessionId)
+            .ResolveTurnControlAsync(launch.TurnId);
+        if (turn is null
+            || turn.Classification is not (AgentTurnControlClassification.Queued or AgentTurnControlClassification.Executing))
+        {
+            return;
+        }
+
+        var stopAction = await services.GetRequiredService<SlackTurnControlService>().CreateStopActionAsync(
+            connection,
+            launch.SessionId,
+            launch.TurnId,
+            launch.InputId,
+            SlackStatusProjection.DispatchRef(source, "progress"),
+            actorSlackUserId,
+            source,
+            threadTs,
+            ct);
+
+        var blocks = await BuildSessionStatusBlocksAsync(
+            services,
+            projectId,
+            launch.SessionId,
+            stopAction?.Blocks);
+        await services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
+            projectId,
+            connection.Id,
+            source,
+            threadTs,
+            SlackStatusProjection.DispatchRef(source, "progress"),
+            blocks,
+            ct);
+    }
+
     private static async Task<SlackThreadHistoryReadResult> ReadThreadHistoryIfAnyAsync(
         HandleChannelIngressRequest req,
         string rootTs,
@@ -641,6 +810,39 @@ public static class SlackConnectionRoutes
                 Truncated: marker is not null,
                 TruncationMarker: marker,
                 OmittedOldestMessageCount: omitted));
+    }
+
+    private static async Task<JsonElement?> BuildSessionStatusBlocksAsync(
+        IServiceProvider services,
+        string projectId,
+        string sessionId,
+        JsonElement? controlBlocks)
+    {
+        var links = services.GetRequiredService<SlackWebLinkBuilder>();
+        if (!links.HasUsableExternalWebUrl)
+            return controlBlocks;
+
+        var project = await services.GetRequiredService<ProjectQuerier>().GetByIdAsync(projectId);
+        var link = project is null
+            ? null
+            : links.BuildOpenSession(project.Name, sessionId);
+        return CombineBlocks(controlBlocks, link?.Blocks);
+    }
+
+    private static JsonElement? CombineBlocks(JsonElement? first, JsonElement? second)
+    {
+        var blocks = new List<JsonElement>();
+        AddBlockArray(blocks, first);
+        AddBlockArray(blocks, second);
+        return blocks.Count == 0 ? null : JsonSerializer.SerializeToElement(blocks);
+    }
+
+    private static void AddBlockArray(List<JsonElement> target, JsonElement? source)
+    {
+        if (source is not { ValueKind: JsonValueKind.Array })
+            return;
+
+        target.AddRange(source.Value.EnumerateArray().Select(block => block.Clone()));
     }
 
     private static async Task EnqueueReplyAsync(
@@ -941,137 +1143,21 @@ public static class SlackConnectionRoutes
         return "Starting a new task. " + detail;
     }
 
-    private enum TurnControlCommand
-    {
-        Cancel,
-        Stop,
-    }
-
-    private sealed record TurnControlReply(
-        string Kind,
-        string Reply,
-        string? SessionId = null,
-        string? TurnId = null);
-
-    private static bool TryGetTurnControlCommand(string prompt, out TurnControlCommand command)
-    {
-        command = default;
-        var trimmed = prompt.TrimStart();
-        if (StartsWithStandaloneKeyword(trimmed, "cancel"))
-        {
-            command = TurnControlCommand.Cancel;
-            return true;
-        }
-        if (StartsWithStandaloneKeyword(trimmed, "stop"))
-        {
-            command = TurnControlCommand.Stop;
-            return true;
-        }
-        return false;
-    }
-
-    private static bool StartsWithStandaloneKeyword(string text, string keyword) =>
-        text.StartsWith(keyword, StringComparison.OrdinalIgnoreCase)
-        && (text.Length == keyword.Length || char.IsWhiteSpace(text[keyword.Length]));
-
     private static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
         string projectId,
         string connectionId,
         string conversationId,
         bool isNewTask,
-        TurnControlCommand? controlCommand,
         SlackDmSessionMappingStore mapping,
-        AgentSessionQuerier sessions,
-        IGrainFactory grains,
         CancellationToken ct)
     {
         if (isNewTask)
             return new(SlackProviderInboxRouteKinds.NewTaskLaunch);
 
         var sessionId = await mapping.GetCurrentSessionIdAsync(projectId, connectionId, conversationId, ct);
-        if (controlCommand is null)
-            return string.IsNullOrWhiteSpace(sessionId)
-                ? new(SlackProviderInboxRouteKinds.Launch)
-                : new(SlackProviderInboxRouteKinds.Followup, sessionId);
-
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return new(SlackProviderInboxRouteKinds.NoActiveWork);
-
-        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
-        if (target is null)
-            return new(SlackProviderInboxRouteKinds.NoActiveWork);
-
-        var current = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ResolveCurrentTurnControlAsync();
-        if (current is null)
-        {
-            var turns = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ListTurnsAsync();
-            return new(turns.Count == 0 ? SlackProviderInboxRouteKinds.NoActiveWork : SlackProviderInboxRouteKinds.AlreadyEnded);
-        }
-
-        return controlCommand == TurnControlCommand.Cancel
-            ? new(SlackProviderInboxRouteKinds.Cancel, target.SessionId, current.TurnId)
-            : new(SlackProviderInboxRouteKinds.Stop, target.SessionId, current.TurnId);
-    }
-
-    private static async Task<TurnControlReply> ExecuteTurnControlAsync(
-        string projectId,
-        TurnControlCommand command,
-        string sessionId,
-        string turnId,
-        AgentSessionQuerier sessions,
-        IGrainFactory grains,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker runnerConnections,
-        CancellationToken ct)
-    {
-        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
-        if (target is null)
-            return new("no_active_work", "There is no active work to cancel or stop.", sessionId);
-
-        if (command == TurnControlCommand.Cancel)
-        {
-            var result = await AgentSessionTurnControlOperations.CancelAsync(
-                grains, target.SessionId, turnId);
-            return result.Kind switch
-            {
-                TurnControlResultKind.Cancelled => new(
-                    "cancelled", "Work cancelled.", target.SessionId, turnId),
-                TurnControlResultKind.Executing => new(
-                    "executing", "The work is running; use stop to request a runtime stop.", target.SessionId, turnId),
-                TurnControlResultKind.AlreadyEnded => new(
-                    "already_ended", "That work has already ended.", target.SessionId, turnId),
-                _ => new(
-                    "no_active_work", "There is no active work to cancel or stop.", target.SessionId, turnId),
-            };
-        }
-
-        var stop = await AgentSessionTurnControlOperations.StopAsync(
-            projectId,
-            grains,
-            runnerHub,
-            runnerConnections,
-            target,
-            turnId,
-            ct);
-        return stop.Kind switch
-        {
-            TurnControlResultKind.Stopped => new(
-                "stopped", "Work stopped.", target.SessionId, turnId),
-            TurnControlResultKind.Unknown => new(
-                "unknown", "Stop requested, but the runtime could not confirm it.", target.SessionId, turnId),
-            TurnControlResultKind.StopRequested => new(
-                "stop_requested", "Stop requested.", target.SessionId, turnId),
-            TurnControlResultKind.NotCancellable => new(
-                "not_cancellable", "The runtime reported that this work could not be stopped.", target.SessionId, turnId),
-            TurnControlResultKind.Queued => new(
-                "queued", "The work is queued; use cancel to cancel it.", target.SessionId, turnId),
-            TurnControlResultKind.AlreadyEnded => new(
-                "already_ended", "That work has already ended.", target.SessionId, turnId),
-            TurnControlResultKind.RunnerUnavailable => new(
-                "runner_unavailable", "Stop could not be requested because the Runner is unavailable.", target.SessionId, turnId),
-            _ => new(
-                "no_active_work", "There is no active work to cancel or stop.", target.SessionId, turnId),
-        };
+        return string.IsNullOrWhiteSpace(sessionId)
+            ? new(SlackProviderInboxRouteKinds.Launch)
+            : new(SlackProviderInboxRouteKinds.Followup, sessionId);
     }
 
     internal static async Task<string> ProbeOwnerAvailabilityAsync(
@@ -1178,24 +1264,17 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { kind = "rejected", reason });
         }
 
-        TurnControlCommand controlCommand = default;
-        var isControl = !isNewTask && TryGetTurnControlCommand(prompt, out controlCommand);
-        AgentInfo? agent = null;
-        AgentConnectionDispatchDecision? dispatchDecision = null;
-        if (!isControl)
-        {
-            agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
-            if (agent is null)
-                return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
+        var agent = await req.Agents.GetByIdAsync(projectId, connection.AgentId);
+        if (agent is null)
+            return ApiResults.Fail("The Agent bound to this Connection no longer exists.", 409, "agent_not_found");
 
-            dispatchDecision = AgentConnectionDispatchDecision.For(
-                AgentReadinessDeriver.Derive(agent.AgentConfig));
-            if (!dispatchDecision.Accepted)
-            {
-                await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                    dispatchDecision.Reason!, null, ct, body.ThreadTs);
-                return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
-            }
+        var dispatchDecision = AgentConnectionDispatchDecision.For(
+            AgentReadinessDeriver.Derive(agent.AgentConfig));
+        if (!dispatchDecision.Accepted)
+        {
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
+                dispatchDecision.Reason!, null, ct, body.ThreadTs);
+            return ApiResults.Ok(new { kind = dispatchDecision.Kind, reason = dispatchDecision.Reason });
         }
 
         var routeDraft = await ResolveInboxRouteDraftAsync(
@@ -1203,10 +1282,7 @@ public static class SlackConnectionRoutes
             connection.Id,
             body.ConversationId,
             isNewTask,
-            isControl ? controlCommand : null,
             req.DmMapping,
-            req.Sessions,
-            req.Grains,
             ct);
 
         SlackProviderInboxAcceptResult accepted;
@@ -1228,51 +1304,6 @@ public static class SlackConnectionRoutes
             await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
 
         var route = await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct);
-
-        if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop)
-        {
-            var control = await ExecuteTurnControlAsync(
-                projectId,
-                route.Kind == SlackProviderInboxRouteKinds.Cancel ? TurnControlCommand.Cancel : TurnControlCommand.Stop,
-                route.SessionId!,
-                route.TurnId!,
-                req.Sessions,
-                req.Grains,
-                req.RunnerHub,
-                req.RunnerConnections,
-                ct);
-            await EnqueueRequiredReplyAsync(
-                req.Outbox,
-                projectId,
-                connection,
-                body.ConversationId,
-                control.Reply,
-                $"slack-ack:{req.Identity.AsKey()}",
-                ct,
-                body.ThreadTs);
-            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-            return ApiResults.Ok(new
-            {
-                kind = control.Kind,
-                sessionId = control.SessionId,
-                turnId = control.TurnId,
-                control = true,
-            });
-        }
-
-        if (route.Kind is SlackProviderInboxRouteKinds.NoActiveWork or SlackProviderInboxRouteKinds.AlreadyEnded)
-        {
-            var reply = route.Kind == SlackProviderInboxRouteKinds.AlreadyEnded
-                ? "That work has already ended; there is no active work to cancel or stop."
-                : "There is no active work to cancel or stop.";
-            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                reply,
-                $"slack-ack:{req.Identity.AsKey()}",
-                ct,
-                body.ThreadTs);
-            await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-            return ApiResults.Ok(new { kind = route.Kind, control = true });
-        }
 
         if (route.Kind is SlackProviderInboxRouteKinds.Launch or SlackProviderInboxRouteKinds.NewTaskLaunch)
         {
@@ -1344,6 +1375,19 @@ public static class SlackConnectionRoutes
                 ct);
             await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
                 projectId, connection.Id, req.Identity, body.ThreadTs, ct);
+            if (launch is not null)
+            {
+                await EnqueueInitialLaunchStatusAsync(
+                    req.Services,
+                    req.Grains,
+                    projectId,
+                    connection,
+                    req.Identity,
+                    body.ThreadTs,
+                    launch,
+                    req.SenderSlackUserId,
+                    ct);
+            }
             await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new
             {
@@ -1374,12 +1418,28 @@ public static class SlackConnectionRoutes
             projectId, connection.Id, req.Identity, body.ThreadTs, ct);
         if (followupResult.Status is "queued" or "executing")
         {
+            var stopAction = await req.Services.GetRequiredService<SlackTurnControlService>().CreateStopActionAsync(
+                connection,
+                followupResult.SessionId,
+                followupResult.TurnId,
+                followupResult.InputId,
+                $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                req.SenderSlackUserId,
+                req.Identity,
+                body.ThreadTs,
+                ct);
+            var blocks = await BuildSessionStatusBlocksAsync(
+                req.Services,
+                projectId,
+                followupResult.SessionId,
+                stopAction?.Blocks);
             await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
                 projectId,
                 connection.Id,
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                blocks,
                 ct);
         }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -1475,10 +1535,6 @@ public static class SlackConnectionRoutes
             var otherBotsInThread = threadBindings.Any(
                 binding => !string.Equals(binding.ConnectionId, connection.Id, StringComparison.Ordinal));
 
-            var controlSessionId = (ownBinding is not null && !isRootMention) ? ownBinding.SessionId : null;
-            var controlResult = await TryDispatchChannelTurnControlAsync(req, prompt, controlSessionId, ct);
-            if (controlResult is not null) return controlResult;
-
             if (!decision.Allowed)
                 return await RejectAsync(req, decision.Reason, ct);
 
@@ -1569,9 +1625,6 @@ public static class SlackConnectionRoutes
 
             var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
 
-            var controlResult = await TryDispatchChannelTurnControlAsync(req, prompt, binding.SessionId, ct);
-            if (controlResult is not null) return controlResult;
-
             if (!decision.Allowed)
                 return await RejectAsync(req, decision.Reason, ct);
 
@@ -1585,9 +1638,6 @@ public static class SlackConnectionRoutes
             if (reconciled is not null)
             {
                 var prompt = RemoveBotMention(body.Text ?? string.Empty, ownBotUserId);
-
-                var controlResult = await TryDispatchChannelTurnControlAsync(req, prompt, reconciled, ct);
-                if (controlResult is not null) return controlResult;
 
                 if (!decision.Allowed)
                     return await RejectAsync(req, decision.Reason, ct);
@@ -1759,130 +1809,6 @@ public static class SlackConnectionRoutes
             reason, null, ct, req.Body.ThreadTs);
         return ApiResults.Ok(new { kind = "rejected", reason });
     }
-
-    private static async Task<IResult?> TryDispatchChannelTurnControlAsync(
-        HandleChannelIngressRequest req,
-        string prompt,
-        string? sessionIdHint,
-        CancellationToken ct)
-    {
-        if (!TryGetTurnControlCommand(prompt, out var controlCommand))
-            return null;
-
-        var body = req.Body;
-        var projectId = req.ProjectId;
-        var connection = req.Connection;
-        var senderSlackUserId = req.SenderSlackUserId;
-
-        var isOwner = !string.IsNullOrEmpty(connection.OwnerSlackUserId)
-            && string.Equals(connection.OwnerSlackUserId, senderSlackUserId, StringComparison.Ordinal);
-
-        string? initiator = null;
-        if (!isOwner && !string.IsNullOrEmpty(sessionIdHint))
-        {
-            var initial = await req.Grains.GetGrain<IAgentSessionGrain>(sessionIdHint).GetInitialLaunchAsync();
-            initiator = initial?.Input?.Provenance?.MemberId;
-        }
-
-        if (!isOwner && !string.Equals(initiator, senderSlackUserId, StringComparison.Ordinal))
-        {
-            const string reason = "Only the Connection Owner or the session initiator may stop or cancel this Turn.";
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, reason, null, ct, body.ThreadTs);
-            return ApiResults.Ok(new { kind = "rejected", reason, control = true });
-        }
-
-        SlackProviderInboxRouteDraft routeDraft;
-        if (string.IsNullOrEmpty(sessionIdHint))
-        {
-            routeDraft = new(SlackProviderInboxRouteKinds.NoActiveWork);
-        }
-        else
-        {
-            var target = await req.Sessions.ResolveCancelTargetAsync(projectId, sessionIdHint, ct);
-            if (target is null)
-            {
-                routeDraft = new(SlackProviderInboxRouteKinds.NoActiveWork);
-            }
-            else
-            {
-                var current = await req.Grains.GetGrain<IAgentSessionGrain>(sessionIdHint).ResolveCurrentTurnControlAsync();
-                if (current is not null)
-                {
-                    routeDraft = new(
-                        controlCommand == TurnControlCommand.Cancel
-                            ? SlackProviderInboxRouteKinds.Cancel
-                            : SlackProviderInboxRouteKinds.Stop,
-                        sessionIdHint,
-                        current.TurnId);
-                }
-                else
-                {
-                    var turns = await req.Grains.GetGrain<IAgentSessionGrain>(sessionIdHint).ListTurnsAsync();
-                    routeDraft = new(
-                        turns.Count == 0
-                            ? SlackProviderInboxRouteKinds.NoActiveWork
-                            : SlackProviderInboxRouteKinds.AlreadyEnded);
-                }
-            }
-        }
-
-        SlackProviderInboxAcceptResult accepted;
-        try
-        {
-            accepted = await req.Inbox.AcceptAsync(new SlackProviderInboxDraft(
-                projectId, connection.Id, req.Identity, senderSlackUserId, body.ThreadTs), routeDraft, ct);
-        }
-        catch (SlackProviderInboxCapacityExceededException)
-        {
-            return ApiResults.Ok(new
-            {
-                kind = "backpressured",
-                reason = "This Slack Connection is backpressured; retry after pending deliveries drain.",
-            });
-        }
-
-        if (!accepted.AlreadyExisted)
-            await req.Connections.ClearOfflineGapIfSetAsync(projectId, connection.Id, ct);
-
-        var route = accepted.AlreadyExisted
-            ? await req.Inbox.GetRouteAsync(projectId, accepted.Id, ct)
-            : new SlackProviderInboxRoute(routeDraft.Kind, routeDraft.SessionId, routeDraft.TurnId);
-
-        TurnControlReply? control = null;
-        if (route.Kind is SlackProviderInboxRouteKinds.Cancel or SlackProviderInboxRouteKinds.Stop
-            && !string.IsNullOrWhiteSpace(route.SessionId)
-            && !string.IsNullOrWhiteSpace(route.TurnId))
-        {
-            control = await ExecuteTurnControlAsync(
-                projectId,
-                route.Kind == SlackProviderInboxRouteKinds.Cancel ? TurnControlCommand.Cancel : TurnControlCommand.Stop,
-                route.SessionId!,
-                route.TurnId!,
-                req.Sessions,
-                req.Grains,
-                req.RunnerHub,
-                req.RunnerConnections,
-                ct);
-        }
-
-        var kind = control?.Kind ?? route.Kind;
-        var reply = control?.Reply ?? (route.Kind == SlackProviderInboxRouteKinds.AlreadyEnded
-            ? "That work has already ended; there is no active work to cancel or stop."
-            : "There is no active work to cancel or stop.");
-        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            reply, ChannelTurnControlDispatchRef(req), ct, body.ThreadTs);
-        await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-        return ApiResults.Ok(new
-        {
-            kind,
-            sessionId = route.SessionId,
-            turnId = route.TurnId,
-            control = true,
-        });
-    }
-
-    private static string ChannelTurnControlDispatchRef(HandleChannelIngressRequest req) =>
-        $"slack-thread-control:{req.Identity.AsKey()}";
 
     private static async Task<IResult> HandleAmbiguousNonOwnerAsync(
         HandleChannelIngressRequest req,
@@ -2077,6 +2003,19 @@ public static class SlackConnectionRoutes
 
         await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
             projectId, connection.Id, req.Identity, body.ThreadTs, ct);
+        if (launch is not null)
+        {
+            await EnqueueInitialLaunchStatusAsync(
+                req.Services,
+                req.Grains,
+                projectId,
+                connection,
+                req.Identity,
+                rootTs,
+                launch,
+                req.SenderSlackUserId,
+                ct);
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -2200,12 +2139,28 @@ public static class SlackConnectionRoutes
             projectId, connection.Id, req.Identity, body.ThreadTs, ct);
         if (followupResult.Status is "queued" or "executing")
         {
+            var stopAction = await req.Services.GetRequiredService<SlackTurnControlService>().CreateStopActionAsync(
+                connection,
+                followupResult.SessionId,
+                followupResult.TurnId,
+                followupResult.InputId,
+                $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                req.SenderSlackUserId,
+                req.Identity,
+                body.ThreadTs,
+                ct);
+            var blocks = await BuildSessionStatusBlocksAsync(
+                req.Services,
+                projectId,
+                followupResult.SessionId,
+                stopAction?.Blocks);
             await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
                 projectId,
                 connection.Id,
                 req.Identity,
                 body.ThreadTs,
                 $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                blocks,
                 ct);
         }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
@@ -2237,7 +2192,6 @@ internal sealed record HandleDmIngressRequest(
     SlackIngressBody Body,
     AgentConnectionStore Connections,
     SlackDmSessionMappingStore DmMapping,
-    AgentSessionQuerier Sessions,
     AgentQuerier Agents,
     SlackOwnerClaimService Claims,
     SlackProviderInboxStore Inbox,
@@ -2246,8 +2200,6 @@ internal sealed record HandleDmIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
-    IHubContext<RunnerHub> RunnerHub,
-    RunnerConnectionTracker RunnerConnections,
     IServiceProvider Services)
 {
     public static HandleDmIngressRequest From(
@@ -2258,7 +2210,6 @@ internal sealed record HandleDmIngressRequest(
         SlackIngressBody body,
         AgentConnectionStore connections,
         SlackDmSessionMappingStore dmMapping,
-        AgentSessionQuerier sessions,
         AgentQuerier agents,
         SlackOwnerClaimService claims,
         SlackProviderInboxStore inbox,
@@ -2267,12 +2218,10 @@ internal sealed record HandleDmIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker runnerConnections,
         IServiceProvider services) =>
         new(projectId, connection, identity, senderSlackUserId, body,
-            connections, dmMapping, sessions, agents, claims, inbox, outbox,
-            launcher, attachmentBinder, grains, followupDispatcher, runnerHub, runnerConnections, services);
+            connections, dmMapping, agents, claims, inbox, outbox,
+            launcher, attachmentBinder, grains, followupDispatcher, services);
 
 }
 
@@ -2303,8 +2252,6 @@ internal sealed record HandleChannelIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
-    IHubContext<RunnerHub> RunnerHub,
-    RunnerConnectionTracker RunnerConnections,
     ISecretStore Secrets,
     SlackThreadHistoryReader ThreadHistory,
     IOptions<SlackProviderOptions> SlackProviderOptions,
@@ -2330,8 +2277,6 @@ internal sealed record HandleChannelIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
-        IHubContext<RunnerHub> runnerHub,
-        RunnerConnectionTracker runnerConnections,
         ISecretStore secrets,
         SlackThreadHistoryReader threadHistory,
         IOptions<SlackProviderOptions> slackProviderOptions,
@@ -2339,7 +2284,7 @@ internal sealed record HandleChannelIngressRequest(
         new(projectId, connection, identity, senderSlackUserId, body,
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, accessDecider, inbox, outbox,
-            launcher, attachmentBinder, grains, followupDispatcher, runnerHub, runnerConnections,
+            launcher, attachmentBinder, grains, followupDispatcher,
             secrets, threadHistory, slackProviderOptions, services);
 }
 

@@ -35,6 +35,7 @@ public static class SlackProviderInboxRouteKinds
     public const string Ambiguous = "ambiguous";
     public const string Ignored = "ignored";
     public const string DisabledDiscarded = "disabled_discarded";
+    public const string Manager = "manager";
 }
 
 public sealed record SlackProviderInboxRouteDraft(

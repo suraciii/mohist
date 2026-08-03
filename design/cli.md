@@ -72,15 +72,15 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   `project repo set-default` 修改。
 - `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
-- `agent connection create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
-  管理一个 Agent 的外部接入关系；它不修改 Agent 定义，也不复制 Slack 专用的根命令组。
+- `slack create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
+  管理一个 Agent 的 Slack 接入关系；它不修改 Agent 定义。接入动作直接挂在根级 `slack`，
+  不设泛化的 connection 子组。
 - `session transcript/followup/compact/reset/cancel/stop` 改变或读取 AgentSession；`cancel` 确定性取消指定的排队 Turn，`stop` 请求 Runtime 停止指定的执行中 Turn；不按 Issue 来源和 Agent 来源复制两套路径。
 - `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`、
-`agent connection`），
+subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`），
 只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
 scope 下的关系（`project workflow`、`project repo`）。AgentSession 有稳定 ID、独立生命周期且经常直接
 操作，因此必须是顶层 `session`。
@@ -112,7 +112,7 @@ scope 下的关系（`project workflow`、`project repo`）。AgentSession 有�
 | 用 `server logs --source` 合并应用日志与本机服务日志 | 命令表更短，但两种日志的连接、权限、流和失败结果不同 | 不采用；保留 `server logs` 与 `service logs server` 两个明确行为 |
 | 为执行后端建立 `runtime list/view/model list` | 看似对称，但把 Runner 内部 adapter 与配置目录提升成不存在的产品资源 | 不采用；Runtime 只作为配置维度，模型目录放在 `agent model list --runtime` |
 | 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
-| 增加根级 `slack`，或按 provider 增加一组命令 | 首个 provider 看似直接，但会让 Agent 绑定、权限与生命周期散落到平台名下 | 不采用；使用 `agent connection`，`--provider slack` 只选择 provider-specific setup |
+| Slack 接入的命令面放在哪 | 曾按「未来多 provider」预演为泛化 provider 子组；但 provider 只有 Slack 一个，预置抽象让绑定、权限与生命周期躲进泛化名词后面 | 采用根级 `slack`：`setup`/`status` 编排 workspace 安装，其余动作管理 Slack 接入资源；不留兼容命令。第二个 provider 出现时按当时形态再评估 |
 | 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
 | 增加存储 / DB 审计命令（表体积、freelist、行数统计） | 能覆盖 server 内部审计场景，但那是开发行为不是产品操作；架构禁令约束的是领域操作，不为一次性审计扩大命令面 | 不采用；`otel` 是遥测入口，server 内部审计直接读库是开发者的合理路径 |
 | `mo otel query` 直读本机追踪存储 | Server 不可用时仍可查询，但绕过 API 与查询安全网、耦合存储 schema、没有查询预算与大小上限，且 CLI 指向远程 Server 时静默读到本机数据 | 不采用；`query` 经 Server 查询能力执行，Server 故障时直接读库是开发者路径 |
@@ -292,8 +292,8 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
   与已知时的 Turn ID。
 - Agent create/edit 的 profile、Runtime、Model、Variant、Skills 与并发限制使用类型化
   flags；命令不暴露任意 Agent config JSON，并显示 Server 提供的 Readiness 缺口。
-- `agent connection` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
-  只有一组规范路径；create 建立可恢复 Connection，configure 安全提交凭据，view 始终显示
+- `slack` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
+  只有一组规范路径；create 建立可恢复接入，configure 安全提交凭据，view 始终显示
   当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，也不暴露 token。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
   把本机进程状态表示成 Runner resource 状态。

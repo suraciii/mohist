@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
-import { SlackAdapter, normalizeSocketEvent } from "./adapter.js"
-import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackConnectionRef, SlackEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
+import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
@@ -27,53 +27,99 @@ class FakeSocket implements SocketClient {
 }
 
 class FakeTransport implements AdapterTransport {
-  readonly leases: SlackConnectionRef[] = []
+  readonly leases: SlackAdapterTarget[] = []
   readonly envelopes: SlackEnvelope[] = []
-  readonly acks: Array<{ ref: SlackConnectionRef; id: string; outcome: string }> = []
+  readonly interactions: SlackInteractionEnvelope[] = []
+  readonly acks: Array<{ ref: SlackAdapterTarget; id: string; outcome: string }> = []
   readonly deliveries: Delivery[] = [{ id: "delivery-1", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "accepted" }) }]
-  connections: SlackConnectionRef[] = []
+  readonly uncertainDeliveries: Delivery[] = []
+  connections: SlackAdapterTarget[] = []
   nextIngressResults: IngressResult[] = []
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
-  async discoverConnections(): Promise<readonly SlackConnectionRef[]> {
+  async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
     return this.connections
   }
 
-  async lease(ref: SlackConnectionRef): Promise<AdapterSession> {
+  async lease(ref: SlackAdapterTarget): Promise<AdapterSession> {
     this.leases.push(ref)
-    const session = { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
-    this.sessionByConnection.set(ref.connectionId, session)
+    const session = ref.ownerKind === "manager"
+      ? { adapterId: "adapter-1", ownerKind: "manager" as const }
+      : { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
+    this.sessionByConnection.set(ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId, session)
     return session
   }
 
-  async ingress(_ref: SlackConnectionRef, envelope: SlackEnvelope): Promise<IngressResult> {
+  async ingress(_ref: SlackAdapterTarget, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
     const queued = this.nextIngressResults.shift()
     return queued ?? { kind: "accepted" }
+  }
+
+  async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
+    this.interactions.push(envelope)
+    return { state: "stop_requested" }
   }
 
   async claimDelivery(): Promise<Delivery | null> {
     return this.deliveries.shift() ?? null
   }
 
-  async ackDelivery(ref: SlackConnectionRef, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
+  async claimUncertainDelivery(): Promise<Delivery | null> {
+    return this.uncertainDeliveries.shift() ?? null
+  }
+
+  async ackDelivery(ref: SlackAdapterTarget, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
     this.acks.push({ ref, id: ack.id, outcome: ack.outcome })
   }
 }
 
 class FakeWeb implements SlackWebClient {
-  readonly posted: Array<{ channel: string; text: string; thread_ts?: string }> = []
+  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; blocks?: readonly Record<string, unknown>[] }> = []
+  readonly updated: Array<{ channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }> = []
   nextResponses: Array<{ ok?: boolean; error?: string }> = []
   readonly chat = {
-    postMessage: async (input: { channel: string; text: string; thread_ts?: string }) => {
+    postMessage: async (input: { channel: string; text: string; thread_ts?: string; blocks?: readonly Record<string, unknown>[] }) => {
       this.posted.push(input)
       const next = this.nextResponses.shift()
       return next ?? { ok: true }
+    },
+    update: async (input: { channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }) => {
+      this.updated.push(input)
+      return { ok: true, ts: input.ts }
     },
   }
 }
 
 describe("mohist-slack adapter", () => {
+  it("normalizes the Socket Mode interactive payload without copying its raw body", () => {
+    const interaction = normalizeSlackInteraction({
+      type: "interactive",
+      payload: JSON.stringify({
+        type: "block_actions",
+        trigger_id: "trigger-1",
+        team: { id: "T1" },
+        user: { id: "U1" },
+        container: { channel_id: "C1", message_ts: "123.456", thread_ts: "123.000" },
+        actions: [{ action_id: "mohist_stop_turn", action_ts: "123.500", value: "server-signed-value" }],
+        token: "xoxb-secret",
+      }),
+    })
+
+    expect(interaction).toEqual({
+      eventType: "block_actions",
+      interactionId: "trigger-1",
+      teamId: "T1",
+      conversationId: "C1",
+      messageTs: "123.456",
+      threadTs: "123.000",
+      actorSlackUserId: "U1",
+      actionId: "mohist_stop_turn",
+      actionValue: "server-signed-value",
+    })
+    expect(JSON.stringify(interaction)).not.toContain("xoxb-secret")
+  })
+
   it("normalizes a Socket Mode event with stable identity", () => {
     expect(normalizeSocketEvent({
       team_id: "T1",
@@ -236,6 +282,164 @@ describe("mohist-slack adapter", () => {
     expect(transport.envelopes[0]?.text).toBe("task")
     expect(webs.get("c1")?.posted).toEqual([{ channel: "D1", text: "accepted" }])
     expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-1", outcome: "delivered" }])
+    controller.abort()
+  })
+
+  it("runs an explicit Manager target through web delivery without starting Socket Mode", async () => {
+    const manager: SlackManagerRef = {
+      ownerKind: "manager",
+      enrollmentId: "enrollment-manager",
+      workspaceTeamId: "T_MANAGER",
+    }
+    const transport = new FakeTransport()
+    transport.connections = [manager]
+    transport.deliveries = [{
+      id: "manager-delivery",
+      ownerKind: "manager",
+      conversationId: "D_MANAGER",
+      threadTs: null,
+      payloadJson: JSON.stringify({ text: "manager reply" }),
+    }]
+    transport.uncertainDeliveries.push({
+      id: "manager-uncertain",
+      ownerKind: "manager",
+      conversationId: "D_MANAGER",
+      threadTs: null,
+      payloadJson: JSON.stringify({ text: "manager uncertain reply" }),
+    })
+    const web = new FakeWeb()
+    let socketFactoryCalls = 0
+    let managerFactoryRef: SlackManagerRef | undefined
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-manager",
+      transport,
+      socketFactory: () => {
+        socketFactoryCalls += 1
+        return new FakeSocket()
+      },
+      webFactory: () => new FakeWeb(),
+      managerWebFactory: (ref) => {
+        managerFactoryRef = ref
+        return web
+      },
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(socketFactoryCalls).toBe(0)
+    expect(managerFactoryRef).toEqual(manager)
+    expect(transport.leases).toEqual([manager])
+    expect(web.posted).toEqual([{ channel: "D_MANAGER", text: "manager reply" }])
+    expect(transport.acks).toEqual([
+      { ref: manager, id: "manager-uncertain", outcome: "uncertain" },
+      { ref: manager, id: "manager-delivery", outcome: "delivered" },
+    ])
+    controller.abort()
+  })
+
+  it("posts a Server-generated Open in Mohist block without interpreting reply text", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    const blocks = [{
+      type: "actions",
+      elements: [{ type: "button", text: { type: "plain_text", text: "Open in Mohist" }, url: "https://mohist.example/demo/sessions/session-1" }],
+    }]
+    transport.deliveries = [{
+      id: "terminal-1",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "post_message",
+        text: 'Completed. Agent said {"blocks":[]}.',
+        clientMessageId: "terminal:1",
+        blocks,
+      }),
+    }]
+    const socket = new FakeSocket()
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.posted).toEqual([{
+      channel: "D1",
+      text: 'Completed. Agent said {"blocks":[]}.',
+      thread_ts: "100.001",
+      client_msg_id: "terminal:1",
+      blocks,
+    }])
+    controller.abort()
+  })
+
+  it("forwards interactions to the Server and drains its block update after acknowledging", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.deliveries = [{
+      id: "control-update",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "chat_update",
+        text: "Stop requested. Waiting for the runtime to confirm.",
+        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        blocks: [{ type: "section", text: { type: "mrkdwn", text: "Stop requested. Waiting for the runtime to confirm." } }],
+      }),
+    }]
+    const socket = new FakeSocket()
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    const acknowledged = await socket.emit({
+      type: "interactive",
+      payload: JSON.stringify({
+        type: "block_actions",
+        trigger_id: "trigger-1",
+        team: { id: "T1" },
+        user: { id: "U1" },
+        container: { channel_id: "C1", message_ts: "100.002", thread_ts: "100.001" },
+        actions: [{ action_id: "mohist_stop_turn", value: "server-signed-value" }],
+      }),
+    })
+
+    expect(acknowledged).toBe(true)
+    expect(transport.interactions).toEqual([{
+      eventType: "block_actions",
+      interactionId: "trigger-1",
+      teamId: "T1",
+      conversationId: "C1",
+      messageTs: "100.002",
+      threadTs: "100.001",
+      actorSlackUserId: "U1",
+      actionId: "mohist_stop_turn",
+      actionValue: "server-signed-value",
+    }])
+    expect(web.updated).toEqual([{
+      channel: "C1",
+      ts: "100.002",
+      text: "Stop requested. Waiting for the runtime to confirm.",
+      blocks: [{ type: "section", text: { type: "mrkdwn", text: "Stop requested. Waiting for the runtime to confirm." } }],
+    }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "control-update", outcome: "delivered" }])
     controller.abort()
   })
 
@@ -473,6 +677,7 @@ describe("mohist-slack adapter", () => {
         active -= 1
         return { kind: "accepted" }
       },
+      interaction: async () => ({ state: "stop_requested" }),
       claimDelivery: async () => null,
       ackDelivery: async () => undefined,
     }

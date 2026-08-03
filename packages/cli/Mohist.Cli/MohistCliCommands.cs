@@ -32,6 +32,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(AgentCommands.Build(api));
+        root.Subcommands.Add(SlackCommands.Build(api, operatorCredential));
         root.Subcommands.Add(SessionCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
         root.Subcommands.Add(LabelCommands.Build(api));
@@ -261,11 +262,10 @@ internal static class MohistCliCommands
 
     private static bool IsDirectSlackCredentialArgument(string[] args)
     {
-        var credentialCommand = args.Length >= 3
-            && string.Equals(args[0], "agent", StringComparison.Ordinal)
-            && string.Equals(args[1], "connection", StringComparison.Ordinal)
-            && (string.Equals(args[2], "configure", StringComparison.Ordinal)
-                || string.Equals(args[2], "rotate-credentials", StringComparison.Ordinal));
+        var credentialCommand = args.Length >= 2
+            && string.Equals(args[0], "slack", StringComparison.Ordinal)
+            && (string.Equals(args[1], "configure", StringComparison.Ordinal)
+                || string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal));
         if (!credentialCommand)
             return false;
 
@@ -273,10 +273,10 @@ internal static class MohistCliCommands
             || string.Equals(arg, "--bot-token", StringComparison.Ordinal)))
             return true;
 
-        if (!string.Equals(args[2], "rotate-credentials", StringComparison.Ordinal))
+        if (!string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal))
             return false;
 
-        for (var index = 4; index < args.Length; index++)
+        for (var index = 3; index < args.Length; index++)
         {
             var argument = args[index];
             if (argument is "--credentials-file" or "--project")

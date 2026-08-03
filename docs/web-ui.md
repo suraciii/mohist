@@ -142,19 +142,19 @@ Agent 详情页包含四个连续区域：
    入口。
 3. **Work and conversations**：分别展示 AgentJob 结果和 AgentSession activity，不能用
    “Session 失败”代替失败的 Job。
-4. **Connections**：把 Agent Readiness、Slack 安装进度、连接健康和身份同步分开
+4. **Slack**：把 Agent Readiness、Slack 安装进度、连接健康和身份同步分开
    展示。Add Slack 是可中断的步骤流，每次只突出一个下一步；Allowlist 通过姓名与头像搜索
    工作区成员。页面同时支持 Owner 转移、凭据轮换、重新验证、Enable、Disable 和 Delete，
    不让用户从一个笼统的 Connected / Failed 状态猜问题。
 
-Agent archived 后，Start session 与 Add connection 不可用；历史 Jobs、Sessions 和
-Connections 仍可读。active Agent 的 Add connection 不受 Readiness 阻塞，因为连接健康与执行
+Agent archived 后，Start session 与 Add Slack 不可用；历史 Jobs、Sessions 和
+Slack 接入仍可读。active Agent 的 Add Slack 不受 Readiness 阻塞，因为连接健康与执行
 准备度是两件事。Agent 编辑只影响之后的新 Job，页面在保存前明确这个生效时机。
 
 ### 实装差距
 
 当前 Agent 列表、编辑、直接启动和 Session 读取已经存在。AgentJob、SessionInput、AgentTurn
-与并发/排队信息尚未完整汇总到 Agent 页；头像、Readiness、Connections 与 Slack setup 尚未
+与并发/排队信息尚未完整汇总到 Agent 页；头像、Readiness、Slack 接入与 setup 尚未
 实装。
 
 ## AgentSession 页

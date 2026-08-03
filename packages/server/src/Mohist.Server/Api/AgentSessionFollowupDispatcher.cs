@@ -1,4 +1,6 @@
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Contracts;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 
@@ -50,7 +52,8 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
                 OperationId: dispatch.OperationId,
                 InputTexts: dispatch.InputTexts,
                 Attachments: dispatch.Attachments,
-                InputId: dispatch.InputId), ct);
+                InputId: dispatch.InputId,
+                SlackExecutionContext: SlackExecutionContextFor(dispatch, target.SessionId)), ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -59,5 +62,25 @@ public sealed class AgentSessionFollowupDispatcher : IScopedService
         }
         if (!result.Accepted)
             await grain.ReleaseFollowupDispatchAsync(dispatch.OperationId);
+    }
+
+    private static AgentSlackExecutionContext? SlackExecutionContextFor(
+        AgentSessionFollowupDispatch dispatch,
+        string sessionId)
+    {
+        var provenance = dispatch.Provenance;
+        return dispatch.InputId is null
+            || provenance is null
+            || !string.Equals(provenance.ProviderKind, "slack", StringComparison.Ordinal)
+            ? null
+            : SlackExecutionContextFactory.Create(
+                provenance.WorkspaceId,
+                provenance.ConversationId,
+                provenance.ThreadId,
+                provenance.MessageId,
+                provenance.MemberId,
+                provenance.ConnectionId ?? string.Empty,
+                sessionId,
+                dispatch.OperationId);
     }
 }

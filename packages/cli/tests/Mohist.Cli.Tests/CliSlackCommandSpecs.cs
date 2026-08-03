@@ -1,23 +1,166 @@
 using System.Text.Json.Nodes;
+using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli.Tests.Support;
 using Xunit;
 
 namespace Mohist.Cli.Tests;
 
-public sealed class CliAgentConnectionCommandSpecs
+public sealed class CliSlackCommandSpecs
 {
     [Fact]
-    public async Task ConnectionHelp_ContainsDeliveredCommandsOnly()
+    public async Task SlackHelp_ContainsMappedCommandsAndSetup()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
-        var exit = await MohistCliCommands.RunAsync(http, ["agent", "connection", "--help"], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["slack", "--help"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "deliveries", "resend-delivery", "clear-gap", "edit", "delete" })
+        foreach (var command in new[] { "setup", "status", "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "create-child-app", "reconcile-create", "reconcile-delete", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "edit", "delete" })
             Assert.Contains(command, text, StringComparison.Ordinal);
+        Assert.DoesNotContain("agent connection", text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("setup", "--workspace-team", "--manager-app-id", "--manager-bot-user-id", "--manager-credential-ref")]
+    [InlineData("status", "--workspace-team")]
+    public async Task SlackSetupAndStatusHelp_ExposeTheirLeafInputsWithoutHttp(
+        string command,
+        params string[] expectedOptions)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", command, "--help"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exit);
+        var text = output.ToString();
+        foreach (var option in expectedOptions)
+            Assert.Contains(option, text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task LegacyAgentConnectionCommand_IsRejectedWithoutHttpRequest()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["agent", "connection", "list"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Setup_RequiresAllS0InputsBeforeReadingCredentialOrCallingHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http, ["slack", "setup"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--workspace-team", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--manager-app-id", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--manager-bot-user-id", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--manager-credential-ref", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Status_RequiresWorkspaceBeforeReadingCredentialOrCallingHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http, ["slack", "status"], output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--workspace-team", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Setup_PostsS0RequestWithOperatorCredential()
+    {
+        const string token = "operator-token-for-slack-setup-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { nextAction = "Claim the Mohist App in Slack." },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "slack", "setup",
+                "--workspace-team", "T_SETUP",
+                "--manager-app-id", "A_SETUP",
+                "--manager-bot-user-id", "U_SETUP",
+                "--manager-credential-ref", "credential_setup",
+            ],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/slack-manager/setup", request.RequestUri?.PathAndQuery);
+        Assert.Equal(token, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+        var body = JsonNode.Parse(request.Body!)!;
+        Assert.Equal("T_SETUP", body["workspaceTeamId"]!.GetValue<string>());
+        Assert.Equal("A_SETUP", body["managerAppId"]!.GetValue<string>());
+        Assert.Equal("U_SETUP", body["managerBotUserId"]!.GetValue<string>());
+        Assert.Equal("credential_setup", body["managerCredentialRef"]!.GetValue<string>());
+        Assert.Equal("socket", body["transportKind"]!.GetValue<string>());
+        Assert.Equal("ready", body["readiness"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task Status_UsesWorkspaceProjectionRouteAndOperatorCredential()
+    {
+        const string token = "operator-token-for-slack-status-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { nextAction = "No action needed." },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "status", "--workspace-team", "T_STATUS"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal("/api/slack-manager/status?workspaceTeamId=T_STATUS", request.RequestUri?.PathAndQuery);
+        Assert.Equal(token, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+    }
+
+    [Theory]
+    [InlineData("setup", "claimCode")]
+    [InlineData("status", "managedApps")]
+    public async Task SlackJsonDiscovery_ListsFieldsWithoutRequiredInputsOrHttp(string command, string expectedField)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http, ["slack", command, "--json"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(expectedField, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain("required", error.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -35,7 +178,7 @@ public sealed class CliAgentConnectionCommandSpecs
         });
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "create", "writer", "--provider", "slack"],
+            ["slack", "create", "writer", "--provider", "slack"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -55,7 +198,7 @@ public sealed class CliAgentConnectionCommandSpecs
         fs.AddFile("/tmp/slack-credentials.json", "{\"appToken\":\"xapp-secret\",\"botToken\":\"xoxb-secret\"}");
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "configure", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
+            ["slack", "configure", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -72,7 +215,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "configure", "connection_1", "--app-token", "xapp-secret"],
+            ["slack", "configure", "connection_1", "--app-token", "xapp-secret"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -88,7 +231,7 @@ public sealed class CliAgentConnectionCommandSpecs
         fs.AddFile("/tmp/slack-credentials.json", "{\"appToken\":\"xapp-secret\",\"botToken\":\"xoxb-secret\"}");
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "rotate-credentials", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
+            ["slack", "rotate-credentials", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -107,7 +250,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "rotate-credentials", "connection_1", "xapp-secret"],
+            ["slack", "rotate-credentials", "connection_1", "xapp-secret"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -127,7 +270,7 @@ public sealed class CliAgentConnectionCommandSpecs
         fs.TreatFilesAsWorldReadable = worldReadable;
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "rotate-credentials", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
+            ["slack", "rotate-credentials", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -147,7 +290,7 @@ public sealed class CliAgentConnectionCommandSpecs
         fs.TreatFilesAsWorldReadable = worldReadable;
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "configure", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
+            ["slack", "configure", "connection_1", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -163,7 +306,7 @@ public sealed class CliAgentConnectionCommandSpecs
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { code = "claim_once", expiresAt = "2026-07-29T10:00:00Z" } })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "claim-owner", "connection_1"], output, error, fs, executor);
+            ["slack", "claim-owner", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, Count(output.ToString(), "claim_once"));
@@ -179,6 +322,37 @@ public sealed class CliAgentConnectionCommandSpecs
         await AssertEndpointAsync(["delete", "connection_1"], "/api/projects/proj_abc/slack-connections/connection_1", HttpMethod.Delete);
     }
 
+    [Theory]
+    [InlineData("create-child-app", "/create")]
+    [InlineData("reconcile-create", "/reconcile-create")]
+    [InlineData("reconcile-delete", "/reconcile-delete")]
+    [InlineData("remove-binding", "/remove-binding")]
+    public async Task ManagedAppCommands_TargetManagerEndpoints(string command, string suffix)
+    {
+        await AssertEndpointAsync(
+            [command, "connection_1"],
+            $"/api/projects/proj_abc/slack-manager/connections/connection_1{suffix}",
+            HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task PermanentDelete_RequiresExplicitConfirmationAndTargetsManagerEndpoint()
+    {
+        await AssertEndpointAsync(
+            ["permanent-delete", "connection_1", "--confirm", "DELETE"],
+            "/api/projects/proj_abc/slack-manager/connections/connection_1/permanent-delete",
+            HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task ClearGap_TargetsConnectionEndpoint()
+    {
+        await AssertEndpointAsync(
+            ["clear-gap", "connection_1"],
+            "/api/projects/proj_abc/slack-connections/connection_1/clear-gap",
+            HttpMethod.Post);
+    }
+
     [Fact]
     public async Task TransferOwner_PrintsCodeAndExpiryAndTargetsTransferEndpoint()
     {
@@ -190,7 +364,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "transfer-owner", "connection_1"], output, error, fs, executor);
+            ["slack", "transfer-owner", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
@@ -213,7 +387,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", command, "connection_1"], output, error, fs, executor);
+            ["slack", command, "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Equal(HttpMethod.Post, handler.Requests.Single().Method);
@@ -245,7 +419,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "view", "connection_1"], output, error, fs, executor);
+            ["slack", "view", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         Assert.Contains("owner_unavailable", output.ToString(), StringComparison.Ordinal);
@@ -270,7 +444,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "list"], output, error, fs, executor);
+            ["slack", "list"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var text = output.ToString();
@@ -284,7 +458,7 @@ public sealed class CliAgentConnectionCommandSpecs
     private static async Task AssertEndpointAsync(string[] command, string path, HttpMethod method)
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        var exit = await MohistCliCommands.RunAsync(http, ["agent", "connection", .. command], output, error, fs, executor);
+        var exit = await MohistCliCommands.RunAsync(http, ["slack", .. command], output, error, fs, executor);
         Assert.Equal(0, exit);
         Assert.Equal(method, handler.Requests.Single().Method);
         Assert.Equal(path, handler.Requests.Single().RequestUri?.PathAndQuery);
@@ -296,7 +470,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "allowlist", "--allow-member", "U_A", "--allow-member", "U_B"],
+            ["slack", "edit", "connection_1", "--access-policy", "allowlist", "--allow-member", "U_A", "--allow-member", "U_B"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -314,7 +488,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "allowlist", "--bot-name", "helper"],
+            ["slack", "edit", "connection_1", "--access-policy", "allowlist", "--bot-name", "helper"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -331,7 +505,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "owner_only", "--allow-member", "U_A"],
+            ["slack", "edit", "connection_1", "--access-policy", "owner_only", "--allow-member", "U_A"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -345,7 +519,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone", "--allow-member", "U_A", "--yes"],
+            ["slack", "edit", "connection_1", "--access-policy", "anyone", "--allow-member", "U_A", "--yes"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -359,7 +533,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "bogus"],
+            ["slack", "edit", "connection_1", "--access-policy", "bogus"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
@@ -373,7 +547,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone"],
+            ["slack", "edit", "connection_1", "--access-policy", "anyone"],
             output, error, fs, executor,
             terminalOverride: new CliTerminal(false));
 
@@ -390,7 +564,7 @@ public sealed class CliAgentConnectionCommandSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "edit", "connection_1", "--access-policy", "anyone", "--yes"],
+            ["slack", "edit", "connection_1", "--access-policy", "anyone", "--yes"],
             output, error, fs, executor);
 
         Assert.Equal(0, exit);
@@ -426,7 +600,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "deliveries", "connection_1"], output, error, fs, executor);
+            ["slack", "deliveries", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var text = output.ToString();
@@ -455,7 +629,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "deliveries", "connection_1", "--only-uncertain"], output, error, fs, executor);
+            ["slack", "deliveries", "connection_1", "--only-uncertain"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
         var text = output.ToString();
@@ -481,7 +655,7 @@ public sealed class CliAgentConnectionCommandSpecs
 
         var stdin = new StringReader("y" + Environment.NewLine);
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
+            ["slack", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
             standardInput: stdin);
 
         Assert.Equal(0, exit);
@@ -513,7 +687,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "resend-delivery", "connection_1", "slkout_pending_1"], output, error, fs, executor);
+            ["slack", "resend-delivery", "connection_1", "slkout_pending_1"], output, error, fs, executor);
 
         Assert.NotEqual(0, exit);
         Assert.Single(handler.Requests);
@@ -538,7 +712,7 @@ public sealed class CliAgentConnectionCommandSpecs
             })));
 
         var exit = await MohistCliCommands.RunAsync(http,
-            ["agent", "connection", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
+            ["slack", "resend-delivery", "connection_1", "slkout_uncertain_1"], output, error, fs, executor,
             terminalOverride: new CliTerminal(false));
 
         Assert.NotEqual(0, exit);

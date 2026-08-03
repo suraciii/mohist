@@ -34,7 +34,7 @@
 - [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
 - [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
 - [Skill 机制](skills.md) —— Mohist Agent 与外部 Agent 如何获得可复用能力
-- [把 Mohist Agent 接入 Slack](agent-connections.md) —— 把已配置 Agent 装成一个独立 Slack Bot，并在私聊和频道里使用
+- [Slack](slack.md) —— Mohist App 对话式管理接入，Agent App 作为独立 Bot 在私聊和频道里工作
 - [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
 - [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
 

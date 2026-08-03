@@ -1,10 +1,11 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ManagerWebClientFactory, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
   readonly transport: AdapterTransport
   readonly socketFactory: SocketClientFactory
   readonly webFactory: WebClientFactory
+  readonly managerWebFactory?: ManagerWebClientFactory
   readonly discoveryIntervalMs?: number
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
@@ -12,7 +13,7 @@ export interface SlackAdapterOptions {
 }
 
 interface ConnectionRuntime {
-  readonly ref: SlackConnectionRef
+  readonly target: SlackAdapterTarget
   socket?: SocketClient
   web?: SlackWebClient
   heartbeatTimer?: ReturnType<typeof setInterval>
@@ -59,7 +60,7 @@ export class SlackAdapter {
     await Promise.all(connections.map(async (ref) => {
       const key = connectionKey(ref)
       if (this.runtimes.has(key)) return
-      const runtime: ConnectionRuntime = { ref, draining: false }
+      const runtime: ConnectionRuntime = { target: ref, draining: false }
       this.runtimes.set(key, runtime)
       try {
         await this.connect(runtime, signal)
@@ -77,11 +78,19 @@ export class SlackAdapter {
   }
 
   private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
-    const session = await this.options.transport.lease(runtime.ref, this.options.adapterId, signal)
-    runtime.web = this.options.webFactory(session.botToken, runtime.ref)
-    runtime.socket = this.options.socketFactory(session.appToken, runtime.ref)
-    runtime.socket.on("slack_event", async (event) => this.handleEvent(runtime, event.body, event.ack, signal))
-    await runtime.socket.start()
+    const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
+    if (isManagerTarget(runtime.target)) {
+      runtime.web = session.botToken
+        ? this.options.webFactory(session.botToken, runtime.target)
+        : this.options.managerWebFactory?.(runtime.target)
+      if (!runtime.web) throw new Error("Manager target has no Web client")
+    } else {
+      if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
+      runtime.web = this.options.webFactory(session.botToken, runtime.target)
+      runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
+      runtime.socket.on("slack_event", async (event) => this.handleEvent(runtime, event.body, event.ack, signal))
+      await runtime.socket.start()
+    }
     const heartbeatMs = Math.max(1_000, this.options.heartbeatIntervalMs ?? 15_000)
     const pollMs = Math.max(100, this.options.deliveryPollIntervalMs ?? 1_000)
     runtime.heartbeatTimer = setInterval(() => void this.refresh(runtime, signal), heartbeatMs)
@@ -92,8 +101,14 @@ export class SlackAdapter {
   private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
     if (this.stopped || signal.aborted) return
     try {
-      const session = await this.options.transport.lease(runtime.ref, this.options.adapterId, signal)
-      runtime.web = this.options.webFactory(session.botToken, runtime.ref)
+      const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
+      if (isManagerTarget(runtime.target)) {
+        runtime.web = session.botToken
+          ? this.options.webFactory(session.botToken, runtime.target)
+          : this.options.managerWebFactory?.(runtime.target)
+      } else if (session.botToken) {
+        runtime.web = this.options.webFactory(session.botToken, runtime.target)
+      }
       await this.drain(runtime, signal)
     } catch {
       // The next heartbeat retries the lease; Server state remains authoritative.
@@ -103,8 +118,14 @@ export class SlackAdapter {
   private async handleEvent(runtime: ConnectionRuntime, body: unknown, ack: () => Promise<void> | void, signal: AbortSignal): Promise<void> {
     await this.acquire(signal)
     try {
+      if (isSlackInteraction(body)) {
+        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
+        await ack()
+        await this.drain(runtime, signal)
+        return
+      }
       const envelope = normalizeSocketEvent(body)
-      const result = await this.options.transport.ingress(runtime.ref, envelope, signal)
+      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
       await this.renderUserFacingRejection(runtime, envelope, result, signal)
       await ack()
       await this.drain(runtime, signal)
@@ -136,13 +157,13 @@ export class SlackAdapter {
     try {
       await this.drainUncertain(runtime, signal)
       while (!signal.aborted) {
-        const delivery = await this.options.transport.claimDelivery(runtime.ref, this.options.adapterId, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
         if (!delivery) break
         try {
           const ack = await this.mutateDelivery(runtime.web, delivery)
-          await this.options.transport.ackDelivery(runtime.ref, withAdapterId(ack, this.options.adapterId), signal)
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
         } catch (error) {
-          await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId({
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
@@ -163,7 +184,12 @@ export class SlackAdapter {
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
-      const response = await web.chat.update?.({ channel: target.conversationId, ts: target.messageTs, text: requiredText(payload) })
+      const response = await web.chat.update?.({
+        channel: target.conversationId,
+        ts: target.messageTs,
+        text: requiredText(payload),
+        ...(payload.blocks ? { blocks: payload.blocks } : {}),
+      })
       if (!response) throw new Error("Slack client does not support chat.update")
       if (response.ok === false)
         return await this.fallbackAfterUpdateFailure(web, delivery, payload, response.error ?? "Slack rejected chat.update")
@@ -211,6 +237,7 @@ export class SlackAdapter {
         channel: existingStatus.conversationId,
         ts: existingStatus.messageTs,
         text,
+        ...(payload.blocks ? { blocks: payload.blocks } : {}),
       })
       if (response.ok === false)
         return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the status update" }
@@ -221,6 +248,7 @@ export class SlackAdapter {
       text,
       ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
       ...(payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
+      ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }
@@ -239,6 +267,7 @@ export class SlackAdapter {
       text: payload.fallbackText ?? requiredText(payload),
       ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
       client_msg_id: payload.fallbackDispatchRef,
+      ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? reason }
@@ -296,14 +325,14 @@ export class SlackAdapter {
   private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.ref, this.options.adapterId, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
       if (!delivery) return
       try {
         const ack = await this.reconcile(runtime.web, delivery)
-        await this.options.transport.ackDelivery(runtime.ref, withAdapterId(ack, this.options.adapterId), signal)
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
-        await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
@@ -322,8 +351,14 @@ export class SlackAdapter {
   }
 }
 
-function connectionKey(ref: SlackConnectionRef) {
-  return `${ref.projectId}:${ref.connectionId}`
+function connectionKey(ref: SlackAdapterTarget) {
+  return isManagerTarget(ref)
+    ? `manager:${ref.enrollmentId}`
+    : `connection:${ref.projectId}:${ref.connectionId}`
+}
+
+function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
+  return value.ownerKind === "manager"
 }
 
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {
@@ -346,6 +381,53 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
     senderKind: normalizeSenderKind(event),
     text: typeof event.text === "string" ? event.text : null,
     files: parseFiles(event.files),
+  }
+}
+
+export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelope {
+  const payload = interactionPayload(body)
+  if (!payload || payload.type !== "block_actions") throw new Error("Slack interaction is malformed")
+  const team = isRecord(payload.team) ? stringValue(payload.team.id) : stringValue(payload, "team_id")
+  const user = isRecord(payload.user) ? stringValue(payload.user.id) : null
+  const container = isRecord(payload.container) ? payload.container : undefined
+  const conversationId = stringValue(container?.channel_id)
+  const messageTs = stringValue(container?.message_ts)
+  const actions = Array.isArray(payload.actions) ? payload.actions : []
+  const action = actions.length > 0 && isRecord(actions[0]) ? actions[0] : undefined
+  const interactionId = stringValue(payload.trigger_id) ?? stringValue(action?.action_ts) ?? stringValue(payload, "event_id")
+  const actionId = stringValue(action?.action_id)
+  const actionValue = stringValue(action?.value)
+  if (!team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
+    throw new Error("Slack interaction is missing its stable identity")
+  return {
+    eventType: "block_actions",
+    interactionId,
+    teamId: team,
+    conversationId,
+    messageTs,
+    threadTs: stringValue(container?.thread_ts),
+    actorSlackUserId: user,
+    actionId,
+    actionValue,
+  }
+}
+
+function isSlackInteraction(value: unknown): value is Record<string, unknown> {
+  return interactionPayload(value)?.type === "block_actions"
+}
+
+function interactionPayload(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null
+  if (value.type === "block_actions") return value
+  if (value.type !== "interactive") return null
+  const payload = value.payload
+  if (isRecord(payload)) return payload
+  if (typeof payload !== "string") return null
+  try {
+    const parsed: unknown = JSON.parse(payload)
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
   }
 }
 
@@ -390,6 +472,7 @@ interface DeliveryPayload {
   readonly fallbackText?: string
   readonly fallbackDispatchRef?: string
   readonly statusDispatchRef?: string
+  readonly blocks?: readonly Record<string, unknown>[]
 }
 
 function parseDeliveryPayload(value: string): DeliveryPayload {

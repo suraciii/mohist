@@ -42,6 +42,7 @@ public sealed class SlackStatusProjection : IScopedService
         SlackMessageIdentity source,
         string? threadTs,
         string? progressDispatchRef = null,
+        JsonElement? blocks = null,
         CancellationToken ct = default)
     {
         var result = await _outbox.UpsertReplaceableProgressAsync(new SlackOutboxDraft(
@@ -56,7 +57,8 @@ public sealed class SlackStatusProjection : IScopedService
                 "Working...",
                 ClientMessageId: DispatchRef(source, "status"),
                 FallbackDispatchRef: DispatchRef(source, "status"),
-                StatusDispatchRef: DispatchRef(source, "status"))),
+                StatusDispatchRef: DispatchRef(source, "status"),
+                Blocks: blocks)),
             threadTs ?? source.MessageTs), ct);
 
         await EnqueueReactionAsync(
@@ -91,6 +93,7 @@ public sealed class SlackStatusProjection : IScopedService
         string text,
         string? terminalDispatchRef = null,
         string? progressDispatchRef = null,
+        JsonElement? blocks = null,
         CancellationToken ct = default)
     {
         var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
@@ -118,7 +121,8 @@ public sealed class SlackStatusProjection : IScopedService
             ProviderMessageIdentity: providerIdentity,
             FallbackText: text,
             FallbackDispatchRef: $"{terminalDispatchRef ?? DispatchRef(source, "terminal")}:fallback",
-            StatusDispatchRef: DispatchRef(projectionSource, "status"));
+            StatusDispatchRef: DispatchRef(projectionSource, "status"),
+            Blocks: blocks);
         var kind = string.Equals(status, "completed", StringComparison.Ordinal)
             ? SlackOutboxKinds.TerminalResult
             : SlackOutboxKinds.ExplicitFailure;

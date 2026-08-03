@@ -2,13 +2,13 @@
 status: wip
 ---
 
-# Slack Agent Connection
+# Slack
 
-Slack Agent Connection 把一个已经配置好的 Mohist Agent 作为独立身份接入一个 Slack
-workspace。Slack 是交互入口，Mohist 仍是 Agent、工作、会话和结果的权威。
+Slack 集成把一个已经配置好的 Mohist Agent 作为独立身份接入一个 Slack workspace。Slack
+是交互入口，Mohist 仍是 Agent、工作、会话和结果的权威。
 
 产品行为——接入条件、Setup 步骤、访问策略、线程用法、回复呈现、生命周期异常——全部由
-[`../docs/agent-connections.md`](../docs/agent-connections.md) 定义，本文不复述。统一调用边界见
+[`../docs/slack.md`](../docs/slack.md) 定义，本文不复述。统一调用边界见
 [`agent-api.md`](agent-api.md)。本文只记录组件边界与必须长期成立的取舍。
 
 本文分两层：**数据面**（Connection ↔ 一个 Bot 的运行通道）随 Epic #61 已落地，不替换；
@@ -31,6 +31,12 @@ workspace。Slack 是交互入口，Mohist 仍是 Agent、工作、会话和结�
 | 可靠性 | Slack 允许重复投递；Mohist 去重并保留已接受输入 | 不能靠丢旧消息腾容量 |
 | 子 App 凭据来源 | 托管路径全凭 API 取得；本机路径的 App-level token 必须人工生成一次 | Slack 不经 API 返回 App-level token，公开接口也没有生成/读取能力 |
 | Web 的角色 | 配置、诊断和接管的备用平面 | 不是使用 Slack Agent 的必经工作站 |
+| Manager 的形态 | Manager 绑定一个名为 `mohist-slack` 的内置 Mohist Agent：预置 Instructions 与 Slack 管理 Skill，经统一 Agent 执行路径运行，管理操作落在既有 API/CLI 资源上 | 能力只在 API/CLI 一份；对话是自然语言界面，不发明第二份管理语义；Manager 自身走统一执行路径，不多一条执行分支 |
+| 对话式创建 Agent | Manager 最多追问名字与日常职责，用默认配置直接创建 Agent 并引导挂载 | Manager 私聊已是授权边界，不需要额外 draft 审核态 |
+| 回复位置 | Server 决定投递目标，并随输入把回复锚点（thread root / 触发消息 / DM）注入给 Agent | 不让模型凭记忆猜 thread；锚点是系统事实不是模型判断 |
+| 中断语义 | 执行中到达的同会话新输入默认 Steer（并入当前 Turn 或排队等待）；只有显式 Stop 是 Interrupt | 与 SessionInput / AgentTurn 模型一致，新消息不意外打断长任务 |
+| 协作规范 | 以内置 Skill 随接入注入：禁空洞确认、完成委派回调 @委派者、沉默为默认、回复自包含、不猜回复位置 | 行为规范可查看、随产品演进，不硬编码进 adapter 或渲染层 |
+| 过程透明 | Slack 只承载 liveness 与最终答案；过程透明指向 Web 会话时间线，Open in Mohist 直达 Session 时间线 | 频道不刷屏与 owner 可看全程是两个信号，各归其位 |
 
 ## 系统边界
 
@@ -66,6 +72,31 @@ SlackWorkspaceEnrollment ── manages ──> ManagedSlackChildApp（每个受
 每个 Mohist Server 运行一个 `mohist-slack`，集中承载该 Server 管理的所有 Slack Connection。
 每个 Connection 仍使用独立 App / Bot 凭据；共享进程不意味着共享 Bot 身份。Manager 控制面
 在 Server 内，不依赖 `mohist-slack`；它创建的子 App 在运行期由数据面消费。
+
+### Manager 的对话形态
+
+Manager 控制面对用户呈现为 Slack 中的 **Mohist App**，其实体是一个名为 `mohist-slack`
+的内置 Mohist Agent：Server 级保留名称，随 `mo slack setup` 确保存在，不占用 Project 中
+用户可命名的空间，不可被普通归档或删除。它预置 Instructions 与 Slack 管理 Skill，经统一
+Agent 执行路径运行；管理操作全部落在既有资源上
+（Agent、AgentConnection、SlackWorkspaceEnrollment、ManagedSlackChildApp），不产生第二份
+管理语义，也不新增执行路径。
+
+注意 `mohist-slack` 同时是 adapter 进程的名称：同名不同物——一个是 Slack 协议收发的
+本机服务，一个是 Mohist App 背后的管理 Agent。二者同属 Slack 集成，命名共享不造成
+实现耦合。
+
+Mohist App 的 Slack 收发复用数据面：主 App 与 Agent App 一样经 adapter / ingress / outbox
+流转，但它的访问决策固定为「有权管理目标资源的 Mohist 操作者」，不使用普通 Connection 的
+Owner / Allowlist / Anyone 策略。永久删除 Slack App 等高危动作不出现在对话中，只在 Web
+与 CLI 以显式确认完成。对话式创建 Agent 直接用默认配置创建真实 Agent：能驱动 Manager 的
+私聊操作者本身已是授权边界，不再引入 draft 审核态。
+
+Manager 的每条私聊先进入标准 Agent Session/Turn。需要查询或改变资源时，内置 Agent 只能在
+自己的终态输出中请求受限的 Manager tool；Server 从该 Session 的不可变 Slack 来源恢复操作者，
+重新验证目标资源，再委托既有 application service 或 store。工具结果作为同一 Session 的后续
+输入交还给 Agent 生成自然语言回复。模型文本既不能绕过授权，也不能把未经 Server 确认的状态
+宣布为就绪。
 
 ### adapter 为什么无状态
 
@@ -327,6 +358,9 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
   token 的依赖，但仍只暴露一个受控入站地址。
 - `mohist-slack` 是高权限本机组件，与 Mohist Server 同信任域部署；它只获得调用固定 Connection、
   读取结果和回送消息所需的权限。
+- Stop 请求的签名钥与 Connection 的 BotToken 假定处于同一个 self-host 安装信任域：adapter 可以
+  持有并使用签名钥转发请求，但 Server 仍必须重新核验签名、目标 Connection、操作者和执行中
+  Turn 后才裁定停止；二者都不能被当作 Slack 用户凭据，也不能跨信任域共享。
 - App 与 Bot 凭据、Manager credential、子 App client secret 与 signing secret 由 Server 加密保存，
   **按各自拥有者寻址**（见「凭据所有权」），不进入 Agent Instructions、transcript、日志、客户端可见
   状态、durable row、DTO 或审计序列化。OAuth code 与 state nonce 同样不得落盘明文；state 只存 hash。
@@ -412,7 +446,7 @@ fake 不触真实网络；与 fixed `TimeProvider` 一起驱动 application serv
 
 ### 允许 / 禁止
 
-允许：更新 `docs/agent-connections.md`、`design/slack-agent-connection.md`，并同步
+允许：更新 `docs/slack.md`、`design/slack.md`，并同步
 `design/architecture.md` / `design/domain-analysis.md`；Server 内新增 Slack-specific、
 transport-variant-neutral 的 Enrollment / ChildApp model/store、deterministic manifest generator、
 app-management port + fake、`TimeProvider` 驱动的 application service；为 staged workspace reservation
@@ -426,39 +460,30 @@ install）。
 
 ## 实装差距与顺序
 
-### 状态投影实装差距
+### 当前实装
 
-当前 Server 已有基础 provider inbox、outbound outbox、可替换进度合并和 terminal delivery 状态，
-但 provider mutation 尚未实装：`ISlackApiClient` 与 `mohist-slack` 的 Slack web client 目前只有
-`chat.postMessage` 投影能力，没有 `chat.update`、reaction add/remove、稳定 provider message identity
-持久化与对应的 unknown mutation reconcile/fallback。所以上述状态消息原位更新、reaction 生命周期、
-未知结果核对和单次 fallback 仍是本契约，不是当前运行保证；在 P0-B 完成针对性 provider/fake/spec
-证据前，不得声称真实 Slack 状态投影已完成。
+数据面已具备 `AgentConnection` 的 Setup progress、Desired state、Connection health 与 Agent
+Readiness 分离，以及 Server 持有的 provider inbox、conversation mapping 和 outbound outbox。无状态
+`mohist-slack` adapter 负责把稳定 delivery identity 投影为 post、update 与 reaction；未知 mutation
+会依据该 identity 核对，update 的明确失败只产生一次 fallback。终态 delivery 由 Server 基于 session
+和管理员配置的 external web URL 构造 link block，adapter 不解析 Agent 文本为 Slack 控制对象。
 
-数据面（Epic #61）已落地：AgentConnection 领域对象（Setup progress、Desired state、Connection health、
-Agent Readiness 四类事实分离）、无状态 `mohist-slack` adapter、可恢复 Setup、Server 持有的 provider
-inbox / conversation mapping / outbound outbox、Owner-only DM 垂直路径均已实装，真实 Agent 已可从
-Slack 私聊使用。频道与 thread 路由、多 Agent 归属判定、Owner-only 频道权限、输入 provenance、
-重复投递保护和 thread 内出站投递已实装；首次提及时已有 thread 历史作为可截断的 read-only 背景导入
-也已完成；Allowlist/Anyone、附件、频道控制操作仍未提供。
+Manager 侧已有 Slack-specific Enrollment、ChildApp、claim 与 ManagerActor 边界。operator setup 签发
+一次性 claim，Manager ingress 先 durable accept，再按认领的 actor 和目标资源授权。内置
+`mohist-slack` Agent 沿用标准 SessionInput、AgentTurn 与 Runner dispatch；受控工具可创建带默认
+runtime 的普通 Project Agent 后委托同一 Manager application service 挂载。删除、解除绑定、凭据和
+投递重发工具不在 Manager 对话 catalog 中。
 
-控制面落地顺序（依赖与可独立验证的产品价值）：
+普通 Slack 输入拥有不可变的 reply anchor 与协作 Skill，dispatch-only context 不进入 Agent 配置。
+普通 follow-up 始终走既有接纳路径；Stop interaction 由 Server 签名、去重并在重读 executing Turn
+和 actor 后才调用既有 stop operation。所有这些路径的测试使用 fake port、in-memory store、fixed
+`TimeProvider` 与 deterministic runner probe。
 
-1. **P0.1 correctness kernel**（spec + Enrollment/ChildApp 模型/不变量/DB 约束 + manifest generator +
-   fake port + 完整测试；不接生产网络）。
-2. workspace enrollment 与授权（Manager installer / Agent owner / Connection owner / caller 四角色、
-   capability/plan 诊断、临时 Configuration Token fallback）。
-3. child create + OAuth + Connection Ready（durable fence、OAuth callback、team/app/bot 复核）。
-4. 托管 HTTPS 数据面（签名校验、按 `api_app_id + team_id` 反查、Server delivery executor 与 Socket
-   互斥）。
-5. Manager 使用面与运维闭环（App Home/安全 Web、唯一 next action、三动作生命周期）。
-6. self-host/升级/规模化（Socket Mode wizard 的每 child 一次手工 `xapp-`、manifest drift、reinstall、
-   改名/头像、撤权与 token rotation、容量与 plan UX）。
+### 仍未实装
 
-Slack 原生 Agent 体验是后续阶段：它换的是 Slack 侧的入口和呈现，不改变 Agent 能力、执行结果或
-本文的任何边界。它会引入不可回退的 App 类型选择，因此要等 Standard Bot 路径被真实使用验证之后
-再评估。
-
-每一步都必须保持 Slack 路径最终调用 Agent API。若某项 Slack 能力要求 adapter 解析 Runner 日志、
-覆盖 Agent 配置或直接读写 Mohist 数据库，说明前置边界仍未完成，应先修正 Connection boundary
-或 Agent API。
+真实 Slack 子 App 创建、OAuth callback、托管 HTTPS ingress 和本机安装 wizard 尚未接到生产网络。
+当前 `mo slack setup` 仍是显式参数的受保护登记入口，不是完整安装向导；真实子 App 创建、授权
+与审批仍未实装。
+公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口、App Home 以及完整的
+规模化和运维体验仍属于后续阶段。后续能力仍必须经 Agent API 与既有 Connection boundary 进入，
+不得让 adapter 解析 Runner 日志、覆盖 Agent 配置或直接写 Mohist 数据库。

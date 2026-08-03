@@ -178,7 +178,7 @@ Mohist Agent 的核心位置是代理人：它进入流水线上原本由 owner 
 和人相同的命令与审批通道执行动作。一个 Mohist Agent 可以有多个 AgentJob，也可以
 有多个 AgentSession。
 
-把 Agent 接入 Slack 的线程与权限规则见[把 Mohist Agent 接入 Slack](agent-connections.md)。
+把 Agent 接入 Slack 的线程与权限规则见 [Slack](slack.md)。
 
 ## AgentJob 与 AgentSession
 
@@ -301,4 +301,4 @@ SessionInput 与 AgentTurn 尚未作为稳定的 Session 子记录完整落地�
 Agent 接入、Slack Bot、接入权限与连接状态尚未实装。当前调用接口也缺少供外部客户端
 安全使用所需的身份验证、重复请求保护和可断线续读的执行事件。目标契约见
 [`design/agent-api.md`](../design/agent-api.md) 与
-[`design/slack-agent-connection.md`](../design/slack-agent-connection.md)。
+[`design/slack.md`](../design/slack.md)。

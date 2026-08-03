@@ -649,7 +649,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
         var inputId = turn.InputIds.Count == 1 ? turn.InputIds[0] : null;
-        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments, inputId);
+        var provenance = inputId is not null && inputs.TryGetValue(inputId, out var input)
+            ? input.Provenance
+            : null;
+        return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments, inputId, provenance);
     }
 
     private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? CollectAttachmentsForDispatch(
@@ -2505,6 +2508,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             failureCategory = (string?)null,
             artifactCount = 0,
             exitCode = (int?)null,
+            assistantText = AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
         };
         var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);

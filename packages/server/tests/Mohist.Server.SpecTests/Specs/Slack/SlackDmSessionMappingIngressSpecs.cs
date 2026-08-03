@@ -74,6 +74,17 @@ public sealed class SlackDmSessionMappingIngressSpecs
         });
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
 
+        List<string> beforeProjection;
+        await using (var beforeScope = _fixture.Services.CreateAsyncScope())
+        {
+            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            beforeProjection = await beforeDb.SlackOutboxRows
+                .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-REPLAY")
+                .OrderBy(row => row.Id)
+                .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+                .ToListAsync();
+        }
+
         using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
             isDirectMessage = true,
@@ -92,6 +103,13 @@ public sealed class SlackDmSessionMappingIngressSpecs
                 && row.ConversationId == "D-DM-REPLAY")
             .CountAsync();
         Assert.Equal(1, uniqueIdentities);
+        var afterProjection = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-REPLAY")
+            .OrderBy(row => row.Id)
+            .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+            .ToListAsync();
+        Assert.Equal(beforeProjection, afterProjection);
+        Assert.DoesNotContain(afterProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -162,6 +180,26 @@ public sealed class SlackDmSessionMappingIngressSpecs
         Assert.True(data.TryGetProperty("inputId", out _),
             "follow-up path must surface the SessionInput id");
         Assert.True(data.GetProperty("followup").GetBoolean());
+        var followupTurnId = data.GetProperty("turnId").GetString()!;
+
+        await using (var projectionScope = _fixture.Services.CreateAsyncScope())
+        {
+            var projectionDb = projectionScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var progress = await projectionDb.SlackOutboxRows.SingleAsync(row =>
+                row.ConnectionId == connection.Id
+                && row.ConversationId == "D-DM-FOLLOWUP"
+                && row.ThreadTs == "1710000000.000300"
+                && row.Kind == SlackOutboxKinds.ReplaceableProgress
+                && row.DispatchRef == $"agent-session-followup:{sessionId}:{followupTurnId}:progress");
+            var payload = SlackDeliveryPayload.Parse(progress.PayloadJson);
+            var source = new SlackMessageIdentity(
+                connection.WorkspaceTeamId,
+                "D-DM-FOLLOWUP",
+                "1710000000.000300");
+            Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.ClientMessageId);
+            Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"), payload.StatusDispatchRef);
+            Assert.DoesNotContain("xoxb-", progress.PayloadJson, StringComparison.Ordinal);
+        }
 
         var switched = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
@@ -173,6 +211,17 @@ public sealed class SlackDmSessionMappingIngressSpecs
             text = "new task separate work",
         });
         switched.EnsureSuccessStatusCode();
+
+        List<string> beforeReplayProjection;
+        await using (var beforeReplayScope = _fixture.Services.CreateAsyncScope())
+        {
+            var beforeReplayDb = beforeReplayScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            beforeReplayProjection = await beforeReplayDb.SlackOutboxRows
+                .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
+                .OrderBy(row => row.Id)
+                .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+                .ToListAsync();
+        }
 
         using var replay = await _fixture.Client.PostAsJsonAsync(Path(connection, "/ingress"), new
         {
@@ -194,6 +243,13 @@ public sealed class SlackDmSessionMappingIngressSpecs
             .Select(row => row.State)
             .SingleAsync();
         Assert.Equal(1, JsonDocument.Parse(state).RootElement.GetProperty("status").GetProperty("turns").GetArrayLength());
+        var afterReplayProjection = await verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>().SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "D-DM-FOLLOWUP")
+            .OrderBy(row => row.Id)
+            .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+            .ToListAsync();
+        Assert.Equal(beforeReplayProjection, afterReplayProjection);
+        Assert.DoesNotContain(afterReplayProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -5,11 +5,21 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-internal static class AgentConnectionCommands
+internal static class SlackCommands
 {
-    public static Command Build(MohistCliApi api)
+    private static readonly ResourceDescriptor SetupDescriptor = new(
+        ResourceCardinality.Single,
+        ["enrollment", "claimCode", "claimExpiresAt", "nextAction"]);
+
+    private static readonly ResourceDescriptor StatusDescriptor = new(
+        ResourceCardinality.Single,
+        ["enrollment", "connections", "managedApps", "nextAction"]);
+
+    public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var group = new Command("connection", "Manage Slack Agent Connections");
+        var group = new Command("slack", "Manage Slack integrations");
+        group.Subcommands.Add(BuildSetup(api, credentials));
+        group.Subcommands.Add(BuildStatus(api, credentials));
         group.Subcommands.Add(BuildCreate(api));
         group.Subcommands.Add(BuildConfigure(api));
         group.Subcommands.Add(BuildRotateCredentials(api));
@@ -30,6 +40,116 @@ internal static class AgentConnectionCommands
         group.Subcommands.Add(BuildEdit(api));
         group.Subcommands.Add(BuildDelete(api));
         return group;
+    }
+
+    private static Command BuildSetup(MohistCliApi api, OperatorCredentialProvider credentials)
+    {
+        var command = new Command("setup", "Set up the workspace-level Mohist Slack App");
+        var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
+        {
+            Description = "Slack workspace team id",
+        };
+        var managerApp = new Option<string?>("--manager-app-id")
+        {
+            Description = "Mohist App id",
+        };
+        var managerBot = new Option<string?>("--manager-bot-user-id")
+        {
+            Description = "Mohist App bot user id",
+        };
+        var credentialRef = new Option<string?>("--manager-credential-ref")
+        {
+            Description = "Reference to the stored Mohist App credential",
+        };
+        var transport = new Option<string>("--transport") { DefaultValueFactory = _ => "socket" };
+        var readiness = new Option<string>("--readiness") { DefaultValueFactory = _ => "ready" };
+        var output = MohistCliCommands.OutputOption(SetupDescriptor);
+        command.Options.Add(workspaceTeam);
+        command.Options.Add(managerApp);
+        command.Options.Add(managerBot);
+        command.Options.Add(credentialRef);
+        command.Options.Add(transport);
+        command.Options.Add(readiness);
+        command.Options.Add(output);
+        command.SetAction(async ctx =>
+        {
+            var outputValue = ctx.GetValue(output);
+            if (MohistCliCommands.OutputOptionState.Explicit
+                && string.Equals(outputValue, "table", StringComparison.Ordinal))
+                return api.WriteJsonSelectionResult(
+                    SetupDescriptor,
+                    new JsonSelection(JsonSelectionKind.Discovery, SetupDescriptor.Fields, null));
+            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (outputExit != 0) return outputExit;
+
+            var missing = new[]
+            {
+                (Name: "--workspace-team", Value: ctx.GetValue(workspaceTeam)),
+                (Name: "--manager-app-id", Value: ctx.GetValue(managerApp)),
+                (Name: "--manager-bot-user-id", Value: ctx.GetValue(managerBot)),
+                (Name: "--manager-credential-ref", Value: ctx.GetValue(credentialRef)),
+            }.Where(item => string.IsNullOrWhiteSpace(item.Value)).Select(item => item.Name).ToArray();
+            if (missing.Length > 0)
+                return CommandHelpHook.RenderUsageFailure(
+                    ctx,
+                    api.Error,
+                    $"slack setup requires {string.Join(", ", missing)} in non-interactive mode.");
+
+            var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
+            if (headers is null) return 1;
+            return await api.PrintPostWithOutputAsync(
+                "/api/slack-manager/setup",
+                new
+                {
+                    workspaceTeamId = ctx.GetValue(workspaceTeam),
+                    managerAppId = ctx.GetValue(managerApp),
+                    managerBotUserId = ctx.GetValue(managerBot),
+                    managerCredentialRef = ctx.GetValue(credentialRef),
+                    transportKind = ctx.GetValue(transport),
+                    readiness = ctx.GetValue(readiness),
+                },
+                resolvedMode,
+                headers: headers).ConfigureAwait(false);
+        });
+        return command;
+    }
+
+    private static Command BuildStatus(MohistCliApi api, OperatorCredentialProvider credentials)
+    {
+        var command = new Command("status", "Show the workspace Slack integration status");
+        var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
+        {
+            Description = "Slack workspace team id",
+        };
+        var output = MohistCliCommands.OutputOption(StatusDescriptor);
+        command.Options.Add(workspaceTeam);
+        command.Options.Add(output);
+        command.SetAction(async ctx =>
+        {
+            var outputValue = ctx.GetValue(output);
+            if (MohistCliCommands.OutputOptionState.Explicit
+                && string.Equals(outputValue, "table", StringComparison.Ordinal))
+                return api.WriteJsonSelectionResult(
+                    StatusDescriptor,
+                    new JsonSelection(JsonSelectionKind.Discovery, StatusDescriptor.Fields, null));
+            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (outputExit != 0) return outputExit;
+
+            var team = ctx.GetValue(workspaceTeam);
+            if (string.IsNullOrWhiteSpace(team))
+                return CommandHelpHook.RenderUsageFailure(
+                    ctx,
+                    api.Error,
+                    "slack status requires --workspace-team in non-interactive mode.");
+
+            var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
+            if (headers is null) return 1;
+            return await api.PrintWithOutputAsync(
+                $"/api/slack-manager/status?workspaceTeamId={Uri.EscapeDataString(team)}",
+                resolvedMode,
+                headers: headers).ConfigureAwait(false);
+        });
+        return command;
     }
 
     private static string Path(string projectId, string suffix = "") =>
@@ -358,7 +478,7 @@ internal static class AgentConnectionCommands
         var id = new Argument<string>("connection-id");
         var deliveryId = new Argument<string>("delivery-id")
         {
-            Description = "Outbox row id returned by `mo connection deliveries` (state: delivery_uncertain).",
+            Description = "Outbox row id returned by `mo slack deliveries` (state: delivery_uncertain).",
         };
         var yes = new Option<bool>("--yes", "-y")
         {
@@ -883,6 +1003,33 @@ internal static class AgentConnectionCommands
     {
         if (!fileSystem.Exists(path) || fileSystem.DirectoryExists(path)) return false;
         return !fileSystem.IsSymbolicLink(path) && fileSystem.IsUserOnlyFile(path);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, string>?> GetOperatorHeadersAsync(
+        MohistCliApi api,
+        OperatorCredentialProvider credentials)
+    {
+        var baseAddress = api.Http.BaseAddress;
+        if (baseAddress is null || !baseAddress.IsLoopback)
+        {
+            api.Error.WriteLine(
+                $"Slack setup and status require a loopback Mohist server URL; refusing to send the operator credential to '{baseAddress}'.");
+            return null;
+        }
+
+        try
+        {
+            var token = await credentials.GetAsync().ConfigureAwait(false);
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                [OperatorCredentialProvider.HeaderName] = token,
+            };
+        }
+        catch (InvalidOperationException ex)
+        {
+            api.Error.WriteLine(ex.Message);
+            return null;
+        }
     }
 
     private sealed record CredentialPair(string AppToken, string BotToken);

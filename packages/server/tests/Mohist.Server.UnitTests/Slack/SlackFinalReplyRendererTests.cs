@@ -110,6 +110,18 @@ public sealed class SlackFinalReplyRendererTests
     }
 
     [Fact]
+    public void AppendStableReference_UsesTheSessionWhenAvailableAndNeutralizesItsMarkup()
+    {
+        var sessionReply = SlackFinalReplyRenderer.AppendStableReference("Completed.", "job-1", "session-1");
+        var jobReply = SlackFinalReplyRenderer.AppendStableReference("Completed.", "job-1", null);
+        var safeReply = SlackFinalReplyRenderer.AppendStableReference("Completed.", "job-1", "<@U123>");
+
+        Assert.Equal("Completed.\nSession: session-1", sessionReply);
+        Assert.Equal("Completed.\nJob: job-1", jobReply);
+        Assert.Equal("Completed.\nSession: &lt;@U123&gt;", safeReply);
+    }
+
+    [Fact]
     public void Project_PreservesHumanTextAndSummarizesMachineResults()
     {
         var humanText = SlackFinalReplyRenderer.Project(new SlackConfirmedAgentResult(

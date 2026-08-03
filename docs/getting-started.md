@@ -203,7 +203,7 @@ Integrate 完成后，issue 进入 Done。这时：
 
 - [Skill 机制](skills.md) — 让外部 Agent 查询、委托和操作 Mohist
 - [Agent 与 AgentSession](agents.md) — 配置并直接使用一个 Mohist Agent
-- [把 Mohist Agent 接入 Slack](agent-connections.md) — 把已经测试好的 Agent 带到 Slack
+- [Slack](slack.md) — 把已经测试好的 Agent 带到 Slack，用 Mohist App 对话式管理接入
 - [核心概念](concepts.md) — 理解你刚才用到的所有名词
 - [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等
 - [用 Epic 规划](epics.md) — 把零散 issue 组织成可自动推进的产品路线
