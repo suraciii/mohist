@@ -409,7 +409,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
-- `agent connection` 命令组与 Slack setup。
+- `slack` 命令组（由 `mo agent connection` 迁移）与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
 - Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
 

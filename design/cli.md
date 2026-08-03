@@ -72,15 +72,15 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   `project repo set-default` 修改。
 - `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
-- `agent connection create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
-  管理一个 Agent 的外部接入关系；它不修改 Agent 定义，也不复制 Slack 专用的根命令组。
+- `slack create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
+  管理一个 Agent 的 Slack 接入关系；它不修改 Agent 定义。接入动作直接挂在根级 `slack`，
+  不设 `agent connection` 子组。
 - `session transcript/followup/compact/reset/cancel/stop` 改变或读取 AgentSession；`cancel` 确定性取消指定的排队 Turn，`stop` 请求 Runtime 停止指定的执行中 Turn；不按 Issue 来源和 Agent 来源复制两套路径。
 - `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
 - `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`、
-`agent connection`），
+subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`），
 只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
 scope 下的关系（`project workflow`、`project repo`）。AgentSession 有稳定 ID、独立生命周期且经常直接
 操作，因此必须是顶层 `session`。
@@ -292,8 +292,8 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
   与已知时的 Turn ID。
 - Agent create/edit 的 profile、Runtime、Model、Variant、Skills 与并发限制使用类型化
   flags；命令不暴露任意 Agent config JSON，并显示 Server 提供的 Readiness 缺口。
-- `agent connection` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
-  只有一组规范路径；create 建立可恢复 Connection，configure 安全提交凭据，view 始终显示
+- `slack` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
+  只有一组规范路径；create 建立可恢复接入，configure 安全提交凭据，view 始终显示
   当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，也不暴露 token。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
   把本机进程状态表示成 Runner resource 状态。
