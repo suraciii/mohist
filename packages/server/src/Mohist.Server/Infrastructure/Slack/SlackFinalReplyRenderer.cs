@@ -219,8 +219,10 @@ public static class SlackFinalReplyRenderer
         return value.ValueKind switch
         {
             JsonValueKind.Object => SummarizeJsonObject(value, depth),
-            JsonValueKind.Array => SummarizeJsonArray(value, depth),
-            JsonValueKind.String => CleanMachineText(value.GetString()) ?? "redacted",
+            JsonValueKind.Array => SummarizeJsonArray(value),
+            JsonValueKind.String => depth == 0
+                ? "text result received"
+                : CleanMachineText(value.GetString()) ?? "redacted",
             JsonValueKind.Number => value.GetRawText(),
             JsonValueKind.True => "true",
             JsonValueKind.False => "false",
@@ -250,20 +252,14 @@ public static class SlackFinalReplyRenderer
             : $"object: {string.Join("; ", fields)}";
     }
 
-    private static string SummarizeJsonArray(JsonElement value, int depth)
+    private static string SummarizeJsonArray(JsonElement value)
     {
-        var items = value.EnumerateArray()
-            .Take(3)
-            .Select(item => SummarizeJsonValue(item, depth + 1))
-            .ToArray();
         var count = value.GetArrayLength();
         if (count == 0)
             return "empty list";
 
         var prefix = $"{count} item{(count == 1 ? "" : "s")}";
-        return items.Length == 0
-            ? prefix
-            : $"{prefix}: {string.Join("; ", items)}";
+        return prefix;
     }
 
     private static bool IsPublicMachineProperty(string name)
@@ -277,8 +273,6 @@ public static class SlackFinalReplyRenderer
             or "failed"
             or "skipped"
             or "pending"
-            or "message"
-            or "result"
             or "service"
             or "name"
             or "version"
@@ -290,7 +284,7 @@ public static class SlackFinalReplyRenderer
         @"(?ix)(?:\b(?:authorization|proxy-authorization|x-api-key|api[-_ ]?key|secret|token|password|cookie|set-cookie|credential|private[-_ ]?key)\b\s*[:=]\s*(?:bearer|basic)?\s*\S+)|(?:\b(?:bearer|basic)\s+\S+)",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex MachineUrl = new(
-        @"(?i)\b(?:https?|wss?|ftp)://[^\s<>""']+",
+        @"(?i)\b[a-z][a-z0-9+.-]{1,15}://[^\s<>""']+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static string? CleanMachineText(string? value)

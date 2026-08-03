@@ -137,7 +137,10 @@ public sealed class SlackFinalReplyRendererTests
         Assert.Contains("The confirmed answer is true.", string.Join('\n', humanText.Segments));
         Assert.Contains("status: false and service is healthy", string.Join('\n', humanText.Segments));
         Assert.Contains("object result: object: status=ready; count=2", string.Join('\n', objectResult.Segments));
-        Assert.Contains("array result: 2 items: api; worker", string.Join('\n', arrayResult.Segments));
+        var arrayText = string.Join('\n', arrayResult.Segments);
+        Assert.Contains("array result: 2 items", arrayText);
+        Assert.DoesNotContain("api", arrayText, StringComparison.Ordinal);
+        Assert.DoesNotContain("worker", arrayText, StringComparison.Ordinal);
         Assert.Contains("scalar result: 42", string.Join('\n', scalarResult.Segments));
         Assert.Contains("embedded result: object: state=ready", string.Join('\n', embeddedResult.Segments));
         Assert.DoesNotContain("{\"state\":\"ready\"}", string.Join('\n', embeddedResult.Segments));
@@ -157,6 +160,9 @@ public sealed class SlackFinalReplyRendererTests
                 new SlackConfirmedMachineResult(
                     "plain output",
                     "2026-08-03T08:00:00Z Authorization: Bearer log-secret https://private.example.test/output"),
+                new SlackConfirmedMachineResult(
+                    "string result",
+                    "\"unrecognized-secret\""),
             ]);
 
         var text = string.Join('\n', SlackFinalReplyRenderer.Project(result).Segments);
@@ -168,6 +174,7 @@ public sealed class SlackFinalReplyRendererTests
         Assert.DoesNotContain("log-secret", text, StringComparison.Ordinal);
         Assert.DoesNotContain("internal.example.test", text, StringComparison.Ordinal);
         Assert.DoesNotContain("private.example.test", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("unrecognized-secret", text, StringComparison.Ordinal);
     }
 
     [Fact]
