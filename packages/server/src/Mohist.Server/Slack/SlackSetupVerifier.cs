@@ -84,12 +84,15 @@ public sealed class SlackSetupVerifier
             return await FailAsync(projectId, connection, ex.Message, ct);
         }
         var verifiedBot = bot.Bot!;
+        var setupProgress = connection.OwnerSlackUserId is null
+            ? SetupProgressKind.ClaimOwner
+            : SetupProgressKind.Complete;
         await _connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal)
         {
             "setupProgress", "connectionHealth", "healthReason", "verifiedBotName", "verifiedBotIconUrl",
-        }, setupProgress: SetupProgressKind.ClaimOwner, connectionHealth: ConnectionHealthKind.Healthy,
+        }, setupProgress: setupProgress, connectionHealth: ConnectionHealthKind.Healthy,
             healthReason: null, verifiedBotName: verifiedBot.Name, verifiedBotIconUrl: verifiedBot.IconUrl, ct: ct);
-        return new(true, SetupProgressKind.ClaimOwner, null, RequiredScopes);
+        return new(true, setupProgress, null, RequiredScopes);
     }
 
     public async Task<RotationCheckResult> VerifyRotationAsync(

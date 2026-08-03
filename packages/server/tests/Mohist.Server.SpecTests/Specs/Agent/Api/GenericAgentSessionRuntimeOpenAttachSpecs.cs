@@ -2,7 +2,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Xunit;
@@ -113,6 +115,57 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             attach.EnsureSuccessStatusCode();
             var attachPayload = await attach.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal("pi", attachPayload.GetProperty("runtime").GetString());
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", content: null);
+        }
+    }
+
+    [Fact]
+    public async Task GenericAttach_AgentConnectionSource_BindsSession()
+    {
+        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
+            "/api/projects",
+            $"generic-attach-connection-{Guid.NewGuid():N}");
+        var sessionId = $"agent-connection-session-{Guid.NewGuid():N}";
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"input-{Guid.NewGuid():N}",
+            TurnId: $"turn-{Guid.NewGuid():N}",
+            Prompt: "attach an agent connection session",
+            Source: "agent-connection",
+            JobId: $"job-{Guid.NewGuid():N}",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = project.Id,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-connection",
+                [GenericAgentSessionMetadata.AgentId] = "connection-agent",
+                [GenericAgentSessionMetadata.AgentName] = "Connection Agent",
+            }),
+            Runtime: "opencode"));
+
+        var runnerId = $"generic-attach-connection-runner-{Guid.NewGuid():N}";
+        await _fixture.Client.PostOkAsync($"/api/runner/{runnerId}/register", new
+        {
+            capabilities = new[] { "spec/*" },
+            hostname = $"{runnerId}-host",
+            projectId = project.Id,
+        });
+
+        try
+        {
+            using var attach = await _fixture.Client.PostAsJsonAsync(
+                $"/api/runner/{runnerId}/agent-sessions/{project.Id}/{sessionId}/attach",
+                new
+                {
+                    runtimeSessionId = $"runtime-{Guid.NewGuid():N}",
+                    workDir = "/tmp/generic-attach-connection",
+                    processPid = 4321,
+                });
+            attach.EnsureSuccessStatusCode();
+            var attachPayload = await attach.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("opencode", attachPayload.GetProperty("runtime").GetString());
         }
         finally
         {
