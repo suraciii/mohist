@@ -422,7 +422,7 @@ public sealed class SlackAttachmentEntryIngressSpecs
         _fixture.Slack.BotsInfo = new(true, null, new("B123", "Mohist", "A123"));
         _fixture.Slack.PermissionsScopesList = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
-            ["im"] = ["chat:write", "im:history"],
+            ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
             ["team"] = ["users:read"],
         });
         _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));

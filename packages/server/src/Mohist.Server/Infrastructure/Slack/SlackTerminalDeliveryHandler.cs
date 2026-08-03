@@ -37,15 +37,24 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
 
         await using var scope = _scopeFactory.CreateAsyncScope();
         var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
-        var result = await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
-            delivery.ResolveProjectId(evt.Extensions),
-            delivery.ConnectionId,
+        var projection = scope.ServiceProvider.GetService<SlackStatusProjection>() ?? new SlackStatusProjection(outbox);
+        var source = new SlackMessageIdentity(
             delivery.WorkspaceTeamId,
             delivery.ConversationId,
-            delivery.Status == "completed" ? SlackOutboxKinds.TerminalResult : SlackOutboxKinds.ExplicitFailure,
+            delivery.MessageTs ?? $"terminal:{delivery.JobKey}");
+        var progressDispatchRef = delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
+            ? $"{delivery.JobKey}:progress"
+            : null;
+        var result = await projection.EnqueueTerminalAsync(
+            delivery.ResolveProjectId(evt.Extensions),
+            delivery.ConnectionId,
+            source,
+            delivery.ThreadTs ?? delivery.MessageTs,
+            delivery.Status,
+            Render(delivery),
             $"agent-job:{delivery.JobKey}:terminal-delivery",
-            JsonSerializer.Serialize(new { text = Render(delivery) }),
-            delivery.ThreadTs), ct);
+            progressDispatchRef,
+            ct);
 
         if (result.Suppressed)
             _log.LogInformation(
@@ -65,6 +74,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         {
             "completed" => "The task completed.",
             "failed" => "The task failed.",
+            "cancelled" => "The task was cancelled.",
             _ => "The task outcome is unknown.",
         };
         var evidence = BuildEvidence(delivery);
@@ -72,6 +82,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         {
             "completed" => "Review the evidence and send the next request.",
             "failed" => "Reply with corrected instructions or retry after fixing the reported problem.",
+            "cancelled" => "Send a new request when you are ready to continue.",
             _ => "Wait for reconciliation, then retry only after the outcome is confirmed.",
         };
         return $"Task: {delivery.WorkLabel}\nConclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
@@ -116,7 +127,8 @@ public sealed record SlackTerminalDelivery(
     string? FailureCategory,
     int ArtifactCount,
     int? ExitCode,
-    string? ThreadTs = null)
+    string? ThreadTs = null,
+    string? MessageTs = null)
 {
     public void Validate()
     {
@@ -125,7 +137,7 @@ public sealed record SlackTerminalDelivery(
             || string.IsNullOrWhiteSpace(ConnectionId)
             || string.IsNullOrWhiteSpace(WorkspaceTeamId)
             || string.IsNullOrWhiteSpace(ConversationId)
-            || Status is not ("completed" or "failed" or "unknown"))
+            || Status is not ("completed" or "failed" or "cancelled" or "unknown"))
         {
             throw new InvalidOperationException("Terminal delivery event has invalid routing or status facts.");
         }

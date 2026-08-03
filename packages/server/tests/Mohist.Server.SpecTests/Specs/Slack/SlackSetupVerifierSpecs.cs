@@ -225,7 +225,7 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
             new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
         public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
-            ["im"] = ["chat:write", "im:history"],
+            ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
             ["team"] = ["users:read"],
         });
 

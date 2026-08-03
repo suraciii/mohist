@@ -64,6 +64,35 @@ public sealed class SlackApiClientTests
             client.OpenFileContentAsync("F123", BotToken, TestContext.Current.CancellationToken));
     }
 
+    [Fact]
+    public async Task ProviderMutationMethodsUseStableSlackIdentitiesAndClientMessageIds()
+    {
+        var handler = new SlackMutationHttpHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var client = new SlackApiClient(http);
+
+        var posted = await client.ChatPostMessageAsync("C123", "Working...", "100.001", "status:1", BotToken);
+        var updated = await client.ChatUpdateAsync("C123", posted.Ts!, "Completed", BotToken);
+        var added = await client.ReactionsAddAsync("C123", "eyes", posted.Ts!, BotToken);
+        var removed = await client.ReactionsRemoveAsync("C123", "eyes", posted.Ts!, BotToken);
+        var reaction = await client.ReactionsGetAsync("C123", posted.Ts!, BotToken);
+        var history = await client.ConversationsHistoryAsync("C123", posted.Ts, posted.Ts, null, BotToken);
+
+        Assert.True(posted.Ok);
+        Assert.True(updated.Ok);
+        Assert.True(added.Ok);
+        Assert.True(removed.Ok);
+        Assert.Contains(reaction.Message!.Reactions!, value => value.Name == "eyes");
+        Assert.Equal("status:1", history.Messages![0].ClientMessageId);
+        Assert.Collection(handler.Requests,
+            request => Assert.Contains("\"client_msg_id\":\"status:1\"", request.Body, StringComparison.Ordinal),
+            request => Assert.Contains("\"ts\":\"100.002\"", request.Body, StringComparison.Ordinal),
+            request => Assert.Contains("\"name\":\"eyes\"", request.Body, StringComparison.Ordinal),
+            request => Assert.Contains("\"name\":\"eyes\"", request.Body, StringComparison.Ordinal),
+            request => Assert.Contains("\"timestamp\":\"100.002\"", request.Body, StringComparison.Ordinal),
+            request => Assert.Contains("\"latest\":\"100.002\"", request.Body, StringComparison.Ordinal));
+    }
+
     private sealed class ThrowingHttpHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
@@ -102,6 +131,37 @@ public sealed class SlackApiClientTests
         {
             Content = new StringContent(body, Encoding.UTF8, "application/json"),
         };
+    }
+
+    private sealed class SlackMutationHttpHandler : HttpMessageHandler
+    {
+        public List<RecordedRequest> Requests { get; } = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? string.Empty
+                : await request.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            Requests.Add(new RecordedRequest(
+                request.Method,
+                request.RequestUri?.ToString() ?? string.Empty,
+                request.Headers.Authorization?.Scheme == "Bearer" ? request.Headers.Authorization.Parameter : null,
+                body));
+            var method = request.RequestUri?.AbsolutePath.Split('/').LastOrDefault();
+            var response = method switch
+            {
+                "chat.postMessage" => "{\"ok\":true,\"ts\":\"100.002\"}",
+                "chat.update" => "{\"ok\":true,\"ts\":\"100.002\"}",
+                "reactions.add" or "reactions.remove" => "{\"ok\":true}",
+                "reactions.get" => "{\"ok\":true,\"message\":{\"reactions\":[{\"name\":\"eyes\",\"users\":[\"U123\"],\"count\":1}]}}",
+                "conversations.history" => "{\"ok\":true,\"messages\":[{\"ts\":\"100.002\",\"client_msg_id\":\"status:1\"}]}",
+                _ => "{\"ok\":false,\"error\":\"unknown_method\"}",
+            };
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed record RecordedRequest(HttpMethod Method, string Uri, string? BearerToken, string Body);

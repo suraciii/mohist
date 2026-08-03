@@ -1,4 +1,4 @@
-import type { AdapterTransport, IngressResult, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -136,30 +136,148 @@ export class SlackAdapter {
     try {
       while (!signal.aborted) {
         const delivery = await this.options.transport.claimDelivery(runtime.ref, this.options.adapterId, signal)
-        if (!delivery) return
-        let response: { ok?: boolean; error?: string } | undefined
+        if (!delivery) break
         try {
-          const payload = JSON.parse(delivery.payloadJson) as unknown
-          const text = readText(payload)
-          if (!text) throw new Error("Delivery payload did not contain text")
-          const message: { channel: string; text: string; thread_ts?: string } = {
-            channel: delivery.conversationId,
-            text,
-          }
-          if (delivery.threadTs) message.thread_ts = delivery.threadTs
-          response = await runtime.web.chat.postMessage(message)
+          const ack = await this.mutateDelivery(runtime.web, delivery)
+          await this.options.transport.ackDelivery(runtime.ref, ack, signal)
         } catch (error) {
           await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
           continue
         }
-        if (response.ok === false) {
-          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }, signal)
-          continue
-        }
-        await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "delivered" }, signal)
       }
+      await this.drainUncertain(runtime, signal)
     } finally {
       runtime.draining = false
+    }
+  }
+
+  private async mutateDelivery(web: SlackWebClient, delivery: Delivery): Promise<DeliveryAck> {
+    const payload = parseDeliveryPayload(delivery.payloadJson)
+    const operation = payload.operation ?? "post_message"
+    if (operation === "chat_update") {
+      const target = payload.providerMessageIdentity
+      if (!target) throw new Error("chat.update delivery has no provider message identity")
+      const response = await web.chat.update?.({ channel: target.conversationId, ts: target.messageTs, text: requiredText(payload) })
+      if (!response) throw new Error("Slack client does not support chat.update")
+      if (response.ok === false)
+        return await this.fallbackAfterUpdateFailure(web, delivery, payload, response.error ?? "Slack rejected chat.update")
+      return delivered(delivery, { conversationId: target.conversationId, messageTs: response.ts ?? target.messageTs })
+    }
+
+    if (operation === "reaction_add" || operation === "reaction_remove") {
+      const target = payload.targetMessageIdentity
+      if (!target || !payload.reaction) throw new Error(`${operation} delivery is missing its target`)
+      const response = await mutateReaction(web, operation, target, payload.reaction)
+      if (!response) throw new Error("Slack client does not support reactions")
+      if (response.ok === false) {
+        if (!isUnsupportedReactionError(response.error))
+          return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the reaction" }
+        const statusTarget = payload.statusDispatchRef
+          ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef)
+          : undefined
+        if (statusTarget && statusTarget.messageTs !== target.messageTs) {
+          const statusResponse = await mutateReaction(web, operation, statusTarget, payload.reaction)
+          if (!statusResponse) throw new Error("Slack client does not support reactions")
+          if (statusResponse.ok !== false)
+            return delivered(delivery, statusTarget)
+          if (!isUnsupportedReactionError(statusResponse.error))
+            return { id: delivery.id, outcome: "retry", reason: statusResponse.error ?? "Slack rejected the reaction" }
+        }
+        if (operation === "reaction_remove")
+          return delivered(delivery, target)
+        if (payload.fallbackText && payload.fallbackDispatchRef)
+          return await this.postFallback(web, delivery, payload, response.error ?? "Slack does not support reactions")
+        return delivered(delivery, target)
+      }
+      return delivered(delivery, target)
+    }
+
+    const text = requiredText(payload)
+    const existingStatus = payload.statusDispatchRef
+      ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef)
+      : undefined
+    if (existingStatus && web.chat.update) {
+      const response = await web.chat.update({
+        channel: existingStatus.conversationId,
+        ts: existingStatus.messageTs,
+        text,
+      })
+      if (response.ok === false)
+        return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the status update" }
+      return delivered(delivery, { conversationId: existingStatus.conversationId, messageTs: response.ts ?? existingStatus.messageTs })
+    }
+    const response = await web.chat.postMessage({
+      channel: delivery.conversationId,
+      text,
+      ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
+      ...(payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
+    })
+    if (response.ok === false)
+      return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }
+    return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
+  }
+
+  private async fallbackAfterUpdateFailure(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string) {
+    if (!payload.fallbackText || !payload.fallbackDispatchRef)
+      return { id: delivery.id, outcome: "retry" as const, reason }
+    return await this.postFallback(web, delivery, payload, reason)
+  }
+
+  private async postFallback(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string): Promise<DeliveryAck> {
+    const response = await web.chat.postMessage({
+      channel: delivery.conversationId,
+      text: payload.fallbackText ?? requiredText(payload),
+      ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
+      client_msg_id: payload.fallbackDispatchRef,
+    })
+    if (response.ok === false)
+      return { id: delivery.id, outcome: "retry", reason: response.error ?? reason }
+    return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
+  }
+
+  private async reconcile(runtime: ConnectionRuntime, delivery: Delivery): Promise<DeliveryAck> {
+    const payload = parseDeliveryPayload(delivery.payloadJson)
+    const target = payload.providerMessageIdentity ?? payload.targetMessageIdentity
+    if ((payload.operation === "reaction_add" || payload.operation === "reaction_remove") && target && payload.reaction) {
+      const response = await runtime.web?.reactions?.get?.({
+        channel: target.conversationId,
+        timestamp: target.messageTs,
+        full: true,
+      })
+      if (!response) return { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot reconcile reactions" }
+      if (response.ok === false) return { id: delivery.id, outcome: "uncertain", reason: response.error ?? "Slack reaction reconciliation failed" }
+      const present = response.message?.reactions?.some(reaction => reaction.name === payload.reaction)
+      const deliveredState = payload.operation === "reaction_add" ? present : !present
+      return deliveredState ? delivered(delivery, target) : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+    }
+
+    const history = await runtime.web?.conversations?.history?.({
+      channel: delivery.conversationId,
+      ...(target ? { latest: target.messageTs, oldest: target.messageTs } : {}),
+      inclusive: true,
+      limit: 200,
+    })
+    if (!history) return { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot reconcile messages" }
+    if (history.ok === false) return { id: delivery.id, outcome: "uncertain", reason: history.error ?? "Slack message reconciliation failed" }
+    const message = history.messages?.find(candidate =>
+      (target && candidate.ts === target.messageTs)
+      || (payload.clientMessageId && candidate.client_msg_id === payload.clientMessageId)
+      || (payload.fallbackDispatchRef && candidate.client_msg_id === payload.fallbackDispatchRef))
+    return message?.ts
+      ? delivered(delivery, { conversationId: delivery.conversationId, messageTs: message.ts })
+      : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+  }
+
+  private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
+    if (!this.options.transport.claimUncertainDelivery) return
+    while (!signal.aborted) {
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.ref, this.options.adapterId, signal)
+      if (!delivery) return
+      try {
+        await this.options.transport.ackDelivery(runtime.ref, await this.reconcile(runtime, delivery), signal)
+      } catch (error) {
+        await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
+      }
     }
   }
 
@@ -230,8 +348,69 @@ function parseMentionedUserIds(text: string | null): readonly string[] {
   return [...mentioned]
 }
 
-function readText(value: unknown): string | null {
-  return isRecord(value) && typeof value.text === "string" ? value.text : null
+interface DeliveryPayload {
+  readonly operation?: string
+  readonly text?: string
+  readonly clientMessageId?: string
+  readonly providerMessageIdentity?: ProviderMessageIdentity
+  readonly targetMessageIdentity?: ProviderMessageIdentity
+  readonly reaction?: string
+  readonly fallbackText?: string
+  readonly fallbackDispatchRef?: string
+  readonly statusDispatchRef?: string
+}
+
+function parseDeliveryPayload(value: string): DeliveryPayload {
+  const parsed: unknown = JSON.parse(value)
+  if (!isRecord(parsed)) throw new Error("Delivery payload was not an object")
+  return parsed as DeliveryPayload
+}
+
+function requiredText(payload: DeliveryPayload): string {
+  if (!payload.text) throw new Error("Delivery payload did not contain text")
+  return payload.text
+}
+
+function delivered(delivery: Delivery, identity?: ProviderMessageIdentity): DeliveryAck {
+  return identity
+    ? { id: delivery.id, outcome: "delivered", providerMessageIdentity: identity }
+    : { id: delivery.id, outcome: "delivered" }
+}
+
+function isUnsupportedReactionError(error: string | undefined): boolean {
+  return new Set([
+    "cant_react",
+    "message_not_found",
+    "not_in_channel",
+    "not_allowed_token_type",
+    "invalid_timestamp",
+    "channel_not_found",
+  ]).has(error ?? "")
+}
+
+async function mutateReaction(
+  web: SlackWebClient,
+  operation: "reaction_add" | "reaction_remove",
+  target: ProviderMessageIdentity,
+  reaction: string,
+) {
+  const method = operation === "reaction_add" ? web.reactions?.add : web.reactions?.remove
+  return await method?.call(web.reactions, {
+    channel: target.conversationId,
+    name: reaction,
+    timestamp: target.messageTs,
+  })
+}
+
+async function findStatusMessage(
+  web: SlackWebClient,
+  conversationId: string,
+  clientMessageId: string,
+): Promise<ProviderMessageIdentity | undefined> {
+  const history = await web.conversations?.history?.({ channel: conversationId, limit: 200 })
+  if (!history || history.ok === false) return undefined
+  const message = history.messages?.find(candidate => candidate.client_msg_id === clientMessageId && candidate.ts)
+  return message?.ts ? { conversationId, messageTs: message.ts } : undefined
 }
 
 function stringValue(value: unknown, key?: string): string | null {

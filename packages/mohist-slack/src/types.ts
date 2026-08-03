@@ -48,10 +48,16 @@ export interface Delivery {
   readonly payloadJson: string
 }
 
+export interface ProviderMessageIdentity {
+  readonly conversationId: string
+  readonly messageTs: string
+}
+
 export interface DeliveryAck {
   readonly id: string
   readonly outcome: "delivered" | "uncertain" | "retry"
   readonly reason?: string
+  readonly providerMessageIdentity?: ProviderMessageIdentity
 }
 
 export interface AdapterTransport {
@@ -59,6 +65,7 @@ export interface AdapterTransport {
   lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
   ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
   claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  claimUncertainDelivery?(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
   ackDelivery(ref: SlackConnectionRef, ack: DeliveryAck, signal: AbortSignal): Promise<void>
 }
 
@@ -75,7 +82,16 @@ export interface SocketClient {
 
 export interface SlackWebClient {
   chat: {
-    postMessage(input: { channel: string; text: string; thread_ts?: string }): Promise<{ ok?: boolean; error?: string }>
+    postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+    update?(input: { channel: string; ts: string; text: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+  }
+  reactions?: {
+    add(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
+    remove(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
+    get?(input: { channel: string; timestamp: string; full?: boolean }): Promise<{ ok?: boolean; error?: string; message?: { reactions?: readonly { name?: string; users?: readonly string[] }[] } }>
+  }
+  conversations?: {
+    history(input: { channel: string; latest?: string; oldest?: string; inclusive?: boolean; limit?: number }): Promise<{ ok?: boolean; error?: string; messages?: readonly { ts?: string; client_msg_id?: string; text?: string; thread_ts?: string }[] }>
   }
 }
 

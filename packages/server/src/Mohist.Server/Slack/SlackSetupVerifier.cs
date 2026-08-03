@@ -19,7 +19,9 @@ public sealed record RotationCheckResult(
 
 public sealed class SlackSetupVerifier
 {
-    private static readonly string[] RequiredScopes = ["chat:write", "users:read", "im:history"];
+    private static readonly string[] RequiredScopes = [
+        "chat:write", "users:read", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write",
+    ];
     private readonly ISlackApiClient _slack;
     private readonly ISecretStore _secrets;
     private readonly AgentConnectionStore _connections;

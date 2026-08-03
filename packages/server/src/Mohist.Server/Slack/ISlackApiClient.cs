@@ -20,6 +20,18 @@ public interface ISlackApiClient
         string? cursor,
         string botToken,
         CancellationToken ct = default);
+    Task<SlackChatPostMessageResponse> ChatPostMessageAsync(string conversationId, string text, string? threadTs, string? clientMessageId, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackChatPostMessageResponse>(new NotSupportedException("Slack chat.postMessage is not implemented by this client."));
+    Task<SlackChatUpdateResponse> ChatUpdateAsync(string conversationId, string messageTs, string text, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackChatUpdateResponse>(new NotSupportedException("Slack chat.update is not implemented by this client."));
+    Task<SlackReactionResponse> ReactionsAddAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackReactionResponse>(new NotSupportedException("Slack reactions.add is not implemented by this client."));
+    Task<SlackReactionResponse> ReactionsRemoveAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackReactionResponse>(new NotSupportedException("Slack reactions.remove is not implemented by this client."));
+    Task<SlackReactionGetResponse> ReactionsGetAsync(string conversationId, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackReactionGetResponse>(new NotSupportedException("Slack reactions.get is not implemented by this client."));
+    Task<SlackConversationsHistoryPage> ConversationsHistoryAsync(string conversationId, string? latest, string? oldest, string? cursor, string botToken, CancellationToken ct = default) =>
+        Task.FromException<SlackConversationsHistoryPage>(new NotSupportedException("Slack conversations.history is not implemented by this client."));
 }
 
 public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
@@ -94,6 +106,24 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
             },
             botToken,
             ct);
+
+    public Task<SlackChatPostMessageResponse> ChatPostMessageAsync(string conversationId, string text, string? threadTs, string? clientMessageId, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackChatPostMessageResponse>("chat.postMessage", new { channel = conversationId, text, thread_ts = threadTs, client_msg_id = clientMessageId }, botToken, ct);
+
+    public Task<SlackChatUpdateResponse> ChatUpdateAsync(string conversationId, string messageTs, string text, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackChatUpdateResponse>("chat.update", new { channel = conversationId, ts = messageTs, text }, botToken, ct);
+
+    public Task<SlackReactionResponse> ReactionsAddAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackReactionResponse>("reactions.add", new { channel = conversationId, name = reaction, timestamp = messageTs }, botToken, ct);
+
+    public Task<SlackReactionResponse> ReactionsRemoveAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackReactionResponse>("reactions.remove", new { channel = conversationId, name = reaction, timestamp = messageTs }, botToken, ct);
+
+    public Task<SlackReactionGetResponse> ReactionsGetAsync(string conversationId, string messageTs, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackReactionGetResponse>("reactions.get", new { channel = conversationId, timestamp = messageTs, full = true }, botToken, ct);
+
+    public Task<SlackConversationsHistoryPage> ConversationsHistoryAsync(string conversationId, string? latest, string? oldest, string? cursor, string botToken, CancellationToken ct = default) =>
+        PostAsync<SlackConversationsHistoryPage>("conversations.history", new { channel = conversationId, latest, oldest, cursor, limit = 200, inclusive = true }, botToken, ct);
 
     private async Task<HttpResponseMessage> GetAsync(string url, string token, CancellationToken ct)
     {
@@ -215,6 +245,28 @@ public sealed record SlackConversationsRepliesPage(
     string? Error,
     [property: JsonPropertyName("messages")] IReadOnlyList<SlackConversationMessage>? Messages,
     [property: JsonPropertyName("response_metadata")] SlackResponseMetadata? ResponseMetadata);
+public sealed record SlackChatPostMessageResponse(
+    bool Ok,
+    string? Error,
+    [property: JsonPropertyName("ts")] string? Ts,
+    [property: JsonPropertyName("message")] SlackConversationMessage? Message);
+public sealed record SlackChatUpdateResponse(
+    bool Ok,
+    string? Error,
+    [property: JsonPropertyName("ts")] string? Ts,
+    [property: JsonPropertyName("message")] SlackConversationMessage? Message);
+public sealed record SlackReactionResponse(bool Ok, string? Error);
+public sealed record SlackReactionGetResponse(bool Ok, string? Error, SlackReactionMessage? Message);
+public sealed record SlackReactionMessage([property: JsonPropertyName("reactions")] IReadOnlyList<SlackReaction>? Reactions);
+public sealed record SlackReaction(
+    [property: JsonPropertyName("name")] string? Name,
+    [property: JsonPropertyName("users")] IReadOnlyList<string>? Users,
+    [property: JsonPropertyName("count")] int Count);
+public sealed record SlackConversationsHistoryPage(
+    bool Ok,
+    string? Error,
+    [property: JsonPropertyName("messages")] IReadOnlyList<SlackConversationMessage>? Messages,
+    [property: JsonPropertyName("response_metadata")] SlackResponseMetadata? ResponseMetadata);
 public sealed record SlackConversationMessage(
     [property: JsonPropertyName("type")] string? Type,
     [property: JsonPropertyName("subtype")] string? Subtype,
@@ -223,4 +275,5 @@ public sealed record SlackConversationMessage(
     [property: JsonPropertyName("text")] string? Text,
     [property: JsonPropertyName("bot_id")] string? BotId,
     [property: JsonPropertyName("thread_ts")] string? ThreadTs,
-    [property: JsonPropertyName("parent_user_id")] string? ParentUserId);
+    [property: JsonPropertyName("parent_user_id")] string? ParentUserId,
+    [property: JsonPropertyName("client_msg_id")] string? ClientMessageId = null);
