@@ -21,6 +21,9 @@ namespace Mohist.Server.Sessions.Services;
 /// </remarks>
 public class AgentSessionQuerier : IScopedService
 {
+    private const string AgentLaunchSourceKind = "agent-launch";
+    private const string AgentConnectionSourceKind = "agent-connection";
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly AgentSessionQuery _sessionQuery;
 
@@ -112,27 +115,13 @@ public class AgentSessionQuerier : IScopedService
         CancellationToken ct = default)
     {
         var clampedLimit = Math.Clamp(limit, 1, 200);
-
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-            [GenericAgentSessionMetadata.AgentId] = agentId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-        };
-        if (additionalContextLabels is not null)
-        {
-            foreach (var (key, value) in additionalContextLabels)
-            {
-                if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
-                    labels[key] = value;
-            }
-        }
-
-        var records = await _sessionQuery.ListByLabelsAsync(
-            labels,
-            AgentSessionQueryOrder.CreatedDescending,
+        var records = await ListAgentSessionRecordsAsync(
+            projectId,
+            agentId,
+            [AgentLaunchSourceKind],
             clampedLimit,
-            ct: ct);
+            additionalContextLabels,
+            ct);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var sessionIds = records.Select(r => r.Session.Id).ToArray();
@@ -161,6 +150,95 @@ public class AgentSessionQuerier : IScopedService
         }
 
         return items;
+    }
+
+    /// <summary>
+    /// Lists an Agent's sessions for the source-agnostic session list. Agent
+    /// Connection sessions share the Agent identity and session read contract
+    /// with direct launches, but remain distinct from Workflow sessions.
+    /// </summary>
+    public async Task<IReadOnlyList<UnifiedSessionListItemDto>> ListUnifiedSessionsByAgentAsync(
+        string projectId,
+        string agentId,
+        int limit = 50,
+        CancellationToken ct = default)
+    {
+        var records = await ListAgentSessionRecordsAsync(
+            projectId,
+            agentId,
+            [AgentLaunchSourceKind, AgentConnectionSourceKind],
+            limit,
+            additionalContextLabels: null,
+            ct: ct);
+        if (records.Count == 0) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(
+            db,
+            records.Select(record => record.Session.Id).ToArray(),
+            ct);
+
+        return records.Select(record =>
+        {
+            var session = record.Session;
+            var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind)!;
+            var summary = eventSummaries.GetValueOrDefault(session.Id);
+            return new UnifiedSessionListItemDto(
+                Id: session.Id,
+                Source: sourceKind,
+                RuntimeSessionId: session.Status.AgentRuntimeSessionId,
+                Runtime: session.Runtime.Runtime,
+                Activity: ResolveAgentSessionActivity(record),
+                CreatedAt: session.Status.CreatedAt.ToString("o"),
+                LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
+                Model: summary?.ResolvedModel ?? session.Settings.Model,
+                AgentId: record.Label(GenericAgentSessionMetadata.AgentId),
+                AgentName: record.Label(GenericAgentSessionMetadata.AgentName),
+                WorkflowRunId: null,
+                SessionName: null,
+                ContextRefs: BuildUnifiedContextRefs(record));
+        }).ToList();
+    }
+
+    private async Task<IReadOnlyList<AgentSessionRecord>> ListAgentSessionRecordsAsync(
+        string projectId,
+        string agentId,
+        IReadOnlyList<string> sourceKinds,
+        int limit,
+        IReadOnlyDictionary<string, string>? additionalContextLabels,
+        CancellationToken ct)
+    {
+        var clampedLimit = Math.Clamp(limit, 1, 200);
+        var records = new List<AgentSessionRecord>();
+        foreach (var sourceKind in sourceKinds)
+        {
+            var labels = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [GenericAgentSessionMetadata.AgentId] = agentId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = sourceKind,
+            };
+            if (additionalContextLabels is not null)
+            {
+                foreach (var (key, value) in additionalContextLabels)
+                {
+                    if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+                        labels[key] = value;
+                }
+            }
+
+            records.AddRange(await _sessionQuery.ListByLabelsAsync(
+                labels,
+                AgentSessionQueryOrder.CreatedDescending,
+                clampedLimit,
+                ct: ct));
+        }
+
+        return records
+            .OrderByDescending(record => record.Session.Status.CreatedAt)
+            .ThenByDescending(record => record.Session.Id, StringComparer.Ordinal)
+            .Take(clampedLimit)
+            .ToList();
     }
 
     /// <summary>
@@ -545,9 +623,10 @@ public class AgentSessionQuerier : IScopedService
     /// <para>
     /// The summary branches internally on the resolved
     /// <see cref="AgentSessionQueryMetadataKeys.SourceKind"/> to populate
-    /// source-specific identity only for its source: agent-launch sessions
-    /// carry <c>agentId</c> / <c>agentName</c>; workflow sessions carry
-    /// <c>workflowRunId</c> / <c>sessionName</c>. The absent-when-empty idiom
+    /// source-specific identity only for its source: agent-launch and
+    /// agent-connection sessions carry <c>agentId</c> / <c>agentName</c>;
+    /// workflow sessions carry <c>workflowRunId</c> / <c>sessionName</c>.
+    /// The absent-when-empty idiom
     /// (<see cref="Infrastructure.JSON.Options"/>) omits the unused branch's
     /// fields from the wire rather than nulling them.
     /// </para>
@@ -574,8 +653,9 @@ public class AgentSessionQuerier : IScopedService
         var session = record.Session;
         var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
         var isWorkflow = string.Equals(sourceKind, "workflow", StringComparison.Ordinal);
-        var isAgentLaunch = string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal);
-        if (!isWorkflow && !isAgentLaunch) return null;
+        var isAgentSession = string.Equals(sourceKind, AgentLaunchSourceKind, StringComparison.Ordinal)
+            || string.Equals(sourceKind, AgentConnectionSourceKind, StringComparison.Ordinal);
+        if (!isWorkflow && !isAgentSession) return null;
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var transcriptSummary = await ResolveTranscriptSummaryAsync(db, session.Id, session, ct);
@@ -597,8 +677,8 @@ public class AgentSessionQuerier : IScopedService
             FailureReason: transcriptSummary.FailureReason,
             ToolCallCount: transcriptSummary.ToolCallCount,
             ToolErrorCount: transcriptSummary.ToolErrorCount,
-            AgentId: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
-            AgentName: isAgentLaunch ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
+            AgentId: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentId) : null,
+            AgentName: isAgentSession ? record.Label(GenericAgentSessionMetadata.AgentName) : null,
             WorkflowRunId: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.WorkflowRunId) : null,
             SessionName: isWorkflow ? record.Label(AgentSessionQueryMetadataKeys.SessionName) : null,
             ContextRefs: BuildUnifiedContextRefs(record),
@@ -614,9 +694,9 @@ public class AgentSessionQuerier : IScopedService
     /// Builds the unified source-agnostic transcript surfaced by
     /// <c>GET /api/projects/{projectRef}/sessions/{sessionId}/transcript</c>.
     /// Resolves the row by id WITHOUT the
-    /// <c>source-kind == agent-launch</c> gate, so a workflow-originated
-    /// session's transcript resolves here by the same stable id as an
-    /// agent-launch session's. Returns <c>null</c> for an unknown id, a
+    /// source gate, so a workflow-originated or Agent Connection session's
+    /// transcript resolves here by the same stable id as an agent-launch
+    /// session's. Returns <c>null</c> for an unknown id, a
     /// cross-project session, or an unknown source kind.
     /// </summary>
     public async Task<AgentSessionTranscriptResponse?> GetUnifiedSessionTranscriptAsync(
@@ -641,7 +721,8 @@ public class AgentSessionQuerier : IScopedService
     /// Resolves a session row by id without the <c>source-kind</c> gate and
     /// enforces project isolation. Returns <c>null</c> when the id does not
     /// resolve, the session belongs to a different project, or the source
-    /// kind is neither <c>agent-launch</c> nor <c>workflow</c>.
+    /// kind is not one of the supported Agent launch, Agent Connection, or
+    /// Workflow sources.
     /// </summary>
     private async Task<AgentSessionRecord?> FindUnifiedSessionAsync(string projectId, string sessionId, CancellationToken ct)
     {
@@ -653,7 +734,8 @@ public class AgentSessionQuerier : IScopedService
             return null;
 
         var sourceKind = record.Label(AgentSessionQueryMetadataKeys.SourceKind);
-        if (!string.Equals(sourceKind, "agent-launch", StringComparison.Ordinal)
+        if (!string.Equals(sourceKind, AgentLaunchSourceKind, StringComparison.Ordinal)
+            && !string.Equals(sourceKind, AgentConnectionSourceKind, StringComparison.Ordinal)
             && !string.Equals(sourceKind, "workflow", StringComparison.Ordinal))
             return null;
 

@@ -468,6 +468,12 @@ function createAgentSessionEventSink(
   return {
     async attachSession(runtimeSessionId, workDir, model) {
       try {
+        await connection.openAgentSession(
+          projectId!,
+          agentSessionId,
+          { workDir },
+          signal,
+        )
         await connection.attachAgentSession(
           projectId!,
           agentSessionId,
@@ -482,7 +488,7 @@ function createAgentSessionEventSink(
           signal,
         )
       } catch (error) {
-        console.error(`agent-session attach failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+        console.error(`agent-session open/attach failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
         throw error
       }
     },

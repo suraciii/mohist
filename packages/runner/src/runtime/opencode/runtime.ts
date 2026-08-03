@@ -320,23 +320,14 @@ export class OpenCodeRuntime {
   }
 
   /**
-   * Dispatch a Follow-up prompt to an existing Runtime Session.
-   *
-   * Wraps `client.session.promptAsync`.
-   * The runtime verifies the persisted binding still resolves to a
-   * live physical Session before dispatching; a stale binding surfaces
-   * as `missing-session` with the existing Reset hint. The dispatch
-   * is fire-and-forget at the SDK layer — the prompt returns when
-   * the message is on the wire, not when the agent finishes. The
-   * runner-side handler treats this as `accepted: true` regardless of
-   * the eventual turn outcome (turn completion is observed through
-   * the existing global event subscription + AgentSession event
-   * channel, the same way the Workflow source observes it).
-   *
-   * `options.model` / `options.variant` apply to the prompt body only
-   * — the physical Session is never rotated on a Follow-up.
+   * Run a Follow-up prompt to completion on an existing Runtime Session.
+   * The SignalR handler still acknowledges the command immediately;
+   * this runtime owns completion and event projection.
    */
-  async followup(request: RuntimeFollowupRequest): Promise<RuntimeResult<RuntimeFollowupResult>> {
+  async followup(
+    request: RuntimeFollowupRequest,
+    observer?: RuntimeTurnObserver,
+  ): Promise<RuntimeResult<RuntimeFollowupResult>> {
     const diagnostics: RuntimeDiagnostic[] = []
 
     if (!this.state.server || !this.state.ready) {
@@ -361,62 +352,28 @@ export class OpenCodeRuntime {
       )
       return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
     }
-    const runtimeSessionId = request.target.runtimeSessionId
+    const result = await this.runTurn({
+      target: request.target,
+      prompt: request.prompt,
+      ...(request.fileParts ? { fileParts: request.fileParts } : {}),
+      options: {
+        ...(request.options ?? {}),
+        model,
+        variant,
+      },
+    }, new AbortController().signal, observer)
+    if (!result.ok) return result
 
-    return await this.directoryInstances.withOperation(request.target.workDir, async (lease) => {
-      const server = this.state.server
-      if (!server || !this.state.ready) {
-        const error = normalizeUnavailableRuntime(this.state.diagnostic ? [this.state.diagnostic] : [])
-        return { ok: false, error, diagnostics: error.diagnostics }
-      }
-      lease.markUsed()
-      const client = server.client
-      try {
-        const resolved = await client.session.get({
-          sessionID: runtimeSessionId,
-          directory: request.target.workDir,
-        }, { throwOnError: true })
-        const resolvedData = resolved.data
-        if (!resolvedData || resolvedData.id !== runtimeSessionId) {
-          const error = normalizeMissingSession()
-          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-        }
-      } catch (cause) {
-        const status = (cause as { status?: number } | undefined)?.status
-        if (status === 404) {
-          const error = normalizeMissingSession()
-          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-        }
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "Failed to resolve persisted Runtime Session") })
-        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-      }
-
-      try {
-        await client.session.promptAsync({
-          sessionID: runtimeSessionId,
-          directory: request.target.workDir,
-          parts: [
-            { type: "text", text: request.prompt },
-            ...(request.fileParts ?? []).map((part) => ({ type: "file" as const, ...part })),
-          ],
-          ...(model ? { model: { providerID: model.providerID, modelID: model.modelID } } : {}),
-          ...(variant ? { variant } : {}),
-        }, { throwOnError: true })
-        const facts: RuntimeFollowupFacts = {
-          runtimeSessionId,
-          workDir: request.target.workDir,
-        }
-        return { ok: true, value: { facts, diagnostics }, diagnostics }
-      } catch (cause) {
-        const status = (cause as { status?: number } | undefined)?.status
-        if (status === 404) {
-          const error = normalizeMissingSession()
-          return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-        }
-        const error = normalizeTurnFailed({ message: errorMessage(cause, "OpenCode follow-up prompt failed") })
-        return { ok: false, error, diagnostics: [...diagnostics, ...error.diagnostics] }
-      }
-    })
+    const facts: RuntimeFollowupFacts = {
+      runtimeSessionId: result.value.facts.runtimeSessionId,
+      workDir: result.value.facts.workDir,
+      finalAssistantText: result.value.facts.finalAssistantText,
+    }
+    return {
+      ok: true,
+      value: { facts, diagnostics: [...diagnostics, ...result.value.diagnostics] },
+      diagnostics: [...diagnostics, ...result.diagnostics],
+    }
   }
 
   /**

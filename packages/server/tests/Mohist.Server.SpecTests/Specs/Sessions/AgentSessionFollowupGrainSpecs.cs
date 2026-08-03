@@ -496,8 +496,11 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
         var persistence = grain.PersistenceCheckpoint(_fixture.Persistence);
         await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
             new[] { new AgentSessionRuntimeEventInput(
-                RuntimeEventTypes.SessionActivity,
-                $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed"}""") },
+                RuntimeEventTypes.MessageDelta,
+                "{\"text\":\"follow-up assistant output\"}"),
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    $$"""{"activity":"idle","operationId":"{{accept.OperationId}}","status":"completed","message":"follow-up assistant output","output":"follow-up assistant output"}""") },
             "runtime-progress-terminal"));
         await persistence.WaitAsync();
 
@@ -507,6 +510,8 @@ public sealed partial class AgentSessionFollowupGrainSpecs : IClassFixture<Agent
 
         var turn = Assert.Single(state.Status.Turns!);
         Assert.Equal(AgentTurnStatus.Completed, turn.Status);
+        Assert.Equal("follow-up assistant output", turn.Result?.Message);
+        Assert.Equal("follow-up assistant output", turn.Result?.Output);
     }
 
     [Fact]

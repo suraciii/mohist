@@ -26,6 +26,9 @@ class Web implements SlackWebClient {
   readonly updated: Array<{ channel: string; ts: string; text: string }> = []
   readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string }> = []
   reactionError: string | undefined
+  reactionThrow: unknown = undefined
+  reactionPresent = false
+  reactionReadThrow: unknown = undefined
   updateError: string | undefined
   historyMessages: Array<{ ts?: string; client_msg_id?: string; text?: string }> = []
   readonly chat = {
@@ -39,9 +42,15 @@ class Web implements SlackWebClient {
     },
   }
   readonly reactions = {
-    add: async () => ({ ok: this.reactionError === undefined, error: this.reactionError }),
+    add: async () => {
+      if (this.reactionThrow !== undefined) throw this.reactionThrow
+      return { ok: this.reactionError === undefined, error: this.reactionError }
+    },
     remove: async () => ({ ok: true }),
-    get: async () => ({ ok: true, message: { reactions: [] } }),
+    get: async () => {
+      if (this.reactionReadThrow !== undefined) throw this.reactionReadThrow
+      return { ok: true, message: { reactions: this.reactionPresent ? [{ name: "eyes" }] : [] } }
+    },
   }
   readonly conversations = {
     history: async () => ({ ok: true, messages: this.historyMessages }),
@@ -115,6 +124,40 @@ describe("Slack status provider mutations", () => {
     expect(transport.acks[0]).toMatchObject({ id: "received", outcome: "delivered", adapterId: "a" })
   })
 
+  it("projects a thrown missing_scope reaction to one fallback before delivering the final text", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    web.reactionThrow = new Error("An API error occurred: missing_scope")
+    transport.deliveries.push({
+      id: "received",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "reaction_add",
+        reaction: "eyes",
+        targetMessageIdentity: { conversationId: "D1", messageTs: "100.001" },
+        fallbackText: "Received",
+        fallbackDispatchRef: "fallback:received",
+      }),
+    }, {
+      id: "terminal",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({ operation: "post_message", text: "Final answer" }),
+    })
+
+    await start(transport, web)
+
+    expect(web.posted).toEqual([
+      { channel: "D1", text: "Received", thread_ts: "100.001", client_msg_id: "fallback:received" },
+      { channel: "D1", text: "Final answer", thread_ts: "100.001" },
+    ])
+    expect(transport.acks).toEqual([
+      { id: "received", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" } },
+      { id: "terminal", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" } },
+    ])
+  })
+
   it("uses one stable same-thread fallback after a terminal update failure", async () => {
     const transport = new Transport()
     const web = new Web()
@@ -164,6 +207,76 @@ describe("Slack status provider mutations", () => {
     expect(web.updated).toEqual([])
     expect(transport.acks).toEqual([{
       id: "uncertain",
+      outcome: "delivered",
+      adapterId: "a",
+      providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+    }])
+  })
+
+  it("reconciles an uncertain reaction missing_scope with one fallback and a delivered identity", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    web.reactionReadThrow = new Error("An API error occurred: missing_scope")
+    transport.deliveries.push({
+      id: "terminal",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({ operation: "post_message", text: "Final answer" }),
+    })
+    transport.uncertain.push({
+      id: "uncertain-received",
+      conversationId: "D1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "reaction_add",
+        reaction: "eyes",
+        targetMessageIdentity: { conversationId: "D1", messageTs: "100.001" },
+        fallbackText: "Received",
+        fallbackDispatchRef: "fallback:received",
+      }),
+    })
+
+    await start(transport, web)
+
+    expect(web.posted).toEqual([
+      { channel: "D1", text: "Received", thread_ts: "100.001", client_msg_id: "fallback:received" },
+      { channel: "D1", text: "Final answer", thread_ts: "100.001" },
+    ])
+    expect(transport.acks).toEqual([
+      {
+        id: "uncertain-received",
+        outcome: "delivered",
+        adapterId: "a",
+        providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" },
+      },
+      {
+        id: "terminal",
+        outcome: "delivered",
+        adapterId: "a",
+        providerMessageIdentity: { conversationId: "D1", messageTs: "200.001" },
+      },
+    ])
+  })
+
+  it("reconciles a delivered uncertain reaction with its target identity", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    web.reactionPresent = true
+    transport.uncertain.push({
+      id: "uncertain-reaction",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "reaction_add",
+        reaction: "eyes",
+        targetMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+      }),
+    })
+
+    await start(transport, web)
+
+    expect(transport.acks).toEqual([{
+      id: "uncertain-reaction",
       outcome: "delivered",
       adapterId: "a",
       providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },

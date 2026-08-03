@@ -86,28 +86,46 @@ function makeAccessors(runtime: OpenCodeRuntime | null = makeFakeRuntime().runti
 
 interface FakeConnectionHandles {
   connection: ServerConnection
+  openCalls: Array<{
+    projectId: string
+    sessionId: string
+    body: Record<string, unknown>
+  }>
   attachCalls: Array<{
     projectId: string
     sessionId: string
     body: Record<string, unknown>
   }>
   eventCalls: Array<{ projectId: string; sessionId: string; body: Record<string, unknown> }>
+  bindingCalls: string[]
   setAgentSession: (session: { runtimeSessionId: string | null } | null) => void
   setEventWriter: (writer: (body: Record<string, unknown>) => Promise<void>) => void
 }
 
 function makeFakeConnection(): FakeConnectionHandles {
+  const openCalls: FakeConnectionHandles["openCalls"] = []
   const attachCalls: FakeConnectionHandles["attachCalls"] = []
   const eventCalls: FakeConnectionHandles["eventCalls"] = []
+  const bindingCalls: string[] = []
   let agentSession: { runtimeSessionId: string | null } | null = null
   let eventWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   const connection = {
+    async openAgentSession(
+      projectId: string,
+      sessionId: string,
+      body: Record<string, unknown>,
+      _signal: AbortSignal,
+    ) {
+      bindingCalls.push("open")
+      openCalls.push({ projectId, sessionId, body })
+    },
     async attachAgentSession(
       projectId: string,
       sessionId: string,
       body: Record<string, unknown>,
       _signal: AbortSignal,
     ) {
+      bindingCalls.push("attach")
       attachCalls.push({ projectId, sessionId, body })
     },
     async getAgentSession(_projectId: string, sessionId: string, _signal: AbortSignal) {
@@ -124,8 +142,10 @@ function makeFakeConnection(): FakeConnectionHandles {
   } as unknown as ServerConnection
   return {
     connection,
+    openCalls,
     attachCalls,
     eventCalls,
+    bindingCalls,
     setAgentSession(session) {
       agentSession = session
     },
@@ -309,7 +329,13 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     })
     const result = await executor.execute(work, new AbortController().signal)
     expect(result.status).toBe("completed")
+    expect(connection.openCalls).toEqual([{
+      projectId: "proj-1",
+      sessionId: "session-bound",
+      body: { workDir: "/tmp/agent-job-ws" },
+    }])
     expect(connection.attachCalls).toHaveLength(1)
+    expect(connection.bindingCalls).toEqual(["open", "attach"])
     const attach = connection.attachCalls[0]
     expect(attach.projectId).toBe("proj-1")
     expect(attach.sessionId).toBe("session-bound")
@@ -441,13 +467,22 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     expect(result.status).toBe("completed")
     expect(runtime.runTurnCalls).toHaveLength(1)
     expect(runtime.runTurnCalls[0].target.runtimeSessionId).toBe("ses_existing")
+    expect(connection.openCalls).toEqual([{
+      projectId: "proj-1",
+      sessionId: "session-existing",
+      body: { workDir: "/tmp/ws" },
+    }])
     expect(connection.attachCalls).toHaveLength(1)
+    expect(connection.bindingCalls).toEqual(["open", "attach"])
     expect(connection.attachCalls[0].body.runtimeSessionId).toMatch(/ses_/)
   })
 
   it("fails before prompting when the runtime binding cannot be recorded", async () => {
     const runtime = makeFakeRuntime()
     const connection: ServerConnection = {
+      async openAgentSession() {
+        return null
+      },
       async attachAgentSession() {
         throw new Error("attach endpoint offline")
       },

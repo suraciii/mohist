@@ -29,7 +29,7 @@ TaskRun 直接选择 Runtime 特有的 Action 并提供输入，不解析 Mohist
 | 路径 | 工作所有者 | Runner 入口 | AgentSession 来源 |
 |---|---|---|---|
 | Workflow 直接调用 | TaskRun | Runtime Action adapter | Workflow |
-| 启动 Mohist Agent | AgentJob | AgentJob executor | Agent launch |
+| 启动 Mohist Agent | AgentJob | AgentJob executor | Agent launch（Web、CLI、Agent Connection、事件或提及） |
 
 ```text
 Workflow: TaskRun -> Runtime Action adapter --+
@@ -46,6 +46,8 @@ Web、CLI、Agent Connection、事件路由和评论提及只是“启动 Mohist
 调用来源，不增加第三条执行路径。交互客户端经 [`agent-api.md`](agent-api.md) 提交任务和
 上下文；Agent context 统一解析定义并创建 AgentJob，Session context 统一持有会话。Slack
 Bot 等 provider adapter 不能自行 snapshot Agent、创建 Runtime Session 或拥有工作结果。
+Agent Connection 来源的 Session 与直接启动来源的 Session 共享稳定 Session ID 的观察、
+transcript 和后续输入语义。
 
 ## Action 语义
 
