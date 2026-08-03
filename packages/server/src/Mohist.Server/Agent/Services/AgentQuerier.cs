@@ -17,12 +17,12 @@ public class AgentQuerier : IScopedService
         _readiness = readiness;
     }
 
-    public async Task<AgentInfo?> GetByIdAsync(string projectId, string id)
+    public async Task<AgentInfo?> GetByIdAsync(string projectId, string id, CancellationToken ct = default)
     {
-        await using var db = await _dbFactory.CreateDbContextAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.Agents.AsNoTracking()
             .Where(agent => agent.ProjectId == projectId)
-            .ToListAsync();
+            .ToListAsync(ct);
         var agent = rows
             .Select(row => AgentStore.Deserialize(row.State))
             .Where(agent => agent is not null)
@@ -32,7 +32,7 @@ public class AgentQuerier : IScopedService
             .FirstOrDefault();
         return agent is null || _readiness is null
             ? agent
-            : agent with { Readiness = await _readiness.GetAsync(projectId, agent) };
+            : agent with { Readiness = await _readiness.GetAsync(projectId, agent, ct) };
     }
 
     /// <summary>
