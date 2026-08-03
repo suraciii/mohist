@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Infrastructure.Slack;
 
@@ -40,8 +41,17 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         await using var scope = _scopeFactory.CreateAsyncScope();
         var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
         var projectId = delivery.ResolveProjectId(evt.Extensions);
+        var sessionId = await ResolveSessionIdAsync(scope.ServiceProvider, evt, delivery, ct);
         if (string.Equals(projectId, SlackDeliveryOwnerIds.ManagerProjectId, StringComparison.Ordinal))
         {
+            var managerTools = scope.ServiceProvider.GetService<SlackManagerToolTurnProcessor>();
+            if (!string.IsNullOrWhiteSpace(sessionId)
+                && managerTools is not null
+                && await managerTools.ProcessAsync(sessionId, delivery, ct))
+            {
+                return;
+            }
+
             await outbox.EnqueueRequiredAsync(new SlackOutboxDraft(
                 projectId,
                 delivery.ConnectionId,
@@ -51,13 +61,12 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
                 $"agent-job:{delivery.JobKey}:terminal-delivery",
                 JsonSerializer.Serialize(new SlackDeliveryPayload(
                     SlackDeliveryOperations.PostMessage,
-                    Render(delivery),
+                    RenderManagerReply(delivery),
                     ClientMessageId: $"agent-job:{delivery.JobKey}:terminal-delivery")),
                 delivery.ThreadTs ?? delivery.MessageTs,
                 SlackDeliveryOwnerKinds.Manager), ct);
             return;
         }
-        var sessionId = await ResolveSessionIdAsync(scope.ServiceProvider, evt, delivery, ct);
         var text = SlackFinalReplyRenderer.AppendStableReference(Render(delivery), delivery.JobKey, sessionId);
         var blocks = await ResolveSessionBlocksAsync(scope.ServiceProvider, projectId, sessionId, ct);
         var projection = scope.ServiceProvider.GetService<SlackStatusProjection>() ?? new SlackStatusProjection(outbox);
@@ -111,6 +120,12 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         };
         return $"Task: {delivery.WorkLabel}\nConclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
     }
+
+    private static string RenderManagerReply(SlackTerminalDelivery delivery) =>
+        string.Equals(delivery.Status, "completed", StringComparison.Ordinal)
+        && !string.IsNullOrWhiteSpace(delivery.AssistantText)
+            ? delivery.AssistantText.Trim()
+            : Render(delivery);
 
     private async Task<string?> ResolveSessionIdAsync(
         IServiceProvider services,
@@ -202,7 +217,9 @@ public sealed record SlackTerminalDelivery(
     int ArtifactCount,
     int? ExitCode,
     string? ThreadTs = null,
-    string? MessageTs = null)
+    string? MessageTs = null,
+    string? SlackUserId = null,
+    string? AssistantText = null)
 {
     public void Validate()
     {

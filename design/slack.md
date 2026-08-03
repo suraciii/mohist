@@ -92,6 +92,12 @@ Owner / Allowlist / Anyone 策略。永久删除 Slack App 等高危动作不出
 与 CLI 以显式确认完成。对话式创建 Agent 直接用默认配置创建真实 Agent：能驱动 Manager 的
 私聊操作者本身已是授权边界，不再引入 draft 审核态。
 
+Manager 的每条私聊先进入标准 Agent Session/Turn。需要查询或改变资源时，内置 Agent 只能在
+自己的终态输出中请求受限的 Manager tool；Server 从该 Session 的不可变 Slack 来源恢复操作者，
+重新验证目标资源，再委托既有 application service 或 store。工具结果作为同一 Session 的后续
+输入交还给 Agent 生成自然语言回复。模型文本既不能绕过授权，也不能把未经 Server 确认的状态
+宣布为就绪。
+
 ### adapter 为什么无状态
 
 独立进程的理由是语言生态，不是状态归属。一旦 adapter 也持久化 thread 映射和待投递消息，

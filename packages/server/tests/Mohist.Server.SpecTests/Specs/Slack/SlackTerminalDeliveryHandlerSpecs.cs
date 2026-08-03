@@ -145,7 +145,8 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
             FailureCategory: null,
             ArtifactCount: 0,
             ExitCode: 0,
-            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+            Output: "{\"kind\":\"opencode\",\"text\":\"Manager response with token=xoxb-secret\"}");
 
         var envelope = AgentJobLineage.BuildTerminalDeliveryEnvelope(
             "job-1",
@@ -157,6 +158,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal(prompt[..80], workLabel);
         Assert.Equal("C1", envelope.Data.Value.GetProperty("conversationId").GetString());
         Assert.Equal("1710000000.000000", envelope.Data.Value.GetProperty("threadTs").GetString());
+        Assert.Equal("Manager response with ***", envelope.Data.Value.GetProperty("assistantText").GetString());
     }
 
     [Fact]

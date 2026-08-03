@@ -680,7 +680,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await PersistAsync();
 
         await PropagateUnknownToInitialTurnAsync(reason);
-        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, reason, "unknown", null, null);
+        StageTerminalDeliveryEvent(AgentJobStatus.Unknown, reason, null, reason, "unknown", null, null);
         await PersistAsync();
         if (State.PendingTerminalDeliveryEvent is not null)
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
@@ -1304,6 +1304,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         StageTerminalDeliveryEvent(
             terminalStatus,
             message,
+            output,
             failureReason,
             failureCategory,
             artifactUploadIds,
@@ -1524,6 +1525,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private void StageTerminalDeliveryEvent(
         AgentJobStatus status,
         string? message,
+        string? output,
         string? failureReason,
         string? failureCategory,
         string[]? artifactUploadIds,
@@ -1542,7 +1544,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureCategory,
             artifactUploadIds?.Length ?? 0,
             exitCode,
-            _timeProvider.GetUtcNow());
+            _timeProvider.GetUtcNow(),
+            output);
     }
 
     private async Task EmitTerminalDeliveryEventAsync(PendingTerminalDeliveryEvent pending)

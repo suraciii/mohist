@@ -90,7 +90,7 @@ public sealed class SlackManagerApplicationSpecs
     }
 
     [Fact]
-    public async Task Claimed_manager_creates_a_default_agent_before_mounting_it()
+    public async Task Authorized_manager_tool_creates_a_default_agent_before_mounting_it()
     {
         const string team = "T_MANAGER_DEFAULT_AGENT";
         const string appId = "A_MANAGER_DEFAULT_AGENT";
@@ -132,18 +132,20 @@ public sealed class SlackManagerApplicationSpecs
         });
         claimResponse.EnsureSuccessStatusCode();
 
-        using var createResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        await using (var managerScope = _fixture.Services.CreateAsyncScope())
         {
-            appId,
-            workspaceTeamId = team,
-            conversationId = "D_MANAGER_DEFAULT_AGENT",
-            messageTs = "1710000000.000002",
-            senderSlackUserId = owner,
-            text = $"create {projectId} release-helper review release changes",
-            isDirectMessage = true,
-        });
-        createResponse.EnsureSuccessStatusCode();
-        Assert.Equal("accepted", (await ReadDataAsync(createResponse)).GetProperty("decision").GetString());
+            var access = managerScope.ServiceProvider.GetRequiredService<ManagerActorAccessDecider>();
+            var actor = await access.AuthenticateAsync(team, owner);
+            Assert.NotNull(actor.Actor);
+            var result = await managerScope.ServiceProvider.GetRequiredService<SlackManagerToolExecutor>()
+                .ExecuteAsync(actor.Actor!, new SlackManagerToolInvocation(
+                    "create",
+                    ProjectId: projectId,
+                    AgentName: "release-helper",
+                    DailyResponsibility: "review release changes"),
+                    "manager-tool-default-agent");
+            Assert.True(result.Succeeded, result.Message);
+        }
 
         await using var verify = _fixture.Services.CreateAsyncScope();
         var database = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -158,10 +160,6 @@ public sealed class SlackManagerApplicationSpecs
             row.ProjectId == projectId
             && row.AgentId == agent.Id
             && row.WorkspaceTeamId == team));
-        Assert.Contains(await database.SlackOutboxRows
-            .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Manager)
-            .Select(row => row.PayloadJson)
-            .ToListAsync(), payload => payload.Contains("Agent created and mounted.", StringComparison.Ordinal));
     }
 
     [Fact]

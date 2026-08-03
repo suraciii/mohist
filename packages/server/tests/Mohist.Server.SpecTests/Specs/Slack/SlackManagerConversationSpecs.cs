@@ -2,10 +2,14 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
@@ -21,7 +25,7 @@ public sealed class SlackManagerConversationSpecs
     public SlackManagerConversationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
     [Fact]
-    public async Task Claimed_manager_conversation_uses_the_shared_status_and_cannot_delete_a_binding()
+    public async Task Claimed_manager_conversation_uses_a_session_and_server_authorizes_every_model_tool_request()
     {
         const string team = "T_MANAGER_CONVERSATION";
         const string appId = "A_MANAGER_CONVERSATION";
@@ -48,35 +52,51 @@ public sealed class SlackManagerConversationSpecs
             appId, team, owner, "1710000000.000002", $"claim {claimCode}");
         Assert.Equal("accepted", claimed.GetProperty("decision").GetString());
 
-        var created = await SendManagerMessageAsync(
+        var naturalLanguageCreate = await SendManagerMessageAsync(
             appId,
             team,
             owner,
             "1710000000.000003",
-            $"create {projectId} release-helper review release changes");
-        Assert.Equal("accepted", created.GetProperty("decision").GetString());
+            $"Please create release-helper in {projectId} to review release changes every day.");
+        Assert.Equal("accepted", naturalLanguageCreate.GetProperty("decision").GetString());
 
         var duplicate = await SendManagerMessageAsync(
             appId,
             team,
             owner,
             "1710000000.000003",
-            $"create {projectId} release-helper review release changes");
+            $"Please create release-helper in {projectId} to review release changes every day.");
         Assert.Equal("duplicate", duplicate.GetProperty("decision").GetString());
-
-        using var statusResponse = await _fixture.Client.GetAsync($"/api/slack-manager/status?workspaceTeamId={team}");
-        statusResponse.EnsureSuccessStatusCode();
-        var status = await ReadDataAsync(statusResponse);
-        var nextAction = status.GetProperty("nextAction").GetString()!;
-
-        var listed = await SendManagerMessageAsync(appId, team, owner, "1710000000.000004", "list");
-        Assert.Equal("accepted", listed.GetProperty("decision").GetString());
-
-        var deletion = await SendManagerMessageAsync(appId, team, owner, "1710000000.000005", "permanent-delete");
-        Assert.Equal("accepted", deletion.GetProperty("decision").GetString());
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var database = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var enrollment = await scope.ServiceProvider.GetRequiredService<SlackWorkspaceEnrollmentStore>()
+            .GetActiveByTeamAsync(team);
+        Assert.NotNull(enrollment);
+        var sessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollment!.Id,
+            team,
+            "D_MANAGER_CONVERSATION",
+            "1710000000.000002"))}";
+        var launch = await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionId)
+            .GetInitialLaunchAsync();
+        Assert.NotNull(launch);
+        Assert.Contains("Manager request", launch!.Input!.Text, StringComparison.Ordinal);
+        await _fixture.Grains.GetGrain<Mohist.Server.Sessions.Grains.IAgentSessionGrain>(sessionId)
+            .AttachPhysicalSessionAsync(new Mohist.Server.Sessions.Grains.AttachPhysicalSessionCommand(
+                "runtime-manager-conversation",
+                "/mohist-tests/manager-conversation"));
+        Assert.Empty(await database.Agents.Where(row => row.ProjectId == projectId).ToListAsync());
+
+        await HandleManagerToolTurnAsync(
+            sessionId,
+            team,
+            owner,
+            enrollment.Id,
+            "manager-tool-create",
+            $"{{\"mohistManagerTool\":{{\"name\":\"create\",\"arguments\":{{\"projectId\":\"{projectId}\",\"agentName\":\"release-helper\",\"dailyResponsibility\":\"review release changes\"}}}}}}");
+
+        database.ChangeTracker.Clear();
         var agent = AgentStore.Deserialize(await database.Agents
             .Where(row => row.ProjectId == projectId && row.Name == "release-helper")
             .Select(row => row.State)
@@ -87,13 +107,31 @@ public sealed class SlackManagerConversationSpecs
             .Where(row => row.ProjectId == projectId && row.AgentId == agent.Id && row.WorkspaceTeamId == team)
             .ToListAsync());
         Assert.Null(connection.DeletedAt);
+
+        await HandleManagerToolTurnAsync(
+            sessionId,
+            team,
+            owner,
+            enrollment.Id,
+            "manager-tool-delete",
+            "{\"mohistManagerTool\":{\"name\":\"permanent-delete\",\"arguments\":{}}}");
+        await HandleManagerToolTurnAsync(
+            sessionId,
+            team,
+            "U_UNAUTHORIZED",
+            enrollment.Id,
+            "manager-tool-disable",
+            $"{{\"mohistManagerTool\":{{\"name\":\"disable\",\"arguments\":{{\"projectId\":\"{projectId}\",\"connectionId\":\"{connection.Id}\"}}}}}}");
+
+        database.ChangeTracker.Clear();
+        var unchanged = await database.AgentConnections.SingleAsync(row => row.Id == connection.Id);
+        Assert.Equal("enabled", unchanged.DesiredState);
         var messages = await database.SlackOutboxRows
             .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Manager)
             .Select(row => row.PayloadJson)
             .ToListAsync();
-        Assert.Single(messages, payload => payload.Contains("Agent created and mounted.", StringComparison.Ordinal));
-        Assert.Contains(messages, payload => payload.Contains($"Manager status: {nextAction}.", StringComparison.Ordinal));
-        Assert.Contains(messages, payload => payload.Contains("manager_tool_not_available", StringComparison.Ordinal));
+        Assert.DoesNotContain(messages, payload => payload.Contains("Agent created and mounted.", StringComparison.Ordinal));
+        Assert.DoesNotContain(messages, payload => payload.Contains("manager_tool_not_available", StringComparison.Ordinal));
     }
 
     private async Task SeedProjectAsync(string projectId)
@@ -130,6 +168,48 @@ public sealed class SlackManagerConversationSpecs
         });
         response.EnsureSuccessStatusCode();
         return await ReadDataAsync(response);
+    }
+
+    private async Task HandleManagerToolTurnAsync(
+        string sessionId,
+        string team,
+        string slackUserId,
+        string enrollmentId,
+        string jobKey,
+        string assistantText)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var handler = new SlackTerminalDeliveryHandler(
+            scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SlackTerminalDeliveryHandler>.Instance);
+        var delivery = new
+        {
+            jobKey,
+            workLabel = "Manager request",
+            connectionId = enrollmentId,
+            workspaceTeamId = team,
+            slackUserId,
+            conversationId = "D_MANAGER_CONVERSATION",
+            status = "completed",
+            message = "AgentJob completed",
+            failureReason = (string?)null,
+            failureCategory = (string?)null,
+            artifactCount = 0,
+            exitCode = 0,
+            assistantText,
+        };
+        var evt = new CloudEvent(
+            $"delivery:{jobKey}",
+            new Uri($"/mohist/agent-session/{sessionId}", UriKind.Relative),
+            EventCatalog.ReverseDns.AgentSessionFollowupDelivery,
+            _fixture.TimeProvider.GetUtcNow(),
+            JsonSerializer.SerializeToElement(delivery),
+            subject: sessionId,
+            extensions: new Dictionary<string, string>
+            {
+                [EventCatalog.Lineage.ProjectId] = BuiltInAgentCatalog.MohistSlackProjectId,
+            });
+        await handler.HandleAsync(evt, CancellationToken.None);
     }
 
     private static async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)

@@ -2508,6 +2508,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             failureCategory = (string?)null,
             artifactCount = 0,
             exitCode = (int?)null,
+            assistantText = AgentJobLineage.ExtractAssistantText(turn.Result?.Output),
         };
         var data = JsonSerializer.SerializeToElement(delivery, CloudEvent.JsonOptions);
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal);

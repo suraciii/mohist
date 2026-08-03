@@ -18,6 +18,9 @@ public sealed class BuiltInAgentCatalogTests
         Assert.Equal("active", agent.Status);
         Assert.Contains("authenticated", agent.Instructions, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("credentials", agent.Instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("mohistManagerTool", agent.Instructions, StringComparison.Ordinal);
+        Assert.Contains("server validates every tool request", agent.Instructions, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("do not delete", agent.Instructions, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("xoxb-", agent.Instructions, StringComparison.Ordinal);
     }
 

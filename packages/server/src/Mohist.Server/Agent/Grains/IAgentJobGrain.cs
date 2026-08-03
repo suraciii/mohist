@@ -177,7 +177,8 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(6)] string? FailureCategory,
     [property: Id(7)] int ArtifactCount,
     [property: Id(8)] int? ExitCode,
-    [property: Id(9)] DateTimeOffset RecordedAt);
+    [property: Id(9)] DateTimeOffset RecordedAt,
+    [property: Id(10)] string? Output = null);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
