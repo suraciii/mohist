@@ -13,12 +13,6 @@ public enum SlackFinalReplyStatus
     Failed,
 }
 
-public enum SlackFinalReplyDetailLevel
-{
-    Summary,
-    Diagnostic,
-}
-
 public sealed record SlackConfirmedAgentResult(
     string WorkLabel,
     SlackFinalReplyStatus Status,
@@ -52,8 +46,7 @@ public static class SlackFinalReplyRenderer
 
     public static SlackFinalReplyProjection Project(
         SlackConfirmedAgentResult result,
-        int maximumSegmentLength = DefaultMaximumSegmentLength,
-        SlackFinalReplyDetailLevel detailLevel = SlackFinalReplyDetailLevel.Summary)
+        int maximumSegmentLength = DefaultMaximumSegmentLength)
     {
         ArgumentNullException.ThrowIfNull(result);
         if (maximumSegmentLength < 1)
@@ -76,7 +69,7 @@ public static class SlackFinalReplyRenderer
                 ? $"Blocked because: {reason}"
                 : $"Failure reason: {reason}");
 
-        var facts = BuildKeyResults(result, detailLevel);
+        var facts = BuildKeyResults(result);
         if (facts.Count > 0)
         {
             lines.Add("Key results:");
@@ -116,13 +109,12 @@ public static class SlackFinalReplyRenderer
     }
 
     private static List<string> BuildKeyResults(
-        SlackConfirmedAgentResult result,
-        SlackFinalReplyDetailLevel detailLevel)
+        SlackConfirmedAgentResult result)
     {
         var facts = new List<string>(MaximumKeyResults);
         AddFacts(facts, result.CompletedParts, "Completed: ");
         AddFacts(facts, result.KeyResults, prefix: null);
-        AddMachineResults(facts, result.MachineResults, detailLevel);
+        AddMachineResults(facts, result.MachineResults);
         return facts;
     }
 
@@ -151,8 +143,7 @@ public static class SlackFinalReplyRenderer
 
     private static void AddMachineResults(
         List<string> facts,
-        IReadOnlyList<SlackConfirmedMachineResult>? values,
-        SlackFinalReplyDetailLevel detailLevel)
+        IReadOnlyList<SlackConfirmedMachineResult>? values)
     {
         if (values is null)
             return;
@@ -162,7 +153,7 @@ public static class SlackFinalReplyRenderer
             if (facts.Count == MaximumKeyResults)
                 return;
 
-            var fact = SummarizeMachineResult(value, detailLevel);
+            var fact = SummarizeMachineResult(value);
             if (!facts.Contains(fact, StringComparer.Ordinal))
                 facts.Add(fact);
         }
@@ -207,30 +198,17 @@ public static class SlackFinalReplyRenderer
     }
 
     private static string SummarizeMachineResult(
-        SlackConfirmedMachineResult result,
-        SlackFinalReplyDetailLevel detailLevel)
+        SlackConfirmedMachineResult result)
     {
-        var label = CleanText(result.Label) ?? "Machine result";
+        var label = CleanMachineText(result.Label) ?? "Machine result";
         var payload = NormalizeText(result.Payload);
         if (payload is null)
             return $"{label}: no result";
 
-        if (detailLevel == SlackFinalReplyDetailLevel.Diagnostic)
-            return $"{label}: {CleanText(payload)}";
-
         if (TryParseJsonValue(payload, out var json))
             return $"{label}: {SummarizeJsonValue(json)}";
 
-        var lines = payload
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Take(3)
-            .Select(CleanText)
-            .Where(line => line is not null)
-            .Cast<string>()
-            .ToArray();
-        return lines.Length == 0
-            ? $"{label}: output received"
-            : $"{label}: {string.Join("; ", lines)}";
+        return $"{label}: machine output received; no public summary available.";
     }
 
     private static string SummarizeJsonValue(JsonElement value, int depth = 0)
@@ -242,7 +220,7 @@ public static class SlackFinalReplyRenderer
         {
             JsonValueKind.Object => SummarizeJsonObject(value, depth),
             JsonValueKind.Array => SummarizeJsonArray(value, depth),
-            JsonValueKind.String => CleanText(value.GetString()) ?? "empty text",
+            JsonValueKind.String => CleanMachineText(value.GetString()) ?? "redacted",
             JsonValueKind.Number => value.GetRawText(),
             JsonValueKind.True => "true",
             JsonValueKind.False => "false",
@@ -254,7 +232,7 @@ public static class SlackFinalReplyRenderer
     private static string SummarizeJsonObject(JsonElement value, int depth)
     {
         var fields = value.EnumerateObject()
-            .Where(property => !IsHiddenMachineProperty(property.Name))
+            .Where(property => IsPublicMachineProperty(property.Name))
             .Select(property =>
             {
                 var propertyName = CleanText(property.Name);
@@ -288,14 +266,45 @@ public static class SlackFinalReplyRenderer
             : $"{prefix}: {string.Join("; ", items)}";
     }
 
-    private static bool IsHiddenMachineProperty(string name)
+    private static bool IsPublicMachineProperty(string name)
     {
         var normalized = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-        return normalized is "tool" or "reasoning" or "thought" or "trace" or "raw" or "stdout" or "stderr" or "log" or "logs"
-            || normalized.Contains("secret", StringComparison.Ordinal)
-            || normalized.Contains("token", StringComparison.Ordinal)
-            || normalized.Contains("password", StringComparison.Ordinal)
-            || normalized.EndsWith("id", StringComparison.Ordinal);
+        return normalized is "status"
+            or "state"
+            or "count"
+            or "total"
+            or "completed"
+            or "failed"
+            or "skipped"
+            or "pending"
+            or "message"
+            or "result"
+            or "service"
+            or "name"
+            or "version"
+            or "duration"
+            or "items";
+    }
+
+    private static readonly Regex SensitiveMachineValue = new(
+        @"(?ix)(?:\b(?:authorization|proxy-authorization|x-api-key|api[-_ ]?key|secret|token|password|cookie|set-cookie|credential|private[-_ ]?key)\b\s*[:=]\s*(?:bearer|basic)?\s*\S+)|(?:\b(?:bearer|basic)\s+\S+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex MachineUrl = new(
+        @"(?i)\b(?:https?|wss?|ftp)://[^\s<>""']+",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static string? CleanMachineText(string? value)
+    {
+        var clean = NormalizeText(value);
+        if (clean is null)
+            return null;
+
+        if (SensitiveMachineValue.IsMatch(clean))
+            return "[redacted]";
+
+        clean = SecretAssignment.Replace(clean, "[REDACTED]");
+        clean = SlackToken.Replace(clean, "[REDACTED]");
+        return MachineUrl.Replace(clean, "[URL omitted]");
     }
 
     private static bool TryParseJsonValue(string value, out JsonElement element)
