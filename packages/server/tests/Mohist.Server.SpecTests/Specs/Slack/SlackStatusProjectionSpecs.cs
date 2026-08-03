@@ -100,6 +100,82 @@ public sealed class SlackStatusProjectionSpecs
         Assert.Equal(new SlackProviderMessageIdentity("C1", "100.002"), payload.ProviderMessageIdentity);
     }
 
+    [Fact]
+    public async Task Quick_terminal_does_not_update_the_original_message_from_a_reaction_ack()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
+        await SeedConnectionAsync(database, time);
+        var store = CreateStore(database, time);
+        var projection = new SlackStatusProjection(store);
+        var source = new SlackMessageIdentity("T1", "C1", "100.001");
+
+        await projection.EnqueueReceivedAsync("p1", "c1", source, null);
+        var received = Assert.Single(
+            (await store.ListAsync("p1", "c1")).Entries,
+            entry => entry.DispatchRef == SlackStatusProjection.DispatchRef(source, "received"));
+        await store.MarkDeliveredAsync("p1", received.Id, new SlackProviderMessageIdentity("C1", "100.001"));
+
+        await projection.EnqueueTerminalAsync("p1", "c1", source, null, "completed", "done");
+
+        var terminal = Assert.Single(
+            (await store.ListAsync("p1", "c1")).Entries,
+            row => row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal"));
+        var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, payload.Operation);
+        Assert.Null(payload.ProviderMessageIdentity);
+    }
+
+    [Fact]
+    public async Task Accepted_terminal_delivery_is_retained_while_disabled_and_claimed_after_reenable()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
+        await SeedConnectionAsync(database, time, DesiredStateKind.Disabled);
+        var store = CreateStore(database, time);
+        var projection = new SlackStatusProjection(store);
+        var source = new SlackMessageIdentity("T1", "C1", "100.001");
+
+        var result = await projection.EnqueueTerminalAsync("p1", "c1", source, null, "completed", "done");
+
+        Assert.False(result.Suppressed);
+        Assert.Single((await store.ListAsync("p1", "c1")).Entries, entry => entry.State == SlackOutboxStates.Pending);
+        Assert.Null(await store.ClaimAsync("p1", "c1", "adapter-1"));
+
+        await using (var db = database.CreateContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == "c1");
+            connection.DesiredState = DesiredStateKind.Enabled;
+            await db.SaveChangesAsync();
+        }
+
+        var claimed = await store.ClaimAsync("p1", "c1", "adapter-1");
+        Assert.NotNull(claimed);
+        Assert.Equal(SlackOutboxKinds.TerminalResult, claimed!.Kind);
+    }
+
+    [Fact]
+    public async Task Deleted_connection_suppresses_new_status_delivery()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 8, 3, 12, 0, 0, TimeSpan.Zero));
+        await SeedConnectionAsync(database, time);
+        await using (var db = database.CreateContext())
+        {
+            var connection = await db.AgentConnections.SingleAsync(row => row.Id == "c1");
+            connection.DeletedAt = time.GetUtcNow();
+            await db.SaveChangesAsync();
+        }
+
+        var store = CreateStore(database, time);
+        var projection = new SlackStatusProjection(store);
+        var result = await projection.EnqueueTerminalAsync(
+            "p1", "c1", new SlackMessageIdentity("T1", "C1", "100.001"), null, "completed", "done");
+
+        Assert.True(result.Suppressed);
+        Assert.Empty((await store.ListAsync("p1", "c1")).Entries);
+    }
+
     private static SlackOutboxStore CreateStore(TestSqliteDatabase database, FakeTimeProvider time) =>
         new(
             new TestDbContextFactory(database.Options),
@@ -107,7 +183,10 @@ public sealed class SlackStatusProjectionSpecs
             time,
             Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = 20 }));
 
-    private static async Task SeedConnectionAsync(TestSqliteDatabase database, FakeTimeProvider time)
+    private static async Task SeedConnectionAsync(
+        TestSqliteDatabase database,
+        FakeTimeProvider time,
+        string desiredState = DesiredStateKind.Enabled)
     {
         await using var db = database.CreateContext();
         db.AgentConnections.Add(new AgentConnectionRow
@@ -120,7 +199,7 @@ public sealed class SlackStatusProjectionSpecs
             AppId = "app",
             BotUserId = "bot",
             SetupProgress = SetupProgressKind.Complete,
-            DesiredState = DesiredStateKind.Enabled,
+            DesiredState = desiredState,
             ConnectionHealth = ConnectionHealthKind.Healthy,
             AgentReadiness = AgentReadinessKind.Ready,
             CreatedAt = time.GetUtcNow(),

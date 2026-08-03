@@ -139,9 +139,13 @@ export class SlackAdapter {
         if (!delivery) break
         try {
           const ack = await this.mutateDelivery(runtime.web, delivery)
-          await this.options.transport.ackDelivery(runtime.ref, ack, signal)
+          await this.options.transport.ackDelivery(runtime.ref, withAdapterId(ack, this.options.adapterId), signal)
         } catch (error) {
-          await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
+          await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+            id: delivery.id,
+            outcome: "uncertain",
+            reason: error instanceof Error ? error.message : String(error),
+          }, this.options.adapterId), signal)
           continue
         }
       }
@@ -154,6 +158,8 @@ export class SlackAdapter {
   private async mutateDelivery(web: SlackWebClient, delivery: Delivery): Promise<DeliveryAck> {
     const payload = parseDeliveryPayload(delivery.payloadJson)
     const operation = payload.operation ?? "post_message"
+    if (!isKnownDeliveryOperation(operation))
+      return await this.reconcileForUnknownOperation(web, delivery)
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
@@ -179,17 +185,17 @@ export class SlackAdapter {
           const statusResponse = await mutateReaction(web, operation, statusTarget, payload.reaction)
           if (!statusResponse) throw new Error("Slack client does not support reactions")
           if (statusResponse.ok !== false)
-            return delivered(delivery, statusTarget)
+            return delivered(delivery)
           if (!isUnsupportedReactionError(statusResponse.error))
             return { id: delivery.id, outcome: "retry", reason: statusResponse.error ?? "Slack rejected the reaction" }
         }
         if (operation === "reaction_remove")
-          return delivered(delivery, target)
+          return delivered(delivery)
         if (payload.fallbackText && payload.fallbackDispatchRef)
           return await this.postFallback(web, delivery, payload, response.error ?? "Slack does not support reactions")
-        return delivered(delivery, target)
+        return delivered(delivery)
       }
-      return delivered(delivery, target)
+      return delivered(delivery)
     }
 
     const text = requiredText(payload)
@@ -235,11 +241,11 @@ export class SlackAdapter {
     return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
   }
 
-  private async reconcile(runtime: ConnectionRuntime, delivery: Delivery): Promise<DeliveryAck> {
+  private async reconcile(web: SlackWebClient | undefined, delivery: Delivery): Promise<DeliveryAck> {
     const payload = parseDeliveryPayload(delivery.payloadJson)
     const target = payload.providerMessageIdentity ?? payload.targetMessageIdentity
     if ((payload.operation === "reaction_add" || payload.operation === "reaction_remove") && target && payload.reaction) {
-      const response = await runtime.web?.reactions?.get?.({
+      const response = await web?.reactions?.get?.({
         channel: target.conversationId,
         timestamp: target.messageTs,
         full: true,
@@ -248,10 +254,10 @@ export class SlackAdapter {
       if (response.ok === false) return { id: delivery.id, outcome: "uncertain", reason: response.error ?? "Slack reaction reconciliation failed" }
       const present = response.message?.reactions?.some(reaction => reaction.name === payload.reaction)
       const deliveredState = payload.operation === "reaction_add" ? present : !present
-      return deliveredState ? delivered(delivery, target) : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+      return deliveredState ? delivered(delivery) : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
     }
 
-    const history = await runtime.web?.conversations?.history?.({
+    const history = await web?.conversations?.history?.({
       channel: delivery.conversationId,
       ...(target ? { latest: target.messageTs, oldest: target.messageTs } : {}),
       inclusive: true,
@@ -263,9 +269,22 @@ export class SlackAdapter {
       (target && candidate.ts === target.messageTs)
       || (payload.clientMessageId && candidate.client_msg_id === payload.clientMessageId)
       || (payload.fallbackDispatchRef && candidate.client_msg_id === payload.fallbackDispatchRef))
-    return message?.ts
-      ? delivered(delivery, { conversationId: delivery.conversationId, messageTs: message.ts })
-      : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+    if (message?.ts) {
+      if (payload.operation === "chat_update" && payload.text && message.text !== payload.text)
+        return { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+      return isKnownDeliveryOperation(payload.operation ?? "post_message")
+        ? delivered(delivery, { conversationId: delivery.conversationId, messageTs: message.ts })
+        : delivered(delivery)
+    }
+    if (payload.operation === "chat_update" && payload.fallbackText && payload.fallbackDispatchRef)
+      return web
+        ? await this.postFallback(web, delivery, payload, "provider_mutation_absent")
+        : { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot post fallback" }
+    return { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
+  }
+
+  private async reconcileForUnknownOperation(web: SlackWebClient, delivery: Delivery): Promise<DeliveryAck> {
+    return await this.reconcile(web, delivery)
   }
 
   private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
@@ -274,9 +293,13 @@ export class SlackAdapter {
       const delivery = await this.options.transport.claimUncertainDelivery(runtime.ref, this.options.adapterId, signal)
       if (!delivery) return
       try {
-        await this.options.transport.ackDelivery(runtime.ref, await this.reconcile(runtime, delivery), signal)
+        await this.options.transport.ackDelivery(runtime.ref, withAdapterId(await this.reconcile(runtime.web, delivery), this.options.adapterId), signal)
       } catch (error) {
-        await this.options.transport.ackDelivery(runtime.ref, { id: delivery.id, outcome: "uncertain", reason: error instanceof Error ? error.message : String(error) }, signal)
+        await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+          id: delivery.id,
+          outcome: "uncertain",
+          reason: error instanceof Error ? error.message : String(error),
+        }, this.options.adapterId), signal)
       }
     }
   }
@@ -375,6 +398,17 @@ function delivered(delivery: Delivery, identity?: ProviderMessageIdentity): Deli
   return identity
     ? { id: delivery.id, outcome: "delivered", providerMessageIdentity: identity }
     : { id: delivery.id, outcome: "delivered" }
+}
+
+function withAdapterId(ack: DeliveryAck, adapterId: string): DeliveryAck {
+  return { ...ack, adapterId }
+}
+
+function isKnownDeliveryOperation(operation: unknown): operation is "post_message" | "chat_update" | "reaction_add" | "reaction_remove" {
+  return operation === "post_message"
+    || operation === "chat_update"
+    || operation === "reaction_add"
+    || operation === "reaction_remove"
 }
 
 function isUnsupportedReactionError(error: string | undefined): boolean {
