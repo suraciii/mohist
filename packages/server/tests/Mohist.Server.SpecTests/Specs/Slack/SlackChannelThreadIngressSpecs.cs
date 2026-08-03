@@ -203,7 +203,8 @@ public sealed class SlackChannelThreadIngressSpecs
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
             await db.SlackOutboxRows
                 .Where(row => row.ConnectionId == connection.Id
-                    && row.DispatchRef == "slack-thread-followup:T123:C-channel-replay-ack:1710000000.000260")
+                    && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                        new SlackMessageIdentity("T123", "C-channel-replay-ack", "1710000000.000260"), "received"))
                 .ExecuteDeleteAsync();
         }
 
@@ -217,7 +218,8 @@ public sealed class SlackChannelThreadIngressSpecs
         await using var verify = _fixture.Services.CreateAsyncScope();
         var outbox = verify.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.True(await outbox.SlackOutboxRows.AnyAsync(row => row.ConnectionId == connection.Id
-            && row.DispatchRef == "slack-thread-followup:T123:C-channel-replay-ack:1710000000.000260"));
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                new SlackMessageIdentity("T123", "C-channel-replay-ack", "1710000000.000260"), "received")));
     }
 
     [Fact]
@@ -329,8 +331,7 @@ public sealed class SlackChannelThreadIngressSpecs
         Assert.Equal(firstSessionId, followup.GetProperty("sessionId").GetString());
         Assert.True(followup.GetProperty("followup").GetBoolean());
 
-        var reply = await ReadOutboxReplyAsync(connection, "C-channel-C", "1710000000.000310");
-        Assert.Contains("Continuing", reply, StringComparison.Ordinal);
+        await AssertWorkingProjectionAsync(connection, "C-channel-C", "1710000000.000310", firstSessionId!);
     }
 
     [Fact]
@@ -852,14 +853,16 @@ public sealed class SlackChannelThreadIngressSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var ack = await db.SlackOutboxRows
+        var received = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == "C-channel-M"
-                && row.ThreadTs == "1710000000.001300")
+                && row.ThreadTs == "1710000000.001300"
+                && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                    new SlackMessageIdentity("T123", "C-channel-M", "1710000000.001300"), "received"))
             .Select(row => row.PayloadJson)
             .FirstOrDefaultAsync();
-        Assert.NotNull(ack);
-        Assert.Contains("Task accepted", ack!, StringComparison.Ordinal);
+        Assert.NotNull(received);
+        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(received!).Operation);
     }
 
     private async Task<JsonElement> PostChannelAsync(
@@ -888,22 +891,24 @@ public sealed class SlackChannelThreadIngressSpecs
         return document.RootElement.GetProperty("data").Clone();
     }
 
-    private async Task<string> ReadOutboxReplyAsync(AgentConnection connection, string conversationId, string messageTs)
+    private async Task AssertWorkingProjectionAsync(
+        AgentConnection connection,
+        string conversationId,
+        string messageTs,
+        string sessionId)
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var candidates = await db.SlackOutboxRows
+        var progressRef = $"agent-session-followup:{sessionId}:";
+        var progress = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
                 && row.ThreadTs == "1710000000.000300"
-                && row.Kind == SlackOutboxKinds.UserAction)
-            .Select(row => new { row.PayloadJson, row.CreatedAt })
-            .ToListAsync();
-        Assert.NotEmpty(candidates);
-        var latest = candidates
-            .OrderByDescending(row => row.CreatedAt)
-            .First();
-        return JsonDocument.Parse(latest.PayloadJson).RootElement.GetProperty("text").GetString()!;
+                && row.Kind == SlackOutboxKinds.ReplaceableProgress
+                && row.DispatchRef != null
+                && EF.Functions.Like(row.DispatchRef, progressRef + "%"))
+            .SingleAsync();
+        Assert.Equal(SlackDeliveryOperations.PostMessage, SlackDeliveryPayload.Parse(progress.PayloadJson).Operation);
     }
 
     private async Task<AgentConnection> CreateConnectionAsync(string agentNameSuffix = "")

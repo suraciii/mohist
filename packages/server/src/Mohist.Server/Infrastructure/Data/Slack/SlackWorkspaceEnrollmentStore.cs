@@ -35,12 +35,20 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<SlackWorkspaceEnrollment?> GetByTeamAsync(string workspaceTeamId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.WorkspaceTeamId == workspaceTeamId, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
     public async Task<SlackWorkspaceEnrollment> CreateAsync(SlackWorkspaceEnrollment enrollment, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(enrollment);
         if (string.IsNullOrWhiteSpace(enrollment.Id)) throw new ArgumentException("Enrollment id is required.", nameof(enrollment));
         if (string.IsNullOrWhiteSpace(enrollment.WorkspaceTeamId)) throw new ArgumentException("Workspace team id is required.", nameof(enrollment));
-        if (string.IsNullOrWhiteSpace(enrollment.ManagerExternalId)) throw new ArgumentException("Manager external id is required.", nameof(enrollment));
         if (enrollment.Lifecycle != SlackEnrollmentLifecycle.Active)
             throw new InvalidOperationException("A new workspace enrollment must start active.");
         SlackStateTransitions.RequireKnownManagerCapability(enrollment.ManagerCapability);
@@ -97,7 +105,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
     {
         Id = row.Id,
         WorkspaceTeamId = row.WorkspaceTeamId,
-        ManagerExternalId = row.ManagerExternalId,
         Lifecycle = row.Lifecycle,
         ManagerCapability = row.ManagerCapability,
         CapabilityReason = row.CapabilityReason,
@@ -115,7 +122,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
     {
         Id = enrollment.Id,
         WorkspaceTeamId = enrollment.WorkspaceTeamId,
-        ManagerExternalId = enrollment.ManagerExternalId,
         Lifecycle = enrollment.Lifecycle,
         ManagerCapability = enrollment.ManagerCapability,
         CapabilityReason = enrollment.CapabilityReason,

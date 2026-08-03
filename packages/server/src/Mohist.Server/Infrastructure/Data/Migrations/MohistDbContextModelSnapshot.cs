@@ -2672,11 +2672,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ManagerExternalId")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("PlanCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2710,6 +2705,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Webhooks.WebhookDeliveryFailureRow", b =>
                 {
+                    b.Property<int?>("DurationMs")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Id")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2736,6 +2734,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ResponseStatus")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("SubscriptionId")
                         .IsRequired()

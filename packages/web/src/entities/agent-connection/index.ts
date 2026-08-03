@@ -57,6 +57,7 @@ export type {
   ConnectionDiagnostic,
   ConnectionDiagnosticFacts,
   ConnectionIdentityFacts,
+  ManagedSlackAppProjection,
   SlackMemberSearchEntry,
   SlackMemberSearchResponse,
   SlackOutboxEntry,

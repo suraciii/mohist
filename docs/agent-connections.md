@@ -9,6 +9,13 @@ Slack 不运行模型，不保存另一份 Instructions、Runtime、Model 或 Sk
 Agent 接入与 Hermes 通知不同：通知只把变化单向推送到聊天工具；Agent 接入允许用户发起
 工作、继续会话、停止当前执行并收到结果。
 
+### 当前开发期管理面
+
+当前 P0 的 Manager 生命周期 API 不提供 Mohist 登录、调用者认证或权限隔离。每次请求都按
+部署管理操作处理；客户端不能通过 `ManagerExternalId`、`actor` 或请求头声明操作者，这些
+字段也不会进入审计记录。Slack 的安装授权仍只用于确认实际的工作区与子 App，不代表 Mohist
+调用者身份。
+
 ## 安装模型
 
 一个 Slack 工作区只需要安装一次 **Mohist Manager**。Manager 是这个工作区的安装与运维
@@ -309,6 +316,22 @@ Bot 可以读取它在 Slack 中有权访问、且在本次消息或 thread 中�
 
 ## 回复呈现
 
+### 一条输入的状态与结果
+
+对每一条已经接受的用户输入，Slack 最多呈现一个可更新的状态消息和一个最终答案。状态消息
+是这次工作的唯一进度载体；最终状态到达后，优先把它原地更新为最终答案，因此不会因为状态
+变化产生消息流水账。状态消息一经创建就保留稳定身份，后续更新不能改为新发一条消息。
+
+快速完成的工作可以只在用户原消息上显示 **Received** reaction，再发送最终答案，不创建状态
+消息。异步或长任务按 **Received → Working → Completed** 呈现；无法完成或需要用户介入时，
+最终状态为 **Needs attention** 或 **Failed**。如果状态消息更新失败，接入只在同一个 thread
+追加一次最终答案，并记录可诊断的投递问题；重试或重复投递都不能产生第二条最终答案。
+
+默认 reaction 是 **👀 → ⏳ → ✅**，异常使用 **⚠️**。reaction 只提示消息已被接收、仍在处理
+或已结束，不代表 Mohist 工作成功；成功、取消、部分完成和失败必须以 Mohist 的 AgentSession
+与 AgentTurn 已确认结果为准。平台不支持给用户原消息加 reaction 时，reaction 加在唯一的状态
+消息上。
+
 - Slack 只展示适合用户消费的 Agent 回复、排队/执行/失败状态和必要的操作，不转发隐藏
   推理、原始工具输出或凭据。
 - Agent 回复按文本渲染，不把其中看起来像 Slack mention、按钮或消息配置的内容当作控制指令；
@@ -446,4 +469,6 @@ Connection 的生命周期有三个**互相独立、各自需要显式确认**�
 重复投递保护和 Owner-only 频道权限已经实装；真实 Agent 已可从 Slack 私聊使用。当前安装仍
 走「人工创建 App 并粘贴凭据」的临时路径，Manager 自动安装上线后将作为默认，人工路径保留为
 排障与自动化入口。Allowlist/Anyone、附件、频道控制操作，以及不同 Mohist Server 之间的
-多 Bot 协调仍未提供。尚未完成的能力不应被理解为 Slack 已经支持。
+多 Bot 协调仍未提供。Received/Working/Completed 状态消息的原位更新、reaction add/remove、
+未知投递核对和更新失败后的单次 fallback 尚未实装；当前 provider mutation 仍不能提供这些
+保证。尚未完成的能力不应被理解为 Slack 已经支持。

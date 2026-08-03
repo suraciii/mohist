@@ -96,8 +96,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         _apps.SetResponse(child.Id, new FakeSlackAppResponse(
             Delete: new SlackAppManagementResult(SlackAppManagementOutcome.Unknown, ErrorClass: "internal_error")));
 
-        var delete = await _appService.DeleteAsync(child.Id, "DELETE", "operator-1");
-        var retry = await _appService.DeleteAsync(child.Id, "DELETE", "operator-1");
+        var delete = await _appService.DeleteAsync(child.Id, "DELETE");
+        var retry = await _appService.DeleteAsync(child.Id, "DELETE");
 
         Assert.Equal(ManagedSlackChildAppOperationStatus.Completed, delete.Status);
         Assert.Equal(SlackAppManagementOutcome.Unknown, delete.Outcome);
@@ -122,8 +122,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             lifecycle: SlackAppLifecycle.Created,
             appId: "A_ACTIVE",
             botUserId: "U_ACTIVE");
-        var blocked = await _appService.DeleteAsync(active.Id, "DELETE", "operator-1");
-        var unconfirmed = await _appService.DeleteAsync(active.Id, "delete", "operator-1");
+        var blocked = await _appService.DeleteAsync(active.Id, "DELETE");
+        var unconfirmed = await _appService.DeleteAsync(active.Id, "delete");
 
         Assert.Equal("active_connection_binding", blocked.ErrorClass);
         Assert.Equal("confirmation_required", unconfirmed.ErrorClass);
@@ -132,7 +132,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         await SoftDeleteConnectionAsync(active.AgentConnectionId);
         _apps.SetResponse(active.Id, new FakeSlackAppResponse(
             Delete: new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded)));
-        var deleted = await _appService.DeleteAsync(active.Id, "DELETE", "operator-1");
+        var deleted = await _appService.DeleteAsync(active.Id, "DELETE");
 
         Assert.Equal(ManagedSlackChildAppOperationStatus.Completed, deleted.Status);
         Assert.Equal(SlackAppManagementOutcome.Succeeded, deleted.Outcome);
@@ -140,7 +140,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         await using var db = _factory.CreateDbContext();
         var audit = await db.ManagedSlackChildApps.Where(row => row.Id == active.Id).Select(row => row.AuditJson).SingleAsync();
         Assert.Contains("permanent_delete", audit, StringComparison.Ordinal);
-        Assert.Contains("operator-1", audit, StringComparison.Ordinal);
+        Assert.DoesNotContain("operator-1", audit, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -249,13 +249,17 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         Assert.Equal(["display_information", "features", "oauth_config", "settings"],
             socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
         var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Equal(["app_mention", "message.im"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
         Assert.False(socketEvents.TryGetProperty("request_url", out _));
         Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
+        var socketAppHome = socketRoot.GetProperty("features").GetProperty("app_home");
+        Assert.False(socketAppHome.GetProperty("home_tab_enabled").GetBoolean());
+        Assert.True(socketAppHome.GetProperty("messages_tab_enabled").GetBoolean());
+        Assert.False(socketAppHome.GetProperty("messages_tab_read_only_enabled").GetBoolean());
 
         using var httpsJson = JsonDocument.Parse(https.CanonicalJson);
         var httpsEvents = httpsJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Equal(["app_mention", "message.im"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
         Assert.Equal("https://mohist.example/slack/events", httpsEvents.GetProperty("request_url").GetString());
     }
 
@@ -378,7 +382,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         {
             Id = "enrollment-duplicate",
             WorkspaceTeamId = child.WorkspaceTeamId,
-            ManagerExternalId = "manager-2",
             Lifecycle = SlackEnrollmentLifecycle.Active,
             ManagerCapability = SlackManagerCapability.Available,
             PlanCode = "pro",
@@ -465,7 +468,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         {
             Id = enrollmentId,
             WorkspaceTeamId = $"T-{suffix}",
-            ManagerExternalId = "manager-1",
             Lifecycle = SlackEnrollmentLifecycle.Active,
             ManagerCapability = SlackManagerCapability.Available,
             PlanCode = "pro",

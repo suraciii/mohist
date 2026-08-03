@@ -21,6 +21,7 @@ public sealed class SlackManifestGenerator : IScopedService
             throw new ArgumentException("Interactivity request URLs must use HTTPS.", nameof(input));
 
         var botScopes = (input.BotScopes ?? Array.Empty<string>())
+            .Concat(SlackManifestScopes.RequiredBotScopes)
             .Where(scope => !string.IsNullOrWhiteSpace(scope))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -30,7 +31,7 @@ public sealed class SlackManifestGenerator : IScopedService
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        var botEvents = (input.BotEvents ?? ["app_mention"])
+        var botEvents = (input.BotEvents ?? ["app_mention", "message.im"])
             .Where(eventType => !string.IsNullOrWhiteSpace(eventType))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -46,6 +47,12 @@ public sealed class SlackManifestGenerator : IScopedService
             },
             ["features"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
+                ["app_home"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["home_tab_enabled"] = false,
+                    ["messages_tab_enabled"] = true,
+                    ["messages_tab_read_only_enabled"] = false,
+                },
                 ["bot_user"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["always_online"] = false,
@@ -118,6 +125,13 @@ public sealed class SlackManifestGenerator : IScopedService
         Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
         && !string.IsNullOrWhiteSpace(uri.Host);
+}
+
+public static class SlackManifestScopes
+{
+    public static readonly string[] RequiredBotScopes = [
+        "channels:history", "groups:history", "im:history", "mpim:history", "reactions:write",
+    ];
 }
 
 public sealed record SlackManifestInput(
