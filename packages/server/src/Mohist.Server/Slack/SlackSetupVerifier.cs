@@ -19,9 +19,8 @@ public sealed record RotationCheckResult(
 
 public sealed class SlackSetupVerifier
 {
-    private static readonly string[] RequiredScopes = [
-        "chat:write", "users:read", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write",
-    ];
+    private static readonly string[] RequiredScopes = ["chat:write", "users:read", "im:history"];
+    private const string ScopeVerificationUnavailableReason = "Slack scope verification is unavailable because the scope-list API is unsupported. Confirm the required scopes are installed and retry verification.";
     private readonly ISlackApiClient _slack;
     private readonly ISecretStore _secrets;
     private readonly AgentConnectionStore _connections;
@@ -57,29 +56,26 @@ public sealed class SlackSetupVerifier
         try
         {
             auth = await _slack.AuthTestAsync(tokenText, ct);
-            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
+            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
                 return await FailAsync(projectId, connection, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", ct);
             bot = await _slack.BotsInfoAsync(auth.BotId, tokenText, ct);
-            grantedScopes = await _slack.PermissionsScopesListAsync(tokenText, ct);
+            grantedScopes = await GetGrantedScopesAsync(auth, tokenText, ct);
         }
         catch (HttpRequestException)
         {
             return await FailAsync(projectId, connection, "Slack could not be reached. Start mohist-slack and retry verification.", ct);
         }
 
-        var scopes = grantedScopes.Scopes?.Values.SelectMany(scopes => scopes) ?? [];
-        var missing = RequiredScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
-        var reason = !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
-            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
-            !grantedScopes.Ok || grantedScopes.Scopes is null ? $"Slack could not list the App's granted scopes: {grantedScopes.Error ?? "apps.permissions.scopes.list failed"}. Reinstall the App and retry verification." :
-            missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
+        var reason = !bot.Ok || bot.Bot is null || string.IsNullOrWhiteSpace(bot.Bot.AppId) ? $"Slack could not resolve the configured App and Bot: {bot.Error ?? "bots.info did not return an App identity"}. Check the App and Bot installation." :
+            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
+            ScopeFailureReason(grantedScopes);
 
         if (reason is not null)
             return await FailAsync(projectId, connection, reason, ct);
 
         try
         {
-            await _connections.BindSlackIdentityAsync(projectId, connectionId, auth.TeamId, auth.AppId, auth.UserId, auth.User, ct);
+            await _connections.BindSlackIdentityAsync(projectId, connectionId, auth.TeamId, bot.Bot!.AppId!, auth.UserId, auth.User, ct);
         }
         catch (AgentConnectionValidationException ex)
         {
@@ -118,39 +114,36 @@ public sealed class SlackSetupVerifier
         SlackAuthTestResponse auth;
         SlackBotInfoResponse bot;
         SlackPermissionsScopesListResponse grantedScopes;
+        string appId;
         try
         {
             app = await _slack.AppsConnectionsOpenAsync(appToken, ct);
             if (!app.Ok || string.IsNullOrWhiteSpace(app.Url))
                 return new(false, $"Slack rejected the App token: {app.Error ?? "invalid_auth"}. Generate a new token.", null, null, null, null, null);
-            var appId = AppIdFromSocketModeUrl(app.Url);
-            if (appId is null)
+            var resolvedAppId = AppIdFromAppToken(appToken) ?? AppIdFromSocketModeUrl(app.Url);
+            if (resolvedAppId is null)
                 return new(false, "Slack did not return an App identity for the App token. Generate a new App token.", null, null, null, null, null);
+            appId = resolvedAppId;
             auth = await _slack.AuthTestAsync(botToken, ct);
-            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.AppId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
+            if (!auth.Ok || string.IsNullOrWhiteSpace(auth.TeamId) || string.IsNullOrWhiteSpace(auth.UserId) || string.IsNullOrWhiteSpace(auth.BotId))
                 return new(false, $"Slack rejected the Bot token: {auth.Error ?? "invalid_auth"}. Generate a new token.", null, null, null, null, null);
-            if (!string.Equals(appId, auth.AppId, StringComparison.Ordinal))
-                return new(false, "The App token and Bot token belong to different Slack Apps. Reinstall the matching App and Bot.", null, null, null, null, null);
             bot = await _slack.BotsInfoAsync(auth.BotId, botToken, ct);
-            grantedScopes = await _slack.PermissionsScopesListAsync(botToken, ct);
+            grantedScopes = await GetGrantedScopesAsync(auth, botToken, ct);
         }
         catch (HttpRequestException)
         {
             return new(false, "Slack could not be reached. Start mohist-slack and retry verification.", null, null, null, null, null);
         }
 
-        var scopes = grantedScopes.Scopes?.Values.SelectMany(scopes => scopes) ?? [];
-        var missing = RequiredScopes.Where(scope => !scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
-        var reason = !bot.Ok || bot.Bot is null ? $"Slack could not resolve the configured Bot: {bot.Error ?? "bots.info failed"}. Check the App and Bot installation." :
-            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, auth.AppId, StringComparison.Ordinal) ? "The App and Bot belong to different Slack installs. Reinstall the matching App and Bot." :
-            !grantedScopes.Ok || grantedScopes.Scopes is null ? $"Slack could not list the App's granted scopes: {grantedScopes.Error ?? "apps.permissions.scopes.list failed"}. Reinstall the App and retry verification." :
-            missing.Length > 0 ? $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App." : null;
+        var reason = !bot.Ok || bot.Bot is null || string.IsNullOrWhiteSpace(bot.Bot.AppId) ? $"Slack could not resolve the configured App and Bot: {bot.Error ?? "bots.info did not return an App identity"}. Check the App and Bot installation." :
+            !string.Equals(bot.Bot.Id, auth.BotId, StringComparison.Ordinal) || !string.Equals(bot.Bot.AppId, appId, StringComparison.Ordinal) ? "The App token and Bot token belong to different Slack Apps. Reinstall the matching App and Bot." :
+            ScopeFailureReason(grantedScopes);
 
         if (reason is not null)
             return new(false, reason, null, null, null, null, null);
 
         var verifiedBot = bot.Bot!;
-        return new(true, null, auth.TeamId, auth.AppId, auth.UserId, verifiedBot.Name, verifiedBot.IconUrl);
+        return new(true, null, auth.TeamId, verifiedBot.AppId, auth.UserId, verifiedBot.Name, verifiedBot.IconUrl);
     }
 
     private static string? AppIdFromSocketModeUrl(string url)
@@ -167,6 +160,53 @@ public sealed class SlackSetupVerifier
         }
         return null;
     }
+
+    private static string? AppIdFromAppToken(string token)
+    {
+        var parts = token.Split('-', StringSplitOptions.None);
+        if (parts.Length < 3 || !string.Equals(parts[0], "xapp", StringComparison.Ordinal) || !string.Equals(parts[1], "1", StringComparison.Ordinal))
+            return null;
+
+        return string.IsNullOrWhiteSpace(parts[2]) ? null : parts[2];
+    }
+
+    private static string? ScopeFailureReason(SlackPermissionsScopesListResponse response)
+    {
+        if (!response.Ok && IsUnsupportedScopeListing(response.Error))
+            return ScopeVerificationUnavailableReason;
+
+        if (!response.Ok || response.Scopes is null)
+            return $"Slack could not list the App's granted scopes: {response.Error ?? "apps.permissions.scopes.list failed"}. Reinstall the App and retry verification.";
+
+        var granted = response.Scopes.Values.SelectMany(scopes => scopes);
+        var missing = RequiredScopes.Where(scope => !granted.Contains(scope, StringComparer.Ordinal)).ToArray();
+        return missing.Length == 0
+            ? null
+            : $"Slack is missing required scopes: {string.Join(", ", missing)}. Add the scopes and reinstall the App.";
+    }
+
+    private Task<SlackPermissionsScopesListResponse> GetGrantedScopesAsync(
+        SlackAuthTestResponse auth,
+        string botToken,
+        CancellationToken ct)
+    {
+        if (auth.GrantedScopes is { } scopes)
+        {
+            return Task.FromResult(new SlackPermissionsScopesListResponse(
+                true,
+                null,
+                new Dictionary<string, IReadOnlyList<string>>
+                {
+                    ["x-oauth-scopes"] = scopes.ToArray(),
+                }));
+        }
+
+        return _slack.PermissionsScopesListAsync(botToken, ct);
+    }
+
+    private static bool IsUnsupportedScopeListing(string? error) =>
+        string.Equals(error, "unknown_method", StringComparison.Ordinal)
+        || string.Equals(error, "method_not_supported", StringComparison.Ordinal);
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)
     {
