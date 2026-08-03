@@ -736,7 +736,24 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialInputId: command.InputId,
             InitialTurnId: command.TurnId,
             Attachments: command.Attachments,
-            StartupContext: command.StartupContext);
+            StartupContext: command.StartupContext,
+            SlackExecutionContext: SlackExecutionContextFor(command));
+
+    private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
+    {
+        var origin = command.ConnectionOrigin;
+        return origin is null
+            ? null
+            : SlackExecutionContextFactory.Create(
+                origin.WorkspaceTeamId,
+                origin.ConversationId,
+                origin.ThreadTs,
+                origin.MessageTs,
+                origin.SlackUserId,
+                origin.ConnectionId,
+                command.SessionId,
+                $"slack:{command.SessionId}:{command.InputId}");
+    }
 
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -803,7 +820,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
-        && Equals(left.StartupContext, right.StartupContext);
+        && Equals(left.StartupContext, right.StartupContext)
+        && Equals(left.SlackExecutionContext, right.SlackExecutionContext);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
     {
@@ -819,6 +837,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
+        if (!Equals(left.SlackExecutionContext, right.SlackExecutionContext)) fields.Add(nameof(AgentJobInput.SlackExecutionContext));
         return string.Join(", ", fields);
     }
 
@@ -1129,6 +1148,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                     size = descriptor.Size,
                 })
                 .ToArray());
+        if (input.SlackExecutionContext is not null)
+            with["slackExecutionContext"] = JSON.SerializeToElement(input.SlackExecutionContext);
         var withJson = JSON.Serialize(with);
 
         return new WorkDispatch(
