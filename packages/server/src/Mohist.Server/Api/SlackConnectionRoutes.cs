@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -186,7 +187,7 @@ public static class SlackConnectionRoutes
             return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
         });
 
-        management.MapPost("/{connectionId}/enable", async (HttpContext context, string connectionId, AgentConnectionStore connections, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/enable", async (HttpContext context, string connectionId, AgentConnectionStore connections, SlackOutboxStore outbox, CancellationToken ct) =>
         {
             var projectId = context.GetResolvedProject().Id;
             var connection = await connections.GetAsync(projectId, connectionId, ct);
@@ -196,6 +197,8 @@ public static class SlackConnectionRoutes
             var updated = await connections.UpdateAsync(projectId, connectionId,
                 new HashSet<string>(StringComparer.Ordinal) { "desiredState" },
                 desiredState: DesiredStateKind.Enabled, ct: ct);
+            if (updated is not null)
+                await outbox.PrunePendingStatusMutationsAsync(projectId, connectionId, ct);
             return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
         });
 
@@ -441,10 +444,32 @@ public static class SlackConnectionRoutes
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
-            if (connection.DesiredState == DesiredStateKind.Disabled)
-                return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled." });
             if (body is null)
                 return ApiResults.Ok(new { kind = "ignored" });
+            if (connection.DesiredState == DesiredStateKind.Disabled)
+            {
+                var disabledIdentity = new SlackMessageIdentity(body.TeamId, body.ConversationId, body.MessageTs);
+                var disabledIdentityError = disabledIdentity.Validate();
+                if (disabledIdentityError.Length != 0)
+                    return ApiResults.BadRequest(disabledIdentityError, "invalid_slack_identity");
+                if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
+                    return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
+
+                try
+                {
+                    var discarded = await inbox.AcceptAsync(
+                        new SlackProviderInboxDraft(projectId, connection.Id, disabledIdentity,
+                            body.SenderSlackUserId ?? "unknown", body.ThreadTs),
+                        new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.DisabledDiscarded), ct);
+                    await inbox.MarkDispatchedAsync(projectId, discarded.Id, ct);
+                }
+                catch (SlackProviderInboxCapacityExceededException)
+                {
+                    // A disabled transport event is still acknowledged. The
+                    // inbox is the audit record when capacity is available.
+                }
+                return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled.", audited = true });
+            }
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
                 return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
 
@@ -533,6 +558,21 @@ public static class SlackConnectionRoutes
             return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
         });
 
+        group.MapPost("/deliveries/claim-uncertain", async (
+            HttpContext http,
+            string connectionId,
+            DeliveryClaimBody body,
+            SlackOutboxStore outbox,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(http.Request.Headers))
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            var projectId = http.GetResolvedProject().Id;
+            var entry = await outbox.ClaimUncertainAsync(projectId, connectionId, body?.AdapterId ?? string.Empty, ct);
+            return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
+        });
+
         group.MapPost("/deliveries/ack", async (
             HttpContext http,
             DeliveryAckBody body,
@@ -546,7 +586,7 @@ public static class SlackConnectionRoutes
             if (body is null || string.IsNullOrWhiteSpace(body.Id))
                 return ApiResults.BadRequest("id is required.");
             if (string.Equals(body.Outcome, "delivered", StringComparison.OrdinalIgnoreCase))
-                await outbox.MarkDeliveredAsync(projectId, body.Id, ct);
+                await outbox.MarkDeliveredAsync(projectId, body.Id, body.ProviderMessageIdentity, ct);
             else if (string.Equals(body.Outcome, "uncertain", StringComparison.OrdinalIgnoreCase))
                 await outbox.MarkDeliveryUncertainAsync(projectId, body.Id, body.Reason, ct);
             else
@@ -1288,17 +1328,8 @@ public static class SlackConnectionRoutes
                 sessionId,
                 body.MessageTs,
                 ct);
-            var acknowledgement = isRoutedNewTask
-                ? BuildNewTaskAck(accepted.AlreadyExisted, dispatchDecision!.Reason)
-                : accepted.AlreadyExisted
-                    ? "This task was already accepted; execution is being resumed."
-                    : dispatchDecision!.Reason ?? "Task accepted and queued for execution.";
-            acknowledgement = BuildAttachmentAck(acknowledgement, body.Files, attachmentBinding);
-            await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-                acknowledgement,
-                $"slack-ack:{req.Identity.AsKey()}",
-                ct,
-                body.ThreadTs);
+            await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
+                projectId, connection.Id, req.Identity, body.ThreadTs, ct);
             await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return ApiResults.Ok(new
             {
@@ -1325,15 +1356,18 @@ public static class SlackConnectionRoutes
             req.Grains,
             req.FollowupDispatcher,
             ct);
-        var followupAck = BuildAttachmentAck(
-            BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
-            body.Files,
-            followupResult.AttachmentBinding);
-        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            followupAck,
-            $"slack-ack:{req.Identity.AsKey()}",
-            ct,
-            body.ThreadTs);
+        await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
+            projectId, connection.Id, req.Identity, body.ThreadTs, ct);
+        if (followupResult.Status is "queued" or "executing")
+        {
+            await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
+                projectId,
+                connection.Id,
+                req.Identity,
+                body.ThreadTs,
+                $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                ct);
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -2027,13 +2061,8 @@ public static class SlackConnectionRoutes
                 ct);
         }
 
-        var acknowledgement = BuildAttachmentAck(
-            BuildLaunchAck(startupContext, accepted.AlreadyExisted),
-            body.Files,
-            attachmentBinding);
-
-        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            acknowledgement, dispatchRef, ct, rootTs);
+        await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
+            projectId, connection.Id, req.Identity, body.ThreadTs, ct);
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -2153,12 +2182,18 @@ public static class SlackConnectionRoutes
             req.Grains,
             req.FollowupDispatcher,
             ct);
-        var ack = BuildAttachmentAck(
-            BuildFollowupAck(followupResult.Status, accepted.AlreadyExisted),
-            body.Files,
-            followupResult.AttachmentBinding);
-        await EnqueueRequiredReplyAsync(req.Outbox, projectId, connection, body.ConversationId,
-            ack, dispatchRef, ct, body.ThreadTs);
+        await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueReceivedAsync(
+            projectId, connection.Id, req.Identity, body.ThreadTs, ct);
+        if (followupResult.Status is "queued" or "executing")
+        {
+            await req.Services.GetRequiredService<SlackStatusProjection>().EnqueueWorkingAsync(
+                projectId,
+                connection.Id,
+                req.Identity,
+                body.ThreadTs,
+                $"agent-session-followup:{followupResult.SessionId}:{followupResult.TurnId}:progress",
+                ct);
+        }
         await req.Inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return ApiResults.Ok(new
         {
@@ -2353,4 +2388,5 @@ public sealed class DeliveryAckBody
     public string Id { get; init; } = string.Empty;
     public string Outcome { get; init; } = string.Empty;
     public string? Reason { get; init; }
+    public SlackProviderMessageIdentity? ProviderMessageIdentity { get; init; }
 }

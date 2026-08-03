@@ -1,5 +1,6 @@
 namespace Mohist.Server.Infrastructure.Slack;
 
+using System.Text.Json.Serialization;
 using Mohist.Server.Agent.Domain;
 
 /// <summary>
@@ -30,12 +31,37 @@ public readonly record struct SlackMessageIdentity(
     }
 }
 
+public readonly record struct SlackProviderMessageIdentity(
+    [property: JsonPropertyName("conversationId")] string ConversationId,
+    [property: JsonPropertyName("messageTs")] string MessageTs)
+{
+    public string Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ConversationId))
+            return "ConversationId is required.";
+        if (string.IsNullOrWhiteSpace(MessageTs))
+            return "MessageTs is required.";
+        return string.Empty;
+    }
+}
+
+public static class SlackDeliveryOperations
+{
+    public const string PostMessage = "post_message";
+    public const string ChatUpdate = "chat_update";
+    public const string ReactionAdd = "reaction_add";
+    public const string ReactionRemove = "reaction_remove";
+}
+
 public static class SlackOutboxKinds
 {
     public const string ReplaceableProgress = "replaceable_progress";
     public const string TerminalResult = "terminal_result";
     public const string ExplicitFailure = "explicit_failure";
     public const string UserAction = "user_action";
+    // Kept as user_action for the existing durable check constraint. The
+    // payload operation is the provider mutation contract.
+    public const string ReactionMutation = UserAction;
 
     public static bool IsDefined(string? value) => value is
         ReplaceableProgress or

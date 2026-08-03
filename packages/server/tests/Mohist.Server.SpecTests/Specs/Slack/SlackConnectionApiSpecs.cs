@@ -109,7 +109,11 @@ public sealed class SlackConnectionApiSpecs
 
         await using var verifyScope = _fixture.Services.CreateAsyncScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Equal(0, await db.SlackProviderInboxRows.CountAsync(row => row.ConnectionId == connection.Id));
+        var discarded = await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id)
+            .ToListAsync();
+        var discardedRow = Assert.Single(discarded);
+        Assert.Equal(SlackProviderInboxRouteKinds.DisabledDiscarded, discardedRow.RouteKind);
         Assert.Equal(SlackOutboxStates.Pending, await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id)
             .Select(row => row.State)
@@ -299,7 +303,7 @@ public sealed class SlackConnectionApiSpecs
         _fixture.Slack.BotsInfo = new(true, null, new("B123", "Mohist", "A123"));
         _fixture.Slack.PermissionsScopesList = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
-            ["im"] = ["chat:write", "im:history"],
+            ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
             ["team"] = ["users:read"],
         });
         _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));

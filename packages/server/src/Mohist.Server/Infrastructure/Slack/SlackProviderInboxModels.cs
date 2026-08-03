@@ -34,6 +34,7 @@ public static class SlackProviderInboxRouteKinds
     public const string FollowupThread = "followup_thread";
     public const string Ambiguous = "ambiguous";
     public const string Ignored = "ignored";
+    public const string DisabledDiscarded = "disabled_discarded";
 }
 
 public sealed record SlackProviderInboxRouteDraft(

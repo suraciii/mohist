@@ -21,6 +21,7 @@ public sealed class SlackManifestGenerator : IScopedService
             throw new ArgumentException("Interactivity request URLs must use HTTPS.", nameof(input));
 
         var botScopes = (input.BotScopes ?? Array.Empty<string>())
+            .Concat(SlackManifestScopes.RequiredBotScopes)
             .Where(scope => !string.IsNullOrWhiteSpace(scope))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -118,6 +119,13 @@ public sealed class SlackManifestGenerator : IScopedService
         Uri.TryCreate(value, UriKind.Absolute, out var uri)
         && uri.Scheme == Uri.UriSchemeHttps
         && !string.IsNullOrWhiteSpace(uri.Host);
+}
+
+public static class SlackManifestScopes
+{
+    public static readonly string[] RequiredBotScopes = [
+        "channels:history", "groups:history", "im:history", "mpim:history", "reactions:write",
+    ];
 }
 
 public sealed record SlackManifestInput(

@@ -1,5 +1,8 @@
 namespace Mohist.Server.Infrastructure.Slack;
 
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 /// <summary>
 /// Snapshot the producer hands to <see cref="SlackOutboxStore.EnqueueAsync"/>.
 /// <see cref="DispatchRef"/> ties multiple progress updates for the same
@@ -27,6 +30,26 @@ public sealed record SlackOutboxDraft(
 /// created — the caller may continue as if a fresh insert succeeded.
 /// </summary>
 public sealed record SlackOutboxEnqueueResult(string Id, bool MergedIntoExisting, bool Suppressed = false);
+
+public sealed record SlackDeliveryPayload(
+    [property: JsonPropertyName("operation")] string Operation,
+    [property: JsonPropertyName("text")] string? Text = null,
+    [property: JsonPropertyName("clientMessageId")] string? ClientMessageId = null,
+    [property: JsonPropertyName("providerMessageIdentity")] SlackProviderMessageIdentity? ProviderMessageIdentity = null,
+    [property: JsonPropertyName("targetMessageIdentity")] SlackProviderMessageIdentity? TargetMessageIdentity = null,
+    [property: JsonPropertyName("reaction")] string? Reaction = null,
+    [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
+    [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
+    [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null)
+{
+    public static SlackDeliveryPayload Parse(string payloadJson)
+    {
+        var payload = JsonSerializer.Deserialize<SlackDeliveryPayload>(payloadJson);
+        return payload is null
+            ? throw new InvalidOperationException("Slack delivery payload is invalid.")
+            : payload with { Operation = string.IsNullOrWhiteSpace(payload.Operation) ? SlackDeliveryOperations.PostMessage : payload.Operation };
+    }
+}
 
 /// <summary>
 /// Read model for the outbox. Mirrors the row columns plus the

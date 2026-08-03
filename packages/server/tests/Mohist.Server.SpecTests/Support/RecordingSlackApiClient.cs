@@ -9,7 +9,7 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
     public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null, new("B123", "Mohist", "A123"));
     public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
     {
-        ["im"] = ["chat:write", "im:history"],
+        ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
         ["team"] = ["users:read"],
     });
     public SlackUserInfoResponse DefaultUsersInfo { get; set; } = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
@@ -82,4 +82,17 @@ public sealed class RecordingSlackApiClient : ISlackApiClient
             return Task.FromResult(ConversationsRepliesPages.Dequeue());
         return Task.FromResult(new SlackConversationsRepliesPage(true, null, [], null));
     }
+
+    public Task<SlackChatPostMessageResponse> ChatPostMessageAsync(string conversationId, string text, string? threadTs, string? clientMessageId, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackChatPostMessageResponse(true, null, "1.000", null));
+    public Task<SlackChatUpdateResponse> ChatUpdateAsync(string conversationId, string messageTs, string text, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackChatUpdateResponse(true, null, messageTs, null));
+    public Task<SlackReactionResponse> ReactionsAddAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackReactionResponse(true, null));
+    public Task<SlackReactionResponse> ReactionsRemoveAsync(string conversationId, string reaction, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackReactionResponse(true, null));
+    public Task<SlackReactionGetResponse> ReactionsGetAsync(string conversationId, string messageTs, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackReactionGetResponse(true, null, new SlackReactionMessage([])));
+    public Task<SlackConversationsHistoryPage> ConversationsHistoryAsync(string conversationId, string? latest, string? oldest, string? cursor, string botToken, CancellationToken ct = default) =>
+        Task.FromResult(new SlackConversationsHistoryPage(true, null, [], null));
 }
