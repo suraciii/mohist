@@ -55,6 +55,19 @@ Agent API 对客户端提供六类能力：
 - 需要持续推进和验收的工作仍应进入 Issue / Workflow；
 - Web、CLI 和 Slack 必须用相同方式解释这些状态，不能各自发明“完成”。
 
+## Session 观察
+
+AgentSession 的稳定 `Session ID` 是跨入口观察和继续操作的唯一身份。Project 是读取边界；
+调用方按 Project 和 Session ID 读取时，Workflow、直接启动和 Agent Connection 创建的会话
+都使用同一套 summary 与 transcript 语义。
+
+- view 与 transcript 不因会话来自 Agent Connection 而切换到另一套读取模型；它们必须展示同一
+  个 Session 的来源、Agent 身份、当前 Runtime 与 activity、输入、Turn 和 transcript。
+- 按 Agent 发现会话时，`--agent` 覆盖该 Agent 的直接启动和 Agent Connection 会话；它不是
+  只列出手动启动记录的历史筛选器。
+- Session ID 存在但属于另一个 Project，或携带未被支持的来源时，读取结果按“不存在”处理，
+  不泄露会话事实。
+
 ## 执行定义与调用上下文
 
 启动时，Mohist 从 Agent 解析并固定这段 Session 使用的执行定义。已有 Session 不因 Agent

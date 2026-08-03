@@ -42,7 +42,8 @@ import {
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
-import type { PiTurnObserver } from "../runtime/pi/index.js"
+import type { PiRuntimeEvent, PiTurnObserver } from "../runtime/pi/index.js"
+import type { RuntimeTurnEvent, RuntimeTurnObserver } from "../runtime/opencode/index.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "../runtime/binding-recovery.js"
 import type { FollowupOperationJournalStore } from "../runtime/followup-operation-journal.js"
 import type { ServerConnection } from "./connection.js"
@@ -235,10 +236,11 @@ async function handleFollowup(
       ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
     } } : {}),
   }
-  const observer = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
+  const observerState = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)
   try {
-    const completion = callFollowup(handle, followupRequest, observer).then(
-      (result) => {
+    const completion = callFollowup(handle, followupRequest, observerState.observer).then(
+      async (result) => {
+        const observerError = await observerState.flush()
         if (!result.ok) {
           const message = readErrorMessage(result)
           recordFollowupActivity(
@@ -255,7 +257,28 @@ async function handleFollowup(
           }
           return
         }
-        recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "idle")
+        if (observerError) {
+          recordFollowupActivity(
+            outbox,
+            sessionTarget,
+            selectedTarget,
+            payload.operationId,
+            payload.turnId,
+            "unknown",
+            observerError,
+          )
+          return
+        }
+        recordFollowupActivity(
+          outbox,
+          sessionTarget,
+          selectedTarget,
+          payload.operationId,
+          payload.turnId,
+          "idle",
+          undefined,
+          readFollowupOutput(result),
+        )
       },
       (error) => {
         console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
@@ -300,13 +323,20 @@ function buildFollowupObserver(
   sessionTarget: SessionTarget,
   target: FollowupTarget,
   operationId: string | undefined,
-): PiTurnObserver | null {
-  if (!operationId) return null
+): {
+  observer: PiTurnObserver | RuntimeTurnObserver | null
+  flush: () => Promise<unknown>
+} {
+  const pending: Promise<void>[] = []
+  let observerError: unknown = null
+  let openCodeEventOrdinal = 0
+  if (!operationId) return { observer: null, flush: async () => null }
   const completedAt = new Date().toISOString()
-  return {
-    onEvent: (event) => {
+  const observer: PiTurnObserver | RuntimeTurnObserver = {
+    onEvent: (event: PiRuntimeEvent | RuntimeTurnEvent) => {
+      const ordinal = "id" in event ? 0 : ++openCodeEventOrdinal
       const record: RuntimeEventRecord = {
-        id: `followup-event:${operationId}:${event.id}`,
+        id: `followup-event:${operationId}:${followupEventId(event, ordinal)}`,
         producerFamily: sessionTarget.kind === "workflow" ? "workflow-session" : "generic-followup",
         target: sessionTargetToRuntimeTarget(sessionTarget),
         runtimeSessionId: target.runtimeSessionId,
@@ -317,11 +347,35 @@ function buildFollowupObserver(
         },
         acknowledgementPolicy: "successful-response",
       }
-      outbox.enqueueProducedFact(record).catch((outboxError) => {
+      const enqueue = outbox.enqueueProducedFact(record)
+      pending.push(enqueue)
+      enqueue.catch((outboxError) => {
+        observerError ??= outboxError
         console.error("failed to persist followup runtime event:", outboxError)
       })
     },
   }
+  return {
+    observer,
+    flush: async () => {
+      await Promise.allSettled(pending)
+      return observerError
+    },
+  }
+}
+
+function followupEventId(event: PiRuntimeEvent | RuntimeTurnEvent, ordinal: number): string {
+  if ("id" in event && typeof event.id === "string") return event.id
+  return `ordinal-${ordinal}`
+}
+
+function readFollowupOutput(result: { readonly ok: true; readonly value: unknown }): string | null {
+  const value = result.value as {
+    readonly finalAssistantText?: unknown
+    readonly facts?: { readonly finalAssistantText?: unknown }
+  }
+  const text = value.facts?.finalAssistantText ?? value.finalAssistantText
+  return typeof text === "string" && text.length > 0 ? text : null
 }
 
 function readErrorMessage(result: { readonly error?: { readonly message?: string } }): string {
@@ -381,6 +435,7 @@ function recordFollowupActivity(
   turnId: string | undefined,
   activity: "idle" | "unknown",
   error?: unknown,
+  output?: string | null,
 ): void {
   if (!operationId) return
   const completedAt = new Date().toISOString()
@@ -396,6 +451,7 @@ function recordFollowupActivity(
         activity,
         status: activity === "idle" ? "completed" : "failed",
         ...(error ? { failureReason: error instanceof Error ? error.message : errorMessage(error) } : {}),
+        ...(output ? { message: output, output } : {}),
         source: "followup",
         operationId,
         ...(turnId ? { turnId } : {}),

@@ -250,6 +250,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
         var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
         Assert.Equal(["app_mention", "message.im"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Contains("reactions:read", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
+        Assert.Contains("reactions:write", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
         Assert.False(socketEvents.TryGetProperty("request_url", out _));
         Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
         var socketAppHome = socketRoot.GetProperty("features").GetProperty("app_home");

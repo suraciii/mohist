@@ -35,7 +35,7 @@ class FakeSubscription implements RuntimeEventSubscription {
 interface BuildArgs {
   failSessionGet?: boolean
   missingSessionOnGet?: boolean
-  failPromptAsync?: boolean
+  failPrompt?: boolean
   failAbort?: boolean
   missingSessionOnPrompt?: boolean
   missingSessionOnAbort?: boolean
@@ -47,7 +47,7 @@ interface BuildResult {
   client: {
     sessionGet: ReturnType<typeof vi.fn>
     sessionStatus: ReturnType<typeof vi.fn>
-    sessionPromptAsync: ReturnType<typeof vi.fn>
+    sessionPrompt: ReturnType<typeof vi.fn>
     sessionAbort: ReturnType<typeof vi.fn>
   }
 }
@@ -65,14 +65,19 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     return { data: { id: params.sessionID } }
   })
   const sessionStatus = vi.fn(async () => ({ data: {} }))
-  const sessionPromptAsync = vi.fn(async (params: { sessionID: string }) => {
-    if (args.failPromptAsync) throw new Error("promptAsync boom")
+  const sessionPrompt = vi.fn(async (params: { sessionID: string }) => {
+    if (args.failPrompt) throw new Error("prompt boom")
     if (args.missingSessionOnPrompt) {
       const error = new Error("not found") as Error & { status?: number }
       error.status = 404
       throw error
     }
-    return { data: { accepted: true, sessionID: params.sessionID } }
+    return {
+      data: {
+        info: { id: "msg_followup", sessionID: params.sessionID, role: "assistant" },
+        parts: [{ id: "part_followup", messageID: "msg_followup", sessionID: params.sessionID, type: "text", text: "followup output" }],
+      },
+    }
   })
   const sessionAbort = vi.fn(async (params: { sessionID: string }) => {
     if (args.failAbort) throw new Error("abort boom")
@@ -91,7 +96,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
       })),
       get: sessionGet,
       status: sessionStatus,
-      promptAsync: sessionPromptAsync,
+      prompt: sessionPrompt,
       abort: sessionAbort,
     },
   }
@@ -114,7 +119,7 @@ function buildDeps(args: BuildArgs = {}): BuildResult {
     client: {
       sessionGet,
       sessionStatus,
-      sessionPromptAsync,
+      sessionPrompt,
       sessionAbort,
     },
   }
@@ -147,7 +152,7 @@ describe("OpenCodeRuntime.resolveSession", () => {
 })
 
 describe("OpenCodeRuntime.followup", () => {
-  it("calls client.session.promptAsync and returns the resolved runtime session facts", async () => {
+  it("runs client.session.prompt to completion and returns the resolved runtime session facts", async () => {
     const { deps, client } = buildDeps()
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
@@ -166,11 +171,44 @@ describe("OpenCodeRuntime.followup", () => {
       { sessionID: "ses_existing", directory: "/tmp/work" },
       { throwOnError: true },
     )
-    expect(client.sessionPromptAsync).toHaveBeenCalledWith({
+    expect(client.sessionPrompt).toHaveBeenCalledWith({
       sessionID: "ses_existing",
       directory: "/tmp/work",
       parts: [{ type: "text", text: "continue the work" }],
     }, { throwOnError: true })
+  })
+
+  it("projects assistant output to the observer before resolving", async () => {
+    const { deps, client, subscription } = buildDeps()
+    const runtime = new OpenCodeRuntime(deps)
+    await runtime.start()
+    const observed: string[] = []
+    client.sessionPrompt.mockImplementationOnce(async (params: { sessionID: string }) => {
+      subscription.emit({
+        type: "message.updated",
+        sessionID: params.sessionID,
+        directory: "/tmp/work",
+        payload: {
+          info: { id: "msg_observed", sessionID: params.sessionID, role: "assistant" },
+          parts: [{ id: "part_observed", messageID: "msg_observed", sessionID: params.sessionID, type: "text", text: "observed output" }],
+        },
+      })
+      return {
+        data: {
+          info: { id: "msg_observed", sessionID: params.sessionID, role: "assistant" },
+          parts: [{ id: "part_observed", messageID: "msg_observed", sessionID: params.sessionID, type: "text", text: "observed output" }],
+        },
+      }
+    })
+
+    const result = await runtime.followup({
+      target: { runtime: "opencode", runtimeSessionId: "ses_existing", workDir: "/tmp/work" },
+      prompt: "continue the work",
+    }, { onEvent: (event) => observed.push(`${event.type}:${String(event.payload.text ?? "")}`) })
+
+    expect(result).toMatchObject({ ok: true, value: { facts: { finalAssistantText: "observed output" } } })
+    expect(observed).toContain("message.delta:observed output")
+    expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
   })
 
   it("applies model and variant on the prompt body without rotating the physical session", async () => {
@@ -185,7 +223,7 @@ describe("OpenCodeRuntime.followup", () => {
     }
     await runtime.followup(request)
 
-    expect(client.sessionPromptAsync).toHaveBeenCalledWith({
+    expect(client.sessionPrompt).toHaveBeenCalledWith({
       sessionID: "ses_existing",
       directory: "/tmp/work",
       parts: [{ type: "text", text: "continue the work" }],
@@ -219,7 +257,7 @@ describe("OpenCodeRuntime.followup", () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("expected failure")
     expect(result.error.kind).toBe("invalid-input")
-    expect(client.sessionPromptAsync).not.toHaveBeenCalled()
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
 
   it("fails with missing-session when client.session.get returns 404", async () => {
@@ -237,7 +275,7 @@ describe("OpenCodeRuntime.followup", () => {
     expect(result.error.message.toLowerCase()).toContain("reset")
   })
 
-  it("fails with missing-session when client.session.promptAsync returns 404", async () => {
+  it("fails with missing-session when client.session.prompt returns 404", async () => {
     const { deps } = buildDeps({ missingSessionOnPrompt: true })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
@@ -265,8 +303,8 @@ describe("OpenCodeRuntime.followup", () => {
     expect(result.error.kind).toBe("turn-failed")
   })
 
-  it("fails with turn-failed when client.session.promptAsync throws", async () => {
-    const { deps } = buildDeps({ failPromptAsync: true })
+  it("fails with turn-failed when client.session.prompt throws", async () => {
+    const { deps } = buildDeps({ failPrompt: true })
     const runtime = new OpenCodeRuntime(deps)
     await runtime.start()
 
@@ -291,7 +329,7 @@ describe("OpenCodeRuntime.followup", () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("expected failure")
     expect(result.error.kind).toBe("invalid-input")
-    expect(client.sessionPromptAsync).not.toHaveBeenCalled()
+    expect(client.sessionPrompt).not.toHaveBeenCalled()
   })
 })
 

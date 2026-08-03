@@ -203,6 +203,8 @@ function makeFakeConnection(): FakeConnectionHandles {
   let agentSession: { runtimeSessionId: string | null } | null = null
   let eventWriter: (body: Record<string, unknown>) => Promise<void> = async () => {}
   const connection = {
+    async openAgentSession() {
+    },
     async attachAgentSession(
       projectId: string,
       sessionId: string,

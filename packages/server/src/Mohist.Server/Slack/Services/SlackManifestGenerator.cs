@@ -130,7 +130,7 @@ public sealed class SlackManifestGenerator : IScopedService
 public static class SlackManifestScopes
 {
     public static readonly string[] RequiredBotScopes = [
-        "channels:history", "groups:history", "im:history", "mpim:history", "reactions:write",
+        "channels:history", "chat:write", "groups:history", "im:history", "mpim:history", "reactions:read", "reactions:write", "users:read",
     ];
 }
 
