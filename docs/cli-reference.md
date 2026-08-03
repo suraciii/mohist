@@ -262,8 +262,7 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
 
 接入只拥有外部身份、权限和连接状态；Agent 配置仍由 `agent edit` 修改。日常挂载与调整的
 主路径是在 Slack 中与 Mohist App 对话；CLI 与 Web 操作同一条接入记录。完整产品语义见
-[Slack](slack.md)。命令面当前实现为 `mo agent connection` 子组，按本节迁移到 `mo
-slack`，开发期不保留兼容别名。
+[Slack](slack.md)。
 
 ## Activity、Event 与本机 Service
 
@@ -409,9 +408,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
-- `slack` 命令组（由 `mo agent connection` 迁移）与 Slack setup。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
-- Agent launch/follow-up 暴露稳定的 SessionInput 与 AgentTurn 身份。
 
 ### 已闭合
 
@@ -428,6 +425,9 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - 互斥关系由参数定义声明并写进叶子帮助（`--all/--archived`、`--before/--after`、
   `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
 - 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
+- 根级 `slack` 命令组及其 setup/status 已交付；接入动作只保留 `mo slack` 这一命令面。
+- Agent launch/follow-up 以稳定的 SessionInput 与 AgentTurn 身份返回；Slack 输入进一步保留
+  Server 生成的回复锚点和协作上下文。
 - 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive` 等缺；`issue rebase`
   返回排队应答而非资源，不在此列）。
 - `project repo set-default`（自 `repo set-default` 迁移）。

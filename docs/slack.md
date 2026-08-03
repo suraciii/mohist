@@ -532,16 +532,17 @@ Connection 的生命周期有三个**互相独立、各自需要显式确认**�
 ## 实装差距
 
 数据面（消息收发与 Agent 调用）已经落地：频道根消息提及、已绑定 thread 追问、多个 Bot
-的归属提示、重复投递保护、Owner-only 频道权限与 thread 历史导入已实装；状态消息原位
-更新、reaction、未知投递核对与更新失败后的单次 fallback 已具备数据面能力。真实 Agent
-已可从 Slack 私聊使用。
+的归属提示、重复投递保护、Owner-only 频道权限与 thread 历史导入均已可用。状态消息可以
+原位更新并呈现进行中的工作；未知投递会核对，更新失败只补发一次。每条 Slack 输入都带有
+协作规则和回复位置，普通追问不会中断当前工作；只有对应执行中的工作才可通过明确的 Stop
+操作请求停止。终态回复保留稳定会话标识，并在管理员配置可公开访问的 Mohist 地址时提供
+安全的会话入口。
 
-Manager 控制面（工作区安装、子 App 创建与授权编排、托管/本机两路径、停用/移除/永久删除
-三动作）正按切片落地，当前安装仍走「人工创建 App 并粘贴凭据」的临时路径。
+Manager 控制面已经提供 `mo slack setup`、`mo slack status` 和一次性认领。认领后的 Mohist
+App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、创建带默认配置的 Agent 并挂载、
+调整接入权限与启停，以及发起 Owner 转移；它与 CLI 读取同一状态和下一步。解除绑定和永久
+删除不在对话中提供，仍是 CLI 或 Web 中独立、明确的生命周期操作。
 
-本文新增、尚未实装的能力：**Mohist App 对话式管理面**（Manager 绑定内置 Agent
-`mohist-slack`，对话式挂载、创建与调整 Agent 接入）、**Slack 协作规范注入**、以及
-`mo slack setup` / `mo slack status` 任务命令。命令面当前实现为 `mo agent connection`
-子组，按本篇目标迁移至 `mo slack`，开发期不留兼容别名。Allowlist/Anyone、附件、频道
-控制操作、跨 Mohist Server 的多 Bot 协调同样仍未提供。尚未完成的能力不应被理解为
-Slack 已经支持。
+当前仍未交付的是完整的托管或本机安装向导、真实 Slack 子 App 创建与授权、公开应用市场、
+跨 Mohist Server 的多 Bot 协调、Slack 原生 Agent 入口及完整诊断工作台。工作区安装仍由
+本机受保护的操作通道启动；这些未完成部分不应被理解为已经由 Slack 支持。
