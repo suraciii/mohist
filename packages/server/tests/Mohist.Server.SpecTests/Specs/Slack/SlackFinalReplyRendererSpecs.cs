@@ -27,5 +27,6 @@ public sealed class SlackFinalReplyRendererSpecs
         Assert.EndsWith("Next step: Resolve the remaining check and ask me to continue.", text, StringComparison.Ordinal);
         Assert.DoesNotContain("{", text);
         Assert.DoesNotContain("raw tool", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<!", text, StringComparison.Ordinal);
     }
 }
