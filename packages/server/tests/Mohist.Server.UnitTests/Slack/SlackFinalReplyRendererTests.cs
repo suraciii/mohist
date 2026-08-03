@@ -144,20 +144,30 @@ public sealed class SlackFinalReplyRendererTests
     }
 
     [Fact]
-    public void Project_AllowsDiagnosticExpansionOnlyWhenRequested()
+    public void Project_NeverProjectsRawMachinePayload()
     {
         var result = new SlackConfirmedAgentResult(
             "inspect the service",
             SlackFinalReplyStatus.Completed,
-            MachineResults: [new SlackConfirmedMachineResult("payload", "{\"status\":\"ok\"}")]);
+            MachineResults:
+            [
+                new SlackConfirmedMachineResult(
+                    "request metadata",
+                    "{\"status\":\"ok\",\"authorization\":\"Bearer do-not-leak\",\"private_url\":\"https://internal.example.test/run/123\",\"logs\":\"Authorization: Bearer log-secret\"}"),
+                new SlackConfirmedMachineResult(
+                    "plain output",
+                    "2026-08-03T08:00:00Z Authorization: Bearer log-secret https://private.example.test/output"),
+            ]);
 
-        var summary = string.Join('\n', SlackFinalReplyRenderer.Project(result).Segments);
-        var diagnostic = string.Join('\n', SlackFinalReplyRenderer.Project(
-            result,
-            detailLevel: SlackFinalReplyDetailLevel.Diagnostic).Segments);
+        var text = string.Join('\n', SlackFinalReplyRenderer.Project(result).Segments);
 
-        Assert.DoesNotContain("{\"status\":\"ok\"}", summary);
-        Assert.Contains("{\"status\":\"ok\"}", diagnostic);
+        Assert.Contains("request metadata: object: status=ok", text);
+        Assert.Contains("plain output: machine output received; no public summary available.", text);
+        Assert.DoesNotContain("Bearer", text, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("do-not-leak", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("log-secret", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("internal.example.test", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("private.example.test", text, StringComparison.Ordinal);
     }
 
     [Fact]
