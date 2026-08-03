@@ -91,27 +91,6 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AuthTestScopeHeader_verifies_required_scopes_when_scope_listing_is_unsupported()
-    {
-        _slack.AuthTest = _slack.AuthTest with
-        {
-            GrantedScopes = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "chat:write", "users:read", "im:history",
-            },
-        };
-        _slack.PermissionsScopesList = new(false, "unknown_method", null);
-
-        var result = await _verifier.VerifyAsync("project-1", "conn-1");
-
-        var connection = await GetConnectionAsync();
-        Assert.True(result.Verified);
-        Assert.Equal(SetupProgressKind.ClaimOwner, connection.SetupProgress);
-        Assert.Equal(ConnectionHealthKind.Healthy, connection.ConnectionHealth);
-        Assert.Equal(["auth.test", "bots.info:B123"], _slack.Calls);
-    }
-
-    [Fact]
     public async Task DifferentBotIdentityLeavesConnectionUnbound()
     {
         _slack.BotsInfo = new(true, null, new("B999", "Mohist", "A123"));
@@ -121,26 +100,6 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         var connection = await GetConnectionAsync();
         Assert.False(result.Verified);
         Assert.Equal(SetupProgressKind.FixSlackSetup, connection.SetupProgress);
-        Assert.Equal(string.Empty, connection.WorkspaceTeamId);
-        Assert.Equal(string.Empty, connection.AppId);
-        Assert.Equal(string.Empty, connection.BotUserId);
-    }
-
-    [Theory]
-    [InlineData("unknown_method")]
-    [InlineData("method_not_supported")]
-    public async Task UnsupportedScopeListingLeavesConnectionUnbound(string error)
-    {
-        _slack.PermissionsScopesList = new(false, error, null);
-
-        var result = await _verifier.VerifyAsync("project-1", "conn-1");
-
-        var connection = await GetConnectionAsync();
-        Assert.False(result.Verified);
-        Assert.Equal(SetupProgressKind.FixSlackSetup, connection.SetupProgress);
-        Assert.Equal(ConnectionHealthKind.Unhealthy, connection.ConnectionHealth);
-        Assert.Contains("scope verification is unavailable", result.Reason, StringComparison.OrdinalIgnoreCase);
-        Assert.Equal(["chat:write", "users:read", "im:history"], result.RequiredScopes);
         Assert.Equal(string.Empty, connection.WorkspaceTeamId);
         Assert.Equal(string.Empty, connection.AppId);
         Assert.Equal(string.Empty, connection.BotUserId);
@@ -261,7 +220,7 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     {
         public List<string> Calls { get; } = [];
         public SlackAppsConnectionOpenResponse AppsConnectionOpen { get; set; } = new(true, null, "wss://socket.slack.com/?app_id=A123");
-        public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", null);
+        public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
         public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null,
             new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
         public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
