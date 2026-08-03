@@ -249,13 +249,17 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         Assert.Equal(["display_information", "features", "oauth_config", "settings"],
             socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
         var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Equal(["app_mention", "message.im"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
         Assert.False(socketEvents.TryGetProperty("request_url", out _));
         Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
+        var socketAppHome = socketRoot.GetProperty("features").GetProperty("app_home");
+        Assert.False(socketAppHome.GetProperty("home_tab_enabled").GetBoolean());
+        Assert.True(socketAppHome.GetProperty("messages_tab_enabled").GetBoolean());
+        Assert.False(socketAppHome.GetProperty("messages_tab_read_only_enabled").GetBoolean());
 
         using var httpsJson = JsonDocument.Parse(https.CanonicalJson);
         var httpsEvents = httpsJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
+        Assert.Equal(["app_mention", "message.im"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
         Assert.Equal("https://mohist.example/slack/events", httpsEvents.GetProperty("request_url").GetString());
     }
 
