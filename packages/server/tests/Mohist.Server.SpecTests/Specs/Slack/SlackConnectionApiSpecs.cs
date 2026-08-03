@@ -67,7 +67,7 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
-    public async Task Disabled_connection_rejects_ingress_and_withholds_pending_delivery()
+    public async Task Disabled_connection_acknowledges_and_discards_ingress_while_withholding_pending_delivery()
     {
         var connection = await CreateConnectionAsync();
         await using (var scope = _fixture.Services.CreateAsyncScope())
@@ -98,7 +98,7 @@ public sealed class SlackConnectionApiSpecs
         Assert.Equal(HttpStatusCode.OK, ingress.StatusCode);
         using (var ingressDocument = JsonDocument.Parse(await ingress.Content.ReadAsStringAsync()))
         {
-            Assert.Equal("rejected", ingressDocument.RootElement.GetProperty("data").GetProperty("kind").GetString());
+            Assert.Equal(SlackProviderInboxRouteKinds.DisabledDiscarded, ingressDocument.RootElement.GetProperty("data").GetProperty("kind").GetString());
             Assert.Equal("This Connection is disabled.", ingressDocument.RootElement.GetProperty("data").GetProperty("reason").GetString());
         }
 
@@ -109,7 +109,11 @@ public sealed class SlackConnectionApiSpecs
 
         await using var verifyScope = _fixture.Services.CreateAsyncScope();
         var db = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        Assert.Equal(0, await db.SlackProviderInboxRows.CountAsync(row => row.ConnectionId == connection.Id));
+        var discarded = await db.SlackProviderInboxRows
+            .Where(row => row.ConnectionId == connection.Id)
+            .ToListAsync();
+        var discardedRow = Assert.Single(discarded);
+        Assert.Equal(SlackProviderInboxRouteKinds.DisabledDiscarded, discardedRow.RouteKind);
         Assert.Equal(SlackOutboxStates.Pending, await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id)
             .Select(row => row.State)
@@ -183,7 +187,7 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
-    public async Task Enable_does_not_replay_a_terminal_delivery_created_while_disabled()
+    public async Task Enable_replays_a_terminal_delivery_accepted_while_disabled()
     {
         var connection = await CreateConnectionAsync();
         using var disable = await _fixture.Client.PostAsync(Path(connection, "/disable"), null);
@@ -223,7 +227,7 @@ public sealed class SlackConnectionApiSpecs
         using var claim = await _fixture.Client.PostAsJsonAsync(Path(connection, "/deliveries/claim"), new { adapterId = "adapter-1" });
         claim.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await claim.Content.ReadAsStringAsync());
-        Assert.False(document.RootElement.TryGetProperty("data", out _));
+        Assert.Equal(SlackOutboxKinds.TerminalResult, document.RootElement.GetProperty("data").GetProperty("kind").GetString());
     }
 
     [Fact]
@@ -299,7 +303,7 @@ public sealed class SlackConnectionApiSpecs
         _fixture.Slack.BotsInfo = new(true, null, new("B123", "Mohist", "A123"));
         _fixture.Slack.PermissionsScopesList = new(true, null, new Dictionary<string, IReadOnlyList<string>>
         {
-            ["im"] = ["chat:write", "im:history"],
+            ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
             ["team"] = ["users:read"],
         });
         _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));

@@ -20,6 +20,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
     [Theory]
     [InlineData("completed", SlackOutboxKinds.TerminalResult, "The task completed.", "Review the evidence")]
     [InlineData("failed", SlackOutboxKinds.ExplicitFailure, "The task failed.", "Reply with corrected instructions")]
+    [InlineData("cancelled", SlackOutboxKinds.ExplicitFailure, "The task was cancelled.", "Send a new request")]
     [InlineData("unknown", SlackOutboxKinds.ExplicitFailure, "The task outcome is unknown.", "Wait for reconciliation")]
     public async Task HandleAsync_RendersTerminalOutcomeAndEnqueuesIdempotently(
         string status,

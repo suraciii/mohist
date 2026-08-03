@@ -34,7 +34,7 @@ describe("HttpAdapterTransport", () => {
       text: "task",
     }, signal)
     await transport.claimDelivery(ref, "a", signal)
-    await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered" }, signal)
+    await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered", adapterId: "a" }, signal)
     expect(calls.map((call) => call.url)).toEqual([
       "http://server/api/slack-connections/adapter",
       "http://server/api/projects/p/slack-connections/c/adapter-session",
@@ -42,5 +42,6 @@ describe("HttpAdapterTransport", () => {
       "http://server/api/projects/p/slack-connections/c/deliveries/claim",
       "http://server/api/projects/p/slack-connections/c/deliveries/ack",
     ])
+    expect(JSON.parse(calls[4]!.body)).toMatchObject({ id: "delivery-1", outcome: "delivered", adapterId: "a" })
   })
 })
