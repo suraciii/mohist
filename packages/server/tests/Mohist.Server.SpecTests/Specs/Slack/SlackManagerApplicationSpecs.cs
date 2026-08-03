@@ -29,7 +29,6 @@ public sealed class SlackManagerApplicationSpecs
         {
             agentId = seeded.Agent.Id,
             workspaceTeamId = "T_MANAGER_CREATE",
-            managerExternalId = "manager-1",
             accessPolicy = AccessPolicyKind.Allowlist,
             ownerSlackUserId = "U_OWNER",
             transportKind = "socket",
@@ -79,7 +78,6 @@ public sealed class SlackManagerApplicationSpecs
         {
             agentId = seeded.Agent.Id,
             workspaceTeamId = "T_MANAGER_ARCHIVED",
-            managerExternalId = "manager-1",
         });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
@@ -95,7 +93,6 @@ public sealed class SlackManagerApplicationSpecs
         {
             agentId = seeded.Agent.Id,
             workspaceTeamId = "T_MANAGER_REMOVE",
-            managerExternalId = "manager-1",
         });
         var created = await ReadDataAsync(createResponse);
         var connectionId = created.GetProperty("connection").GetProperty("id").GetString()!;
@@ -119,6 +116,39 @@ public sealed class SlackManagerApplicationSpecs
         Assert.NotNull(await db.AgentConnections.SingleAsync(row => row.Id == connectionId && row.DeletedAt != null));
         Assert.NotNull(await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
         Assert.NotNull(await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id));
+    }
+
+    [Fact]
+    public async Task Client_identity_fields_are_rejected_without_creating_or_auditing_an_actor()
+    {
+        var seeded = await SeedAgentAsync(AgentStatus.Active);
+        using var createResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), new
+        {
+            agentId = seeded.Agent.Id,
+            workspaceTeamId = "T_MANAGER_IDENTITY",
+            managerExternalId = "spoofed-manager",
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, createResponse.StatusCode);
+        using (var error = JsonDocument.Parse(await createResponse.Content.ReadAsStringAsync()))
+            Assert.Equal("client_identity_not_supported", error.RootElement.GetProperty("code").GetString());
+
+        using var deleteResponse = await _fixture.Client.PostAsJsonAsync(
+            ManagerPath(seeded.ProjectId, "/connections/unknown/permanent-delete"), new
+            {
+                confirmation = "DELETE",
+                actor = "spoofed-actor",
+            });
+
+        Assert.Equal(HttpStatusCode.BadRequest, deleteResponse.StatusCode);
+        using (var error = JsonDocument.Parse(await deleteResponse.Content.ReadAsStringAsync()))
+            Assert.Equal("client_identity_not_supported", error.RootElement.GetProperty("code").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        Assert.Empty(await db.SlackWorkspaceEnrollments
+            .Where(row => row.WorkspaceTeamId == "T_MANAGER_IDENTITY")
+            .ToListAsync());
     }
 
     private async Task<SeededAgent> SeedAgentAsync(string status)

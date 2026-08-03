@@ -49,7 +49,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         ArgumentNullException.ThrowIfNull(enrollment);
         if (string.IsNullOrWhiteSpace(enrollment.Id)) throw new ArgumentException("Enrollment id is required.", nameof(enrollment));
         if (string.IsNullOrWhiteSpace(enrollment.WorkspaceTeamId)) throw new ArgumentException("Workspace team id is required.", nameof(enrollment));
-        if (string.IsNullOrWhiteSpace(enrollment.ManagerExternalId)) throw new ArgumentException("Manager external id is required.", nameof(enrollment));
         if (enrollment.Lifecycle != SlackEnrollmentLifecycle.Active)
             throw new InvalidOperationException("A new workspace enrollment must start active.");
         SlackStateTransitions.RequireKnownManagerCapability(enrollment.ManagerCapability);
@@ -106,7 +105,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
     {
         Id = row.Id,
         WorkspaceTeamId = row.WorkspaceTeamId,
-        ManagerExternalId = row.ManagerExternalId,
         Lifecycle = row.Lifecycle,
         ManagerCapability = row.ManagerCapability,
         CapabilityReason = row.CapabilityReason,
@@ -124,7 +122,6 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
     {
         Id = enrollment.Id,
         WorkspaceTeamId = enrollment.WorkspaceTeamId,
-        ManagerExternalId = enrollment.ManagerExternalId,
         Lifecycle = enrollment.Lifecycle,
         ManagerCapability = enrollment.ManagerCapability,
         CapabilityReason = enrollment.CapabilityReason,

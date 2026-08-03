@@ -615,7 +615,6 @@ public class MohistDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ManagerExternalId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Lifecycle).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerCapability).HasMaxLength(32).IsRequired();
             entity.Property(e => e.CapabilityReason).HasMaxLength(1024);

@@ -35,11 +35,9 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
     public async Task<ManagedSlackChildAppOperationResult> DeleteAsync(
         string childAppId,
         string confirmation,
-        string actor,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(confirmation);
-        ArgumentException.ThrowIfNullOrWhiteSpace(actor);
         if (!string.Equals(confirmation, "DELETE", StringComparison.Ordinal))
             return ManagedSlackChildAppOperationResult.NotAllowed(SlackAppLifecycle.Created, "confirmation_required");
 
@@ -52,21 +50,15 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
             return ManagedSlackChildAppOperationResult.NotAllowed(child.AppLifecycle, "active_connection_binding");
         if (child.AppLifecycle != SlackAppLifecycle.Created)
             return ManagedSlackChildAppOperationResult.NotAllowed(child.AppLifecycle, "permanent_delete_requires_created");
-        return await ExecuteAsync(childAppId, SlackChildAppOperation.Delete, actor, ct);
+        return await ExecuteAsync(childAppId, SlackChildAppOperation.Delete, ct);
     }
 
     public Task<ManagedSlackChildAppOperationResult> ReconcileDeleteAsync(string childAppId, CancellationToken ct = default) =>
         ReconcileAsync(childAppId, SlackChildAppOperation.Delete, ct);
 
-    private Task<ManagedSlackChildAppOperationResult> ExecuteAsync(
-        string childAppId,
-        SlackChildAppOperation operation,
-        CancellationToken ct) => ExecuteAsync(childAppId, operation, null, ct);
-
     private async Task<ManagedSlackChildAppOperationResult> ExecuteAsync(
         string childAppId,
         SlackChildAppOperation operation,
-        string? actor,
         CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(childAppId);
@@ -102,7 +94,7 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
         var external = operation == SlackChildAppOperation.Create
             ? await _appManagement.CreateAsync(request, ct)
             : await _appManagement.DeleteAsync(request, ct);
-        return await ApplyResultAsync(childAppId, nextFence, operationId, operation, external, actor, ct);
+        return await ApplyResultAsync(childAppId, nextFence, operationId, operation, external, ct);
     }
 
     private async Task<ManagedSlackChildAppOperationResult> ReconcileAsync(
@@ -150,7 +142,6 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
         string operationId,
         SlackChildAppOperation operation,
         SlackAppManagementResult result,
-        string? actor,
         CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -200,12 +191,12 @@ public sealed class ManagedSlackChildAppApplicationService : IScopedService
         if (changed == 0)
             return ManagedSlackChildAppOperationResult.Stale;
 
-        if (actor is not null)
+        if (operation == SlackChildAppOperation.Delete)
         {
             var row = await db.ManagedSlackChildApps.SingleAsync(item =>
                 item.Id == childAppId && item.OperationFence == fence && item.OperationId == operationId, ct);
             var audit = JsonSerializer.Deserialize<List<ManagedSlackAuditEntry>>(row.AuditJson) ?? [];
-            audit.Add(new ManagedSlackAuditEntry("permanent_delete", actor, result.Outcome.ToString().ToLowerInvariant(), now));
+            audit.Add(new ManagedSlackAuditEntry("permanent_delete", result.Outcome.ToString().ToLowerInvariant(), now));
             row.AuditJson = JsonSerializer.Serialize(audit);
             await db.SaveChangesAsync(ct);
         }
@@ -310,6 +301,5 @@ public enum ManagedSlackChildAppOperationStatus
 
 public sealed record ManagedSlackAuditEntry(
     string Action,
-    string Actor,
     string Outcome,
     DateTimeOffset At);

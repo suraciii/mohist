@@ -9,6 +9,13 @@ Slack 不运行模型，不保存另一份 Instructions、Runtime、Model 或 Sk
 Agent 接入与 Hermes 通知不同：通知只把变化单向推送到聊天工具；Agent 接入允许用户发起
 工作、继续会话、停止当前执行并收到结果。
 
+### 当前开发期管理面
+
+当前 P0 的 Manager 生命周期 API 不提供 Mohist 登录、调用者认证或权限隔离。每次请求都按
+部署管理操作处理；客户端不能通过 `ManagerExternalId`、`actor` 或请求头声明操作者，这些
+字段也不会进入审计记录。Slack 的安装授权仍只用于确认实际的工作区与子 App，不代表 Mohist
+调用者身份。
+
 ## 安装模型
 
 一个 Slack 工作区只需要安装一次 **Mohist Manager**。Manager 是这个工作区的安装与运维

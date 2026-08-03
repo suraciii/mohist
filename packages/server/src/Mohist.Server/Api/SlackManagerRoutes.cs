@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Slack.Domain;
@@ -30,16 +32,14 @@ public static class SlackManagerRoutes
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId))
                 return ApiResults.BadRequest("agentId and workspaceTeamId are required.");
 
-            var managerId = body.ManagerExternalId
-                ?? context.Request.Headers["X-Mohist-Manager-Id"].FirstOrDefault()
-                ?? "local-manager";
+            var identityError = RejectClientIdentity(context, body.ExtensionData);
+            if (identityError is not null) return identityError;
             try
             {
                 var result = await service.CreateAsync(new SlackManagerCreateRequest(
                     context.GetResolvedProject().Id,
                     body.AgentId,
                     body.WorkspaceTeamId,
-                    managerId,
                     body.AccessPolicy ?? AccessPolicyKind.OwnerOnly,
                     body.OwnerSlackUserId,
                     body.BotName,
@@ -47,10 +47,6 @@ public static class SlackManagerRoutes
                     body.TransportKind ?? SlackTransportKind.Socket,
                     body.PublicIngressBaseUrl), ct);
                 return Results.Json(new ApiResponse<object>(true, result), statusCode: result.Created ? 201 : 200);
-            }
-            catch (SlackManagerAuthorizationException ex)
-            {
-                return ApiResults.Fail(ex.Message, 403, "manager_unauthorized");
             }
             catch (SlackManagerConflictException ex)
             {
@@ -183,11 +179,10 @@ public static class SlackManagerRoutes
         {
             if (body is null || !string.Equals(body.Confirmation, "DELETE", StringComparison.Ordinal))
                 return ApiResults.Conflict("Permanent delete requires confirmation=DELETE.", "confirmation_required");
-            var actor = body.Actor
-                ?? context.Request.Headers["X-Mohist-Manager-Id"].FirstOrDefault()
-                ?? "local-manager";
+            var identityError = RejectClientIdentity(context, body.ExtensionData);
+            if (identityError is not null) return identityError;
             var result = await service.PermanentDeleteAsync(
-                context.GetResolvedProject().Id, connectionId, body.Confirmation, actor, ct);
+                context.GetResolvedProject().Id, connectionId, body.Confirmation, ct);
             return result.Status switch
             {
                 ManagedSlackChildAppOperationStatus.NotFound => ApiResults.NotFound("The managed Child App was not found."),
@@ -232,19 +227,37 @@ public static class SlackManagerRoutes
         result.Status == ManagedSlackChildAppOperationStatus.NotFound
             ? ApiResults.NotFound("The managed Child App was not found.")
             : ApiResults.Ok(result);
+
+    private static IResult? RejectClientIdentity(
+        HttpContext context,
+        IReadOnlyDictionary<string, JsonElement>? extensionData)
+    {
+        if (context.Request.Headers.ContainsKey("X-Mohist-Manager-Id")
+            || extensionData?.Keys.Any(IsClientIdentityField) == true)
+            return ApiResults.BadRequest(
+                "Client identity fields are not supported by the Manager API.",
+                "client_identity_not_supported");
+        return null;
+    }
+
+    private static bool IsClientIdentityField(string name) =>
+        name.Equals("managerExternalId", StringComparison.OrdinalIgnoreCase)
+        || name.Equals("actor", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class SlackManagerCreateBody
 {
     public string AgentId { get; init; } = string.Empty;
     public string WorkspaceTeamId { get; init; } = string.Empty;
-    public string? ManagerExternalId { get; init; }
     public string? AccessPolicy { get; init; }
     public string? OwnerSlackUserId { get; init; }
     public string? BotName { get; init; }
     public string? AvatarHash { get; init; }
     public string? TransportKind { get; init; }
     public string? PublicIngressBaseUrl { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
 
 public sealed class SlackAuthorizationProgressBody
@@ -262,5 +275,7 @@ public sealed class SlackAuthorizeBody
 public sealed class PermanentDeleteBody
 {
     public string Confirmation { get; init; } = string.Empty;
-    public string? Actor { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
 }
