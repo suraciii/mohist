@@ -77,6 +77,20 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerificationAfterOwnerClaimPreservesCompleteSetup()
+    {
+        await SetConnectionStateAsync(SetupProgressKind.Complete, "U_OWNER");
+
+        var result = await _verifier.VerifyAsync("project-1", "conn-1");
+
+        var connection = await GetConnectionAsync();
+        Assert.True(result.Verified);
+        Assert.Equal(SetupProgressKind.Complete, result.SetupProgress);
+        Assert.Equal(SetupProgressKind.Complete, connection.SetupProgress);
+        Assert.Equal("U_OWNER", connection.OwnerSlackUserId);
+    }
+
+    [Fact]
     public async Task DifferentBotIdentityLeavesConnectionUnbound()
     {
         _slack.BotsInfo = new(true, null, new("B999", "Mohist", "A123"));
@@ -181,6 +195,18 @@ public sealed class SlackSetupVerifierSpecs : IAsyncLifetime
         await using var db = _database.CreateContext();
         var row = await db.AgentConnections.SingleAsync();
         row.LastHeartbeatAt = heartbeat;
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SetConnectionStateAsync(string setupProgress, string ownerSlackUserId)
+    {
+        await using var db = _database.CreateContext();
+        var row = await db.AgentConnections.SingleAsync();
+        row.SetupProgress = setupProgress;
+        row.OwnerSlackUserId = ownerSlackUserId;
+        row.WorkspaceTeamId = "T123";
+        row.AppId = "A123";
+        row.BotUserId = "U123";
         await db.SaveChangesAsync();
     }
 

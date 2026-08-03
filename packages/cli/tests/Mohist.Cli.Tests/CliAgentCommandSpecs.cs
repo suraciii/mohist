@@ -1213,6 +1213,30 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentUpdate_OnlySendsFieldsExplicitlyProvided()
+    {
+        var handler = new RecordingHttpHandler((request, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = request.Method == HttpMethod.Get
+                ? new[] { Agent("agent_123", "reviewer") }
+                : Agent("agent_123", "reviewer", updatedAt: "2026-06-18T02:00:00Z"),
+        })));
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "edit", "reviewer", "--agent-config", "{\"runtime\":\"opencode\",\"model\":\"openai/gpt-5.6\"}"],
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests[1].Body!)!.AsObject();
+        Assert.Equal("opencode", body["agentConfig"]?["runtime"]?.GetValue<string>());
+        Assert.Equal("openai/gpt-5.6", body["agentConfig"]?["model"]?.GetValue<string>());
+        Assert.False(body.ContainsKey("name"));
+        Assert.False(body.ContainsKey("instructions"));
+    }
+
+    [Fact]
     public async Task AgentUpdate_ClearFlagsSendExplicitNulls()
     {
         var handler = new RecordingHttpHandler((request, _) => Task.FromResult(RecordingHttpHandler.Json(new
