@@ -27,6 +27,7 @@ function salienceFor(renderClass: TimelineRenderClass): TimelineSalience {
       return 'normal'
     case 'file-edit':
     case 'shell':
+      return 'medium'
     case 'file-read':
     case 'tool':
     case 'reasoning':
@@ -109,7 +110,7 @@ function classifyTool(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
 
   if (domainAction) {
     renderClass = 'domain-action'
-    summary = `${domainAction.verb}${domainAction.object}`
+    summary = `${domainAction.verb} ${domainAction.object}`
     reference = domainAction.reference
   } else if (FILE_READ_TOOLS.has(toolName(tool))) {
     renderClass = 'file-read'
@@ -134,7 +135,7 @@ function classifyTool(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
   if (isFailedTool(tool)) {
     return {
       renderClass: 'error',
-      summary: `${summary} -> 失败`,
+      summary: `${summary} → 失败`,
       salience: 'critical',
       detail: makeDetail(fact),
       reference,
@@ -142,7 +143,7 @@ function classifyTool(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
     }
   }
 
-  if (tool.status === 'completed' || tool.exitCode === 0) summary = `${summary} -> 通过`
+  if (tool.status === 'completed' || tool.exitCode === 0) summary = `${summary} → 通过`
   return {
     renderClass,
     summary,
@@ -157,7 +158,7 @@ function classifyTool(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
 function classifyFact(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds' | 'occurredAt'> {
   switch (fact.kind) {
     case 'input': {
-      const outcome = fact.input?.acceptance ? ` -> ${fact.input.acceptance}` : ''
+      const outcome = fact.input?.acceptance ? ` → ${fact.input.acceptance}` : ''
       return {
         renderClass: 'input',
         summary: `输入了 ${fact.input?.text ?? fact.text ?? '消息'}${outcome}`,
@@ -178,7 +179,7 @@ function classifyFact(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
     case 'reasoning':
       return {
         renderClass: 'reasoning',
-        summary: fact.text ? `思考了 ${fact.text}` : '进行了思考',
+        summary: '进行了思考',
         salience: 'low',
         detail: makeDetail(fact),
         isTerminal: false,
@@ -234,11 +235,11 @@ function hasToolDescriptor(tool: TimelineToolFact | undefined): boolean {
 }
 
 function withoutOutcome(summary: string): string {
-  return summary.replace(/ -> (通过|失败)$/, '')
+  return summary.replace(/ → (通过|失败)$/, '')
 }
 
 function outcomeFrom(summary: string): string {
-  const outcome = summary.match(/( -> (?:通过|失败))$/)
+  const outcome = summary.match(/( → (?:通过|失败))$/)
   return outcome?.[1] ?? ''
 }
 

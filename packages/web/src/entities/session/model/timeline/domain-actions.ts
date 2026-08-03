@@ -93,6 +93,21 @@ function findIssueNumber(argv: string[]): number | undefined {
   return undefined
 }
 
+function findIssueOption(argv: string[]): number | undefined {
+  const issueIndex = argv.indexOf('--issue')
+  if (issueIndex === -1) return undefined
+  const candidate = argv[issueIndex + 1]
+  if (!candidate || !/^\d+$/.test(candidate)) return undefined
+  const number = Number(candidate)
+  return Number.isSafeInteger(number) && number > 0 ? number : undefined
+}
+
+function findWorkflowRunId(argv: string[], definition: ActionDefinition): string | undefined {
+  if (definition.argv[0] !== 'run') return undefined
+  const candidate = argv[definition.argv.length]
+  return candidate && /^wr_[A-Za-z0-9_-]+$/.test(candidate) ? candidate : undefined
+}
+
 function extractIssueNumber(input: unknown): number | undefined {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
   const record = input as Record<string, unknown>
@@ -128,7 +143,7 @@ function toAction(
   if (issueNumber) {
     return {
       verb: definition.verb,
-      object: `Issue #${issueNumber}`,
+      object: `#${issueNumber}`,
       reference: { kind: 'issue', label: `Issue #${issueNumber}`, issueNumber },
       source,
     }
@@ -145,7 +160,9 @@ export function detectShellDomainAction(command: string): TimelineDomainAction |
   const argv = extractMoArgv(command)
   if (!argv) return undefined
   const definition = actionForArgv(argv)
-  return definition ? toAction(definition, findIssueNumber(argv), undefined, 'shell') : undefined
+  if (!definition) return undefined
+  const issueNumber = definition.requiresIssue ? findIssueNumber(argv) : findIssueOption(argv)
+  return toAction(definition, issueNumber, findWorkflowRunId(argv, definition), 'shell')
 }
 
 export function detectToolDomainAction(tool: TimelineToolFact): TimelineDomainAction | undefined {

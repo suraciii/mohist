@@ -28,7 +28,7 @@ export type TimelineRenderClass =
   | 'error'
   | 'suppressed'
 
-export type TimelineSalience = 'critical' | 'high' | 'normal' | 'low' | 'quiet'
+export type TimelineSalience = 'critical' | 'high' | 'normal' | 'medium' | 'low' | 'quiet'
 
 export interface TimelineFileChange {
   path: string

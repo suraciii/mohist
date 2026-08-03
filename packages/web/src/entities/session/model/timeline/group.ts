@@ -2,9 +2,8 @@ import type { TimelineEntry, TimelineGroup, TimelineItem } from './types'
 
 function isGroupCandidate(item: TimelineItem): item is TimelineItem & { renderClass: 'file-read' | 'shell' | 'tool' } {
   return (item.renderClass === 'file-read' || item.renderClass === 'shell' || item.renderClass === 'tool')
-    && item.salience === 'low'
     && item.isTerminal
-    && !item.summary.endsWith('-> 失败')
+    && !item.summary.endsWith(' → 失败')
 }
 
 function compatible(left: TimelineItem, right: TimelineItem): boolean {

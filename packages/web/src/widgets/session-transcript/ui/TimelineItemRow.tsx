@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { ChevronDownIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import type { TimelineDetail, TimelineItem, TimelineReference, TimelineRenderClass } from '@/entities/session'
+import type { TimelineDetail, TimelineItem, TimelineReference, TimelineRenderClass, TimelineSalience } from '@/entities/session'
 
 export type TimelineReferenceResolver = (reference: TimelineReference) => string | null | undefined
 
@@ -35,6 +35,15 @@ const MARKER_STYLES: Record<TimelineRenderClass, string> = {
   boundary: 'bg-warning',
   error: 'bg-danger',
   suppressed: 'bg-muted-foreground/30',
+}
+
+const SALIENCE_STYLES: Record<TimelineSalience, string> = {
+  critical: 'shadow-sm',
+  high: 'border-l-2',
+  normal: 'opacity-100',
+  medium: 'opacity-95',
+  low: 'opacity-80',
+  quiet: 'opacity-60',
 }
 
 function formatValue(value: unknown): string {
@@ -107,7 +116,7 @@ export function TimelineItemRow({ item, resolveReference }: TimelineItemRowProps
 
   return (
     <article
-      className={`relative flex gap-3 rounded-md border px-3 py-2.5 ${ITEM_STYLES[item.renderClass]} ${item.renderClass === 'error' ? 'border-l-4' : ''}`}
+      className={`relative flex gap-3 rounded-md border px-3 py-2.5 ${ITEM_STYLES[item.renderClass]} ${SALIENCE_STYLES[item.salience]} ${item.renderClass === 'error' ? 'border-l-4' : ''}`}
       data-testid="timeline-item-row"
       data-timeline-item-id={item.id}
       data-timeline-render-class={item.renderClass}

@@ -318,7 +318,7 @@ function turnInputFacts(
     const occurredAt = transcriptTurn?.user.sentAt ?? fallback
     return fact(`input:${input.id}`, 'input', 'input', occurredAt, timestampOrder(occurredAt, input.sequence, 0), input, {
       text,
-      input: { text, acceptance: input.acceptance, turnId: observation?.id },
+      input: { text, acceptance: observation ? input.acceptance : 'unknown', turnId: observation?.id },
       correlationId: observation?.id,
     })
   })

@@ -140,7 +140,7 @@ describe('buildTimelineFacts', () => {
     const facts = buildTimelineFacts({
       turns: [turn('turn-unmatched')],
       summary: {
-        inputs: [{ id: 'input-unmatched', sequence: 1, source: 'web', acceptance: 'unknown' }],
+        inputs: [{ id: 'input-unmatched', sequence: 1, source: 'web', acceptance: 'accepted' }],
         turns: [],
       },
     })

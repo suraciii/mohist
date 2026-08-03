@@ -11,7 +11,7 @@ function makeItem(overrides: Partial<TimelineItem> = {}): TimelineItem {
     sourceIds: ['source-1', 'source-1-update'],
     occurredAt: '2026-01-01T00:00:00.000Z',
     renderClass: 'error',
-    summary: '运行了命令 -> 失败',
+    summary: '运行了命令 → 失败',
     salience: 'critical',
     detail: {
       input: { command: 'false' },
@@ -53,7 +53,7 @@ describe('TimelineItemRow', () => {
       id: 'domain-action-1',
       sourceIds: ['domain-source-1'],
       renderClass: 'domain-action',
-      summary: '启动了 Issue #42',
+      summary: '启动了 #42',
       salience: 'high',
       reference: { kind: 'issue', label: 'Issue #42', issueNumber: 42 },
       detail: { raw: { command: 'mo issue start 42' } },
@@ -70,5 +70,32 @@ describe('TimelineItemRow', () => {
       'href',
       '/projects/project-1/issues/42',
     )
+  })
+
+  it('keeps reasoning content behind closed details and applies its low salience style', () => {
+    const item = makeItem({
+      renderClass: 'reasoning',
+      summary: '进行了思考',
+      salience: 'low',
+      detail: { raw: { type: 'reasoning', text: 'private chain of thought' } },
+    })
+
+    render(<TimelineItemRow item={item} />)
+
+    const row = screen.getByTestId('timeline-item-row')
+    const details = within(row).getByTestId('timeline-item-details')
+    expect(row).toHaveClass('opacity-80')
+    expect(details).not.toHaveAttribute('open')
+    expect(within(row).getByText('进行了思考')).toBeVisible()
+
+    fireEvent.click(within(details).getByText('Show details'))
+
+    expect(within(details).getByText(/private chain of thought/)).toBeInTheDocument()
+  })
+
+  it('visually distinguishes medium salience timeline rows', () => {
+    render(<TimelineItemRow item={makeItem({ renderClass: 'shell', salience: 'medium' })} />)
+
+    expect(screen.getByTestId('timeline-item-row')).toHaveClass('opacity-95')
   })
 })

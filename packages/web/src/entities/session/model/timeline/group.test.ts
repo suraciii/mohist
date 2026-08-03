@@ -8,15 +8,15 @@ function item(id: string, renderClass: TimelineItem['renderClass'], groupKey?: s
     sourceIds: [id],
     occurredAt: '2026-08-03T10:00:00.000Z',
     renderClass,
-    summary: `${renderClass} ${id} -> 通过`,
-    salience: renderClass === 'error' ? 'critical' : renderClass === 'domain-action' ? 'high' : renderClass === 'status' ? 'quiet' : 'low',
+    summary: `${renderClass} ${id} → 通过`,
+    salience: renderClass === 'error' ? 'critical' : renderClass === 'domain-action' ? 'high' : renderClass === 'status' ? 'quiet' : renderClass === 'file-edit' || renderClass === 'shell' ? 'medium' : 'low',
     groupKey,
     isTerminal: true,
   }
 }
 
 describe('groupTimelineItems', () => {
-  it('groups only continuous runs of three low-salience candidates', () => {
+  it('groups only continuous runs of terminal successful candidates', () => {
     const entries = groupTimelineItems([
       item('read-1', 'file-read', 'files'),
       item('read-2', 'file-read', 'files'),

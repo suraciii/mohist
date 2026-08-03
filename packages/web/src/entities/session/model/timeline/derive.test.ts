@@ -33,9 +33,19 @@ describe('deriveTimelineItems', () => {
       'input', 'message', 'reasoning', 'file-read', 'file-edit', 'shell', 'domain-action',
       'plan', 'tool', 'status', 'boundary', 'error', 'suppressed',
     ])
-    expect(items[4]?.summary).toBe('编辑了 a.ts (+12/-3) -> 通过')
+    expect(items.map(item => item.salience)).toEqual([
+      'normal', 'normal', 'low', 'low', 'medium', 'medium', 'high',
+      'normal', 'low', 'quiet', 'normal', 'critical', 'quiet',
+    ])
+    expect(items[2]).toMatchObject({
+      summary: '进行了思考',
+      salience: 'low',
+      detail: { raw: { sourceId: 'reasoning' } },
+    })
+    expect(items[4]).toMatchObject({ summary: '编辑了 a.ts (+12/-3) → 通过', salience: 'medium' })
+    expect(items[5]).toMatchObject({ salience: 'medium' })
     expect(items[6]).toMatchObject({
-      summary: '启动了Issue #42 -> 通过',
+      summary: '启动了 #42 → 通过',
       reference: { kind: 'issue', issueNumber: 42 },
     })
   })
@@ -50,7 +60,7 @@ describe('deriveTimelineItems', () => {
       }),
     ])
 
-    expect(item).toMatchObject({ renderClass: 'error', summary: '评论了Issue #42 -> 失败', salience: 'critical' })
+    expect(item).toMatchObject({ renderClass: 'error', summary: '评论了 #42 → 失败', salience: 'critical' })
   })
 
   it('updates a tool in place and never regresses after a terminal fact', () => {
@@ -61,7 +71,7 @@ describe('deriveTimelineItems', () => {
     ])
 
     expect(items).toHaveLength(1)
-    expect(items[0]).toMatchObject({ id: 'same-tool', renderClass: 'shell', summary: '运行了 npm test -> 通过', isTerminal: true })
+    expect(items[0]).toMatchObject({ id: 'same-tool', renderClass: 'shell', summary: '运行了 npm test → 通过', isTerminal: true })
     expect(items[0]?.sourceIds).toEqual(['tool-start', 'tool-complete'])
     expect(items[0]?.detail).toMatchObject({ input: { command: 'npm test' }, output: 'ok' })
   })
@@ -74,7 +84,7 @@ describe('deriveTimelineItems', () => {
       fact({ sourceId: 'message-3', order: 4, kind: 'message', correlationId: 'message', text: 'after tool' }),
     ])
 
-    expect(items.map(item => item.summary)).toEqual(['回复了 first part', '读取了 文件 -> 通过', '回复了 after tool'])
+    expect(items.map(item => item.summary)).toEqual(['回复了 first part', '读取了 文件 → 通过', '回复了 after tool'])
     expect(items[0]?.isStreaming).toBe(false)
   })
 })

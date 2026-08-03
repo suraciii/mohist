@@ -50,7 +50,7 @@ function makeTimeline() {
     makeFact('activity-1', 'status', 11, { activity: 'idle' }),
   ]
   const entries: TimelineEntry[] = [
-    makeItem('input-1', 'input-1', 'input', '输入了 Review the change -> accepted'),
+    makeItem('input-1', 'input-1', 'input', '输入了 Review the change → accepted'),
     makeReadGroup('read-before', ['read-1', 'read-2', 'read-3']),
     makeItem('failure-1', 'failure-1', 'error', 'Runner failed'),
     makeReadGroup('read-after', ['read-4', 'read-5', 'read-6']),
