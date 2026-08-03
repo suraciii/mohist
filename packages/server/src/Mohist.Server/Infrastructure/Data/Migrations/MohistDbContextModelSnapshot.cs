@@ -2285,6 +2285,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("OwnerKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ConversationId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -2346,23 +2351,23 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ConnectionId", "DispatchRef", "Kind")
+                    b.HasIndex("OwnerKind", "ConnectionId", "DispatchRef", "Kind")
                         .IsUnique()
-                        .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
+                        .HasDatabaseName("UX_SlackOutboxRows_OwnerKind_ConnectionId_DispatchRef_Kind");
 
-                    b.HasIndex("ConnectionId", "State", "ClaimedAt")
+                    b.HasIndex("OwnerKind", "ConnectionId", "State", "ClaimedAt")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
 
-                    b.HasIndex("ConnectionId", "State", "DeliveryUncertainAt")
+                    b.HasIndex("OwnerKind", "ConnectionId", "State", "DeliveryUncertainAt")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
 
-                    b.HasIndex("ConnectionId", "State", "NextAttemptAt")
+                    b.HasIndex("OwnerKind", "ConnectionId", "State", "NextAttemptAt")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_NextAttemptAt");
 
-                    b.HasIndex("ProjectId", "ConnectionId", "State")
+                    b.HasIndex("OwnerKind", "ProjectId", "ConnectionId", "State")
                         .HasDatabaseName("IX_SlackOutboxRows_ProjectId_ConnectionId_State");
 
-                    b.HasIndex("ConnectionId", "DispatchRef", "Kind", "State")
+                    b.HasIndex("OwnerKind", "ConnectionId", "DispatchRef", "Kind", "State")
                         .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
 
                     b.ToTable("SlackOutboxRows", null, t =>
@@ -2370,6 +2375,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_SlackOutboxRows_Kind", "\"Kind\" IN ('replaceable_progress', 'terminal_result', 'explicit_failure', 'user_action')");
 
                             t.HasCheckConstraint("CK_SlackOutboxRows_State", "\"State\" IN ('pending', 'claimed', 'delivered', 'delivery_uncertain', 'dead_lettered')");
+
+                            t.HasCheckConstraint("CK_SlackOutboxRows_OwnerKind", "\"OwnerKind\" IN ('connection', 'manager')");
                         });
                 });
 
@@ -2672,6 +2679,48 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(512)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ManagerAppId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerBotUserId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerTransportKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerReadiness")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerActorId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClaimedSlackUserId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerClaimHash")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ManagerClaimIssuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ManagerClaimExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ManagerClaimConsumedAt")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PlanCode")
                         .IsRequired()
                         .HasMaxLength(64)
@@ -2700,6 +2749,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_Lifecycle", "\"Lifecycle\" IN ('active', 'disabled', 'removed')");
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerCapability", "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" IN ('socket', 'https')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerReadiness", "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
                         });
                 });
 

@@ -8,6 +8,9 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 using DomainAgent = Mohist.Server.Agent.Domain.Agent;
@@ -25,6 +28,7 @@ public sealed class SlackManagerApplicationSpecs
     public async Task Create_selects_active_agent_persists_manager_records_and_is_idempotent()
     {
         var seeded = await SeedAgentAsync(AgentStatus.Active);
+        await SetupManagerAsync("T_MANAGER_CREATE");
         var request = new
         {
             agentId = seeded.Agent.Id,
@@ -89,6 +93,7 @@ public sealed class SlackManagerApplicationSpecs
     public async Task Remove_binding_keeps_child_facts_and_permanent_delete_requires_explicit_confirmation()
     {
         var seeded = await SeedAgentAsync(AgentStatus.Active);
+        await SetupManagerAsync("T_MANAGER_REMOVE");
         using var createResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), new
         {
             agentId = seeded.Agent.Id,
@@ -151,6 +156,135 @@ public sealed class SlackManagerApplicationSpecs
             .ToListAsync());
     }
 
+    [Fact]
+    public async Task Setup_and_manager_claim_ingress_are_durable_and_do_not_leak_credentials()
+    {
+        const string team = "T_MANAGER_S0_INGRESS";
+        const string credentialRef = "manager-credential-s0-ingress";
+        using var setupResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
+        {
+            workspaceTeamId = team,
+            managerAppId = "A_MANAGER_S0_INGRESS",
+            managerBotUserId = "U_MANAGER_S0_INGRESS",
+            managerCredentialRef = credentialRef,
+        });
+        setupResponse.EnsureSuccessStatusCode();
+        var setupJson = await setupResponse.Content.ReadAsStringAsync();
+        var setup = await ReadDataAsync(setupResponse);
+        Assert.DoesNotContain(credentialRef, setupJson, StringComparison.Ordinal);
+
+        using var statusResponse = await _fixture.Client.GetAsync($"/api/slack-manager/status?workspaceTeamId={team}");
+        statusResponse.EnsureSuccessStatusCode();
+        Assert.DoesNotContain(credentialRef, await statusResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        Assert.Equal("claim_manager", (await ReadDataAsync(statusResponse)).GetProperty("nextAction").GetString());
+
+        var claimCode = setup.GetProperty("claimCode").GetString()!;
+        using var deniedIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId = "A_MANAGER_S0_INGRESS",
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_S0",
+            messageTs = "1710000000.000000",
+            senderSlackUserId = "U_MANAGER_UNCLAIMED",
+            text = "list agents",
+            isDirectMessage = true,
+            actor = "forged-actor",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, deniedIngress.StatusCode);
+        using (var deniedError = JsonDocument.Parse(await deniedIngress.Content.ReadAsStringAsync()))
+            Assert.Equal("client_identity_not_supported", deniedError.RootElement.GetProperty("code").GetString());
+
+        using var unclaimedIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId = "A_MANAGER_S0_INGRESS",
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_S0",
+            messageTs = "1710000000.000000",
+            senderSlackUserId = "U_MANAGER_UNCLAIMED",
+            text = "list agents",
+            isDirectMessage = true,
+        });
+        unclaimedIngress.EnsureSuccessStatusCode();
+        var unclaimed = await ReadDataAsync(unclaimedIngress);
+        Assert.Equal("rejected", unclaimed.GetProperty("decision").GetString());
+        Assert.False(unclaimed.GetProperty("deliveryIntentCreated").GetBoolean());
+
+        var message = new
+        {
+            appId = "A_MANAGER_S0_INGRESS",
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_S0",
+            messageTs = "1710000000.000001",
+            senderSlackUserId = "U_MANAGER_OWNER",
+            text = $"claim {claimCode}",
+            isDirectMessage = true,
+        };
+        using var firstIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", message);
+        firstIngress.EnsureSuccessStatusCode();
+        Assert.Equal("accepted", (await ReadDataAsync(firstIngress)).GetProperty("decision").GetString());
+
+        using var duplicateIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", message);
+        duplicateIngress.EnsureSuccessStatusCode();
+        Assert.Equal("duplicate", (await ReadDataAsync(duplicateIngress)).GetProperty("decision").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var enrollment = await db.SlackWorkspaceEnrollments.SingleAsync(row => row.WorkspaceTeamId == team);
+        Assert.Equal("U_MANAGER_OWNER", enrollment.ClaimedSlackUserId);
+        var inboxes = await db.SlackProviderInboxRows.Where(row =>
+            row.ProjectId == SlackDeliveryOwnerIds.ManagerProjectId
+            && row.ConnectionId == enrollment.Id).ToListAsync();
+        Assert.Equal(2, inboxes.Count);
+        Assert.All(inboxes, inbox => Assert.NotNull(inbox.DispatchedAt));
+        Assert.Empty(await db.SlackOutboxRows.Where(row =>
+            row.OwnerKind == SlackDeliveryOwnerKinds.Manager
+            && row.ConnectionId == enrollment.Id).ToListAsync());
+
+        db.AgentConnections.Add(new AgentConnectionRow
+        {
+            Id = "connection-foreign-manager-s0",
+            ProjectId = "project-foreign-manager-s0",
+            AgentId = "agent-foreign-manager-s0",
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "T_FOREIGN_MANAGER_S0",
+            AppId = "A_FOREIGN_MANAGER_S0",
+            BotUserId = "U_FOREIGN_MANAGER_S0",
+            BotName = "foreign-manager-s0",
+            SetupProgress = SetupProgressKind.Complete,
+            DesiredState = DesiredStateKind.Enabled,
+            ConnectionHealth = ConnectionHealthKind.Healthy,
+            AgentReadiness = AgentReadinessKind.Ready,
+            CreatedAt = _fixture.TimeProvider.GetUtcNow(),
+            UpdatedAt = _fixture.TimeProvider.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+
+        var access = scope.ServiceProvider.GetRequiredService<ManagerActorAccessDecider>();
+        var authenticated = await access.AuthenticateAsync(team, "U_MANAGER_OWNER");
+        Assert.True(authenticated.Allowed);
+        var forged = await access.AuthorizeAsync(authenticated.Actor! with { ManagerActorId = "forged" });
+        var foreign = await access.AuthorizeAsync(authenticated.Actor!, new ManagerResourceTarget(
+            ManagerResourceKinds.Connection,
+            "project-foreign-manager-s0",
+            "connection-foreign-manager-s0"));
+        Assert.False(forged.Allowed);
+        Assert.Equal("manager_actor_not_authorized", forged.Reason);
+        Assert.False(foreign.Allowed);
+        Assert.Equal("manager_resource_not_found", foreign.Reason);
+
+        using var repeatedSetup = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
+        {
+            workspaceTeamId = team,
+            managerAppId = "A_MANAGER_S0_INGRESS",
+            managerBotUserId = "U_MANAGER_S0_INGRESS",
+            managerCredentialRef = credentialRef,
+        });
+        repeatedSetup.EnsureSuccessStatusCode();
+        var repeated = await ReadDataAsync(repeatedSetup);
+        Assert.False(repeated.TryGetProperty("claimCode", out _));
+        Assert.Equal("U_MANAGER_OWNER", repeated.GetProperty("enrollment").GetProperty("claimedSlackUserId").GetString());
+    }
+
     private async Task<SeededAgent> SeedAgentAsync(string status)
     {
         var projectId = $"project_manager_{Guid.NewGuid():N}";
@@ -186,6 +320,20 @@ public sealed class SlackManagerApplicationSpecs
 
     private static string ManagerPath(string projectId, string suffix = "") =>
         $"/api/projects/{projectId}/slack-manager{suffix}";
+
+    private async Task SetupManagerAsync(string workspaceTeamId)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
+        {
+            workspaceTeamId,
+            managerAppId = $"A_MANAGER_{workspaceTeamId}",
+            managerBotUserId = $"U_MANAGER_{workspaceTeamId}",
+            managerCredentialRef = $"manager-credential-{workspaceTeamId}",
+            transportKind = SlackManagerTransportKind.Socket,
+            readiness = SlackManagerReadiness.Ready,
+        });
+        response.EnsureSuccessStatusCode();
+    }
 
     private static async Task<JsonElement> ReadDataAsync(HttpResponseMessage response)
     {
