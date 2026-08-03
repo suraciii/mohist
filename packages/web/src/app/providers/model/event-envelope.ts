@@ -146,6 +146,10 @@ export function normalizeTranscriptDetail(
   const sessionId = readEnvelopeField(candidate, 'sessionId', 'SessionId')
     ?? (innerPayload && readEnvelopeField(innerPayload, 'sessionId', 'SessionId'))
   const workId = readEnvelopeField(candidate, 'workId', 'WorkId')
+  const sequence = readEnvelopeField(candidate, 'sequence', 'Sequence')
+  const createdAt = readEnvelopeField(candidate, 'createdAt', 'CreatedAt')
+  const eventId = readEnvelopeField(candidate, 'eventId', 'EventId')
+    ?? (candidate.source !== undefined ? readEnvelopeField(candidate, 'id', 'Id') : undefined)
   const normalized: Record<string, unknown> = {
     ...candidate,
     ...(innerPayload ?? {}),
@@ -172,7 +176,16 @@ export function normalizeTranscriptDetail(
       eventName,
     )
   }
-  if (innerPayload) {
+  if (sequence !== undefined) {
+    normalized.sequence = sequence
+  }
+  if (createdAt !== undefined) {
+    normalized.createdAt = createdAt
+  }
+  if (eventId !== undefined) {
+    normalized.eventId = eventId
+  }
+  if (innerPayload !== undefined) {
     normalized.payload = innerPayload
   }
   if (normalized.runtimeSessionId === undefined && runtimeSessionId !== undefined) {

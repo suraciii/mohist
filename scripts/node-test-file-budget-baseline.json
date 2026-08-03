@@ -32,7 +32,6 @@
   "packages/web/src/widgets/kanban-board/ui/IssueCard.test.tsx": 629,
   "packages/web/src/widgets/runner-status/ui/runner-status.test.tsx": 579,
   "packages/web/src/widgets/session-transcript/model/transcript-state.test.ts": 620,
-  "packages/web/src/widgets/session-transcript/model/useTurnKeyboardNav.test.tsx": 573,
   "packages/web/tests/IssueDetailPage.spec.tsx": 1180,
   "packages/web/tests/SessionLiveUpdates.spec.tsx": 913
 }

@@ -64,7 +64,6 @@ function makeDependencies(): UnifiedSessionPageDependencies {
           isStreaming: false,
         } as never
       },
-      projectTurn: (turn) => turn as never,
       useGenericFollowup: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
       useGenericTurnControl: () => ({
         mutate: (input: { sessionId: string; turnId: string; operation: 'cancel' | 'stop' }, options?: { onSuccess?: (result: { state: string }) => void }) => {
@@ -75,7 +74,17 @@ function makeDependencies(): UnifiedSessionPageDependencies {
       }) as never,
     },
     shellComponents: {
-      SessionTranscriptLayout: () => <div data-testid="transcript" />,
+      SessionTranscriptLayout: (props: any) => (
+        <div
+          data-testid="transcript"
+          data-activity-state={props.currentActivity?.state ?? ''}
+          data-timeline-view={props.viewMode ?? 'summary'}
+        >
+          {(props.entries ?? []).map((entry: any) => (
+            <div key={entry.id} data-timeline-entry={entry.id}>{entry.summary}</div>
+          ))}
+        </div>
+      ),
       SessionRecoveryActions: ({ recoveryAvailable }: any) => (
         <div data-testid="recovery" data-recovery-available={String(recoveryAvailable ?? false)} />
       ),
@@ -123,7 +132,7 @@ describe('UnifiedSessionPage', () => {
     expect(screen.getByTestId('session-source-context')).toHaveTextContent(detailLabel)
   })
 
-  it('groups chronological inputs under their authoritative turn observation', () => {
+  it('passes authoritative inputs, turns, and activity into the timeline instead of duplicate evidence regions', () => {
     summary = baseSummary({
       inputs: [
         { id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' },
@@ -133,12 +142,13 @@ describe('UnifiedSessionPage', () => {
     })
     transcript = { turns: [transcriptTurn], partCount: 1, lastActivityAt: transcriptTurn.completedAt }
     renderPage()
-    const evidence = screen.getByTestId('session-input-turn-evidence')
-    expect(evidence).toHaveTextContent('accepted: accepted')
-    expect(evidence).toHaveTextContent('accepted: pending')
-    expect(evidence).toHaveTextContent('delivered: executing')
-    expect(evidence).toHaveTextContent('Turn 1')
-    expect(screen.getByTestId('session-turn-evidence-turn-1')).toBeInTheDocument()
+    const timeline = screen.getByTestId('transcript')
+    expect(timeline).toHaveTextContent('输入了 Build it')
+    expect(timeline).toHaveTextContent('accepted')
+    expect(timeline).toHaveTextContent('执行中')
+    expect(timeline).toHaveAttribute('data-activity-state', 'idle')
+    expect(screen.queryByTestId('session-input-turn-evidence')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-recovery-history')).not.toBeInTheDocument()
   })
 
   it.each([
@@ -148,7 +158,7 @@ describe('UnifiedSessionPage', () => {
   ])('keeps %s empty state distinct', (activity, stateKind) => {
     summary = baseSummary({ activity, recoveryAvailable: activity === 'idle' })
     renderPage()
-    expect(screen.getByTestId('session-empty-state')).toHaveAttribute('data-state-kind', stateKind)
+    expect(screen.getByTestId('transcript')).toHaveAttribute('data-activity-state', stateKind.replace('-no-content', ''))
   })
 
   it('shows failure evidence and resolved model without inventing a terminal state', () => {
@@ -282,7 +292,7 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     expect(screen.getByTestId('recovery')).toHaveAttribute('data-recovery-available', 'true')
   })
 
-  it('renders terminal turn results and persistent recovery history', () => {
+  it('renders terminal turn results and persistent recovery boundaries in the timeline', () => {
     summary = baseSummary({
       turns: [{
         id: 'turn-1',
@@ -304,9 +314,11 @@ describe('UnifiedSessionPage — turn control and recovery gating', () => {
     })
     renderPage()
 
-    expect(screen.getByTestId('session-turn-result-turn-1')).toHaveTextContent('The launch failed')
-    expect(screen.getByTestId('session-turn-result-output-turn-1')).toHaveTextContent('diagnostic output')
-    expect(screen.getByTestId('session-recovery-history')).toHaveTextContent('Runtime context reset')
-    expect(screen.getByTestId('session-recovery-history')).toHaveTextContent('Context compacted')
+    const timeline = screen.getByTestId('transcript')
+    expect(timeline).toHaveTextContent('The launch failed')
+    expect(timeline).toHaveTextContent('上下文已重置')
+    expect(timeline).toHaveTextContent('上下文已压缩')
+    expect(screen.queryByTestId('session-turn-result-turn-1')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('session-recovery-history')).not.toBeInTheDocument()
   })
 })

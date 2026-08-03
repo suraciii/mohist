@@ -1,483 +1,133 @@
 import '@testing-library/jest-dom'
-import { fireEvent, render } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useState } from 'react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { TimelineEntry, TimelineFact, TimelineGroup, TimelineItem } from '@/entities/session'
 import { SessionTranscriptLayout } from './SessionTranscriptLayout'
-import type { DisplayTurn } from '../model/session-transcript-display'
-import { setScopedValue, restoreScopedProperties } from '../../../../tests/support/scoped-property'
 
-function makeTurn(overrides: {
-  id?: string
-  prompt?: Partial<DisplayTurn['prompt']>
-  startedAt?: string
-  completedAt?: string | null
-  assistantParts?: DisplayTurn['assistantParts']
-}): DisplayTurn {
-  const startedAt = overrides.startedAt ?? '2024-05-15T10:00:00.000Z'
+const at = '2026-08-03T10:00:00.000Z'
+
+function makeItem(id: string, sourceId: string, renderClass: TimelineItem['renderClass'], summary: string): TimelineItem {
   return {
-    id: overrides.id ?? 'turn-1',
-    startedAt,
-    completedAt: overrides.completedAt ?? null,
-    prompt: {
-      role: 'mohist',
-      text: 'prompt body',
-      kind: 'followup',
-      sentAt: startedAt,
-      ...overrides.prompt,
-    },
-    assistantParts: overrides.assistantParts ?? [],
-    changedFiles: [],
-    state: 'idle',
+    id,
+    sourceIds: [sourceId],
+    occurredAt: at,
+    renderClass,
+    summary,
+    salience: renderClass === 'error' ? 'critical' : renderClass === 'domain-action' ? 'high' : 'normal',
+    detail: { raw: { sourceId, id } },
+    isTerminal: true,
   }
 }
 
-describe('SessionTranscriptLayout — flat single-column timeline', () => {
-  let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
+function makeFact(sourceId: string, kind: TimelineFact['kind'], order: number, raw: unknown = { sourceId }): TimelineFact {
+  return { sourceId, source: 'transcript', order, occurredAt: at, kind, raw }
+}
 
-  beforeEach(() => {
-    scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
-  })
+function makeReadGroup(id: string, sourceIds: string[]): TimelineGroup {
+  return {
+    id,
+    renderClass: 'file-read',
+    sourceIds,
+    summary: `读取了 ${sourceIds.length} 个文件`,
+    salience: 'low',
+    items: sourceIds.map((sourceId, index) => makeItem(`${id}-${index}`, sourceId, 'file-read', `读取了 file-${index}.ts`)),
+  }
+}
 
-  afterEach(() => {
-    scrollIntoViewSpy.mockRestore()
-  })
+function makeTimeline() {
+  const facts = [
+    makeFact('input-1', 'input', 1, { text: 'Review the change' }),
+    makeFact('read-1', 'tool', 2, { path: 'before.ts' }),
+    makeFact('read-2', 'tool', 3, { path: 'before.test.ts' }),
+    makeFact('read-3', 'tool', 4, { path: 'before.css' }),
+    makeFact('failure-1', 'error', 5, { message: 'Runner failed' }),
+    makeFact('read-4', 'tool', 6, { path: 'after.ts' }),
+    makeFact('read-5', 'tool', 7, { path: 'after.test.ts' }),
+    makeFact('read-6', 'tool', 8, { path: 'after.css' }),
+    makeFact('action-1', 'tool', 9, { command: 'mo issue start 42' }),
+    makeFact('reset-1', 'boundary', 10, { reason: 'reset' }),
+    makeFact('activity-1', 'status', 11, { activity: 'idle' }),
+  ]
+  const entries: TimelineEntry[] = [
+    makeItem('input-1', 'input-1', 'input', '输入了 Review the change → accepted'),
+    makeReadGroup('read-before', ['read-1', 'read-2', 'read-3']),
+    makeItem('failure-1', 'failure-1', 'error', 'Runner failed'),
+    makeReadGroup('read-after', ['read-4', 'read-5', 'read-6']),
+    { ...makeItem('action-1', 'action-1', 'domain-action', '启动了 Issue #42'), reference: { kind: 'issue', label: 'Issue #42', issueNumber: 42 } },
+    makeItem('reset-1', 'reset-1', 'boundary', '上下文已重置'),
+    makeItem('activity-1', 'activity-1', 'status', '空闲'),
+  ]
+  return { facts, entries }
+}
 
-  describe('flat single-column container', () => {
-    it('renders a single full-width column with no two-column grid or max-width cap', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
+describe('SessionTranscriptLayout timeline integration', () => {
+  afterEach(() => vi.restoreAllMocks())
 
-      expect(container.querySelector('[data-turn-toc-rail]')).toBeNull()
-      expect(container.querySelector('[data-turn-toc-list]')).toBeNull()
-      expect(container.querySelector('[data-transcript-toolbar]')).toBeNull()
-      expect(container.querySelector('[data-transcript-toolbar-toc-trigger]')).toBeNull()
-
-      const gridCandidates = Array.from(container.querySelectorAll('[class*="grid-cols"]'))
-      expect(gridCandidates).toHaveLength(0)
-
-      const maxWidthCandidates = Array.from(container.querySelectorAll('[class*="max-w-4xl"]'))
-      expect(maxWidthCandidates).toHaveLength(0)
-    })
-
-    it('keeps the CopyFullTextButton in the column header for non-empty transcripts', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
-
-      const copyButtons = document.querySelectorAll('[data-copy-full-text]')
-      expect(copyButtons).toHaveLength(1)
-      expect((copyButtons[0] as HTMLButtonElement).disabled).toBe(false)
-    })
-
-    it('renders a mini-timeline rail that is hidden below xl and visible at xl+', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 'a' }),
-        makeTurn({ id: 'b' }),
-      ]
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
-
-      const rail = container.querySelector('[data-mini-timeline]') as HTMLElement
-      expect(rail).not.toBeNull()
-      expect(rail.className).toContain('hidden')
-      expect(rail.className).toContain('xl:flex')
-    })
-
-    it('mounts the mini-timeline as a sibling of the transcript column inside a flex-row root at xl', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
-
-      const root = container.querySelector('[data-scrollable]') as HTMLElement
-      expect(root).not.toBeNull()
-      expect(root.className).toContain('xl:flex-row')
-
-      const rail = root.querySelector(':scope > [data-mini-timeline]')
-      expect(rail).not.toBeNull()
-      const transcriptColumn = root.querySelector(':scope > [data-mini-timeline] + div')
-      expect(transcriptColumn).not.toBeNull()
-      expect(transcriptColumn!.className).toContain('flex-1')
-
-      const turnList = transcriptColumn!.querySelector('[role="log"]')
-      expect(turnList).not.toBeNull()
-    })
-  })
-
-  describe('turn divider bar — ordinal, kind label, start time, duration', () => {
-    it('renders a divider bar for every turn with ordinal, kind label, and start time', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 't1', prompt: { kind: 'initial' } }),
-        makeTurn({ id: 't2', prompt: { kind: 'followup' } }),
-        makeTurn({ id: 't3', prompt: { kind: 'task' } }),
-      ]
-
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
-
-      const dividers = container.querySelectorAll('[data-turn-divider]')
-      expect(dividers).toHaveLength(3)
-      expect(dividers[0].getAttribute('data-turn-index')).toBe('1')
-      expect(dividers[1].getAttribute('data-turn-index')).toBe('2')
-      expect(dividers[2].getAttribute('data-turn-index')).toBe('3')
-
-      const ordinals = container.querySelectorAll('[data-turn-index-label]')
-      expect(ordinals[0].textContent).toBe('Turn 1')
-      expect(ordinals[1].textContent).toBe('Turn 2')
-      expect(ordinals[2].textContent).toBe('Turn 3')
-
-      const kindLabels = container.querySelectorAll('[data-turn-kind-label]')
-      expect(kindLabels[0].textContent).toBe('Initial Task')
-      expect(kindLabels[1].textContent).toBe('Follow-up')
-      expect(kindLabels[2].textContent).toBe('Task')
-
-      const timestamps = container.querySelectorAll('[data-turn-timestamp]')
-      expect(timestamps[0].getAttribute('datetime')).toBe(turns[0].startedAt)
-      expect(timestamps[1].getAttribute('datetime')).toBe(turns[1].startedAt)
-      expect(timestamps[2].getAttribute('datetime')).toBe(turns[2].startedAt)
-    })
-
-    it('shows duration on completed turns and omits it on running turns', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({
-          id: 'completed',
-          startedAt: '2024-05-15T10:00:00.000Z',
-          completedAt: '2024-05-15T10:01:00.000Z',
-          prompt: { kind: 'initial' },
-        }),
-        makeTurn({
-          id: 'running',
-          startedAt: '2024-05-15T10:02:00.000Z',
-          completedAt: null,
-          prompt: { kind: 'followup' },
-        }),
-      ]
-
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning />,
-      )
-
-      const durations = container.querySelectorAll('[data-turn-duration]')
-      expect(durations).toHaveLength(1)
-      expect(durations[0].textContent).toBe('1m 00s')
-    })
-  })
-
-  describe('turn refs map is owned by the layout and registered by TurnList', () => {
-    it('registers each turn element with its 1-based index via data-turn-ref', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 't1' }),
-        makeTurn({ id: 't2' }),
-        makeTurn({ id: 't3' }),
-      ]
-
-      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
-
-      const turnRefs = document.querySelectorAll('[data-turn-ref]')
-      expect(turnRefs).toHaveLength(3)
-      expect(turnRefs[0].getAttribute('data-turn-id')).toBe('t1')
-      expect(turnRefs[1].getAttribute('data-turn-id')).toBe('t2')
-      expect(turnRefs[2].getAttribute('data-turn-id')).toBe('t3')
-    })
-
-    it('streaming-appended turns grow the turn refs map without dropping existing ids', () => {
-      const initialTurns: DisplayTurn[] = [
-        makeTurn({ id: 'a' }),
-        makeTurn({ id: 'b' }),
-      ]
-
-      function AppendableTranscript() {
-        const [turns, setTurns] = useState<DisplayTurn[]>(initialTurns)
-        return (
-          <div>
-            <button data-testid="append" onClick={() => setTurns((prev) => [...prev, makeTurn({ id: `c-${prev.length + 1}` })])}>append</button>
-            <SessionTranscriptLayout turns={turns} isRunning />
-          </div>
-        )
-      }
-
-      const { getByTestId } = render(<AppendableTranscript />)
-
-      const beforeRefs = document.querySelectorAll('[data-turn-ref]')
-      expect(beforeRefs).toHaveLength(2)
-      const firstRefBefore = beforeRefs[0]
-
-      fireEvent.click(getByTestId('append'))
-
-      const afterRefs = document.querySelectorAll('[data-turn-ref]')
-      expect(afterRefs).toHaveLength(3)
-      expect(afterRefs[0]).toBe(firstRefBefore)
-      expect(afterRefs[0].getAttribute('data-turn-id')).toBe('a')
-    })
-  })
-
-  describe('responsive card classes', () => {
-    it('does not render the legacy rounded-2xl bubble on the prompt block', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a', prompt: { kind: 'task', title: 'Hello' } })]
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
-
-      const promptBlock = container.querySelector('[data-prompt-block]')
-      expect(promptBlock).not.toBeNull()
-      expect(promptBlock!.className).not.toContain('rounded-2xl')
-      expect(promptBlock!.className).not.toContain('justify-end')
-      expect(promptBlock!.className).not.toContain('max-w-[80%]')
-      expect(promptBlock!.className).not.toContain('max-w-[90%]')
-    })
-
-    it('assistant text parts render without a max-width cap', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({
-          id: 'a',
-          assistantParts: [
-            {
-              id: 'p1',
-              partType: 'text',
-              text: 'Hello, world.',
-              startedAt: '2024-05-15T10:00:01.000Z',
-              completedAt: '2024-05-15T10:00:02.000Z',
-            },
-          ],
-        }),
-      ]
-
-      const { container } = render(
-        <SessionTranscriptLayout turns={turns} isRunning={false} />,
-      )
-
-      const found = Array.from(container.querySelectorAll('div')).find((el) =>
-        !!el.querySelector('.transcript-md'),
-      )
-      expect(found).toBeTruthy()
-      expect(found!.className).not.toContain('max-w-[80%]')
-      expect(found!.className).not.toContain('max-w-[90%]')
-    })
-
-    it('the turn list role=log element has min-w-0', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
-      const log = document.querySelector('[role="log"]')
-      expect(log?.className).toContain('min-w-0')
-    })
-  })
-
-  describe('useTurnKeyboardNav wiring into SessionTranscriptLayout', () => {
-    function makeRect(top: number, height = 200): DOMRect {
-      return {
-        top,
-        left: 0,
-        right: 0,
-        bottom: top + height,
-        width: 0,
-        height,
-        x: 0,
-        y: top,
-        toJSON: () => ({}),
-      } as DOMRect
-    }
-
-    function renderWithScrollContainer({
-      turns,
-      containerTop = 0,
-      turnTops,
-    }: {
-      turns: DisplayTurn[]
-      containerTop?: number
-      turnTops: number[]
-    }) {
-      const scrollContainer = document.createElement('div')
-      document.body.appendChild(scrollContainer)
-      const scrollContainerRef = { current: scrollContainer }
-
-      const rectMap = new Map<Element, DOMRect>()
-      rectMap.set(scrollContainer, makeRect(containerTop, 800))
-
-      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
-        return rectMap.get(this) ?? makeRect(0, 0)
-      })
-
-      const view = render(
+  it('renders input, grouped reads, failure, later reads, domain action, reset, and activity in order', () => {
+    const { facts, entries } = makeTimeline()
+    render(
+      <MemoryRouter>
         <SessionTranscriptLayout
-          turns={turns}
-          isRunning={false}
-          scrollContainerRef={scrollContainerRef}
-        />,
-      )
+          entries={entries}
+          facts={facts}
+          currentActivity={{ state: 'idle', label: '空闲' }}
+          resolveReference={() => '/Project/issues/42'}
+        />
+      </MemoryRouter>,
+    )
 
-      const turnRefs = Array.from(document.querySelectorAll<HTMLDivElement>('[data-turn-ref]'))
-      turnRefs.forEach((el, i) => {
-        rectMap.set(el, makeRect(turnTops[i] ?? 1000 * (i + 1), 200))
-      })
-
-      let mounted = true
-      const unmount = () => {
-        if (!mounted) return
-        mounted = false
-        view.unmount()
-        scrollContainer.remove()
-      }
-
-      return {
-        scrollContainer,
-        scrollContainerRef,
-        turnRefs,
-        unmount,
-      }
-    }
-
-    it('fires keydown from window and scrolls to the next turn', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 'a' }),
-        makeTurn({ id: 'b' }),
-        makeTurn({ id: 'c' }),
-      ]
-      const { turnRefs } = renderWithScrollContainer({
-        turns,
-        turnTops: [50, 1100, 2100],
-      })
-
-      fireEvent.keyDown(window, { key: 'j' })
-
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
-    })
-
-    it('fires keydown from document body and scrolls to the next turn', () => {
-      const turns: DisplayTurn[] = [
-        makeTurn({ id: 'a' }),
-        makeTurn({ id: 'b' }),
-      ]
-      const { turnRefs } = renderWithScrollContainer({
-        turns,
-        turnTops: [50, 1100],
-      })
-
-      fireEvent.keyDown(document.body, { key: 'j' })
-
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-      expect(scrollIntoViewSpy.mock.instances[0]).toBe(turnRefs[1])
-    })
-
-    it('detaches the listener when the layout unmounts', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { unmount } = renderWithScrollContainer({
-        turns,
-        turnTops: [50],
-      })
-
-      fireEvent.keyDown(window, { key: 'g' })
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-
-      unmount()
-
-      fireEvent.keyDown(window, { key: 'g' })
-      expect(scrollIntoViewSpy).toHaveBeenCalledTimes(1)
-    })
-
-    it('respects the focus-deferral contract when the followup composer is focused', () => {
-      const turns: DisplayTurn[] = [makeTurn({ id: 'a' })]
-      const { scrollContainer } = renderWithScrollContainer({
-        turns,
-        turnTops: [50],
-      })
-
-      const textarea = document.createElement('textarea')
-      scrollContainer.appendChild(textarea)
-      textarea.focus()
-
-      fireEvent.keyDown(window, { key: 'g' })
-      fireEvent.keyDown(window, { key: 'G' })
-      fireEvent.keyDown(window, { key: 'j' })
-      fireEvent.keyDown(window, { key: 'k' })
-      expect(scrollIntoViewSpy).not.toHaveBeenCalled()
-    })
-  })
-})
-
-describe('SessionTranscriptLayout narrow viewport no-overflow integration', () => {
-  let scrollIntoViewSpy: ReturnType<typeof vi.spyOn>
-
-  beforeEach(() => {
-    scrollIntoViewSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    const list = screen.getByTestId('timeline-item-list')
+    const rows = Array.from(list.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .filter((row) => !row.classList.contains('sr-only'))
+    const sourceIds = Array.from(list.querySelectorAll<HTMLElement>('[data-timeline-source-id]'))
+      .map((row) => row.dataset.timelineSourceId)
+    expect(rows.map((row) => row.dataset.timelineSourceId)).toEqual([
+      'input-1', 'read-1', 'failure-1', 'read-4', 'action-1', 'reset-1', 'activity-1',
+    ])
+    expect(sourceIds).toEqual(facts.map((fact) => fact.sourceId))
+    expect(screen.getAllByTestId('timeline-item-row').find((row) => row.getAttribute('data-timeline-render-class') === 'input')).toHaveTextContent('输入了 Review the change')
+    expect(screen.getAllByTestId('timeline-group-row')).toHaveLength(2)
+    expect(screen.getByText('Runner failed')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '启动了 Issue #42' })).toHaveAttribute('href', '/Project/issues/42')
+    expect(screen.getByText('上下文已重置')).toBeInTheDocument()
+    expect(screen.getByTestId('timeline-current-activity')).toHaveAttribute('data-activity-state', 'idle')
   })
 
-  afterEach(() => {
-    scrollIntoViewSpy.mockRestore()
-    restoreScopedProperties()
+  it('keeps failures and domain actions outside collapsed read groups', () => {
+    const { facts, entries } = makeTimeline()
+    render(
+      <MemoryRouter>
+        <SessionTranscriptLayout entries={entries} facts={facts} currentActivity={{ state: 'idle', label: '空闲' }} />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getAllByTestId('timeline-item-row').find((row) => row.getAttribute('data-timeline-render-class') === 'input')).toHaveAttribute('data-timeline-render-class', 'input')
+    expect(screen.getAllByTestId('timeline-item-row').some((row) => row.getAttribute('data-timeline-render-class') === 'error')).toBe(true)
+    expect(screen.queryByText('读取了 file-0.ts')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getAllByTestId('timeline-group-toggle')[0]!)
+    expect(screen.getByText('读取了 file-0.ts')).toBeInTheDocument()
+    expect(screen.getByText('Runner failed')).toBeInTheDocument()
   })
 
-  it.each([320, 375, 430])(
-    'flat-column timeline protects long prompt/code content at %ipx width',
-    (width) => {
-      setScopedValue(window, 'innerWidth', width)
+  it('switches the same facts to raw rows without changing order or payload', () => {
+    const { facts, entries } = makeTimeline()
+    const view = render(
+      <MemoryRouter>
+        <SessionTranscriptLayout entries={entries} facts={facts} currentActivity={{ state: 'idle', label: '空闲' }} />
+      </MemoryRouter>,
+    )
 
-      const turns: DisplayTurn[] = Array.from({ length: 3 }, (_, i) => makeTurn({
-        id: `t${i + 1}`,
-        prompt: {
-          kind: 'task',
-          title: 'A long prompt title without spaces'.repeat(8),
-          text: 'Long line content '.repeat(40),
-        },
-        assistantParts: [
-          {
-            id: `p${i + 1}`,
-            partType: 'text',
-            text: 'A'.repeat(200),
-            startedAt: '2024-05-15T10:00:01.000Z',
-            completedAt: '2024-05-15T10:00:02.000Z',
-          },
-        ],
-      }))
+    view.rerender(
+      <MemoryRouter>
+        <SessionTranscriptLayout entries={entries} facts={facts} currentActivity={{ state: 'idle', label: '空闲' }} viewMode="raw" />
+      </MemoryRouter>,
+    )
 
-      const view = render(
-        <SessionTranscriptLayout
-          turns={turns}
-          isRunning={false}
-        />,
-      )
-
-      const scrollable = view.container.querySelector('[data-scrollable]')
-      expect(scrollable?.className).toContain('min-w-0')
-
-      const promptBlock = view.container.querySelector('[data-prompt-block]')
-      expect(promptBlock).not.toBeNull()
-      expect(promptBlock!.className).not.toContain('rounded-2xl')
-      expect(promptBlock!.className).not.toContain('max-w-[80%]')
-
-      const turnList = view.container.querySelector('[role="log"]')
-      expect(turnList?.className).toContain('min-w-0')
-      expect(turnList?.className).not.toContain('max-w-2xl')
-
-      const markdown = view.container.querySelector('.transcript-md')
-      expect(markdown?.className).toContain('leading-relaxed')
-      const assistantCard = markdown?.parentElement
-      expect(assistantCard?.className).not.toContain('max-w-[80%]')
-      expect(assistantCard?.className).not.toContain('max-w-[90%]')
-    },
-  )
-
-  it('fenced assistant code blocks carry max-width and horizontal-scroll classes for long lines', () => {
-    const turns: DisplayTurn[] = [makeTurn({
-      id: 'code',
-      assistantParts: [
-        {
-          id: 'code-part',
-          partType: 'text',
-          text: '```ts\nconst value = "' + 'x'.repeat(160) + '"\n```',
-          startedAt: '2024-05-15T10:00:01.000Z',
-          completedAt: '2024-05-15T10:00:02.000Z',
-        },
-      ],
-    })]
-
-    const { container } = render(<SessionTranscriptLayout turns={turns} isRunning={false} />)
-    const pre = container.querySelector('.transcript-md pre')
-    expect(pre).not.toBeNull()
-    expect(pre?.className).toContain('max-w-full')
-    expect(pre?.className).toContain('overflow-x-auto')
+    const rows = screen.getAllByTestId('raw-timeline-row')
+    expect(rows).toHaveLength(facts.length)
+    expect(rows.map((row) => row.getAttribute('data-timeline-source-id'))).toEqual(facts.map((fact) => fact.sourceId))
+    expect(within(rows[0]!).getByTestId('raw-timeline-payload-details')).not.toHaveAttribute('open')
   })
 })

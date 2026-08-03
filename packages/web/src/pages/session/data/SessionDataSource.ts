@@ -1,6 +1,12 @@
 import type { AgentSessionTranscriptResponse, FollowupStatus, SessionFollowupResult, SessionMetadata, SessionRecoveryObservation, SessionStatusKind, SessionTurn } from '../../../entities/coder-session'
 import type { AgentLaunchObservationDto } from '../../../entities/agent'
-import type { DisplayTurn } from '../../../widgets/session-transcript'
+import type {
+  TimelineEntry,
+  TimelineFact,
+  TimelineItem,
+  TimelineReference,
+} from '../../../entities/session'
+import type { SessionTimelineCurrentActivity } from '../../../widgets/session-transcript'
 
 export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
 export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-no-content'
@@ -95,7 +101,11 @@ export interface SessionDataSourceResult {
   isThinking: boolean
   isStreaming: boolean
 
-  displayTurns: DisplayTurn[]
+  facts: TimelineFact[]
+  items: TimelineItem[]
+  entries: TimelineEntry[]
+  currentActivity: SessionTimelineCurrentActivity
+  resolveTimelineReference?: (reference: TimelineReference) => string | null
 
   emptyStateKind: EmptyStateKind | null
 
