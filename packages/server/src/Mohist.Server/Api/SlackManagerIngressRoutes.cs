@@ -56,6 +56,16 @@ public static class SlackManagerIngressRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_manager_setup");
             }
+            catch (InvalidOperationException ex) when (ex.Message is
+                "The Manager App identity cannot be changed after setup."
+                or "The workspace enrollment disappeared during setup."
+                or "The workspace enrollment could not be recovered after a concurrent setup.")
+            {
+                var code = ex.Message.StartsWith("The Manager App identity", StringComparison.Ordinal)
+                    ? "manager_identity_conflict"
+                    : "manager_enrollment_unavailable";
+                return ApiResults.Conflict(ex.Message, code);
+            }
         });
 
         manager.MapGet("/status", async (

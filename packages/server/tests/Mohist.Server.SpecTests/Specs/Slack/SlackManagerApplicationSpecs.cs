@@ -312,8 +312,7 @@ public sealed class SlackManagerApplicationSpecs
         var managerDeliveries = await db.SlackOutboxRows.Where(row =>
             row.OwnerKind == SlackDeliveryOwnerKinds.Manager
             && row.ConnectionId == enrollment.Id).ToListAsync();
-        var managerDelivery = Assert.Single(managerDeliveries);
-        Assert.DoesNotContain(credentialRef, managerDelivery.PayloadJson, StringComparison.Ordinal);
+        Assert.Empty(managerDeliveries);
 
         db.AgentConnections.Add(new AgentConnectionRow
         {
