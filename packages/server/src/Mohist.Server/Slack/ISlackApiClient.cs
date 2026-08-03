@@ -27,17 +27,20 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
     public Task<SlackAppsConnectionOpenResponse> AppsConnectionsOpenAsync(string appToken, CancellationToken ct = default) =>
         PostAsync<SlackAppsConnectionOpenResponse>("apps.connections.open", new { }, appToken, ct);
 
-    public Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default) =>
-        PostAsync<SlackAuthTestResponse>("auth.test", new { }, botToken, ct);
+    public async Task<SlackAuthTestResponse> AuthTestAsync(string botToken, CancellationToken ct = default)
+    {
+        var (response, scopesHeader) = await PostWithHeadersAsync<SlackAuthTestResponse>("auth.test", new { }, botToken, ct).ConfigureAwait(false);
+        return response with { GrantedScopes = ParseScopesHeader(scopesHeader) };
+    }
 
     public Task<SlackBotInfoResponse> BotsInfoAsync(string botId, string botToken, CancellationToken ct = default) =>
-        PostAsync<SlackBotInfoResponse>("bots.info", new { bot = botId }, botToken, ct);
+        PostFormAsync<SlackBotInfoResponse>("bots.info", new Dictionary<string, string> { ["bot"] = botId }, botToken, ct);
 
     public Task<SlackPermissionsScopesListResponse> PermissionsScopesListAsync(string botToken, CancellationToken ct = default) =>
         PostAsync<SlackPermissionsScopesListResponse>("apps.permissions.scopes.list", new { }, botToken, ct);
 
     public Task<SlackUserInfoResponse> UsersInfoAsync(string userId, string botToken, CancellationToken ct = default) =>
-        PostAsync<SlackUserInfoResponse>("users.info", new { user = userId }, botToken, ct);
+        PostFormAsync<SlackUserInfoResponse>("users.info", new Dictionary<string, string> { ["user"] = userId }, botToken, ct);
 
     public Task<SlackConversationInfoResponse> ConversationsInfoAsync(string conversationId, string botToken, CancellationToken ct = default) =>
         PostAsync<SlackConversationInfoResponse>("conversations.info", new { channel = conversationId }, botToken, ct);
@@ -124,6 +127,45 @@ public sealed class SlackApiClient(HttpClient http) : ISlackApiClient
         var result = await response.Content.ReadFromJsonAsync<T>(cancellationToken: ct).ConfigureAwait(false);
         return result ?? throw new InvalidOperationException($"Slack returned an empty response for {method}.");
     }
+
+    private async Task<(T Result, string? ScopesHeader)> PostWithHeadersAsync<T>(string method, object body, string token, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, method)
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<T>(cancellationToken: ct).ConfigureAwait(false)
+            ?? throw new InvalidOperationException($"Slack returned an empty response for {method}.");
+        var scopesHeader = response.Headers.TryGetValues("x-oauth-scopes", out var values)
+            ? string.Join(',', values)
+            : null;
+        return (result, scopesHeader);
+    }
+
+    private static IReadOnlySet<string>? ParseScopesHeader(string? value)
+    {
+        if (value is null)
+            return null;
+
+        return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.Ordinal);
+    }
+
+    private async Task<T> PostFormAsync<T>(string method, IReadOnlyDictionary<string, string> values, string token, CancellationToken ct)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, method)
+        {
+            Content = new FormUrlEncodedContent(values),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        using var response = await http.SendAsync(request, ct).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<T>(cancellationToken: ct).ConfigureAwait(false);
+        return result ?? throw new InvalidOperationException($"Slack returned an empty response for {method}.");
+    }
 }
 
 public sealed record SlackAuthTestResponse(
@@ -134,7 +176,11 @@ public sealed record SlackAuthTestResponse(
     [property: JsonPropertyName("user_id")] string? UserId,
     string? User,
     [property: JsonPropertyName("bot_id")] string? BotId,
-    [property: JsonPropertyName("app_id")] string? AppId);
+    [property: JsonPropertyName("app_id")] string? AppId)
+{
+    [JsonIgnore]
+    public IReadOnlySet<string>? GrantedScopes { get; init; }
+}
 public sealed record SlackAppsConnectionOpenResponse(bool Ok, string? Error, string? Url);
 public sealed record SlackBotInfoResponse(bool Ok, string? Error, SlackBotInfo? Bot);
 public sealed record SlackBotInfo(
@@ -163,12 +209,12 @@ public sealed record SlackPermissionsScopesListResponse(bool Ok, string? Error, 
 public sealed record SlackUserInfoResponse(bool Ok, string? Error, SlackUserInfo? User);
 public sealed record SlackUserInfo(
     string? Id,
-    string? TeamId,
-    bool IsBot,
+    [property: JsonPropertyName("team_id")] string? TeamId,
+    [property: JsonPropertyName("is_bot")] bool IsBot,
     bool Deleted,
-    bool IsRestricted,
-    bool IsUltraRestricted,
-    bool IsGuest,
+    [property: JsonPropertyName("is_restricted")] bool IsRestricted,
+    [property: JsonPropertyName("is_ultra_restricted")] bool IsUltraRestricted,
+    [property: JsonPropertyName("is_guest")] bool IsGuest,
     IReadOnlyList<string>? TeamIds = null,
     string? DisplayName = null,
     string? RealName = null,

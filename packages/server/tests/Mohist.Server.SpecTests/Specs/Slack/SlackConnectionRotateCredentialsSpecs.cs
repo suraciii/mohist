@@ -80,6 +80,35 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task VerifyRotationAsync_uses_app_token_identity_when_socket_url_id_is_opaque()
+    {
+        _slack.AppsConnectionOpen = new(true, null, "wss://wss-primary.slack.com/link/?app_id=opaque-ticket-id");
+
+        var result = await _verifier.VerifyRotationAsync("project-1", _connectionId, "xapp-1-A123-connection-ticket", "xoxb-new");
+
+        Assert.True(result.Verified);
+        Assert.Equal("A123", result.ResolvedAppId);
+    }
+
+    [Fact]
+    public async Task VerifyRotationAsync_uses_auth_test_scope_header_when_scope_listing_is_unsupported()
+    {
+        _slack.AuthTest = _slack.AuthTest with
+        {
+            GrantedScopes = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "chat:write", "users:read", "im:history",
+            },
+        };
+        _slack.PermissionsScopesList = new(false, "method_not_supported", null);
+
+        var result = await _verifier.VerifyRotationAsync("project-1", _connectionId, "xapp-new", "xoxb-new");
+
+        Assert.True(result.Verified);
+        Assert.Equal("A123", result.ResolvedAppId);
+    }
+
+    [Fact]
     public async Task VerifyRotationAsync_rejects_invalid_token_with_reason()
     {
         _slack.AuthTest = new(false, "invalid_auth", null, null, null, null, null, null);
@@ -104,6 +133,23 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
 
         Assert.False(result.Verified);
         Assert.Contains("im:history", result.Reason);
+    }
+
+    [Theory]
+    [InlineData("unknown_method")]
+    [InlineData("method_not_supported")]
+    public async Task VerifyRotationAsync_rejects_unverifiable_scopes_without_mutating_store(string error)
+    {
+        _slack.PermissionsScopesList = new(false, error, null);
+
+        var result = await _verifier.VerifyRotationAsync("project-1", _connectionId, "xapp-new", "xoxb-new");
+
+        var connection = await GetConnectionAsync();
+        Assert.False(result.Verified);
+        Assert.Contains("scope verification is unavailable", result.Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(SetupProgressKind.Complete, connection.SetupProgress);
+        Assert.Equal(ConnectionHealthKind.Healthy, connection.ConnectionHealth);
+        Assert.Equal("U_OWNER", connection.OwnerSlackUserId);
     }
 
     [Fact]
@@ -166,7 +212,7 @@ public sealed class SlackConnectionRotateCredentialsSpecs : IAsyncLifetime
     {
         public List<string> Calls { get; } = [];
         public SlackAppsConnectionOpenResponse AppsConnectionOpen { get; set; } = new(true, null, "wss://socket.slack.com/?app_id=A123");
-        public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
+        public SlackAuthTestResponse AuthTest { get; set; } = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", null);
         public SlackBotInfoResponse BotsInfo { get; set; } = new(true, null,
             new("B123", "Mohist", "A123", new SlackBotIcons(Image48: "https://slack/icon-48.png")));
         public SlackPermissionsScopesListResponse PermissionsScopesList { get; set; } = new(true, null, new Dictionary<string, IReadOnlyList<string>>
