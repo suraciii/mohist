@@ -12,7 +12,7 @@ import {
 } from '../../../entities/coder-session'
 import type { SessionFollowupResult, SessionMetadata, SessionTurn, UnifiedSessionSummaryDto } from '../../../entities/coder-session'
 import type { TimelineReference } from '../../../entities/session'
-import { projectTurn, useSessionTimeline, useSessionTranscript } from '../../../widgets/session-transcript'
+import { useSessionTimeline, useSessionTranscript } from '../../../widgets/session-transcript'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { ApiError } from '../../../shared/api/client'
@@ -21,7 +21,6 @@ import type { EmptyStateKind, SessionCancelOptions, SessionDataSourceResult, Ses
 
 export interface UnifiedSessionDataSourceDependencies {
   useSessionTranscript: typeof useSessionTranscript
-  projectTurn: typeof projectTurn
   useUnifiedSessionSummary: typeof useUnifiedSessionSummary
   useUnifiedSessionTranscript: typeof useUnifiedSessionTranscript
   useGenericFollowup: typeof useGenericFollowup
@@ -30,7 +29,6 @@ export interface UnifiedSessionDataSourceDependencies {
 
 const defaultDependencies: UnifiedSessionDataSourceDependencies = {
   useSessionTranscript,
-  projectTurn,
   useUnifiedSessionSummary,
   useUnifiedSessionTranscript,
   useGenericFollowup,
@@ -82,7 +80,6 @@ export function useUnifiedSessionDataSource(
 ): SessionDataSourceResult {
   const {
     useSessionTranscript: useTranscript,
-    projectTurn: projectTranscriptTurn,
     useUnifiedSessionSummary: useSummary,
     useUnifiedSessionTranscript: useTranscriptResponse,
     useGenericFollowup: useFollowup,
@@ -163,10 +160,6 @@ export function useUnifiedSessionDataSource(
     } : null,
   }), [summary, transcript.liveDetails, transcript.turns])
   const timeline = useSessionTimeline(timelineInput)
-  const displayTurns = useMemo(
-    () => transcript.turns.map((turn) => projectTranscriptTurn(turn)),
-    [projectTranscriptTurn, transcript.turns],
-  )
 
   const sendFollowup = useCallback(async (text: string, attachmentIds: string[] = []) => {
     const retryKey = `${sessionId}:${text}:${attachmentIds.join(',')}`
@@ -328,7 +321,6 @@ export function useUnifiedSessionDataSource(
     entries: timeline.entries,
     currentActivity: timeline.currentActivity,
     resolveTimelineReference,
-    displayTurns,
     emptyStateKind,
     issueNumber,
   }

@@ -94,7 +94,6 @@ function makeData(): SessionDataSourceResult {
     isFinalizing: false,
     isThinking: false,
     isStreaming: false,
-    displayTurns: [],
     facts: [fact],
     items: [item],
     entries: [item],

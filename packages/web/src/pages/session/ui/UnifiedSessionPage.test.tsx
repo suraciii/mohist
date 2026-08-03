@@ -64,7 +64,6 @@ function makeDependencies(): UnifiedSessionPageDependencies {
           isStreaming: false,
         } as never
       },
-      projectTurn: (turn) => turn as never,
       useGenericFollowup: () => ({ mutateAsync: vi.fn(), isPending: false }) as never,
       useGenericTurnControl: () => ({
         mutate: (input: { sessionId: string; turnId: string; operation: 'cancel' | 'stop' }, options?: { onSuccess?: (result: { state: string }) => void }) => {

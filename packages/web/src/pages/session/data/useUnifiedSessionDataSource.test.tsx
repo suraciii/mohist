@@ -84,7 +84,6 @@ function makeDependencies(overrides: Partial<UnifiedSessionDataSourceDependencie
       isThinking: false,
       isStreaming: false,
     })) as never,
-    projectTurn: ((turn: unknown) => turn) as never,
     useUnifiedSessionSummary: (() => ({ data: makeSummary(), isLoading: false, isError: false })) as never,
     useUnifiedSessionTranscript: (() => ({ data: { turns: [], partCount: 0, lastActivityAt: null } as AgentSessionTranscriptResponse })) as never,
     useGenericFollowup: (() => followupMock) as never,
