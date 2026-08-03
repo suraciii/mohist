@@ -8,6 +8,8 @@ import { useSessionTimeline } from './useSessionTimeline'
 
 const at = '2026-08-03T10:00:00.000Z'
 const emptyTurns: SessionTurn[] = []
+let mountedHookUnmount: (() => void) | undefined
+let testQueryClient: QueryClient | undefined
 
 function readTurn(): SessionTurn {
   return {
@@ -37,6 +39,11 @@ describe('useSessionTimeline', () => {
   })
 
   afterEach(() => {
+    mountedHookUnmount?.()
+    testQueryClient?.clear()
+    mountedHookUnmount = undefined
+    testQueryClient = undefined
+    vi.runOnlyPendingTimers()
     vi.useRealTimers()
   })
 
@@ -102,11 +109,12 @@ describe('useSessionTimeline', () => {
   })
 
   it('combines identity-filtered live details without losing raw headers or tool identity', () => {
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
+    testQueryClient = queryClient
     const wrapper = ({ children }: { children: React.ReactNode }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     )
-    const { result } = renderHook(() => {
+    const rendered = renderHook(() => {
       const transcript = useSessionTranscript({
         issueNumber: 0,
         sessionId: 'session-1',
@@ -124,6 +132,8 @@ describe('useSessionTimeline', () => {
         }),
       }
     }, { wrapper })
+    mountedHookUnmount = rendered.unmount
+    const { result } = rendered
 
     act(() => {
       dispatchAgentEvent('tool_call.started', {
