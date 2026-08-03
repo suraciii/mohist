@@ -313,11 +313,13 @@ terminal delivery key，故重试、重连和重复入站不会再追加第二�
   验证 DM/@mention、thread follow-up、失败、取消、重复投递、update failure fallback、Agent 未就绪
   和 Connection Disabled。I 不绕过 B 的 provider mutation contract。
 
-Connection Disabled 时，Server 立即拒绝新的 Slack 输入，adapter 也不得 claim 或发送新的 Slack
-回复；已经接受的 Agent 工作继续由 Mohist 裁定。重新启用后只补齐仍有效的当前状态或最终结果，不
-回放禁用期间已经过期的 Working 进度。Remove binding 与 Permanent delete 仍是两个独立、显式确认
-的生命周期动作：前者保留 Agent App 管理事实，后者要求无 active binding、二次确认和审计；两者都
-不删除 Mohist Agent 或 AgentSession。
+Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event 已处理，并记录审计后丢弃
+该事件。这个传输层确认不代表连接层接纳：连接层不得把事件创建或接纳为 `SessionInput`、
+`AgentJob` 或任何 `DeliveryIntent`，也不得让它们在稍后重新启用时被重放。已经接受的 Agent 工作
+继续由 Mohist 裁定，但禁用期间 adapter 不得 claim 或发送新的 Slack 回复。重新启用后只补齐仍有效
+的当前状态或最终结果，不回放禁用期间已经过期的 Working 进度。Remove binding 与 Permanent delete
+仍是两个独立、显式确认的生命周期动作：前者保留 Agent App 管理事实，后者要求无 active binding、
+二次确认和审计；两者都不删除 Mohist Agent 或 AgentSession。
 
 ## 安全边界
 
