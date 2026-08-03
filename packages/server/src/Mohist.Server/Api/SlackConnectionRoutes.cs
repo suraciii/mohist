@@ -468,7 +468,7 @@ public static class SlackConnectionRoutes
                     // A disabled transport event is still acknowledged. The
                     // inbox is the audit record when capacity is available.
                 }
-                return ApiResults.Ok(new { kind = "rejected", reason = "This Connection is disabled.", audited = true });
+                return ApiResults.Ok(new { kind = SlackProviderInboxRouteKinds.DisabledDiscarded, reason = "This Connection is disabled.", audited = true });
             }
             if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
                 return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
@@ -585,12 +585,14 @@ public static class SlackConnectionRoutes
             var projectId = http.GetResolvedProject().Id;
             if (body is null || string.IsNullOrWhiteSpace(body.Id))
                 return ApiResults.BadRequest("id is required.");
+            if (string.IsNullOrWhiteSpace(body.AdapterId))
+                return ApiResults.BadRequest("adapterId is required.");
             if (string.Equals(body.Outcome, "delivered", StringComparison.OrdinalIgnoreCase))
-                await outbox.MarkDeliveredAsync(projectId, body.Id, body.ProviderMessageIdentity, ct);
+                await outbox.MarkDeliveredAsync(projectId, body.Id, body.ProviderMessageIdentity, body.AdapterId, ct);
             else if (string.Equals(body.Outcome, "uncertain", StringComparison.OrdinalIgnoreCase))
-                await outbox.MarkDeliveryUncertainAsync(projectId, body.Id, body.Reason, ct);
+                await outbox.MarkDeliveryUncertainAsync(projectId, body.Id, body.Reason, body.AdapterId, ct);
             else
-                await outbox.ScheduleRetryAsync(projectId, body.Id, body.Reason, ct);
+                await outbox.ScheduleRetryAsync(projectId, body.Id, body.Reason, body.AdapterId, ct);
             return ApiResults.Ok(new { id = body.Id, outcome = body.Outcome });
         });
 
@@ -2386,6 +2388,7 @@ public sealed class DeliveryClaimBody
 public sealed class DeliveryAckBody
 {
     public string Id { get; init; } = string.Empty;
+    public string AdapterId { get; init; } = string.Empty;
     public string Outcome { get; init; } = string.Empty;
     public string? Reason { get; init; }
     public SlackProviderMessageIdentity? ProviderMessageIdentity { get; init; }

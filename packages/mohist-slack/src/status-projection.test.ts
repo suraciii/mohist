@@ -27,7 +27,7 @@ class Web implements SlackWebClient {
   readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string }> = []
   reactionError: string | undefined
   updateError: string | undefined
-  historyMessages: Array<{ ts?: string; client_msg_id?: string }> = []
+  historyMessages: Array<{ ts?: string; client_msg_id?: string; text?: string }> = []
   readonly chat = {
     postMessage: async (input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string }) => {
       this.posted.push(input)
@@ -82,6 +82,7 @@ describe("Slack status provider mutations", () => {
     expect(transport.acks).toEqual([{
       id: "progress",
       outcome: "delivered",
+      adapterId: "a",
       providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
     }])
   })
@@ -111,7 +112,7 @@ describe("Slack status provider mutations", () => {
       thread_ts: "100.001",
       client_msg_id: "fallback:received",
     }])
-    expect(transport.acks[0]).toMatchObject({ id: "received", outcome: "delivered" })
+    expect(transport.acks[0]).toMatchObject({ id: "received", outcome: "delivered", adapterId: "a" })
   })
 
   it("uses one stable same-thread fallback after a terminal update failure", async () => {
@@ -140,13 +141,13 @@ describe("Slack status provider mutations", () => {
       thread_ts: "100.001",
       client_msg_id: "fallback:terminal",
     }])
-    expect(transport.acks).toEqual([{ id: "terminal", outcome: "delivered", providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" } }])
+    expect(transport.acks).toEqual([{ id: "terminal", outcome: "delivered", adapterId: "a", providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" } }])
   })
 
   it("reconciles uncertain updates before allowing another mutation", async () => {
     const transport = new Transport()
     const web = new Web()
-    web.historyMessages = [{ ts: "100.002" }]
+    web.historyMessages = [{ ts: "100.002", text: "Completed" }]
     transport.uncertain.push({
       id: "uncertain",
       conversationId: "C1",
@@ -164,7 +165,82 @@ describe("Slack status provider mutations", () => {
     expect(transport.acks).toEqual([{
       id: "uncertain",
       outcome: "delivered",
+      adapterId: "a",
       providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
     }])
+  })
+
+  it("reconciles an explicit unknown operation without posting a message", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    web.historyMessages = [{ ts: "100.003", client_msg_id: "unknown:1" }]
+    transport.deliveries.push({
+      id: "unknown",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({ operation: "delete_message", clientMessageId: "unknown:1", text: "ignored" }),
+    })
+
+    await start(transport, web)
+
+    expect(web.posted).toEqual([])
+    expect(web.updated).toEqual([])
+    expect(transport.acks).toContainEqual({
+      id: "unknown",
+      outcome: "delivered",
+      adapterId: "a",
+    })
+  })
+
+  it("does not persist a reaction target as a created message identity", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    transport.deliveries.push({
+      id: "reaction",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "reaction_add",
+        targetMessageIdentity: { conversationId: "C1", messageTs: "100.001" },
+        reaction: "eyes",
+      }),
+    })
+
+    await start(transport, web)
+
+    expect(transport.acks).toContainEqual({ id: "reaction", outcome: "delivered", adapterId: "a" })
+  })
+
+  it("posts the stable fallback only after reconciliation confirms an update target is absent", async () => {
+    const transport = new Transport()
+    const web = new Web()
+    transport.uncertain.push({
+      id: "uncertain-missing",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "chat_update",
+        text: "Completed",
+        providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" },
+        fallbackText: "Completed",
+        fallbackDispatchRef: "fallback:terminal",
+      }),
+    })
+
+    await start(transport, web)
+
+    expect(web.updated).toEqual([])
+    expect(web.posted).toEqual([{
+      channel: "C1",
+      text: "Completed",
+      thread_ts: "100.001",
+      client_msg_id: "fallback:terminal",
+    }])
+    expect(transport.acks).toContainEqual({
+      id: "uncertain-missing",
+      outcome: "delivered",
+      adapterId: "a",
+      providerMessageIdentity: { conversationId: "C1", messageTs: "200.001" },
+    })
   })
 })

@@ -56,6 +56,7 @@ export interface ProviderMessageIdentity {
 export interface DeliveryAck {
   readonly id: string
   readonly outcome: "delivered" | "uncertain" | "retry"
+  readonly adapterId?: string
   readonly reason?: string
   readonly providerMessageIdentity?: ProviderMessageIdentity
 }
