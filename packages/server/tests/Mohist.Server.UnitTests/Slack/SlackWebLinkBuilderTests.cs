@@ -27,6 +27,7 @@ public sealed class SlackWebLinkBuilderTests
     [InlineData("https://10.0.0.1")]
     [InlineData("https://192.168.1.1")]
     [InlineData("https://[::1]")]
+    [InlineData("https://[::]")]
     [InlineData("https://operator@mohist.example")]
     [InlineData("http://mohist.example")]
     public void BuildOpenSession_RejectsUnsafeOrUnconfiguredExternalUrls(string externalWebUrl)

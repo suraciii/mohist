@@ -239,8 +239,8 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
 `mo slack` 管理 Slack 接入：一个 Mohist Agent 与一个 Slack 工作区中 Bot 身份的绑定，
 以及 workspace 级 Mohist App 的安装。
 
-- `mo slack setup` 通过向导把 Mohist App 装入工作区（选择托管或本机路径、完成安装授权
-  与操作者认领）；`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
+- `mo slack setup` 用显式参数登记工作区级 Mohist App；完整的路径选择、安装授权与操作者认领
+  向导尚未实装。`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
 - `mo slack create <agent>` 只创建可恢复接入，输出 Slack identity preview、预填创建地址
   与接入 ID；不要求 `mohist-slack` 在线，也不读取凭据。
 - `mo slack configure <id>` 使用隐藏输入提交 Slack 凭据，不接受 token literal flag。非交互
@@ -409,6 +409,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
 - `install/update/service ... slack` 与 `mohist-slack` 受管服务。
+- `mo slack setup` 的完整托管或本机安装向导，以及真实 Slack 子 App 的创建、授权和审批流程。
 
 ### 已闭合
 

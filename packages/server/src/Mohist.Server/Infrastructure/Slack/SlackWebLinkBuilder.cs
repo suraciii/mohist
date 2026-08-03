@@ -122,7 +122,8 @@ public sealed class SlackWebLinkBuilder : IScopedService
                 || (bytes[0] == 169 && bytes[1] == 254)
                 || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
                 || (bytes[0] == 192 && bytes[1] == 168),
-            AddressFamily.InterNetworkV6 => address.IsIPv6LinkLocal
+            AddressFamily.InterNetworkV6 => address.Equals(IPAddress.IPv6Any)
+                || address.IsIPv6LinkLocal
                 || address.IsIPv6SiteLocal
                 || bytes[0] is 0xfc or 0xfd,
             _ => true,

@@ -201,8 +201,9 @@ Setup required。
 
 `mo slack` 覆盖 Slack 接入的全部操作：
 
-- `mo slack setup` 把一个工作区装上 Mohist App：选择托管或本机路径，完成安装授权与
-  操作者认领；`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
+- `mo slack setup` 把一个工作区装上 Mohist App，`mo slack status` 查看该工作区各接入的
+  整体状态与唯一下一步。完整的路径选择、安装授权和操作者认领向导仍属于未交付目标，当前
+  CLI 需要明确提供安装所需的工作区、App、Bot 和凭据引用。
 - 接入资源的管理：
 
 ```text
@@ -544,5 +545,7 @@ App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、创建带
 删除不在对话中提供，仍是 CLI 或 Web 中独立、明确的生命周期操作。
 
 当前仍未交付的是完整的托管或本机安装向导、真实 Slack 子 App 创建与授权、公开应用市场、
-跨 Mohist Server 的多 Bot 协调、Slack 原生 Agent 入口及完整诊断工作台。工作区安装仍由
-本机受保护的操作通道启动；这些未完成部分不应被理解为已经由 Slack 支持。
+跨 Mohist Server 的多 Bot 协调、Slack 原生 Agent 入口及完整诊断工作台。`mo slack setup`
+目前是需要显式参数的受保护操作，不会引导用户完成完整安装流程；它也不会代替真实子 App
+的创建、授权或审批。工作区安装仍由本机受保护的操作通道启动；这些未完成部分不应被理解
+为已经由 Slack 支持。

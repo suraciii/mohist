@@ -358,6 +358,9 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
   token 的依赖，但仍只暴露一个受控入站地址。
 - `mohist-slack` 是高权限本机组件，与 Mohist Server 同信任域部署；它只获得调用固定 Connection、
   读取结果和回送消息所需的权限。
+- Stop 请求的签名钥与 Connection 的 BotToken 假定处于同一个 self-host 安装信任域：adapter 可以
+  持有并使用签名钥转发请求，但 Server 仍必须重新核验签名、目标 Connection、操作者和执行中
+  Turn 后才裁定停止；二者都不能被当作 Slack 用户凭据，也不能跨信任域共享。
 - App 与 Bot 凭据、Manager credential、子 App client secret 与 signing secret 由 Server 加密保存，
   **按各自拥有者寻址**（见「凭据所有权」），不进入 Agent Instructions、transcript、日志、客户端可见
   状态、durable row、DTO 或审计序列化。OAuth code 与 state nonce 同样不得落盘明文；state 只存 hash。
@@ -479,6 +482,8 @@ runtime 的普通 Project Agent 后委托同一 Manager application service 挂�
 ### 仍未实装
 
 真实 Slack 子 App 创建、OAuth callback、托管 HTTPS ingress 和本机安装 wizard 尚未接到生产网络。
+当前 `mo slack setup` 仍是显式参数的受保护登记入口，不是完整安装向导；真实子 App 创建、授权
+与审批仍未实装。
 公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口、App Home 以及完整的
 规模化和运维体验仍属于后续阶段。后续能力仍必须经 Agent API 与既有 Connection boundary 进入，
 不得让 adapter 解析 Runner 日志、覆盖 Agent 配置或直接写 Mohist 数据库。

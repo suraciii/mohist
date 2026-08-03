@@ -22,6 +22,30 @@ public sealed class CliSlackCommandSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData("setup", "--workspace-team", "--manager-app-id", "--manager-bot-user-id", "--manager-credential-ref")]
+    [InlineData("status", "--workspace-team")]
+    public async Task SlackSetupAndStatusHelp_ExposeTheirLeafInputsWithoutHttp(
+        string command,
+        params string[] expectedOptions)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", command, "--help"],
+            output,
+            error,
+            fs,
+            executor);
+
+        Assert.Equal(0, exit);
+        var text = output.ToString();
+        foreach (var option in expectedOptions)
+            Assert.Contains(option, text, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
     [Fact]
     public async Task LegacyAgentConnectionCommand_IsRejectedWithoutHttpRequest()
     {
