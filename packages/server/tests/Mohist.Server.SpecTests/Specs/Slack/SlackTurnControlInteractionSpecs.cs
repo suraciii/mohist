@@ -132,6 +132,38 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Queued_control_actions_cancel_queued_work_and_stop_work_that_has_started()
+    {
+        var connection = await CreateConnectionAsync();
+        var queued = await SeedQueuedSessionAsync(connection, "U_OWNER", "C-queued-cancel");
+        var queuedAction = await CreateStopActionAsync(connection, queued, "U_OWNER", "C-queued-cancel");
+
+        var cancelled = await PostInteractionAsync(connection, queuedAction, "U_OWNER", "C-queued-cancel");
+
+        Assert.Equal("cancelled", cancelled.GetProperty("state").GetString());
+        Assert.Equal(AgentTurnControlClassification.Terminal,
+            (await _fixture.Grains.GetGrain<IAgentSessionGrain>(queued.SessionId)
+                .ResolveTurnControlAsync(queued.TurnId))?.Classification);
+
+        var started = await SeedQueuedSessionAsync(connection, "U_OWNER", "C-queued-stop");
+        var startedAction = await CreateStopActionAsync(connection, started, "U_OWNER", "C-queued-stop");
+        await RegisterRunnerAsync(connection.ProjectId, started.RunnerId);
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(
+            started.RunnerId,
+            $"{started.RunnerId}-connection");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(started.SessionId)
+            .MarkTurnExecutingAsync(started.TurnId);
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+
+        var stopped = await PostInteractionAsync(connection, startedAction, "U_OWNER", "C-queued-stop");
+
+        Assert.Equal("stopped", stopped.GetProperty("state").GetString());
+        Assert.Single(hub.Invocations);
+    }
+
+    [Fact]
     public async Task Expired_replayed_wrong_connection_and_terminal_actions_have_no_runtime_side_effect()
     {
         var connection = await CreateConnectionAsync();
@@ -249,6 +281,18 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
         string initiatorSlackUserId,
         string conversationId)
     {
+        var seeded = await SeedQueuedSessionAsync(connection, initiatorSlackUserId, conversationId);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(seeded.SessionId).MarkTurnExecutingAsync(seeded.TurnId);
+        await RegisterRunnerAsync(connection.ProjectId, seeded.RunnerId);
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(seeded.RunnerId, $"{seeded.RunnerId}-connection");
+        return seeded;
+    }
+
+    private async Task<SeededSession> SeedQueuedSessionAsync(
+        AgentConnection connection,
+        string initiatorSlackUserId,
+        string conversationId)
+    {
         var sessionId = $"slack-control-{Guid.NewGuid():N}";
         var inputId = $"input-{Guid.NewGuid():N}";
         var turnId = $"turn-{Guid.NewGuid():N}";
@@ -272,12 +316,9 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
                 conversationId,
                 "1710000000.000001",
                 initiatorSlackUserId,
-                "1710000000.000001",
-                connection.Id)));
-        await session.MarkTurnExecutingAsync(turnId);
-        await RegisterRunnerAsync(connection.ProjectId, runnerId);
-        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(runnerId, $"{runnerId}-connection");
-        return new SeededSession(sessionId, inputId, turnId);
+            "1710000000.000001",
+            connection.Id)));
+        return new SeededSession(sessionId, inputId, turnId, runnerId);
     }
 
     private async Task RegisterRunnerAsync(string projectId, string runnerId)
@@ -369,5 +410,5 @@ public sealed class SlackTurnControlInteractionSpecs : IAsyncLifetime
     private static string IngressPath(AgentConnection connection, string suffix) =>
         $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}{suffix}";
 
-    private sealed record SeededSession(string SessionId, string InputId, string TurnId);
+    private sealed record SeededSession(string SessionId, string InputId, string TurnId, string RunnerId);
 }

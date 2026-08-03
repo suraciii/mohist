@@ -1,12 +1,24 @@
+export type SlackDeliveryOwnerKind = "connection" | "manager"
+
 export interface SlackConnectionRef {
+  readonly ownerKind?: "connection"
   readonly projectId: string
   readonly connectionId: string
 }
 
+export interface SlackManagerRef {
+  readonly ownerKind: "manager"
+  readonly enrollmentId: string
+  readonly workspaceTeamId: string
+}
+
+export type SlackAdapterTarget = SlackConnectionRef | SlackManagerRef
+
 export interface AdapterSession {
   readonly adapterId: string
-  readonly appToken: string
-  readonly botToken: string
+  readonly ownerKind?: SlackDeliveryOwnerKind
+  readonly appToken?: string
+  readonly botToken?: string
 }
 
 export interface SlackFileRef {
@@ -59,6 +71,7 @@ export interface InteractionResult {
 
 export interface Delivery {
   readonly id: string
+  readonly ownerKind?: SlackDeliveryOwnerKind
   readonly conversationId: string
   readonly threadTs: string | null
   readonly payloadJson: string
@@ -78,13 +91,13 @@ export interface DeliveryAck {
 }
 
 export interface AdapterTransport {
-  discoverConnections(signal: AbortSignal): Promise<readonly SlackConnectionRef[]>
-  lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
-  ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
-  interaction(ref: SlackConnectionRef, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
-  claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  claimUncertainDelivery?(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  ackDelivery(ref: SlackConnectionRef, ack: DeliveryAck, signal: AbortSignal): Promise<void>
+  discoverConnections(signal: AbortSignal): Promise<readonly SlackAdapterTarget[]>
+  lease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
+  ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
+  interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
+  claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  claimUncertainDelivery?(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, signal: AbortSignal): Promise<void>
 }
 
 export interface SocketEvent {
@@ -116,4 +129,5 @@ export interface SlackWebClient {
 export type SlackBlock = Record<string, unknown>
 
 export type SocketClientFactory = (appToken: string, ref: SlackConnectionRef) => SocketClient
-export type WebClientFactory = (botToken: string, ref: SlackConnectionRef) => SlackWebClient
+export type WebClientFactory = (botToken: string, ref: SlackAdapterTarget) => SlackWebClient
+export type ManagerWebClientFactory = (ref: SlackManagerRef) => SlackWebClient

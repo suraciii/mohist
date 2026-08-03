@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
-import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
@@ -27,33 +27,36 @@ class FakeSocket implements SocketClient {
 }
 
 class FakeTransport implements AdapterTransport {
-  readonly leases: SlackConnectionRef[] = []
+  readonly leases: SlackAdapterTarget[] = []
   readonly envelopes: SlackEnvelope[] = []
   readonly interactions: SlackInteractionEnvelope[] = []
-  readonly acks: Array<{ ref: SlackConnectionRef; id: string; outcome: string }> = []
+  readonly acks: Array<{ ref: SlackAdapterTarget; id: string; outcome: string }> = []
   readonly deliveries: Delivery[] = [{ id: "delivery-1", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "accepted" }) }]
-  connections: SlackConnectionRef[] = []
+  readonly uncertainDeliveries: Delivery[] = []
+  connections: SlackAdapterTarget[] = []
   nextIngressResults: IngressResult[] = []
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
-  async discoverConnections(): Promise<readonly SlackConnectionRef[]> {
+  async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
     return this.connections
   }
 
-  async lease(ref: SlackConnectionRef): Promise<AdapterSession> {
+  async lease(ref: SlackAdapterTarget): Promise<AdapterSession> {
     this.leases.push(ref)
-    const session = { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
-    this.sessionByConnection.set(ref.connectionId, session)
+    const session = ref.ownerKind === "manager"
+      ? { adapterId: "adapter-1", ownerKind: "manager" as const }
+      : { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
+    this.sessionByConnection.set(ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId, session)
     return session
   }
 
-  async ingress(_ref: SlackConnectionRef, envelope: SlackEnvelope): Promise<IngressResult> {
+  async ingress(_ref: SlackAdapterTarget, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
     const queued = this.nextIngressResults.shift()
     return queued ?? { kind: "accepted" }
   }
 
-  async interaction(_ref: SlackConnectionRef, envelope: SlackInteractionEnvelope) {
+  async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
     this.interactions.push(envelope)
     return { state: "stop_requested" }
   }
@@ -62,7 +65,11 @@ class FakeTransport implements AdapterTransport {
     return this.deliveries.shift() ?? null
   }
 
-  async ackDelivery(ref: SlackConnectionRef, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
+  async claimUncertainDelivery(): Promise<Delivery | null> {
+    return this.uncertainDeliveries.shift() ?? null
+  }
+
+  async ackDelivery(ref: SlackAdapterTarget, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
     this.acks.push({ ref, id: ack.id, outcome: ack.outcome })
   }
 }
@@ -275,6 +282,61 @@ describe("mohist-slack adapter", () => {
     expect(transport.envelopes[0]?.text).toBe("task")
     expect(webs.get("c1")?.posted).toEqual([{ channel: "D1", text: "accepted" }])
     expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-1", outcome: "delivered" }])
+    controller.abort()
+  })
+
+  it("runs an explicit Manager target through web delivery without starting Socket Mode", async () => {
+    const manager: SlackManagerRef = {
+      ownerKind: "manager",
+      enrollmentId: "enrollment-manager",
+      workspaceTeamId: "T_MANAGER",
+    }
+    const transport = new FakeTransport()
+    transport.connections = [manager]
+    transport.deliveries = [{
+      id: "manager-delivery",
+      ownerKind: "manager",
+      conversationId: "D_MANAGER",
+      threadTs: null,
+      payloadJson: JSON.stringify({ text: "manager reply" }),
+    }]
+    transport.uncertainDeliveries.push({
+      id: "manager-uncertain",
+      ownerKind: "manager",
+      conversationId: "D_MANAGER",
+      threadTs: null,
+      payloadJson: JSON.stringify({ text: "manager uncertain reply" }),
+    })
+    const web = new FakeWeb()
+    let socketFactoryCalls = 0
+    let managerFactoryRef: SlackManagerRef | undefined
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-manager",
+      transport,
+      socketFactory: () => {
+        socketFactoryCalls += 1
+        return new FakeSocket()
+      },
+      webFactory: () => new FakeWeb(),
+      managerWebFactory: (ref) => {
+        managerFactoryRef = ref
+        return web
+      },
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(socketFactoryCalls).toBe(0)
+    expect(managerFactoryRef).toEqual(manager)
+    expect(transport.leases).toEqual([manager])
+    expect(web.posted).toEqual([{ channel: "D_MANAGER", text: "manager reply" }])
+    expect(transport.acks).toEqual([
+      { ref: manager, id: "manager-uncertain", outcome: "uncertain" },
+      { ref: manager, id: "manager-delivery", outcome: "delivered" },
+    ])
     controller.abort()
   })
 

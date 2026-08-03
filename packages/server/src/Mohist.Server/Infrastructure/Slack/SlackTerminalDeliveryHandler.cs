@@ -124,7 +124,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
     private static string RenderManagerReply(SlackTerminalDelivery delivery) =>
         string.Equals(delivery.Status, "completed", StringComparison.Ordinal)
         && !string.IsNullOrWhiteSpace(delivery.AssistantText)
-            ? delivery.AssistantText.Trim()
+            ? SlackFinalReplyRenderer.NeutralizeSlackControlSyntax(delivery.AssistantText.Trim())
             : Render(delivery);
 
     private async Task<string?> ResolveSessionIdAsync(

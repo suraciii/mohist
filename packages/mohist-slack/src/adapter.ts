@@ -1,10 +1,11 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ManagerWebClientFactory, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
   readonly transport: AdapterTransport
   readonly socketFactory: SocketClientFactory
   readonly webFactory: WebClientFactory
+  readonly managerWebFactory?: ManagerWebClientFactory
   readonly discoveryIntervalMs?: number
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
@@ -12,7 +13,7 @@ export interface SlackAdapterOptions {
 }
 
 interface ConnectionRuntime {
-  readonly ref: SlackConnectionRef
+  readonly target: SlackAdapterTarget
   socket?: SocketClient
   web?: SlackWebClient
   heartbeatTimer?: ReturnType<typeof setInterval>
@@ -59,7 +60,7 @@ export class SlackAdapter {
     await Promise.all(connections.map(async (ref) => {
       const key = connectionKey(ref)
       if (this.runtimes.has(key)) return
-      const runtime: ConnectionRuntime = { ref, draining: false }
+      const runtime: ConnectionRuntime = { target: ref, draining: false }
       this.runtimes.set(key, runtime)
       try {
         await this.connect(runtime, signal)
@@ -77,11 +78,19 @@ export class SlackAdapter {
   }
 
   private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
-    const session = await this.options.transport.lease(runtime.ref, this.options.adapterId, signal)
-    runtime.web = this.options.webFactory(session.botToken, runtime.ref)
-    runtime.socket = this.options.socketFactory(session.appToken, runtime.ref)
-    runtime.socket.on("slack_event", async (event) => this.handleEvent(runtime, event.body, event.ack, signal))
-    await runtime.socket.start()
+    const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
+    if (isManagerTarget(runtime.target)) {
+      runtime.web = session.botToken
+        ? this.options.webFactory(session.botToken, runtime.target)
+        : this.options.managerWebFactory?.(runtime.target)
+      if (!runtime.web) throw new Error("Manager target has no Web client")
+    } else {
+      if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
+      runtime.web = this.options.webFactory(session.botToken, runtime.target)
+      runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
+      runtime.socket.on("slack_event", async (event) => this.handleEvent(runtime, event.body, event.ack, signal))
+      await runtime.socket.start()
+    }
     const heartbeatMs = Math.max(1_000, this.options.heartbeatIntervalMs ?? 15_000)
     const pollMs = Math.max(100, this.options.deliveryPollIntervalMs ?? 1_000)
     runtime.heartbeatTimer = setInterval(() => void this.refresh(runtime, signal), heartbeatMs)
@@ -92,8 +101,14 @@ export class SlackAdapter {
   private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
     if (this.stopped || signal.aborted) return
     try {
-      const session = await this.options.transport.lease(runtime.ref, this.options.adapterId, signal)
-      runtime.web = this.options.webFactory(session.botToken, runtime.ref)
+      const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
+      if (isManagerTarget(runtime.target)) {
+        runtime.web = session.botToken
+          ? this.options.webFactory(session.botToken, runtime.target)
+          : this.options.managerWebFactory?.(runtime.target)
+      } else if (session.botToken) {
+        runtime.web = this.options.webFactory(session.botToken, runtime.target)
+      }
       await this.drain(runtime, signal)
     } catch {
       // The next heartbeat retries the lease; Server state remains authoritative.
@@ -104,13 +119,13 @@ export class SlackAdapter {
     await this.acquire(signal)
     try {
       if (isSlackInteraction(body)) {
-        await this.options.transport.interaction(runtime.ref, normalizeSlackInteraction(body), signal)
+        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
         await ack()
         await this.drain(runtime, signal)
         return
       }
       const envelope = normalizeSocketEvent(body)
-      const result = await this.options.transport.ingress(runtime.ref, envelope, signal)
+      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
       await this.renderUserFacingRejection(runtime, envelope, result, signal)
       await ack()
       await this.drain(runtime, signal)
@@ -142,13 +157,13 @@ export class SlackAdapter {
     try {
       await this.drainUncertain(runtime, signal)
       while (!signal.aborted) {
-        const delivery = await this.options.transport.claimDelivery(runtime.ref, this.options.adapterId, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
         if (!delivery) break
         try {
           const ack = await this.mutateDelivery(runtime.web, delivery)
-          await this.options.transport.ackDelivery(runtime.ref, withAdapterId(ack, this.options.adapterId), signal)
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
         } catch (error) {
-          await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId({
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
@@ -310,14 +325,14 @@ export class SlackAdapter {
   private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.ref, this.options.adapterId, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
       if (!delivery) return
       try {
         const ack = await this.reconcile(runtime.web, delivery)
-        await this.options.transport.ackDelivery(runtime.ref, withAdapterId(ack, this.options.adapterId), signal)
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
-        await this.options.transport.ackDelivery(runtime.ref, withAdapterId({
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
@@ -336,8 +351,14 @@ export class SlackAdapter {
   }
 }
 
-function connectionKey(ref: SlackConnectionRef) {
-  return `${ref.projectId}:${ref.connectionId}`
+function connectionKey(ref: SlackAdapterTarget) {
+  return isManagerTarget(ref)
+    ? `manager:${ref.enrollmentId}`
+    : `connection:${ref.projectId}:${ref.connectionId}`
+}
+
+function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
+  return value.ownerKind === "manager"
 }
 
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {

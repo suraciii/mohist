@@ -402,7 +402,7 @@ public static class SlackFinalReplyRenderer
     private static bool IsMatchingJsonDelimiter(char opening, char closing) =>
         opening == '{' ? closing == '}' : closing == ']';
 
-    private static string NeutralizeSlackControlSyntax(string value) =>
+    internal static string NeutralizeSlackControlSyntax(string value) =>
         SlackControlSyntax.Replace(value, match => $"&lt;{match.Value[1..^1]}&gt;");
 
     private static string DefaultNextStep(SlackFinalReplyStatus status) => status switch
