@@ -7,9 +7,14 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Project;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Project.Services;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -32,6 +37,13 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
         await using (var db = database.CreateContext())
         {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = "proj-1",
+                Name = "demo",
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
             db.AgentConnections.Add(new AgentConnectionRow
             {
                 Id = "conn-1",
@@ -49,14 +61,26 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
                 CreatedAt = time.GetUtcNow(),
                 UpdatedAt = time.GetUtcNow(),
             });
+            db.AgentJobs.Add(new AgentJobRow { JobKey = "job-1", AgentSessionId = "session-1" });
             await db.SaveChangesAsync();
         }
         var services = new ServiceCollection();
+        var slackOptions = Options.Create(new SlackProviderOptions
+        {
+            OutboxCapacityPerConnection = 1,
+            ExternalWebUrl = "https://mohist.example",
+        });
         services.AddScoped<SlackOutboxStore>(_ => new SlackOutboxStore(
             new TestDbContextFactory(database.Options),
             new NoopHealthBackpressurer(),
             time,
-            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = 1 })));
+            slackOptions));
+        services.AddScoped<IAgentJobStore>(_ => new AgentJobStore(
+            new TestDbContextFactory(database.Options),
+            NullLogger<AgentJobStore>.Instance,
+            time));
+        services.AddSingleton(new ProjectQuerier(new TestDbContextFactory(database.Options)));
+        services.AddScoped(_ => new SlackWebLinkBuilder(slackOptions));
         await using var provider = services.BuildServiceProvider();
         var handler = new SlackTerminalDeliveryHandler(
             provider.GetRequiredService<IServiceScopeFactory>(),
@@ -95,13 +119,96 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal(expectedKind, row.Kind);
         Assert.Equal("D1", row.ConversationId);
         Assert.Equal("1710000000.000001", row.ThreadTs);
-        var text = JsonDocument.Parse(row.PayloadJson).RootElement.GetProperty("text").GetString()!;
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        var text = payload.Text!;
         Assert.StartsWith("Task: ship the release\n", text, StringComparison.Ordinal);
         Assert.Contains($"Conclusion: {expectedConclusion}", text);
         Assert.Contains("Evidence: ", text);
         Assert.True(text.Contains($"Next step: {expectedNextStep}", StringComparison.Ordinal), text);
         Assert.DoesNotContain("xoxb-secret", text);
         Assert.DoesNotContain("raw tool output", text);
+        Assert.Contains("Session: session-1", text);
+        Assert.True(payload.Blocks.HasValue);
+        var button = payload.Blocks.Value[0].GetProperty("elements")[0];
+        Assert.Equal("https://mohist.example/demo/sessions/session-1", button.GetProperty("url").GetString());
+    }
+
+    [Fact]
+    public async Task HandleAsync_Neutralizes_control_syntax_in_a_completed_Manager_reply()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+        const string enrollmentId = "manager-enrollment-reply";
+        await using (var db = database.CreateContext())
+        {
+            db.SlackWorkspaceEnrollments.Add(new SlackWorkspaceEnrollmentRow
+            {
+                Id = enrollmentId,
+                WorkspaceTeamId = "T_MANAGER_REPLY",
+                Lifecycle = SlackEnrollmentLifecycle.Active,
+                ManagerCapability = SlackManagerCapability.Available,
+                ManagerAppId = "A_MANAGER_REPLY",
+                ManagerBotUserId = "U_MANAGER_REPLY",
+                ManagerCredentialRef = "manager-credential-reply",
+                ManagerReadiness = SlackManagerReadiness.Ready,
+                ManagerActorId = "manager-actor-reply",
+                PlanCode = "unknown",
+                AuditJson = "[]",
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var services = new ServiceCollection();
+        services.AddScoped<SlackOutboxStore>(_ => new SlackOutboxStore(
+            new TestDbContextFactory(database.Options),
+            new NoopHealthBackpressurer(),
+            time,
+            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = 4 })));
+        await using var provider = services.BuildServiceProvider();
+        var handler = new SlackTerminalDeliveryHandler(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SlackTerminalDeliveryHandler>.Instance);
+        var delivery = new
+        {
+            jobKey = "manager-job-reply",
+            workLabel = "answer the manager",
+            connectionId = enrollmentId,
+            workspaceTeamId = "T_MANAGER_REPLY",
+            conversationId = "D_MANAGER_REPLY",
+            messageTs = "1710000000.000001",
+            status = "completed",
+            message = "completed",
+            assistantText = "The reply contains <!channel>, <@U123>, and <https://example.test|a link>.",
+            artifactCount = 0,
+            exitCode = 0,
+        };
+        var evt = new CloudEvent(
+            "manager-delivery-1",
+            new Uri("/mohist/agent-job/manager-job-reply", UriKind.Relative),
+            EventCatalog.ReverseDns.AgentJobTerminalDelivery,
+            time.GetUtcNow(),
+            JsonSerializer.SerializeToElement(delivery),
+            subject: "manager-job-reply",
+            extensions: new Dictionary<string, string>
+            {
+                [EventCatalog.Lineage.ProjectId] = SlackDeliveryOwnerIds.ManagerProjectId,
+            });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        await using var scope = provider.CreateAsyncScope();
+        var row = Assert.Single((await scope.ServiceProvider
+            .GetRequiredService<SlackOutboxStore>()
+            .ListManagerAsync(enrollmentId)).Entries);
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        Assert.Equal(SlackDeliveryOwnerKinds.Manager, row.OwnerKind);
+        Assert.Equal(
+            "The reply contains &lt;!channel&gt;, &lt;@U123&gt;, and &lt;https://example.test|a link&gt;.",
+            payload.Text);
+        Assert.DoesNotContain("<!channel>", payload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("<@U123>", payload.Text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -118,7 +225,8 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
             FailureCategory: null,
             ArtifactCount: 0,
             ExitCode: 0,
-            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+            RecordedAt: new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero),
+            Output: "{\"kind\":\"opencode\",\"text\":\"Manager response with token=xoxb-secret\"}");
 
         var envelope = AgentJobLineage.BuildTerminalDeliveryEnvelope(
             "job-1",
@@ -130,6 +238,7 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
         Assert.Equal(prompt[..80], workLabel);
         Assert.Equal("C1", envelope.Data.Value.GetProperty("conversationId").GetString());
         Assert.Equal("1710000000.000000", envelope.Data.Value.GetProperty("threadTs").GetString());
+        Assert.Equal("Manager response with ***", envelope.Data.Value.GetProperty("assistantText").GetString());
     }
 
     [Fact]

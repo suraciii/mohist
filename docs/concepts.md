@@ -112,6 +112,11 @@ Agent 接入把一个 Mohist Agent 暴露到外部交互场所。例如 Slack Ag
 Bot 代表指定的 Mohist Agent：Slack 负责接收消息和展示回复，Mohist Agent 仍负责理解、
 执行和会话。接入不复制 Agent 配置，也不能在同一段对话中临时切换成另一个 Agent。
 
+Slack 接入在用户侧呈现为两类 App。**Mohist App** 是工作区的管理入口，本身是一个内置
+Mohist Agent：用户用自然语言与它对话，完成挂载、调整、诊断和创建 Agent。**Agent App**
+是执行入口：每个接入的 Mohist Agent 各有独立的 Slack App 与 Bot 身份，直接接受工作并
+回复结果。管理动作与工作任务各有明确身份，互不代发。
+
 AgentSession 不是 Agent，也不是工作结果；它记录一段对话的消息、上下文、用量、
 活动状态和当前 Runtime Session。Workflow TaskRun 负责 Workflow 工作，AgentJob 负责一次
 Mohist Agent launch 的首次执行；后续输入继续同一个 AgentSession，但不改写 AgentJob。
@@ -119,7 +124,7 @@ AgentSession 中每条被接受的输入是 SessionInput，一次连续的 Runti
 Turn 可以按顺序处理多条 Input，因此消息、执行过程和工作结果不会被混成同一个状态。
 
 完整关系见 [Agent 与 AgentSession](agents.md)；Slack 使用方式见
-[把 Mohist Agent 接入 Slack](agent-connections.md)；OpenCode Action 配置见
+[Slack](slack.md)；OpenCode Action 配置见
 [`mohist/opencode` Action](actions/opencode.md)。
 
 ## Approval（审批）

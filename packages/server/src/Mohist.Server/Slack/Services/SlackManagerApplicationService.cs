@@ -1,8 +1,10 @@
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Slack.Domain;
+using Microsoft.EntityFrameworkCore;
 
 namespace Mohist.Server.Slack.Services;
 
@@ -21,6 +23,8 @@ public sealed class SlackManagerApplicationService : IScopedService
     private readonly ManagedSlackChildAppApplicationService _childOperations;
     private readonly SlackOAuthStateService _oauthStates;
     private readonly SlackOAuthAuthorizationService _oauthAuthorization;
+    private readonly ManagerClaimService _claims;
+    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
 
     public SlackManagerApplicationService(
         AgentQuerier agents,
@@ -30,7 +34,9 @@ public sealed class SlackManagerApplicationService : IScopedService
         SlackManifestGenerator manifests,
         ManagedSlackChildAppApplicationService childOperations,
         SlackOAuthStateService oauthStates,
-        SlackOAuthAuthorizationService oauthAuthorization)
+        SlackOAuthAuthorizationService oauthAuthorization,
+        ManagerClaimService claims,
+        IDbContextFactory<MohistDbContext> dbFactory)
     {
         _agents = agents;
         _connections = connections;
@@ -40,6 +46,119 @@ public sealed class SlackManagerApplicationService : IScopedService
         _childOperations = childOperations;
         _oauthStates = oauthStates;
         _oauthAuthorization = oauthAuthorization;
+        _claims = claims;
+        _dbFactory = dbFactory;
+    }
+
+    public async Task<SlackManagerSetupResult> SetupAsync(
+        SlackManagerSetupRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerBotUserId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerCredentialRef);
+        SlackStateTransitions.RequireManagerTransportKind(request.TransportKind);
+        SlackStateTransitions.RequireManagerReadiness(request.Readiness);
+
+        var enrollment = await _enrollments.GetByTeamAsync(request.WorkspaceTeamId.Trim(), ct);
+        if (enrollment is not null && enrollment.Lifecycle == SlackEnrollmentLifecycle.Removed)
+            throw new SlackManagerConflictException(
+                "The workspace enrollment was removed and cannot be reused.",
+                "enrollment_removed");
+
+        if (enrollment is null)
+        {
+            enrollment = new SlackWorkspaceEnrollment
+            {
+                Id = $"enrollment_{Guid.NewGuid():N}",
+                WorkspaceTeamId = request.WorkspaceTeamId.Trim(),
+                ManagerActorId = $"manager_actor_{Guid.NewGuid():N}",
+                ManagerCapability = SlackManagerCapability.Available,
+                PlanCode = "unknown",
+                ManagedAppLimit = 0,
+            };
+            try
+            {
+                enrollment = await _enrollments.CreateAsync(enrollment, ct);
+            }
+            catch (DbUpdateException)
+            {
+                enrollment = await _enrollments.GetByTeamAsync(request.WorkspaceTeamId.Trim(), ct)
+                    ?? throw new InvalidOperationException(
+                        "The workspace enrollment could not be recovered after a concurrent setup.");
+            }
+        }
+        else if (enrollment.Lifecycle == SlackEnrollmentLifecycle.Disabled)
+        {
+            enrollment = await _enrollments.TransitionLifecycleAsync(
+                enrollment.Id, SlackEnrollmentLifecycle.Active, ct)
+                ?? throw new InvalidOperationException("The workspace enrollment disappeared during setup.");
+        }
+
+        if (string.IsNullOrWhiteSpace(enrollment.ManagerActorId))
+            enrollment = await _enrollments.EnsureManagerActorAsync(
+                enrollment.Id,
+                $"manager_actor_{Guid.NewGuid():N}",
+                ct) ?? throw new InvalidOperationException("The workspace enrollment disappeared during setup.");
+
+        enrollment = await _enrollments.ConfigureManagerAppAsync(
+            enrollment.Id,
+            request.ManagerAppId.Trim(),
+            request.ManagerBotUserId.Trim(),
+            request.ManagerCredentialRef.Trim(),
+            request.TransportKind,
+            request.Readiness,
+            ct) ?? throw new InvalidOperationException("The workspace enrollment disappeared during setup.");
+
+        var claim = string.IsNullOrWhiteSpace(enrollment.ClaimedSlackUserId)
+            ? await _claims.IssueAsync(enrollment.Id, ct)
+            : SlackManagerClaimIssued.None;
+        return new(
+            ProjectEnrollment(enrollment),
+            claim.Code,
+            claim.ExpiresAt,
+            NextAction(enrollment));
+    }
+
+    public async Task<SlackManagerStatusProjection?> GetStatusAsync(
+        string workspaceTeamId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        var normalizedTeamId = workspaceTeamId.Trim();
+        var enrollment = await _enrollments.GetByTeamAsync(normalizedTeamId, ct);
+        if (enrollment is null)
+            return null;
+
+        var children = await _childApps.ListByEnrollmentAsync(enrollment.Id, ct);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var connections = await db.AgentConnections.AsNoTracking()
+            .Where(connection => connection.ProviderKind == ConnectionProviderKind.Slack
+                && connection.WorkspaceTeamId == normalizedTeamId)
+            .OrderBy(connection => connection.ProjectId)
+            .ThenBy(connection => connection.Id)
+            .Select(connection => new SlackManagerConnectionStatus(
+                connection.ProjectId,
+                connection.Id,
+                connection.AgentId,
+                connection.WorkspaceTeamId,
+                connection.AppId,
+                connection.BotUserId,
+                connection.SetupProgress,
+                connection.DesiredState,
+                connection.ConnectionHealth,
+                connection.HealthReason,
+                connection.AgentReadiness,
+                connection.DeletedAt))
+            .ToListAsync(ct);
+
+        return new(
+            ProjectEnrollment(enrollment),
+            connections,
+            children.Select(ProjectChild).ToList(),
+            NextAction(enrollment));
     }
 
     public async Task<IReadOnlyList<SlackManagerAgentOption>> ListAgentOptionsAsync(
@@ -88,7 +207,10 @@ public sealed class SlackManagerApplicationService : IScopedService
         if (agent.Status != AgentStatus.Active)
             throw new SlackManagerValidationException("Only active Agents can receive a managed App.", "agent_archived");
 
-        var enrollment = await EnsureEnrollmentAsync(request, ct);
+        var enrollment = await _enrollments.GetActiveByTeamAsync(request.WorkspaceTeamId, ct)
+            ?? throw new SlackManagerConflictException(
+                "Run Manager setup for this workspace before creating a managed Connection.",
+                "enrollment_required");
         var existing = (await _connections.ListAsync(request.ProjectId, ct: ct))
             .FirstOrDefault(connection =>
                 connection.AgentId == request.AgentId
@@ -223,31 +345,6 @@ public sealed class SlackManagerApplicationService : IScopedService
                 botToken,
                 ct), ct);
 
-    private async Task<SlackWorkspaceEnrollment> EnsureEnrollmentAsync(
-        SlackManagerCreateRequest request,
-        CancellationToken ct)
-    {
-        var existing = await _enrollments.GetByTeamAsync(request.WorkspaceTeamId, ct);
-        if (existing is not null)
-        {
-            if (existing.Lifecycle == SlackEnrollmentLifecycle.Removed)
-                throw new SlackManagerConflictException("The workspace enrollment was removed and cannot be reused.", "enrollment_removed");
-            if (existing.Lifecycle == SlackEnrollmentLifecycle.Disabled)
-                return await _enrollments.TransitionLifecycleAsync(existing.Id, SlackEnrollmentLifecycle.Active, ct)
-                    ?? throw new InvalidOperationException("The workspace enrollment disappeared during recovery.");
-            return existing;
-        }
-
-        return await _enrollments.CreateAsync(new SlackWorkspaceEnrollment
-        {
-            Id = $"enrollment_{Guid.NewGuid():N}",
-            WorkspaceTeamId = request.WorkspaceTeamId.Trim(),
-            ManagerCapability = SlackManagerCapability.Unknown,
-            PlanCode = "unknown",
-            ManagedAppLimit = 0,
-        }, ct);
-    }
-
     private async Task<ManagedSlackChildApp> CreateChildAsync(
         AgentConnection connection,
         SlackWorkspaceEnrollment enrollment,
@@ -343,6 +440,33 @@ public sealed class SlackManagerApplicationService : IScopedService
         connection.AccessPolicy,
         connection.DeletedAt);
 
+    private static SlackManagerEnrollmentProjection ProjectEnrollment(SlackWorkspaceEnrollment enrollment) => new(
+        enrollment.Id,
+        enrollment.WorkspaceTeamId,
+        enrollment.Lifecycle,
+        enrollment.ManagerCapability,
+        enrollment.ManagerAppId,
+        enrollment.ManagerBotUserId,
+        enrollment.ManagerTransportKind,
+        enrollment.ManagerReadiness,
+        !string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef),
+        enrollment.ClaimedSlackUserId,
+        enrollment.UpdatedAt);
+
+    private static string NextAction(SlackWorkspaceEnrollment enrollment)
+    {
+        if (enrollment.Lifecycle == SlackEnrollmentLifecycle.Removed)
+            return "setup";
+        if (string.IsNullOrWhiteSpace(enrollment.ManagerAppId)
+            || string.IsNullOrWhiteSpace(enrollment.ManagerBotUserId)
+            || string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef)
+            || enrollment.ManagerReadiness != SlackManagerReadiness.Ready)
+            return "configure_manager_app";
+        return string.IsNullOrWhiteSpace(enrollment.ClaimedSlackUserId)
+            ? "claim_manager"
+            : "ready";
+    }
+
     private static SlackManagerAppProjection ProjectChild(ManagedSlackChildApp child)
     {
         var status = ManagedSlackChildAppStatusDeriver.Derive(child);
@@ -382,6 +506,60 @@ public sealed record SlackManagerCreateRequest(
     string? AvatarHash = null,
     string TransportKind = SlackTransportKind.Socket,
     string? PublicIngressBaseUrl = null);
+
+public sealed record SlackManagerSetupRequest(
+    string WorkspaceTeamId,
+    string ManagerAppId,
+    string ManagerBotUserId,
+    string ManagerCredentialRef,
+    string TransportKind = SlackManagerTransportKind.Socket,
+    string Readiness = SlackManagerReadiness.Ready);
+
+public sealed record SlackManagerClaimIssued(
+    string? Code,
+    DateTimeOffset? ExpiresAt)
+{
+    public static SlackManagerClaimIssued None { get; } = new(null, null);
+}
+
+public sealed record SlackManagerSetupResult(
+    SlackManagerEnrollmentProjection Enrollment,
+    string? ClaimCode,
+    DateTimeOffset? ClaimExpiresAt,
+    string NextAction);
+
+public sealed record SlackManagerEnrollmentProjection(
+    string Id,
+    string WorkspaceTeamId,
+    string Lifecycle,
+    string ManagerCapability,
+    string ManagerAppId,
+    string ManagerBotUserId,
+    string ManagerTransportKind,
+    string ManagerReadiness,
+    bool ManagerCredentialConfigured,
+    string? ClaimedSlackUserId,
+    DateTimeOffset UpdatedAt);
+
+public sealed record SlackManagerStatusProjection(
+    SlackManagerEnrollmentProjection Enrollment,
+    IReadOnlyList<SlackManagerConnectionStatus> Connections,
+    IReadOnlyList<SlackManagerAppProjection> ManagedApps,
+    string NextAction);
+
+public sealed record SlackManagerConnectionStatus(
+    string ProjectId,
+    string ConnectionId,
+    string AgentId,
+    string WorkspaceTeamId,
+    string AppId,
+    string BotUserId,
+    string SetupProgress,
+    string DesiredState,
+    string ConnectionHealth,
+    string? HealthReason,
+    string AgentReadiness,
+    DateTimeOffset? DeletedAt);
 
 public sealed record SlackManagerAgentOption(
     string AgentId,

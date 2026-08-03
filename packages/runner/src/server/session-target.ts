@@ -127,6 +127,7 @@ export interface ReceiveFollowupPayload {
     readonly contentType: string | null
     readonly size: number
   }>
+  slackExecutionContext?: unknown
 }
 
 // Payload delivered by the server-side `ReceiveWorkflowRunStatus` SignalR

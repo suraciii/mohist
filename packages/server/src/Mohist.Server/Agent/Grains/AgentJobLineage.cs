@@ -29,6 +29,7 @@ namespace Mohist.Server.Agent.Grains;
 public static class AgentJobLineage
 {
     private const int SummaryFactMaxLength = 480;
+    private const int AssistantTextMaxLength = 4_000;
     private const int WorkLabelMaxLength = 80;
     private static readonly Regex SecretAssignment = new(
         "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
@@ -120,6 +121,7 @@ public static class AgentJobLineage
             failureCategory = SafeSummaryFact(payload.FailureCategory),
             artifactCount = payload.ArtifactCount,
             exitCode = payload.ExitCode,
+            assistantText = ExtractAssistantText(payload.Output),
         }, JSON.Options);
         return new CloudEvent(
             id: payload.EventId,
@@ -129,6 +131,33 @@ public static class AgentJobLineage
             data: data,
             subject: jobKey,
             extensions: extensions);
+    }
+
+    public static string? ExtractAssistantText(string? output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(output);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("text", out var text)
+                || text.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(text.GetString()))
+            {
+                return null;
+            }
+
+            var redacted = SlackToken.Replace(SecretAssignment.Replace(text.GetString()!, "***"), "***");
+            return redacted.Length <= AssistantTextMaxLength
+                ? redacted
+                : redacted[..AssistantTextMaxLength];
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     private static string BuildWorkLabel(string? sessionLaunchPrompt)

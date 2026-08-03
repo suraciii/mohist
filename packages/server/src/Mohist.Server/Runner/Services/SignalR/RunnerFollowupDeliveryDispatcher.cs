@@ -61,6 +61,7 @@ public sealed class RunnerFollowupDeliveryDispatcher : IFollowupDeliveryDispatch
             text = string.Join("\n", request.InputTexts),
             operationId = request.OperationId,
             inputId = request.InputId,
+            slackExecutionContext = request.SlackExecutionContext,
             attachments = request.Attachments is { Count: > 0 }
                 ? request.Attachments
                     .Select(descriptor => new

@@ -92,12 +92,18 @@ public sealed class SlackStatusProjectionSpecs
 
         var progress = await projection.EnqueueWorkingAsync("p1", "c1", source, "100.000");
         await store.MarkDeliveredAsync("p1", progress.Id, new SlackProviderMessageIdentity("C1", "100.002"));
-        await projection.EnqueueTerminalAsync("p1", "c1", source, "100.000", "failed", "failed");
+        var blocks = JsonSerializer.SerializeToElement(new[]
+        {
+            new { type = "actions", elements = new[] { new { type = "button", url = "https://mohist.example/p1/sessions/s1" } }, },
+        });
+        await projection.EnqueueTerminalAsync("p1", "c1", source, "100.000", "failed", "failed", blocks: blocks);
 
         var terminal = Assert.Single((await store.ListAsync("p1", "c1")).Entries, row => row.Kind == SlackOutboxKinds.ExplicitFailure);
         var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
         Assert.Equal(SlackDeliveryOperations.ChatUpdate, payload.Operation);
         Assert.Equal(new SlackProviderMessageIdentity("C1", "100.002"), payload.ProviderMessageIdentity);
+        Assert.True(payload.Blocks.HasValue);
+        Assert.Equal(blocks.GetRawText(), payload.Blocks.Value.GetRawText());
     }
 
     [Fact]

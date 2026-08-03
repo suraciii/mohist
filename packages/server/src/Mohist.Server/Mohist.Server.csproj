@@ -41,6 +41,7 @@
     <Content Include="Workflow/Services/Prompts/builtins/*.prompt" CopyToOutputDirectory="PreserveNewest" />
     <EmbeddedResource Include="Workflow/Services/Profiles/*.workflow.yaml" />
     <EmbeddedResource Include="Workflow/Services/Prompts/builtins/*.prompt" />
+    <EmbeddedResource Include="Agent/Services/Assets/*.md" />
     <Content Include="Issue/Services/IssueTemplates/templates/*.md" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

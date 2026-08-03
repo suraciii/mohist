@@ -35,6 +35,7 @@ public sealed record FollowupDeliveryRequest(
     /// via the owning-input scoped content route.
     /// </summary>
     IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
-    string? InputId = null);
+    string? InputId = null,
+    AgentSlackExecutionContext? SlackExecutionContext = null);
 
 public sealed record FollowupDeliveryResult(bool Accepted);

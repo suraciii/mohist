@@ -13,6 +13,7 @@ using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -54,6 +55,28 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         await using var scope = _fixture.Services.CreateAsyncScope();
         var mapping = scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var firstProgress = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "D-DM-NEW"
+            && row.ThreadTs == "1710000000.000100"
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                new SlackMessageIdentity("T123", "D-DM-NEW", "1710000000.000100"), "progress"));
+        var secondProgress = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "D-DM-NEW"
+            && row.ThreadTs == "1710000000.000200"
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                new SlackMessageIdentity("T123", "D-DM-NEW", "1710000000.000200"), "progress"));
+        var firstPayload = SlackDeliveryPayload.Parse(firstProgress.PayloadJson);
+        var secondPayload = SlackDeliveryPayload.Parse(secondProgress.PayloadJson);
+        Assert.Equal("Working...", firstPayload.Text);
+        Assert.Equal("Working...", secondPayload.Text);
+        Assert.Contains(SlackTurnControlService.StopActionId, firstPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains(SlackTurnControlService.StopActionId, secondPayload.Blocks?.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-", firstProgress.PayloadJson, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-", secondProgress.PayloadJson, StringComparison.Ordinal);
         Assert.Equal(secondSessionId, await mapping.GetCurrentSessionIdAsync(
             connection.ProjectId, connection.Id, "D-DM-NEW"));
         Assert.Equal(2, await db.AgentSessions.CountAsync(row => row.LabelConnectionId == connection.Id
@@ -114,6 +137,14 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
             .Select(row => row.PayloadJson)
             .SingleAsync();
         Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(received).Operation);
+        var progress = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "C-THREAD"
+            && row.ThreadTs == "1710000000.000400"
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                new SlackMessageIdentity("T123", "C-THREAD", "1710000000.000450"), "progress"));
+        Assert.Equal("Working...", SlackDeliveryPayload.Parse(progress.PayloadJson).Text);
     }
 
     [Fact]

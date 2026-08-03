@@ -44,6 +44,10 @@ public sealed class SlackProviderOptions
 
     public int DispatcherBatchSize { get; set; } = 100;
 
+    public string? ExternalWebUrl { get; set; }
+
+    public string[] DevelopmentExternalWebUrlAllowlist { get; set; } = [];
+
     /// <summary>
     /// Character budget for the rendered thread-history background on a
     /// first-mention launch. When the bounded range exceeds the budget
@@ -89,6 +93,9 @@ public sealed class SlackProviderOptions
         OutboxClaimTimeout = section.GetValue(nameof(OutboxClaimTimeout), OutboxClaimTimeout);
         OutboxUncertainTimeout = section.GetValue(nameof(OutboxUncertainTimeout), OutboxUncertainTimeout);
         DispatcherBatchSize = section.GetValue(nameof(DispatcherBatchSize), DispatcherBatchSize);
+        ExternalWebUrl = section.GetValue<string?>(nameof(ExternalWebUrl)) ?? ExternalWebUrl;
+        DevelopmentExternalWebUrlAllowlist = section.GetSection(nameof(DevelopmentExternalWebUrlAllowlist)).Get<string[]>()
+            ?? DevelopmentExternalWebUrlAllowlist;
         OutboxReminderPeriod = section.GetValue(nameof(OutboxReminderPeriod), OutboxReminderPeriod);
         StartupContextCharacterBudget = section.GetValue(nameof(StartupContextCharacterBudget), StartupContextCharacterBudget);
         StartupContextPaginationDepthCap = section.GetValue(nameof(StartupContextPaginationDepthCap), StartupContextPaginationDepthCap);

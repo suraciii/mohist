@@ -212,4 +212,4 @@ Buzz 的实现证明聊天入口需要明确的调用者访问策略和有界队
 3. 最后让 Slack Connection 作为普通客户端接入，不通过 shell、日志解析或隐藏配置补能力。
 
 Slack 的身份、访问、thread 路由和投递设计见
-[`slack-agent-connection.md`](slack-agent-connection.md)。
+[`slack.md`](slack.md)。

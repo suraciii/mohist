@@ -27,6 +27,7 @@ import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
+import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
 import {
   attachmentManifestEnvelope,
   buildAttachmentContext,
@@ -90,6 +91,9 @@ export class AgentJobExecutor {
 
     const instructions = readOptionalString(payload, "instructions")
     const skillNames = readSkillNames(payload)
+    const slackContext = readSlackExecutionContext(payload)
+    if (slackContext.kind === "invalid")
+      return failureResult("invalid-input", slackContext.message)
 
     const runtimeName = readRuntime(payload)
     const modelInput = readOptionalString(payload, "model")
@@ -107,6 +111,9 @@ export class AgentJobExecutor {
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
+    const skills = slackContext.kind === "resolved"
+      ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
+      : resolvedSkills.skills
 
     let attachmentDelivery: readonly DeliveredAttachment[]
     try {
@@ -115,7 +122,13 @@ export class AgentJobExecutor {
     } catch (error) {
       return failureResult("attachment-delivery-failed", `AgentJob failed to resolve attachments: ${errorMessage(error)}`)
     }
-    const composed = attachmentManifestEnvelope(buildExecutionEnvelope(prompt ?? "", instructions, resolvedSkills.skills), attachmentDelivery)
+    const composed = attachmentManifestEnvelope(
+      buildExecutionEnvelope(
+        prompt ?? "",
+        instructions,
+        skills,
+        slackContext.kind === "resolved" ? slackContext.value : null),
+      attachmentDelivery)
 
     let binding: BindingResolution
     try {
@@ -125,9 +138,9 @@ export class AgentJobExecutor {
     }
 
     if (runtimeName === "pi") {
-      return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills)
+      return this.executePi(work, signal, payload, composed, model, modelInput, variant, workDir, binding, skills)
     }
-    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, resolvedSkills.skills, attachmentDelivery)
+    return this.executeOpenCode(work, signal, payload, composed, model, modelInput, variant, workDir, binding, skills, attachmentDelivery)
   }
 
   private async resolveAttachments(
@@ -425,7 +438,7 @@ function parseModel(input: string | null): ParsedModel {
 
 function collectUnknownKeys(payload: JsonObject | null): readonly string[] | undefined {
   if (!payload || typeof payload !== "object") return undefined
-  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills", "attachments"])
+  const known = new Set(["prompt", "instructions", "model", "variant", "runtime", "skills", "attachments", "slackExecutionContext"])
   const unknown: string[] = []
   for (const key of Object.keys(payload)) {
     if (!known.has(key)) unknown.push(key)

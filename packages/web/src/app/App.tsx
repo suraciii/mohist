@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type ComponentType } from 'react'
 import { BrowserRouter, Routes, Route, useLocation, Navigate, useParams, Outlet } from 'react-router-dom'
 import { useProjects } from '../entities/project'
 import { LiveTaskProvider } from './providers/LiveTaskProvider'
@@ -32,7 +32,7 @@ const AgentDetailPage = lazy(() => import('../pages/agent-detail').then(({ Agent
 const AgentSessionComposerPage = lazy(() => import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({ default: AgentSessionComposerPage })))
 const ConnectionDiagnosticPage = lazy(() => import('../pages/connection-diagnostic').then(({ ConnectionDiagnosticPage }) => ({ default: ConnectionDiagnosticPage })))
 
-export function AppContent() {
+export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { sessionPage?: ComponentType } = {}) {
   const { projectId, setProjectId, setProjects } = useProject()
   const location = useLocation()
 
@@ -68,7 +68,7 @@ export function AppContent() {
                   <Route path="issues" element={<IssuesPage />} />
                   <Route path="issues/:number" element={<IssueDetailPage />} />
                   <Route path="issues/:number/files" element={<IssueChangedFilesPage />} />
-                  <Route path="sessions/:sessionId" element={<UnifiedSessionPage />} />
+                  <Route path="sessions/:sessionId" element={<SessionPage />} />
                   <Route path="agents" element={<AgentListPage />} />
                   <Route path="agents/:agentId" element={<AgentDetailPage />} />
                   <Route path="connections/:connectionId" element={<ConnectionDiagnosticPage />} />

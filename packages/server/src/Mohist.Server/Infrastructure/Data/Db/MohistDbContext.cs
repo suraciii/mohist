@@ -87,6 +87,7 @@ public class MohistDbContext : DbContext
     public DbSet<ConnectionSecretRow> ConnectionSecrets { get; set; } = null!;
     public DbSet<SlackProviderInboxRow> SlackProviderInboxRows { get; set; } = null!;
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
+    public DbSet<SlackManagerToolExecutionFenceRow> SlackManagerToolExecutionFences { get; set; } = null!;
     public DbSet<SlackOwnerClaimCodeRow> SlackOwnerClaimCodes { get; set; } = null!;
     public DbSet<SlackDmSessionMappingRow> SlackDmSessionMappings { get; set; } = null!;
     public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
@@ -616,6 +617,12 @@ public class MohistDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerCapability",
                     "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_ManagerTransportKind",
+                    "\"ManagerTransportKind\" IN ('socket', 'https')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_ManagerReadiness",
+                    "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
@@ -626,6 +633,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.PlanCode).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ManagedAppLimit).IsRequired();
             entity.Property(e => e.ManagerCredentialRef).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.ManagerAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ManagerBotUserId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ManagerTransportKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerReadiness).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerActorId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ClaimedSlackUserId).HasMaxLength(256);
+            entity.Property(e => e.ManagerClaimHash).HasMaxLength(128);
             entity.Property(e => e.AuditJson).HasColumnType("JSON").IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
@@ -1523,11 +1537,15 @@ public class MohistDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_SlackOutboxRows_State",
                     "\"State\" IN ('pending', 'claimed', 'delivered', 'delivery_uncertain', 'dead_lettered')");
+                table.HasCheckConstraint(
+                    "CK_SlackOutboxRows_OwnerKind",
+                    "\"OwnerKind\" IN ('connection', 'manager')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OwnerKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ConversationId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ThreadTs).HasMaxLength(64);
@@ -1539,19 +1557,34 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LastError).HasMaxLength(1024);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId, e.State })
+            entity.HasIndex(e => new { e.OwnerKind, e.ProjectId, e.ConnectionId, e.State })
                 .HasDatabaseName("IX_SlackOutboxRows_ProjectId_ConnectionId_State");
-            entity.HasIndex(e => new { e.ConnectionId, e.State, e.NextAttemptAt })
+            entity.HasIndex(e => new { e.OwnerKind, e.ConnectionId, e.State, e.NextAttemptAt })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_NextAttemptAt");
-            entity.HasIndex(e => new { e.ConnectionId, e.State, e.ClaimedAt })
+            entity.HasIndex(e => new { e.OwnerKind, e.ConnectionId, e.State, e.ClaimedAt })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_ClaimedAt");
-            entity.HasIndex(e => new { e.ConnectionId, e.State, e.DeliveryUncertainAt })
+            entity.HasIndex(e => new { e.OwnerKind, e.ConnectionId, e.State, e.DeliveryUncertainAt })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_State_DeliveryUncertainAt");
-            entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind, e.State })
+            entity.HasIndex(e => new { e.OwnerKind, e.ConnectionId, e.DispatchRef, e.Kind, e.State })
                 .HasDatabaseName("IX_SlackOutboxRows_ConnectionId_DispatchRef_Kind_State");
-            entity.HasIndex(e => new { e.ConnectionId, e.DispatchRef, e.Kind })
+            entity.HasIndex(e => new { e.OwnerKind, e.ConnectionId, e.DispatchRef, e.Kind })
                 .IsUnique()
-                .HasDatabaseName("UX_SlackOutboxRows_ConnectionId_DispatchRef_Kind");
+                .HasDatabaseName("UX_SlackOutboxRows_OwnerKind_ConnectionId_DispatchRef_Kind");
+        });
+
+        modelBuilder.Entity<SlackManagerToolExecutionFenceRow>(entity =>
+        {
+            entity.ToTable("SlackManagerToolExecutionFences", table =>
+                table.HasCheckConstraint(
+                    "CK_SlackManagerToolExecutionFences_State",
+                    "\"State\" IN ('started', 'completed')"));
+            entity.HasKey(e => e.JobKey);
+            entity.Property(e => e.JobKey).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.SessionId).HasMaxLength(512).IsRequired();
+            entity.Property(e => e.State).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.StartedAt).IsRequired();
+            entity.HasIndex(e => e.SessionId)
+                .HasDatabaseName("IX_SlackManagerToolExecutionFences_SessionId");
         });
 
         modelBuilder.Entity<SlackDmSessionMappingRow>(entity =>

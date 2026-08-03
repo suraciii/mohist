@@ -98,6 +98,8 @@ public static class MohistServiceRegistration
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
+        services.AddScoped<ISlackManagerConversationProcessor>(sp =>
+            sp.GetRequiredService<SlackManagerConversationService>());
         services.AddSingleton<Mohist.Server.Sessions.Services.IAgentSessionConnectionRegistry>(sp =>
             sp.GetRequiredService<Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker>());
 

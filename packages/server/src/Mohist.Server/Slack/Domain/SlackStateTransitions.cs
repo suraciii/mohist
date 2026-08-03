@@ -96,6 +96,16 @@ public static class SlackStateTransitions
     public static void RequireTransportKind(string value) =>
         RequireKnown(value, SlackTransportKind.Socket, SlackTransportKind.Https);
 
+    public static void RequireManagerTransportKind(string value) =>
+        RequireKnown(value, SlackManagerTransportKind.Socket, SlackManagerTransportKind.Https);
+
+    public static void RequireManagerReadiness(string value) =>
+        RequireKnown(value,
+            SlackManagerReadiness.Unknown,
+            SlackManagerReadiness.Ready,
+            SlackManagerReadiness.NotReady,
+            SlackManagerReadiness.Degraded);
+
     public static void RequireBindingTransition(string current, string next)
     {
         RequireKnownBinding(current);

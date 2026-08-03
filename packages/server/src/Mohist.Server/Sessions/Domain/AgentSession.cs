@@ -484,7 +484,8 @@ public sealed record AgentSessionFollowupDispatch(
     /// A follow-up currently consumes one input; null preserves the
     /// legacy multi-input shape without inventing an owner scope.
     /// </summary>
-    [property: Id(4)] string? InputId = null);
+    [property: Id(4)] string? InputId = null,
+    [property: Id(5)] AgentSessionInputProvenance? Provenance = null);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.

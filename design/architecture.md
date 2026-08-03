@@ -217,7 +217,7 @@ Node, not because it is a separate state boundary: it is stateless, enters throu
 and reaches Agent API, and never reads Mohist storage, shells out to `mo`, parses Runner logs, persists
 provider inbox, thread mappings or pending deliveries, or stores a shadow copy of Agent
 instructions/config/skills. Detailed contracts: [`agent-api.md`](agent-api.md) and
-[`slack-agent-connection.md`](slack-agent-connection.md).
+[`slack.md`](slack.md).
 
 External skills read projects, call `mo` CLI, and may write ordinary files. They never touch the Mohist
 database. Runner may adapt OpenCode or another runtime for Workflow TaskRun and AgentJob work.

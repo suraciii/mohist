@@ -49,6 +49,7 @@ import type { FollowupOperationJournalStore } from "../runtime/followup-operatio
 import type { ServerConnection } from "./connection.js"
 import { SkillResolver } from "../runtime/skill-resolver.js"
 import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
+import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "../runtime/slack-execution-context.js"
 import {
   attachmentManifestEnvelope,
   deliverAcceptedAttachments,
@@ -180,11 +181,16 @@ async function handleFollowup(
   }
 
   const definition = sessionTarget.kind === "generic" ? target.definition : undefined
+  const slackContext = readSlackExecutionContext(payload)
+  if (slackContext.kind === "invalid") return unavailable()
   const resolvedSkills = await (deps.skillResolver ?? new SkillResolver()).resolve(
     definition?.skills,
     selectedTarget.workDir,
   )
   if (!resolvedSkills.ok) return unavailable()
+  const skills = slackContext.kind === "resolved"
+    ? [...resolvedSkills.skills, inlineSlackCollaborationSkill(slackContext.value)]
+    : resolvedSkills.skills
 
   if (operationId && operationKey && deps.followupOperationJournal) {
     try {
@@ -210,7 +216,11 @@ async function handleFollowup(
   )
   const deliveredAttachments = attachmentDelivery.attachments
   const composedPrompt = attachmentManifestEnvelope(
-    buildExecutionEnvelope(text, definition?.instructions, resolvedSkills.skills),
+    buildExecutionEnvelope(
+      text,
+      definition?.instructions,
+      skills,
+      slackContext.kind === "resolved" ? slackContext.value : null),
     deliveredAttachments,
   )
   const fileParts = deliveredAttachments
@@ -233,7 +243,7 @@ async function handleFollowup(
     ...(definition ? { options: {
       model: definition.model ?? null,
       variant: definition.variant ?? null,
-      ...(resolvedSkills.skills.length > 0 ? { skills: resolvedSkills.skills } : {}),
+      ...(skills.length > 0 ? { skills } : {}),
     } } : {}),
   }
   const observerState = buildFollowupObserver(outbox, sessionTarget, selectedTarget, payload.operationId)

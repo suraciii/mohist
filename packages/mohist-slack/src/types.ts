@@ -1,12 +1,24 @@
+export type SlackDeliveryOwnerKind = "connection" | "manager"
+
 export interface SlackConnectionRef {
+  readonly ownerKind?: "connection"
   readonly projectId: string
   readonly connectionId: string
 }
 
+export interface SlackManagerRef {
+  readonly ownerKind: "manager"
+  readonly enrollmentId: string
+  readonly workspaceTeamId: string
+}
+
+export type SlackAdapterTarget = SlackConnectionRef | SlackManagerRef
+
 export interface AdapterSession {
   readonly adapterId: string
-  readonly appToken: string
-  readonly botToken: string
+  readonly ownerKind?: SlackDeliveryOwnerKind
+  readonly appToken?: string
+  readonly botToken?: string
 }
 
 export interface SlackFileRef {
@@ -30,6 +42,18 @@ export interface SlackEnvelope {
   readonly files: readonly SlackFileRef[]
 }
 
+export interface SlackInteractionEnvelope {
+  readonly eventType: "block_actions"
+  readonly interactionId: string
+  readonly teamId: string
+  readonly conversationId: string
+  readonly messageTs: string
+  readonly threadTs: string | null
+  readonly actorSlackUserId: string
+  readonly actionId: string
+  readonly actionValue: string
+}
+
 export type SlackSenderKind = "human" | "bot" | "unknown"
 
 export type IngressResult =
@@ -41,8 +65,13 @@ export type IngressResult =
   | { readonly kind: "backpressured"; readonly reason: string }
   | { readonly kind: string; readonly reason?: string }
 
+export interface InteractionResult {
+  readonly state: string
+}
+
 export interface Delivery {
   readonly id: string
+  readonly ownerKind?: SlackDeliveryOwnerKind
   readonly conversationId: string
   readonly threadTs: string | null
   readonly payloadJson: string
@@ -62,12 +91,13 @@ export interface DeliveryAck {
 }
 
 export interface AdapterTransport {
-  discoverConnections(signal: AbortSignal): Promise<readonly SlackConnectionRef[]>
-  lease(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
-  ingress(ref: SlackConnectionRef, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
-  claimDelivery(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  claimUncertainDelivery?(ref: SlackConnectionRef, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  ackDelivery(ref: SlackConnectionRef, ack: DeliveryAck, signal: AbortSignal): Promise<void>
+  discoverConnections(signal: AbortSignal): Promise<readonly SlackAdapterTarget[]>
+  lease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
+  ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
+  interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
+  claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  claimUncertainDelivery?(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, signal: AbortSignal): Promise<void>
 }
 
 export interface SocketEvent {
@@ -83,8 +113,8 @@ export interface SocketClient {
 
 export interface SlackWebClient {
   chat: {
-    postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
-    update?(input: { channel: string; ts: string; text: string }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+    postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
+    update?(input: { channel: string; ts: string; text: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
   }
   reactions?: {
     add(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
@@ -96,5 +126,8 @@ export interface SlackWebClient {
   }
 }
 
+export type SlackBlock = Record<string, unknown>
+
 export type SocketClientFactory = (appToken: string, ref: SlackConnectionRef) => SocketClient
-export type WebClientFactory = (botToken: string, ref: SlackConnectionRef) => SlackWebClient
+export type WebClientFactory = (botToken: string, ref: SlackAdapterTarget) => SlackWebClient
+export type ManagerWebClientFactory = (ref: SlackManagerRef) => SlackWebClient

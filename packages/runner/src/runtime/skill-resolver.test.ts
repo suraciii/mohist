@@ -4,6 +4,8 @@ import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { SkillResolver } from "./skill-resolver.js"
+import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
+import { createHash } from "node:crypto"
 
 async function skill(root: string, name: string, body: string): Promise<void> {
   await mkdir(join(root, name), { recursive: true })
@@ -48,5 +50,45 @@ describe("SkillResolver", () => {
     const envelope = buildExecutionEnvelope("goal", "agent instructions", [{ name: "demo", instructions: "body with ${not-a-template}" }])
     expect(envelope).toContain(JSON.stringify({ instructions: "agent instructions", skills: [{ name: "demo", instructions: "body with ${not-a-template}" }] }))
     expect(envelope).toContain("goal")
+  })
+
+  it("preserves a normal dispatch exactly and serializes managed Slack facts separately", () => {
+    expect(buildExecutionEnvelope("goal", "agent instructions")).toBe("agent instructions\n\ngoal")
+
+    const instructions = "Use the reply anchor supplied by the Server."
+    const context = {
+      version: 1,
+      replyAnchor: {
+        workspaceId: "T1",
+        conversationId: "D1",
+        threadRootMessageId: "100.0",
+        triggeringMessageId: "101.0",
+        initiatingMemberId: "U1",
+        connectionId: "connection_1",
+        sessionId: "session_1",
+        dispatchRef: "dispatch_1",
+      },
+      collaborationSkill: {
+        name: "mohist-slack-collaboration",
+        version: "1.0.0",
+        instructions,
+        contentHash: createHash("sha256").update(instructions, "utf8").digest("hex"),
+      },
+    }
+
+    const resolved = readSlackExecutionContext({ slackExecutionContext: context })
+    expect(resolved.kind).toBe("resolved")
+    if (resolved.kind !== "resolved") throw new Error("Slack context did not resolve")
+
+    const envelope = buildExecutionEnvelope(
+      "goal",
+      null,
+      [inlineSlackCollaborationSkill(resolved.value)],
+      resolved.value,
+    )
+    expect(envelope).toContain("[mohist-system-facts]")
+    expect(envelope).toContain('"dispatchRef":"dispatch_1"')
+    expect(envelope).toContain('"name":"mohist-slack-collaboration"')
+    expect(envelope).toContain(instructions)
   })
 })

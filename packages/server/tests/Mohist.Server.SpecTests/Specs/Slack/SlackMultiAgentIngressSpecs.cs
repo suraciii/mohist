@@ -533,14 +533,13 @@ public sealed class SlackMultiAgentIngressSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var promptRow = await db.SlackOutboxRows
+        var promptRows = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connectionA.Id
                 && row.ConversationId == "C-thread-prompt"
                 && row.ThreadTs == "1710000000.010800"
                 && row.Kind == SlackOutboxKinds.UserAction)
-            .FirstOrDefaultAsync();
-        Assert.NotNull(promptRow);
-        Assert.Contains("Multiple Agents", promptRow!.PayloadJson);
+            .ToListAsync();
+        Assert.Contains(promptRows, row => row.PayloadJson.Contains("Multiple Agents", StringComparison.Ordinal));
     }
 
     [Fact]

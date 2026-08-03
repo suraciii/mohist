@@ -177,7 +177,8 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(6)] string? FailureCategory,
     [property: Id(7)] int ArtifactCount,
     [property: Id(8)] int? ExitCode,
-    [property: Id(9)] DateTimeOffset RecordedAt);
+    [property: Id(9)] DateTimeOffset RecordedAt,
+    [property: Id(10)] string? Output = null);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -539,7 +540,8 @@ public sealed record AgentJobInput(
     /// Append-only Orleans field id (next free after
     /// <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(17)] AgentStartupContext? StartupContext = null);
+    [property: Id(17)] AgentStartupContext? StartupContext = null,
+    [property: Id(18)] AgentSlackExecutionContext? SlackExecutionContext = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

@@ -77,6 +77,17 @@ public sealed class SlackChannelThreadIngressSpecs
             && row.ConversationId == "C-channel-A"
             && row.SlackMessageIdentity.EndsWith("1710000000.000100"));
         Assert.Equal("1710000000.000100", inboxRow.ThreadTs);
+        var initialProgress = await db.SlackOutboxRows.SingleAsync(row =>
+            row.ConnectionId == connection.Id
+            && row.ConversationId == "C-channel-A"
+            && row.ThreadTs == "1710000000.000100"
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(
+                new SlackMessageIdentity("T123", "C-channel-A", "1710000000.000100"), "progress"));
+        var initialProgressPayload = SlackDeliveryPayload.Parse(initialProgress.PayloadJson);
+        Assert.Equal(SlackDeliveryOperations.PostMessage, initialProgressPayload.Operation);
+        Assert.Equal("Working...", initialProgressPayload.Text);
+        Assert.DoesNotContain("xoxb-", initialProgress.PayloadJson, StringComparison.Ordinal);
         Assert.NotNull(data.GetProperty("jobKey").GetString());
     }
 
@@ -809,6 +820,16 @@ public sealed class SlackChannelThreadIngressSpecs
             mentions: new[] { connection.BotUserId },
             text: "<@U123> replay me");
         var firstSessionId = first.GetProperty("sessionId").GetString();
+        List<string> beforeProjection;
+        await using (var beforeScope = _fixture.Services.CreateAsyncScope())
+        {
+            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            beforeProjection = await beforeDb.SlackOutboxRows
+                .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "C-channel-L")
+                .OrderBy(row => row.Id)
+                .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+                .ToListAsync();
+        }
 
         var replay = await PostChannelAsync(connection, "C-channel-L",
             messageTs: "1710000000.001200",
@@ -839,6 +860,13 @@ public sealed class SlackChannelThreadIngressSpecs
             connection.ProjectId, connection.WorkspaceTeamId,
             "C-channel-L", "1710000000.001200");
         Assert.Single(bindings);
+        var afterProjection = await db.SlackOutboxRows
+            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "C-channel-L")
+            .OrderBy(row => row.Id)
+            .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
+            .ToListAsync();
+        Assert.Equal(beforeProjection, afterProjection);
+        Assert.DoesNotContain(afterProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -895,7 +923,8 @@ public sealed class SlackChannelThreadIngressSpecs
         AgentConnection connection,
         string conversationId,
         string messageTs,
-        string sessionId)
+        string sessionId,
+        string threadTs = "1710000000.000300")
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -903,7 +932,7 @@ public sealed class SlackChannelThreadIngressSpecs
         var progress = await db.SlackOutboxRows
             .Where(row => row.ConnectionId == connection.Id
                 && row.ConversationId == conversationId
-                && row.ThreadTs == "1710000000.000300"
+                && row.ThreadTs == threadTs
                 && row.Kind == SlackOutboxKinds.ReplaceableProgress
                 && row.DispatchRef != null
                 && EF.Functions.Like(row.DispatchRef, progressRef + "%"))

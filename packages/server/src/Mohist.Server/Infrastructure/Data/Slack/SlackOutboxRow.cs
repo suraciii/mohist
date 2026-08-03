@@ -1,3 +1,5 @@
+using Mohist.Server.Infrastructure.Slack;
+
 namespace Mohist.Server.Infrastructure.Data.Slack;
 
 /// <summary>
@@ -12,6 +14,7 @@ public sealed class SlackOutboxRow
     public string Id { get; set; } = string.Empty;
     public string ProjectId { get; set; } = string.Empty;
     public string ConnectionId { get; set; } = string.Empty;
+    public string OwnerKind { get; set; } = SlackDeliveryOwnerKinds.Connection;
     public string WorkspaceTeamId { get; set; } = string.Empty;
     public string ConversationId { get; set; } = string.Empty;
     public string? ThreadTs { get; set; }
