@@ -546,9 +546,9 @@ internal static class AgentCommands
                             : null;
 
                         var body = new JsonObject();
-                        AddIfProvided(body, "name", name);
+                        AddIfProvided(body, "name", name, name is not null);
                         AddIfProvided(body, "description", clearDescription ? null : description, clearDescription || description is not null);
-                        AddIfProvided(body, "instructions", resolvedInstructions);
+                        AddIfProvided(body, "instructions", resolvedInstructions, instructionsResult is BodyInputResolver.Result.Success);
                         AddIfProvided(body, "agentConfig", clearAgentConfig ? null : ((ResolveJsonResult.Valid)config).Value, clearAgentConfig || agentConfig is not null);
                         AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
                         AddIfProvided(body, "maxConcurrentRuns", clearMaxConcurrentRuns ? null : maxConcurrentRuns, clearMaxConcurrentRuns || maxConcurrentRuns is not null);
