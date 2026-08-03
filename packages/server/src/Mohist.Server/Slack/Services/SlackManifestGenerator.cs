@@ -30,7 +30,7 @@ public sealed class SlackManifestGenerator : IScopedService
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        var botEvents = (input.BotEvents ?? ["app_mention", "message.im"])
+        var botEvents = (input.BotEvents ?? ["app_mention"])
             .Where(eventType => !string.IsNullOrWhiteSpace(eventType))
             .Distinct(StringComparer.Ordinal)
             .Order(StringComparer.Ordinal)
@@ -46,12 +46,6 @@ public sealed class SlackManifestGenerator : IScopedService
             },
             ["features"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["app_home"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["home_tab_enabled"] = false,
-                    ["messages_tab_enabled"] = true,
-                    ["messages_tab_read_only_enabled"] = false,
-                },
                 ["bot_user"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["always_online"] = false,
