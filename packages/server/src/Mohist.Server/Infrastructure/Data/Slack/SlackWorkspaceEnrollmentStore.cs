@@ -35,6 +35,15 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
+    public async Task<SlackWorkspaceEnrollment?> GetByTeamAsync(string workspaceTeamId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.WorkspaceTeamId == workspaceTeamId, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
     public async Task<SlackWorkspaceEnrollment> CreateAsync(SlackWorkspaceEnrollment enrollment, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(enrollment);

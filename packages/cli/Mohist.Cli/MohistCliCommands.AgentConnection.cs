@@ -19,6 +19,11 @@ internal static class AgentConnectionCommands
         group.Subcommands.Add(BuildEnable(api));
         group.Subcommands.Add(BuildView(api));
         group.Subcommands.Add(BuildList(api));
+        group.Subcommands.Add(BuildCreateChildApp(api));
+        group.Subcommands.Add(BuildReconcileCreate(api));
+        group.Subcommands.Add(BuildReconcileDelete(api));
+        group.Subcommands.Add(BuildRemoveBinding(api));
+        group.Subcommands.Add(BuildPermanentDelete(api));
         group.Subcommands.Add(BuildListDeliveries(api));
         group.Subcommands.Add(BuildResendDelivery(api));
         group.Subcommands.Add(BuildClearGap(api));
@@ -29,6 +34,9 @@ internal static class AgentConnectionCommands
 
     private static string Path(string projectId, string suffix = "") =>
         $"/api/projects/{Uri.EscapeDataString(projectId)}/slack-connections{suffix}";
+
+    private static string ManagerPath(string projectId, string suffix = "") =>
+        $"/api/projects/{Uri.EscapeDataString(projectId)}/slack-manager{suffix}";
 
     private static async Task<(string? ProjectId, int Exit)> ProjectAsync(MohistCliApi api, string? project)
     {
@@ -42,10 +50,25 @@ internal static class AgentConnectionCommands
         var agent = new Argument<string>("agent") { Description = "Agent name or id" };
         var provider = new Option<string>("--provider") { DefaultValueFactory = _ => "slack" };
         var botName = new Option<string?>("--bot-name");
+        var workspaceTeam = new Option<string?>("--workspace-team")
+        {
+            Description = "Create a Manager-owned Agent App in this Slack workspace.",
+        };
+        var managerId = new Option<string?>("--manager-id");
+        var accessPolicy = new Option<string>("--access-policy") { DefaultValueFactory = _ => "owner_only" };
+        var owner = new Option<string?>("--owner-slack-user-id");
+        var transport = new Option<string>("--transport") { DefaultValueFactory = _ => "socket" };
+        var ingress = new Option<string?>("--public-ingress");
         var project = MohistCliCommands.ProjectRefOption();
         command.Arguments.Add(agent);
         command.Options.Add(provider);
         command.Options.Add(botName);
+        command.Options.Add(workspaceTeam);
+        command.Options.Add(managerId);
+        command.Options.Add(accessPolicy);
+        command.Options.Add(owner);
+        command.Options.Add(transport);
+        command.Options.Add(ingress);
         command.Options.Add(project);
         command.SetAction(async ctx =>
         {
@@ -55,6 +78,22 @@ internal static class AgentConnectionCommands
             if (exit != 0 || projectId is null) return exit;
             var agentId = await ResolveAgentIdAsync(api, projectId, ctx.GetValue(agent));
             if (agentId is null) return 1;
+            var team = ctx.GetValue(workspaceTeam);
+            if (!string.IsNullOrWhiteSpace(team))
+            {
+                var managerResult = await api.PostAndReadAsync(ManagerPath(projectId, "/apps"), new
+                {
+                    agentId,
+                    workspaceTeamId = team,
+                    managerExternalId = ctx.GetValue(managerId),
+                    accessPolicy = ctx.GetValue(accessPolicy),
+                    ownerSlackUserId = ctx.GetValue(owner),
+                    botName = ctx.GetValue(botName),
+                    transportKind = ctx.GetValue(transport),
+                    publicIngressBaseUrl = ctx.GetValue(ingress),
+                });
+                return managerResult.ExitCode;
+            }
             var result = await api.PostAndReadAsync(Path(projectId), new
             {
                 agentId,
@@ -196,16 +235,97 @@ internal static class AgentConnectionCommands
     private static Command BuildList(MohistCliApi api)
     {
         var command = new Command("list", "List Slack Connections");
+        var agent = new Argument<string?>("agent")
+        {
+            Arity = ArgumentArity.ZeroOrOne,
+            Description = "Limit status to an Agent name or id.",
+        };
+        var workspaceTeam = new Option<string?>("--workspace-team");
         var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(agent);
+        command.Options.Add(workspaceTeam);
         command.Options.Add(project);
         command.SetAction(async ctx =>
         {
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
             if (exit != 0 || projectId is null) return exit;
-            var result = await api.GetDataOrPrintErrorAsync(Path(projectId));
+            var team = ctx.GetValue(workspaceTeam);
+            var agentReference = ctx.GetValue(agent);
+            var agentId = string.IsNullOrWhiteSpace(agentReference)
+                ? null
+                : await ResolveAgentIdAsync(api, projectId, agentReference);
+            if (!string.IsNullOrWhiteSpace(agentReference) && agentId is null) return 1;
+            var result = await api.GetDataOrPrintErrorAsync(
+                string.IsNullOrWhiteSpace(team)
+                    ? Path(projectId, string.IsNullOrWhiteSpace(agentId)
+                        ? ""
+                        : $"?agentId={Uri.EscapeDataString(agentId)}")
+                    : $"{ManagerPath(projectId, "/agents")}?workspaceTeamId={Uri.EscapeDataString(team)}");
             if (result.ExitCode != 0) return result.ExitCode;
-            RenderConnectionList(api.Output, result.Data);
+            if (string.IsNullOrWhiteSpace(team))
+                RenderConnectionList(api.Output, result.Data);
+            else
+                RenderManagerAgentList(api.Output, result.Data, agentReference);
             return 0;
+        });
+        return command;
+    }
+
+    private static Command BuildReconcileCreate(MohistCliApi api) => BuildManagerOperation(
+        api, "reconcile-create", "Reconcile an unknown managed Child App create", "/reconcile-create");
+
+    private static Command BuildCreateChildApp(MohistCliApi api) => BuildManagerOperation(
+        api, "create-child-app", "Start creating the managed Slack Child App", "/create");
+
+    private static Command BuildReconcileDelete(MohistCliApi api) => BuildManagerOperation(
+        api, "reconcile-delete", "Reconcile an unknown managed Child App delete", "/reconcile-delete");
+
+    private static Command BuildRemoveBinding(MohistCliApi api) => BuildManagerOperation(
+        api, "remove-binding", "Remove the Mohist Connection binding while retaining Child App facts", "/remove-binding");
+
+    private static Command BuildManagerOperation(
+        MohistCliApi api,
+        string name,
+        string description,
+        string suffix)
+    {
+        var command = new Command(name, description);
+        var id = new Argument<string>("connection-id");
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            return await api.PrintPostAsync(
+                ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(ctx.GetValue(id)!)}{suffix}"),
+                new { });
+        });
+        return command;
+    }
+
+    private static Command BuildPermanentDelete(MohistCliApi api)
+    {
+        var command = new Command("permanent-delete", "Delete the managed Slack Child App after its Connection binding was removed");
+        var id = new Argument<string>("connection-id");
+        var confirmation = new Option<string?>("--confirm")
+        {
+            Description = "Must be exactly DELETE. This operation cannot be inferred from a normal remove-binding.",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Arguments.Add(id);
+        command.Options.Add(confirmation);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            if (!string.Equals(ctx.GetValue(confirmation), "DELETE", StringComparison.Ordinal))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--confirm DELETE is required for permanent-delete.");
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+            return await api.PrintPostAsync(
+                ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(ctx.GetValue(id)!)}/permanent-delete"),
+                new { confirmation = "DELETE" });
         });
         return command;
     }
@@ -455,6 +575,44 @@ internal static class AgentConnectionCommands
                 Truncate(ValueOf(row, "botName"), widths[1]),
                 Truncate(state.State, widths[2]),
                 Truncate(state.NextAction, widths[3]),
+            };
+            output.WriteLine(string.Join("  ", cells.Select((cell, index) => cell.PadRight(widths[index]))).TrimEnd());
+        }
+    }
+
+    private static void RenderManagerAgentList(TextWriter output, JsonNode? data, string? agentReference)
+    {
+        if (data is not JsonArray rows)
+        {
+            output.WriteLine(data?.ToJsonString(MohistCliApi.JsonOutputOptions) ?? "(no Agent App data)");
+            return;
+        }
+
+        var selected = rows.OfType<JsonObject>()
+            .Where(row => string.IsNullOrWhiteSpace(agentReference)
+                || string.Equals(ValueOf(row, "agentId"), agentReference, StringComparison.Ordinal)
+                || string.Equals(ValueOf(row, "agentName"), agentReference, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (selected.Count == 0)
+        {
+            output.WriteLine("No active Agent App candidates");
+            return;
+        }
+
+        var headers = new[] { "agent", "preview bot", "app lifecycle", "authorization", "next action" };
+        var widths = new[] { 28, 28, 18, 18, 28 };
+        output.WriteLine(string.Join("  ", headers.Select((header, index) => header.PadRight(widths[index]))).TrimEnd());
+        foreach (var row in selected)
+        {
+            var managedApp = row["managedApp"] as JsonObject;
+            var preview = row["preview"] as JsonObject;
+            var cells = new[]
+            {
+                Truncate(ValueOf(row, "agentName"), widths[0]),
+                Truncate(ValueOf(preview, "botName"), widths[1]),
+                Truncate(ValueOf(managedApp, "appLifecycle"), widths[2]),
+                Truncate(ValueOf(managedApp, "authorization"), widths[3]),
+                Truncate(ValueOf(managedApp, "nextAction"), widths[4]),
             };
             output.WriteLine(string.Join("  ", cells.Select((cell, index) => cell.PadRight(widths[index]))).TrimEnd());
         }
