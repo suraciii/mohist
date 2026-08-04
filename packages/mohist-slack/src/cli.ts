@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SocketModeClient } from "@slack/socket-mode"
 import { WebClient, type FetchFunction } from "@slack/web-api"
+import { fetch as undiciFetch, ProxyAgent, type RequestInit as UndiciRequestInit } from "undici"
 import { readFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import { SlackAdapter } from "./adapter.js"
@@ -13,6 +14,7 @@ export interface SlackCliOptions {
   readonly operatorToken: string
   readonly serverFetch?: typeof fetch
   readonly slackFetch?: FetchFunction
+  readonly slackProxyUrl?: string
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
   readonly discoveryIntervalMs?: number
@@ -22,6 +24,12 @@ export interface SlackCliOptions {
 export type OperatorCredentialFileReader = (path: string) => Promise<string>
 
 export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
+  const proxyUrl = options.slackProxyUrl?.trim()
+  const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined
+  const slackFetch = options.slackFetch ?? (dispatcher
+    ? (input: string | URL, init?: Parameters<FetchFunction>[1]) => undiciFetch(input, { ...(init as UndiciRequestInit | undefined), dispatcher })
+    : undefined)
+
   return new SlackAdapter({
     adapterId: options.adapterId,
     transport: new HttpAdapterTransport({
@@ -29,8 +37,8 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
       operatorToken: options.operatorToken,
       fetch: options.serverFetch,
     }),
-    socketFactory: (appToken) => new SocketModeClient({ appToken }) as unknown as SocketClient,
-    webFactory: (botToken) => new WebClient(botToken, options.slackFetch ? { fetch: options.slackFetch } : undefined),
+    socketFactory: (appToken) => new SocketModeClient({ appToken, ...(dispatcher ? { dispatcher } : {}) }) as unknown as SocketClient,
+    webFactory: (botToken) => new WebClient(botToken, slackFetch ? { fetch: slackFetch } : undefined),
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 15_000,
     deliveryPollIntervalMs: options.deliveryPollIntervalMs ?? 1_000,
     discoveryIntervalMs: options.discoveryIntervalMs ?? 15_000,
@@ -68,6 +76,7 @@ export async function runCli() {
     adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
     serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
     operatorToken: await resolveOperatorToken(),
+    slackProxyUrl: env("SLACK_PROXY_URL"),
     heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
     deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),
     discoveryIntervalMs: positiveNumberEnv("DISCOVERY_POLL_INTERVAL_MS"),
