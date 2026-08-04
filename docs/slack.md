@@ -417,11 +417,18 @@ Slack 呈现与过程透明是两个分开的信号。Slack 里只有 liveness�
   重复发送已经确认的回复。
 
 > **当前实装差距：** 频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、重复投递保护和
-> Owner-only、Allowlist、Anyone 访问策略已经可用；Anyone 还会校验 Bot 是否能看到当前频道。
-> 已有 thread 历史作为首次启动背景导入也已经可用——导入是
-> 按 bot 可见的 thread 消息、按 ts 早于本次提及的整条消息删除的方式来截断，超出大小时同时
-> 在 Slack 确认回复和 Agent 输入里标出。文件输入、独立的频道控制操作，以及不同 Mohist
-> Server 之间的多 Bot 协调仍未提供。
+> Owner-only、Allowlist、Anyone 的 Connection 级调用者访问策略已经可用；Anyone 还会校验
+> Bot 是否能看到当前频道，私聊在所有策略下仍只接受 Owner。已有 thread 历史作为首次启动背景
+> 导入也已经可用——导入是按 bot 可见的 thread 消息、按 ts 早于本次提及的整条消息删除的方式
+> 来截断，超出大小时同时在 Slack 确认回复和 Agent 输入里标出。
+>
+> 附件可以随 Slack 消息一起提交为文件详情，包括文件名称、类型、大小和身份。只有 Mohist
+> 能够读取文件内容时，才会尝试获取内容；不支持、超过大小限制或无法读取的文件会被拒绝。
+> 这不保证能够取得或处理所有附件内容。
+>
+> Connection 访问策略已经交付，包含 Owner only、Allowlist 和 Anyone；Anyone 仍会确认 Bot
+> 能看到当前频道。独立选择每个 Connection 接受哪些频道仍未交付。不同 Mohist Server 之间的
+> 多 Bot 协调仍未提供。
 
 ## Agent 在 Slack 里的协作规范
 

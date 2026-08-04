@@ -13,13 +13,17 @@ describe("mohist-slack CLI composition", () => {
       threadTs: null,
       payloadJson: JSON.stringify({ text: "manager reply" }),
     }
-    const serverCalls: Array<{ url: string; body?: string }> = []
+    const serverCalls: Array<{ url: string; body?: string; operatorToken: string | null }> = []
     const ackBodies: unknown[] = []
     let deliveryClaimed = false
     const serverFetch: typeof fetch = async (input, init) => {
       const url = String(input)
       const body = init?.body === undefined ? undefined : String(init.body)
-      serverCalls.push({ url, body })
+      serverCalls.push({
+        url,
+        body,
+        operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
+      })
       let data: unknown
       if (url.endsWith("/api/slack-connections/adapter")) {
         data = []
@@ -64,6 +68,8 @@ describe("mohist-slack CLI composition", () => {
 
     await adapter.start(controller.signal)
 
+    expect(serverCalls.length).toBeGreaterThan(0)
+    expect(serverCalls.every((call) => call.operatorToken === "test-operator")).toBe(true)
     expect(slackCalls).toHaveLength(1)
     expect(slackCalls[0]).toMatchObject({
       url: "https://slack.com/api/chat.postMessage",
