@@ -347,6 +347,9 @@ public sealed class LoopbackTestConnectionStartupFilter : IStartupFilter
     {
         app.Use(async (context, continuation) =>
         {
+            if (context.Request.Headers.TryGetValue("X-Test-Remote-Address", out var requestedAddress)
+                && IPAddress.TryParse(requestedAddress.ToString(), out var parsedAddress))
+                context.Connection.RemoteIpAddress = parsedAddress;
             context.Connection.RemoteIpAddress ??= IPAddress.Loopback;
             context.Connection.LocalIpAddress ??= IPAddress.Loopback;
             await continuation();

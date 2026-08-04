@@ -249,7 +249,10 @@ public sealed class SlackManagerApplicationSpecs
         using var statusResponse = await _fixture.Client.GetAsync($"/api/slack-manager/status?workspaceTeamId={team}");
         statusResponse.EnsureSuccessStatusCode();
         Assert.DoesNotContain(credentialRef, await statusResponse.Content.ReadAsStringAsync(), StringComparison.Ordinal);
-        Assert.Equal("claim_manager", (await ReadDataAsync(statusResponse)).GetProperty("nextAction").GetString());
+        var status = await ReadDataAsync(statusResponse);
+        Assert.True(status.GetProperty("enrollment").GetProperty("managerCredentialConfigured").GetBoolean());
+        Assert.False(status.GetProperty("enrollment").GetProperty("managerCredentialProvisioned").GetBoolean());
+        Assert.Equal("configure_manager_credentials", status.GetProperty("nextAction").GetString());
 
         var claimCode = setup.GetProperty("claimCode").GetString()!;
         using var deniedIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new

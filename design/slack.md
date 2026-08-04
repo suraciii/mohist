@@ -225,7 +225,12 @@ Connection/Bot 目标。OAuth cancel/expiry/pending approval 都 Resume 同一�
 
 凭据按真正拥有者寻址，Connection **不拥有或复制**子 App 运行凭据：
 
-- Manager credential → Enrollment 地址；
+- Manager credential → Enrollment 地址。`ManagerCredentialRef` 是 enrollment 持久化的 opaque 引用，
+  不由 CLI 或 HTTP caller 提供地址组成部分；Manager BotToken 的唯一地址是
+  `SecretStoreAddress("__mohist_slack_manager__", ManagerCredentialRef, SecretKind.BotToken)`。
+  `mo slack setup` 只登记引用，`mo slack configure-manager --workspace-team <team>` 才是显式的
+  provision/rotation 操作。Server 根据活动 enrollment 的 workspace team 反查已持久化引用，再写入
+  上述地址；重复 provision 覆盖同一地址以完成安全轮换。
 - child client secret、signing secret、App-level token (`xapp-`)、Bot token (`xoxb-`) → ChildApp 地址；
 - Connection 只通过 active ChildApp binding 取得数据面所需凭据。
 
@@ -235,6 +240,13 @@ Connection/Bot 目标。OAuth cancel/expiry/pending approval 都 Resume 同一�
 `Infrastructure/Security/Secrets/SecretStoreAddress.cs`）最终应泛化为 typed owner address 或新增
 Slack integration secret address；**P0.1 只在 spec/model 层定义引用与所有权，不迁移现有生产
 secret 路径。**
+
+Manager provision endpoint 只允许 operator-authenticated loopback 请求，body 只能表达 workspace team
+和 Bot 凭据。caller 不能提交 Project、Connection、credential ref、secret kind 或 secret address。
+凭据必须来自 CLI 隐藏输入，或来自用户专属、受保护且非符号链接的文件；HTTP response、status、错误、
+日志、审计 DTO 和文档示例都不包含凭据。Server 只返回非敏感的 workspace 与 provisioned confirmation。
+状态同时暴露 `ManagerCredentialConfigured`（引用存在）与 `ManagerCredentialProvisioned`（该地址有
+非空 secret）；只有二者都为真时才允许 Manager session 进入 ready。
 
 OAuth 成功的收敛顺序必须保证：身份先验证；secret durable 后才让 Connection 可用；跨 secret store
 与 DB 失败要可恢复，不能出现「Connection 已绑定可用但 token 未落盘」。回调重放必须返回同一结果，
@@ -473,6 +485,11 @@ Manager 侧已有 Slack-specific Enrollment、ChildApp、claim 与 ManagerActor 
 `mohist-slack` Agent 沿用标准 SessionInput、AgentTurn 与 Runner dispatch；受控工具可创建带默认
 runtime 的普通 Project Agent 后委托同一 Manager application service 挂载。删除、解除绑定、凭据和
 投递重发工具不在 Manager 对话 catalog 中。
+
+Manager 凭据由 `mo slack configure-manager --workspace-team <team> [--credentials-file <path>]`
+显式 provision 或 rotation。无文件时 CLI 使用隐藏输入；有文件时只接受受保护的用户专属非符号链接
+文件。CLI 不暴露 token flag，Server endpoint 只接受 workspace team 与凭据，并从活动 enrollment 的
+`ManagerCredentialRef` 派生 secret address。
 
 普通 Slack 输入拥有不可变的 reply anchor 与协作 Skill，dispatch-only context 不进入 Agent 配置。
 普通 follow-up 始终走既有接纳路径；Stop interaction 由 Server 签名、去重并在重读 executing Turn

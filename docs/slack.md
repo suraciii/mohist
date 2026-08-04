@@ -204,6 +204,10 @@ Setup required。
 - `mo slack setup` 把一个工作区装上 Mohist App，`mo slack status` 查看该工作区各接入的
   整体状态与唯一下一步。完整的路径选择、安装授权和操作者认领向导仍属于未交付目标，当前
   CLI 需要明确提供安装所需的工作区、App、Bot 和凭据引用。
+- `mo slack configure-manager --workspace-team <team> [--credentials-file <path>]` 为已登记的
+  workspace Manager 提供或轮换 Bot 凭据。凭据只能来自交互式隐藏输入，或来自用户专属、受保护且
+  非符号链接的凭据文件；命令行不接受 token 字面量。`setup` 保存的只是 Manager 凭据引用，
+  `status` 会分别显示引用是否已配置和凭据是否已提供，只有后者也成立时才会显示凭据就绪。
 - 接入资源的管理：
 
 ```text
@@ -217,7 +221,7 @@ mo slack transfer-owner <connection-id>
 
 CLI 与 Web 配置的是同一个接入，不建立两份本机配置；与 Mohist App 对话驱动的安装流程
 产出的记录同样可由 CLI 查询和继续。投递诊断与受管子 App 运维（deliveries、
-resend-delivery、clear-gap、create-child-app、reconcile、remove-binding、
+resend-delivery、clear-gap、create-child-app、reconcile-create、reconcile-delete、remove-binding、
 permanent-delete）的完整命令清单见 [CLI 参考](cli-reference.md)。
 
 `--allow-member` 可以重复；选择 Allowlist 时，它替换除 Owner 外的完整成员列表。Owner 不用
@@ -225,8 +229,9 @@ permanent-delete）的完整命令清单见 [CLI 参考](cli-reference.md)。
 `--allow-member`，错误会在修改前返回。member ID 是 CLI 自动化入口；Web 与 Slack 界面都
 使用成员搜索和头像，不把 ID 当作主要交互。
 
-> 本机路径需要补一次 App-level token 的场景，CLI 与 Web 提供同样的受保护输入；凭据不进入
-> 命令参数、Agent Instructions、消息、日志或 Session transcript。
+> Manager Bot 凭据目前只能通过 `mo slack configure-manager` 的隐藏输入或受保护凭据文件提供；Web
+> 当前不提供这个 provisioning 操作。本机路径需要补一次 App-level token 时，仍使用对应的受保护
+> 输入；凭据不进入命令参数、Agent Instructions、消息、日志或 Session transcript。
 
 ## 接入配置
 
@@ -412,10 +417,11 @@ Slack 呈现与过程透明是两个分开的信号。Slack 里只有 liveness�
   重复发送已经确认的回复。
 
 > **当前实装差距：** 频道根消息提及、已绑定 thread 追问、多个 Bot 的归属提示、重复投递保护和
-> Owner-only 频道权限已经可用。已有 thread 历史作为首次启动背景导入也已经可用——导入是
+> Owner-only、Allowlist、Anyone 访问策略已经可用；Anyone 还会校验 Bot 是否能看到当前频道。
+> 已有 thread 历史作为首次启动背景导入也已经可用——导入是
 > 按 bot 可见的 thread 消息、按 ts 早于本次提及的整条消息删除的方式来截断，超出大小时同时
-> 在 Slack 确认回复和 Agent 输入里标出。Allowlist/Anyone、文件、频道控制操作，以及
-> 不同 Mohist Server 之间的多 Bot 协调仍未提供。
+> 在 Slack 确认回复和 Agent 输入里标出。文件输入、独立的频道控制操作，以及不同 Mohist
+> Server 之间的多 Bot 协调仍未提供。
 
 ## Agent 在 Slack 里的协作规范
 
@@ -533,13 +539,17 @@ Connection 的生命周期有三个**互相独立、各自需要显式确认**�
 ## 实装差距
 
 数据面（消息收发与 Agent 调用）已经落地：频道根消息提及、已绑定 thread 追问、多个 Bot
-的归属提示、重复投递保护、Owner-only 频道权限与 thread 历史导入均已可用。状态消息可以
+的归属提示、重复投递保护、Owner-only/Allowlist/Anyone 访问策略与 thread 历史导入均已可用。
+Anyone 访问会校验 Bot 是否能看到当前频道。状态消息可以
 原位更新并呈现进行中的工作；未知投递会核对，更新失败只补发一次。每条 Slack 输入都带有
 协作规则和回复位置，普通追问不会中断当前工作；只有对应执行中的工作才可通过明确的 Stop
 操作请求停止。终态回复保留稳定会话标识，并在管理员配置可公开访问的 Mohist 地址时提供
 安全的会话入口。
 
-Manager 控制面已经提供 `mo slack setup`、`mo slack status` 和一次性认领。认领后的 Mohist
+Manager 控制面已经提供 `mo slack setup`、`mo slack configure-manager`、`mo slack status` 和一次性认领。
+`configure-manager` 只向已登记的活动 workspace enrollment 写入该 enrollment 的 Manager Bot 凭据；
+重复执行是有意设计的安全轮换，命令输出只确认 workspace 和 provisioned 状态，不返回凭据。
+认领后的 Mohist
 App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、创建带默认配置的 Agent 并挂载、
 调整接入权限与启停，以及发起 Owner 转移；它与 CLI 读取同一状态和下一步。解除绑定和永久
 删除不在对话中提供，仍是 CLI 或 Web 中独立、明确的生命周期操作。

@@ -17,7 +17,7 @@ describe("HttpAdapterTransport", () => {
             : url.includes("/api/projects/") && url.endsWith("/adapter-session")
           ? { adapterId: "a", appToken: "xapp", botToken: "xoxb" }
           : url.includes("/api/slack-manager/adapter/") && url.endsWith("/session")
-            ? { adapterId: "a", ownerKind: "manager", workspaceTeamId: "T_MANAGER" }
+            ? { adapterId: "a", ownerKind: "manager", workspaceTeamId: "T_MANAGER", botToken: "manager credential" }
             : url.endsWith("/ingress") ? { kind: "accepted" }
               : url.endsWith("/interactions") ? { state: "stop_requested" }
                 : url.endsWith("/claim-uncertain")
@@ -33,7 +33,7 @@ describe("HttpAdapterTransport", () => {
     const signal = new AbortController().signal
     await expect(transport.discoverConnections(signal)).resolves.toEqual([ref, manager])
     await expect(transport.lease(ref, "a", signal)).resolves.toMatchObject({ appToken: "xapp" })
-    await expect(transport.lease(manager, "a", signal)).resolves.toMatchObject({ ownerKind: "manager" })
+    await expect(transport.lease(manager, "a", signal)).resolves.toMatchObject({ ownerKind: "manager", botToken: "manager credential" })
     await transport.ingress(ref, {
       eventType: "message",
       isDirectMessage: true,

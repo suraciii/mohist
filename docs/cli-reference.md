@@ -126,7 +126,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
-| `slack` | `setup`、`status`；`list`、`view`、`create`、`configure`、`claim-owner`、`edit`、`rotate-credentials`、`transfer-owner`、`enable`、`disable`、`delete`；`deliveries`、`resend-delivery`、`clear-gap`、`create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、`permanent-delete` |
+| `slack` | `setup`、`configure-manager`、`status`；`list`、`view`、`create`、`configure`、`claim-owner`、`edit`、`rotate-credentials`、`transfer-owner`、`enable`、`disable`、`delete`；`deliveries`、`resend-delivery`、`clear-gap`、`create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、`permanent-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
@@ -241,6 +241,10 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
 
 - `mo slack setup` 用显式参数登记工作区级 Mohist App；完整的路径选择、安装授权与操作者认领
   向导尚未实装。`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
+- `mo slack configure-manager --workspace-team <team> [--credentials-file <path>]` 为活动 workspace
+  enrollment 提供或轮换 Manager Bot 凭据。无文件时使用隐藏输入；有文件时要求用户专属、受保护且
+  非符号链接的文件，文件只包含一个非空的 Bot 凭据字段。命令不接受 token 字面量参数，成功输出
+  只确认 workspace 和凭据已 provisioned，不显示凭据。`status` 区分凭据引用已配置与凭据已提供。
 - `mo slack create <agent>` 只创建可恢复接入，输出 Slack identity preview、预填创建地址
   与接入 ID；不要求 `mohist-slack` 在线，也不读取凭据。
 - `mo slack configure <id>` 使用隐藏输入提交 Slack 凭据，不接受 token literal flag。非交互

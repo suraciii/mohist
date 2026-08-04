@@ -1,9 +1,11 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
@@ -23,6 +25,8 @@ public sealed class SlackManagerAdapterSpecs
     {
         const string enrollmentId = "enrollment-manager-adapter";
         const string teamId = "T_MANAGER_ADAPTER";
+        const string credentialRef = "manager-credential-adapter";
+        const string managerCredential = "manager credential";
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
@@ -34,7 +38,7 @@ public sealed class SlackManagerAdapterSpecs
                 ManagerCapability = SlackManagerCapability.Available,
                 ManagerAppId = "A_MANAGER_ADAPTER",
                 ManagerBotUserId = "U_MANAGER_ADAPTER",
-                ManagerCredentialRef = "manager-credential-adapter",
+                ManagerCredentialRef = credentialRef,
                 ManagerReadiness = SlackManagerReadiness.Ready,
                 ManagerTransportKind = SlackManagerTransportKind.Socket,
                 PlanCode = "unknown",
@@ -43,6 +47,9 @@ public sealed class SlackManagerAdapterSpecs
                 UpdatedAt = _fixture.TimeProvider.GetUtcNow(),
             });
             await db.SaveChangesAsync();
+            await scope.ServiceProvider.GetRequiredService<ISecretStore>().StoreAsync(
+                new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, credentialRef, SecretKind.BotToken),
+                Encoding.UTF8.GetBytes(managerCredential));
         }
 
         using var discovery = await _fixture.Client.GetAsync("/api/slack-manager/adapter");
@@ -69,7 +76,7 @@ public sealed class SlackManagerAdapterSpecs
         Assert.Equal("manager", sessionData.GetProperty("ownerKind").GetString());
         Assert.Equal(teamId, sessionData.GetProperty("workspaceTeamId").GetString());
         Assert.False(sessionData.TryGetProperty("appToken", out _));
-        Assert.False(sessionData.TryGetProperty("botToken", out _));
+        Assert.Equal(managerCredential, sessionData.GetProperty("botToken").GetString());
 
         string deliveryId;
         await using (var scope = _fixture.Services.CreateAsyncScope())

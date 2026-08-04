@@ -265,12 +265,14 @@ internal static class MohistCliCommands
         var credentialCommand = args.Length >= 2
             && string.Equals(args[0], "slack", StringComparison.Ordinal)
             && (string.Equals(args[1], "configure", StringComparison.Ordinal)
-                || string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal));
+                || string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal)
+                || string.Equals(args[1], "configure-manager", StringComparison.Ordinal));
         if (!credentialCommand)
             return false;
 
         if (args.Any(arg => string.Equals(arg, "--app-token", StringComparison.Ordinal)
-            || string.Equals(arg, "--bot-token", StringComparison.Ordinal)))
+            || string.Equals(arg, "--bot-token", StringComparison.Ordinal)
+            || string.Equals(arg, "--manager-bot-token", StringComparison.Ordinal)))
             return true;
 
         if (!string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal))
