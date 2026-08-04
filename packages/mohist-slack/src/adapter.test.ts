@@ -44,7 +44,7 @@ class FakeTransport implements AdapterTransport {
   async lease(ref: SlackAdapterTarget): Promise<AdapterSession> {
     this.leases.push(ref)
     const session = ref.ownerKind === "manager"
-      ? { adapterId: "adapter-1", ownerKind: "manager" as const }
+      ? { adapterId: "adapter-1", ownerKind: "manager" as const, botToken: "manager credential" }
       : { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
     this.sessionByConnection.set(ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId, session)
     return session
@@ -309,7 +309,7 @@ describe("mohist-slack adapter", () => {
     })
     const web = new FakeWeb()
     let socketFactoryCalls = 0
-    let managerFactoryRef: SlackManagerRef | undefined
+    let webFactoryToken: string | undefined
     const adapter = new SlackAdapter({
       adapterId: "adapter-manager",
       transport,
@@ -317,9 +317,8 @@ describe("mohist-slack adapter", () => {
         socketFactoryCalls += 1
         return new FakeSocket()
       },
-      webFactory: () => new FakeWeb(),
-      managerWebFactory: (ref) => {
-        managerFactoryRef = ref
+      webFactory: (botToken) => {
+        webFactoryToken = botToken
         return web
       },
       heartbeatIntervalMs: 60_000,
@@ -330,7 +329,7 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
 
     expect(socketFactoryCalls).toBe(0)
-    expect(managerFactoryRef).toEqual(manager)
+    expect(webFactoryToken).toBe("manager credential")
     expect(transport.leases).toEqual([manager])
     expect(web.posted).toEqual([{ channel: "D_MANAGER", text: "manager reply" }])
     expect(transport.acks).toEqual([

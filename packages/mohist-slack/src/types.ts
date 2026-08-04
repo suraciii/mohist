@@ -130,4 +130,3 @@ export type SlackBlock = Record<string, unknown>
 
 export type SocketClientFactory = (appToken: string, ref: SlackConnectionRef) => SocketClient
 export type WebClientFactory = (botToken: string, ref: SlackAdapterTarget) => SlackWebClient
-export type ManagerWebClientFactory = (ref: SlackManagerRef) => SlackWebClient

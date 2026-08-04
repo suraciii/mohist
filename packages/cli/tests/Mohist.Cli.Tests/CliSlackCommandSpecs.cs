@@ -16,7 +16,7 @@ public sealed class CliSlackCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "setup", "status", "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "create-child-app", "reconcile-create", "reconcile-delete", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "edit", "delete" })
+        foreach (var command in new[] { "setup", "configure-manager", "status", "create", "configure", "rotate-credentials", "claim-owner", "transfer-owner", "disable", "enable", "view", "list", "create-child-app", "reconcile-create", "reconcile-delete", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "edit", "delete" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.DoesNotContain("agent connection", text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
@@ -146,6 +146,120 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal(HttpMethod.Get, request.Method);
         Assert.Equal("/api/slack-manager/status?workspaceTeamId=T_STATUS", request.RequestUri?.PathAndQuery);
         Assert.Equal(token, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+    }
+
+    [Fact]
+    public async Task ConfigureManager_ProtectedFilePostsCredentialWithoutEchoingIt()
+    {
+        const string managerCredential = "manager-credential-fixture";
+        const string operatorToken = "operator-token-for-manager-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { workspaceTeamId = "T_MANAGER", credentialProvisioned = true },
+            })));
+        fs.AddFile("/tmp/manager-credentials.json", "{\"botToken\":\"manager-credential-fixture\"}");
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "configure-manager", "--workspace-team", "T_MANAGER", "--credentials-file", "/tmp/manager-credentials.json"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/slack-manager/credentials", request.RequestUri?.PathAndQuery);
+        Assert.Equal("T_MANAGER", JsonNode.Parse(request.Body!)!["workspaceTeamId"]!.GetValue<string>());
+        Assert.Equal(managerCredential, JsonNode.Parse(request.Body!)!["managerBotToken"]!.GetValue<string>());
+        Assert.DoesNotContain(managerCredential, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(managerCredential, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConfigureManager_HiddenInputPostsCredentialWithoutEchoingIt()
+    {
+        const string managerCredential = "manager-hidden-fixture";
+        const string operatorToken = "operator-token-for-manager-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { workspaceTeamId = "T_MANAGER", credentialProvisioned = true },
+            })));
+        var terminal = new RecordingCliTerminal(managerCredential);
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "configure-manager", "--workspace-team", "T_MANAGER"],
+            output, error, fs, executor,
+            standardInput: TextReader.Null,
+            environment: env,
+            terminalOverride: terminal);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, terminal.HiddenReads);
+        Assert.Contains(managerCredential, handler.Requests.Single().Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain(managerCredential, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(managerCredential, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConfigureManager_DirectTokenArgumentIsRejectedBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "configure-manager", "--workspace-team", "T_MANAGER", "--manager-bot-token", "manager-credential-fixture"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain("manager-credential-fixture", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("manager-credential-fixture", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task ConfigureManager_RejectsSymlinkOrWorldReadableFile(bool symlink, bool worldReadable)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        fs.AddFile("/tmp/manager-credentials.json", "{\"botToken\":\"manager-credential-fixture\"}");
+        fs.TreatFilesAsSymbolicLinks = symlink;
+        fs.TreatFilesAsWorldReadable = worldReadable;
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "configure-manager", "--workspace-team", "T_MANAGER", "--credentials-file", "/tmp/manager-credentials.json"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain("manager-credential-fixture", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("manager-credential-fixture", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("disable", "Disable a Slack Connection")]
+    [InlineData("enable", "Enable a Slack Connection")]
+    [InlineData("reconcile-create", "Reconcile an unknown managed Child App create")]
+    [InlineData("reconcile-delete", "Reconcile an unknown managed Child App delete")]
+    public async Task SlackHelp_UsesLifecycleAndReconciliationTerminology(string command, string description)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(
+            http, ["slack", command, "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Contains(description, output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 
     [Theory]
@@ -718,5 +832,17 @@ public sealed class CliSlackCommandSpecs
         Assert.NotEqual(0, exit);
         Assert.Single(handler.Requests);
         Assert.Contains("--yes", error.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class RecordingCliTerminal(string value) : ICliTerminal
+    {
+        public bool IsInputInteractive => true;
+        public int HiddenReads { get; private set; }
+
+        public Task<string?> ReadHiddenAsync(TextReader input, CancellationToken cancellationToken = default)
+        {
+            HiddenReads++;
+            return Task.FromResult<string?>(value);
+        }
     }
 }

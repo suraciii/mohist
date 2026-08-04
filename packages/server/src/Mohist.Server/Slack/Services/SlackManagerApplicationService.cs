@@ -1,8 +1,11 @@
+using System.Text;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -25,6 +28,7 @@ public sealed class SlackManagerApplicationService : IScopedService
     private readonly SlackOAuthAuthorizationService _oauthAuthorization;
     private readonly ManagerClaimService _claims;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly ISecretStore _secrets;
 
     public SlackManagerApplicationService(
         AgentQuerier agents,
@@ -36,7 +40,8 @@ public sealed class SlackManagerApplicationService : IScopedService
         SlackOAuthStateService oauthStates,
         SlackOAuthAuthorizationService oauthAuthorization,
         ManagerClaimService claims,
-        IDbContextFactory<MohistDbContext> dbFactory)
+        IDbContextFactory<MohistDbContext> dbFactory,
+        ISecretStore secrets)
     {
         _agents = agents;
         _connections = connections;
@@ -48,6 +53,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         _oauthAuthorization = oauthAuthorization;
         _claims = claims;
         _dbFactory = dbFactory;
+        _secrets = secrets;
     }
 
     public async Task<SlackManagerSetupResult> SetupAsync(
@@ -115,11 +121,37 @@ public sealed class SlackManagerApplicationService : IScopedService
         var claim = string.IsNullOrWhiteSpace(enrollment.ClaimedSlackUserId)
             ? await _claims.IssueAsync(enrollment.Id, ct)
             : SlackManagerClaimIssued.None;
+        var credentialProvisioned = await HasManagerCredentialAsync(enrollment, ct);
         return new(
-            ProjectEnrollment(enrollment),
+            ProjectEnrollment(enrollment, credentialProvisioned),
             claim.Code,
             claim.ExpiresAt,
-            NextAction(enrollment));
+            NextAction(enrollment, credentialProvisioned));
+    }
+
+    public async Task<SlackManagerCredentialProvisionResult> ProvisionManagerCredentialAsync(
+        string workspaceTeamId,
+        string managerBotToken,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(managerBotToken);
+
+        var enrollment = await _enrollments.GetActiveByTeamAsync(workspaceTeamId.Trim(), ct)
+            ?? throw new SlackManagerConflictException(
+                "Run Manager setup for this workspace before provisioning its credential.",
+                "enrollment_required");
+        if (string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef))
+            throw new SlackManagerConflictException(
+                "Manager setup has not configured a credential reference.",
+                "manager_credential_reference_required");
+
+        await _secrets.StoreAsync(
+            ManagerCredentialAddress(enrollment.ManagerCredentialRef),
+            Encoding.UTF8.GetBytes(managerBotToken.Trim()),
+            ct);
+
+        return new(enrollment.WorkspaceTeamId, true);
     }
 
     public async Task<SlackManagerStatusProjection?> GetStatusAsync(
@@ -154,11 +186,12 @@ public sealed class SlackManagerApplicationService : IScopedService
                 connection.DeletedAt))
             .ToListAsync(ct);
 
+        var credentialProvisioned = await HasManagerCredentialAsync(enrollment, ct);
         return new(
-            ProjectEnrollment(enrollment),
+            ProjectEnrollment(enrollment, credentialProvisioned),
             connections,
             children.Select(ProjectChild).ToList(),
-            NextAction(enrollment));
+            NextAction(enrollment, credentialProvisioned));
     }
 
     public async Task<IReadOnlyList<SlackManagerAgentOption>> ListAgentOptionsAsync(
@@ -440,7 +473,9 @@ public sealed class SlackManagerApplicationService : IScopedService
         connection.AccessPolicy,
         connection.DeletedAt);
 
-    private static SlackManagerEnrollmentProjection ProjectEnrollment(SlackWorkspaceEnrollment enrollment) => new(
+    private static SlackManagerEnrollmentProjection ProjectEnrollment(
+        SlackWorkspaceEnrollment enrollment,
+        bool credentialProvisioned) => new(
         enrollment.Id,
         enrollment.WorkspaceTeamId,
         enrollment.Lifecycle,
@@ -450,10 +485,13 @@ public sealed class SlackManagerApplicationService : IScopedService
         enrollment.ManagerTransportKind,
         enrollment.ManagerReadiness,
         !string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef),
+        credentialProvisioned,
         enrollment.ClaimedSlackUserId,
         enrollment.UpdatedAt);
 
-    private static string NextAction(SlackWorkspaceEnrollment enrollment)
+    private static string NextAction(
+        SlackWorkspaceEnrollment enrollment,
+        bool credentialProvisioned)
     {
         if (enrollment.Lifecycle == SlackEnrollmentLifecycle.Removed)
             return "setup";
@@ -462,10 +500,30 @@ public sealed class SlackManagerApplicationService : IScopedService
             || string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef)
             || enrollment.ManagerReadiness != SlackManagerReadiness.Ready)
             return "configure_manager_app";
+        if (!credentialProvisioned)
+            return "configure_manager_credentials";
         return string.IsNullOrWhiteSpace(enrollment.ClaimedSlackUserId)
             ? "claim_manager"
             : "ready";
     }
+
+    private async Task<bool> HasManagerCredentialAsync(
+        SlackWorkspaceEnrollment enrollment,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef))
+            return false;
+
+        var secret = await _secrets.LoadAsync(
+            ManagerCredentialAddress(enrollment.ManagerCredentialRef),
+            ct);
+        return secret is { Length: > 0 };
+    }
+
+    private static SecretStoreAddress ManagerCredentialAddress(string credentialRef) => new(
+        SlackDeliveryOwnerIds.ManagerProjectId,
+        credentialRef,
+        SecretKind.BotToken);
 
     private static SlackManagerAppProjection ProjectChild(ManagedSlackChildApp child)
     {
@@ -515,6 +573,10 @@ public sealed record SlackManagerSetupRequest(
     string TransportKind = SlackManagerTransportKind.Socket,
     string Readiness = SlackManagerReadiness.Ready);
 
+public sealed record SlackManagerCredentialProvisionResult(
+    string WorkspaceTeamId,
+    bool CredentialProvisioned);
+
 public sealed record SlackManagerClaimIssued(
     string? Code,
     DateTimeOffset? ExpiresAt)
@@ -538,6 +600,7 @@ public sealed record SlackManagerEnrollmentProjection(
     string ManagerTransportKind,
     string ManagerReadiness,
     bool ManagerCredentialConfigured,
+    bool ManagerCredentialProvisioned,
     string? ClaimedSlackUserId,
     DateTimeOffset UpdatedAt);
 

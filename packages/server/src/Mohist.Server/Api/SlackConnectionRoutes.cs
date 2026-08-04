@@ -659,7 +659,6 @@ public static class SlackConnectionRoutes
                 adapterId = body.AdapterId,
                 ownerKind = SlackDeliveryOwnerKinds.Manager,
                 workspaceTeamId = session.WorkspaceTeamId,
-                appToken = session.AppToken,
                 botToken = session.BotToken,
             });
         });

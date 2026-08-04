@@ -29,7 +29,7 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.SlackWorkspaceEnrollments.AsNoTracking()
+        var candidates = await db.SlackWorkspaceEnrollments.AsNoTracking()
             .Where(enrollment => enrollment.DeletedAt == null
                 && enrollment.Lifecycle == SlackEnrollmentLifecycle.Active
                 && enrollment.ManagerCapability == SlackManagerCapability.Available
@@ -38,10 +38,23 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
                 && enrollment.ManagerBotUserId != string.Empty
                 && enrollment.ManagerCredentialRef != string.Empty)
             .OrderBy(enrollment => enrollment.Id)
-            .Select(enrollment => new SlackManagerAdapterTarget(
+            .Select(enrollment => new
+            {
                 enrollment.Id,
-                enrollment.WorkspaceTeamId))
+                enrollment.WorkspaceTeamId,
+                enrollment.ManagerCredentialRef,
+            })
             .ToListAsync(ct);
+
+        var targets = new List<SlackManagerAdapterTarget>(candidates.Count);
+        foreach (var candidate in candidates)
+        {
+            var credential = await LoadManagerCredentialAsync(candidate.ManagerCredentialRef, ct);
+            if (credential is not null)
+                targets.Add(new SlackManagerAdapterTarget(candidate.Id, candidate.WorkspaceTeamId));
+        }
+
+        return targets;
     }
 
     public async Task<SlackManagerAdapterSessionResult> GetSessionAsync(
@@ -53,18 +66,31 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
             return SlackManagerAdapterSessionResult.NotFound;
         if (enrollment.Lifecycle != SlackEnrollmentLifecycle.Active)
             return SlackManagerAdapterSessionResult.Inactive;
-        if (enrollment.ManagerReadiness != SlackManagerReadiness.Ready)
+        if (enrollment.ManagerReadiness != SlackManagerReadiness.Ready
+            || string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef))
             return SlackManagerAdapterSessionResult.NotReady;
 
-        var appToken = await _secrets.LoadAsync(
-            new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, enrollment.Id, SecretKind.AppToken), ct);
-        var botToken = await _secrets.LoadAsync(
-            new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, enrollment.Id, SecretKind.BotToken), ct);
+        var botToken = await LoadManagerCredentialAsync(enrollment.ManagerCredentialRef, ct);
+        if (botToken is null)
+            return SlackManagerAdapterSessionResult.NotReady;
+
         return new SlackManagerAdapterSessionResult(
             SlackManagerAdapterSessionStates.Ready,
             enrollment.WorkspaceTeamId,
-            appToken is { Length: > 0 } ? Encoding.UTF8.GetString(appToken) : null,
-            botToken is { Length: > 0 } ? Encoding.UTF8.GetString(botToken) : null);
+            Encoding.UTF8.GetString(botToken));
+    }
+
+    private async Task<byte[]?> LoadManagerCredentialAsync(
+        string credentialRef,
+        CancellationToken ct)
+    {
+        var secret = await _secrets.LoadAsync(
+            new SecretStoreAddress(
+                SlackDeliveryOwnerIds.ManagerProjectId,
+                credentialRef,
+                SecretKind.BotToken),
+            ct);
+        return secret is { Length: > 0 } ? secret : null;
     }
 }
 
@@ -73,7 +99,6 @@ public sealed record SlackManagerAdapterTarget(string EnrollmentId, string Works
 public sealed record SlackManagerAdapterSessionResult(
     string State,
     string? WorkspaceTeamId = null,
-    string? AppToken = null,
     string? BotToken = null)
 {
     public static readonly SlackManagerAdapterSessionResult NotFound = new(SlackManagerAdapterSessionStates.NotFound);

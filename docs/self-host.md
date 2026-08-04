@@ -49,6 +49,8 @@ mo install slack
 
 核心有两个 unit：`mohist.service`（server）、`mohist-runner.service`（runner）；安装 Slack 接入后再增加 `mohist-slack.service`。`mo install` 已自动 `enable` + `restart` + `loginctl enable-linger`，所以**未登录或开机也会运行**。
 
+Slack 接入会从受保护的 `~/.mohist/operator-token` 文件加载本机 operator credential，不会把文件内容复制到 service unit。若安装命令进程显式设置了 `MOHIST_OPERATOR_TOKEN`，则该值仍按显式安装配置写入 unit；否则服务会把 `MOHIST_OPERATOR_TOKEN_PATH` 指向受保护的 systemd credential 文件。也可用 `MOHIST_OPERATOR_TOKEN_PATH` 指定安装时的受保护源文件路径。
+
 常用命令：
 
 ```bash

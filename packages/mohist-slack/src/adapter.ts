@@ -1,11 +1,10 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ManagerWebClientFactory, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
   readonly transport: AdapterTransport
   readonly socketFactory: SocketClientFactory
   readonly webFactory: WebClientFactory
-  readonly managerWebFactory?: ManagerWebClientFactory
   readonly discoveryIntervalMs?: number
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
@@ -80,10 +79,8 @@ export class SlackAdapter {
   private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
     const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
     if (isManagerTarget(runtime.target)) {
-      runtime.web = session.botToken
-        ? this.options.webFactory(session.botToken, runtime.target)
-        : this.options.managerWebFactory?.(runtime.target)
-      if (!runtime.web) throw new Error("Manager target has no Web client")
+      if (!session.botToken) throw new Error("Manager lease did not return Slack credentials")
+      runtime.web = this.options.webFactory(session.botToken, runtime.target)
     } else {
       if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
       runtime.web = this.options.webFactory(session.botToken, runtime.target)
@@ -105,7 +102,7 @@ export class SlackAdapter {
       if (isManagerTarget(runtime.target)) {
         runtime.web = session.botToken
           ? this.options.webFactory(session.botToken, runtime.target)
-          : this.options.managerWebFactory?.(runtime.target)
+          : undefined
       } else if (session.botToken) {
         runtime.web = this.options.webFactory(session.botToken, runtime.target)
       }

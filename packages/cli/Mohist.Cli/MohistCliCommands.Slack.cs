@@ -15,10 +15,15 @@ internal static class SlackCommands
         ResourceCardinality.Single,
         ["enrollment", "connections", "managedApps", "nextAction"]);
 
+    private static readonly ResourceDescriptor ManagerCredentialDescriptor = new(
+        ResourceCardinality.Single,
+        ["workspaceTeamId", "credentialProvisioned"]);
+
     public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {
         var group = new Command("slack", "Manage Slack integrations");
         group.Subcommands.Add(BuildSetup(api, credentials));
+        group.Subcommands.Add(BuildConfigureManager(api, credentials));
         group.Subcommands.Add(BuildStatus(api, credentials));
         group.Subcommands.Add(BuildCreate(api));
         group.Subcommands.Add(BuildConfigure(api));
@@ -107,6 +112,58 @@ internal static class SlackCommands
                     managerCredentialRef = ctx.GetValue(credentialRef),
                     transportKind = ctx.GetValue(transport),
                     readiness = ctx.GetValue(readiness),
+                },
+                resolvedMode,
+                headers: headers).ConfigureAwait(false);
+        });
+        return command;
+    }
+
+    private static Command BuildConfigureManager(
+        MohistCliApi api,
+        OperatorCredentialProvider credentials)
+    {
+        var command = new Command("configure-manager", "Provide or rotate the workspace Manager Bot credential");
+        var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
+        {
+            Description = "Slack workspace team id",
+        };
+        var file = new Option<string?>("--credentials-file")
+        {
+            Description = "Protected UTF-8 JSON file containing exactly one non-empty Bot credential field",
+        };
+        var output = MohistCliCommands.OutputOption(ManagerCredentialDescriptor);
+        command.Options.Add(workspaceTeam);
+        command.Options.Add(file);
+        command.Options.Add(output);
+        command.SetAction(async ctx =>
+        {
+            var outputValue = ctx.GetValue(output);
+            if (MohistCliCommands.OutputOptionState.Explicit
+                && string.Equals(outputValue, "table", StringComparison.Ordinal))
+                return api.WriteJsonSelectionResult(
+                    ManagerCredentialDescriptor,
+                    new JsonSelection(JsonSelectionKind.Discovery, ManagerCredentialDescriptor.Fields, null));
+            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
+            if (outputExit != 0) return outputExit;
+
+            var team = ctx.GetValue(workspaceTeam);
+            if (string.IsNullOrWhiteSpace(team))
+                return CommandHelpHook.RenderUsageFailure(
+                    ctx,
+                    api.Error,
+                    "slack configure-manager requires --workspace-team in non-interactive mode.");
+
+            var managerBotToken = await ReadManagerCredentialAsync(api, ctx.GetValue(file)).ConfigureAwait(false);
+            if (managerBotToken is null) return 2;
+            var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
+            if (headers is null) return 1;
+            return await api.PrintPostWithOutputAsync(
+                "/api/slack-manager/credentials",
+                new
+                {
+                    workspaceTeamId = team,
+                    managerBotToken,
                 },
                 resolvedMode,
                 headers: headers).ConfigureAwait(false);
@@ -307,9 +364,9 @@ internal static class SlackCommands
         return command;
     }
 
-    private static Command BuildDisable(MohistCliApi api) => BuildDesiredStateCommand(api, "disable", "Disabled");
+    private static Command BuildDisable(MohistCliApi api) => BuildDesiredStateCommand(api, "disable", "Disable");
 
-    private static Command BuildEnable(MohistCliApi api) => BuildDesiredStateCommand(api, "enable", "Enabled");
+    private static Command BuildEnable(MohistCliApi api) => BuildDesiredStateCommand(api, "enable", "Enable");
 
     private static Command BuildDesiredStateCommand(MohistCliApi api, string operation, string desiredState)
     {
@@ -991,6 +1048,46 @@ internal static class SlackCommands
                 || string.IsNullOrWhiteSpace(app.GetString()) || string.IsNullOrWhiteSpace(bot.GetString()))
                 throw new InvalidOperationException("Credential file must contain exactly non-empty appToken and botToken strings.");
             return new CredentialPair(app.GetString()!, bot.GetString()!);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            api.Error.WriteLine(ex.Message);
+            return null;
+        }
+    }
+
+    private static async Task<string?> ReadManagerCredentialAsync(MohistCliApi api, string? path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path))
+            {
+                if (!await api.Invocation.RequirePromptAsync(
+                        "Manager Bot credential",
+                        "--credentials-file <path>",
+                        () => Task.FromResult(true)).ConfigureAwait(false))
+                    return null;
+                await api.Error.WriteLineAsync("Manager Bot credential:").ConfigureAwait(false);
+                var hidden = await api.Invocation.Terminal
+                    .ReadHiddenAsync(api.Invocation.Input, api.Invocation.CancellationToken)
+                    .ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(hidden))
+                    throw new InvalidOperationException("A non-empty Manager Bot credential is required.");
+                return hidden.Trim();
+            }
+
+            if (!IsProtectedFile(api.FileSystem, path))
+                throw new InvalidOperationException("Credential file must be a regular, non-symlink file readable and writable only by the current user.");
+            var json = await api.FileSystem.ReadAllTextAsync(path).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || root.EnumerateObject().Count() != 1
+                || !root.TryGetProperty("botToken", out var bot)
+                || bot.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(bot.GetString()))
+                throw new InvalidOperationException("Credential file must contain exactly one non-empty botToken string.");
+            return bot.GetString()!.Trim();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
         {
