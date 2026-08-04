@@ -252,6 +252,32 @@ OAuth 成功的收敛顺序必须保证：身份先验证；secret durable 后�
 与 DB 失败要可恢复，不能出现「Connection 已绑定可用但 token 未落盘」。回调重放必须返回同一结果，
 不重复交换/绑定。
 
+### App 供给凭据（Slack Configuration Token）
+
+`SlackAppManagementPort` 的正式实现以一枚**工作区级 Configuration Token**（`xoxe.xoxp-`）
+为供给凭据，负责 Manager 与全部 ChildApp 的 manifest create/update 与外部生命周期查询。
+它与 Manager 运行凭据（OAuth 安装后得到的 bot token）是两枚不同凭据：前者授予「创建/维护
+App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效互不影响，不得混用或互相推导。
+
+- **所有权与寻址**：Configuration Token 是「提供者身份 × 工作区」级的外部凭据，归
+  Enrollment 地址保存（与 Manager credential 引用同址，作为其供给部分）。DB 只存引用与
+  元数据（提供时间、来源、轮换代数）；序列化、审计、错误、日志均不得含明文。
+- **两条供给路径**：(1) 本机部署便利——本机 Slack 官方 CLI 已登录目标工作区时，Server 经
+  其标准凭据位置接管这份已授权凭据，用户无需粘贴；(2) 通用路径——setup 引导用户在 Slack
+  App 管理页生成 Configuration Token 并粘贴一次。两条路径产出同一份 Enrollment 侧凭据
+  记录，后续语义一致。路径 (1) 是本机/开发期便利，不是产品对 slack CLI 的依赖。
+- **失效语义**：Slack 侧撤销或过期表现为 App 管理调用鉴权失败；Enrollment 的 Manager
+  capability 进入 Degraded，next action 为「重新供给 App 供给凭据」。已有 ChildApp 与
+  Connection 的数据面（bot token）不受影响，但新建、续装与 manifest 修复全部阻塞，
+  直到重新供给；不得自动重试放大外部失败。
+- **审计**：每次用供给凭据发起的外部写操作（create/update manifest、token rotate）记录
+  操作者、对象与结果，不记录 token 本身。
+- **落地边界**：当前生产实现是 `UnavailableSlackAppManagementPort` 与
+  `UnavailableSlackOAuthCredentialSink` 占位，`/authorize` 仍要求用户直接提交 Bot
+  Token——这是已标注的未交付能力。正式实现落地时，同一切片须同时完成 CLI/Web 的供给
+  引导与本机 slack CLI 凭据接管，使「用户只需授权、不再粘贴运行凭据」成为真实路径，
+  并删除过渡形态里要求粘贴 Bot Token 的入口。
+
 ### 入站通道选择
 
 一个 Connection 在任一时刻只有**一种** transport 有资格 claim 其 outbox，避免 Socket 与 HTTPS
