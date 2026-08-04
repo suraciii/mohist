@@ -262,10 +262,9 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
 - **所有权与寻址**：Configuration Token 是「提供者身份 × 工作区」级的外部凭据，归
   Enrollment 地址保存（与 Manager credential 引用同址，作为其供给部分）。DB 只存引用与
   元数据（提供时间、来源、轮换代数）；序列化、审计、错误、日志均不得含明文。
-- **两条供给路径**：(1) 本机部署便利——本机 Slack 官方 CLI 已登录目标工作区时，Server 经
-  其标准凭据位置接管这份已授权凭据，用户无需粘贴；(2) 通用路径——setup 引导用户在 Slack
-  App 管理页生成 Configuration Token 并粘贴一次。两条路径产出同一份 Enrollment 侧凭据
-  记录，后续语义一致。路径 (1) 是本机/开发期便利，不是产品对 slack CLI 的依赖。
+- **供给路径只有一条**：setup 引导用户在 Slack App 管理页生成 Configuration Token，
+  并以受保护输入粘贴一次（不回显、可撤销、可重供）。不假设用户环境存在 Slack 官方
+  CLI 或任何其他工具；产品文档与 CLI 引导均不出现它们。
 - **失效语义**：Slack 侧撤销或过期表现为 App 管理调用鉴权失败；Enrollment 的 Manager
   capability 进入 Degraded，next action 为「重新供给 App 供给凭据」。已有 ChildApp 与
   Connection 的数据面（bot token）不受影响，但新建、续装与 manifest 修复全部阻塞，
@@ -275,8 +274,8 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
 - **落地边界**：当前生产实现是 `UnavailableSlackAppManagementPort` 与
   `UnavailableSlackOAuthCredentialSink` 占位，`/authorize` 仍要求用户直接提交 Bot
   Token——这是已标注的未交付能力。正式实现落地时，同一切片须同时完成 CLI/Web 的供给
-  引导与本机 slack CLI 凭据接管，使「用户只需授权、不再粘贴运行凭据」成为真实路径，
-  并删除过渡形态里要求粘贴 Bot Token 的入口。
+  引导，使「用户只需授权、不再粘贴运行凭据」成为真实路径，并删除过渡形态里要求粘贴
+  Bot Token 的入口。
 
 ### 入站通道选择
 
