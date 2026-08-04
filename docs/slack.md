@@ -61,6 +61,26 @@ Manager、或让某个 Slack 成员成为 Owner，都不会自动获得 Mohist �
 > 公共入站地址的签名校验替代了对这个 token 的依赖，因此省去这一步手工 token；但它仍需要
 > 安装者完成 Slack 安装授权，也不绕过工作区要求的管理员审批。
 
+### App 供给凭据
+
+Mohist 要为工作区创建并持续维护 Manager 与各 Agent App，需要一枚**工作区级 App 供给
+凭据**（Slack Configuration Token）。它把整个接入过程里需要用户手工处理的凭据压缩到
+最少：
+
+- **只提供一次**：首次连接工作区时提供。本机部署且本机 Slack 官方 CLI 已登录该工作区
+  时，Mohist 可以直接接管这份已授权凭据，用户一次粘贴都不需要；其他情况，引导用户在
+  Slack 的 App 管理页生成并粘贴一次。
+- **加密保存、可轮换、可撤销**：供给凭据只由 Mohist Server 保存，不出现在消息、日志、
+  CLI 回显或 Agent 可见的任何文本中。失效或被撤销时，该工作区的 App 维护动作进入
+  降级并给出唯一下一步（重新供给）；已安装 Bot 的收发不受影响，但新建与续装会阻塞。
+- **之后只剩授权**：有了供给凭据，Manager 与 Agent App 的创建、配置更新都由 Mohist
+  自动完成；用户面对的只剩 Slack 安装授权点击（以及本机路径每个 Agent 一次性的
+  App-level token）。供给凭据只用于创建和维护 App 本身，不能替代安装授权，也不授予
+  Mohist 读取工作区消息的能力。
+
+设计原则：**用户的主交互是授权，不是配置凭据**。任何要求用户再粘贴一枚 token 的流程，
+都必须先证明 Slack 平台没有自动化手段——目前唯一的残留是本机路径的 App-level token。
+
 ## 与 Mohist App 对话
 
 Manager 不仅完成一次性安装，它是 Slack 里的常驻管理入口。用户在 Mohist App 的私聊中
@@ -110,7 +130,8 @@ Mohist App 绑定一个名为 `mohist-slack` 的内置 Mohist Agent：它的能�
 ## 接入前的条件与建议
 
 把一个工作区连接到 Manager 需要一个有权在该工作区创建和安装 App 的 Slack 成员完成一次
-授权。**很多工作区默认禁止成员自行安装 App**，这时 Manager 的安装本身要过一次管理员审批；
+授权，并一次性提供 App 供给凭据（见「App 供给凭据」）。**很多工作区默认禁止成员自行安装
+App**，这时 Manager 的安装本身要过一次管理员审批；
 之后 Manager 为各 Agent 创建的子 App，以及这些子 App 的安装授权，仍可能各自需要审批。
 先确认工作区的 App 安装策略与 plan 是否支持 Manager，再决定要把哪几个 Agent 接进来。
 
@@ -152,7 +173,7 @@ Slack 不会成为 Agent 配置的第二份来源：直接使用失败的 Agent�
 
 ### 创建 Agent App 并完成安装授权
 
-4. Manager 用工作区的 Manager 授权，为这个 Agent 生成一份版本化的 App 配置，并创建一个
+4. Manager 用已供给的 App 供给凭据，为这个 Agent 生成一份版本化的 App 配置，并创建一个
    独立 Slack App。创建可能因超时或网络中断而结果未知；此时 Manager 进入**结果未知**状态，
    **不会自动再创建一个 App**，必须先与 Slack 核对或由人工裁决，确认同一个 Agent 仍只对应
    一个 App。
