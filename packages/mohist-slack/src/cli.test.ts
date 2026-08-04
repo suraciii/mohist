@@ -1,8 +1,117 @@
-import { describe, expect, it } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { FetchFunction } from "@slack/web-api"
 import { createSlackAdapter, resolveOperatorToken } from "./cli.js"
 
+type SocketModeOptionsForTest = { appToken: string; dispatcher?: unknown }
+type WebClientOptionsForTest = { fetch?: FetchFunction }
+type PostMessageInput = { channel: string; text: string; thread_ts?: string }
+
+const slackSdkMocks = vi.hoisted(() => ({
+  proxyUrls: [] as string[],
+  socketOptions: [] as SocketModeOptionsForTest[],
+  webOptions: [] as Array<{ token: string; fetch?: FetchFunction }>,
+  undiciFetchCalls: [] as Array<{ input: string; dispatcher: unknown }>,
+}))
+
+vi.mock("@slack/socket-mode", () => ({
+  SocketModeClient: class {
+    constructor(options: SocketModeOptionsForTest) {
+      slackSdkMocks.socketOptions.push(options)
+    }
+
+    on() {}
+
+    async start() {}
+
+    async disconnect() {}
+  },
+}))
+
+vi.mock("@slack/web-api", () => ({
+  WebClient: class {
+    readonly chat: { postMessage: (input: PostMessageInput) => Promise<{ ok: boolean; ts: string }> }
+
+    constructor(token: string, options?: WebClientOptionsForTest) {
+      const fetch = options?.fetch
+      slackSdkMocks.webOptions.push({ token, fetch })
+      this.chat = {
+        postMessage: async (input) => {
+          if (!fetch) return { ok: true, ts: "fake.001" }
+          const response = await fetch("https://slack.com/api/chat.postMessage", {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+              channel: input.channel,
+              text: input.text,
+              ...(input.thread_ts ? { thread_ts: input.thread_ts } : {}),
+            }).toString(),
+          })
+          return await response.json() as { ok: boolean; ts: string }
+        },
+      }
+    }
+  },
+}))
+
+vi.mock("undici", () => ({
+  ProxyAgent: class {
+    constructor(url: string) {
+      slackSdkMocks.proxyUrls.push(url)
+    }
+  },
+  fetch: async (input: string | URL, init?: { dispatcher?: unknown }) => {
+    slackSdkMocks.undiciFetchCalls.push({ input: String(input), dispatcher: init?.dispatcher })
+    return new Response(JSON.stringify({ ok: true, ts: "proxy.001" }), { status: 200 })
+  },
+}))
+
 const directToken = "direct-token"
+
+beforeEach(() => {
+  slackSdkMocks.proxyUrls.length = 0
+  slackSdkMocks.socketOptions.length = 0
+  slackSdkMocks.webOptions.length = 0
+  slackSdkMocks.undiciFetchCalls.length = 0
+})
+
+function compositionServerFetch(withManagerDelivery = true): typeof fetch {
+  let managerDeliveryClaimed = false
+  return async (input, _init) => {
+    const url = String(input)
+    let data: unknown
+    if (url.endsWith("/api/slack-connections/adapter")) {
+      data = [{ projectId: "p", connectionId: "c" }]
+    } else if (url.endsWith("/api/slack-manager/adapter")) {
+      data = [{ ownerKind: "manager", enrollmentId: "m", workspaceTeamId: "T" }]
+    } else if (url.endsWith("/api/projects/p/slack-connections/c/adapter-session")) {
+      data = { adapterId: "a", appToken: "xapp-c", botToken: "xoxb-c" }
+    } else if (url.endsWith("/api/slack-manager/adapter/m/session")) {
+      data = { adapterId: "a", ownerKind: "manager", workspaceTeamId: "T", botToken: "xoxb-manager" }
+    } else if (url.endsWith("/deliveries/claim-uncertain")) {
+      data = null
+    } else if (url.endsWith("/deliveries/claim")) {
+      const isManager = url.includes("/api/slack-manager/")
+      data = isManager && withManagerDelivery && !managerDeliveryClaimed
+        ? {
+            id: "delivery-1",
+            ownerKind: "manager",
+            conversationId: "D1",
+            threadTs: null,
+            payloadJson: JSON.stringify({ text: "proxy composition" }),
+          }
+        : null
+      managerDeliveryClaimed = managerDeliveryClaimed || isManager
+    } else if (url.endsWith("/deliveries/ack")) {
+      data = null
+    } else {
+      throw new Error(`Unexpected Server request: ${url}`)
+    }
+    return new Response(JSON.stringify({ success: true, data }), { status: 200 })
+  }
+}
 
 describe("mohist-slack CLI composition", () => {
   it("prefers a direct Mohist token over the compatibility environment variable and file path", async () => {
@@ -144,6 +253,54 @@ describe("mohist-slack CLI composition", () => {
       providerMessageIdentity: { conversationId: "D_MANAGER", messageTs: "1700000000.001" },
     }])
     expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)
+    controller.abort()
+  })
+
+  it("injects one explicit ProxyAgent dispatcher into Socket Mode and Web API fetch", async () => {
+    const controller = new AbortController()
+    const adapter = createSlackAdapter({
+      adapterId: "adapter-proxy",
+      serverUrl: "http://server",
+      operatorToken: "test-operator",
+      slackProxyUrl: "http://proxy.test:3128",
+      serverFetch: compositionServerFetch(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+      discoveryIntervalMs: 60_000,
+    })
+
+    await adapter.start(controller.signal)
+
+    const dispatcher = slackSdkMocks.socketOptions[0]?.dispatcher
+    const webFetches = slackSdkMocks.webOptions.map((options) => options.fetch).filter((fetch): fetch is FetchFunction => fetch !== undefined)
+    expect(slackSdkMocks.proxyUrls).toEqual(["http://proxy.test:3128"])
+    expect(dispatcher).toBeDefined()
+    expect(slackSdkMocks.socketOptions[0]).toMatchObject({ appToken: "xapp-c", dispatcher })
+    expect(webFetches).toHaveLength(2)
+    expect(new Set(webFetches).size).toBe(1)
+    expect(slackSdkMocks.undiciFetchCalls).toEqual([{ input: "https://slack.com/api/chat.postMessage", dispatcher }])
+    controller.abort()
+  })
+
+  it("keeps both Slack SDK paths on their direct defaults when no proxy URL is supplied", async () => {
+    const controller = new AbortController()
+    const adapter = createSlackAdapter({
+      adapterId: "adapter-direct",
+      serverUrl: "http://server",
+      operatorToken: "test-operator",
+      serverFetch: compositionServerFetch(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+      discoveryIntervalMs: 60_000,
+    })
+
+    await adapter.start(controller.signal)
+
+    expect(slackSdkMocks.proxyUrls).toEqual([])
+    expect(slackSdkMocks.socketOptions).toEqual([{ appToken: "xapp-c" }])
+    expect(slackSdkMocks.webOptions).toHaveLength(2)
+    expect(slackSdkMocks.webOptions.every((options) => options.fetch === undefined)).toBe(true)
+    expect(slackSdkMocks.undiciFetchCalls).toEqual([])
     controller.abort()
   })
 })
