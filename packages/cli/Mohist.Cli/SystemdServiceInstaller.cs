@@ -8,6 +8,11 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
     private const string SlackUnit = "mohist-slack.service";
+    private const string OperatorCredentialName = "operator-token";
+    private const string DefaultOperatorCredentialSource = "%h/"
+        + OperatorCredentialProvider.DefaultTokenDirectoryName
+        + "/"
+        + OperatorCredentialProvider.DefaultTokenFileName;
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -73,13 +78,20 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     {
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
         var environment = BuildServiceEnvironment(includeOperatorToken: true);
+        var loadCredentials = Array.Empty<string>();
+        if (!environment.ContainsKey(OperatorCredentialProvider.TokenEnvironmentVariable))
+        {
+            environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = $"%d/{OperatorCredentialName}";
+            loadCredentials = [$"{OperatorCredentialName}:{ResolveOperatorCredentialSource()}"];
+        }
         environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
         var unit = new SystemdUnit(
             Name: SlackUnit,
             Description: "Mohist Slack adapter",
             WorkingDirectory: repoRoot,
             ExecStart: $"{ResolveExecutable("node")} packages/mohist-slack/dist/cli.js",
-            Environment: environment);
+            Environment: environment,
+            LoadCredentials: loadCredentials);
         return await InstallAsync(unit, options);
     }
 
@@ -396,6 +408,14 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         return name;
     }
 
+    private string ResolveOperatorCredentialSource()
+    {
+        var configured = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenPathEnvironmentVariable);
+        return string.IsNullOrWhiteSpace(configured)
+            ? DefaultOperatorCredentialSource
+            : NormalizePath(Path.GetFullPath(configured));
+    }
+
     private static string ShellQuote(string value)
     {
         if (value.Length == 0) return "''";
@@ -410,7 +430,8 @@ internal record SystemdUnit(
     string Description,
     string WorkingDirectory,
     string ExecStart,
-    IReadOnlyDictionary<string, string> Environment)
+    IReadOnlyDictionary<string, string> Environment,
+    IReadOnlyList<string>? LoadCredentials = null)
 {
     public string Render()
     {
@@ -422,6 +443,8 @@ internal record SystemdUnit(
         builder.AppendLine("[Service]");
         builder.AppendLine("Type=simple");
         builder.AppendLine($"WorkingDirectory={EscapeValue(NormalizePath(WorkingDirectory))}");
+        foreach (var credential in LoadCredentials ?? [])
+            builder.AppendLine($"LoadCredential={EscapeValue(credential)}");
         foreach (var (key, value) in Environment)
             builder.AppendLine($"Environment=\"{EscapeEnvironment(key)}={EscapeEnvironment(NormalizePath(value))}\"");
         builder.AppendLine($"ExecStart={ExecStart}");

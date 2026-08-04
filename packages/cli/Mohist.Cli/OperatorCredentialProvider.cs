@@ -8,6 +8,8 @@ internal sealed class OperatorCredentialProvider
     public const string HeaderName = "X-Mohist-Operator-Token";
     public const string TokenEnvironmentVariable = "MOHIST_OPERATOR_TOKEN";
     public const string TokenPathEnvironmentVariable = "MOHIST_OPERATOR_TOKEN_PATH";
+    internal const string DefaultTokenDirectoryName = ".mohist";
+    internal const string DefaultTokenFileName = "operator-token";
 
     private const int MinimumTokenLength = 32;
     private readonly IFileSystem _fileSystem;
@@ -49,7 +51,7 @@ internal sealed class OperatorCredentialProvider
         if (!string.IsNullOrWhiteSpace(configured))
             return Path.GetFullPath(configured);
 
-        return Path.Combine(HomeDirectory(), ".mohist", "operator-token");
+        return Path.Combine(HomeDirectory(), DefaultTokenDirectoryName, DefaultTokenFileName);
     }
 
     private UserConfig ReadUserConfig()
