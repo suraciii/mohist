@@ -1,8 +1,68 @@
 import { describe, expect, it } from "vitest"
 import type { FetchFunction } from "@slack/web-api"
-import { createSlackAdapter } from "./cli.js"
+import { createSlackAdapter, resolveOperatorToken } from "./cli.js"
+
+const directToken = "direct-token"
 
 describe("mohist-slack CLI composition", () => {
+  it("prefers a direct Mohist token over the compatibility environment variable and file path", async () => {
+    const token = await resolveOperatorToken(
+      {
+        MOHIST_OPERATOR_TOKEN: `  ${directToken}  `,
+        OPERATOR_TOKEN: "compatibility-operator-token-0123456789abcdef",
+        MOHIST_OPERATOR_TOKEN_PATH: "/run/credentials/operator-token",
+      },
+      async () => {
+        throw new Error("file reader should not be called")
+      },
+    )
+
+    expect(token).toBe(directToken)
+  })
+
+  it("reads, trims, and validates a protected credential path when no direct token is present", async () => {
+    const token = await resolveOperatorToken(
+      { MOHIST_OPERATOR_TOKEN_PATH: "/run/credentials/operator-token" },
+      async (path) => {
+        expect(path).toBe("/run/credentials/operator-token")
+        return `\n${directToken}\n`
+      },
+    )
+
+    expect(token).toBe(directToken)
+  })
+
+  it("rejects an absent credential path without exposing details", async () => {
+    await expect(resolveOperatorToken({}, async () => "should not be read"))
+      .rejects.toThrow("Mohist operator credential is required")
+  })
+
+  it("rejects a blank credential path without exposing details", async () => {
+    await expect(resolveOperatorToken(
+      { MOHIST_OPERATOR_TOKEN_PATH: "   " },
+      async () => "should not be read",
+    )).rejects.toThrow("Mohist operator credential is required")
+  })
+
+  it("rejects an unreadable credential file without exposing the filesystem error", async () => {
+    const result = await resolveOperatorToken(
+      { MOHIST_OPERATOR_TOKEN_PATH: "/run/credentials/operator-token" },
+      async () => { throw new Error("sensitive filesystem detail") },
+    ).catch((error: unknown) => error as Error)
+
+    expect(result.message).toBe("Mohist operator credential file could not be read")
+    expect(result.message).not.toContain("sensitive filesystem detail")
+  })
+
+  it("rejects a blank credential file without exposing its contents", async () => {
+    const result = await resolveOperatorToken(
+      { MOHIST_OPERATOR_TOKEN_PATH: "/run/credentials/operator-token" },
+      async () => " \n\t",
+    ).catch((error: unknown) => error as Error)
+
+    expect(result.message).toBe("Mohist operator credential is invalid")
+  })
+
   it("delivers a Manager message through the production WebClient and acknowledges it on the Manager route", async () => {
     const managerCredential = "test-manager-credential"
     const manager = { ownerKind: "manager" as const, enrollmentId: "manager-enrollment", workspaceTeamId: "T_MANAGER" }

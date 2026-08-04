@@ -81,6 +81,53 @@ public class InstallSpecs
         Assert.Contains("Restart=on-failure", unitContent);
         Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
         Assert.Contains("Environment=\"MOHIST_OPERATOR_TOKEN=operator-token-for-test\"", unitContent);
+        Assert.DoesNotContain("LoadCredential=", unitContent);
+        Assert.DoesNotContain("MOHIST_OPERATOR_TOKEN_PATH=", unitContent);
+    }
+
+    [Fact]
+    public async Task InstallSlack_UsesUserCredentialFileWhenNoInstallationTokenIsSet()
+    {
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        var installer = new SystemdServiceInstaller(
+            TextWriter.Null, TextWriter.Null, files, new FakeCommandExecutor(), environment);
+
+        var exitCode = await installer.InstallSlackAsync(new ServiceInstallOptions(
+            DryRun: true,
+            UnitDir: "/units",
+            RepoRoot: "/repo",
+            ListenUrl: null,
+            ServerUrl: null,
+            RunnerRoot: null));
+
+        Assert.Equal(0, exitCode);
+        var unitContent = files.Read("/units/mohist-slack.service");
+        Assert.Contains("LoadCredential=operator-token:%h/.mohist/operator-token", unitContent);
+        Assert.Contains("Environment=\"MOHIST_OPERATOR_TOKEN_PATH=%d/operator-token\"", unitContent);
+    }
+
+    [Fact]
+    public async Task InstallSlack_UsesExplicitCredentialPathWhenConfigured()
+    {
+        var files = new FakeFileSystem();
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = "/run/mohist/operator-token";
+        var installer = new SystemdServiceInstaller(
+            TextWriter.Null, TextWriter.Null, files, new FakeCommandExecutor(), environment);
+
+        var exitCode = await installer.InstallSlackAsync(new ServiceInstallOptions(
+            DryRun: true,
+            UnitDir: "/units",
+            RepoRoot: "/repo",
+            ListenUrl: null,
+            ServerUrl: null,
+            RunnerRoot: null));
+
+        Assert.Equal(0, exitCode);
+        var unitContent = files.Read("/units/mohist-slack.service");
+        Assert.Contains("LoadCredential=operator-token:/run/mohist/operator-token", unitContent);
+        Assert.Contains("Environment=\"MOHIST_OPERATOR_TOKEN_PATH=%d/operator-token\"", unitContent);
     }
 
     [Fact]

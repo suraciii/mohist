@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { SocketModeClient } from "@slack/socket-mode"
 import { WebClient, type FetchFunction } from "@slack/web-api"
+import { readFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import { SlackAdapter } from "./adapter.js"
 import { HttpAdapterTransport } from "./transport.js"
@@ -17,6 +18,8 @@ export interface SlackCliOptions {
   readonly discoveryIntervalMs?: number
   readonly maxInFlight?: number
 }
+
+export type OperatorCredentialFileReader = (path: string) => Promise<string>
 
 export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
   return new SlackAdapter({
@@ -35,6 +38,27 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
   })
 }
 
+export async function resolveOperatorToken(
+  environment: NodeJS.ProcessEnv = process.env,
+  readCredentialFile: OperatorCredentialFileReader = (path) => readFile(path, "utf8"),
+): Promise<string> {
+  const directToken = firstNonBlank(environment.MOHIST_OPERATOR_TOKEN, environment.OPERATOR_TOKEN)
+  if (directToken !== undefined)
+    return validateOperatorToken(directToken)
+
+  const credentialPath = environment.MOHIST_OPERATOR_TOKEN_PATH?.trim()
+  if (!credentialPath)
+    throw new Error("Mohist operator credential is required")
+
+  let fileToken: string
+  try {
+    fileToken = await readCredentialFile(credentialPath)
+  } catch {
+    throw new Error("Mohist operator credential file could not be read")
+  }
+  return validateOperatorToken(fileToken)
+}
+
 export async function runCli() {
   const controller = new AbortController()
   process.on("SIGINT", () => controller.abort())
@@ -43,7 +67,7 @@ export async function runCli() {
   const adapter = createSlackAdapter({
     adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
     serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
-    operatorToken: requiredEnv("MOHIST_OPERATOR_TOKEN", "OPERATOR_TOKEN"),
+    operatorToken: await resolveOperatorToken(),
     heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
     deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),
     discoveryIntervalMs: positiveNumberEnv("DISCOVERY_POLL_INTERVAL_MS"),
@@ -53,10 +77,15 @@ export async function runCli() {
   await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve(), { once: true }))
 }
 
-function requiredEnv(name: string, fallback?: string): string {
-  const value = env(name) ?? (fallback ? env(fallback) : undefined)
-  if (!value) throw new Error(`${name} is required`)
-  return value
+function firstNonBlank(...values: Array<string | undefined>): string | undefined {
+  return values.find((value) => value?.trim())?.trim()
+}
+
+function validateOperatorToken(value: string): string {
+  const token = value.trim()
+  if (!token)
+    throw new Error("Mohist operator credential is invalid")
+  return token
 }
 
 function env(name: string) {
