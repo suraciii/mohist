@@ -20,7 +20,8 @@
   },
   "dependencies": {
     "@slack/socket-mode": "^3.0.0",
-    "@slack/web-api": "^8.0.0"
+    "@slack/web-api": "^8.0.0",
+    "undici": "7.28.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
