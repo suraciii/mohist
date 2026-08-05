@@ -1,9 +1,18 @@
+using ArchUnitNET.Domain;
+using ArchUnitNET.Loader;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 
 namespace Mohist.Server.ArchTests;
 
 internal static class ArchitectureRulesSupport
 {
+    internal static readonly Architecture Architecture = new ArchLoader()
+        .LoadAssemblies(
+            System.Reflection.Assembly.Load("Mohist.Server"),
+            System.Reflection.Assembly.Load("Mohist.Cli"))
+        .Build();
+
     private static readonly ConcurrentDictionary<string, Lazy<IReadOnlyList<ArchitectureRules.EmbeddedSource>>> EmbeddedSourceCache = new();
 
     internal static IReadOnlyList<ArchitectureRules.EmbeddedSource> EmbeddedSources(string prefix)
@@ -26,4 +35,10 @@ internal static class ArchitectureRulesSupport
             .ToArray()
             .AsReadOnly();
     }
+}
+
+internal static class ArchitectureRulesWarmup
+{
+    [ModuleInitializer]
+    internal static void Initialize() => _ = ArchitectureRulesSupport.Architecture;
 }
