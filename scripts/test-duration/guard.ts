@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve, basename } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { evaluateTrack } from './budget.js'
 import { parseSuiteConfig, validateConfig } from './config.js'
@@ -130,25 +130,32 @@ function evaluateFromFile(track: TrackConfig): TrackEvaluation {
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
-  const xml = readCsproj(csprojPath)
-  const assemblyName = parseAssemblyName(xml) ?? basename(csprojPath).replace(/\.csproj$/, '')
-  const cmd = resolveFocusedCommand({ csprojXml: xml, className, projectDir: dirname(csprojPath), assemblyName })
-  const list = execFileSync(cmd.apphost, cmd.verify as string[], { cwd: repoRoot, encoding: 'utf8' })
-  const classes = list.split('\n').map((line) => line.trim()).filter(Boolean)
-  if (!classes.includes(className)) {
-    const suggestion = classes.find((c) => c.endsWith(`.${className}`) || c.includes(className))
-    process.stderr.write(
-      `class not found: ${className}\n` +
-        (suggestion ? `did you mean: ${suggestion}\n` : `available classes written above\n`),
-    )
-    return 2
-  }
-  console.log(`# focused run (apphost -class, never dotnet --filter)\n${cmd.apphost} ${cmd.args.join(' ')}`)
   try {
-    execFileSync(cmd.apphost, cmd.args as string[], { cwd: repoRoot, stdio: 'inherit' })
-    return 0
-  } catch {
-    return 1
+    const xml = readCsproj(csprojPath)
+    const assemblyName = parseAssemblyName(xml) ?? basename(csprojPath).replace(/\.csproj$/, '')
+    const cmd = resolveFocusedCommand({ csprojXml: xml, className, projectDir: dirname(csprojPath), assemblyName })
+    const list = execFileSync(cmd.apphost, cmd.verify as string[], { cwd: repoRoot, encoding: 'utf8' })
+    const classes = list.split('\n').map((line) => line.trim()).filter(Boolean)
+    if (!classes.includes(className)) {
+      const suggestion = classes.find((c) => c.endsWith(`.${className}`) || c.includes(className))
+      process.stderr.write(
+        `class not found: ${className}\n` +
+          (suggestion ? `did you mean: ${suggestion}\n` : `available classes written above\n`),
+      )
+      return 2
+    }
+    console.log(`# focused run (apphost -class, never dotnet --filter)\n${cmd.apphost} ${cmd.args.join(' ')}`)
+    try {
+      execFileSync(cmd.apphost, cmd.args as string[], { cwd: repoRoot, stdio: 'inherit' })
+      return 0
+    } catch {
+      return 1
+    }
+  } catch (error) {
+    // Bad input (missing csproj/apphost, unreadable csproj) is a usage error:
+    // fail explicitly instead of surfacing an unhandled exception.
+    process.stderr.write(`focused run failed: ${(error as Error).message}\n`)
+    return 2
   }
 }
 
@@ -159,7 +166,7 @@ interface Args {
   focused?: { csproj: string; className: string }
 }
 
-function parseArgs(argv: readonly string[]): Args {
+export function parseArgs(argv: readonly string[]): Args {
   const tracks: string[] = []
   let mode: 'run' | 'check' | 'focused' = 'run'
   let all = false
@@ -172,14 +179,23 @@ function parseArgs(argv: readonly string[]): Args {
     else if (arg.startsWith('--track=')) tracks.push(arg.slice('--track='.length))
     else if (arg === 'focused') {
       mode = 'focused'
-      focused = { csproj: argv[++i], className: argv[++i] }
+      const csproj = argv[i + 1]
+      const className = argv[i + 2]
+      // Missing or partial focused args must not reach resolve(undefined);
+      // main() turns an absent request into usage + exit 2.
+      if (!csproj || !className) {
+        focused = undefined
+      } else {
+        focused = { csproj, className }
+        i += 2
+      }
     }
   }
   return { mode, tracks, all, focused }
 }
 
-async function main(): Promise<number> {
-  const { mode, tracks, all, focused } = parseArgs(process.argv.slice(2))
+export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
+  const { mode, tracks, all, focused } = parseArgs(argv)
 
   if (mode === 'focused') {
     if (!focused) {
@@ -269,4 +285,7 @@ async function main(): Promise<number> {
   return runFailed || budgetFailed ? 1 : 0
 }
 
-void main().then((code) => process.exit(code))
+const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+if (isMain) {
+  void main().then((code) => process.exit(code))
+}

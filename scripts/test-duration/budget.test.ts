@@ -118,6 +118,37 @@ test('evaluateTrack: enforce=true fails on absolute violation but passes when go
   assert.equal(failing.rules[0].absoluteViolations.length, 1)
 })
 
+test('evaluateTrack: enforce=true fails on a parseable but empty report (0 cases)', () => {
+  const track: TrackConfig = {
+    id: 'enforced',
+    kind: 'report-only',
+    report: 'x',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: true,
+    rules: [{ id: 'unit', absoluteMs: 50 }],
+  }
+  const evaluation = evaluateTrack(track, [], TODAY)
+  assert.equal(evaluation.passed, false)
+  assert.equal(evaluation.total, 0)
+  assert.equal(evaluation.rules[0].total, 0)
+})
+
+test('evaluateTrack: enforce=false baseline track stays green on empty report (deadline-governed only)', () => {
+  const track: TrackConfig = {
+    id: 'pending',
+    kind: 'report-only',
+    report: 'x',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+    status: 'baseline-pending',
+  }
+  const evaluation = evaluateTrack(track, [], TODAY)
+  assert.equal(evaluation.passed, true)
+  assert.equal(evaluation.total, 0)
+})
+
 test('model: a spec test at 600ms passes the spec rule (5s cap) but violates the unit rule (500ms cap)', () => {
   const specRule: BudgetRule = { id: 'spec', namePattern: 'Specs\\.', absoluteMs: 5000, percentile: 95, percentileMs: 500 }
   const unitRule: BudgetRule = { id: 'unit', absoluteMs: 500, percentile: 95, percentileMs: 50 }
