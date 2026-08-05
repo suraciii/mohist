@@ -8,7 +8,7 @@ using Mohist.Server.Infrastructure.Security.Secrets;
 
 namespace Mohist.Server.Agent.Services;
 
-public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBindingPort
+public sealed class AgentConnectionStore : IScopedService, ISlackAgentAppBindingPort
 {
     private static readonly HashSet<string> ImmutableBindingFields = new(StringComparer.Ordinal)
     {
@@ -190,11 +190,11 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
             ct);
         if (!existing && requireWorkspaceReservation)
         {
-            existing = await db.ManagedSlackAgentApps.AnyAsync(child =>
-                child.DeletedAt == null
-                && child.WorkspaceTeamId == connection.WorkspaceTeamId
+            existing = await db.ManagedSlackAgentApps.AnyAsync(agentApp =>
+                agentApp.DeletedAt == null
+                && agentApp.WorkspaceTeamId == connection.WorkspaceTeamId
                 && db.AgentConnections.Any(candidate =>
-                    candidate.Id == child.AgentConnectionId
+                    candidate.Id == agentApp.AgentConnectionId
                     && candidate.ProjectId == connection.ProjectId
                     && candidate.AgentId == connection.AgentId), ct);
         }
@@ -317,7 +317,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
                 && c.BotUserId == string.Empty);
         if (claimToken is not null)
         {
-            update = update.Where(connection => db.SlackChildAppBindingObligations.Any(obligation =>
+            update = update.Where(connection => db.SlackAgentAppBindingObligations.Any(obligation =>
                 obligation.AgentConnectionId == connection.Id
                 && obligation.Status == "in_progress"
                 && obligation.ClaimToken == claimToken));
@@ -337,7 +337,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
                 && afterRace.AppId == appId
                 && afterRace.BotUserId == botUserId)
                 return ToDomain(afterRace);
-            if (claimToken is not null && !await db.SlackChildAppBindingObligations.AnyAsync(obligation =>
+            if (claimToken is not null && !await db.SlackAgentAppBindingObligations.AnyAsync(obligation =>
                     obligation.AgentConnectionId == id
                     && obligation.Status == "in_progress"
                     && obligation.ClaimToken == claimToken, ct))

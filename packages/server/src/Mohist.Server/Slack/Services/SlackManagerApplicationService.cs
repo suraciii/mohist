@@ -21,7 +21,7 @@ public sealed class SlackManagerApplicationService : IScopedService
     private readonly AgentQuerier _agents;
     private readonly AgentConnectionStore _connections;
     private readonly SlackWorkspaceEnrollmentStore _enrollments;
-    private readonly ManagedSlackAgentAppStore _childApps;
+    private readonly ManagedSlackAgentAppStore _agentApps;
     private readonly SlackManifestGenerator _manifests;
     private readonly ManagedSlackAgentAppApplicationService _childOperations;
     private readonly SlackOAuthStateService _oauthStates;
@@ -34,7 +34,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         AgentQuerier agents,
         AgentConnectionStore connections,
         SlackWorkspaceEnrollmentStore enrollments,
-        ManagedSlackAgentAppStore childApps,
+        ManagedSlackAgentAppStore agentApps,
         SlackManifestGenerator manifests,
         ManagedSlackAgentAppApplicationService childOperations,
         SlackOAuthStateService oauthStates,
@@ -46,7 +46,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         _agents = agents;
         _connections = connections;
         _enrollments = enrollments;
-        _childApps = childApps;
+        _agentApps = agentApps;
         _manifests = manifests;
         _childOperations = childOperations;
         _oauthStates = oauthStates;
@@ -164,7 +164,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         if (enrollment is null)
             return null;
 
-        var children = await _childApps.ListByEnrollmentAsync(enrollment.Id, ct);
+        var agentApps = await _agentApps.ListByEnrollmentAsync(enrollment.Id, ct);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var connections = await db.AgentConnections.AsNoTracking()
             .Where(connection => connection.ProviderKind == ConnectionProviderKind.Slack
@@ -190,7 +190,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         return new(
             ProjectEnrollment(enrollment, credentialProvisioned),
             connections,
-            children.Select(ProjectChild).ToList(),
+            agentApps.Select(ProjectChild).ToList(),
             NextAction(enrollment, credentialProvisioned));
     }
 
@@ -209,16 +209,16 @@ public sealed class SlackManagerApplicationService : IScopedService
         {
             var connection = connections.FirstOrDefault(item =>
                 item.AgentId == agent.Id && item.WorkspaceTeamId == workspaceTeamId);
-            var child = connection is null
+            var agentApp = connection is null
                 ? null
-                : await _childApps.GetByConnectionAsync(connection.Id, ct);
+                : await _agentApps.GetByConnectionAsync(connection.Id, ct);
             options.Add(new(
                 agent.Id,
                 agent.Name,
                 agent.Description,
                 SlackBotIdentityDeriver.Derive(agent),
                 connection is null ? null : ProjectConnection(connection),
-                child is null ? null : ProjectChild(child)));
+                agentApp is null ? null : ProjectChild(agentApp)));
         }
         return options;
     }
@@ -248,14 +248,14 @@ public sealed class SlackManagerApplicationService : IScopedService
                 && connection.WorkspaceTeamId == request.WorkspaceTeamId);
         if (existing is not null)
         {
-            var existingChild = await _childApps.GetByConnectionAsync(existing.Id, ct);
+            var existingChild = await _agentApps.GetByConnectionAsync(existing.Id, ct);
             if (existingChild is null)
                 existingChild = await CreateChildAsync(existing, enrollment, agent, request, ct);
             return new(false, ProjectConnection(existing), ProjectChild(existingChild),
                 SlackBotIdentityDeriver.Derive(agent));
         }
 
-        if (await _childApps.HasUndeletedForAgentAndWorkspaceAsync(
+        if (await _agentApps.HasUndeletedForAgentAndWorkspaceAsync(
                 request.ProjectId, request.AgentId, request.WorkspaceTeamId, ct))
             throw new SlackManagerConflictException(
                 "An undeleted managed App still owns this Agent/workspace binding. Permanently delete that App before creating another one.",
@@ -290,13 +290,13 @@ public sealed class SlackManagerApplicationService : IScopedService
                 .FirstOrDefault(item => item.AgentId == request.AgentId
                     && item.WorkspaceTeamId == request.WorkspaceTeamId);
             if (raced is null) throw;
-            var racedChild = await _childApps.GetByConnectionAsync(raced.Id, ct)
+            var racedChild = await _agentApps.GetByConnectionAsync(raced.Id, ct)
                 ?? await CreateChildAsync(raced, enrollment, agent, request, ct);
             return new(false, ProjectConnection(raced), ProjectChild(racedChild), preview);
         }
 
-        var child = await CreateChildAsync(connection, enrollment, agent, request, ct);
-        return new(true, ProjectConnection(connection), ProjectChild(child), preview);
+        var agentApp = await CreateChildAsync(connection, enrollment, agent, request, ct);
+        return new(true, ProjectConnection(connection), ProjectChild(agentApp), preview);
     }
 
     public async Task<SlackManagerAppProjection?> GetAsync(
@@ -306,11 +306,11 @@ public sealed class SlackManagerApplicationService : IScopedService
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null) return null;
-        var child = await _childApps.GetByConnectionAsync(connectionId, ct);
-        return child is null ? null : ProjectChild(child);
+        var agentApp = await _agentApps.GetByConnectionAsync(connectionId, ct);
+        return agentApp is null ? null : ProjectChild(agentApp);
     }
 
-    public async Task<ManagedSlackAgentAppOperationResult> CreateChildAppAsync(
+    public async Task<ManagedSlackAgentAppOperationResult> CreateAgentAppAsync(
         string projectId,
         string connectionId,
         CancellationToken ct = default) =>
@@ -328,9 +328,9 @@ public sealed class SlackManagerApplicationService : IScopedService
         string confirmation,
         CancellationToken ct = default)
     {
-        var child = await FindChildAsync(projectId, connectionId, ct);
-        if (child is null) return ManagedSlackAgentAppOperationResult.NotFound;
-        return await _childOperations.DeleteAsync(child.Id, confirmation, ct);
+        var agentApp = await FindChildAsync(projectId, connectionId, ct);
+        if (agentApp is null) return ManagedSlackAgentAppOperationResult.NotFound;
+        return await _childOperations.DeleteAsync(agentApp.Id, confirmation, ct);
     }
 
     public async Task<ManagedSlackAgentAppOperationResult> ReconcileDeleteAsync(
@@ -344,11 +344,11 @@ public sealed class SlackManagerApplicationService : IScopedService
         string connectionId,
         CancellationToken ct = default)
     {
-        var child = await RequireChildAsync(projectId, connectionId, ct);
-        if (child.AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(child.AppId))
-            throw new SlackManagerConflictException("The Child App must be created before authorization.", "child_app_not_created");
-        await _oauthAuthorization.RecordProgressAsync(child.Id, SlackAuthorizationState.AwaitingUser, ct);
-        return await _oauthStates.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId, ct: ct);
+        var agentApp = await RequireChildAsync(projectId, connectionId, ct);
+        if (agentApp.AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(agentApp.AppId))
+            throw new SlackManagerConflictException("The Agent App must be created before authorization.", "child_app_not_created");
+        await _oauthAuthorization.RecordProgressAsync(agentApp.Id, SlackAuthorizationState.AwaitingUser, ct);
+        return await _oauthStates.IssueAsync(agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId, ct: ct);
     }
 
     public Task<SlackOAuthAuthorizationResult> RecordAuthorizationProgressAsync(
@@ -357,7 +357,7 @@ public sealed class SlackManagerApplicationService : IScopedService
         string authorization,
         CancellationToken ct = default) =>
         RunOAuthOperationAsync(projectId, connectionId,
-            child => _oauthAuthorization.RecordProgressAsync(child.Id, authorization, ct), ct);
+            agentApp => _oauthAuthorization.RecordProgressAsync(agentApp.Id, authorization, ct), ct);
 
     public Task<SlackOAuthAuthorizationResult> AuthorizeAsync(
         string projectId,
@@ -366,12 +366,12 @@ public sealed class SlackManagerApplicationService : IScopedService
         string botUserId,
         string botToken,
         CancellationToken ct = default) =>
-        RunOAuthOperationAsync(projectId, connectionId, async child =>
+        RunOAuthOperationAsync(projectId, connectionId, async agentApp =>
             await _oauthAuthorization.AuthorizeAsync(
                 state,
-                child.Id,
-                child.WorkspaceTeamId,
-                child.AppId,
+                agentApp.Id,
+                agentApp.WorkspaceTeamId,
+                agentApp.AppId,
                 botUserId,
                 botToken,
                 ct), ct);
@@ -391,7 +391,7 @@ public sealed class SlackManagerApplicationService : IScopedService
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
             SlackManifestKind.AgentApp,
             ManifestVersion));
-        return await _childApps.CreateAsync(new ManagedSlackAgentApp
+        return await _agentApps.CreateAsync(new ManagedSlackAgentApp
         {
             Id = $"child_app_{Guid.NewGuid():N}",
             EnrollmentId = enrollment.Id,
@@ -410,8 +410,8 @@ public sealed class SlackManagerApplicationService : IScopedService
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null)
             throw new SlackManagerNotFoundException("The Slack Connection was not found.");
-        return await _childApps.GetByConnectionAsync(connectionId, ct)
-            ?? throw new SlackManagerNotFoundException("The managed Child App was not found.");
+        return await _agentApps.GetByConnectionAsync(connectionId, ct)
+            ?? throw new SlackManagerNotFoundException("The managed Agent App was not found.");
     }
 
     private async Task<ManagedSlackAgentAppOperationResult> RunChildOperationAsync(
@@ -420,10 +420,10 @@ public sealed class SlackManagerApplicationService : IScopedService
         Func<string, CancellationToken, Task<ManagedSlackAgentAppOperationResult>> operation,
         CancellationToken ct)
     {
-        var child = await FindChildAsync(projectId, connectionId, ct);
-        return child is null
+        var agentApp = await FindChildAsync(projectId, connectionId, ct);
+        return agentApp is null
             ? ManagedSlackAgentAppOperationResult.NotFound
-            : await operation(child.Id, ct);
+            : await operation(agentApp.Id, ct);
     }
 
     private async Task<ManagedSlackAgentApp?> FindChildAsync(
@@ -433,8 +433,8 @@ public sealed class SlackManagerApplicationService : IScopedService
     {
         var connection = await _connections.GetAsync(projectId, connectionId, ct);
         if (connection is null) return null;
-        var child = await _childApps.GetByConnectionAsync(connectionId, ct);
-        return child;
+        var agentApp = await _agentApps.GetByConnectionAsync(connectionId, ct);
+        return agentApp;
     }
 
     private async Task<SlackOAuthAuthorizationResult> RunOAuthOperationAsync(
@@ -443,8 +443,8 @@ public sealed class SlackManagerApplicationService : IScopedService
         Func<ManagedSlackAgentApp, Task<SlackOAuthAuthorizationResult>> operation,
         CancellationToken ct)
     {
-        var child = await RequireChildAsync(projectId, connectionId, ct);
-        return await operation(child);
+        var agentApp = await RequireChildAsync(projectId, connectionId, ct);
+        return await operation(agentApp);
     }
 
     private static SlackManagerConnectionProjection ProjectConnection(AgentConnection connection) => new(
@@ -514,26 +514,26 @@ public sealed class SlackManagerApplicationService : IScopedService
     private static SecretStoreAddress ManagerCredentialAddress(string enrollmentId) =>
         SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken);
 
-    private static SlackManagerAppProjection ProjectChild(ManagedSlackAgentApp child)
+    private static SlackManagerAppProjection ProjectChild(ManagedSlackAgentApp agentApp)
     {
-        var status = ManagedSlackAgentAppStatusDeriver.Derive(child);
+        var status = ManagedSlackAgentAppStatusDeriver.Derive(agentApp);
         return new(
-            child.Id,
-            child.EnrollmentId,
-            child.AgentConnectionId,
-            child.WorkspaceTeamId,
-            child.AppId,
-            child.BotUserId,
-            child.AppLifecycle,
-            child.Authorization,
+            agentApp.Id,
+            agentApp.EnrollmentId,
+            agentApp.AgentConnectionId,
+            agentApp.WorkspaceTeamId,
+            agentApp.AppId,
+            agentApp.BotUserId,
+            agentApp.AppLifecycle,
+            agentApp.Authorization,
             status.ManifestState,
             SlackManagerTransportKind.Socket,
             status.TransportReadiness,
             status.NextAction,
-            child.BindingState,
-            child.UnknownOutcome,
-            child.ErrorClass,
-            child.DeletedAt);
+            agentApp.BindingState,
+            agentApp.UnknownOutcome,
+            agentApp.ErrorClass,
+            agentApp.DeletedAt);
     }
 
     private static void ValidateAccessPolicy(string value)

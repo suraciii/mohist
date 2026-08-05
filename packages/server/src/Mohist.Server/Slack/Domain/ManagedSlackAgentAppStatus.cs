@@ -9,28 +9,28 @@ public sealed record ManagedSlackAgentAppStatus(
 
 public static class ManagedSlackAgentAppStatusDeriver
 {
-    public static ManagedSlackAgentAppStatus Derive(ManagedSlackAgentApp child)
+    public static ManagedSlackAgentAppStatus Derive(ManagedSlackAgentApp agentApp)
     {
-        ArgumentNullException.ThrowIfNull(child);
-        ValidateKnownState(child);
-        var manifestState = DeriveManifestState(child);
-        var transportReadiness = DeriveTransportReadiness(child);
-        var nextAction = DeriveNextAction(child, manifestState, transportReadiness);
-        return new(child.AppLifecycle, child.Authorization, manifestState, transportReadiness, nextAction);
+        ArgumentNullException.ThrowIfNull(agentApp);
+        ValidateKnownState(agentApp);
+        var manifestState = DeriveManifestState(agentApp);
+        var transportReadiness = DeriveTransportReadiness(agentApp);
+        var nextAction = DeriveNextAction(agentApp, manifestState, transportReadiness);
+        return new(agentApp.AppLifecycle, agentApp.Authorization, manifestState, transportReadiness, nextAction);
     }
 
-    private static void ValidateKnownState(ManagedSlackAgentApp child)
+    private static void ValidateKnownState(ManagedSlackAgentApp agentApp)
     {
-        SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, child.AppLifecycle);
-        SlackStateTransitions.RequireAuthorizationTransition(child.Authorization, child.Authorization);
-        SlackStateTransitions.RequireBindingTransition(child.BindingState, child.BindingState);
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(agentApp.AppLifecycle, agentApp.AppLifecycle);
+        SlackStateTransitions.RequireAuthorizationTransition(agentApp.Authorization, agentApp.Authorization);
+        SlackStateTransitions.RequireBindingTransition(agentApp.BindingState, agentApp.BindingState);
     }
 
-    public static string DeriveManifestState(ManagedSlackAgentApp child) => DeriveManifestState(
-        child.DesiredManifestVersion,
-        child.DesiredManifestHash,
-        child.AppliedManifestVersion,
-        child.AppliedManifestHash);
+    public static string DeriveManifestState(ManagedSlackAgentApp agentApp) => DeriveManifestState(
+        agentApp.DesiredManifestVersion,
+        agentApp.DesiredManifestHash,
+        agentApp.AppliedManifestVersion,
+        agentApp.AppliedManifestHash);
 
     public static string DeriveManifestState(
         int desiredManifestVersion,
@@ -46,9 +46,9 @@ public static class ManagedSlackAgentAppStatusDeriver
                 ? SlackManifestState.Desired
                 : SlackManifestState.DriftKnown;
 
-    public static string DeriveTransportReadiness(ManagedSlackAgentApp child) => DeriveTransportReadiness(
-        child.AppLevelTokenRef,
-        child.BotTokenRef);
+    public static string DeriveTransportReadiness(ManagedSlackAgentApp agentApp) => DeriveTransportReadiness(
+        agentApp.AppLevelTokenRef,
+        agentApp.BotTokenRef);
 
     public static string DeriveTransportReadiness(
         string? appLevelTokenRef,
@@ -61,14 +61,14 @@ public static class ManagedSlackAgentAppStatusDeriver
     }
 
     public static string DeriveNextAction(
-        ManagedSlackAgentApp child,
+        ManagedSlackAgentApp agentApp,
         string manifestState,
         string transportReadiness) => DeriveNextAction(
-            child.AppLifecycle,
-            child.Authorization,
+            agentApp.AppLifecycle,
+            agentApp.Authorization,
             manifestState,
             transportReadiness,
-            child.BindingState);
+            agentApp.BindingState);
 
     public static string DeriveNextAction(
         string appLifecycle,
@@ -78,28 +78,28 @@ public static class ManagedSlackAgentAppStatusDeriver
         string bindingState)
     {
         if (appLifecycle == SlackAppLifecycle.CreateUnknown)
-            return SlackChildAppNextAction.ReconcileCreate;
+            return SlackAgentAppNextAction.ReconcileCreate;
         if (appLifecycle == SlackAppLifecycle.DeleteUnknown)
-            return SlackChildAppNextAction.ReconcileDelete;
+            return SlackAgentAppNextAction.ReconcileDelete;
         if (appLifecycle == SlackAppLifecycle.NotCreated)
-            return SlackChildAppNextAction.CreateChildApp;
+            return SlackAgentAppNextAction.CreateAgentApp;
         if (appLifecycle is SlackAppLifecycle.Creating or SlackAppLifecycle.Deleting)
-            return SlackChildAppNextAction.WaitForOperation;
+            return SlackAgentAppNextAction.WaitForOperation;
         if (appLifecycle == SlackAppLifecycle.Deleted)
-            return SlackChildAppNextAction.Deleted;
+            return SlackAgentAppNextAction.Deleted;
         if (authorization != SlackAuthorizationState.Authorized)
-            return SlackChildAppNextAction.AuthorizeChildApp;
+            return SlackAgentAppNextAction.AuthorizeAgentApp;
         if (manifestState != SlackManifestState.Applied)
-            return SlackChildAppNextAction.ApplyManifest;
+            return SlackAgentAppNextAction.ApplyManifest;
         if (transportReadiness != SlackTransportReadiness.Ready)
-            return SlackChildAppNextAction.ConfigureSocketCredentials;
-        if (bindingState != SlackChildAppBindingState.Bound)
-            return SlackChildAppNextAction.BindConnection;
-        return SlackChildAppNextAction.Ready;
+            return SlackAgentAppNextAction.ConfigureSocketCredentials;
+        if (bindingState != SlackAgentAppBindingState.Bound)
+            return SlackAgentAppNextAction.BindConnection;
+        return SlackAgentAppNextAction.Ready;
     }
 }
 
-public static class SlackChildAppBindingState
+public static class SlackAgentAppBindingState
 {
     public const string Pending = "pending";
     public const string InProgress = "in_progress";
@@ -108,7 +108,7 @@ public static class SlackChildAppBindingState
     public const string Conflict = "conflict";
 }
 
-public static class SlackChildAppBindingObligationStatus
+public static class SlackAgentAppBindingObligationStatus
 {
     public const string Pending = "pending";
     public const string InProgress = "in_progress";
@@ -117,15 +117,16 @@ public static class SlackChildAppBindingObligationStatus
     public const string Conflict = "conflict";
 }
 
-public static class SlackChildAppNextAction
+public static class SlackAgentAppNextAction
 {
     public const string ReconcileCreate = "reconcile_create";
     public const string ReconcileDelete = "reconcile_delete";
-    public const string CreateChildApp = "create_child_app";
+    public const string CreateAgentApp = "create_child_app";
     public const string WaitForOperation = "wait_for_operation";
-    public const string AuthorizeChildApp = "authorize_child_app";
+    public const string AuthorizeAgentApp = "authorize_child_app";
     public const string ApplyManifest = "apply_manifest";
     public const string ConfigureSocketCredentials = "configure_socket_credentials";
+    public const string ProvideCredentials = "provide_credentials";
     public const string BindConnection = "bind_connection";
     public const string Ready = "ready";
     public const string Deleted = "deleted";

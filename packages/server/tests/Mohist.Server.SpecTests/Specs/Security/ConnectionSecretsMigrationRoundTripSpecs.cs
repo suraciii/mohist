@@ -12,8 +12,8 @@ public partial class ConnectionSecretsMigrationSpecs
     {
         AssertIndex(
             model,
-            typeof(SlackChildAppBindingObligationRow),
-            "IX_SlackChildAppBindingObligations_AgentConnectionId",
+            typeof(SlackAgentAppBindingObligationRow),
+            "IX_SlackAgentAppBindingObligations_AgentConnectionId",
             "AgentConnectionId");
         AssertIndex(
             model,
@@ -104,24 +104,21 @@ public partial class ConnectionSecretsMigrationSpecs
         Assert.Null(await ReadTextAsync(context, appsTable, "UnknownOutcome", "child_copy"));
         Assert.Null(await ReadTextAsync(context, appsTable, "AuthorizationExpiresAt", "child_copy"));
 
-        var binding = Assert.Single(await context.SlackChildAppBindingObligations.AsNoTracking().ToListAsync());
-        Assert.Equal("child_copy", binding.ChildAppId);
-        Assert.Equal("connection_copy", binding.AgentConnectionId);
-        Assert.Equal(2, binding.AttemptCount);
-        Assert.NotNull(binding.LastAttemptAt);
-        Assert.Null(binding.FailureClass);
+        Assert.Equal("child_copy", await ReadTextAsync(context, "SlackChildAppBindingObligations", "ChildAppId", "binding_copy"));
+        Assert.Equal("connection_copy", await ReadTextAsync(context, "SlackChildAppBindingObligations", "AgentConnectionId", "binding_copy"));
+        Assert.Equal("2", await ReadTextAsync(context, "SlackChildAppBindingObligations", "AttemptCount", "binding_copy"));
+        Assert.NotNull(await ReadTextAsync(context, "SlackChildAppBindingObligations", "LastAttemptAt", "binding_copy"));
+        Assert.Null(await ReadTextAsync(context, "SlackChildAppBindingObligations", "FailureClass", "binding_copy"));
 
-        var attempt = Assert.Single(await context.SlackOAuthAttempts.AsNoTracking().ToListAsync());
-        Assert.Equal("child_copy", attempt.ChildAppId);
-        Assert.Equal("oauth-token-copy", attempt.BotTokenRef);
-        Assert.Null(attempt.FailureClass);
-        Assert.NotNull(attempt.AppliedAt);
+        Assert.Equal("child_copy", await ReadTextAsync(context, "SlackOAuthAttempts", "ChildAppId", "attempt_copy"));
+        Assert.Equal("oauth-token-copy", await ReadTextAsync(context, "SlackOAuthAttempts", "BotTokenRef", "attempt_copy"));
+        Assert.Null(await ReadTextAsync(context, "SlackOAuthAttempts", "FailureClass", "attempt_copy"));
+        Assert.NotNull(await ReadTextAsync(context, "SlackOAuthAttempts", "AppliedAt", "attempt_copy"));
 
-        var state = Assert.Single(await context.SlackOAuthStates.AsNoTracking().ToListAsync());
-        Assert.Equal("child_copy", state.ChildAppId);
-        Assert.Equal("attempt_copy", state.AuthorizationAttemptId);
-        Assert.Null(state.ConsumedAt);
-        Assert.Equal("accepted", state.Outcome);
+        Assert.Equal("child_copy", await ReadTextAsync(context, "SlackOAuthStates", "ChildAppId", "state_copy"));
+        Assert.Equal("attempt_copy", await ReadTextAsync(context, "SlackOAuthStates", "AuthorizationAttemptId", "state_copy"));
+        Assert.Null(await ReadTextAsync(context, "SlackOAuthStates", "ConsumedAt", "state_copy"));
+        Assert.Equal("accepted", await ReadTextAsync(context, "SlackOAuthStates", "Outcome", "state_copy"));
         await AssertNoForeignKeyViolationsAsync(context);
     }
 

@@ -96,7 +96,7 @@ public class MohistDbContext : DbContext
     public DbSet<ManagedSlackAgentAppRow> ManagedSlackAgentApps { get; set; } = null!;
     public DbSet<SlackOAuthStateRow> SlackOAuthStates { get; set; } = null!;
     public DbSet<SlackOAuthAttemptRow> SlackOAuthAttempts { get; set; } = null!;
-    public DbSet<SlackChildAppBindingObligationRow> SlackChildAppBindingObligations { get; set; } = null!;
+    public DbSet<SlackAgentAppBindingObligationRow> SlackAgentAppBindingObligations { get; set; } = null!;
 
     public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
@@ -701,6 +701,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.DesiredManifestHash).HasMaxLength(128).IsRequired();
             entity.Property(e => e.AppliedManifestHash).HasMaxLength(128);
             entity.Property(e => e.VerifiedScopesJson).HasColumnType("JSON").IsRequired();
+            entity.Property(e => e.InstallUrl).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.RuntimeCredentialValidationState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.OperationId).HasMaxLength(256);
             entity.Property(e => e.OperationKind).HasMaxLength(32);
             entity.Property(e => e.UnknownOutcome).HasMaxLength(1024);
@@ -746,7 +748,7 @@ public class MohistDbContext : DbContext
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.StateHash).HasMaxLength(64).IsRequired();
@@ -758,26 +760,26 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.StateHash)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackOAuthAttempts_StateHash");
-            entity.HasIndex(e => new { e.ChildAppId, e.Status, e.UpdatedAt })
-                .HasDatabaseName("IX_SlackOAuthAttempts_ChildAppId_Status_UpdatedAt");
+            entity.HasIndex(e => new { e.AgentAppId, e.Status, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackOAuthAttempts_AgentAppId_Status_UpdatedAt");
         });
 
-        modelBuilder.Entity<SlackChildAppBindingObligationRow>(entity =>
+        modelBuilder.Entity<SlackAgentAppBindingObligationRow>(entity =>
         {
-            entity.ToTable("SlackChildAppBindingObligations", table =>
+            entity.ToTable("SlackAgentAppBindingObligations", table =>
             {
                 table.HasCheckConstraint(
-                    "CK_SlackChildAppBindingObligations_Status",
+                    "CK_SlackAgentAppBindingObligations_Status",
                     "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AgentConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ClaimToken).HasMaxLength(64).IsRequired();
@@ -786,19 +788,19 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<AgentConnectionRow>()
                 .WithMany()
                 .HasForeignKey(e => e.AgentConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.AgentConnectionId)
-                .HasDatabaseName("IX_SlackChildAppBindingObligations_AgentConnectionId");
-            entity.HasIndex(e => e.ChildAppId)
+                .HasDatabaseName("IX_SlackAgentAppBindingObligations_AgentConnectionId");
+            entity.HasIndex(e => e.AgentAppId)
                 .IsUnique()
-                .HasDatabaseName("UX_SlackChildAppBindingObligations_ChildAppId");
+                .HasDatabaseName("UX_SlackAgentAppBindingObligations_AgentAppId");
             entity.HasIndex(e => new { e.Status, e.UpdatedAt })
-                .HasDatabaseName("IX_SlackChildAppBindingObligations_Status_UpdatedAt");
+                .HasDatabaseName("IX_SlackAgentAppBindingObligations_Status_UpdatedAt");
         });
 
         modelBuilder.Entity<SlackOAuthStateRow>(entity =>
@@ -811,7 +813,7 @@ public class MohistDbContext : DbContext
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.StateHash).HasMaxLength(64).IsRequired();
@@ -821,7 +823,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SlackOAuthAttemptRow>()
                 .WithMany()
@@ -832,8 +834,8 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => e.StateHash)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackOAuthStates_StateHash");
-            entity.HasIndex(e => new { e.ChildAppId, e.ConsumedAt, e.ExpiresAt })
-                .HasDatabaseName("IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt");
+            entity.HasIndex(e => new { e.AgentAppId, e.ConsumedAt, e.ExpiresAt })
+                .HasDatabaseName("IX_SlackOAuthStates_AgentAppId_ConsumedAt_ExpiresAt");
         });
 
         modelBuilder.Entity<SlackOwnerClaimCodeRow>(entity =>

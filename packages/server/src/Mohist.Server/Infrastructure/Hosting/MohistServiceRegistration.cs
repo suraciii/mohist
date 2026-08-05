@@ -165,7 +165,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackConfigurationCredentialStore>(sp => sp.GetRequiredService<ProtectedSlackConfigurationCredentialStore>());
         services.AddScoped<ISlackBotIdentityVerificationPort>(sp => sp.GetRequiredService<UnavailableSlackBotIdentityVerificationPort>());
         services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
-        services.AddScoped<ISlackChildAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
+        services.AddScoped<ISlackAgentAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
 
         // Socket lease core: the conventional scan registers concrete stores
         // as themselves only, so the lease interfaces need explicit bindings.
@@ -224,7 +224,7 @@ public static class MohistServiceRegistration
             sp.GetRequiredService<SlackConnectionHealthBackpressurer>());
         services.AddScoped<SlackOutboxDispatcherService>();
         services.AddHostedService<SlackOutboxDispatcherActivationService>();
-        services.AddHostedService<SlackChildAppBindingObligationWorker>();
+        services.AddHostedService<SlackAgentAppBindingObligationWorker>();
         services.AddScoped<IWorkflowArtifactBindService, WorkflowArtifactBindService>();
         services.AddScoped<IWorkflowArtifactQuerier, WorkflowArtifactQuerier>();
         services.AddScoped<Mohist.Server.Workflow.Services.IWorkflowProfileProvider, Mohist.Server.Workflow.Services.WorkflowProfileProvider>();

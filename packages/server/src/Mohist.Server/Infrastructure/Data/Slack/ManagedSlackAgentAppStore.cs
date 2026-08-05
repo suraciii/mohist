@@ -54,70 +54,99 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.ManagedSlackAgentApps.AnyAsync(child =>
-            child.DeletedAt == null
-            && child.WorkspaceTeamId == workspaceTeamId
+        return await db.ManagedSlackAgentApps.AnyAsync(agentApp =>
+            agentApp.DeletedAt == null
+            && agentApp.WorkspaceTeamId == workspaceTeamId
             && db.AgentConnections.Any(connection =>
-                connection.Id == child.AgentConnectionId
+                connection.Id == agentApp.AgentConnectionId
                 && connection.ProjectId == projectId
                 && connection.AgentId == agentId), ct);
     }
 
-    public async Task<ManagedSlackAgentApp> CreateAsync(ManagedSlackAgentApp childApp, CancellationToken ct = default)
+    public async Task<ManagedSlackAgentApp> CreateAsync(ManagedSlackAgentApp agentApp, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(childApp);
-        if (string.IsNullOrWhiteSpace(childApp.Id)) throw new ArgumentException("Child App id is required.", nameof(childApp));
-        if (string.IsNullOrWhiteSpace(childApp.EnrollmentId)) throw new ArgumentException("Enrollment id is required.", nameof(childApp));
-        if (string.IsNullOrWhiteSpace(childApp.WorkspaceTeamId)) throw new ArgumentException("Workspace team id is required.", nameof(childApp));
-        if (string.IsNullOrWhiteSpace(childApp.AgentConnectionId)) throw new ArgumentException("Agent connection id is required.", nameof(childApp));
-        SlackStateTransitions.RequireChildAppLifecycleTransition(childApp.AppLifecycle, childApp.AppLifecycle);
-        SlackStateTransitions.RequireAuthorizationTransition(childApp.Authorization, childApp.Authorization);
-        SlackStateTransitions.RequireBindingTransition(childApp.BindingState, childApp.BindingState);
-        if (childApp.AppLifecycle != SlackAppLifecycle.NotCreated)
-            throw new InvalidOperationException("A new Child App must start not_created.");
-        if (childApp.Authorization != SlackAuthorizationState.NotStarted)
-            throw new InvalidOperationException("A new Child App must start not_started.");
-        if (childApp.BindingState != SlackChildAppBindingState.Pending)
-            throw new InvalidOperationException("A new Child App must start with a pending binding.");
-        if (!string.IsNullOrEmpty(childApp.AppId) || !string.IsNullOrEmpty(childApp.BotUserId))
-            throw new InvalidOperationException("A new Child App cannot have a partially bound Slack identity.");
-        if (childApp.DesiredManifestVersion <= 0 || string.IsNullOrWhiteSpace(childApp.DesiredManifestHash))
-            throw new InvalidOperationException("A new Child App requires a versioned desired manifest.");
-        if (childApp.AppliedManifestVersion is not null || !string.IsNullOrWhiteSpace(childApp.AppliedManifestHash))
-            throw new InvalidOperationException("A new Child App cannot have an applied manifest.");
+        ArgumentNullException.ThrowIfNull(agentApp);
+        if (string.IsNullOrWhiteSpace(agentApp.Id)) throw new ArgumentException("Agent App id is required.", nameof(agentApp));
+        if (string.IsNullOrWhiteSpace(agentApp.EnrollmentId)) throw new ArgumentException("Enrollment id is required.", nameof(agentApp));
+        if (string.IsNullOrWhiteSpace(agentApp.WorkspaceTeamId)) throw new ArgumentException("Workspace team id is required.", nameof(agentApp));
+        if (string.IsNullOrWhiteSpace(agentApp.AgentConnectionId)) throw new ArgumentException("Agent connection id is required.", nameof(agentApp));
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(agentApp.AppLifecycle, agentApp.AppLifecycle);
+        SlackStateTransitions.RequireAuthorizationTransition(agentApp.Authorization, agentApp.Authorization);
+        SlackStateTransitions.RequireBindingTransition(agentApp.BindingState, agentApp.BindingState);
+        if (agentApp.AppLifecycle != SlackAppLifecycle.NotCreated)
+            throw new InvalidOperationException("A new Agent App must start not_created.");
+        if (agentApp.Authorization != SlackAuthorizationState.NotStarted)
+            throw new InvalidOperationException("A new Agent App must start not_started.");
+        if (agentApp.BindingState != SlackAgentAppBindingState.Pending)
+            throw new InvalidOperationException("A new Agent App must start with a pending binding.");
+        if (!string.IsNullOrEmpty(agentApp.AppId) || !string.IsNullOrEmpty(agentApp.BotUserId))
+            throw new InvalidOperationException("A new Agent App cannot have a partially bound Slack identity.");
+        if (agentApp.DesiredManifestVersion <= 0 || string.IsNullOrWhiteSpace(agentApp.DesiredManifestHash))
+            throw new InvalidOperationException("A new Agent App requires a versioned desired manifest.");
+        if (agentApp.AppliedManifestVersion is not null || !string.IsNullOrWhiteSpace(agentApp.AppliedManifestHash))
+            throw new InvalidOperationException("A new Agent App cannot have an applied manifest.");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var enrollmentExists = await db.SlackWorkspaceEnrollments.AnyAsync(item =>
-            item.Id == childApp.EnrollmentId
-            && item.WorkspaceTeamId == childApp.WorkspaceTeamId
+            item.Id == agentApp.EnrollmentId
+            && item.WorkspaceTeamId == agentApp.WorkspaceTeamId
             && item.DeletedAt == null, ct);
-        if (!enrollmentExists) throw new InvalidOperationException("The Child App enrollment does not match an active workspace enrollment.");
+        if (!enrollmentExists) throw new InvalidOperationException("The Agent App enrollment does not match an active workspace enrollment.");
 
         var now = _timeProvider.GetUtcNow();
-        childApp.CreatedAt = now;
-        childApp.UpdatedAt = now;
-        db.ManagedSlackAgentApps.Add(ToRow(childApp));
+        agentApp.CreatedAt = now;
+        agentApp.UpdatedAt = now;
+        db.ManagedSlackAgentApps.Add(ToRow(agentApp));
         await db.SaveChangesAsync(ct);
-        return childApp;
+        return agentApp;
     }
 
     public Task<ManagedSlackAgentApp?> TransitionAppLifecycleAsync(
         string id,
         string nextLifecycle,
         CancellationToken ct = default) =>
-        UpdateAsync(id, childApp => childApp.TransitionAppLifecycle(nextLifecycle), ct);
+        UpdateAsync(id, agentApp => agentApp.TransitionAppLifecycle(nextLifecycle), ct);
 
     public Task<ManagedSlackAgentApp?> TransitionAuthorizationAsync(
         string id,
         string nextAuthorization,
         CancellationToken ct = default) =>
-        UpdateAsync(id, childApp => childApp.TransitionAuthorization(nextAuthorization), ct);
+        UpdateAsync(id, agentApp => agentApp.TransitionAuthorization(nextAuthorization), ct);
 
     public Task<ManagedSlackAgentApp?> TransitionBindingStateAsync(
         string id,
         string nextBindingState,
         CancellationToken ct = default) =>
-        UpdateAsync(id, childApp => childApp.TransitionBindingState(nextBindingState), ct);
+        UpdateAsync(id, agentApp => agentApp.TransitionBindingState(nextBindingState), ct);
+
+    public Task<ManagedSlackAgentApp?> UpdateDesiredManifestAsync(
+        string id,
+        int manifestVersion,
+        string manifestHash,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, agentApp =>
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(manifestVersion);
+            ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+            agentApp.DesiredManifestVersion = manifestVersion;
+            agentApp.DesiredManifestHash = manifestHash;
+        }, ct);
+
+    public Task<ManagedSlackAgentApp?> StageRuntimeCredentialsAsync(
+        string id,
+        string botTokenRef,
+        string appLevelTokenRef,
+        string botUserId,
+        string verifiedScopesJson,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, agentApp => agentApp.StageRuntimeCredentials(
+            botTokenRef, appLevelTokenRef, botUserId, verifiedScopesJson), ct);
+
+    public Task<ManagedSlackAgentApp?> ApplyCredentialValidationAsync(
+        string id,
+        string validationState,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, agentApp => agentApp.ApplyCredentialValidation(validationState), ct);
 
     private async Task<ManagedSlackAgentApp?> UpdateAsync(
         string id,
@@ -129,12 +158,12 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.ManagedSlackAgentApps.SingleOrDefaultAsync(item => item.Id == id, ct);
         if (row is null) return null;
-        var childApp = ToDomain(row);
-        transition(childApp);
-        Apply(childApp, row);
+        var agentApp = ToDomain(row);
+        transition(agentApp);
+        Apply(agentApp, row);
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
-        return childApp;
+        return agentApp;
     }
 
     private static ManagedSlackAgentApp ToDomain(ManagedSlackAgentAppRow row) => new()
@@ -152,6 +181,8 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         AppliedManifestVersion = row.AppliedManifestVersion,
         AppliedManifestHash = row.AppliedManifestHash,
         VerifiedScopesJson = row.VerifiedScopesJson,
+        InstallUrl = row.InstallUrl,
+        RuntimeCredentialValidationState = row.RuntimeCredentialValidationState,
         OperationFence = row.OperationFence,
         OperationId = row.OperationId,
         OperationKind = row.OperationKind,
@@ -173,47 +204,57 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         DeletedAt = row.DeletedAt,
     };
 
-    private static ManagedSlackAgentAppRow ToRow(ManagedSlackAgentApp childApp) => new()
+    private static ManagedSlackAgentAppRow ToRow(ManagedSlackAgentApp agentApp) => new()
     {
-        Id = childApp.Id,
-        EnrollmentId = childApp.EnrollmentId,
-        WorkspaceTeamId = childApp.WorkspaceTeamId,
-        AgentConnectionId = childApp.AgentConnectionId,
-        AppId = childApp.AppId,
-        BotUserId = childApp.BotUserId,
-        AppLifecycle = childApp.AppLifecycle,
-        Authorization = childApp.Authorization,
-        DesiredManifestVersion = childApp.DesiredManifestVersion,
-        DesiredManifestHash = childApp.DesiredManifestHash,
-        AppliedManifestVersion = childApp.AppliedManifestVersion,
-        AppliedManifestHash = childApp.AppliedManifestHash,
-        VerifiedScopesJson = childApp.VerifiedScopesJson,
-        OperationFence = childApp.OperationFence,
-        OperationId = childApp.OperationId,
-        OperationKind = childApp.OperationKind,
-        OperationStartedAt = childApp.OperationStartedAt,
-        UnknownOutcome = childApp.UnknownOutcome,
-        ErrorClass = childApp.ErrorClass,
-        AuthorizationAttemptId = childApp.AuthorizationAttemptId,
-        AuthorizedAt = childApp.AuthorizedAt,
-        AuthorizationExpiresAt = childApp.AuthorizationExpiresAt,
-        ClientSecretRef = childApp.ClientSecretRef,
-        SigningSecretRef = childApp.SigningSecretRef,
-        AppLevelTokenRef = childApp.AppLevelTokenRef,
-        BotTokenRef = childApp.BotTokenRef,
-        BindingState = childApp.BindingState,
-        BindingErrorClass = childApp.BindingErrorClass,
-        AuditJson = childApp.AuditJson,
-        CreatedAt = childApp.CreatedAt,
-        UpdatedAt = childApp.UpdatedAt,
-        DeletedAt = childApp.DeletedAt,
+        Id = agentApp.Id,
+        EnrollmentId = agentApp.EnrollmentId,
+        WorkspaceTeamId = agentApp.WorkspaceTeamId,
+        AgentConnectionId = agentApp.AgentConnectionId,
+        AppId = agentApp.AppId,
+        BotUserId = agentApp.BotUserId,
+        AppLifecycle = agentApp.AppLifecycle,
+        Authorization = agentApp.Authorization,
+        DesiredManifestVersion = agentApp.DesiredManifestVersion,
+        DesiredManifestHash = agentApp.DesiredManifestHash,
+        AppliedManifestVersion = agentApp.AppliedManifestVersion,
+        AppliedManifestHash = agentApp.AppliedManifestHash,
+        VerifiedScopesJson = agentApp.VerifiedScopesJson,
+        InstallUrl = agentApp.InstallUrl,
+        RuntimeCredentialValidationState = agentApp.RuntimeCredentialValidationState,
+        OperationFence = agentApp.OperationFence,
+        OperationId = agentApp.OperationId,
+        OperationKind = agentApp.OperationKind,
+        OperationStartedAt = agentApp.OperationStartedAt,
+        UnknownOutcome = agentApp.UnknownOutcome,
+        ErrorClass = agentApp.ErrorClass,
+        AuthorizationAttemptId = agentApp.AuthorizationAttemptId,
+        AuthorizedAt = agentApp.AuthorizedAt,
+        AuthorizationExpiresAt = agentApp.AuthorizationExpiresAt,
+        ClientSecretRef = agentApp.ClientSecretRef,
+        SigningSecretRef = agentApp.SigningSecretRef,
+        AppLevelTokenRef = agentApp.AppLevelTokenRef,
+        BotTokenRef = agentApp.BotTokenRef,
+        BindingState = agentApp.BindingState,
+        BindingErrorClass = agentApp.BindingErrorClass,
+        AuditJson = agentApp.AuditJson,
+        CreatedAt = agentApp.CreatedAt,
+        UpdatedAt = agentApp.UpdatedAt,
+        DeletedAt = agentApp.DeletedAt,
     };
-    private static void Apply(ManagedSlackAgentApp childApp, ManagedSlackAgentAppRow row)
+    private static void Apply(ManagedSlackAgentApp agentApp, ManagedSlackAgentAppRow row)
     {
-        row.AppLifecycle = childApp.AppLifecycle;
-        row.Authorization = childApp.Authorization;
-        row.BindingState = childApp.BindingState;
-        row.DeletedAt = childApp.DeletedAt;
+        row.AppLifecycle = agentApp.AppLifecycle;
+        row.Authorization = agentApp.Authorization;
+        row.BindingState = agentApp.BindingState;
+        row.BotUserId = agentApp.BotUserId;
+        row.VerifiedScopesJson = agentApp.VerifiedScopesJson;
+        row.InstallUrl = agentApp.InstallUrl;
+        row.RuntimeCredentialValidationState = agentApp.RuntimeCredentialValidationState;
+        row.ClientSecretRef = agentApp.ClientSecretRef;
+        row.SigningSecretRef = agentApp.SigningSecretRef;
+        row.AppLevelTokenRef = agentApp.AppLevelTokenRef;
+        row.BotTokenRef = agentApp.BotTokenRef;
+        row.DeletedAt = agentApp.DeletedAt;
     }
 
 }

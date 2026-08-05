@@ -23,6 +23,8 @@ public sealed class ManagedSlackAgentApp
     public int? AppliedManifestVersion { get; set; }
     public string? AppliedManifestHash { get; set; }
     public string VerifiedScopesJson { get; set; } = "[]";
+    public string InstallUrl { get; set; } = string.Empty;
+    public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
 
     public int OperationFence { get; set; }
     public string? OperationId { get; set; }
@@ -39,7 +41,7 @@ public sealed class ManagedSlackAgentApp
     public string SigningSecretRef { get; set; } = string.Empty;
     public string AppLevelTokenRef { get; set; } = string.Empty;
     public string BotTokenRef { get; set; } = string.Empty;
-    public string BindingState { get; set; } = SlackChildAppBindingState.Pending;
+    public string BindingState { get; set; } = SlackAgentAppBindingState.Pending;
     public string? BindingErrorClass { get; set; }
     public string AuditJson { get; set; } = "[]";
 
@@ -49,7 +51,7 @@ public sealed class ManagedSlackAgentApp
 
     public void TransitionAppLifecycle(string nextLifecycle)
     {
-        SlackStateTransitions.RequireChildAppLifecycleTransition(AppLifecycle, nextLifecycle);
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(AppLifecycle, nextLifecycle);
         AppLifecycle = nextLifecycle;
     }
 
@@ -63,6 +65,40 @@ public sealed class ManagedSlackAgentApp
     {
         SlackStateTransitions.RequireBindingTransition(BindingState, nextBindingState);
         BindingState = nextBindingState;
+    }
+
+    public void StageRuntimeCredentials(
+        string botTokenRef,
+        string appLevelTokenRef,
+        string botUserId,
+        string verifiedScopesJson)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(botTokenRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appLevelTokenRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(botUserId);
+        if (AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(AppId))
+            throw new InvalidOperationException("Runtime credentials require a created Agent App with a known App id.");
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState,
+            SlackRuntimeCredentialValidationState.Candidate);
+        BotTokenRef = botTokenRef.Trim();
+        AppLevelTokenRef = appLevelTokenRef.Trim();
+        BotUserId = botUserId.Trim();
+        VerifiedScopesJson = string.IsNullOrWhiteSpace(verifiedScopesJson) ? "[]" : verifiedScopesJson;
+        Authorization = SlackAuthorizationState.Authorized;
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Candidate;
+    }
+
+    public void ApplyCredentialValidation(string validationState)
+    {
+        if (validationState is not (SlackRuntimeCredentialValidationState.Verified
+            or SlackRuntimeCredentialValidationState.Failed
+            or SlackRuntimeCredentialValidationState.AwaitingSocket))
+            throw new ArgumentException("A credential validation result must be 'verified', 'awaiting_socket' or 'failed'.", nameof(validationState));
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState,
+            validationState);
+        RuntimeCredentialValidationState = validationState;
     }
 }
 

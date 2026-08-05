@@ -17,6 +17,8 @@ public sealed class ManagedSlackAgentAppRow
     public int? AppliedManifestVersion { get; set; }
     public string? AppliedManifestHash { get; set; }
     public string VerifiedScopesJson { get; set; } = "[]";
+    public string InstallUrl { get; set; } = string.Empty;
+    public string RuntimeCredentialValidationState { get; set; } = "not_provided";
 
     public int OperationFence { get; set; }
     public string? OperationId { get; set; }

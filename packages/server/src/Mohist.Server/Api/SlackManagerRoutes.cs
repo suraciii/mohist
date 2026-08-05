@@ -68,7 +68,7 @@ public static class SlackManagerRoutes
         {
             var result = await service.GetAsync(context.GetResolvedProject().Id, connectionId, ct);
             return result is null
-                ? ApiResults.NotFound("The managed Child App was not found.")
+                ? ApiResults.NotFound("The managed Agent App was not found.")
                 : ApiResults.Ok(result);
         });
 
@@ -77,7 +77,7 @@ public static class SlackManagerRoutes
             string connectionId,
             SlackManagerApplicationService service,
             CancellationToken ct) =>
-            OperationResult(await service.CreateChildAppAsync(
+            OperationResult(await service.CreateAgentAppAsync(
                 context.GetResolvedProject().Id, connectionId, ct)));
 
         manager.MapPost("/connections/{connectionId}/reconcile-create", async (
@@ -183,7 +183,7 @@ public static class SlackManagerRoutes
                 context.GetResolvedProject().Id, connectionId, body.Confirmation, ct);
             return result.Status switch
             {
-                ManagedSlackAgentAppOperationStatus.NotFound => ApiResults.NotFound("The managed Child App was not found."),
+                ManagedSlackAgentAppOperationStatus.NotFound => ApiResults.NotFound("The managed Agent App was not found."),
                 ManagedSlackAgentAppOperationStatus.NotAllowed => ApiResults.Conflict(
                     result.ErrorClass ?? "Permanent delete is not currently allowed.", "permanent_delete_not_allowed"),
                 _ => ApiResults.Ok(result),
@@ -223,7 +223,7 @@ public static class SlackManagerRoutes
 
     private static IResult OperationResult(ManagedSlackAgentAppOperationResult result) =>
         result.Status == ManagedSlackAgentAppOperationStatus.NotFound
-            ? ApiResults.NotFound("The managed Child App was not found.")
+            ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
     private static IResult? RejectClientIdentity(

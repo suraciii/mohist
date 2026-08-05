@@ -39,7 +39,7 @@ public static class SlackStateTransitions
             SlackManagerCapability.Unauthorized,
             SlackManagerCapability.CapacityLimited);
 
-    public static void RequireChildAppLifecycleTransition(string current, string next)
+    public static void RequireAgentAppLifecycleTransition(string current, string next)
     {
         var known = new[]
         {
@@ -62,7 +62,7 @@ public static class SlackStateTransitions
             || current == SlackAppLifecycle.Deleting && IsOneOf(next, SlackAppLifecycle.Deleted, SlackAppLifecycle.DeleteUnknown, SlackAppLifecycle.Created)
             || current == SlackAppLifecycle.DeleteUnknown && IsOneOf(next, SlackAppLifecycle.Deleted, SlackAppLifecycle.Created, SlackAppLifecycle.Deleting))
             return;
-        throw InvalidTransition("Child App lifecycle", current, next);
+        throw InvalidTransition("Agent App lifecycle", current, next);
     }
 
     public static void RequireAuthorizationTransition(string current, string next)
@@ -157,14 +157,14 @@ public static class SlackStateTransitions
         RequireKnownBinding(next);
         if (current == next)
             return;
-        if (current == SlackChildAppBindingState.Pending
-            && IsOneOf(next, SlackChildAppBindingState.InProgress, SlackChildAppBindingState.Bound, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-            || current == SlackChildAppBindingState.InProgress && IsOneOf(next, SlackChildAppBindingState.Bound, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-            || current == SlackChildAppBindingState.Bound && next == SlackChildAppBindingState.ConnectionDeleted
-            || IsOneOf(current, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-                && IsOneOf(next, SlackChildAppBindingState.Pending, SlackChildAppBindingState.InProgress))
+        if (current == SlackAgentAppBindingState.Pending
+            && IsOneOf(next, SlackAgentAppBindingState.InProgress, SlackAgentAppBindingState.Bound, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+            || current == SlackAgentAppBindingState.InProgress && IsOneOf(next, SlackAgentAppBindingState.Bound, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+            || current == SlackAgentAppBindingState.Bound && next == SlackAgentAppBindingState.ConnectionDeleted
+            || IsOneOf(current, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+                && IsOneOf(next, SlackAgentAppBindingState.Pending, SlackAgentAppBindingState.InProgress))
             return;
-        throw InvalidTransition("Child App binding", current, next);
+        throw InvalidTransition("Agent App binding", current, next);
     }
 
     public static void RequireOAuthAttemptTransition(string current, string next)
@@ -204,11 +204,11 @@ public static class SlackStateTransitions
 
     private static void RequireKnownBinding(string value) =>
         RequireKnown(value,
-            SlackChildAppBindingState.Pending,
-            SlackChildAppBindingState.InProgress,
-            SlackChildAppBindingState.Bound,
-            SlackChildAppBindingState.ConnectionDeleted,
-            SlackChildAppBindingState.Conflict);
+            SlackAgentAppBindingState.Pending,
+            SlackAgentAppBindingState.InProgress,
+            SlackAgentAppBindingState.Bound,
+            SlackAgentAppBindingState.ConnectionDeleted,
+            SlackAgentAppBindingState.Conflict);
 
     private static void RequireKnown(string value, params string[] allowed)
     {

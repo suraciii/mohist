@@ -3,17 +3,17 @@ using Microsoft.Extensions.Logging;
 
 namespace Mohist.Server.Slack.Services;
 
-public sealed class SlackChildAppBindingObligationWorker : BackgroundService
+public sealed class SlackAgentAppBindingObligationWorker : BackgroundService
 {
     private static readonly TimeSpan InitialDelay = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ILogger<SlackChildAppBindingObligationWorker> _logger;
+    private readonly ILogger<SlackAgentAppBindingObligationWorker> _logger;
 
-    public SlackChildAppBindingObligationWorker(
+    public SlackAgentAppBindingObligationWorker(
         IServiceScopeFactory scopeFactory,
-        ILogger<SlackChildAppBindingObligationWorker> logger)
+        ILogger<SlackAgentAppBindingObligationWorker> logger)
     {
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -28,7 +28,7 @@ public sealed class SlackChildAppBindingObligationWorker : BackgroundService
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 await scope.ServiceProvider
-                    .GetRequiredService<SlackChildAppBindingService>()
+                    .GetRequiredService<SlackAgentAppBindingService>()
                     .ProcessPendingAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -37,7 +37,7 @@ public sealed class SlackChildAppBindingObligationWorker : BackgroundService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to process Slack Child App binding obligations");
+                _logger.LogWarning(ex, "Failed to process Slack Agent App binding obligations");
             }
 
             await DelayAsync(Interval, stoppingToken);

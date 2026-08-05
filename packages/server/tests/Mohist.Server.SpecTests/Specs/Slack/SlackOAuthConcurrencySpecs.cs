@@ -65,7 +65,7 @@ public sealed class SlackOAuthConcurrencySpecs : IAsyncLifetime
             ClientSecretRef = "client-secret-ref",
             SigningSecretRef = "signing-secret-ref",
             AppLevelTokenRef = "app-token-ref",
-            BindingState = SlackChildAppBindingState.Pending,
+            BindingState = SlackAgentAppBindingState.Pending,
             AuditJson = "[]",
             CreatedAt = now,
             UpdatedAt = now,

@@ -1,9 +1,9 @@
 namespace Mohist.Server.Infrastructure.Data.Slack;
 
-public sealed class SlackChildAppBindingObligationRow
+public sealed class SlackAgentAppBindingObligationRow
 {
     public string Id { get; set; } = string.Empty;
-    public string ChildAppId { get; set; } = string.Empty;
+    public string AgentAppId { get; set; } = string.Empty;
     public string AgentConnectionId { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;
     public int AttemptCount { get; set; }

@@ -1874,6 +1874,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("JSON");
 
+                    b.Property<string>("InstallUrl")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuntimeCredentialValidationState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("WorkspaceTeamId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -1971,7 +1981,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("SlackAmbiguousPrompts", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackChildAppBindingObligationRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAgentAppBindingObligationRow", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(256)
@@ -1985,7 +1995,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2016,18 +2026,18 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AgentConnectionId")
-                        .HasDatabaseName("IX_SlackChildAppBindingObligations_AgentConnectionId");
+                        .HasDatabaseName("IX_SlackAgentAppBindingObligations_AgentConnectionId");
 
-                    b.HasIndex("ChildAppId")
+                    b.HasIndex("AgentAppId")
                         .IsUnique()
-                        .HasDatabaseName("UX_SlackChildAppBindingObligations_ChildAppId");
+                        .HasDatabaseName("UX_SlackAgentAppBindingObligations_AgentAppId");
 
                     b.HasIndex("Status", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackChildAppBindingObligations_Status_UpdatedAt");
+                        .HasDatabaseName("IX_SlackAgentAppBindingObligations_Status_UpdatedAt");
 
-                    b.ToTable("SlackChildAppBindingObligations", null, t =>
+                    b.ToTable("SlackAgentAppBindingObligations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_SlackChildAppBindingObligations_Status", "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
+                            t.HasCheckConstraint("CK_SlackAgentAppBindingObligations_Status", "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
                         });
                 });
 
@@ -2150,7 +2160,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2192,8 +2202,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_SlackOAuthAttempts_StateHash");
 
-                    b.HasIndex("ChildAppId", "Status", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackOAuthAttempts_ChildAppId_Status_UpdatedAt");
+                    b.HasIndex("AgentAppId", "Status", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackOAuthAttempts_AgentAppId_Status_UpdatedAt");
 
                     b.ToTable("SlackOAuthAttempts", null, t =>
                         {
@@ -2216,7 +2226,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2253,8 +2263,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_SlackOAuthStates_StateHash");
 
-                    b.HasIndex("ChildAppId", "ConsumedAt", "ExpiresAt")
-                        .HasDatabaseName("IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt");
+                    b.HasIndex("AgentAppId", "ConsumedAt", "ExpiresAt")
+                        .HasDatabaseName("IX_SlackOAuthStates_AgentAppId_ConsumedAt_ExpiresAt");
 
                     b.ToTable("SlackOAuthStates", null, t =>
                         {
@@ -3529,7 +3539,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackChildAppBindingObligationRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAgentAppBindingObligationRow", b =>
                 {
                     b.HasOne("Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow", null)
                         .WithMany()
@@ -3539,7 +3549,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -3548,7 +3558,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                 {
                     b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -3562,7 +3572,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });

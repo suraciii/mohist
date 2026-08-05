@@ -1,9 +1,11 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
-using System.Text.Json;
 
 namespace Mohist.Server.Slack.Services;
 
@@ -12,28 +14,31 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISlackAppManagementPort _appManagement;
     private readonly ISlackAppManagementFactPort _appManagementFacts;
+    private readonly ISecretStore _secrets;
     private readonly TimeProvider _timeProvider;
 
     public ManagedSlackAgentAppApplicationService(
         IDbContextFactory<MohistDbContext> dbFactory,
         ISlackAppManagementPort appManagement,
         ISlackAppManagementFactPort appManagementFacts,
+        ISecretStore secrets,
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _appManagement = appManagement;
         _appManagementFacts = appManagementFacts;
+        _secrets = secrets;
         _timeProvider = timeProvider;
     }
 
-    public Task<ManagedSlackAgentAppOperationResult> CreateAsync(string childAppId, CancellationToken ct = default) =>
-        ExecuteAsync(childAppId, SlackChildAppOperation.Create, ct);
+    public Task<ManagedSlackAgentAppOperationResult> CreateAsync(string agentAppId, CancellationToken ct = default) =>
+        ExecuteAsync(agentAppId, SlackAgentAppOperation.Create, ct);
 
-    public Task<ManagedSlackAgentAppOperationResult> ReconcileCreateAsync(string childAppId, CancellationToken ct = default) =>
-        ReconcileAsync(childAppId, SlackChildAppOperation.Create, ct);
+    public Task<ManagedSlackAgentAppOperationResult> ReconcileCreateAsync(string agentAppId, CancellationToken ct = default) =>
+        ReconcileAsync(agentAppId, SlackAgentAppOperation.Create, ct);
 
     public async Task<ManagedSlackAgentAppOperationResult> DeleteAsync(
-        string childAppId,
+        string agentAppId,
         string confirmation,
         CancellationToken ct = default)
     {
@@ -42,132 +47,137 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             return ManagedSlackAgentAppOperationResult.NotAllowed(SlackAppLifecycle.Created, "confirmation_required");
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var child = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == childAppId, ct);
-        if (child is null) return ManagedSlackAgentAppOperationResult.NotFound;
+        var agentApp = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
+        if (agentApp is null) return ManagedSlackAgentAppOperationResult.NotFound;
         var connectionActive = await db.AgentConnections.AnyAsync(item =>
-            item.Id == child.AgentConnectionId && item.DeletedAt == null, ct);
+            item.Id == agentApp.AgentConnectionId && item.DeletedAt == null, ct);
         if (connectionActive)
-            return ManagedSlackAgentAppOperationResult.NotAllowed(child.AppLifecycle, "active_connection_binding");
-        if (child.AppLifecycle != SlackAppLifecycle.Created)
-            return ManagedSlackAgentAppOperationResult.NotAllowed(child.AppLifecycle, "permanent_delete_requires_created");
-        return await ExecuteAsync(childAppId, SlackChildAppOperation.Delete, ct);
+            return ManagedSlackAgentAppOperationResult.NotAllowed(agentApp.AppLifecycle, "active_connection_binding");
+        if (agentApp.AppLifecycle != SlackAppLifecycle.Created)
+            return ManagedSlackAgentAppOperationResult.NotAllowed(agentApp.AppLifecycle, "permanent_delete_requires_created");
+        return await ExecuteAsync(agentAppId, SlackAgentAppOperation.Delete, ct);
     }
 
-    public Task<ManagedSlackAgentAppOperationResult> ReconcileDeleteAsync(string childAppId, CancellationToken ct = default) =>
-        ReconcileAsync(childAppId, SlackChildAppOperation.Delete, ct);
+    public Task<ManagedSlackAgentAppOperationResult> ReconcileDeleteAsync(string agentAppId, CancellationToken ct = default) =>
+        ReconcileAsync(agentAppId, SlackAgentAppOperation.Delete, ct);
 
     private async Task<ManagedSlackAgentAppOperationResult> ExecuteAsync(
-        string childAppId,
-        SlackChildAppOperation operation,
+        string agentAppId,
+        SlackAgentAppOperation operation,
         CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(childAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var child = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == childAppId, ct);
-        if (child is null) return ManagedSlackAgentAppOperationResult.NotFound;
-        if (!CanStart(child, operation))
-            return ManagedSlackAgentAppOperationResult.NotAllowed(child.AppLifecycle, child.ErrorClass);
+        var agentApp = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
+        if (agentApp is null) return ManagedSlackAgentAppOperationResult.NotFound;
+        if (!CanStart(agentApp, operation))
+            return ManagedSlackAgentAppOperationResult.NotAllowed(agentApp.AppLifecycle, agentApp.ErrorClass);
 
         var operationId = $"{operation.ToString().ToLowerInvariant()}_{Guid.NewGuid():N}";
-        var nextLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
-        SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, nextLifecycle);
-        var nextFence = child.OperationFence + 1;
+        var nextLifecycle = operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(agentApp.AppLifecycle, nextLifecycle);
+        var nextFence = agentApp.OperationFence + 1;
         var now = _timeProvider.GetUtcNow();
         var changed = await db.ManagedSlackAgentApps
-            .Where(item => item.Id == childAppId
-                && item.OperationFence == child.OperationFence
-                && item.AppLifecycle == child.AppLifecycle
-                && item.OperationId == child.OperationId)
+            .Where(item => item.Id == agentAppId
+                && item.OperationFence == agentApp.OperationFence
+                && item.AppLifecycle == agentApp.AppLifecycle
+                && item.OperationId == agentApp.OperationId)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.OperationFence, nextFence)
                 .SetProperty(item => item.OperationId, operationId)
-                .SetProperty(item => item.OperationKind, operation == SlackChildAppOperation.Create ? "create" : "delete")
+                .SetProperty(item => item.OperationKind, operation == SlackAgentAppOperation.Create ? "create" : "delete")
                 .SetProperty(item => item.OperationStartedAt, now)
                 .SetProperty(item => item.UnknownOutcome, (string?)null)
                 .SetProperty(item => item.ErrorClass, (string?)null)
-                .SetProperty(item => item.AppLifecycle, operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting)
+                .SetProperty(item => item.AppLifecycle, operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting)
                 .SetProperty(item => item.UpdatedAt, now), ct);
         if (changed == 0)
             return ManagedSlackAgentAppOperationResult.Concurrent;
 
-        var request = new SlackAppManagementRequest(child.EnrollmentId, child.Id, child.WorkspaceTeamId, child.AppId);
-        var external = operation == SlackChildAppOperation.Create
+        var request = new SlackAppManagementRequest(agentApp.EnrollmentId, agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId);
+        var external = operation == SlackAgentAppOperation.Create
             ? await _appManagement.CreateAsync(request, ct)
             : await _appManagement.DeleteAsync(request, ct);
-        return await ApplyResultAsync(childAppId, nextFence, operationId, operation, external, ct);
+        return await ApplyResultAsync(agentAppId, nextFence, operationId, operation, external, ct);
     }
 
     private async Task<ManagedSlackAgentAppOperationResult> ReconcileAsync(
-        string childAppId,
-        SlackChildAppOperation operation,
+        string agentAppId,
+        SlackAgentAppOperation operation,
         CancellationToken ct)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(childAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var child = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == childAppId, ct);
-        if (child is null) return ManagedSlackAgentAppOperationResult.NotFound;
-        var expectedLifecycle = operation == SlackChildAppOperation.Create
+        var agentApp = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
+        if (agentApp is null) return ManagedSlackAgentAppOperationResult.NotFound;
+        var expectedLifecycle = operation == SlackAgentAppOperation.Create
             ? SlackAppLifecycle.CreateUnknown
             : SlackAppLifecycle.DeleteUnknown;
-        if (child.AppLifecycle != expectedLifecycle)
-            return ManagedSlackAgentAppOperationResult.NotAllowed(child.AppLifecycle, child.ErrorClass);
+        if (agentApp.AppLifecycle != expectedLifecycle)
+            return ManagedSlackAgentAppOperationResult.NotAllowed(agentApp.AppLifecycle, agentApp.ErrorClass);
 
         var operationId = $"reconcile_{operation.ToString().ToLowerInvariant()}_{Guid.NewGuid():N}";
-        var nextLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
-        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, nextLifecycle);
-        var nextFence = child.OperationFence + 1;
+        var nextLifecycle = operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.Creating : SlackAppLifecycle.Deleting;
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(expectedLifecycle, nextLifecycle);
+        var nextFence = agentApp.OperationFence + 1;
         var now = _timeProvider.GetUtcNow();
         var changed = await db.ManagedSlackAgentApps
-            .Where(item => item.Id == childAppId
-                && item.OperationFence == child.OperationFence
+            .Where(item => item.Id == agentAppId
+                && item.OperationFence == agentApp.OperationFence
                 && item.AppLifecycle == expectedLifecycle
-                && item.OperationId == child.OperationId)
+                && item.OperationId == agentApp.OperationId)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.OperationFence, nextFence)
                 .SetProperty(item => item.OperationId, operationId)
-                .SetProperty(item => item.OperationKind, operation == SlackChildAppOperation.Create ? "reconcile_create" : "reconcile_delete")
+                .SetProperty(item => item.OperationKind, operation == SlackAgentAppOperation.Create ? "reconcile_create" : "reconcile_delete")
                 .SetProperty(item => item.OperationStartedAt, now)
                 .SetProperty(item => item.UpdatedAt, now), ct);
         if (changed == 0)
             return ManagedSlackAgentAppOperationResult.Concurrent;
 
-        var request = new SlackAppManagementRequest(child.EnrollmentId, child.Id, child.WorkspaceTeamId, child.AppId);
+        var request = new SlackAppManagementRequest(agentApp.EnrollmentId, agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId);
         var fact = await _appManagementFacts.InspectAsync(request, ct);
-        return await ApplyFactAsync(childAppId, nextFence, operationId, operation, fact, ct);
+        return await ApplyFactAsync(agentAppId, nextFence, operationId, operation, fact, ct);
     }
 
     private async Task<ManagedSlackAgentAppOperationResult> ApplyResultAsync(
-        string childAppId,
+        string agentAppId,
         int fence,
         string operationId,
-        SlackChildAppOperation operation,
+        SlackAgentAppOperation operation,
         SlackAppManagementResult result,
         CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var now = _timeProvider.GetUtcNow();
-        var expectedLifecycle = operation == SlackChildAppOperation.Create
+        var expectedLifecycle = operation == SlackAgentAppOperation.Create
             ? SlackAppLifecycle.Creating
             : SlackAppLifecycle.Deleting;
-        var lifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.Created : SlackAppLifecycle.Deleted;
-        var unknownLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown;
-        var failedLifecycle = operation == SlackChildAppOperation.Create ? SlackAppLifecycle.NotCreated : SlackAppLifecycle.Created;
-        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, lifecycle);
-        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, unknownLifecycle);
-        SlackStateTransitions.RequireChildAppLifecycleTransition(expectedLifecycle, failedLifecycle);
+        var lifecycle = operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.Created : SlackAppLifecycle.Deleted;
+        var unknownLifecycle = operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown;
+        var failedLifecycle = operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.NotCreated : SlackAppLifecycle.Created;
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(expectedLifecycle, lifecycle);
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(expectedLifecycle, unknownLifecycle);
+        SlackStateTransitions.RequireAgentAppLifecycleTransition(expectedLifecycle, failedLifecycle);
         var query = db.ManagedSlackAgentApps
-            .Where(item => item.Id == childAppId
+            .Where(item => item.Id == agentAppId
                 && item.OperationFence == fence
                 && item.OperationId == operationId
                 && item.AppLifecycle == expectedLifecycle);
+        if (result.Outcome == SlackAppManagementOutcome.Succeeded && operation == SlackAgentAppOperation.Create)
+            await PersistAppCredentialsAsync(agentAppId, result, ct);
         int changed;
         if (result.Outcome == SlackAppManagementOutcome.Succeeded)
         {
             changed = await query.ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.AppLifecycle, lifecycle)
-                .SetProperty(item => item.AppId, operation == SlackChildAppOperation.Create ? result.AppId ?? string.Empty : string.Empty)
+                .SetProperty(item => item.AppId, operation == SlackAgentAppOperation.Create ? result.AppId ?? string.Empty : string.Empty)
                 .SetProperty(item => item.BotUserId, string.Empty)
-                .SetProperty(item => item.DeletedAt, operation == SlackChildAppOperation.Delete ? now : (DateTimeOffset?)null)
+                .SetProperty(item => item.InstallUrl, operation == SlackAgentAppOperation.Create ? result.InstallUrl ?? string.Empty : string.Empty)
+                .SetProperty(item => item.ClientSecretRef, operation == SlackAgentAppOperation.Create && !string.IsNullOrEmpty(result.ClientSecret) ? agentAppId : string.Empty)
+                .SetProperty(item => item.SigningSecretRef, operation == SlackAgentAppOperation.Create && !string.IsNullOrEmpty(result.SigningSecret) ? agentAppId : string.Empty)
+                .SetProperty(item => item.DeletedAt, operation == SlackAgentAppOperation.Delete ? now : (DateTimeOffset?)null)
                 .SetProperty(item => item.UnknownOutcome, (string?)null)
                 .SetProperty(item => item.ErrorClass, (string?)null)
                 .SetProperty(item => item.UpdatedAt, now), ct);
@@ -191,10 +201,10 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         if (changed == 0)
             return ManagedSlackAgentAppOperationResult.Stale;
 
-        if (operation == SlackChildAppOperation.Delete)
+        if (operation == SlackAgentAppOperation.Delete)
         {
             var row = await db.ManagedSlackAgentApps.SingleAsync(item =>
-                item.Id == childAppId && item.OperationFence == fence && item.OperationId == operationId, ct);
+                item.Id == agentAppId && item.OperationFence == fence && item.OperationId == operationId, ct);
             var audit = JsonSerializer.Deserialize<List<ManagedSlackAuditEntry>>(row.AuditJson) ?? [];
             audit.Add(new ManagedSlackAuditEntry("permanent_delete", result.Outcome.ToString().ToLowerInvariant(), now));
             row.AuditJson = JsonSerializer.Serialize(audit);
@@ -203,35 +213,56 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         return ManagedSlackAgentAppOperationResult.Completed(result.Outcome, result.AppId, result.ErrorClass);
     }
 
+    private async Task PersistAppCredentialsAsync(
+        string agentAppId,
+        SlackAppManagementResult result,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(result.ClientSecret))
+        {
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.ClientSecret),
+                Encoding.UTF8.GetBytes(result.ClientSecret),
+                ct);
+        }
+        if (!string.IsNullOrEmpty(result.SigningSecret))
+        {
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.SigningSecret),
+                Encoding.UTF8.GetBytes(result.SigningSecret),
+                ct);
+        }
+    }
+
     private async Task<ManagedSlackAgentAppOperationResult> ApplyFactAsync(
-        string childAppId,
+        string agentAppId,
         int fence,
         string operationId,
-        SlackChildAppOperation operation,
+        SlackAgentAppOperation operation,
         SlackAppManagementFact fact,
         CancellationToken ct)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var now = _timeProvider.GetUtcNow();
         var query = db.ManagedSlackAgentApps
-            .Where(item => item.Id == childAppId && item.OperationFence == fence && item.OperationId == operationId);
+            .Where(item => item.Id == agentAppId && item.OperationFence == fence && item.OperationId == operationId);
         var outcome = fact.Outcome switch
         {
-            SlackAppManagementFactOutcome.Present when operation == SlackChildAppOperation.Create =>
+            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create =>
                 await query.ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.Created)
                     .SetProperty(item => item.AppId, fact.AppId ?? string.Empty)
                     .SetProperty(item => item.UnknownOutcome, (string?)null)
                     .SetProperty(item => item.ErrorClass, (string?)null)
                     .SetProperty(item => item.UpdatedAt, now), ct),
-            SlackAppManagementFactOutcome.Absent when operation == SlackChildAppOperation.Create =>
+            SlackAppManagementFactOutcome.Absent when operation == SlackAgentAppOperation.Create =>
                 await query.ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.NotCreated)
                     .SetProperty(item => item.AppId, string.Empty)
                     .SetProperty(item => item.UnknownOutcome, (string?)null)
                     .SetProperty(item => item.ErrorClass, "reconciled_absent")
                     .SetProperty(item => item.UpdatedAt, now), ct),
-            SlackAppManagementFactOutcome.Absent when operation == SlackChildAppOperation.Delete =>
+            SlackAppManagementFactOutcome.Absent when operation == SlackAgentAppOperation.Delete =>
                 await query.ExecuteUpdateAsync(setters => setters
                     .SetProperty(item => item.AppLifecycle, SlackAppLifecycle.Deleted)
                     .SetProperty(item => item.AppId, string.Empty)
@@ -240,7 +271,7 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
                     .SetProperty(item => item.ErrorClass, (string?)null)
                     .SetProperty(item => item.UpdatedAt, now), ct),
             _ => await query.ExecuteUpdateAsync(setters => setters
-                .SetProperty(item => item.AppLifecycle, operation == SlackChildAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown)
+                .SetProperty(item => item.AppLifecycle, operation == SlackAgentAppOperation.Create ? SlackAppLifecycle.CreateUnknown : SlackAppLifecycle.DeleteUnknown)
                 .SetProperty(item => item.UnknownOutcome, fact.ErrorClass ?? "manual_adjudication_required")
                 .SetProperty(item => item.ErrorClass, fact.ErrorClass ?? "manual_adjudication_required")
                 .SetProperty(item => item.UpdatedAt, now), ct),
@@ -248,8 +279,8 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
 
         var status = fact.Outcome switch
         {
-            SlackAppManagementFactOutcome.Present when operation == SlackChildAppOperation.Create => ManagedSlackAgentAppOperationStatus.Reconciled,
-            SlackAppManagementFactOutcome.Absent when operation is SlackChildAppOperation.Create or SlackChildAppOperation.Delete => ManagedSlackAgentAppOperationStatus.Reconciled,
+            SlackAppManagementFactOutcome.Present when operation == SlackAgentAppOperation.Create => ManagedSlackAgentAppOperationStatus.Reconciled,
+            SlackAppManagementFactOutcome.Absent when operation is SlackAgentAppOperation.Create or SlackAgentAppOperation.Delete => ManagedSlackAgentAppOperationStatus.Reconciled,
             _ => ManagedSlackAgentAppOperationStatus.ManualAdjudicationRequired,
         };
         return outcome == 1
@@ -257,16 +288,16 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             : ManagedSlackAgentAppOperationResult.Stale;
     }
 
-    private static bool CanStart(ManagedSlackAgentAppRow child, SlackChildAppOperation operation) =>
+    private static bool CanStart(ManagedSlackAgentAppRow agentApp, SlackAgentAppOperation operation) =>
         operation switch
         {
-            SlackChildAppOperation.Create => child.AppLifecycle == SlackAppLifecycle.NotCreated,
-            SlackChildAppOperation.Delete => child.AppLifecycle == SlackAppLifecycle.Created,
+            SlackAgentAppOperation.Create => agentApp.AppLifecycle == SlackAppLifecycle.NotCreated,
+            SlackAgentAppOperation.Delete => agentApp.AppLifecycle == SlackAppLifecycle.Created,
             _ => false,
         };
 }
 
-public enum SlackChildAppOperation
+public enum SlackAgentAppOperation
 {
     Create,
     Delete,

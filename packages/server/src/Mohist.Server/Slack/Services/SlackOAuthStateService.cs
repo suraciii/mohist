@@ -22,13 +22,13 @@ public sealed class SlackOAuthStateService : IScopedService
     }
 
     public async Task<SlackOAuthStateIssued> IssueAsync(
-        string childAppId,
+        string agentAppId,
         string workspaceTeamId,
         string appId,
         TimeSpan? lifetime = null,
         CancellationToken ct = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(childAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
         ArgumentException.ThrowIfNullOrWhiteSpace(appId);
         var state = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
@@ -36,18 +36,18 @@ public sealed class SlackOAuthStateService : IScopedService
         var now = _timeProvider.GetUtcNow();
         var expiresAt = now.Add(lifetime ?? DefaultLifetime);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var childExists = await db.ManagedSlackAgentApps.AnyAsync(child =>
-            child.Id == childAppId
-            && child.WorkspaceTeamId == workspaceTeamId
-            && child.AppId == appId
-            && child.DeletedAt == null, ct);
-        if (!childExists) throw new InvalidOperationException("The OAuth state target does not match a managed Child App.");
+        var childExists = await db.ManagedSlackAgentApps.AnyAsync(agentApp =>
+            agentApp.Id == agentAppId
+            && agentApp.WorkspaceTeamId == workspaceTeamId
+            && agentApp.AppId == appId
+            && agentApp.DeletedAt == null, ct);
+        if (!childExists) throw new InvalidOperationException("The OAuth state target does not match a managed Agent App.");
 
         var attemptId = $"oauth_attempt_{Guid.NewGuid():N}";
         db.SlackOAuthAttempts.Add(new SlackOAuthAttemptRow
         {
             Id = attemptId,
-            ChildAppId = childAppId,
+            AgentAppId = agentAppId,
             WorkspaceTeamId = workspaceTeamId,
             AppId = appId,
             StateHash = stateHash,
@@ -58,7 +58,7 @@ public sealed class SlackOAuthStateService : IScopedService
         db.SlackOAuthStates.Add(new SlackOAuthStateRow
         {
             Id = $"oauth_state_{Guid.NewGuid():N}",
-            ChildAppId = childAppId,
+            AgentAppId = agentAppId,
             WorkspaceTeamId = workspaceTeamId,
             AppId = appId,
             StateHash = stateHash,
@@ -72,7 +72,7 @@ public sealed class SlackOAuthStateService : IScopedService
 
     public async Task<SlackOAuthStateValidation> ConsumeAsync(
         string state,
-        string childAppId,
+        string agentAppId,
         string workspaceTeamId,
         string appId,
         CancellationToken ct = default)
@@ -82,7 +82,7 @@ public sealed class SlackOAuthStateService : IScopedService
         var hash = Hash(state);
         var row = await db.SlackOAuthStates.AsNoTracking().SingleOrDefaultAsync(item => item.StateHash == hash, ct);
         if (row is null) return SlackOAuthStateValidation.Invalid;
-        if (row.ChildAppId != childAppId || row.WorkspaceTeamId != workspaceTeamId || row.AppId != appId)
+        if (row.AgentAppId != agentAppId || row.WorkspaceTeamId != workspaceTeamId || row.AppId != appId)
             return SlackOAuthStateValidation.Mismatch;
 
         var now = _timeProvider.GetUtcNow();
@@ -169,12 +169,12 @@ public static class SlackSecretRedactor
 
 public interface ISlackOAuthCredentialSink
 {
-    Task<string> GetOrStoreBotTokenAsync(string childAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default);
+    Task<string> GetOrStoreBotTokenAsync(string agentAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default);
 }
 
 public sealed class UnavailableSlackOAuthCredentialSink : ISlackOAuthCredentialSink, IScopedService
 {
-    public Task<string> GetOrStoreBotTokenAsync(string childAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default) =>
+    public Task<string> GetOrStoreBotTokenAsync(string agentAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default) =>
         throw new NotSupportedException("Slack OAuth credential storage is not connected in this slice.");
 }
 
@@ -185,7 +185,7 @@ public sealed class FakeSlackOAuthCredentialSink : ISlackOAuthCredentialSink
 
     public IReadOnlyDictionary<string, string> Tokens => _tokensByReference;
 
-    public Task<string> GetOrStoreBotTokenAsync(string childAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default)
+    public Task<string> GetOrStoreBotTokenAsync(string agentAppId, string authorizationAttemptId, string botToken, CancellationToken ct = default)
     {
         if (!botToken.StartsWith("xoxb-", StringComparison.Ordinal))
             throw new InvalidOperationException("Only Slack Bot tokens can be stored.");
@@ -219,7 +219,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
     }
 
     public async Task<SlackOAuthAuthorizationResult> RecordProgressAsync(
-        string childAppId,
+        string agentAppId,
         string authorization,
         CancellationToken ct = default)
     {
@@ -230,12 +230,12 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var current = await db.ManagedSlackAgentApps.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Id == childAppId && item.DeletedAt == null, ct);
+            .SingleOrDefaultAsync(item => item.Id == agentAppId && item.DeletedAt == null, ct);
         if (current is null)
             return SlackOAuthAuthorizationResult.RecoveryRequired;
         SlackStateTransitions.RequireAuthorizationTransition(current.Authorization, authorization);
         var changed = await db.ManagedSlackAgentApps
-            .Where(item => item.Id == childAppId
+            .Where(item => item.Id == agentAppId
                 && item.DeletedAt == null
                 && item.Authorization == current.Authorization)
             .ExecuteUpdateAsync(setters => setters
@@ -248,7 +248,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
     public async Task<SlackOAuthAuthorizationResult> AuthorizeAsync(
         string state,
-        string childAppId,
+        string agentAppId,
         string workspaceTeamId,
         string appId,
         string botUserId,
@@ -260,7 +260,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
         if (string.IsNullOrWhiteSpace(botUserId))
             return SlackOAuthAuthorizationResult.Rejected("bot_identity_required");
 
-        var validation = await _states.ConsumeAsync(state, childAppId, workspaceTeamId, appId, ct);
+        var validation = await _states.ConsumeAsync(state, agentAppId, workspaceTeamId, appId, ct);
         if (validation is SlackOAuthStateValidation.Mismatch or SlackOAuthStateValidation.Invalid
             or SlackOAuthStateValidation.Expired or SlackOAuthStateValidation.ReplayRejected)
             return SlackOAuthAuthorizationResult.Rejected(validation.ToString().ToLowerInvariant());
@@ -269,7 +269,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
         await using var lookup = await _dbFactory.CreateDbContextAsync(ct);
         var stateRow = await lookup.SlackOAuthStates.AsNoTracking()
             .SingleOrDefaultAsync(item => item.StateHash == stateHash
-                && item.ChildAppId == childAppId
+                && item.AgentAppId == agentAppId
                 && item.WorkspaceTeamId == workspaceTeamId
                 && item.AppId == appId, ct);
         if (stateRow?.AuthorizationAttemptId is null)
@@ -297,7 +297,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
         {
             try
             {
-                tokenRef = await _credentials.GetOrStoreBotTokenAsync(childAppId, attempt.Id, botToken, ct);
+                tokenRef = await _credentials.GetOrStoreBotTokenAsync(agentAppId, attempt.Id, botToken, ct);
             }
             catch
             {
@@ -318,7 +318,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
         try
         {
-            return await ApplyAuthorizationAsync(attempt.Id, childAppId, workspaceTeamId, appId, botUserId, tokenRef, ct);
+            return await ApplyAuthorizationAsync(attempt.Id, agentAppId, workspaceTeamId, appId, botUserId, tokenRef, ct);
         }
         catch
         {
@@ -357,7 +357,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
     private async Task<SlackOAuthAuthorizationResult> ApplyAuthorizationAsync(
         string attemptId,
-        string childAppId,
+        string agentAppId,
         string workspaceTeamId,
         string appId,
         string botUserId,
@@ -367,44 +367,44 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var child = await db.ManagedSlackAgentApps.SingleOrDefaultAsync(item => item.Id == childAppId, ct);
+        var agentApp = await db.ManagedSlackAgentApps.SingleOrDefaultAsync(item => item.Id == agentAppId, ct);
         var attempt = await db.SlackOAuthAttempts.SingleOrDefaultAsync(item => item.Id == attemptId, ct);
-        if (child is null || attempt is null
-            || child.WorkspaceTeamId != workspaceTeamId
-            || child.AppId != appId
-            || attempt.ChildAppId != childAppId)
+        if (agentApp is null || attempt is null
+            || agentApp.WorkspaceTeamId != workspaceTeamId
+            || agentApp.AppId != appId
+            || attempt.AgentAppId != agentAppId)
             return SlackOAuthAuthorizationResult.RecoveryRequired;
 
         SlackStateTransitions.RequireOAuthAttemptTransition(attempt.Status, SlackOAuthAttemptStatus.Applied);
-        SlackStateTransitions.RequireAuthorizationTransition(child.Authorization, SlackAuthorizationState.Authorized);
+        SlackStateTransitions.RequireAuthorizationTransition(agentApp.Authorization, SlackAuthorizationState.Authorized);
         if (attempt.Status == SlackOAuthAttemptStatus.Applied)
             return SlackOAuthAuthorizationResult.AlreadyApplied(attempt.BotUserId);
-        if (child.Authorization == SlackAuthorizationState.Authorized)
+        if (agentApp.Authorization == SlackAuthorizationState.Authorized)
         {
-            if (child.AuthorizationAttemptId != attemptId || child.BotUserId != botUserId)
+            if (agentApp.AuthorizationAttemptId != attemptId || agentApp.BotUserId != botUserId)
                 return SlackOAuthAuthorizationResult.Rejected("authorization_conflict");
             attempt.Status = SlackOAuthAttemptStatus.Applied;
             attempt.AppliedAt ??= now;
             attempt.UpdatedAt = now;
-            await EnsureBindingObligationAsync(db, child, now, ct);
+            await EnsureBindingObligationAsync(db, agentApp, now, ct);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
             return SlackOAuthAuthorizationResult.AlreadyApplied(botUserId);
         }
 
-        child.BotUserId = botUserId;
-        child.BotTokenRef = tokenRef;
-        child.Authorization = SlackAuthorizationState.Authorized;
-        child.AuthorizationAttemptId = attemptId;
-        child.AuthorizedAt = now;
-        child.AuthorizationExpiresAt = null;
-        child.UpdatedAt = now;
+        agentApp.BotUserId = botUserId;
+        agentApp.BotTokenRef = tokenRef;
+        agentApp.Authorization = SlackAuthorizationState.Authorized;
+        agentApp.AuthorizationAttemptId = attemptId;
+        agentApp.AuthorizedAt = now;
+        agentApp.AuthorizationExpiresAt = null;
+        agentApp.UpdatedAt = now;
         attempt.BotUserId = botUserId;
         attempt.BotTokenRef = tokenRef;
         attempt.Status = SlackOAuthAttemptStatus.Applied;
         attempt.AppliedAt = now;
         attempt.UpdatedAt = now;
-        await EnsureBindingObligationAsync(db, child, now, ct);
+        await EnsureBindingObligationAsync(db, agentApp, now, ct);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return SlackOAuthAuthorizationResult.Accepted(botUserId);
@@ -412,36 +412,36 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
     private static async Task EnsureBindingObligationAsync(
         MohistDbContext db,
-        ManagedSlackAgentAppRow child,
+        ManagedSlackAgentAppRow agentApp,
         DateTimeOffset now,
         CancellationToken ct)
     {
-        var existing = await db.SlackChildAppBindingObligations
-            .SingleOrDefaultAsync(item => item.ChildAppId == child.Id, ct);
+        var existing = await db.SlackAgentAppBindingObligations
+            .SingleOrDefaultAsync(item => item.AgentAppId == agentApp.Id, ct);
         if (existing is null)
         {
-            db.SlackChildAppBindingObligations.Add(new SlackChildAppBindingObligationRow
+            db.SlackAgentAppBindingObligations.Add(new SlackAgentAppBindingObligationRow
             {
                 Id = $"bind_obligation_{Guid.NewGuid():N}",
-                ChildAppId = child.Id,
-                AgentConnectionId = child.AgentConnectionId,
-                Status = SlackChildAppBindingObligationStatus.Pending,
+                AgentAppId = agentApp.Id,
+                AgentConnectionId = agentApp.AgentConnectionId,
+                Status = SlackAgentAppBindingObligationStatus.Pending,
                 CreatedAt = now,
                 UpdatedAt = now,
             });
             return;
         }
 
-        if (existing.Status is SlackChildAppBindingObligationStatus.ConnectionDeleted or SlackChildAppBindingObligationStatus.Conflict)
+        if (existing.Status is SlackAgentAppBindingObligationStatus.ConnectionDeleted or SlackAgentAppBindingObligationStatus.Conflict)
         {
-            SlackStateTransitions.RequireBindingTransition(existing.Status, SlackChildAppBindingObligationStatus.Pending);
-            SlackStateTransitions.RequireBindingTransition(child.BindingState, SlackChildAppBindingState.Pending);
-            existing.Status = SlackChildAppBindingObligationStatus.Pending;
+            SlackStateTransitions.RequireBindingTransition(existing.Status, SlackAgentAppBindingObligationStatus.Pending);
+            SlackStateTransitions.RequireBindingTransition(agentApp.BindingState, SlackAgentAppBindingState.Pending);
+            existing.Status = SlackAgentAppBindingObligationStatus.Pending;
             existing.FailureClass = null;
             existing.UpdatedAt = now;
-            child.BindingState = SlackChildAppBindingState.Pending;
-            child.BindingErrorClass = null;
-            child.UpdatedAt = now;
+            agentApp.BindingState = SlackAgentAppBindingState.Pending;
+            agentApp.BindingErrorClass = null;
+            agentApp.UpdatedAt = now;
         }
     }
 

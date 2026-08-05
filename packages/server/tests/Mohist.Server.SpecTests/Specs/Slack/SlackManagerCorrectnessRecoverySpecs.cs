@@ -78,8 +78,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
     }
 
     [Theory]
-    [InlineData(SlackChildAppBindingState.Conflict, SlackChildAppBindingObligationStatus.Conflict)]
-    [InlineData(SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingObligationStatus.ConnectionDeleted)]
+    [InlineData(SlackAgentAppBindingState.Conflict, SlackAgentAppBindingObligationStatus.Conflict)]
+    [InlineData(SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingObligationStatus.ConnectionDeleted)]
     public async Task Binding_diagnostic_retry_resets_both_states_and_converges_to_bound(string bindingState, string obligationStatus)
     {
         var child = await SeedChildAsync(
@@ -95,15 +95,15 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             new FakeSecretStore(),
             Array.Empty<IAgentConnectionProviderCleanup>(),
             _time);
-        var binding = new SlackChildAppBindingService(_factory, connections, _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
 
         var result = await binding.ReconcileAsync(child.Id);
 
-        Assert.Equal(SlackChildAppBindingStatus.Bound, result.Status);
-        Assert.Equal(SlackChildAppBindingState.Bound, await BindingStateAsync(child.Id));
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, result.Status);
+        Assert.Equal(SlackAgentAppBindingState.Bound, await BindingStateAsync(child.Id));
         await using var db = _factory.CreateDbContext();
-        var obligation = await db.SlackChildAppBindingObligations.SingleAsync(item => item.ChildAppId == child.Id);
-        Assert.Equal(SlackChildAppBindingObligationStatus.Bound, obligation.Status);
+        var obligation = await db.SlackAgentAppBindingObligations.SingleAsync(item => item.AgentAppId == child.Id);
+        Assert.Equal(SlackAgentAppBindingObligationStatus.Bound, obligation.Status);
         Assert.Equal(("A_BIND_RETRY", "U_BIND_RETRY"), await ConnectionIdentityAsync(child.AgentConnectionId));
     }
 
@@ -121,20 +121,20 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             PauseFirstCall = true,
             FailFirstCall = true,
         };
-        var first = new SlackChildAppBindingService(_factory, port, _time);
-        var second = new SlackChildAppBindingService(_factory, port, _time);
+        var first = new SlackAgentAppBindingService(_factory, port, _time);
+        var second = new SlackAgentAppBindingService(_factory, port, _time);
 
         var staleFailure = first.ReconcileAsync(child.Id);
         await port.FirstCallStarted;
         _time.Advance(TimeSpan.FromMinutes(5));
 
         var newerSuccess = await second.ReconcileAsync(child.Id);
-        Assert.Equal(SlackChildAppBindingStatus.Bound, newerSuccess.Status);
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, newerSuccess.Status);
 
         port.ReleaseFirstCall();
         var staleResult = await staleFailure;
-        Assert.Equal(SlackChildAppBindingStatus.Bound, staleResult.Status);
-        await AssertBindingConvergedAsync(child, SlackChildAppBindingState.Bound);
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, staleResult.Status);
+        await AssertBindingConvergedAsync(child, SlackAgentAppBindingState.Bound);
     }
 
     [Fact]
@@ -151,20 +151,20 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             PauseFirstCall = true,
             FailSecondCall = true,
         };
-        var staleWorker = new SlackChildAppBindingService(_factory, port, _time);
-        var newerWorker = new SlackChildAppBindingService(_factory, port, _time);
+        var staleWorker = new SlackAgentAppBindingService(_factory, port, _time);
+        var newerWorker = new SlackAgentAppBindingService(_factory, port, _time);
 
         var staleSuccess = staleWorker.ReconcileAsync(child.Id);
         await port.FirstCallStarted;
         _time.Advance(TimeSpan.FromMinutes(5));
 
         var newerFailure = await newerWorker.ReconcileAsync(child.Id);
-        Assert.Equal(SlackChildAppBindingStatus.Conflict, newerFailure.Status);
+        Assert.Equal(SlackAgentAppBindingStatus.Conflict, newerFailure.Status);
 
         port.ReleaseFirstCall();
         var staleResult = await staleSuccess;
-        Assert.Equal(SlackChildAppBindingStatus.Conflict, staleResult.Status);
-        await AssertBindingConvergedAsync(child, SlackChildAppBindingState.Conflict);
+        Assert.Equal(SlackAgentAppBindingStatus.Conflict, staleResult.Status);
+        await AssertBindingConvergedAsync(child, SlackAgentAppBindingState.Conflict);
         Assert.Equal((string.Empty, string.Empty), await ConnectionIdentityAsync(child.AgentConnectionId));
     }
 
@@ -179,13 +179,13 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
     {
         Assert.Equal(state, await BindingStateAsync(child.Id));
         await using var db = _factory.CreateDbContext();
-        Assert.Equal(state, await db.SlackChildAppBindingObligations
-            .Where(item => item.ChildAppId == child.Id)
+        Assert.Equal(state, await db.SlackAgentAppBindingObligations
+            .Where(item => item.AgentAppId == child.Id)
             .Select(item => item.Status)
             .SingleAsync());
     }
 
-    private sealed class InterleavingBindingPort(AgentConnectionStore inner) : ISlackChildAppBindingPort
+    private sealed class InterleavingBindingPort(AgentConnectionStore inner) : ISlackAgentAppBindingPort
     {
         private readonly TaskCompletionSource<bool> _firstCallStarted =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -234,7 +234,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_APPLY_RETRY");
         var states = new SlackOAuthStateService(_factory, _time);
         var issued = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId);
-        var sink = new ControlledSlackOAuthCredentialSink(_factory, child.Id) { MutateChildAppIdBeforeReturn = "A_CHANGED" };
+        var sink = new ControlledSlackOAuthCredentialSink(_factory, child.Id) { MutateAgentAppIdBeforeReturn = "A_CHANGED" };
         var authorization = new SlackOAuthAuthorizationService(_factory, states, sink, _time);
 
         var first = await authorization.AuthorizeAsync(
@@ -254,7 +254,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             row.AppId = "A_APPLY_RETRY";
             await restore.SaveChangesAsync();
         }
-        sink.MutateChildAppIdBeforeReturn = null;
+        sink.MutateAgentAppIdBeforeReturn = null;
         var retry = await authorization.AuthorizeAsync(
             issued.State, child.Id, child.WorkspaceTeamId, "A_APPLY_RETRY", "U_APPLY_RETRY", "xoxb-apply-retry");
         Assert.Equal(SlackOAuthAuthorizationStatus.Accepted, retry.Status);
@@ -271,7 +271,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         {
             AppLifecycle = SlackAppLifecycle.Created,
             Authorization = SlackAuthorizationState.Authorized,
-            BindingState = SlackChildAppBindingState.Bound,
+            BindingState = SlackAgentAppBindingState.Bound,
         };
         Assert.Throws<InvalidOperationException>(() => child.TransitionAppLifecycle(SlackAppLifecycle.NotCreated));
         child.AppLifecycle = "invalid";
@@ -358,24 +358,24 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
     private sealed class ControlledSlackOAuthCredentialSink : ISlackOAuthCredentialSink
     {
         private readonly IDbContextFactory<MohistDbContext> _factory;
-        private readonly string _childAppId;
+        private readonly string _agentAppId;
         private readonly Dictionary<string, string> _referencesByAttempt = new(StringComparer.Ordinal);
         private readonly Dictionary<string, string> _tokensByReference = new(StringComparer.Ordinal);
 
-        public ControlledSlackOAuthCredentialSink(IDbContextFactory<MohistDbContext> factory, string childAppId)
+        public ControlledSlackOAuthCredentialSink(IDbContextFactory<MohistDbContext> factory, string agentAppId)
         {
             _factory = factory;
-            _childAppId = childAppId;
+            _agentAppId = agentAppId;
         }
 
         public bool FailNextStore { get; set; }
-        public string? MutateChildAppIdBeforeReturn { get; set; }
+        public string? MutateAgentAppIdBeforeReturn { get; set; }
         public int StoreCalls { get; private set; }
         public int ExternalWriteCount { get; private set; }
         public IReadOnlyDictionary<string, string> Tokens => _tokensByReference;
 
         public async Task<string> GetOrStoreBotTokenAsync(
-            string childAppId,
+            string agentAppId,
             string authorizationAttemptId,
             string botToken,
             CancellationToken ct = default)
@@ -394,11 +394,11 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             var reference = $"slack-oauth-attempt:{authorizationAttemptId}:bot-token";
             _referencesByAttempt.Add(authorizationAttemptId, reference);
             _tokensByReference.Add(reference, botToken);
-            if (MutateChildAppIdBeforeReturn is not null)
+            if (MutateAgentAppIdBeforeReturn is not null)
             {
                 await using var db = _factory.CreateDbContext();
-                var child = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == _childAppId, ct);
-                child.AppId = MutateChildAppIdBeforeReturn;
+                var child = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == _agentAppId, ct);
+                child.AppId = MutateAgentAppIdBeforeReturn;
                 await db.SaveChangesAsync(ct);
             }
             return reference;
