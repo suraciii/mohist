@@ -64,7 +64,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspaceTeamId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerBotUserId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ManagerCredentialRef);
         SlackStateTransitions.RequireManagerTransportKind(request.TransportKind);
         SlackStateTransitions.RequireManagerReadiness(request.Readiness);
 
@@ -113,7 +112,7 @@ public sealed class SlackManagerApplicationService : IScopedService
             enrollment.Id,
             request.ManagerAppId.Trim(),
             request.ManagerBotUserId.Trim(),
-            request.ManagerCredentialRef.Trim(),
+            enrollment.Id,
             request.TransportKind,
             request.Readiness,
             ct) ?? throw new InvalidOperationException("The workspace enrollment disappeared during setup.");
@@ -556,7 +555,6 @@ public sealed record SlackManagerSetupRequest(
     string WorkspaceTeamId,
     string ManagerAppId,
     string ManagerBotUserId,
-    string ManagerCredentialRef,
     string TransportKind = SlackManagerTransportKind.Socket,
     string Readiness = SlackManagerReadiness.Ready);
 

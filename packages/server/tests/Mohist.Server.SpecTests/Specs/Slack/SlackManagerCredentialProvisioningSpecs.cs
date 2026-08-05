@@ -22,7 +22,6 @@ public sealed class SlackManagerCredentialProvisioningSpecs
     public async Task Manager_credential_provisioning_is_operator_only_reference_derived_rotatable_and_nonsecret()
     {
         const string team = "T_MANAGER_CREDENTIALS";
-        const string credentialRef = "manager-credential-reference";
         const string firstCredential = "manager-credential-first";
         const string rotatedCredential = "manager-credential-rotated";
 
@@ -31,7 +30,6 @@ public sealed class SlackManagerCredentialProvisioningSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_CREDENTIALS",
             managerBotUserId = "U_MANAGER_CREDENTIALS",
-            managerCredentialRef = credentialRef,
         });
         setup.EnsureSuccessStatusCode();
         var setupData = await ReadDataAsync(setup);

@@ -174,6 +174,7 @@ public static class MohistServiceRegistration
             client.BaseAddress = new Uri(slackApiOptions.ApiBaseUrl);
             client.Timeout = slackApiOptions.ApiTimeout;
         });
+        services.AddSlackControlPlane();
 
         // Socket lease core: the conventional scan registers concrete stores
         // as themselves only, so the lease interfaces need explicit bindings.

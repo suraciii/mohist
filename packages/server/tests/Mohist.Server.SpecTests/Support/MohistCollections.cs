@@ -15,6 +15,9 @@ namespace Mohist.Server.SpecTests.Support;
 [CollectionDefinition("SlackLeaseRoutes")]
 public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRoutesFixture>;
 
+[CollectionDefinition("SlackControlPlaneRoutes")]
+public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
+
 // Parallel integration collections. Each shares one MohistIntegrationFixture
 // (one silo + one web host) whose silo/gateway ports are allocated via
 // TestClusterPortAllocator, so the collections run concurrently without

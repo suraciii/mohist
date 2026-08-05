@@ -26,10 +26,13 @@ public static class SlackManagerIngressRoutes
             if (body is null
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
                 || string.IsNullOrWhiteSpace(body.ManagerAppId)
-                || string.IsNullOrWhiteSpace(body.ManagerBotUserId)
-                || string.IsNullOrWhiteSpace(body.ManagerCredentialRef))
+                || string.IsNullOrWhiteSpace(body.ManagerBotUserId))
                 return ApiResults.BadRequest(
-                    "workspaceTeamId, managerAppId, managerBotUserId, and managerCredentialRef are required.");
+                    "workspaceTeamId, managerAppId, and managerBotUserId are required.");
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the Manager API.",
+                    "credential_address_not_supported");
             if (HasClientIdentity(body.ExtensionData))
                 return ApiResults.BadRequest(
                     "Client identity fields are not supported by the Manager API.",
@@ -41,7 +44,6 @@ public static class SlackManagerIngressRoutes
                     body.WorkspaceTeamId,
                     body.ManagerAppId,
                     body.ManagerBotUserId,
-                    body.ManagerCredentialRef,
                     body.TransportKind ?? SlackManagerTransportKind.Socket,
                     body.Readiness ?? SlackManagerReadiness.Ready), ct));
             }
@@ -124,6 +126,94 @@ public static class SlackManagerIngressRoutes
                 : ApiResults.Ok(status);
         });
 
+        manager.MapPost("/setup/configuration", async (
+            HttpContext context,
+            SlackControlSetupConfigurationBody body,
+            SlackManagerSetupOrchestrator orchestrator,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            var guard = RequireOperatorLoopback(context, credential);
+            if (guard is not null) return guard;
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
+                || string.IsNullOrWhiteSpace(body.ConfigurationAccessToken)
+                || string.IsNullOrWhiteSpace(body.ConfigurationRefreshToken))
+                return ApiResults.BadRequest(
+                    "workspaceTeamId, configurationAccessToken, and configurationRefreshToken are required.");
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the control-plane API.",
+                    "credential_address_not_supported");
+            try
+            {
+                return ApiResults.Ok(await orchestrator.SupplyConfigurationAsync(new(
+                    body.WorkspaceTeamId,
+                    new(body.ConfigurationAccessToken, body.ConfigurationRefreshToken)), ct));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_configuration_credentials");
+            }
+        });
+
+        manager.MapPost("/setup/runtime-credentials", async (
+            HttpContext context,
+            SlackControlSetupRuntimeBody body,
+            SlackManagerSetupOrchestrator orchestrator,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            var guard = RequireOperatorLoopback(context, credential);
+            if (guard is not null) return guard;
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
+                || string.IsNullOrWhiteSpace(body.BotToken)
+                || string.IsNullOrWhiteSpace(body.AppLevelToken))
+                return ApiResults.BadRequest(
+                    "workspaceTeamId, botToken, and appLevelToken are required.");
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the control-plane API.",
+                    "credential_address_not_supported");
+            try
+            {
+                return ApiResults.Ok(await orchestrator.SupplyRuntimeCredentialsAsync(new(
+                    body.WorkspaceTeamId, body.BotToken, body.AppLevelToken), ct));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_runtime_credentials");
+            }
+        });
+
+        manager.MapGet("/setup/progress", async (
+            HttpContext context,
+            string? workspaceTeamId,
+            SlackManagerSetupOrchestrator orchestrator,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(context.Request.Headers))
+                return ApiResults.Fail(
+                    "Setup progress requires an operator credential.",
+                    403, "operator_credential_required");
+            if (string.IsNullOrWhiteSpace(workspaceTeamId))
+                return ApiResults.BadRequest("workspaceTeamId is required.");
+            var progress = await orchestrator.GetProgressAsync(workspaceTeamId, ct);
+            return progress is null
+                ? ApiResults.NotFound("The workspace has not started setup.")
+                : ApiResults.Ok(progress);
+        });
+
         manager.MapPost("/ingress", async (
             HttpContext context,
             SlackManagerIngressBody body,
@@ -159,6 +249,20 @@ public static class SlackManagerIngressRoutes
         return app;
     }
 
+    private static IResult? RequireOperatorLoopback(HttpContext context, OperatorCredential credential)
+    {
+        if (!credential.Authorizes(context.Request.Headers))
+            return ApiResults.Fail(
+                "Slack control-plane secret operations require an operator credential.",
+                403, "operator_credential_required");
+        if (context.Connection.RemoteIpAddress is not { } remoteAddress
+            || !IPAddress.IsLoopback(remoteAddress))
+            return ApiResults.Fail(
+                "Slack control-plane secret operations are only available over loopback.",
+                403, "loopback_required");
+        return null;
+    }
+
     private static bool HasClientIdentity(IReadOnlyDictionary<string, JsonElement>? extensionData) =>
         extensionData?.Keys.Any(key =>
             key.Equals("managerExternalId", StringComparison.OrdinalIgnoreCase)
@@ -178,9 +282,28 @@ public sealed class SlackManagerSetupBody
     public string WorkspaceTeamId { get; init; } = string.Empty;
     public string ManagerAppId { get; init; } = string.Empty;
     public string ManagerBotUserId { get; init; } = string.Empty;
-    public string ManagerCredentialRef { get; init; } = string.Empty;
     public string? TransportKind { get; init; }
     public string? Readiness { get; init; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed class SlackControlSetupConfigurationBody
+{
+    public string WorkspaceTeamId { get; init; } = string.Empty;
+    public string ConfigurationAccessToken { get; init; } = string.Empty;
+    public string ConfigurationRefreshToken { get; init; } = string.Empty;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed class SlackControlSetupRuntimeBody
+{
+    public string WorkspaceTeamId { get; init; } = string.Empty;
+    public string BotToken { get; init; } = string.Empty;
+    public string AppLevelToken { get; init; } = string.Empty;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

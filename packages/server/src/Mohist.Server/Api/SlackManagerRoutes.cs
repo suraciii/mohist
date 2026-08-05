@@ -1,7 +1,9 @@
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
@@ -57,6 +59,98 @@ public static class SlackManagerRoutes
             catch (AgentConnectionDuplicateException ex)
             {
                 return ApiResults.Conflict(ex.Message, "connection_duplicate");
+            }
+        });
+
+        manager.MapPost("/install-agent", async (
+            HttpContext context,
+            SlackControlInstallAgentBody body,
+            SlackInstallAgentService service,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            if (!credential.Authorizes(context.Request.Headers))
+                return ApiResults.Fail(
+                    "Control-plane install operations require an operator credential.",
+                    403, "operator_credential_required");
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.EnrollmentId)
+                || string.IsNullOrWhiteSpace(body.AgentId))
+                return ApiResults.BadRequest("enrollmentId and agentId are required.");
+            var identityError = RejectClientIdentity(context, body.ExtensionData);
+            if (identityError is not null) return identityError;
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the control-plane API.",
+                    "credential_address_not_supported");
+            try
+            {
+                var projectId = context.GetResolvedProject().Id;
+                return ApiResults.Ok(await service.InstallAsync(projectId, body.AgentId, body.EnrollmentId, ct));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code);
+            }
+        });
+
+        manager.MapPost("/install-agent/credentials", async (
+            HttpContext context,
+            SlackControlInstallAgentCredentialsBody body,
+            SlackInstallAgentService service,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            var guard = RequireOperatorLoopback(context, credential);
+            if (guard is not null) return guard;
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.AgentAppId)
+                || string.IsNullOrWhiteSpace(body.BotToken)
+                || string.IsNullOrWhiteSpace(body.AppLevelToken))
+                return ApiResults.BadRequest("agentAppId, botToken, and appLevelToken are required.");
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the control-plane API.",
+                    "credential_address_not_supported");
+            try
+            {
+                return ApiResults.Ok(await service.ProvisionCredentialsAsync(
+                    body.AgentAppId, body.BotToken, body.AppLevelToken, ct));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "invalid_install_credentials");
+            }
+        });
+
+        manager.MapPost("/install-agent/validation", async (
+            HttpContext context,
+            SlackControlInstallAgentValidationBody body,
+            SlackInstallAgentService service,
+            OperatorCredential credential,
+            CancellationToken ct) =>
+        {
+            var guard = RequireOperatorLoopback(context, credential);
+            if (guard is not null) return guard;
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.AgentAppId)
+                || string.IsNullOrWhiteSpace(body.HelloAppId))
+                return ApiResults.BadRequest("agentAppId and helloAppId are required.");
+            if (HasCredentialAddressOverride(body.ExtensionData))
+                return ApiResults.BadRequest(
+                    "Credential address fields are not supported by the control-plane API.",
+                    "credential_address_not_supported");
+            try
+            {
+                return ApiResults.Ok(await service.ApplySocketValidationAsync(body.AgentAppId, body.HelloAppId, ct));
+            }
+            catch (SlackManagerConflictException ex)
+            {
+                return ApiResults.Conflict(ex.Message, ex.Code);
             }
         });
 
@@ -226,6 +320,28 @@ public static class SlackManagerRoutes
             ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
+    private static IResult? RequireOperatorLoopback(HttpContext context, OperatorCredential credential)
+    {
+        if (!credential.Authorizes(context.Request.Headers))
+            return ApiResults.Fail(
+                "Slack control-plane secret operations require an operator credential.",
+                403, "operator_credential_required");
+        if (context.Connection.RemoteIpAddress is not { } remoteAddress
+            || !IPAddress.IsLoopback(remoteAddress))
+            return ApiResults.Fail(
+                "Slack control-plane secret operations are only available over loopback.",
+                403, "loopback_required");
+        return null;
+    }
+
+    private static bool HasCredentialAddressOverride(IReadOnlyDictionary<string, JsonElement>? extensionData) =>
+        extensionData?.Keys.Any(key =>
+            key.Equals("projectId", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("connectionId", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("managerCredentialRef", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("secretAddress", StringComparison.OrdinalIgnoreCase)
+            || key.Equals("secretKind", StringComparison.OrdinalIgnoreCase)) == true;
+
     private static IResult? RejectClientIdentity(
         HttpContext context,
         IReadOnlyDictionary<string, JsonElement>? extensionData)
@@ -271,6 +387,34 @@ public sealed class SlackAuthorizeBody
 public sealed class PermanentDeleteBody
 {
     public string Confirmation { get; init; } = string.Empty;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed class SlackControlInstallAgentBody
+{
+    public string EnrollmentId { get; init; } = string.Empty;
+    public string AgentId { get; init; } = string.Empty;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed class SlackControlInstallAgentCredentialsBody
+{
+    public string AgentAppId { get; init; } = string.Empty;
+    public string BotToken { get; init; } = string.Empty;
+    public string AppLevelToken { get; init; } = string.Empty;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
+}
+
+public sealed class SlackControlInstallAgentValidationBody
+{
+    public string AgentAppId { get; init; } = string.Empty;
+    public string HelloAppId { get; init; } = string.Empty;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

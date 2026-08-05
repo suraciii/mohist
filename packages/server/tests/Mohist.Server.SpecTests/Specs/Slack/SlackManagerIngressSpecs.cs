@@ -22,7 +22,6 @@ public sealed class SlackManagerIngressSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_SETUP_CONFLICT",
             managerBotUserId = "U_MANAGER_SETUP_CONFLICT",
-            managerCredentialRef = "manager-credential-setup-conflict",
         });
         first.EnsureSuccessStatusCode();
 
@@ -31,7 +30,6 @@ public sealed class SlackManagerIngressSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_SETUP_CONFLICT_OTHER",
             managerBotUserId = "U_MANAGER_SETUP_CONFLICT_OTHER",
-            managerCredentialRef = "manager-credential-setup-conflict-other",
         });
 
         Assert.Equal(HttpStatusCode.Conflict, conflicting.StatusCode);

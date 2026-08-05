@@ -115,7 +115,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = "U_MANAGER_BOT_DEFAULT_AGENT",
-            managerCredentialRef = "manager-credential-default-agent",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
@@ -239,7 +238,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         setupResponse.EnsureSuccessStatusCode();
         var setupJson = await setupResponse.Content.ReadAsStringAsync();
@@ -354,7 +352,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         repeatedSetup.EnsureSuccessStatusCode();
         var repeated = await ReadDataAsync(repeatedSetup);
@@ -405,7 +402,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId,
             managerAppId = $"A_MANAGER_{workspaceTeamId}",
             managerBotUserId = $"U_MANAGER_{workspaceTeamId}",
-            managerCredentialRef = $"manager-credential-{workspaceTeamId}",
             transportKind = SlackManagerTransportKind.Socket,
             readiness = SlackManagerReadiness.Ready,
         });
