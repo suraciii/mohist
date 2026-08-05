@@ -167,6 +167,15 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
         services.AddScoped<ISlackChildAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
 
+        // Socket lease core: the conventional scan registers concrete stores
+        // as themselves only, so the lease interfaces need explicit bindings.
+        // The target provider is the in-memory registry until a future slice
+        // binds the enrollment/connection-backed provider.
+        services.AddScoped<ISlackLeaseStore>(sp => sp.GetRequiredService<SlackAdapterLeaseStore>());
+        services.AddSingleton<ISlackLeaseTargetProvider, InMemorySlackLeaseTargetProvider>();
+        services.AddScoped<ISlackLeaseSecretResolver>(sp => sp.GetRequiredService<SlackLeaseSecretResolver>());
+        services.AddScoped<ISlackAdapterOperatorAuthenticator>(sp => sp.GetRequiredService<SlackAdapterOperatorAuthenticator>());
+
         services.AddCloudEventBus();
         services.AddCloudEventHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
         services.AddCloudEventPushHandlersFromAssembly(typeof(MohistServiceRegistration).Assembly);
