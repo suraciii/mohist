@@ -54,6 +54,7 @@ Agent、理解全局与复杂状态，也在外部入口不可用或需要人工
 
 - **人离开回路** —— 监管 Agent 代理审批与失败处理；Issue 关注与 @提及让委托可配置、可收回。见 [Agent 监管](agent-supervision.md)、[Agent 事件路由](event-routing.md)
 - **独立可用的 Mohist Agent** —— Agent 在 Web、CLI 和外部接入中保持同一身份、配置、工作与会话模型。见 [Agent 与 AgentSession](agents.md)
+- **富 Agent 与会话树** —— Agent 在自己的会话里 spawn 子会话，把运行时才能看清形状的任务分解出去；Mohist 承载树、消息与生命周期，工作流由 Agent 规划。见 [Subagent 与会话树](subagents.md)
 - **把 Agent 接入已有场所** —— 已配置的 Mohist Agent 可以作为独立身份加入 Slack；Slack 只承担交互适配。见 [Slack](slack.md)
 - **外部 Agent 友好** —— 第三方 Agent 通过稳定的 Skill 与命令面操作 Mohist，人机使用同一套领域动作。见 [Skill 机制](skills.md)、[CLI 参考](cli-reference.md)
 - **备用操作与可视化** —— Web UI 汇总全局状态、展示执行证据，并在需要时支持人工操作与接管。见 [Web UI 指南](web-ui.md)

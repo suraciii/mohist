@@ -37,6 +37,7 @@
 - [Slack](slack.md) —— Mohist App 对话式管理接入，Agent App 作为独立 Bot 在私聊和频道里工作
 - [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
 - [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
+- [Subagent 与会话树](subagents.md) —— Agent 在自己的会话里分解任务：spawn 子会话、终态回报、级联停止
 
 ## 板块 6：部署与运维
 
