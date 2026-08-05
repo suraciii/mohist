@@ -42,7 +42,7 @@
     },
     { "id": "web", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": false, "status": "baseline-pending", "reason": "large suite; ratchet pending a baseline capture run"
     },
-    { "id": "server-unit", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+    { "id": "server-unit", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
         { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [
           { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncFansOutToEveryMatchingSubscription", "observedMs": 951.4, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
           { "id": "Mohist.Server.UnitTests.Agent.Services.ProjectRecentEventReaderTests.ListAsyncFiltersProjectOrdersNewestFirstAndBoundsResults", "observedMs": 2034.2, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },

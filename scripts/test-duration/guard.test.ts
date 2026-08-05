@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 
-import { main, parseArgs } from './guard.js'
+import { commandFor, main, parseArgs } from './guard.js'
+import type { TrackConfig } from './types.js'
 
 function captureStderr(): { calls: () => string; restore: () => void } {
   const stderrMock = mock.method(process.stderr, 'write', () => true)
@@ -16,6 +17,21 @@ test('parseArgs: focused with both arguments resolves the request', () => {
   assert.equal(args.mode, 'focused')
   assert.equal(args.focused?.csproj, 'packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj')
   assert.equal(args.focused?.className, 'Mohist.Cli.Tests.Skills.SkillsContentTests')
+})
+
+test('commandFor appends dotnet apphost arguments after the default report arguments', () => {
+  const track: TrackConfig = {
+    id: 'unit',
+    kind: 'dotnet-apphost',
+    apphost: 'bin/tests',
+    apphostArgs: ['-parallel', 'none'],
+    report: 'reports/unit.trx',
+    reportFormat: 'trx',
+    deadlineMs: 1000,
+    enforce: false,
+  }
+  const command = commandFor(track)
+  assert.deepEqual(command.args.slice(-6), ['-noColor', '-noLogo', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
 })
 
 test('parseArgs: focused without any argument leaves the request unresolved', () => {

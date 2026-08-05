@@ -66,6 +66,11 @@ export function validateConfig(config: SuiteConfig): string[] {
 function validateTrack(track: TrackConfig): string[] {
   const errors: string[] = []
   const prefix = `track "${track.id}"`
+  if (track.apphostArgs !== undefined && !Array.isArray(track.apphostArgs)) {
+    errors.push(`${prefix}: apphostArgs must be an array of strings`)
+  } else if (track.apphostArgs?.some((arg) => typeof arg !== 'string')) {
+    errors.push(`${prefix}: apphostArgs must contain only strings`)
+  }
   if (track.deadlineMs <= 0) errors.push(`${prefix}: deadlineMs must be positive`)
   if (track.kind !== 'report-only' && !track.run && !track.csproj && !track.apphost) {
     errors.push(`${prefix}: needs a run command, csproj, or apphost`)
