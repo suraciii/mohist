@@ -202,7 +202,7 @@ export class SlackAdapter {
         const socket = runtime.socket
         runtime.socket = undefined
         runtime.web = undefined
-        await socket?.disconnect?.()
+        await this.disconnectSocket(socket, runtime.target)
         if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return
         if (!await this.openRuntimeSocket(runtime, signal, refreshGeneration)) return
         if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return

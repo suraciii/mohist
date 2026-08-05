@@ -12,6 +12,8 @@ class FakeSocket implements SocketClient {
   disconnectError?: Error
   disconnectGate?: Promise<void>
   disconnectStarted?: () => void
+  startGate?: Promise<void>
+  startStarted?: () => void
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -20,6 +22,8 @@ class FakeSocket implements SocketClient {
   async start() {
     this.started = true
     this.starts += 1
+    this.startStarted?.()
+    await this.startGate
     return { appId: "A1" }
   }
 
@@ -440,7 +444,70 @@ describe("mohist-slack adapter", () => {
     await adapter.stop()
   })
 
-  it("does not let a stale concurrent renewal reopen or replace the current Socket", async () => {
+  it("keeps the current runtime when a stale Socket disconnect fails", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [
+      { kind: "runtime", leaseId: "lease-first", appToken: "xapp-first", botToken: "xoxb-first" },
+      { kind: "runtime", leaseId: "lease-second", appToken: "xapp-second", botToken: "xoxb-second" },
+    ]
+    const sockets: FakeSocket[] = []
+    const webs: FakeWeb[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => {
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let releaseDisconnect!: () => void
+    let markDisconnectStarted!: () => void
+    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
+    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
+    sockets[0]!.disconnectGate = disconnectGate
+    sockets[0]!.disconnectStarted = markDisconnectStarted
+    sockets[0]!.disconnectError = new Error("disconnect rejected xapp-secret-value")
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await disconnectStarted
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(sockets).toHaveLength(2)
+    expect(sockets[1]?.starts).toBe(1)
+    releaseDisconnect()
+    await vi.advanceTimersByTimeAsync(0)
+
+    transport.deliveries.push({ id: "current-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "current" }) })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(sockets[1]?.disconnected).toBe(false)
+    expect(webs[1]?.posted).toEqual([{ channel: "D", text: "current" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "current-delivery", outcome: "delivered" }])
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "socket disconnect failed",
+      fields: { target: "connection:p:c", reason: "disconnect rejected <redacted>" },
+    })
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-secret-value")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("fences a stale concurrent renewal through its Socket startup", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
@@ -452,46 +519,83 @@ describe("mohist-slack adapter", () => {
     const sockets: FakeSocket[] = []
     const socketTokens: string[] = []
     const webTokens: string[] = []
+    const webs: FakeWeb[] = []
+    let releaseFirstStart!: () => void
+    let markFirstStart!: () => void
+    let releaseSecondStart!: () => void
+    let markSecondStart!: () => void
+    const firstStartGate = new Promise<void>((resolve) => { releaseFirstStart = resolve })
+    const firstStartStarted = new Promise<void>((resolve) => { markFirstStart = resolve })
+    const secondStartGate = new Promise<void>((resolve) => { releaseSecondStart = resolve })
+    const secondStartStarted = new Promise<void>((resolve) => { markSecondStart = resolve })
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
       socketFactory: (token) => {
         socketTokens.push(token)
         const socket = new FakeSocket()
+        if (token === "xapp-first") {
+          socket.startGate = firstStartGate
+          socket.startStarted = markFirstStart
+        }
+        if (token === "xapp-second") {
+          socket.startGate = secondStartGate
+          socket.startStarted = markSecondStart
+        }
         sockets.push(socket)
         return socket
       },
       webFactory: (token) => {
         webTokens.push(token)
-        return new FakeWeb()
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
       },
       heartbeatIntervalMs: 1_000,
-      deliveryPollIntervalMs: 60_000,
+      deliveryPollIntervalMs: 100,
     })
     const controller = new AbortController()
     await adapter.start(controller.signal)
-    let releaseDisconnect!: () => void
-    let markDisconnectStarted!: () => void
-    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
-    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
-    sockets[0]!.disconnectGate = disconnectGate
-    sockets[0]!.disconnectStarted = markDisconnectStarted
 
     await vi.advanceTimersByTimeAsync(1_000)
-    await disconnectStarted
+    await firstStartStarted
+    const claimsWhileSocketsStart = transport.claimDeliveryCalls
+    transport.deliveries.push({ id: "concurrent-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
+    expect(webs.map((web) => web.posted)).toEqual([[], []])
+    expect(webs.map((web) => web.updated)).toEqual([[], []])
+    expect(transport.acks).toEqual([])
+
     await vi.advanceTimersByTimeAsync(1_000)
+    await secondStartStarted
+    await vi.advanceTimersByTimeAsync(100)
 
-    expect(socketTokens).toEqual(["xapp-c", "xapp-second"])
-    expect(webTokens).toEqual(["xoxb-c", "xoxb-second"])
-    expect(sockets).toHaveLength(2)
-    expect(await sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "old", user: "U", text: "late" } })).toBe(false)
-    expect(transport.envelopes).toEqual([])
+    expect(socketTokens).toEqual(["xapp-c", "xapp-first", "xapp-second"])
+    expect(webTokens).toEqual(["xoxb-c", "xoxb-first", "xoxb-second"])
+    expect(sockets).toHaveLength(3)
+    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
+    expect(webs.map((web) => web.posted)).toEqual([[], [], []])
+    expect(webs.map((web) => web.updated)).toEqual([[], [], []])
+    expect(transport.acks).toEqual([])
 
-    releaseDisconnect()
+    releaseFirstStart()
     await vi.advanceTimersByTimeAsync(0)
 
-    expect(sockets).toHaveLength(2)
-    expect(sockets[1]?.starts).toBe(1)
+    expect(sockets[1]?.disconnected).toBe(true)
+    expect(sockets[2]?.disconnected).toBe(false)
+    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
+    expect(webs.map((web) => web.posted)).toEqual([[], [], []])
+    expect(webs.map((web) => web.updated)).toEqual([[], [], []])
+    expect(transport.acks).toEqual([])
+
+    releaseSecondStart()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(sockets[2]?.starts).toBe(1)
+    expect(webs[2]?.posted).toEqual([{ channel: "D", text: "pending" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "concurrent-delivery", outcome: "delivered" }])
     controller.abort()
     await adapter.stop()
   })
