@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
@@ -40,6 +41,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         _botIdentity = new FakeSlackBotIdentityVerificationPort();
         var enrollmentStore = new SlackWorkspaceEnrollmentStore(_factory, _time);
         _enrollments = enrollmentStore;
+        var connections = new AgentConnectionStore(
+            _factory, new AgentQuerier(_factory), _secrets, [], _time);
+        var agentApps = new ManagedSlackAgentAppStore(_factory, _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
         _orchestrator = new SlackManagerSetupOrchestrator(
             _configurationPort,
             new ProtectedSlackConfigurationCredentialStore(_factory, _secrets),
@@ -51,7 +56,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             _time);
         _leases = new SlackAdapterLeaseService(
             new SlackAdapterLeaseStore(_factory),
-            new EnrollmentSlackLeaseTargetProvider(enrollmentStore, _factory),
+            new EnrollmentSlackLeaseTargetProvider(enrollmentStore, agentApps, binding, _factory),
             new SlackLeaseSecretResolver(_secrets),
             _time);
     }

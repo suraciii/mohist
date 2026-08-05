@@ -249,7 +249,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_BIND",
-            botUserId: "U_BIND");
+            botUserId: "U_BIND",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var connections = new AgentConnectionStore(
             _factory,
             new AgentQuerier(_factory),
@@ -271,18 +272,44 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Unverified_child_is_not_bound_before_socket_hello()
+    {
+        var child = await SeedChildAsync(
+            lifecycle: SlackAppLifecycle.Created,
+            authorization: SlackAuthorizationState.Authorized,
+            appId: "A_UNVERIFIED",
+            botUserId: "U_UNVERIFIED",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Candidate);
+        var connections = new AgentConnectionStore(
+            _factory,
+            new AgentQuerier(_factory),
+            new FakeSecretStore(),
+            Array.Empty<IAgentConnectionProviderCleanup>(),
+            _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
+
+        var result = await binding.ReconcileAsync(child.Id);
+
+        Assert.Equal(SlackAgentAppBindingStatus.NotVerified, result.Status);
+        Assert.Equal(SlackAgentAppBindingState.Pending, await BindingStateAsync(child.Id));
+        Assert.Equal((string.Empty, string.Empty), await ConnectionIdentityAsync(child.AgentConnectionId));
+    }
+
+    [Fact]
     public async Task Pending_binding_processing_orders_in_memory_for_sqlite_date_compatibility()
     {
         var oldest = await SeedChildAsync(
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_OLDEST",
-            botUserId: "U_OLDEST");
+            botUserId: "U_OLDEST",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var newest = await SeedChildAsync(
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_NEWEST",
-            botUserId: "U_NEWEST");
+            botUserId: "U_NEWEST",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         await SeedBindingObligationAsync(oldest, SlackAgentAppBindingObligationStatus.Pending, _time.GetUtcNow().AddMinutes(-1));
         await SeedBindingObligationAsync(newest, SlackAgentAppBindingObligationStatus.Pending, _time.GetUtcNow());
 
@@ -378,7 +405,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         string authorization = SlackAuthorizationState.NotStarted,
         string appId = "",
         string botUserId = "",
-        string bindingState = SlackAgentAppBindingState.Pending)
+        string bindingState = SlackAgentAppBindingState.Pending,
+        string runtimeCredentialValidationState = SlackRuntimeCredentialValidationState.NotProvided)
     {
         var suffix = Guid.NewGuid().ToString("N");
         var enrollmentId = $"enrollment-{suffix}";
@@ -427,6 +455,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             BotUserId = botUserId,
             AppLifecycle = lifecycle,
             Authorization = authorization,
+            RuntimeCredentialValidationState = runtimeCredentialValidationState,
             DesiredManifestVersion = 2,
             DesiredManifestHash = "desired",
             VerifiedScopesJson = "[]",

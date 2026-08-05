@@ -57,7 +57,8 @@ public sealed class SlackAgentAppBindingService : IScopedService
         if (agentApp.AppLifecycle != SlackAppLifecycle.Created
             || agentApp.Authorization != SlackAuthorizationState.Authorized
             || string.IsNullOrWhiteSpace(agentApp.AppId)
-            || string.IsNullOrWhiteSpace(agentApp.BotUserId))
+            || string.IsNullOrWhiteSpace(agentApp.BotUserId)
+            || agentApp.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified)
             return SlackAgentAppBindingResult.NotVerified;
 
         var obligation = await db.SlackAgentAppBindingObligations

@@ -87,7 +87,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_BIND_RETRY",
             botUserId: "U_BIND_RETRY",
-            bindingState: bindingState);
+            bindingState: bindingState,
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         await SeedBindingObligationAsync(child, obligationStatus);
         var connections = new AgentConnectionStore(
             _factory,
@@ -114,7 +115,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_BIND_LEASE_FAILURE",
-            botUserId: "U_BIND_LEASE_FAILURE");
+            botUserId: "U_BIND_LEASE_FAILURE",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var actual = CreateBindingPortStore();
         var port = new InterleavingBindingPort(actual)
         {
@@ -144,7 +146,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_BIND_LEASE_SUCCESS",
-            botUserId: "U_BIND_LEASE_SUCCESS");
+            botUserId: "U_BIND_LEASE_SUCCESS",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var actual = CreateBindingPortStore();
         var port = new InterleavingBindingPort(actual)
         {
