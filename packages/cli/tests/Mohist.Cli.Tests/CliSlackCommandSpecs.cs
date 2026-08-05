@@ -23,7 +23,7 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Theory]
-    [InlineData("setup", "--workspace-team", "--configuration-token-file", "--credentials-file", "--manager-app-id", "--manager-bot-user-id", "--manager-credential-ref")]
+    [InlineData("setup", "--workspace-team", "--configuration-token-file", "--credentials-file")]
     [InlineData("install-agent", "--workspace-team", "--credentials-file", "--project")]
     [InlineData("status", "--workspace-team")]
     public async Task SlackWizardAndStatusHelp_ExposeTheirLeafInputsWithoutHttp(
@@ -114,6 +114,7 @@ public sealed class CliSlackCommandSpecs
     [Fact]
     public async Task InstallAgent_JsonFieldList_IsNotRefusedAsTokenLiteral()
     {
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
             var path = request.RequestUri?.PathAndQuery ?? "";
@@ -124,25 +125,31 @@ public sealed class CliSlackCommandSpecs
                     data = new object[] { new { id = "agent_1", name = "writer" } },
                 }));
 
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                }));
+
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new object[]
+                data = new
                 {
-                    new
-                    {
-                        agentId = "agent_1",
-                        agentName = "writer",
-                        connection = new { id = "connection_1", botName = "writer-bot" },
-                        managedApp = new { id = "child_app_1", nextAction = "ready" },
-                    },
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer-bot" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "not_provided" },
+                    nextAction = "ready",
+                    errorClass = (string?)null,
                 },
             }));
         });
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "install-agent", "writer", "--workspace-team", "T_W", "--json", "connection,nextAction"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
         var projected = JsonNode.Parse(output.ToString())!.AsObject();
@@ -152,173 +159,134 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task Setup_EnrollsProvisionsAndPrintsClaimCodeWithoutEchoingCredential()
+    public async Task Setup_ConfigurationAndRuntimeCredentials_ArePostedInSequenceWithoutEcho()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        const string managerCredential = "manager-credential-fixture";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
-        var statusCalls = 0;
+        const string configurationToken = "configuration-token-fixture-0123456789";
+        const string refreshToken = "configuration-refresh-token-fixture";
+        const string botToken = "xoxb-runtime-bot-fixture-0123456789";
+        const string appToken = "xapp-runtime-app-fixture-0123456789";
+        var env = OperatorEnv();
+        var progressCalls = 0;
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
-            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/status?workspaceTeamId=T_W")
+            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
             {
-                statusCalls++;
-                return Task.FromResult(statusCalls == 1
-                    ? RecordingHttpHandler.JsonError("The workspace has not been enrolled.", "not_found", System.Net.HttpStatusCode.NotFound)
-                    : statusCalls == 2
-                        ? RecordingHttpHandler.Json(new
-                        {
-                            success = true,
-                            data = new
-                            {
-                                enrollment = new { id = "enrollment_1", workspaceTeamId = "T_W" },
-                                connections = Array.Empty<object>(),
-                                managedApps = Array.Empty<object>(),
-                                nextAction = "configure_manager_credentials",
-                            },
-                        })
-                        : RecordingHttpHandler.Json(new
-                        {
-                            success = true,
-                            data = new
-                            {
-                                enrollment = new { id = "enrollment_1", workspaceTeamId = "T_W" },
-                                connections = Array.Empty<object>(),
-                                managedApps = Array.Empty<object>(),
-                                nextAction = "claim_manager",
-                            },
-                        }));
+                progressCalls++;
+                return Task.FromResult(progressCalls switch
+                {
+                    1 => RecordingHttpHandler.Json(new { success = true, data = EnrollmentProgress("supply_configuration", phase: "not_started") }),
+                    2 => RecordingHttpHandler.Json(new { success = true, data = EnrollmentProgress("supply_runtime_credentials", phase: "awaiting_install") }),
+                    _ => RecordingHttpHandler.Json(new { success = true, data = EnrollmentProgress("report_socket_hello", phase: "awaiting_socket_validation") }),
+                });
             }
 
-            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/setup")
+            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/configuration")
                 return Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1", workspaceTeamId = "T_W" },
-                        claimCode = "claim_once",
-                        claimExpiresAt = "2026-08-10T00:00:00Z",
-                        nextAction = "configure_manager_credentials",
-                    },
+                    data = EnrollmentProgress("supply_runtime_credentials", phase: "awaiting_install"),
                 }));
 
-            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/credentials")
+            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/runtime-credentials")
                 return Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { workspaceTeamId = "T_W", credentialProvisioned = true },
+                    data = EnrollmentProgress("report_socket_hello", phase: "awaiting_socket_validation"),
                 }));
 
             return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
         });
-        fs.AddFile("/tmp/manager-credentials.json", $"{{\"botToken\":\"{managerCredential}\"}}");
+        fs.AddFile("/tmp/configuration-token.json", $"{{\"configurationToken\":\"{configurationToken}\",\"configurationRefreshToken\":\"{refreshToken}\"}}");
+        fs.AddFile("/tmp/slack-credentials.json", $"{{\"botToken\":\"{botToken}\",\"appToken\":\"{appToken}\"}}");
 
         var exit = await MohistCliCommands.RunAsync(
             http,
             [
                 "slack", "setup",
                 "--workspace-team", "T_W",
-                "--manager-app-id", "A_1",
-                "--manager-bot-user-id", "U_1",
-                "--manager-credential-ref", "ref_1",
-                "--credentials-file", "/tmp/manager-credentials.json",
+                "--configuration-token-file", "/tmp/configuration-token.json",
+                "--credentials-file", "/tmp/slack-credentials.json",
             ],
             output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.Equal(5, handler.Requests.Count);
-        Assert.Equal(HttpMethod.Get, handler.Requests[0].Method);
-        Assert.Equal("/api/slack-manager/status?workspaceTeamId=T_W", handler.Requests[0].RequestUri?.PathAndQuery);
-        Assert.Equal(operatorToken, Assert.Single(handler.Requests[0].Headers[OperatorCredentialProvider.HeaderName]));
+        Assert.Equal(
+            [
+                "/api/slack-manager/setup/progress?workspaceTeamId=T_W",
+                "/api/slack-manager/setup/configuration",
+                "/api/slack-manager/setup/progress?workspaceTeamId=T_W",
+                "/api/slack-manager/setup/runtime-credentials",
+                "/api/slack-manager/setup/progress?workspaceTeamId=T_W",
+            ],
+            handler.Requests.Select(request => request.RequestUri?.PathAndQuery ?? string.Empty).ToArray());
 
-        var setupRequest = handler.Requests[1];
-        Assert.Equal(HttpMethod.Post, setupRequest.Method);
-        Assert.Equal("/api/slack-manager/setup", setupRequest.RequestUri?.PathAndQuery);
-        var setupBody = JsonNode.Parse(setupRequest.Body!)!;
-        Assert.Equal("T_W", setupBody["workspaceTeamId"]!.GetValue<string>());
-        Assert.Equal("A_1", setupBody["managerAppId"]!.GetValue<string>());
-        Assert.Equal("U_1", setupBody["managerBotUserId"]!.GetValue<string>());
-        Assert.Equal("ref_1", setupBody["managerCredentialRef"]!.GetValue<string>());
-        Assert.Equal("socket", setupBody["transportKind"]!.GetValue<string>());
-        Assert.Equal("ready", setupBody["readiness"]!.GetValue<string>());
+        foreach (var request in handler.Requests)
+            Assert.Equal(OperatorToken, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
 
-        var credentialRequest = handler.Requests[3];
-        Assert.Equal(HttpMethod.Post, credentialRequest.Method);
-        Assert.Equal("/api/slack-manager/credentials", credentialRequest.RequestUri?.PathAndQuery);
-        Assert.Equal(managerCredential, JsonNode.Parse(credentialRequest.Body!)!["managerBotToken"]!.GetValue<string>());
+        var configurationBody = JsonNode.Parse(handler.Requests[1].Body!)!;
+        Assert.Equal("T_W", configurationBody["workspaceTeamId"]!.GetValue<string>());
+        Assert.Equal(configurationToken, configurationBody["configurationAccessToken"]!.GetValue<string>());
+        Assert.Equal(refreshToken, configurationBody["configurationRefreshToken"]!.GetValue<string>());
+
+        var runtimeBody = JsonNode.Parse(handler.Requests[3].Body!)!;
+        Assert.Equal(botToken, runtimeBody["botToken"]!.GetValue<string>());
+        Assert.Equal(appToken, runtimeBody["appLevelToken"]!.GetValue<string>());
 
         var stdout = output.ToString();
-        Assert.Equal(1, Count(stdout, "claim_once"));
-        Assert.Contains("valid until", stdout, StringComparison.Ordinal);
-        Assert.Contains("Mohist App bot", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain(managerCredential, stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain(managerCredential, error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Workspace T_W is enrolled.", error.ToString(), StringComparison.Ordinal);
-        Assert.Contains("Manager credential provisioned for T_W.", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("report_socket_hello", stdout, StringComparison.Ordinal);
+        Assert.Contains("https://slack.com/oauth/v2/authorize?client_id=A_1", stdout, StringComparison.Ordinal);
+        Assert.Contains("Configuration credentials accepted for T_W.", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("Runtime credentials accepted for T_W.", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(configurationToken, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(configurationToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(refreshToken, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(refreshToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Setup_ResumesFromProvisionedStateWithoutReEnrolling()
+    public async Task Setup_ResumesFromRuntimeCredentialsStepWithoutReSupplyingConfiguration()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
-        var statusCalls = 0;
+        const string botToken = "xoxb-runtime-bot-fixture-0123456789";
+        const string appToken = "xapp-runtime-app-fixture-0123456789";
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
-        {
-            if (string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/status?workspaceTeamId=T_W", StringComparison.Ordinal))
-            {
-                statusCalls++;
-                return Task.FromResult(RecordingHttpHandler.Json(new
+            request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/progress?workspaceTeamId=T_W"
+                ? Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        connections = Array.Empty<object>(),
-                        managedApps = Array.Empty<object>(),
-                        nextAction = statusCalls == 1 ? "configure_manager_credentials" : "ready",
-                    },
-                }));
-            }
-
-            return Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = new { workspaceTeamId = "T_W", credentialProvisioned = true },
-            }));
-        });
-        fs.AddFile("/tmp/manager-credentials.json", "{\"botToken\":\"manager-credential-fixture\"}");
+                    data = EnrollmentProgress("supply_runtime_credentials", phase: "awaiting_install"),
+                }))
+                : Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                })));
+        fs.AddFile("/tmp/slack-credentials.json", $"{{\"botToken\":\"{botToken}\",\"appToken\":\"{appToken}\"}}");
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["slack", "setup", "--workspace-team", "T_W", "--credentials-file", "/tmp/manager-credentials.json"],
+            ["slack", "setup", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.DoesNotContain(handler.Requests, request => string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/setup", StringComparison.Ordinal));
-        Assert.Contains("Manager credential provisioned for T_W.", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(handler.Requests, request =>
+            string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/setup/configuration", StringComparison.Ordinal));
+        Assert.Contains("Runtime credentials accepted for T_W.", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Setup_ReadyWorkspacePrintsSummaryWithoutMutation()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new
-                {
-                    enrollment = new { id = "enrollment_1" },
-                    connections = Array.Empty<object>(),
-                    managedApps = Array.Empty<object>(),
-                    nextAction = "ready",
-                },
+                data = EnrollmentProgress("ready"),
             })));
 
         var exit = await MohistCliCommands.RunAsync(
@@ -334,107 +302,72 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task Setup_ReadyWithCredentialsFile_RotatesCredentialOnce()
+    public async Task Setup_ReadyWithCredentialsFile_RotatesViaRuntimeCredentialsRoute()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        const string rotatedCredential = "rotated-manager-credential-fixture";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        const string rotatedBotToken = "xoxb-rotated-bot-fixture-0123456789";
+        const string rotatedAppToken = "xapp-rotated-app-fixture-0123456789";
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
-            request.RequestUri?.PathAndQuery == "/api/slack-manager/credentials"
+            request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/progress?workspaceTeamId=T_W"
                 ? Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { workspaceTeamId = "T_W", credentialProvisioned = true },
+                    data = EnrollmentProgress("ready"),
                 }))
                 : Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        connections = Array.Empty<object>(),
-                        managedApps = Array.Empty<object>(),
-                        nextAction = "ready",
-                    },
+                    data = EnrollmentProgress("ready"),
                 })));
-        fs.AddFile("/tmp/manager-credentials.json", $"{{\"botToken\":\"{rotatedCredential}\"}}");
+        fs.AddFile("/tmp/slack-credentials.json", $"{{\"botToken\":\"{rotatedBotToken}\",\"appToken\":\"{rotatedAppToken}\"}}");
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            ["slack", "setup", "--workspace-team", "T_W", "--credentials-file", "/tmp/manager-credentials.json"],
+            ["slack", "setup", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
             output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
         var credentialPosts = handler.Requests
-            .Where(request => request.RequestUri?.PathAndQuery == "/api/slack-manager/credentials")
+            .Where(request => request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/runtime-credentials")
             .ToList();
         Assert.Single(credentialPosts);
-        Assert.Equal(rotatedCredential, JsonNode.Parse(credentialPosts[0].Body!)!["managerBotToken"]!.GetValue<string>());
-        Assert.Contains("Manager credential rotated for T_W.", error.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(rotatedCredential, output.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(rotatedCredential, error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(rotatedBotToken, JsonNode.Parse(credentialPosts[0].Body!)!["botToken"]!.GetValue<string>());
+        Assert.Equal(rotatedAppToken, JsonNode.Parse(credentialPosts[0].Body!)!["appLevelToken"]!.GetValue<string>());
+        Assert.Contains("Runtime credentials rotated for T_W.", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(rotatedBotToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(rotatedBotToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(rotatedAppToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(rotatedAppToken, error.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task Setup_ClaimPhaseRerun_ReissuesCodeWithManagerFacts()
+    [Theory]
+    [InlineData("--manager-app-id", "A_1")]
+    [InlineData("--manager-bot-user-id", "U_1")]
+    [InlineData("--manager-credential-ref", "ref_1")]
+    public async Task Setup_RefusesLegacyManagerFactsBeforeHttp(string option, string value)
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
-            request.RequestUri?.PathAndQuery == "/api/slack-manager/status?workspaceTeamId=T_W"
-                ? Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        connections = Array.Empty<object>(),
-                        managedApps = Array.Empty<object>(),
-                        nextAction = "claim_manager",
-                    },
-                }))
-                : Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        claimCode = "claim_fresh",
-                        claimExpiresAt = "2026-08-11T00:00:00Z",
-                        nextAction = "claim_manager",
-                    },
-                })));
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            [
-                "slack", "setup",
-                "--workspace-team", "T_W",
-                "--manager-app-id", "A_1",
-                "--manager-bot-user-id", "U_1",
-                "--manager-credential-ref", "ref_1",
-            ],
-            output, error, fs, executor, env);
+            ["slack", "setup", "--workspace-team", "T_W", option, value],
+            output, error, fs, executor);
 
-        Assert.Equal(0, exit);
-        var setupPosts = handler.Requests
-            .Where(request => request.RequestUri?.PathAndQuery == "/api/slack-manager/setup")
-            .ToList();
-        Assert.Single(setupPosts);
-        Assert.Contains("claim_fresh", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(2, exit);
+        Assert.Empty(handler.Requests);
+        Assert.DoesNotContain(value, output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Setup_MissingManagerFactsAtEnrollmentStep_FailsWithUsageBeforeHttpMutation()
+    public async Task Setup_MissingConfigurationTokenFileAtConfigurationStep_FailsWithUsageBeforePost()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
-            Task.FromResult(RecordingHttpHandler.JsonError(
-                "The workspace has not been enrolled.", "not_found", System.Net.HttpStatusCode.NotFound)));
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("supply_configuration", phase: "configuration_required"),
+            })));
 
         var exit = await MohistCliCommands.RunAsync(
             http,
@@ -442,33 +375,32 @@ public sealed class CliSlackCommandSpecs
             output, error, fs, executor, env);
 
         Assert.Equal(2, exit);
-        Assert.DoesNotContain(handler.Requests, request => string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/setup", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/setup/configuration", StringComparison.Ordinal));
         var stderr = error.ToString();
-        Assert.Contains("--manager-app-id", stderr, StringComparison.Ordinal);
-        Assert.Contains("--manager-bot-user-id", stderr, StringComparison.Ordinal);
-        Assert.Contains("--manager-credential-ref", stderr, StringComparison.Ordinal);
+        Assert.Contains("--configuration-token-file", stderr, StringComparison.Ordinal);
+        Assert.Contains("Re-run `mo slack setup`", stderr, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task Setup_ConfigurationTokenFile_ShapeValidatedBeforeHttpWithoutEcho()
+    public async Task Setup_ConfigurationTokenFile_ShapeValidatedAndPostedWithoutEcho()
     {
         const string configurationToken = "configuration-token-fixture";
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
-            Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = new
+        const string refreshToken = "refresh-fixture";
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+            request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/progress?workspaceTeamId=T_W"
+                ? Task.FromResult(RecordingHttpHandler.Json(new
                 {
-                    enrollment = new { id = "enrollment_1" },
-                    connections = Array.Empty<object>(),
-                    managedApps = Array.Empty<object>(),
-                    nextAction = "ready",
-                },
-            })));
-        fs.AddFile("/tmp/configuration-token.json", $"{{\"configurationToken\":\"{configurationToken}\",\"configurationRefreshToken\":\"refresh-fixture\"}}");
+                    success = true,
+                    data = EnrollmentProgress("supply_configuration", phase: "configuration_required"),
+                }))
+                : Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                })));
+        fs.AddFile("/tmp/configuration-token.json", $"{{\"configurationToken\":\"{configurationToken}\",\"configurationRefreshToken\":\"{refreshToken}\"}}");
 
         var exit = await MohistCliCommands.RunAsync(
             http,
@@ -476,10 +408,18 @@ public sealed class CliSlackCommandSpecs
             output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.Single(handler.Requests);
+        Assert.Equal(3, handler.Requests.Count);
+        var configurationRequest = handler.Requests[1];
+        Assert.Equal(HttpMethod.Post, configurationRequest.Method);
+        Assert.Equal("/api/slack-manager/setup/configuration", configurationRequest.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(configurationRequest.Body!)!;
+        Assert.Equal(configurationToken, body["configurationAccessToken"]!.GetValue<string>());
+        Assert.Equal(refreshToken, body["configurationRefreshToken"]!.GetValue<string>());
         Assert.Contains("Configuration token pair accepted", error.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(configurationToken, output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(configurationToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(refreshToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(refreshToken, error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -487,69 +427,50 @@ public sealed class CliSlackCommandSpecs
     [InlineData(false, true)]
     public async Task Setup_ConfigurationTokenFile_RejectsSymlinkOrWorldReadableFileBeforeHttp(bool symlink, bool worldReadable)
     {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
-        fs.AddFile("/tmp/configuration-token.json", "{\"configurationToken\":\"ct\",\"configurationRefreshToken\":\"cr\"}");
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("supply_configuration", phase: "configuration_required"),
+            })));
+        fs.AddFile("/tmp/configuration-token.json", "{\"configurationToken\":\"ct-secret-fixture\",\"configurationRefreshToken\":\"cr-secret-fixture\"}");
         fs.TreatFilesAsSymbolicLinks = symlink;
         fs.TreatFilesAsWorldReadable = worldReadable;
 
         var exit = await MohistCliCommands.RunAsync(
             http,
             ["slack", "setup", "--workspace-team", "T_W", "--configuration-token-file", "/tmp/configuration-token.json"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
 
         Assert.NotEqual(0, exit);
-        Assert.Empty(handler.Requests);
-        Assert.DoesNotContain("ct", output.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("ct", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+        Assert.DoesNotContain(handler.Requests, request =>
+            string.Equals(request.RequestUri?.PathAndQuery, "/api/slack-manager/setup/configuration", StringComparison.Ordinal));
+        Assert.DoesNotContain("ct-secret-fixture", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("ct-secret-fixture", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task Setup_SelectedJson_ProjectsRequestedFieldsAfterWizard()
     {
-        const string operatorToken = "operator-token-for-slack-setup-test-0123456789";
-        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
-            request.RequestUri?.PathAndQuery == "/api/slack-manager/status?workspaceTeamId=T_W"
-                ? Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        connections = Array.Empty<object>(),
-                        managedApps = Array.Empty<object>(),
-                        nextAction = "claim_manager",
-                    },
-                }))
-                : Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new
-                    {
-                        enrollment = new { id = "enrollment_1" },
-                        claimCode = "claim_json",
-                        claimExpiresAt = "2026-08-12T00:00:00Z",
-                        nextAction = "claim_manager",
-                    },
-                })));
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("report_socket_hello", phase: "awaiting_socket_validation"),
+            })));
 
         var exit = await MohistCliCommands.RunAsync(
             http,
-            [
-                "slack", "setup",
-                "--workspace-team", "T_W",
-                "--manager-app-id", "A_1",
-                "--manager-bot-user-id", "U_1",
-                "--manager-credential-ref", "ref_1",
-                "--json", "claimCode,nextAction",
-            ],
+            ["slack", "setup", "--workspace-team", "T_W", "--json", "installUrl,nextAction"],
             output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
         var projected = JsonNode.Parse(output.ToString())!.AsObject();
-        Assert.Equal("claim_json", projected["claimCode"]!.GetValue<string>());
-        Assert.Equal("claim_manager", projected["nextAction"]!.GetValue<string>());
+        Assert.Equal("https://slack.com/oauth/v2/authorize?client_id=A_1", projected["installUrl"]!.GetValue<string>());
+        Assert.Equal("report_socket_hello", projected["nextAction"]!.GetValue<string>());
         Assert.Equal(2, projected.Count);
         Assert.Equal(string.Empty, error.ToString());
     }
@@ -573,9 +494,9 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task InstallAgent_CreatesAppDrivesPhasesAndStopsAtInstallAuthorization()
+    public async Task InstallAgent_PostsUnifiedRouteAndStopsAtCredentialsStep()
     {
-        var optionsCall = 0;
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
             var path = request.RequestUri?.PathAndQuery ?? "";
@@ -586,145 +507,116 @@ public sealed class CliSlackCommandSpecs
                     data = new object[] { new { id = "agent_1", name = "writer" } },
                 }));
 
-            if (path.EndsWith("/slack-manager/agents?workspaceTeamId=T_W", StringComparison.Ordinal))
-            {
-                optionsCall++;
-                return Task.FromResult(optionsCall == 1
-                    ? RecordingHttpHandler.Json(new
-                    {
-                        success = true,
-                        data = new object[]
-                        {
-                            new { agentId = "agent_1", agentName = "writer", connection = (object?)null, managedApp = (object?)null },
-                        },
-                    })
-                    : RecordingHttpHandler.Json(new
-                    {
-                        success = true,
-                        data = new object[]
-                        {
-                            new
-                            {
-                                agentId = "agent_1",
-                                agentName = "writer",
-                                connection = new { id = "connection_1", botName = "writer" },
-                                managedApp = new { id = "child_app_1", nextAction = "authorize_child_app" },
-                            },
-                        },
-                    }));
-            }
-
-            if (path.EndsWith("/slack-manager/apps", StringComparison.Ordinal))
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
                 return Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new
-                    {
-                        created = true,
-                        connection = new { id = "connection_1", botName = "writer" },
-                        managedApp = new { id = "child_app_1", nextAction = "create_child_app" },
-                    },
-                }));
-
-            if (path.EndsWith("/connections/connection_1/create", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { id = "child_app_1" },
-                }));
-
-            if (path.EndsWith("/connections/connection_1/begin-authorization", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { state = "oauth_state_1", expiresAt = "2026-08-10T00:00:00Z", authorizationAttemptId = "attempt_1" },
-                }));
-
-            if (path.EndsWith("/connections/connection_1/authorization-progress", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new { authorization = "awaiting_user" },
-                }));
-
-            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
-        });
-
-        var exit = await MohistCliCommands.RunAsync(http,
-            ["slack", "install-agent", "writer", "--workspace-team", "T_W"],
-            output, error, fs, executor);
-
-        Assert.Equal(0, exit);
-        Assert.Equal(
-            [
-                "/api/projects/proj_abc/agents?all=true",
-                "/api/projects/proj_abc/slack-manager/agents?workspaceTeamId=T_W",
-                "/api/projects/proj_abc/slack-manager/apps",
-                "/api/projects/proj_abc/slack-manager/connections/connection_1/create",
-                "/api/projects/proj_abc/slack-manager/agents?workspaceTeamId=T_W",
-                "/api/projects/proj_abc/slack-manager/connections/connection_1/begin-authorization",
-                "/api/projects/proj_abc/slack-manager/connections/connection_1/authorization-progress",
-            ],
-            handler.Requests.Select(request => request.RequestUri?.PathAndQuery ?? string.Empty).ToArray());
-
-        var appsBody = JsonNode.Parse(handler.Requests[2].Body!)!;
-        Assert.Equal("agent_1", appsBody["agentId"]!.GetValue<string>());
-        Assert.Equal("T_W", appsBody["workspaceTeamId"]!.GetValue<string>());
-        Assert.Equal("owner_only", appsBody["accessPolicy"]!.GetValue<string>());
-
-        var progressBody = JsonNode.Parse(handler.Requests[6].Body!)!;
-        Assert.Equal("awaiting_user", progressBody["authorization"]!.GetValue<string>());
-
-        var stdout = output.ToString();
-        Assert.Contains("Installation authorization is required", stdout, StringComparison.Ordinal);
-        Assert.Contains("oauth_state_1", stdout, StringComparison.Ordinal);
-        Assert.Contains("mo slack install-agent <agent>", stdout, StringComparison.Ordinal);
-        Assert.DoesNotContain("token", stdout, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task InstallAgent_ResumesExistingConnectionWithoutCreatingSecondApp()
-    {
-        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
-        {
-            var path = request.RequestUri?.PathAndQuery ?? "";
-            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
-                return Task.FromResult(RecordingHttpHandler.Json(new
-                {
-                    success = true,
-                    data = new object[] { new { id = "agent_1", name = "writer" } },
+                    data = EnrollmentProgress("ready"),
                 }));
 
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new object[]
+                data = new
                 {
-                    new
-                    {
-                        agentId = "agent_1",
-                        agentName = "writer",
-                        connection = new { id = "connection_1", botName = "writer" },
-                        managedApp = new { id = "child_app_1", nextAction = "wait_for_operation" },
-                    },
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer-bot" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "not_provided" },
+                    nextAction = "provide_credentials",
+                    errorClass = (string?)null,
                 },
             }));
         });
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "install-agent", "writer", "--workspace-team", "T_W"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
+
+        Assert.Equal(2, exit);
+        Assert.Equal(
+            [
+                "/api/projects/proj_abc/agents?all=true",
+                "/api/slack-manager/setup/progress?workspaceTeamId=T_W",
+                "/api/projects/proj_abc/slack-manager/install-agent",
+            ],
+            handler.Requests.Select(request => request.RequestUri?.PathAndQuery ?? string.Empty).ToArray());
+
+        var installRequest = handler.Requests[2];
+        Assert.Equal(HttpMethod.Post, installRequest.Method);
+        Assert.Equal(OperatorToken, Assert.Single(installRequest.Headers[OperatorCredentialProvider.HeaderName]));
+        var installBody = JsonNode.Parse(installRequest.Body!)!;
+        Assert.Equal("enrollment_1", installBody["enrollmentId"]!.GetValue<string>());
+        Assert.Equal("agent_1", installBody["agentId"]!.GetValue<string>());
+
+        Assert.Equal(string.Empty, output.ToString());
+        var stderr = error.ToString();
+        Assert.Contains("needs the runtime credentials", stderr, StringComparison.Ordinal);
+        Assert.Contains("--credentials-file", stderr, StringComparison.Ordinal);
+        Assert.Contains("mo slack install-agent", stderr, StringComparison.Ordinal);
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("/slack-manager/apps", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("create", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("begin-authorization", StringComparison.Ordinal));
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("authorization-progress", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task InstallAgent_ResumesExistingInstallationWithoutCreatingSecondApp()
+    {
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? "";
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new object[] { new { id = "agent_1", name = "writer" } },
+                }));
+
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                }));
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer-bot" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "not_provided" },
+                    nextAction = "wait_for_operation",
+                    errorClass = (string?)null,
+                },
+            }));
+        });
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "install-agent", "writer", "--workspace-team", "T_W"],
+            output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.Equal(2, handler.Requests.Count);
-        Assert.DoesNotContain(handler.Requests, request => (request.RequestUri?.PathAndQuery ?? string.Empty).EndsWith("/slack-manager/apps", StringComparison.Ordinal));
-        Assert.Contains("in progress", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("wait_for_operation", output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("/slack-manager/apps", StringComparison.Ordinal));
+        var stdout = output.ToString();
+        Assert.Contains("in progress", stdout, StringComparison.Ordinal);
+        Assert.Contains("wait_for_operation", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
     public async Task InstallAgent_Ready_PrintsConnectionAndBotSummary()
     {
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
             var path = request.RequestUri?.PathAndQuery ?? "";
@@ -735,30 +627,37 @@ public sealed class CliSlackCommandSpecs
                     data = new object[] { new { id = "agent_1", name = "writer" } },
                 }));
 
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                }));
+
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new object[]
+                data = new
                 {
-                    new
-                    {
-                        agentId = "agent_1",
-                        agentName = "writer",
-                        connection = new { id = "connection_1", botName = "writer-bot" },
-                        managedApp = new { id = "child_app_1", nextAction = "ready" },
-                    },
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer-bot" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "verified" },
+                    nextAction = "ready",
+                    errorClass = (string?)null,
                 },
             }));
         });
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "install-agent", "writer", "--workspace-team", "T_W"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.Contains("installed and ready in workspace T_W", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("connection_1", output.ToString(), StringComparison.Ordinal);
-        Assert.Contains("writer-bot", output.ToString(), StringComparison.Ordinal);
+        var stdout = output.ToString();
+        Assert.Contains("installed and ready in workspace T_W", stdout, StringComparison.Ordinal);
+        Assert.Contains("connection_1", stdout, StringComparison.Ordinal);
+        Assert.Contains("writer-bot", stdout, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -781,10 +680,12 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task InstallAgent_CredentialsFile_ValidatedAtAuthorizationStepWithoutEcho()
+    public async Task InstallAgent_CredentialsFile_AreSubmittedToUnifiedCredentialsRouteWithoutEcho()
     {
         const string appToken = "xapp-secret-fixture";
         const string botToken = "xoxb-secret-fixture";
+        var env = OperatorEnv();
+        var installCalls = 0;
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
             var path = request.RequestUri?.PathAndQuery ?? "";
@@ -795,53 +696,78 @@ public sealed class CliSlackCommandSpecs
                     data = new object[] { new { id = "agent_1", name = "writer" } },
                 }));
 
-            if (path.EndsWith("/slack-manager/agents?workspaceTeamId=T_W", StringComparison.Ordinal))
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
                 return Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new object[]
-                    {
-                        new
-                        {
-                            agentId = "agent_1",
-                            agentName = "writer",
-                            connection = new { id = "connection_1", botName = "writer" },
-                            managedApp = new { id = "child_app_1", nextAction = "authorize_child_app" },
-                        },
-                    },
+                    data = EnrollmentProgress("ready"),
                 }));
 
-            if (path.EndsWith("/begin-authorization", StringComparison.Ordinal))
+            if (path.EndsWith("/slack-manager/install-agent/credentials", StringComparison.Ordinal))
                 return Task.FromResult(RecordingHttpHandler.Json(new
                 {
                     success = true,
-                    data = new { state = "oauth_state_1", expiresAt = "2026-08-10T00:00:00Z", authorizationAttemptId = "attempt_1" },
+                    data = new { accepted = true, runtimeCredentialValidationState = "candidate", errorClass = (string?)null },
                 }));
 
+            installCalls++;
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new { authorization = "awaiting_user" },
+                data = new
+                {
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer" },
+                    agentApp = new
+                    {
+                        id = "agent_app_1",
+                        runtimeCredentialValidationState = installCalls == 1 ? "not_provided" : "candidate",
+                    },
+                    nextAction = "provide_credentials",
+                    errorClass = (string?)null,
+                },
             }));
         });
         fs.AddFile("/tmp/slack-credentials.json", $"{{\"appToken\":\"{appToken}\",\"botToken\":\"{botToken}\"}}");
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "install-agent", "writer", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
 
         Assert.Equal(0, exit);
-        Assert.DoesNotContain(appToken, output.ToString(), StringComparison.Ordinal);
+        Assert.Equal(
+            [
+                "/api/projects/proj_abc/agents?all=true",
+                "/api/slack-manager/setup/progress?workspaceTeamId=T_W",
+                "/api/projects/proj_abc/slack-manager/install-agent",
+                "/api/projects/proj_abc/slack-manager/install-agent/credentials",
+                "/api/projects/proj_abc/slack-manager/install-agent",
+            ],
+            handler.Requests.Select(request => request.RequestUri?.PathAndQuery ?? string.Empty).ToArray());
+
+        var credentialsRequest = handler.Requests[3];
+        Assert.Equal(HttpMethod.Post, credentialsRequest.Method);
+        var credentialsBody = JsonNode.Parse(credentialsRequest.Body!)!;
+        Assert.Equal("agent_app_1", credentialsBody["agentAppId"]!.GetValue<string>());
+        Assert.Equal(botToken, credentialsBody["botToken"]!.GetValue<string>());
+        Assert.Equal(appToken, credentialsBody["appLevelToken"]!.GetValue<string>());
+
+        var stdout = output.ToString();
+        Assert.Contains("waiting for the Slack connection", stdout, StringComparison.Ordinal);
+        Assert.Contains("Socket hello", stdout, StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, stdout, StringComparison.Ordinal);
         Assert.DoesNotContain(appToken, error.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(botToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, stdout, StringComparison.Ordinal);
         Assert.DoesNotContain(botToken, error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    public async Task InstallAgent_CredentialsFile_RejectsSymlinkOrWorldReadableFileAtAuthorizationStep(bool symlink, bool worldReadable)
+    public async Task InstallAgent_CredentialsFile_RejectsSymlinkOrWorldReadableFileWithoutPosting(bool symlink, bool worldReadable)
     {
+        var env = OperatorEnv();
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
         {
             var path = request.RequestUri?.PathAndQuery ?? "";
@@ -852,18 +778,24 @@ public sealed class CliSlackCommandSpecs
                     data = new object[] { new { id = "agent_1", name = "writer" } },
                 }));
 
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                }));
+
             return Task.FromResult(RecordingHttpHandler.Json(new
             {
                 success = true,
-                data = new object[]
+                data = new
                 {
-                    new
-                    {
-                        agentId = "agent_1",
-                        agentName = "writer",
-                        connection = new { id = "connection_1", botName = "writer" },
-                        managedApp = new { id = "child_app_1", nextAction = "authorize_child_app" },
-                    },
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "not_provided" },
+                    nextAction = "provide_credentials",
+                    errorClass = (string?)null,
                 },
             }));
         });
@@ -873,11 +805,198 @@ public sealed class CliSlackCommandSpecs
 
         var exit = await MohistCliCommands.RunAsync(http,
             ["slack", "install-agent", "writer", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
-            output, error, fs, executor);
+            output, error, fs, executor, env);
 
         Assert.NotEqual(0, exit);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).EndsWith("/install-agent/credentials", StringComparison.Ordinal));
         Assert.DoesNotContain("xapp-secret", output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("xapp-secret", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Setup_MissingCredentialsFile_FailsWithInstallUrlAndNextStepHint()
+    {
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("supply_runtime_credentials", phase: "awaiting_install"),
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "setup", "--workspace-team", "T_W"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(2, exit);
+        Assert.Single(handler.Requests);
+        Assert.Equal(string.Empty, output.ToString());
+        var stderr = error.ToString();
+        Assert.Contains("supply_runtime_credentials", stderr, StringComparison.Ordinal);
+        Assert.Contains("https://slack.com/oauth/v2/authorize?client_id=A_1", stderr, StringComparison.Ordinal);
+        Assert.Contains("--credentials-file", stderr, StringComparison.Ordinal);
+        Assert.Contains("mo slack setup", stderr, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Setup_WaitingForSocketHello_PrintsUniqueNextStepWithoutFakingValidation()
+    {
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("report_socket_hello", phase: "awaiting_socket_validation"),
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "setup", "--workspace-team", "T_W"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Get, handler.Requests.Single().Method);
+        var stdout = output.ToString();
+        Assert.Contains("report_socket_hello", stdout, StringComparison.Ordinal);
+        Assert.Contains("Socket hello", stdout, StringComparison.Ordinal);
+        Assert.Contains("mo slack setup", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Setup_RuntimeCredentialMismatch_ReportsErrorClassAndExits1()
+    {
+        const string botToken = "xoxb-mismatch-bot-fixture-0123456789";
+        const string appToken = "xapp-mismatch-app-fixture-0123456789";
+        var env = OperatorEnv();
+        var progressCalls = 0;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            if (request.RequestUri?.PathAndQuery == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+            {
+                progressCalls++;
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = progressCalls == 1
+                        ? EnrollmentProgress("supply_runtime_credentials", phase: "awaiting_install")
+                        : EnrollmentProgress("supply_runtime_credentials", phase: "failed", errorClass: "runtime_credential_mismatch"),
+                }));
+            }
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = EnrollmentProgress("supply_runtime_credentials", phase: "failed", errorClass: "runtime_credential_mismatch"),
+            }));
+        });
+        fs.AddFile("/tmp/slack-credentials.json", $"{{\"botToken\":\"{botToken}\",\"appToken\":\"{appToken}\"}}");
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "setup", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(3, handler.Requests.Count);
+        Assert.Contains("runtime_credential_mismatch", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("supply_runtime_credentials", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InstallAgent_RejectedCredentials_Exit1WithErrorClassWithoutEcho()
+    {
+        const string botToken = "xoxb-wrong-bot-fixture-0123456789";
+        const string appToken = "xapp-wrong-app-fixture-0123456789";
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? "";
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new object[] { new { id = "agent_1", name = "writer" } },
+                }));
+
+            if (path == "/api/slack-manager/setup/progress?workspaceTeamId=T_W")
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = EnrollmentProgress("ready"),
+                }));
+
+            if (path.EndsWith("/slack-manager/install-agent/credentials", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new { accepted = false, runtimeCredentialValidationState = "failed", errorClass = "identity_mismatch" },
+                }));
+
+            return Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    enrollmentId = "enrollment_1",
+                    workspaceTeamId = "T_W",
+                    connection = new { id = "connection_1", botName = "writer-bot" },
+                    agentApp = new { id = "agent_app_1", runtimeCredentialValidationState = "not_provided" },
+                    nextAction = "provide_credentials",
+                    errorClass = (string?)null,
+                },
+            }));
+        });
+        fs.AddFile("/tmp/slack-credentials.json", $"{{\"appToken\":\"{appToken}\",\"botToken\":\"{botToken}\"}}");
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "install-agent", "writer", "--workspace-team", "T_W", "--credentials-file", "/tmp/slack-credentials.json"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.Contains("identity_mismatch", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("rejected", error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(botToken, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(appToken, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task InstallAgent_WorkspaceNotEnrolled_FailsWithSetupHintBeforeInstallPost()
+    {
+        var env = OperatorEnv();
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? "";
+            if (path.EndsWith("/agents?all=true", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new
+                {
+                    success = true,
+                    data = new object[] { new { id = "agent_1", name = "writer" } },
+                }));
+
+            return Task.FromResult(RecordingHttpHandler.JsonError(
+                "The workspace has not started setup.", "not_found", System.Net.HttpStatusCode.NotFound));
+        });
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "install-agent", "writer", "--workspace-team", "T_W"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(1, exit);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.DoesNotContain(handler.Requests, request =>
+            (request.RequestUri?.PathAndQuery ?? string.Empty).Contains("/install-agent", StringComparison.Ordinal));
+        Assert.Contains("mo slack setup", error.ToString(), StringComparison.Ordinal);
     }
 
     [Theory]
@@ -900,7 +1019,7 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Theory]
-    [InlineData("setup", "claimCode")]
+    [InlineData("setup", "installUrl")]
     [InlineData("status", "managedApps")]
     [InlineData("install-agent", "managedApp")]
     public async Task SlackJsonDiscovery_ListsFieldsWithoutRequiredInputsOrHttp(string command, string expectedField)
@@ -938,6 +1057,34 @@ public sealed class CliSlackCommandSpecs
             ["permanent-delete", "connection_1", "--confirm", "DELETE"],
             "/api/projects/proj_abc/slack-manager/connections/connection_1/permanent-delete",
             HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task PermanentDelete_Yes_ConfirmsAndTargetsManagerEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "permanent-delete", "connection_1", "--yes"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_abc/slack-manager/connections/connection_1/permanent-delete", request.RequestUri?.PathAndQuery);
+        Assert.Equal("DELETE", JsonNode.Parse(request.Body!)!["confirmation"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PermanentDelete_WithoutYesOrConfirm_FailsBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "permanent-delete", "connection_1"], output, error, fs, executor);
+
+        Assert.Equal(2, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--yes", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1182,6 +1329,30 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/manage-access", request.RequestUri?.PathAndQuery);
         Assert.Equal("anyone", JsonNode.Parse(request.Body!)!["accessPolicy"]!.GetValue<string>());
     }
+
+    private const string OperatorToken = "operator-token-for-slack-setup-test-0123456789";
+
+    private static MockEnvironmentVariableProvider OperatorEnv(string token = OperatorToken)
+    {
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        return env;
+    }
+
+    private static object EnrollmentProgress(
+        string nextAction,
+        string? phase = null,
+        string? installUrl = "https://slack.com/oauth/v2/authorize?client_id=A_1",
+        string? errorClass = null) => new
+    {
+        enrollmentId = "enrollment_1",
+        workspaceTeamId = "T_W",
+        phase = phase ?? nextAction,
+        managerAppId = "A_1",
+        installUrl,
+        nextAction,
+        errorClass,
+    };
 
     private static int Count(string text, string value)
     {
