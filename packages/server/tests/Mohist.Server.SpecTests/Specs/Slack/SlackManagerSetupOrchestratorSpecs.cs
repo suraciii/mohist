@@ -381,6 +381,69 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
     }
 
+    [Fact]
+    public async Task Configuration_setup_persists_manager_app_client_and_signing_secrets_under_the_enrollment_owner()
+    {
+        _configurationPort.Enqueue(ConfigurationRotation("T_APP_SECRETS"));
+        var configuration = await _orchestrator.SupplyConfigurationAsync(
+            new("T_APP_SECRETS", new("xoxe-current", "xoxr-current")));
+
+        Assert.NotNull(configuration.ManagerAppId);
+        await AssertRuntimeSecretAsync(configuration.EnrollmentId!, SecretKind.ClientSecret, $"xoxc-fake-{configuration.ManagerAppId}");
+        await AssertRuntimeSecretAsync(configuration.EnrollmentId!, SecretKind.SigningSecret, $"sig-fake-{configuration.ManagerAppId}");
+        Assert.DoesNotContain("xoxc", configuration.InstallUrl ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("sig-fake", configuration.InstallUrl ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Rerunning_configuration_keeps_a_single_manager_app_secret_pair_without_a_second_create()
+    {
+        _configurationPort.Enqueue(ConfigurationRotation("T_SECRET_RERUN"));
+        var first = await _orchestrator.SupplyConfigurationAsync(
+            new("T_SECRET_RERUN", new("xoxe-a", "xoxr-a")));
+        var enrollmentId = first.EnrollmentId!;
+        var appId = first.ManagerAppId!;
+        var clientBefore = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ClientSecret));
+        var signingBefore = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.SigningSecret));
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_SECRET_RERUN"));
+        var second = await _orchestrator.SupplyConfigurationAsync(
+            new("T_SECRET_RERUN", new("xoxe-b", "xoxr-b")));
+
+        Assert.Equal(enrollmentId, second.EnrollmentId);
+        Assert.Equal(appId, second.ManagerAppId);
+        Assert.Equal(1, _appManagement.CreateCalls);
+        Assert.Equal(clientBefore, await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ClientSecret)));
+        Assert.Equal(signingBefore, await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.SigningSecret)));
+    }
+
+    [Fact]
+    public async Task Create_without_install_url_records_create_unknown_and_does_not_store_app_secrets()
+    {
+        var enrollment = await SeedEnrollmentAsync("T_NO_URL_SECRETS");
+        _appManagement.SetResponse(enrollment.Id, new FakeSlackAppResponse(
+            Create: new SlackAppManagementResult(
+                SlackAppManagementOutcome.Succeeded,
+                AppId: "A_NO_URL_SECRETS",
+                InstallUrl: null,
+                ClientSecret: "xoxc-leak",
+                SigningSecret: "sig-leak")));
+
+        _configurationPort.Enqueue(ConfigurationRotation("T_NO_URL_SECRETS"));
+        var progress = await _orchestrator.SupplyConfigurationAsync(
+            new("T_NO_URL_SECRETS", new("xoxe-current", "xoxr-current")));
+
+        Assert.Equal(SlackSetupPhase.CreateUnknown, progress.Phase);
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.ClientSecret)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(progress.EnrollmentId!, SecretKind.SigningSecret)));
+    }
+
     private async Task<(string EnrollmentId, string ManagerAppId)> DriveToReadyAsync(string teamId)
     {
         _configurationPort.Enqueue(ConfigurationRotation(teamId));

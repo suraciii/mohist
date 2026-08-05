@@ -24,6 +24,9 @@ public sealed class SlackInstallAgentService : IScopedService
     private const string ProductCapabilityVersion = "p0-agent-app";
     private const int ManifestVersion = 2;
 
+    private static readonly IReadOnlyCollection<string> RequiredAgentBotScopes =
+        SlackManifestDefinition.For(SlackManifestKind.AgentApp).BotScopes;
+
     private readonly AgentQuerier _agents;
     private readonly AgentConnectionStore _connections;
     private readonly SlackWorkspaceEnrollmentStore _enrollments;
@@ -133,6 +136,10 @@ public sealed class SlackInstallAgentService : IScopedService
         if (identityMismatch)
             return new SlackInstallAgentCredentialResult(
                 false, await RejectOrRestoreAsync(agentApp, ct), "identity_mismatch");
+
+        if (!HasRequiredAgentBotScopes(verification.GrantedScopes))
+            return new SlackInstallAgentCredentialResult(
+                false, await RejectOrRestoreAsync(agentApp, ct), "missing_required_scopes");
 
         // Rotate: park the verified pair in the previous slot before the new
         // candidate overwrites the runtime addresses, so the old credentials
@@ -346,6 +353,9 @@ public sealed class SlackInstallAgentService : IScopedService
         await RejectCandidateCredentialsAsync(agentApp, ct);
         return agentApp.RuntimeCredentialValidationState;
     }
+
+    private static bool HasRequiredAgentBotScopes(IReadOnlySet<string>? granted) =>
+        granted is not null && RequiredAgentBotScopes.All(scope => granted.Contains(scope));
 
     private async Task<bool> IsUnchangedRuntimeCredentialsAsync(
         string agentAppId,

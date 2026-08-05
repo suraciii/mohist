@@ -272,6 +272,7 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 enrollment.Id, fence, SlackManagerAppLifecycle.Created, "created", ct);
             await _enrollments.RecordManagerAppCreatedAsync(
                 enrollment.Id, external.AppId, manifest.Hash, external.InstallUrl, ct);
+            await StoreManagerAppSecretsAsync(enrollment.Id, external.ClientSecret, external.SigningSecret, ct);
         }
         else if (external.Outcome == SlackAppManagementOutcome.Succeeded && external.AppId is not null)
         {
@@ -292,6 +293,19 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 enrollment.Id, fence, SlackManagerAppLifecycle.NotCreated,
                 SlackSecretRedactor.Redact(external.ErrorMessage ?? external.ErrorClass ?? "definite_failure"), ct);
         }
+    }
+
+    private async Task StoreManagerAppSecretsAsync(
+        string enrollmentId, string? clientSecret, string? signingSecret, CancellationToken ct)
+    {
+        if (!string.IsNullOrEmpty(clientSecret))
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ClientSecret),
+                Encoding.UTF8.GetBytes(clientSecret), ct);
+        if (!string.IsNullOrEmpty(signingSecret))
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.SigningSecret),
+                Encoding.UTF8.GetBytes(signingSecret), ct);
     }
 
     private async Task StoreRuntimeSecretsAsync(

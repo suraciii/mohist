@@ -120,7 +120,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
             WorkspaceTeamId: team,
             BotUserId: "U_INSTALL_BOT",
             AppId: appId,
-            GrantedScopes: new HashSet<string> { "chat:write", "users:read" });
+            GrantedScopes: new HashSet<string>(SlackManifestDefinition.For(SlackManifestKind.AgentApp).BotScopes));
 
         using var provisioned = await client.PostAsJsonAsync(
             CredentialsPath(projectId), new { agentAppId, botToken = "xoxb-live", appLevelToken = "xapp-live" });

@@ -125,12 +125,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedEnrollmentAsync("enrollment-1");
         var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
-        _botIdentity.Result = new SlackBotIdentityVerificationResult(
-            true,
-            WorkspaceTeamId: TeamId,
-            BotUserId: "U_REVIEW_BOT",
-            AppId: installed.AgentApp.AppId,
-            GrantedScopes: new HashSet<string>(["chat:write", "users:read"]));
+        _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
 
         var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-candidate", "xapp-candidate");
 
@@ -164,8 +159,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedEnrollmentAsync("enrollment-1");
         var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
-        _botIdentity.Result = new SlackBotIdentityVerificationResult(
-            true, WorkspaceTeamId: TeamId, BotUserId: "U_REVIEW_BOT", AppId: installed.AgentApp.AppId);
+        _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
         await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-candidate", "xapp-candidate");
 
         var mismatch = await _service.ApplySocketValidationAsync(agentAppId, "A_WRONG_APP");
@@ -208,8 +202,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedEnrollmentAsync("enrollment-1");
         var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
-        _botIdentity.Result = new SlackBotIdentityVerificationResult(
-            true, WorkspaceTeamId: TeamId, BotUserId: "U_REVIEW_BOT", AppId: installed.AgentApp.AppId);
+        _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
         await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-live", "xapp-live");
         await _service.ApplySocketValidationAsync(agentAppId, installed.AgentApp.AppId);
 
@@ -325,6 +318,93 @@ public sealed class SlackInstallAgentSpecs
         }
     }
 
+    [Fact]
+    public async Task Provision_credentials_with_a_missing_required_scope_fails_closed_without_storing_or_binding()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var agentAppId = installed.AgentApp.Id;
+        var incomplete = AgentAppBotScopes.Where(scope => scope != "chat:write").ToHashSet();
+
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true,
+            WorkspaceTeamId: TeamId,
+            BotUserId: "U_REVIEW_BOT",
+            AppId: installed.AgentApp.AppId,
+            GrantedScopes: incomplete);
+
+        var failed = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-partial", "xapp-partial");
+
+        Assert.False(failed.Accepted);
+        Assert.Equal("missing_required_scopes", failed.ErrorClass);
+        Assert.False(HasCandidateSecretsAsync(agentAppId));
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == agentAppId);
+            Assert.Equal(SlackRuntimeCredentialValidationState.NotProvided, row.RuntimeCredentialValidationState);
+            Assert.Equal(SlackAgentAppBindingState.Pending, row.BindingState);
+            Assert.Equal(string.Empty, row.BotUserId);
+        }
+    }
+
+    [Fact]
+    public async Task Provision_credentials_with_full_required_scopes_stages_candidate_and_allows_extra_scopes()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var agentAppId = installed.AgentApp.Id;
+        var superset = new HashSet<string>(AgentAppBotScopes) { "channels:read" };
+
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true,
+            WorkspaceTeamId: TeamId,
+            BotUserId: "U_REVIEW_BOT",
+            AppId: installed.AgentApp.AppId,
+            GrantedScopes: superset);
+
+        var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-full", "xapp-full");
+
+        Assert.True(staged.Accepted);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
+        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-full", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+    }
+
+    [Fact]
+    public async Task Missing_required_scope_is_repeatable_and_a_full_scope_resupply_then_stages()
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        var agentAppId = installed.AgentApp.Id;
+        var incomplete = AgentAppBotScopes.Where(scope => scope != "im:history").ToHashSet();
+
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true,
+            WorkspaceTeamId: TeamId,
+            BotUserId: "U_REVIEW_BOT",
+            AppId: installed.AgentApp.AppId,
+            GrantedScopes: incomplete);
+
+        var first = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-missing", "xapp-missing");
+        Assert.False(first.Accepted);
+        Assert.Equal("missing_required_scopes", first.ErrorClass);
+        Assert.False(HasCandidateSecretsAsync(agentAppId));
+
+        var second = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-missing", "xapp-missing");
+        Assert.False(second.Accepted);
+        Assert.Equal("missing_required_scopes", second.ErrorClass);
+        Assert.False(HasCandidateSecretsAsync(agentAppId));
+
+        _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
+        var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-full", "xapp-full");
+        Assert.True(staged.Accepted);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
+        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+    }
+
     private async Task<(string AgentAppId, string ConnectionId, string AppId)> DriveToVerifiedAsync(string botToken, string appToken)
     {
         await SeedAgentAsync(AgentStatus.Active);
@@ -338,12 +418,15 @@ public sealed class SlackInstallAgentSpecs
         return (installed.AgentApp.Id, installed.Connection.Id, installed.AgentApp.AppId);
     }
 
+    private static readonly IReadOnlyCollection<string> AgentAppBotScopes =
+        SlackManifestDefinition.For(SlackManifestKind.AgentApp).BotScopes;
+
     private static SlackBotIdentityVerificationResult VerifiedAgentBot(string appId) => new(
         true,
         WorkspaceTeamId: TeamId,
         BotUserId: "U_REVIEW_BOT",
         AppId: appId,
-        GrantedScopes: new HashSet<string>(["chat:write", "users:read"]));
+        GrantedScopes: new HashSet<string>(AgentAppBotScopes));
 
     private bool HasCandidateSecretsAsync(string agentAppId) =>
         _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken))
