@@ -54,7 +54,9 @@ public sealed record SessionParentLink(
     [property: Id(7)] DateTimeOffset? DetachedAt = null,
     [property: Id(8)] long? DetachedRevision = null,
     [property: Id(9)] TerminalReportState TerminalReport = TerminalReportState.None,
-    [property: Id(10)] string? TerminalReportDeliveredInputId = null);
+    [property: Id(10)] string? TerminalReportDeliveredInputId = null,
+    [property: Id(11)] string? DetachCommandId = null,
+    [property: Id(12)] long? DetachExpectedAttachedRevision = null);
 
 [GenerateSerializer]
 public sealed record LinkReservation(
@@ -64,7 +66,12 @@ public sealed record LinkReservation(
     [property: Id(3)] LinkReservationState State,
     [property: Id(4)] string? RejectionReason = null,
     [property: Id(5)] long? AttachedRevision = null,
-    [property: Id(6)] string? CommandId = null);
+    [property: Id(6)] string? CommandId = null,
+    [property: Id(7)] string? ChildLaunchJobId = null,
+    [property: Id(8)] string? ExpectedWorkDir = null,
+    [property: Id(9)] string? ExpectedRunnerId = null,
+    [property: Id(10)] string? ExpectedRuntime = null,
+    [property: Id(11)] string? ExpectedRuntimeSessionId = null);
 
 [GenerateSerializer]
 public sealed record PendingSessionTreeMutation(
@@ -78,7 +85,10 @@ public sealed record PendingSessionTreeMutation(
     [property: Id(7)] string? ExpectedRunnerId,
     [property: Id(8)] string? ExpectedRuntime,
     [property: Id(9)] string? ExpectedRuntimeSessionId,
-    [property: Id(10)] bool StopAdmissionActive = false);
+    [property: Id(10)] bool StopAdmissionActive = false,
+    [property: Id(11)] bool ParticipantAcknowledged = false,
+    [property: Id(12)] string? ChildLaunchJobId = null,
+    [property: Id(13)] long? ExpectedAttachedRevision = null);
 
 [GenerateSerializer]
 public sealed record SessionTreeMutationFence(
@@ -88,7 +98,10 @@ public sealed record SessionTreeMutationFence(
     [property: Id(3)] PendingSessionTreeMutation? PendingMutation = null,
     [property: Id(4)] bool ActiveTreeStop = false,
     [property: Id(5)] IReadOnlyList<LinkReservation>? Reservations = null,
-    [property: Id(6)] IReadOnlyList<PendingSessionTreeMutation>? PendingMutations = null);
+    [property: Id(6)] IReadOnlyList<PendingSessionTreeMutation>? PendingMutations = null,
+    [property: Id(7)] IReadOnlyList<SessionTreeDetachReceipt>? DetachReceipts = null,
+    [property: Id(8)] IReadOnlyList<SessionTreeStopSnapshot>? StopSnapshots = null,
+    [property: Id(9)] IReadOnlyList<SessionTreeAttachReceipt>? FinalizeReceipts = null);
 
 [GenerateSerializer]
 public sealed record ReserveSessionTreeLinkCommand(
@@ -100,14 +113,16 @@ public sealed record ReserveSessionTreeLinkCommand(
     [property: Id(5)] string? ExpectedRunnerId,
     [property: Id(6)] string? ExpectedRuntime,
     [property: Id(7)] string? ExpectedRuntimeSessionId,
-    [property: Id(8)] string CommandId);
+    [property: Id(8)] string CommandId,
+    [property: Id(9)] string? ChildLaunchJobId = null);
 
 [GenerateSerializer]
 public sealed record SessionTreeMutationResult(
     [property: Id(0)] string EdgeId,
     [property: Id(1)] long Revision,
     [property: Id(2)] LinkReservationState State,
-    [property: Id(3)] string? RejectionReason = null);
+    [property: Id(3)] string? RejectionReason = null,
+    [property: Id(4)] bool ReconciliationRequired = false);
 
 [GenerateSerializer]
 public sealed record SpawnRequestFence(

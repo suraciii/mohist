@@ -11,6 +11,7 @@ namespace Mohist.Server.SpecTests.Support;
 public enum LaunchParticipantGate
 {
     PrepareJob,
+    ReserveLink,
     EnsureInitialLaunch,
     ParentLinkCommitted,
     SubmitJob,
@@ -63,6 +64,9 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
 
     public Task OnPrepareJobAsync(string jobKey, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.PrepareJob, jobKey, commandId);
+
+    public Task OnReserveLinkAsync(string edgeId, string commandId) =>
+        RecordAndMaybeThrow(LaunchParticipantGate.ReserveLink, edgeId, commandId);
 
     public Task OnEnsureInitialLaunchAsync(string sessionId, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.EnsureInitialLaunch, sessionId, commandId);

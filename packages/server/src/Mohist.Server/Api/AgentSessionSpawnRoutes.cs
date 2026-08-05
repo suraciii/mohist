@@ -75,6 +75,10 @@ public static class AgentSessionSpawnRoutes
             {
                 return ApiResults.Conflict(ex.Message, "spawn_rejected", new { reason = ex.Reason });
             }
+            catch (AgentSpawnPostPlanRejectedException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "spawn_rejected", new { reason = ex.Reason });
+            }
             catch (AgentSpawnValidationPendingException ex)
             {
                 return Results.Json(

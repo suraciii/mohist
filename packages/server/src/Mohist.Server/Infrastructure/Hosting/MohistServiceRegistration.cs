@@ -95,6 +95,10 @@ public static class MohistServiceRegistration
         // without taking on the concrete type. Lifetime matches the
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
+        services.AddScoped<ISessionTreeMutationFenceReadPort>(sp =>
+            new SessionTreeMutationFenceReadPort(
+                sp.GetRequiredService<IGrainFactory>(),
+                sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());

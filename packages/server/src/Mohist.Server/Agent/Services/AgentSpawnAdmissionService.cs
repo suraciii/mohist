@@ -16,8 +16,7 @@ public sealed record AgentSpawnAdmission(
     string WorkDir,
     string RunnerId,
     string Runtime,
-    string RuntimeSessionId,
-    long GraphRevision);
+    string RuntimeSessionId);
 
 [Serializable]
 [Orleans.GenerateSerializer]
@@ -25,6 +24,17 @@ public sealed class AgentSpawnPreplanRejectedException : Exception
 {
     public AgentSpawnPreplanRejectedException(string reason)
         : base($"The subagent spawn was rejected before planning: {reason}.") => Reason = reason;
+
+    [Orleans.Id(0)]
+    public string Reason { get; }
+}
+
+[Serializable]
+[Orleans.GenerateSerializer]
+public sealed class AgentSpawnPostPlanRejectedException : Exception
+{
+    public AgentSpawnPostPlanRejectedException(string reason)
+        : base($"The subagent spawn was rejected after planning: {reason}.") => Reason = reason;
 
     [Orleans.Id(0)]
     public string Reason { get; }
@@ -92,10 +102,6 @@ public sealed class AgentSpawnAdmissionService(
 
         if (current.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
             throw new AgentSpawnPreplanRejectedException(current.PreplanRejectionReason ?? "spawn_rejected");
-
-        var graph = await grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId).GetAsync();
-        if (graph.ActiveTreeStop)
-            throw new AgentSpawnValidationPendingException("parent_tree_stop_in_progress");
 
         var parent = (await sessions.ListByIdsAsync([parentSessionId], ct)).FirstOrDefault();
         if (parent is null || !string.Equals(parent.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal))
@@ -171,8 +177,7 @@ public sealed class AgentSpawnAdmissionService(
             parent.Session.Runtime.WorkDir!,
             runnerId,
             runtime,
-            runtimeSessionId,
-            graph.GraphRevision);
+            runtimeSessionId);
     }
 
     private static async Task<AgentSpawnAdmission> RejectAsync(

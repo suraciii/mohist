@@ -117,7 +117,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(38)] bool AbortFenceAcknowledged = false,
     [property: Id(39)] bool AbortJobAcknowledged = false,
     [property: Id(40)] bool AbortSessionAcknowledged = false,
-    [property: Id(41)] string? SpawnRequestFingerprint = null);
+    [property: Id(41)] string? SpawnRequestFingerprint = null,
+    [property: Id(42)] bool PostPlanRejected = false);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
