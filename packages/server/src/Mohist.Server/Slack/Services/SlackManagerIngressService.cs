@@ -63,7 +63,7 @@ public sealed class SlackManagerIngressService : IScopedService
                 message.Identity,
                 message.SenderSlackUserId,
                 message.ThreadTs),
-            new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, currentSessionId),
+            new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, SessionId: null),
             ct);
         if (accepted.AlreadyExisted)
         {
