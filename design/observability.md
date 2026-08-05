@@ -33,6 +33,60 @@ Server 同时维护最近 5 分钟的有界诊断摘要，最多保留 10 条异
 路由名，显示请求量、耗时以及每次请求的数据库和下游调用量，并由 `mo otel status`
 读取。摘要不写入业务数据库，Server 重启后重新开始。
 
+## 日志
+
+日志的第一读者是 agent：行格式必须让 rg 等行工具零学习直接使用，同时被标准
+logfmt 解析器无歧义解析。人裸眼可读是第三目标，不与前两者冲突时尽力满足。
+
+### 行契约
+
+日志格式是严格 logfmt（Go slog TextHandler 的文本格式）。一行一条记录，无例外。
+
+- 前导键固定顺序：`time`、`level`、`msg`；属性随后，`service`、`component` 在前，
+  领域键在后。
+- `time` 是 RFC3339 UTC、毫秒精度，如 `2025-01-15T10:30:45.123Z`。
+- `level` 取值为 `TRACE`、`DEBUG`、`INFO`、`WARN`、`ERROR`、`FATAL`。
+- `msg` 是人类可读短句，陈述发生了什么。
+- 值包含空格、`=`、引号或不可打印字符时加双引号，内部以 `\n`、`\"`、`\\` 转义；
+  数字、布尔和简单标识符使用裸值。
+- 换行只允许以 `\n` 转义形式出现在引号值内。异常的完整信息（类型、消息、堆栈）
+  放入 `exception` 键，保持单行。
+- 没有值的键直接省略。
+
+```
+time=2025-01-15T10:30:45.123Z level=INFO msg="work claimed" service=server component=dispatch work=w_abc run=r_123 issue=468
+time=2025-01-15T10:30:46.567Z level=ERROR msg="report failed" service=runner component=report work=w_abc attempt=3 exception="HttpRequestException: connection refused\n   at RunnerClient.Report(...)"
+```
+
+### 字段词汇
+
+- 领域键是小写单词：`issue`、`run`、`work`、`session`、`job`、`runner`、`attempt`、
+  `path`、`reason`。同一含义在所有进程使用同一个键名。
+- 日志模板参数（如 `LogWarning(ex, "report failed for {WorkId}", id)` 中的
+  `WorkId`）必须提取为独立键，不得只留在 `msg` 插值文本里。
+- `component` 是短词（如 `dispatch`、`cleanup`），从日志 category 投影；不使用完整
+  类名。投影规则：取 category 最后一段，去除 `Service`、`Grain`、`Handler`、
+  `Routes`、`Provider` 后缀，首字母小写（`DispatchService` → `dispatch`，
+  `RunnerHub` → `runnerHub`）。
+- `service` 标识写入进程（`server` 或 `runner`），与日志文件名一致。
+- 领域 ID 只进日志键和 Trace 属性，不进指标标签。
+
+### 文件与保留
+
+- 日志目录默认为 `$HOME/.mohist/logs`；Server 可用 `Mohist:LogsPath` 配置覆盖，
+  Runner 可用 `MOHIST_LOGS_PATH` 环境变量覆盖。
+- Server 写 `server.log`，Runner 写 `runner.log`。两端使用同一行契约。
+- 文件按大小滚动：单文件上限 32 MiB，保留当前加两代历史（如 `server.log`、
+  `server.log.1`、`server.log.2`）。滚动产物不压缩，保持行工具直接可用。
+- Runner 的进程诊断输出统一走同一行契约写 `runner.log`，并透传到终端供开发时
+  观察。不再存在只写终端的诊断输出。
+
+### 读取路径
+
+- `/api/logs/tail` 逐行解析 logfmt 投影为 `LogEntry`；文件格式是唯一真相，不维护
+  第二种磁盘格式。
+- 解析失败的行不丢弃：作为 `message` 原样投影，结构化字段留空，`raw` 保留原行。
+
 ## 资源预算
 
 所有队列、批次和存储都有硬上限。默认预算适合单机长期运行：
@@ -88,5 +142,8 @@ Runner 通信。
 
 ## 当前差距
 
-指标、有界路由诊断摘要与 `mo otel status` 运行状态均已落地。剩余差距是没有自动
-异常提示——指标能发现问题，但异常路由只在 status 中可见，不会主动浮现。
+指标、有界路由诊断摘要与 `mo otel status` 运行状态均已落地。剩余差距：
+
+- 没有自动异常提示——指标能发现问题，但异常路由只在 status 中可见，不会主动浮现。
+- 日志行契约尚未实装：Server 日志仍是 NDJSON，模板参数未提取为键，无滚动保留；
+  Runner 诊断只写终端，不落盘。
