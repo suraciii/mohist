@@ -1110,7 +1110,7 @@ public static partial class AgentSessionExtensions
                 updatedTurn = new AgentTurnRecord(
                     Id: turnId,
                     Sequence: turns.Count + 1,
-                    InputIds: [inputId],
+                    InputIds: new[] { inputId },
                     Status: AgentTurnStatus.Queued,
                     JobId: null,
                     Result: null,

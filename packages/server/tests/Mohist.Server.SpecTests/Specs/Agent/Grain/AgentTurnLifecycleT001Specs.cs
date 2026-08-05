@@ -92,6 +92,7 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
         Assert.Equal(turnId, turn.Id);
         Assert.Equal(AgentTurnStatus.Queued, turn.Status);
         Assert.Null(turn.JobId);
+        Assert.IsType<string[]>(turn.InputIds);
         Assert.Equal(new[] { inputId }, turn.InputIds);
     }
 

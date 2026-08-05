@@ -35,6 +35,7 @@ class FakeTransport implements AdapterTransport {
   readonly uncertainDeliveries: Delivery[] = []
   connections: SlackAdapterTarget[] = []
   nextIngressResults: IngressResult[] = []
+  interactionError?: Error
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
   async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
@@ -58,6 +59,7 @@ class FakeTransport implements AdapterTransport {
 
   async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
     this.interactions.push(envelope)
+    if (this.interactionError) throw this.interactionError
     return { state: "stop_requested" }
   }
 
@@ -118,6 +120,43 @@ describe("mohist-slack adapter", () => {
       actionValue: "server-signed-value",
     })
     expect(JSON.stringify(interaction)).not.toContain("xoxb-secret")
+  })
+
+  it("leaves a failed interaction unacknowledged without crashing the socket callback", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.interactionError = new Error("Server returned 500 with xoxb-secret")
+    const socket = new FakeSocket()
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const body = {
+      type: "block_actions",
+      trigger_id: "trigger-1",
+      team: { id: "T1" },
+      user: { id: "U1" },
+      container: { channel_id: "C1", message_ts: "123.456" },
+      actions: [{ action_id: "mohist_stop_turn", action_ts: "123.500", value: "signed-value" }],
+    }
+
+    await expect(socket.emit(body)).resolves.toBe(false)
+    expect(error).toHaveBeenCalledWith(
+      "Slack event handling failed; the event remains unacknowledged for retry.",
+      "Server returned 500 with <redacted>",
+    )
+
+    transport.interactionError = undefined
+    await expect(socket.emit(body)).resolves.toBe(true)
+    controller.abort()
   })
 
   it("normalizes a Socket Mode event with stable identity", () => {
