@@ -25,6 +25,9 @@ namespace Mohist.Server.SpecTests.Support;
 [CollectionDefinition("MohistIntegration")]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("SlackReplyAnchorIngress")]
+public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
 public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
 

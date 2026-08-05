@@ -25,6 +25,8 @@ public sealed class SessionTreeStopRetrySpecs
     [Fact]
     public async Task UnknownRetryKeepsFence_AndCompletedOperationDoesNotStopALaterTurn()
     {
+        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
+        var invocationCountAtStart = hub.Invocations.Count;
         var projectId = await CreateProjectAsync("stop-retry");
         var unknownSessionId = $"stop-unknown-{Guid.NewGuid():N}";
         var unknown = await OpenSessionAsync(projectId, unknownSessionId);
@@ -53,8 +55,9 @@ public sealed class SessionTreeStopRetrySpecs
         var turns = await later.ListTurnsAsync();
         Assert.Equal(AgentTurnStatus.Queued, Assert.Single(turns, item => item.Id == laterTurnId).Status);
 
-        var hub = _fixture.Services.GetRequiredService<RecordingRunnerHubContext>();
-        Assert.DoesNotContain(hub.Invocations, item => item.Method == "CancelAgentSession");
+        Assert.DoesNotContain(
+            hub.Invocations.Skip(invocationCountAtStart),
+            item => item.Method == "CancelAgentSession");
     }
 
     [Fact]
