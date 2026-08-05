@@ -100,6 +100,7 @@ public class MohistDbContext : DbContext
 
     public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
+    public DbSet<SlackAdapterLeaseRow> SlackAdapterLeases { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -1713,6 +1714,29 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackConnectionAllowedMembers_ProjectId_ConnectionId_SlackUserId");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
                 .HasDatabaseName("IX_SlackConnectionAllowedMembers_ProjectId_ConnectionId");
+        });
+
+        modelBuilder.Entity<SlackAdapterLeaseRow>(entity =>
+        {
+            entity.ToTable("SlackAdapterLeases", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_SlackAdapterLeases_LeaseKind",
+                    "\"LeaseKind\" IS NULL OR \"LeaseKind\" IN ('validation', 'runtime')");
+                table.HasCheckConstraint(
+                    "CK_SlackAdapterLeases_ActiveLeaseCoherent",
+                    "(\"LeaseId\" IS NULL) = (\"LeaseKind\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"AdapterId\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"IssuedAt\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"ExpiresAt\" IS NULL)");
+            });
+            entity.HasKey(e => e.TargetKey);
+            entity.Property(e => e.TargetKey).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.Generation).IsRequired();
+            entity.Property(e => e.LeaseId).HasMaxLength(64);
+            entity.Property(e => e.LeaseKind).HasMaxLength(32);
+            entity.Property(e => e.AdapterId).HasMaxLength(256);
+            entity.Property(e => e.UpdatedAt).IsRequired();
         });
     }
 

@@ -1,0 +1,198 @@
+using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Slack.Domain;
+
+namespace Mohist.Server.Slack.Services;
+
+/// <summary>
+/// Non-secret discovery view. Tokens and secret addresses never appear here.
+/// </summary>
+public sealed record SlackLeaseTargetView(
+    string Kind,
+    string? EnrollmentId,
+    string? WorkspaceTeamId,
+    string? ProjectId,
+    string? ConnectionId,
+    string ExpectedAppId,
+    bool Active,
+    bool AppLevelTokenProvisioned,
+    bool BotTokenProvisioned,
+    bool CredentialVerified,
+    bool CanAcquireValidation,
+    bool CanAcquireRuntime);
+
+/// <summary>
+/// Validation lease response. The only lease response that carries the
+/// candidate App-level token, and only so the adapter can open one Socket
+/// and report a single <c>hello.app_id</c>. No Bot token, no ingress, no
+/// outbox grant.
+/// </summary>
+public sealed record SlackValidationLeaseResult(
+    string LeaseId,
+    int Generation,
+    DateTimeOffset ExpiresAt,
+    string ExpectedAppId,
+    string AppToken);
+
+/// <summary>
+/// Runtime lease response. Issued only after a verified hello and an active
+/// target. Carries both Socket and Bot tokens; ingress / outbox are separate
+/// operations gated on this lease elsewhere.
+/// </summary>
+public sealed record SlackRuntimeLeaseResult(
+    string LeaseId,
+    int Generation,
+    DateTimeOffset ExpiresAt,
+    string AppToken,
+    string BotToken);
+
+public enum SlackHelloOutcome
+{
+    Verified,
+    AppIdMismatch,
+    NoLease
+}
+
+/// <summary>
+/// Renewed lease metadata. Renewal never reissues tokens: the holder already
+/// has them and only needs the new expiry plus the fencing tokens.
+/// </summary>
+public sealed record SlackLeaseRenewalResult(
+    string LeaseId,
+    string Kind,
+    int Generation,
+    DateTimeOffset ExpiresAt);
+
+public sealed class SlackAdapterLeaseService(
+    ISlackLeaseStore store,
+    ISlackLeaseTargetProvider targetProvider,
+    ISlackLeaseSecretResolver secretResolver,
+    TimeProvider timeProvider) : IScopedService
+{
+    public static readonly TimeSpan ValidationLeaseTtl = TimeSpan.FromMinutes(2);
+    public static readonly TimeSpan RuntimeLeaseTtl = TimeSpan.FromMinutes(5);
+
+    public async Task<IReadOnlyList<SlackLeaseTargetView>> DiscoverAsync(
+        string operatorId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        var targets = await targetProvider.GetTargetsAsync(operatorId, ct);
+        return targets
+            .Where(target => target.AppLevelTokenProvisioned)
+            .Select(ToView)
+            .ToList();
+    }
+
+    public async Task<SlackValidationLeaseResult?> AcquireValidationLeaseAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adapterId);
+
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        if (target is null || !target.AppLevelTokenProvisioned || target.CredentialVerified)
+            return null;
+
+        var now = timeProvider.GetUtcNow();
+        var lease = await store.IssueAsync(
+            target.Ref.TargetKey, SlackLeaseKind.Validation, adapterId, now + ValidationLeaseTtl, now, ct);
+        var appToken = await RequireSecretAsync(target.AppLevelTokenAddress, ct);
+        return new SlackValidationLeaseResult(
+            lease.LeaseId, lease.Generation, lease.ExpiresAt, target.ExpectedAppId, appToken);
+    }
+
+    public async Task<SlackHelloOutcome> ReportHelloAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string appId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(leaseId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        if (target is null)
+            return SlackHelloOutcome.NoLease;
+        if (!string.Equals(appId, target.ExpectedAppId, StringComparison.Ordinal))
+            return SlackHelloOutcome.AppIdMismatch;
+
+        var now = timeProvider.GetUtcNow();
+        if (!await store.ConfirmHelloAsync(target.Ref.TargetKey, leaseId, now, ct))
+            return SlackHelloOutcome.NoLease;
+
+        await targetProvider.MarkVerifiedAsync(operatorId, target.Ref, appId, now, ct);
+        return SlackHelloOutcome.Verified;
+    }
+
+    public async Task<SlackRuntimeLeaseResult?> AcquireRuntimeLeaseAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adapterId);
+
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        if (target is null || !target.CredentialVerified || !target.Active || !target.BotTokenProvisioned)
+            return null;
+
+        var now = timeProvider.GetUtcNow();
+        var lease = await store.IssueAsync(
+            target.Ref.TargetKey, SlackLeaseKind.Runtime, adapterId, now + RuntimeLeaseTtl, now, ct);
+        var appToken = await RequireSecretAsync(target.AppLevelTokenAddress, ct);
+        var botToken = await RequireSecretAsync(target.BotTokenAddress, ct);
+        return new SlackRuntimeLeaseResult(
+            lease.LeaseId, lease.Generation, lease.ExpiresAt, appToken, botToken);
+    }
+
+    public async Task<SlackLeaseRenewalResult?> RenewLeaseAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        ArgumentException.ThrowIfNullOrWhiteSpace(leaseId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(adapterId);
+
+        var now = timeProvider.GetUtcNow();
+        var active = await store.GetActiveAsync(targetRef.TargetKey, ct);
+        if (active is null
+            || !string.Equals(active.LeaseId, leaseId, StringComparison.Ordinal)
+            || !string.Equals(active.AdapterId, adapterId, StringComparison.Ordinal)
+            || active.ExpiresAt <= now)
+            return null;
+
+        var ttl = active.Kind == SlackLeaseKind.Runtime ? RuntimeLeaseTtl : ValidationLeaseTtl;
+        var renewed = await store.RenewAsync(targetRef.TargetKey, leaseId, adapterId, now + ttl, now, ct);
+        return renewed is null
+            ? null
+            : new SlackLeaseRenewalResult(renewed.LeaseId, renewed.Kind, renewed.Generation, renewed.ExpiresAt);
+    }
+
+    private async Task<string> RequireSecretAsync(SecretStoreAddress address, CancellationToken ct)
+    {
+        var token = await secretResolver.LoadAsync(address, ct);
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException(
+                "The lease target is marked provisioned but its secret could not be resolved.");
+        return token;
+    }
+
+    private static SlackLeaseTargetView ToView(SlackLeaseTarget target) => new(
+        Kind: target.Ref.Kind,
+        EnrollmentId: (target.Ref as SlackLeaseTargetRef.Manager)?.EnrollmentId,
+        WorkspaceTeamId: (target.Ref as SlackLeaseTargetRef.Manager)?.WorkspaceTeamId,
+        ProjectId: (target.Ref as SlackLeaseTargetRef.Connection)?.ProjectId,
+        ConnectionId: (target.Ref as SlackLeaseTargetRef.Connection)?.ConnectionId,
+        ExpectedAppId: target.ExpectedAppId,
+        Active: target.Active,
+        AppLevelTokenProvisioned: target.AppLevelTokenProvisioned,
+        BotTokenProvisioned: target.BotTokenProvisioned,
+        CredentialVerified: target.CredentialVerified,
+        CanAcquireValidation: target.AppLevelTokenProvisioned && !target.CredentialVerified,
+        CanAcquireRuntime: target.CredentialVerified && target.Active && target.BotTokenProvisioned);
+
+    private static void RequireOperator(string operatorId) =>
+        ArgumentException.ThrowIfNullOrWhiteSpace(operatorId);
+
+    private static void RequireTarget(SlackLeaseTargetRef targetRef) =>
+        ArgumentNullException.ThrowIfNull(targetRef);
+}

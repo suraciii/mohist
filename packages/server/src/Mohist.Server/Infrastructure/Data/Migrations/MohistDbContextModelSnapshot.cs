@@ -2411,6 +2411,45 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         });
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAdapterLeaseRow", b =>
+                {
+                    b.Property<string>("TargetKey")
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LeaseId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdapterId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("IssuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TargetKey");
+
+                    b.ToTable("SlackAdapterLeases", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackAdapterLeases_LeaseKind", "\"LeaseKind\" IS NULL OR \"LeaseKind\" IN ('validation', 'runtime')");
+                            t.HasCheckConstraint("CK_SlackAdapterLeases_ActiveLeaseCoherent", "(\"LeaseId\" IS NULL) = (\"LeaseKind\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"AdapterId\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"IssuedAt\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"ExpiresAt\" IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeRow", b =>
                 {
                     b.Property<string>("Id")
