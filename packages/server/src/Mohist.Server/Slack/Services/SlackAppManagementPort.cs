@@ -1,4 +1,3 @@
-using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Slack.Services;
 
@@ -16,7 +15,12 @@ public interface ISlackAppManagementFactPort
     Task<SlackAppManifestExport> ExportManifestAsync(SlackAppManagementRequest request, CancellationToken ct = default);
 }
 
-public sealed record SlackAppManagementRequest(string EnrollmentId, string AgentAppId, string WorkspaceTeamId, string? AppId = null);
+public sealed record SlackAppManagementRequest(
+    string EnrollmentId,
+    string AgentAppId,
+    string WorkspaceTeamId,
+    string? AppId = null,
+    string? ManifestJson = null);
 
 public sealed record SlackAppManifestRequest(SlackAppManagementRequest App, SlackManifest Manifest);
 
@@ -51,27 +55,6 @@ public enum SlackAppManagementOutcome
     Succeeded,
     DefiniteFailure,
     Unknown,
-}
-
-public sealed class UnavailableSlackAppManagementPort : ISlackAppManagementPort, ISlackAppManagementFactPort, IScopedService
-{
-    public Task<SlackAppManagementResult> ValidateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager manifest validation is not connected in this slice.");
-
-    public Task<SlackAppManagementResult> CreateAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager app management is not connected in this slice.");
-
-    public Task<SlackAppManagementResult> UpdateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager manifest update is not connected in this slice.");
-
-    public Task<SlackAppManagementResult> DeleteAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager app management is not connected in this slice.");
-
-    public Task<SlackAppManagementFact> InspectAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager app inspection is not connected in this slice.");
-
-    public Task<SlackAppManifestExport> ExportManifestAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Manager manifest export is not connected in this slice.");
 }
 
 public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlackAppManagementFactPort

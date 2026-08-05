@@ -11,9 +11,13 @@ namespace Mohist.Server.Slack.Services;
 
 public sealed class ManagedSlackAgentAppApplicationService : IScopedService
 {
+    private const string ProductCapabilityVersion = "p0-agent-app";
+    private const int ManifestVersion = 2;
+
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISlackAppManagementPort _appManagement;
     private readonly ISlackAppManagementFactPort _appManagementFacts;
+    private readonly SlackManifestGenerator _manifests;
     private readonly ISecretStore _secrets;
     private readonly TimeProvider _timeProvider;
 
@@ -21,12 +25,14 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         IDbContextFactory<MohistDbContext> dbFactory,
         ISlackAppManagementPort appManagement,
         ISlackAppManagementFactPort appManagementFacts,
+        SlackManifestGenerator manifests,
         ISecretStore secrets,
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _appManagement = appManagement;
         _appManagementFacts = appManagementFacts;
+        _manifests = manifests;
         _secrets = secrets;
         _timeProvider = timeProvider;
     }
@@ -95,7 +101,12 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         if (changed == 0)
             return ManagedSlackAgentAppOperationResult.Concurrent;
 
-        var request = new SlackAppManagementRequest(agentApp.EnrollmentId, agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId);
+        var request = new SlackAppManagementRequest(
+            agentApp.EnrollmentId,
+            agentApp.Id,
+            agentApp.WorkspaceTeamId,
+            agentApp.AppId,
+            operation == SlackAgentAppOperation.Create ? await BuildManifestJsonAsync(db, agentApp, ct).ConfigureAwait(false) : null);
         var external = operation == SlackAgentAppOperation.Create
             ? await _appManagement.CreateAsync(request, ct)
             : await _appManagement.DeleteAsync(request, ct);
@@ -286,6 +297,26 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         return outcome == 1
             ? ManagedSlackAgentAppOperationResult.Reconciled(status, fact.Outcome, fact.AppId, fact.ErrorClass)
             : ManagedSlackAgentAppOperationResult.Stale;
+    }
+
+    private async Task<string> BuildManifestJsonAsync(
+        MohistDbContext db,
+        ManagedSlackAgentAppRow agentApp,
+        CancellationToken ct)
+    {
+        var connection = await db.AgentConnections.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == agentApp.AgentConnectionId, ct)
+            .ConfigureAwait(false);
+        if (connection is null)
+            throw new InvalidOperationException("The Agent App's staged Connection was not found.");
+        var manifest = _manifests.Generate(new SlackManifestInput(
+            connection.BotName is { Length: > 0 } ? connection.BotName : "agent-app",
+            string.Empty,
+            ProductCapabilityVersion,
+            new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
+            SlackManifestKind.AgentApp,
+            ManifestVersion));
+        return manifest.CanonicalJson;
     }
 
     private static bool CanStart(ManagedSlackAgentAppRow agentApp, SlackAgentAppOperation operation) =>

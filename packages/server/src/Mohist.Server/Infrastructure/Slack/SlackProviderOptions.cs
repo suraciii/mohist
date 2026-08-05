@@ -14,6 +14,19 @@ public sealed class SlackProviderOptions
 {
     public const string SectionName = "SlackProvider";
 
+    /// <summary>
+    /// Base URL for the Slack Web API used by the control-plane outbound
+    /// port adapters. Trailing slash is significant: endpoints are relative.
+    /// </summary>
+    public string ApiBaseUrl { get; set; } = "https://slack.com/api/";
+
+    /// <summary>
+    /// Per-request timeout for the Slack Web API calls made by the
+    /// control-plane outbound port adapters. A timeout maps to an Unknown
+    /// external outcome (the side effect may or may not have happened).
+    /// </summary>
+    public TimeSpan ApiTimeout { get; set; } = TimeSpan.FromSeconds(15);
+
     public int InboxCapacityPerConnection { get; set; } = 256;
 
     public int OutboxCapacityPerConnection { get; set; } = 256;
@@ -85,6 +98,8 @@ public sealed class SlackProviderOptions
         if (!section.Exists())
             return;
 
+        ApiBaseUrl = section.GetValue(nameof(ApiBaseUrl), ApiBaseUrl) ?? ApiBaseUrl;
+        ApiTimeout = section.GetValue(nameof(ApiTimeout), ApiTimeout);
         InboxCapacityPerConnection = section.GetValue(nameof(InboxCapacityPerConnection), InboxCapacityPerConnection);
         OutboxCapacityPerConnection = section.GetValue(nameof(OutboxCapacityPerConnection), OutboxCapacityPerConnection);
         OutboxMaxAttempts = section.GetValue(nameof(OutboxMaxAttempts), OutboxMaxAttempts);

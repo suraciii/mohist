@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Slack.Services;
 using Xunit;
 
@@ -26,20 +27,44 @@ public sealed class SlackOutboundPortTests
     public void Server_Slack_boundary_does_not_directly_use_protocol_clients_or_register_Slack_http_clients()
     {
         var surfaceLeaks = SlackBoundaryTypes()
+            .Where(type => !IsProductionTransport(type))
             .SelectMany(ReferencedSurfaceTypes)
             .Where(IsDirectProtocolType)
+            .Where(type => !IsProductionTransport(type))
             .Select(type => type.FullName)
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         Assert.Empty(surfaceLeaks);
 
         var protocolCalls = SlackBoundaryMethods()
+            .Where(method => !IsProductionTransport(method.DeclaringType!))
             .SelectMany(ReferencedMethods)
-            .Where(IsDirectProtocolCall)
+            .Where(method => IsDirectProtocolCall(method) && !IsProductionTransport(method.DeclaringType!))
             .Select(method => $"{method.DeclaringType?.FullName}.{method.Name}")
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         Assert.Empty(protocolCalls);
+    }
+
+    [Fact]
+    public void Production_adapters_wire_the_three_ports_through_the_transport_only()
+    {
+        var serverAssembly = typeof(ISlackAppManagementPort).Assembly;
+        var adapterTypes = new[]
+        {
+            serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackAppManagementPortAdapter")!,
+            serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackConfigurationCredentialPortAdapter")!,
+            serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackBotIdentityVerificationPortAdapter")!,
+        };
+        Assert.Contains(typeof(ISlackAppManagementPort), adapterTypes[0].GetInterfaces());
+        Assert.Contains(typeof(ISlackAppManagementFactPort), adapterTypes[0].GetInterfaces());
+        Assert.Contains(typeof(ISlackConfigurationCredentialPort), adapterTypes[1].GetInterfaces());
+        Assert.Contains(typeof(ISlackBotIdentityVerificationPort), adapterTypes[2].GetInterfaces());
+
+        var transport = serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackApiTransport")!;
+        Assert.Contains(typeof(HttpClient), transport.GetConstructors().SelectMany(ctor => ctor.GetParameters()).Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(adapterTypes, adapter =>
+            adapter.GetConstructors().SelectMany(ctor => ctor.GetParameters()).Any(parameter => IsDirectProtocolType(parameter.ParameterType)));
     }
 
     [Fact]
@@ -131,6 +156,10 @@ public sealed class SlackOutboundPortTests
     }
 
     private sealed class ExternalSlackSdkProbe;
+
+    private static bool IsProductionTransport(Type type) =>
+        type == typeof(SlackApiTransport)
+        || type.DeclaringType == typeof(SlackApiTransport);
 
     private static IEnumerable<Type> SlackBoundaryTypes() => typeof(ISlackAppManagementPort).Assembly
         .GetTypes()
@@ -252,7 +281,12 @@ public sealed class SlackOutboundPortTests
             return false;
 
         if (method.IsGenericMethod)
-            return method.GetGenericArguments().Any(type => type.Name.Contains("Slack", StringComparison.Ordinal));
+        {
+            var argument = method.GetGenericArguments().FirstOrDefault();
+            return argument is not null
+                && argument != typeof(SlackApiTransport)
+                && argument.Name.Contains("Slack", StringComparison.Ordinal);
+        }
 
         // Named overload AddHttpClient("Slack", ...): the client name is a string operand the
         // method token cannot expose, and the boundary must not register a named HTTP client.

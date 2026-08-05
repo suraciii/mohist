@@ -30,7 +30,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         _database = TestSqliteDatabase.CreateMigrated();
         _factory = new TestDbContextFactory(_database.Options);
         _apps = new FakeSlackAppManagementPort();
-        _appService = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, _secrets, _time);
+        _appService = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
         return ValueTask.CompletedTask;
     }
 

@@ -44,6 +44,7 @@ using Mohist.Server.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Webhooks;
 
 namespace Mohist.Server.Infrastructure.Hosting;
@@ -159,13 +160,20 @@ public static class MohistServiceRegistration
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
          services.AddScoped<SlackAttachmentInputBinder>();
 
-        services.AddScoped<ISlackAppManagementPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
-        services.AddScoped<ISlackAppManagementFactPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
-        services.AddScoped<ISlackConfigurationCredentialPort>(sp => sp.GetRequiredService<UnavailableSlackConfigurationCredentialPort>());
+        services.AddScoped<ISlackAppManagementPort, SlackAppManagementPortAdapter>();
+        services.AddScoped<ISlackAppManagementFactPort, SlackAppManagementPortAdapter>();
+        services.AddScoped<ISlackConfigurationCredentialPort, SlackConfigurationCredentialPortAdapter>();
         services.AddScoped<ISlackConfigurationCredentialStore>(sp => sp.GetRequiredService<ProtectedSlackConfigurationCredentialStore>());
-        services.AddScoped<ISlackBotIdentityVerificationPort>(sp => sp.GetRequiredService<UnavailableSlackBotIdentityVerificationPort>());
+        services.AddScoped<ISlackBotIdentityVerificationPort, SlackBotIdentityVerificationPortAdapter>();
         services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
         services.AddScoped<ISlackAgentAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
+        var slackApiOptions = configuration.GetSection(SlackProviderOptions.SectionName).Get<SlackProviderOptions>()
+            ?? new SlackProviderOptions();
+        services.AddHttpClient<SlackApiTransport>(client =>
+        {
+            client.BaseAddress = new Uri(slackApiOptions.ApiBaseUrl);
+            client.Timeout = slackApiOptions.ApiTimeout;
+        });
 
         // Socket lease core: the conventional scan registers concrete stores
         // as themselves only, so the lease interfaces need explicit bindings.

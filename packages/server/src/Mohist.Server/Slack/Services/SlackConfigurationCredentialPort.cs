@@ -1,4 +1,3 @@
-using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Slack.Services;
 
@@ -30,14 +29,6 @@ public enum SlackConfigurationCredentialRotationOutcome
     Succeeded,
     DefiniteFailure,
     Unknown,
-}
-
-public sealed class UnavailableSlackConfigurationCredentialPort : ISlackConfigurationCredentialPort, IScopedService
-{
-    public Task<SlackConfigurationCredentialRotationResult> RotateAsync(
-        SlackConfigurationCredentialPair credentials,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Configuration credential rotation is not connected in this slice.");
 }
 
 public sealed class FakeSlackConfigurationCredentialPort : ISlackConfigurationCredentialPort

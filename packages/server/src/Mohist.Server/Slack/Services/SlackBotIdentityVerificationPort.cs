@@ -1,4 +1,3 @@
-using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Slack.Services;
 
@@ -18,14 +17,6 @@ public sealed record SlackBotIdentityVerificationResult(
     string? AppId = null,
     IReadOnlySet<string>? GrantedScopes = null,
     string? ErrorClass = null);
-
-public sealed class UnavailableSlackBotIdentityVerificationPort : ISlackBotIdentityVerificationPort, IScopedService
-{
-    public Task<SlackBotIdentityVerificationResult> VerifyAsync(
-        SlackBotIdentityVerificationRequest request,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException("Slack Bot identity verification is not connected in this slice.");
-}
 
 public sealed class FakeSlackBotIdentityVerificationPort : ISlackBotIdentityVerificationPort
 {

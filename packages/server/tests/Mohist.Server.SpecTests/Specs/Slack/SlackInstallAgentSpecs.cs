@@ -36,7 +36,7 @@ public sealed class SlackInstallAgentSpecs
         var connections = new AgentConnectionStore(_factory, agents, _secrets, [], _time);
         var enrollments = new SlackWorkspaceEnrollmentStore(_factory, _time);
         var agentApps = new ManagedSlackAgentAppStore(_factory, _time);
-        var operations = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, _secrets, _time);
+        var operations = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
         var binding = new SlackAgentAppBindingService(_factory, connections, _time);
         _service = new SlackInstallAgentService(
             agents, connections, enrollments, agentApps,

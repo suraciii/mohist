@@ -234,7 +234,7 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             return;
         }
 
-        var request = new SlackAppManagementRequest(enrollment.Id, enrollment.Id, enrollment.WorkspaceTeamId);
+        var request = new SlackAppManagementRequest(enrollment.Id, enrollment.Id, enrollment.WorkspaceTeamId, ManifestJson: manifest.CanonicalJson);
         var external = await _appManagement.CreateAsync(request, ct);
         var fence = begin.Enrollment!.ManagerAppOperationFence;
         if (external.Outcome == SlackAppManagementOutcome.Succeeded && external.AppId is not null && external.InstallUrl is not null)
