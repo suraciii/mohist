@@ -238,6 +238,10 @@ public static class GrainTestConfig
             options.ConfigureWarnings(w => w.Ignore(
                 RelationalEventId.PendingModelChangesWarning));
         });
+        siloBuilder.Services.AddScoped<ISessionTreeMutationFenceReadPort>(services =>
+            new SessionTreeMutationFenceReadPort(
+                services.GetRequiredService<IGrainFactory>(),
+                services.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
         siloBuilder.Services.AddRequiredInfrastructure();
         siloBuilder.Services.AddSingleton<IActionCatalogSource>(NullActionCatalogSource.Instance);
         siloBuilder.Services.AddScoped<IWorkflowProfileProvider, WorkflowProfileProvider>();

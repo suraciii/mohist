@@ -2188,43 +2188,226 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
 
     public async Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command)
     {
+        throw new InvalidOperationException("Parent link attachment requires the fence receipt protocol.");
+    }
+
+    public async Task<ApplyParentLinkAttachResult> ApplyParentLinkAttachAsync(
+        ApplyParentLinkAttachCommand command)
+    {
         ArgumentNullException.ThrowIfNull(command);
-        ArgumentNullException.ThrowIfNull(command.Link);
-        var session = await GetRequiredAsync();
-        if (command.ExpectedWorkDir is null
-            || !string.Equals(session.Runtime.WorkDir, command.ExpectedWorkDir, StringComparison.Ordinal))
+        if (command.AttachedRevision <= 0
+            || string.IsNullOrWhiteSpace(command.CommandId)
+            || string.IsNullOrWhiteSpace(command.EdgeId)
+            || string.IsNullOrWhiteSpace(command.ParentSessionId)
+            || string.IsNullOrWhiteSpace(command.ParentAgentId)
+            || string.IsNullOrWhiteSpace(command.ChildLaunchJobId))
         {
-            throw new InvalidOperationException("Parent link workDir no longer matches the launch plan.");
-        }
-        if (!string.IsNullOrWhiteSpace(session.Runtime.RunnerId)
-            && !string.Equals(session.Runtime.RunnerId, command.ExpectedRunnerId, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException("Parent link Runner binding no longer matches the launch plan.");
+            return new ApplyParentLinkAttachResult(
+                SessionTreeAttachMutationState.Rejected,
+                RejectionReason: "parent_link_attach_identity_invalid");
         }
 
+        var session = await GetRequiredAsync();
+        var receipt = new SessionTreeAttachReceipt(
+            command.CommandId,
+            command.EdgeId,
+            command.ParentSessionId,
+            SessionId,
+            command.ChildLaunchJobId,
+            command.AttachedRevision);
         if (session.ParentLink is { } existing)
         {
-            if (existing == command.Link)
-                return new EnsureParentLinkResult(SessionId, existing.EdgeId, true);
-            if (existing.EdgeId == command.Link.EdgeId
-                && existing.ParentSessionId == command.Link.ParentSessionId
-                && existing.ChildLaunchJobId == command.Link.ChildLaunchJobId
-                && existing.AttachedRevision == 0
-                && command.Link.AttachedRevision > 0)
-            {
-                session.ParentLink = command.Link;
-                await _stateStore.SaveAsync(SessionId, session);
-                _session = session;
-                return new EnsureParentLinkResult(SessionId, existing.EdgeId, true);
-            }
-            throw new InvalidOperationException($"AgentSession {SessionId} already has a different parent link.");
+            return existing.EdgeId == command.EdgeId
+                && existing.ParentSessionId == command.ParentSessionId
+                && existing.ChildLaunchJobId == command.ChildLaunchJobId
+                && existing.State == SessionParentLinkState.Attached
+                && existing.AttachedRevision == command.AttachedRevision
+                ? new ApplyParentLinkAttachResult(SessionTreeAttachMutationState.Attached, existing, receipt)
+                : new ApplyParentLinkAttachResult(
+                    SessionTreeAttachMutationState.ReconciliationRequired,
+                    RejectionReason: "parent_link_identity_mismatch");
         }
 
-        session.ParentLink = command.Link;
-        await _stateStore.SaveAsync(SessionId, session);
-        _session = session;
-        return new EnsureParentLinkResult(SessionId, command.Link.EdgeId, false);
+        session.ParentLink = new SessionParentLink(
+            command.EdgeId,
+            command.ParentSessionId,
+            command.ParentAgentId,
+            command.ChildLaunchJobId,
+            _timeProvider.GetUtcNow(),
+            command.AttachedRevision,
+            SessionParentLinkState.Attached);
+        await CommitAsync(session, []);
+        return new ApplyParentLinkAttachResult(SessionTreeAttachMutationState.Attached, session.ParentLink, receipt);
     }
+
+    public async Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(
+        ClaimSubagentTerminalReportCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null || !MatchesParentLink(link, command.EdgeId, command.ChildLaunchJobId))
+        {
+            return new ClaimSubagentTerminalReportResult(
+                SubagentTerminalReportClaimDisposition.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+
+        if (link.TerminalReport == TerminalReportState.Delivered)
+        {
+            return new ClaimSubagentTerminalReportResult(
+                SubagentTerminalReportClaimDisposition.Delivered,
+                link.TerminalReportDeliveredInputId);
+        }
+        if (link.TerminalReport == TerminalReportState.Pending)
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Pending);
+        if (link.TerminalReport == TerminalReportState.Suppressed)
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Suppressed);
+        if (link.State == SessionParentLinkState.Detached)
+        {
+            session.ParentLink = link with { TerminalReport = TerminalReportState.Suppressed };
+            await CommitAsync(session, []);
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Suppressed);
+        }
+
+        session.ParentLink = link with { TerminalReport = TerminalReportState.Pending };
+        await CommitAsync(session, []);
+        return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.ClaimedPending);
+    }
+
+    public async Task<RecordSubagentTerminalReportDeliveredResult> RecordSubagentTerminalReportDeliveredAsync(
+        RecordSubagentTerminalReportDeliveredCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.ParentInputId))
+            throw new ArgumentException("ParentInputId is required.", nameof(command));
+
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null || !MatchesParentLink(link, command.EdgeId, command.ChildLaunchJobId))
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                SubagentTerminalReportDeliveryDisposition.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+        if (link.TerminalReport == TerminalReportState.Delivered)
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                link.TerminalReportDeliveredInputId == command.ParentInputId
+                    ? SubagentTerminalReportDeliveryDisposition.AlreadyDelivered
+                    : SubagentTerminalReportDeliveryDisposition.InputIdConflict,
+                link.TerminalReportDeliveredInputId,
+                link.TerminalReportDeliveredInputId == command.ParentInputId
+                    ? null
+                    : "parent_input_id_conflict");
+        }
+        if (link.TerminalReport != TerminalReportState.Pending)
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                SubagentTerminalReportDeliveryDisposition.Rejected,
+                RejectionReason: "terminal_report_not_pending");
+        }
+
+        session.ParentLink = link with
+        {
+            TerminalReport = TerminalReportState.Delivered,
+            TerminalReportDeliveredInputId = command.ParentInputId,
+        };
+        await CommitAsync(session, []);
+        return new RecordSubagentTerminalReportDeliveredResult(
+            SubagentTerminalReportDeliveryDisposition.Delivered,
+            command.ParentInputId);
+    }
+
+    public async Task<ApplyParentLinkDetachResult> ApplyParentLinkDetachAsync(
+        ApplyParentLinkDetachCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (command.DetachedRevision <= 0
+            || string.IsNullOrWhiteSpace(command.CommandId)
+            || string.IsNullOrWhiteSpace(command.ChildSessionId)
+            || command.ExpectedAttachedRevision is null
+            || command.ExpectedAttachedRevision <= 0)
+            throw new ArgumentOutOfRangeException(nameof(command), "DetachedRevision must be positive.");
+
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null
+            || command.ChildSessionId != SessionId
+            || !MatchesParentLink(link, command.EdgeId, command.ParentSessionId, command.ChildLaunchJobId))
+        {
+            return new ApplyParentLinkDetachResult(
+                SessionTreeDetachMutationState.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+        if (link.AttachedRevision != command.ExpectedAttachedRevision)
+        {
+            return new ApplyParentLinkDetachResult(
+                SessionTreeDetachMutationState.ReconciliationRequired,
+                link,
+                "reconciliation_required");
+        }
+        if (link.State == SessionParentLinkState.Detached)
+        {
+            return link.DetachCommandId == command.CommandId
+                && link.DetachedRevision == command.DetachedRevision
+                && link.DetachExpectedAttachedRevision == command.ExpectedAttachedRevision
+                ? new ApplyParentLinkDetachResult(
+                    SessionTreeDetachMutationState.Detached,
+                    link,
+                    Receipt: new SessionTreeDetachReceipt(
+                        command.CommandId!,
+                        command.EdgeId,
+                        command.ParentSessionId,
+                        command.ChildSessionId!,
+                        command.DetachedRevision,
+                        command.ChildLaunchJobId,
+                        command.ExpectedAttachedRevision.Value))
+                : new ApplyParentLinkDetachResult(
+                    SessionTreeDetachMutationState.ReconciliationRequired,
+                    link,
+                    "reconciliation_required");
+        }
+
+        session.ParentLink = link with
+        {
+            State = SessionParentLinkState.Detached,
+            DetachedAt = Now(),
+            DetachedRevision = command.DetachedRevision,
+            DetachCommandId = command.CommandId,
+            DetachExpectedAttachedRevision = command.ExpectedAttachedRevision,
+            TerminalReport = link.TerminalReport == TerminalReportState.None
+                ? TerminalReportState.Suppressed
+                : link.TerminalReport,
+        };
+        await CommitAsync(session, []);
+        return new ApplyParentLinkDetachResult(
+            SessionTreeDetachMutationState.Detached,
+            session.ParentLink,
+            Receipt: new SessionTreeDetachReceipt(
+                command.CommandId!,
+                command.EdgeId,
+                command.ParentSessionId,
+                command.ChildSessionId!,
+                command.DetachedRevision,
+                command.ChildLaunchJobId,
+                command.ExpectedAttachedRevision.Value));
+    }
+
+    private static bool MatchesParentLink(
+        SessionParentLink link,
+        string edgeId,
+        string childLaunchJobId) =>
+        MatchesParentLink(link, edgeId, link.ParentSessionId, childLaunchJobId);
+
+    private static bool MatchesParentLink(
+        SessionParentLink link,
+        string edgeId,
+        string parentSessionId,
+        string childLaunchJobId) =>
+        link.EdgeId == edgeId
+        && link.ParentSessionId == parentSessionId
+        && link.ChildLaunchJobId == childLaunchJobId;
 
     public async Task PromoteProvisionalLaunchAsync()
     {

@@ -684,9 +684,16 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.LaunchVisibility == AgentLaunchVisibility.Rejected && IsTerminal)
             return;
         State.LaunchVisibility = AgentLaunchVisibility.Rejected;
-        State.FailureReason = reason;
-        await PersistAsync();
-        await CancelAsync();
+        await EnterTerminalStateAsync(
+            AgentJobStatus.Cancelled,
+            exitCode: null,
+            failureReason: reason,
+            failureCategory: null,
+            pendingReason: reason,
+            message: "cancelled",
+            output: null,
+            artifactUploadIds: null,
+            terminalExitCode: null);
     }
 
     public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
@@ -1433,7 +1440,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
+        var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        if (await sessionGrain.GetAsync() is null)
+            return;
+
+        await sessionGrain.MarkTurnTerminalAsync(
             State.Input!.InitialTurnId!,
             status switch
             {

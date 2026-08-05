@@ -84,6 +84,10 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// </summary>
     Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command);
     Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command);
+    Task<ApplyParentLinkAttachResult> ApplyParentLinkAttachAsync(ApplyParentLinkAttachCommand command);
+    Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(ClaimSubagentTerminalReportCommand command);
+    Task<RecordSubagentTerminalReportDeliveredResult> RecordSubagentTerminalReportDeliveredAsync(RecordSubagentTerminalReportDeliveredCommand command);
+    Task<ApplyParentLinkDetachResult> ApplyParentLinkDetachAsync(ApplyParentLinkDetachCommand command);
     Task PromoteProvisionalLaunchAsync();
     Task AbortProvisionalLaunchAsync(string jobId, string turnId, string reason);
 
