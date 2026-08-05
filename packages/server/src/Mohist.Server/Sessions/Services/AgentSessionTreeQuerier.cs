@@ -7,13 +7,11 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Grains;
 
 namespace Mohist.Server.Sessions.Services;
 
 public sealed class AgentSessionTreeQuerier(
-    IDbContextFactory<MohistDbContext> dbFactory,
-    IGrainFactory grains) : IScopedService
+    IDbContextFactory<MohistDbContext> dbFactory) : IScopedService
 {
     public async Task<AgentSessionTreePage?> GetAsync(
         string projectId,
@@ -22,17 +20,15 @@ public sealed class AgentSessionTreeQuerier(
         string? continuation,
         CancellationToken ct = default)
     {
-        var fence = grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        var graph = await fence.GetAsync();
-        var cursor = ReadCursor(projectId, rootSessionId, graph.GraphRevision, continuation);
-        var revision = cursor?.GraphRevision ?? graph.GraphRevision;
-        var offset = cursor?.Offset ?? 0;
+        var published = await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(dbFactory, projectId, ct);
+        var cursor = ReadCursor(projectId, rootSessionId, published, continuation);
+        var revision = cursor?.GraphRevision ?? published;
         var rows = await LoadTreeRowsAsync(projectId, rootSessionId, revision, ct);
         if (rows.Count == 0)
             return null;
 
         var pageSize = Math.Clamp(limit, 1, 200);
-        var pageRows = rows.Skip(offset).Take(pageSize).ToArray();
+        var pageRows = rows.Skip(cursor?.Offset ?? 0).Take(pageSize).ToArray();
         var page = pageRows.Select(item => ToNode(item.Record, item.Depth)).ToArray();
         var edges = pageRows
             .Where(item => item.Record.Row.ParentSessionId is not null)
@@ -43,7 +39,7 @@ public sealed class AgentSessionTreeQuerier(
                 item.Record.Row.ChildLaunchJobId!,
                 SessionParentLinkState.Attached.ToString().ToLowerInvariant()))
             .ToArray();
-        var nextOffset = offset + page.Length;
+        var nextOffset = (cursor?.Offset ?? 0) + page.Length;
         var next = nextOffset < rows.Count
             ? EncodeCursor(new TreeCursor(projectId, rootSessionId, revision, nextOffset))
             : null;
@@ -75,48 +71,81 @@ public sealed class AgentSessionTreeQuerier(
         if (root is null)
             return [];
 
-        var result = new List<(AgentSessionRecord Record, int Depth)>();
         var rootRecord = ToRecord(root);
         if (rootRecord is null)
             return [];
-        result.Add((rootRecord, 0));
 
-        var frontier = new[] { (SessionId: rootSessionId, Depth: 0) };
-        while (frontier.Length > 0)
+        var result = new List<(AgentSessionRecord Record, int Depth)> { (rootRecord, 0) };
+        var visited = new HashSet<string>(StringComparer.Ordinal) { rootSessionId };
+        var seenEdges = new HashSet<string>(StringComparer.Ordinal);
+        var frontier = new List<string> { rootSessionId };
+        var depth = 0;
+
+        while (frontier.Count > 0)
         {
-            var parentIds = frontier.Select(item => item.SessionId).ToArray();
-            var children = await db.AgentSessions.AsNoTracking()
+            depth++;
+            var parentIds = frontier.ToArray();
+            var candidates = await db.AgentSessions.AsNoTracking()
                 .Where(row => row.LabelProjectId == projectId
-                    && row.ParentLinkAttachedRevision <= revision
-                    && (row.ParentLinkDetachedRevision == null || row.ParentLinkDetachedRevision > revision)
                     && row.ParentSessionId != null
-                    && parentIds.Contains(row.ParentSessionId))
+                    && parentIds.Contains(row.ParentSessionId)
+                    && row.ParentLinkAttachedRevision <= revision
+                    && (row.ParentLinkDetachedRevision == null || row.ParentLinkDetachedRevision > revision))
                 .OrderBy(row => row.ParentSessionId)
                 .ThenBy(row => row.ParentLinkAttachedRevision)
                 .ThenBy(row => row.ParentLinkEdgeId)
                 .ToListAsync(ct);
 
-            var byParent = children
+            var byParent = candidates
                 .GroupBy(row => row.ParentSessionId!, StringComparer.Ordinal)
                 .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-            var next = new List<(string SessionId, int Depth)>();
+            var next = new List<string>();
             foreach (var parent in frontier)
             {
-                if (!byParent.TryGetValue(parent.SessionId, out var siblings))
+                if (!byParent.TryGetValue(parent, out var siblings))
                     continue;
-                foreach (var child in siblings)
+                foreach (var candidate in siblings)
                 {
-                    var record = ToRecord(child);
+                    ValidateCandidate(candidate, projectId, revision, seenEdges, visited);
+                    var record = ToRecord(candidate);
                     if (record is null)
-                        continue;
-                    result.Add((record, parent.Depth + 1));
-                    next.Add((child.Id, parent.Depth + 1));
+                        throw new SessionTreeProjectionInconsistentException();
+                    result.Add((record, depth));
+                    next.Add(candidate.Id);
+                    visited.Add(candidate.Id);
                 }
             }
-            frontier = next.ToArray();
+            frontier = next;
         }
 
         return result;
+    }
+
+    private static void ValidateCandidate(
+        AgentSessionRow candidate,
+        string projectId,
+        long revision,
+        HashSet<string> seenEdges,
+        HashSet<string> visited)
+    {
+        if (!string.Equals(candidate.LabelProjectId, projectId, StringComparison.Ordinal)
+            || string.IsNullOrEmpty(candidate.ParentLinkEdgeId)
+            || string.IsNullOrEmpty(candidate.ParentSessionId)
+            || string.IsNullOrEmpty(candidate.ChildLaunchJobId))
+            throw new SessionTreeProjectionInconsistentException();
+
+        var attached = candidate.ParentLinkAttachedRevision;
+        if (!attached.HasValue || attached.Value <= 0 || attached.Value > revision)
+            throw new SessionTreeProjectionInconsistentException();
+
+        var detached = candidate.ParentLinkDetachedRevision;
+        if (detached.HasValue && (detached.Value <= revision || detached.Value <= attached.Value))
+            throw new SessionTreeProjectionInconsistentException();
+
+        if (string.Equals(candidate.ParentSessionId, candidate.Id, StringComparison.Ordinal)
+            || !seenEdges.Add(candidate.ParentLinkEdgeId!)
+            || !visited.Add(candidate.Id))
+            throw new SessionTreeProjectionInconsistentException();
     }
 
     private static AgentSessionTreeNode ToNode(AgentSessionRecord record, int depth) => new(
@@ -186,6 +215,10 @@ public sealed class AgentSessionTreeQuerier(
 }
 
 public sealed class AgentSessionTreeContinuationException : Exception
+{
+}
+
+public sealed class SessionTreeProjectionInconsistentException : Exception
 {
 }
 

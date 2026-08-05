@@ -3569,6 +3569,24 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.SessionTreeGraphRevisionRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId");
+
+                    b.ToTable("SessionTreeGraphRevisions");
+                });
 #pragma warning restore 612, 618
         }
     }

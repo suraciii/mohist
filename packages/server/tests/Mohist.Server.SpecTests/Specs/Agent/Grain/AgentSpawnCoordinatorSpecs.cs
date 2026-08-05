@@ -150,8 +150,7 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
 
                 var services = _fixture.Cluster.GetSiloServiceProvider(null);
                 var tree = new AgentSessionTreeQuerier(
-                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-                    Grains);
+                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>());
                 var published = await tree.GetAsync(projectId, parentSessionId, 10, null);
                 Assert.NotNull(published);
                 Assert.Equal(1, published!.Revision);
@@ -194,8 +193,7 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
             {
                 var services = _fixture.Cluster.GetSiloServiceProvider(null);
                 var tree = new AgentSessionTreeQuerier(
-                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-                    Grains);
+                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>());
                 var recoveredTree = await tree.GetAsync(projectId, parentSessionId, 10, null);
                 Assert.NotNull(recoveredTree);
                 Assert.Equal(1, recoveredTree!.Revision);
