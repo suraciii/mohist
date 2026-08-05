@@ -286,8 +286,11 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
   Slack CLI 凭据或浏览器自动化绕过该边界。
 - **Socket token 边界**：App-level token 由用户在 App 设置页生成，scope 只能是
   `connections:write`。Mohist 验证它能为预期 App 建立 Socket 后才保存 readiness 事实。
-- **当前差距**：生产实现仍使用 `UnavailableSlackAppManagementPort` 与
-  `UnavailableSlackOAuthCredentialSink` 占位；目标 `setup` / `install-agent` 尚未接入真实 port。
+- **当前差距**：三个 outbound port 已接生产 adapter（`SlackApiTransport` + App
+  management / Configuration credential rotation / Bot identity verification），`setup` /
+  `install-agent` 已接入真实 port。`ISlackOAuthCredentialSink` 生产注册仍指向
+  `UnavailableSlackOAuthCredentialSink`：OAuth redirect 回填路径不可用，目标流程本来就不经
+  OAuth callback，token 由 CLI 受保护输入进入。
 
 Server 的 Slack control plane 只经三个窄 outbound port 访问 Slack HTTPS API：
 
@@ -511,14 +514,15 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
 
 ## 已交付 correctness kernel
 
-本节记录当前已交付的纯模型 correctness kernel，供后续真实 port 与向导复用。它不接生产网络，
-不代表目标安装流程已经交付。
+本节记录 correctness kernel 已交付的纯模型部分。三个 outbound port 的生产 adapter 已接线
+（见「凭据所有权」差距注），但默认测试仍全部使用 fake port 与 fixed `TimeProvider`，不触
+真实网络。
 
 ### 模型不变量
 
 - `SlackWorkspaceEnrollment`：active enrollment 的 `team_id` 唯一；拥有 Mohist App 身份/能力/lifecycle
   与 credential refs；不带 Project（除非产品 spec 改成每 Project）。
-- 目标模型名 `ManagedSlackAgentApp`（当前代码仍名为 `ManagedSlackChildApp`）：引用
+- 模型名 `ManagedSlackAgentApp`：引用
   `AgentConnectionId`；拥有四轴状态、desired/applied manifest + hash、verified scopes、operation
   fence、unknown outcome、error class、audit、Agent App secret refs。
 - Connection 分阶段绑定：`AgentId + WorkspaceTeamId` 创建即固定；`AppId + BotUserId` 从「都空」
@@ -537,7 +541,8 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
 ### fake app-management port
 
 生产代码只能经一个窄 port 调 Slack create/delete（ArchTest 兜底）。目标态按上文拆为 Configuration
-credential、app-management 与 Bot identity verification 三个窄 port；当前 kernel 只提供 fake 实现，覆盖：
+credential、app-management 与 Bot identity verification 三个窄 port；生产 adapter 已接线，
+默认测试仍使用 fake 实现，覆盖：
 
 - create 成功 / definite 失败 / **unknown**（超时或 internal_error）；
 - delete 成功 / definite 失败 / **unknown**；
@@ -614,17 +619,18 @@ Readiness 分离，以及 Server 持有的 provider inbox、conversation mapping
 会依据该 identity 核对，update 的明确失败只产生一次 fallback。终态 delivery 由 Server 基于 session
 和管理员配置的 external web URL 构造 link block，adapter 不解析 Agent 文本为 Slack 控制对象。
 
-控制面已有 Slack-specific Enrollment、代码名为 `ManagedSlackChildApp` 的 Agent App 聚合、claim
+控制面已有 Slack-specific Enrollment、`ManagedSlackAgentApp` 聚合、claim
 与 ManagerActor 边界。operator setup 签发
 一次性 claim，Manager ingress 先 durable accept，再按认领的 actor 和目标资源授权。内置
 `mohist-slack` Agent 沿用标准 SessionInput、AgentTurn 与 Runner dispatch；受控工具可创建带默认
 runtime 的普通 Project Agent 后委托同一 Manager application service 挂载。删除、解除绑定、凭据和
 投递重发工具不在 Manager 对话 catalog 中。
 
-Manager 凭据由 `mo slack configure-manager --workspace-team <team> [--credentials-file <path>]`
-显式 provision 或 rotation。无文件时 CLI 使用隐藏输入；有文件时只接受受保护的用户专属非符号链接
-文件。CLI 不暴露 token flag，Server endpoint 只接受 workspace team 与凭据，并从活动 enrollment 的
-`ManagerCredentialRef` 派生 secret address。
+`mo slack setup` 向导经 `/setup/configuration` 路由轮换并原子保存 Configuration token pair（
+`ProtectedSlackConfigurationCredentialStore`），经 `/setup/runtime-credentials` 校验 workspace 与
+Mohist App 身份后写入 enrollment secret address；`mo slack install-agent` 经 `/install-agent/credentials`
+校验 Bot 身份并写入 AgentApp secret address。无文件时 CLI 使用隐藏输入；有文件时只接受受保护的
+用户专属非符号链接文件。CLI 不暴露 token flag。
 
 普通 Slack 输入拥有不可变的 reply anchor 与协作 Skill，dispatch-only context 不进入 Agent 配置。
 普通 follow-up 始终走既有接纳路径；Stop interaction 由 Server 签名、去重并在重读 executing Turn
@@ -633,14 +639,20 @@ Manager 凭据由 `mo slack configure-manager --workspace-team <team> [--credent
 
 ### 仍未实装
 
-真实 Mohist App / Agent App 创建与本机安装向导尚未接到生产网络。当前 `mo slack setup` 仍是
-显式参数的受保护登记入口，不是完整安装向导；`mo slack install-agent` 尚不存在，安装被拆在
-`create`、`configure`、`configure-manager` 与 `create-child-app` 等底层命令中。Manager adapter
-target 只有 Web API 出站投递，不取得 App-level token，也不启动 Socket Mode ingress，因此 Mohist
-App 的真实对话入口尚未闭合。
-当前 manifest 模型仍保留 HTTPS transport 与 `PublicIngressBaseUrl`，required scopes 仍包含第一版
-不使用的 `mpim:history`；实现目标流程时应删除这两个分支，并把 `app_mentions:read` 纳入 Agent App
-固定 contract，而不是依赖调用方额外传入。
+`setup` / `install-agent` 的本机安装向导、三个 outbound port 的生产 adapter、adapter lease
+routes 与 Mohist App / Agent App 的 Socket Mode ingress 均已接入：CLI 从持久进度幂等续跑，
+完成 Configuration token 轮换、manifest create、安装引导、运行凭据验证与 Socket hello 确认；
+manifest 只输出 Socket Mode（无 HTTPS transport / `PublicIngressBaseUrl`），Agent App scopes 已
+固定为不含 `mpim:history` 的目标 contract。与真实 Slack 的端到端验收尚未进行：默认测试全部
+走 fake port 与 fixed `TimeProvider`，发布前仍需在隔离工作区人工跑通 `setup`、
+`install-agent`、Bot mention、thread 锚点回复与 Stop，并核对两条 Socket lease。
+
+Server 仍保留未清理的旧面：`SlackOAuthStateService` / `SlackOAuthAuthorizationService` 的
+OAuth redirect 路径（`begin-authorization` / `authorization-progress` / `authorize` 路由与
+`ISlackOAuthCredentialSink` 的 Unavailable 占位）、旧 `slack-manager/credentials` 登记路由与
+数据面 `rotate-credentials` 路由仍映射，新 CLI 与 Manager 对话均不调用；目标流程不依赖 OAuth
+callback。
+
 公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口、App Home 以及完整的
 规模化和运维体验仍属于后续阶段。后续能力仍必须经 Agent API 与既有 Connection boundary 进入，
 不得让 adapter 解析 Runner 日志、覆盖 Agent 配置或直接写 Mohist 数据库。

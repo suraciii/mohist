@@ -255,9 +255,6 @@ CLI 与 Web 配置的是同一个接入，不建立两份本机配置；与 Mohi
 `--allow-member`，错误会在修改前返回。member ID 是 CLI 自动化入口；Web 与 Slack 界面都
 使用成员搜索和头像，不把 ID 当作主要交互。
 
-> 当前实现仍暴露 `configure-manager`、`create`、`configure` 和受管 App 运维命令；它们是目标
-> `setup` / `install-agent` 尚未收敛前的底层入口，不属于目标用户流程。具体差距见文末。
-
 ## 接入配置
 
 | 配置 | 含义 |
@@ -576,16 +573,16 @@ Anyone 访问会校验 Bot 是否能看到当前频道。状态消息可以
 操作请求停止。终态回复保留稳定会话标识，并在管理员配置可公开访问的 Mohist 地址时提供
 安全的会话入口。
 
-当前控制面实现已提供 `mo slack setup`、`mo slack configure-manager`、`mo slack status` 和一次性认领。
-`configure-manager` 只向已登记的活动工作区安装记录写入该记录的 Manager Bot 凭据；
-重复执行是有意设计的安全轮换，命令输出只确认 workspace 和 provisioned 状态，不返回凭据。
-认领后的 Mohist
-App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、创建带默认配置的 Agent 并安装到 Slack、
-调整接入权限与启停，以及发起 Owner 转移；它与 CLI 读取同一状态和下一步。解除绑定和永久
-删除不在对话中提供，仍是 CLI 或 Web 中独立、明确的生命周期操作。
+当前控制面已提供 `mo slack setup` / `mo slack install-agent` 本机安装向导与一次性认领：两者
+都从同一条持久进度幂等续跑，自动完成 App 创建与配置，只在 Slack 安装确认和本机凭据输入时
+停下并给出唯一下一步；重跑会重新校验已保存凭据，对就绪记录显式重供凭据即轮换。认领后的
+Mohist App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、创建带默认配置的 Agent 并
+挂载接入（涉及 secret 的步骤仍回到本机 CLI）、调整接入权限与启停，以及发起 Owner 转移；
+它与 CLI 读取同一状态和下一步。解除绑定和永久删除不在对话中提供，仍是 CLI 或 Web 中独立、
+明确的生命周期操作。`configure-manager`、`create`、`configure`、`create-child-app` 等底层
+命令已从命令面移除。
 
-当前仍未交付的是目标 `mo slack setup` / `mo slack install-agent` 本机安装向导和真实 App
-供给。`setup` 目前仍是需要显式参数的受保护登记入口；`install-agent` 尚不存在，现有实现以
-`create`、`configure`、`configure-manager`、`create-child-app` 等底层命令分别推进。真实 App
-创建、安装授权、运行凭据引导与同一命令续跑尚未连成产品流程。公开应用市场、多租户托管、
-跨 Mohist Server 协调、Slack 原生 Agent 入口及完整诊断工作台也仍未交付。
+仍未交付的是与真实 Slack 的端到端验收：安装授权、Socket 连接与消息收发目前只在本地模拟
+环境中验证过，真实 Slack 工作区上的 `setup`、`install-agent`、Bot 提及与 thread 回复尚未
+完整跑通。公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口及完整
+诊断工作台也仍未交付。

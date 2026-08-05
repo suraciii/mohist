@@ -424,11 +424,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
-- `install/update/service ... slack` 与 `mohist-slack` 受管服务。
-- `mo slack setup` 的完整本机安装向导、`mo slack install-agent`，以及真实 Mohist App / Agent
-  App 的创建、授权、凭据校验和 Socket Mode 上线流程。当前实现仍以 `configure-manager`、
-  `create`、`configure`、`create-child-app` 等底层动作分别推进；目标命令面不再保留这些底层
-  动作与 `rotate-credentials`，凭据轮换由重跑 `setup` / `install-agent` 完成。
 
 ### 已闭合
 
@@ -446,6 +441,11 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
 - 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
 - 根级 `slack` 命令组及其 setup/status 已交付；接入动作只保留 `mo slack` 这一命令面。
+- `mo slack setup` / `mo slack install-agent` 本机安装向导与 `mo install/update/service ... slack`
+  受管服务已交付：setup/install-agent 从持久进度幂等续跑，自动完成 App 创建与配置，只在
+  Slack 安装确认和本机凭据输入时停下；`configure-manager`、`create`、`configure`、
+  `create-child-app`、`rotate-credentials` 底层动作已从命令面移除，凭据轮换由重跑
+  `setup` / `install-agent` 完成。
 - Agent launch/follow-up 以稳定的 SessionInput 与 AgentTurn 身份返回；Slack 输入进一步保留
   Server 生成的回复锚点和协作上下文。
 - 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive` 等缺；`issue rebase`
