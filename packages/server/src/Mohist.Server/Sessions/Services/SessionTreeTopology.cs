@@ -75,6 +75,11 @@ internal static class SessionTreeTopology
 
 public sealed class SessionTreeProjectionInconsistentException : InvalidOperationException
 {
+    public SessionTreeProjectionInconsistentException()
+        : base("session_tree_projection_inconsistent")
+    {
+    }
+
     public SessionTreeProjectionInconsistentException(string message)
         : base(message)
     {

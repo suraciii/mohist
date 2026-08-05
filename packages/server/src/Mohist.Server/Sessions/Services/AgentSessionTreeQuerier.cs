@@ -224,10 +224,6 @@ public sealed class AgentSessionTreeContinuationException : Exception
 {
 }
 
-public sealed class SessionTreeProjectionInconsistentException : Exception
-{
-}
-
 public sealed record AgentSessionTreePage(
     AgentSessionTreeRoot Root,
     long Revision,
