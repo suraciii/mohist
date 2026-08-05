@@ -189,6 +189,8 @@ public partial class ConnectionSecretsMigrationSpecs
         var entityType = context.Model.FindEntityType(typeof(StoredSecretRow));
         Assert.NotNull(entityType);
         Assert.Equal("StoredSecrets", entityType.GetTableName());
+        AssertRebuiltDependentIndexes(context.Model);
+        AssertRebuiltDependentIndexes(new Mohist.Server.Infrastructure.Data.Migrations.MohistDbContextModelSnapshot().Model);
     }
 
     [Fact]

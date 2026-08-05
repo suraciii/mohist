@@ -2025,7 +2025,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AgentConnectionId");
+                    b.HasIndex("AgentConnectionId")
+                        .HasDatabaseName("IX_SlackChildAppBindingObligations_AgentConnectionId");
 
                     b.HasIndex("ChildAppId")
                         .IsUnique()
@@ -2255,7 +2256,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AuthorizationAttemptId");
+                    b.HasIndex("AuthorizationAttemptId")
+                        .HasDatabaseName("IX_SlackOAuthStates_AuthorizationAttemptId");
 
                     b.HasIndex("StateHash")
                         .IsUnique()

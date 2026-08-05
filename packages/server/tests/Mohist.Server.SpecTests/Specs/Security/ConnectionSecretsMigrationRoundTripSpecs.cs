@@ -1,11 +1,36 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Security;
 
 public partial class ConnectionSecretsMigrationSpecs
 {
+    private static void AssertRebuiltDependentIndexes(IReadOnlyModel model)
+    {
+        AssertIndex(
+            model,
+            typeof(SlackChildAppBindingObligationRow),
+            "IX_SlackChildAppBindingObligations_AgentConnectionId",
+            "AgentConnectionId");
+        AssertIndex(
+            model,
+            typeof(SlackOAuthStateRow),
+            "IX_SlackOAuthStates_AuthorizationAttemptId",
+            "AuthorizationAttemptId");
+    }
+
+    private static void AssertIndex(IReadOnlyModel model, Type entityType, string indexName, string propertyName)
+    {
+        var entity = model.FindEntityType(entityType);
+        Assert.NotNull(entity);
+        var index = entity!.GetIndexes().SingleOrDefault(candidate => candidate.GetDatabaseName() == indexName);
+        Assert.NotNull(index);
+        Assert.Equal([propertyName], index!.Properties.Select(property => property.Name));
+    }
+
     private static async Task SeedRebuildRowsAsync(MohistDbContext context)
     {
         await context.Database.ExecuteSqlRawAsync("""

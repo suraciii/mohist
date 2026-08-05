@@ -782,6 +782,8 @@ public class MohistDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.AgentConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.AgentConnectionId)
+                .HasDatabaseName("IX_SlackChildAppBindingObligations_AgentConnectionId");
             entity.HasIndex(e => e.ChildAppId)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackChildAppBindingObligations_ChildAppId");
@@ -815,6 +817,8 @@ public class MohistDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.AuthorizationAttemptId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.AuthorizationAttemptId)
+                .HasDatabaseName("IX_SlackOAuthStates_AuthorizationAttemptId");
             entity.HasIndex(e => e.StateHash)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackOAuthStates_StateHash");
