@@ -159,8 +159,14 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, "A_WRONG"));
-        await AssertEnrollmentRuntimeStateAsync(runtime.EnrollmentId!, SlackRuntimeCredentialValidationState.AwaitingSocket);
+        // A mismatched hello on a first-provision candidate rejects like the
+        // control-plane route: the candidate is deleted and validation fails.
+        await AssertEnrollmentRuntimeStateAsync(runtime.EnrollmentId!, SlackRuntimeCredentialValidationState.Failed);
         await AssertEnrollmentReadinessAsync(runtime.EnrollmentId!, SlackManagerReadiness.Unknown);
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.AppToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.BotToken)));
     }
 
     [Fact]
@@ -357,7 +363,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task In_flight_rotation_survives_a_mismatched_hello_with_the_previous_pair_intact()
+    public async Task In_flight_rotation_with_mismatched_hello_restores_the_previous_verified_pair()
     {
         var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_HELLO_ROTATE");
         _botIdentity.Result = VerifiedBot("T_HELLO_ROTATE", managerAppId);
@@ -369,16 +375,67 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.NotNull(validation);
 
-        // A mismatched hello intentionally does not roll back a rotation:
-        // the parked previous pair stays put so the enrollment remains
-        // recoverable until a correct hello or a fresh credential re-supply.
+        // A mismatched hello rejects like the control-plane route: the candidate
+        // is bad, so restore the parked previous verified pair and return the
+        // enrollment to Verified serving the old pair.
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, "A_WRONG_APP"));
-        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
-        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
-        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken)));
+    }
+
+    [Fact]
+    public async Task Rotation_crash_at_candidate_store_never_serves_the_unverified_pair_to_the_runtime_lease()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_CRASH_STORE");
+        var manager = new SlackLeaseTargetRef.Manager(enrollmentId, "T_CRASH_STORE");
+
+        // A faulting secret store simulates a process crash at the boundary the
+        // old ordering got wrong: after the state has left Verified but while
+        // the new candidate is being written to the runtime address.
+        var faulting = new SlackManagerSetupOrchestrator(
+            _configurationPort,
+            new ProtectedSlackConfigurationCredentialStore(_factory, _secrets),
+            _enrollments,
+            new SlackManifestGenerator(),
+            _appManagement,
+            _botIdentity,
+            new FaultingSecretStore(_secrets),
+            _time);
+        _botIdentity.Result = VerifiedBot("T_CRASH_STORE", managerAppId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            faulting.SupplyRuntimeCredentialsAsync(new("T_CRASH_STORE", "xoxb-rotated", "xapp-rotated")));
+
+        // Stage ran before the faulted Store, so the state has left Verified and
+        // the runtime lease is closed; the runtime address still holds the old
+        // verified pair, also parked in Previous for restore.
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Candidate);
+        Assert.Null(await _leases.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A"));
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousBotToken, "xoxb-runtime");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
+
+        // Resume with the working store converges to the new pair after hello.
+        _botIdentity.Result = VerifiedBot("T_CRASH_STORE", managerAppId);
+        var resumed = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_CRASH_STORE", "xoxb-rotated", "xapp-rotated"));
+        Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, resumed.Phase);
+
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, managerAppId));
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
     }
 
     [Fact]
@@ -574,5 +631,31 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         public Task<byte[]?> TryLoadAsync(string path, CancellationToken ct = default) => Task.FromResult<byte[]?>(_key);
 
         public Task WriteAsync(string path, byte[] key, CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    private sealed class FaultingSecretStore : ISecretStore
+    {
+        private readonly ISecretStore _inner;
+
+        public FaultingSecretStore(ISecretStore inner) => _inner = inner;
+
+        public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
+        {
+            // Simulate a crash at the runtime candidate write: Preserve (previous
+            // slot) and every load/delete still succeed, but storing the new
+            // runtime Bot token fails after the state has already left Verified.
+            if (address.Kind == SecretKind.BotToken)
+                throw new InvalidOperationException("fault-injected secret store failure");
+            return _inner.StoreAsync(address, plaintext, ct);
+        }
+
+        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.LoadAsync(address, ct);
+
+        public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.DeleteAsync(address, ct);
+
+        public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) =>
+            _inner.Redact(values);
     }
 }

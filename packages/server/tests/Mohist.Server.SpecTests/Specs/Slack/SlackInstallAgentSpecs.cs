@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
@@ -32,16 +33,21 @@ public sealed class SlackInstallAgentSpecs
     public SlackInstallAgentSpecs()
     {
         _factory = new TestDbContextFactory(_database.Options);
+        _service = BuildService(_secrets);
+    }
+
+    private SlackInstallAgentService BuildService(ISecretStore secrets)
+    {
         var agents = new AgentQuerier(_factory);
         var connections = new AgentConnectionStore(_factory, agents, _secrets, [], _time);
         var enrollments = new SlackWorkspaceEnrollmentStore(_factory, _time);
         var agentApps = new ManagedSlackAgentAppStore(_factory, _time);
         var operations = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
         var binding = new SlackAgentAppBindingService(_factory, connections, _time);
-        _service = new SlackInstallAgentService(
+        return new SlackInstallAgentService(
             agents, connections, enrollments, agentApps,
             new SlackManifestGenerator(), operations, binding,
-            _apps, _botIdentity, _secrets);
+            _apps, _botIdentity, secrets);
     }
 
     [Fact]
@@ -319,6 +325,56 @@ public sealed class SlackInstallAgentSpecs
     }
 
     [Fact]
+    public async Task Rotation_crash_at_candidate_store_never_serves_the_unverified_pair_to_a_runtime_lease()
+    {
+        var (agentAppId, connectionId, appId) = await DriveToVerifiedAsync("xoxb-live", "xapp-live");
+        var targetRef = new SlackLeaseTargetRef.Connection(ProjectId, connectionId);
+        var leases = BuildLeases();
+
+        // Before the rotation the runtime lease serves the verified live pair.
+        var live = await leases.AcquireRuntimeLeaseAsync("operator-1", targetRef, "adapter-A");
+        Assert.NotNull(live);
+        Assert.Equal("xoxb-live", live!.BotToken);
+        Assert.Equal("xapp-live", live.AppToken);
+
+        var faultingService = BuildService(new FaultingSecretStore(_secrets));
+
+        _botIdentity.Result = VerifiedAgentBot(appId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            faultingService.ProvisionCredentialsAsync(agentAppId, "xoxb-rotated", "xapp-rotated"));
+
+        // Stage ran before the faulted Store, so the state has left Verified and
+        // the runtime lease is closed: it returns null rather than the new,
+        // unverified candidate. The runtime address still holds the old verified
+        // pair, also parked in Previous for restore.
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, await ReadAgentAppStateAsync(agentAppId));
+        Assert.Null(await leases.AcquireRuntimeLeaseAsync("operator-1", targetRef, "adapter-A"));
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.PreviousBotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.PreviousAppToken));
+
+        // Resume with the working store converges; after a correct hello the
+        // runtime lease serves the new pair.
+        _botIdentity.Result = VerifiedAgentBot(appId);
+        var resumed = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-rotated", "xapp-rotated");
+        Assert.True(resumed.Accepted);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, resumed.RuntimeCredentialValidationState);
+        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+
+        var verified = await _service.ApplySocketValidationAsync(agentAppId, appId);
+        Assert.Equal(SlackInstallAgentValidationOutcome.Verified, verified.Outcome);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Verified, await ReadAgentAppStateAsync(agentAppId));
+        Assert.False(_secrets.Addresses.ContainsKey(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
+
+        var rotated = await leases.AcquireRuntimeLeaseAsync("operator-1", targetRef, "adapter-A");
+        Assert.NotNull(rotated);
+        Assert.Equal("xoxb-rotated", rotated!.BotToken);
+        Assert.Equal("xapp-rotated", rotated.AppToken);
+    }
+
+    [Fact]
     public async Task Provision_credentials_with_a_missing_required_scope_fails_closed_without_storing_or_binding()
     {
         await SeedAgentAsync(AgentStatus.Active);
@@ -435,6 +491,24 @@ public sealed class SlackInstallAgentSpecs
     private string ReadSecretAsync(string agentAppId, SecretKind kind) =>
         Encoding.UTF8.GetString(_secrets.Addresses[SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, kind)]);
 
+    private async Task<string> ReadAgentAppStateAsync(string agentAppId)
+    {
+        await using var db = _factory.CreateDbContext();
+        var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == agentAppId);
+        return row.RuntimeCredentialValidationState;
+    }
+
+    private SlackAdapterLeaseService BuildLeases()
+    {
+        var connections = new AgentConnectionStore(_factory, new AgentQuerier(_factory), _secrets, [], _time);
+        var agentApps = new ManagedSlackAgentAppStore(_factory, _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
+        var provider = new EnrollmentSlackLeaseTargetProvider(
+            new SlackWorkspaceEnrollmentStore(_factory, _time), agentApps, binding, _factory, _secrets);
+        return new SlackAdapterLeaseService(
+            new SlackAdapterLeaseStore(_factory), provider, new SlackLeaseSecretResolver(_secrets), _time);
+    }
+
     private async Task SeedAgentAsync(string status)
     {
         await using var db = _factory.CreateDbContext();
@@ -487,5 +561,31 @@ public sealed class SlackInstallAgentSpecs
             Task.FromResult(Addresses.Remove(address));
 
         public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
+    }
+
+    private sealed class FaultingSecretStore : ISecretStore
+    {
+        private readonly ISecretStore _inner;
+
+        public FaultingSecretStore(ISecretStore inner) => _inner = inner;
+
+        public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
+        {
+            // Preserve (previous slot) and every load/delete still succeed, but
+            // storing the new runtime Bot token fails after the state has left
+            // Verified — the boundary the old ordering got wrong.
+            if (address.Kind == SecretKind.BotToken)
+                throw new InvalidOperationException("fault-injected secret store failure");
+            return _inner.StoreAsync(address, plaintext, ct);
+        }
+
+        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.LoadAsync(address, ct);
+
+        public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.DeleteAsync(address, ct);
+
+        public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) =>
+            _inner.Redact(values);
     }
 }

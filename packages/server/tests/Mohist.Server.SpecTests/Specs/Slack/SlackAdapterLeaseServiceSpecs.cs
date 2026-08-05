@@ -66,6 +66,10 @@ public sealed class SlackAdapterLeaseServiceSpecs
         var validation = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
             await service.ReportHelloAsync("operator-1", manager, validation!.LeaseId, "WRONG"));
+        // The mismatch is delegated to the target provider (reject/restore) but
+        // does not consume the validation lease, so a corrected hello on the
+        // same lease can still proceed.
+        Assert.Contains(manager.TargetKey, provider.RejectedTargets);
         Assert.Equal(SlackHelloOutcome.Verified,
             await service.ReportHelloAsync("operator-1", manager, validation.LeaseId, "A123"));
     }

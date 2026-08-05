@@ -71,6 +71,24 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
         }
     }
 
+    public async Task RejectAsync(
+        string operatorId,
+        SlackLeaseTargetRef targetRef,
+        DateTimeOffset rejectedAt,
+        CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        switch (targetRef)
+        {
+            case SlackLeaseTargetRef.Manager manager:
+                await RejectManagerTargetAsync(manager, ct);
+                return;
+            case SlackLeaseTargetRef.Connection connection:
+                await RejectConnectionTargetAsync(connection, ct);
+                return;
+        }
+    }
+
     private async Task<IReadOnlyList<SlackLeaseTarget>> DiscoverManagerTargetsAsync(CancellationToken ct)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -235,6 +253,110 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
         await secrets.DeleteAsync(
             SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousAppToken), ct);
         await binding.ReconcileAsync(agentApp.Id, ct);
+    }
+
+    private async Task RejectManagerTargetAsync(SlackLeaseTargetRef.Manager manager, CancellationToken ct)
+    {
+        var enrollment = await enrollments.GetAsync(manager.EnrollmentId, ct);
+        if (enrollment is null)
+            return;
+
+        if (await secrets.LoadAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.PreviousBotToken), ct) is not null)
+        {
+            // A rotation was in flight: restore the parked previous verified
+            // pair to the runtime addresses so the Mohist App keeps serving it.
+            await RestoreEnrollmentRuntimeFromPreviousAsync(manager.EnrollmentId, ct);
+            if (enrollment.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified
+                && enrollment.Lifecycle == SlackEnrollmentLifecycle.Active)
+                await enrollments.CompleteSocketVerificationAsync(manager.EnrollmentId, ct);
+            return;
+        }
+
+        // First-provision candidate: delete it and mark validation failed.
+        // Verified/Failed/NotProvided targets are left untouched (idempotent).
+        if (enrollment.RuntimeCredentialValidationState
+            is SlackRuntimeCredentialValidationState.Candidate
+            or SlackRuntimeCredentialValidationState.AwaitingSocket)
+        {
+            await secrets.DeleteAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.AppToken), ct);
+            await secrets.DeleteAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.BotToken), ct);
+            await enrollments.ApplySocketValidationAsync(
+                manager.EnrollmentId, SlackRuntimeCredentialValidationState.Failed, ct);
+        }
+    }
+
+    private async Task RejectConnectionTargetAsync(SlackLeaseTargetRef.Connection connection, CancellationToken ct)
+    {
+        var agentApp = await agentApps.GetByConnectionAsync(connection.ConnectionId, ct);
+        if (agentApp is null
+            || agentApp.DeletedAt is not null
+            || agentApp.AppLifecycle != SlackAppLifecycle.Created)
+            return;
+
+        if (await secrets.LoadAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousBotToken), ct) is not null)
+        {
+            // A rotation was in flight: restore the previous verified pair. The
+            // Connection stays bound to the same App from its prior verification.
+            await RestoreAgentAppRuntimeFromPreviousAsync(agentApp.Id, ct);
+            if (agentApp.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified)
+                await agentApps.ApplyCredentialValidationAsync(
+                    agentApp.Id, SlackRuntimeCredentialValidationState.Verified, ct);
+            return;
+        }
+
+        // First-provision candidate: delete it and fail. The Connection is
+        // never bound here; binding only follows a verified hello.
+        if (agentApp.RuntimeCredentialValidationState
+            is SlackRuntimeCredentialValidationState.Candidate
+            or SlackRuntimeCredentialValidationState.AwaitingSocket)
+        {
+            await secrets.DeleteAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.AppToken), ct);
+            await secrets.DeleteAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.BotToken), ct);
+            await agentApps.ApplyCredentialValidationAsync(
+                agentApp.Id, SlackRuntimeCredentialValidationState.Failed, ct);
+        }
+    }
+
+    private async Task RestoreEnrollmentRuntimeFromPreviousAsync(string enrollmentId, CancellationToken ct)
+    {
+        var bot = await secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), ct);
+        var app = await secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken), ct);
+        if (bot is not null)
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), bot, ct);
+        if (app is not null)
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), app, ct);
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), ct);
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken), ct);
+    }
+
+    private async Task RestoreAgentAppRuntimeFromPreviousAsync(string agentAppId, CancellationToken ct)
+    {
+        var bot = await secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken), ct);
+        var app = await secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousAppToken), ct);
+        if (bot is not null)
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), bot, ct);
+        if (app is not null)
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), app, ct);
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken), ct);
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousAppToken), ct);
     }
 
     private static void RequireOperator(string operatorId) =>

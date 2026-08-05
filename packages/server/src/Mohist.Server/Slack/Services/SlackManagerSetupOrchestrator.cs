@@ -151,16 +151,27 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
 
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
         {
-            // Rotate: park the verified pair in the previous slot before the
-            // new candidate overwrites the runtime addresses, so the old
-            // credentials survive until the new Socket hello verifies.
+            // Rotation must leave Verified (closing the runtime lease while the
+            // runtime address still holds the old verified pair) BEFORE the new
+            // unverified candidate overwrites that address. Preserve first so
+            // the old pair is recoverable; stage Verified -> Candidate; only
+            // then store the new pair; then advance to AwaitingSocket. A crash
+            // at any boundary leaves the state non-Verified while the runtime
+            // address holds either the old pair (before Store) or the new
+            // candidate (after Store), so the runtime lease can never serve an
+            // unverified pair, and the old pair stays restorable.
             await PreserveRuntimeSecretsAsync(enrollment.Id, ct);
-            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
             await _enrollments.StageManagerRuntimeCredentialsAsync(enrollment.Id, verified.BotUserId!, ct);
+            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
             await _enrollments.ApplySocketValidationAsync(enrollment.Id, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
         }
         else
         {
+            // Not Verified: the runtime lease is already closed, so storing the
+            // candidate at the runtime address is safe. A Candidate/AwaitingSocket
+            // state with a parked Previous is a resumed rotation: keep the
+            // non-Verified state, (re)store the candidate, and only push
+            // Candidate -> AwaitingSocket (never stage back from AwaitingSocket).
             await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
 
             if (enrollment.RuntimeCredentialValidationState

@@ -37,6 +37,20 @@ public interface ISlackLeaseTargetProvider
         string appId,
         DateTimeOffset verifiedAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Rejects a Socket hello whose <c>app_id</c> does not match the target's
+    /// expected App: delete the unverified candidate (or, during a rotation,
+    /// restore the parked previous verified pair) and keep the target
+    /// unverified / unbound. Idempotent: a verified, failed or not-provided
+    /// target is left untouched. Equivalent to the control-plane rejection
+    /// path, so the lease hello cannot bypass it.
+    /// </summary>
+    Task RejectAsync(
+        string operatorId,
+        SlackLeaseTargetRef targetRef,
+        DateTimeOffset rejectedAt,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -47,6 +61,7 @@ public sealed class InMemorySlackLeaseTargetProvider : ISlackLeaseTargetProvider
 {
     private readonly Dictionary<string, SlackLeaseTarget> _targets = new(StringComparer.Ordinal);
     private readonly HashSet<string> _verified = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _rejected = new(StringComparer.Ordinal);
 
     public InMemorySlackLeaseTargetProvider Add(SlackLeaseTarget target)
     {
@@ -84,6 +99,26 @@ public sealed class InMemorySlackLeaseTargetProvider : ISlackLeaseTargetProvider
         _verified.Add(targetRef.TargetKey);
         return Task.CompletedTask;
     }
+
+    /// <summary>
+    /// The in-memory fake exercises the lease core, not the enrollment domain,
+    /// so it only records that a rejection was delegated. Production cleanup
+    /// (candidate deletion / previous-pair restore) is owned by
+    /// <see cref="EnrollmentSlackLeaseTargetProvider"/> and covered by its
+    /// own specs.
+    /// </summary>
+    public Task RejectAsync(
+        string operatorId,
+        SlackLeaseTargetRef targetRef,
+        DateTimeOffset rejectedAt,
+        CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        _rejected.Add(targetRef.TargetKey);
+        return Task.CompletedTask;
+    }
+
+    public IReadOnlySet<string> RejectedTargets => _rejected;
 
     private SlackLeaseTarget WithVerified(SlackLeaseTarget target) =>
         target with { CredentialVerified = _verified.Contains(target.Ref.TargetKey) };

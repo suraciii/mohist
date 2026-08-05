@@ -127,33 +127,6 @@ public static class SlackManagerRoutes
             }
         });
 
-        manager.MapPost("/install-agent/validation", async (
-            HttpContext context,
-            SlackControlInstallAgentValidationBody body,
-            SlackInstallAgentService service,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            var guard = RequireOperatorLoopback(context, credential);
-            if (guard is not null) return guard;
-            if (body is null
-                || string.IsNullOrWhiteSpace(body.AgentAppId)
-                || string.IsNullOrWhiteSpace(body.HelloAppId))
-                return ApiResults.BadRequest("agentAppId and helloAppId are required.");
-            if (HasCredentialAddressOverride(body.ExtensionData))
-                return ApiResults.BadRequest(
-                    "Credential address fields are not supported by the control-plane API.",
-                    "credential_address_not_supported");
-            try
-            {
-                return ApiResults.Ok(await service.ApplySocketValidationAsync(body.AgentAppId, body.HelloAppId, ct));
-            }
-            catch (SlackManagerConflictException ex)
-            {
-                return ApiResults.Conflict(ex.Message, ex.Code);
-            }
-        });
-
         manager.MapGet("/connections/{connectionId}", async (
             HttpContext context,
             string connectionId,
@@ -406,15 +379,6 @@ public sealed class SlackControlInstallAgentCredentialsBody
     public string AgentAppId { get; init; } = string.Empty;
     public string BotToken { get; init; } = string.Empty;
     public string AppLevelToken { get; init; } = string.Empty;
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
-}
-
-public sealed class SlackControlInstallAgentValidationBody
-{
-    public string AgentAppId { get; init; } = string.Empty;
-    public string HelloAppId { get; init; } = string.Empty;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

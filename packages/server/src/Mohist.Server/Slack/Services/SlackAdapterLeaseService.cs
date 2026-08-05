@@ -114,7 +114,16 @@ public sealed class SlackAdapterLeaseService(
         if (target is null)
             return SlackHelloOutcome.NoLease;
         if (!string.Equals(appId, target.ExpectedAppId, StringComparison.Ordinal))
+        {
+            // A mismatched hello means the candidate App-level token does not
+            // prove the expected App. Reject exactly like the control-plane
+            // route would: delete the candidate (or, during a rotation, restore
+            // the parked previous verified pair) and keep the target
+            // unverified / unbound. The validation lease itself is not consumed,
+            // so a corrected attempt can re-acquire. This is idempotent.
+            await targetProvider.RejectAsync(operatorId, target.Ref, timeProvider.GetUtcNow(), ct);
             return SlackHelloOutcome.AppIdMismatch;
+        }
 
         var now = timeProvider.GetUtcNow();
         if (!await store.ConfirmHelloAsync(target.Ref.TargetKey, leaseId, now, ct))

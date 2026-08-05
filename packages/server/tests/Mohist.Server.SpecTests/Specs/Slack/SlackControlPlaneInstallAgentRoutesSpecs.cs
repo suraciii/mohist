@@ -78,17 +78,13 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         Assert.Equal("agent_archived", await CodeAsync(response));
     }
 
-    [Theory]
-    [InlineData("credentials")]
-    [InlineData("validation")]
-    public async Task Secret_install_routes_require_an_operator_token_and_loopback(string suffix)
+    [Fact]
+    public async Task Credential_install_route_requires_an_operator_token_and_loopback()
     {
         var projectId = $"project-install-auth-{Guid.NewGuid():N}";
         await SeedProjectAsync(projectId);
-        var path = $"/api/projects/{projectId}/slack-manager/install-agent/{suffix}";
-        var body = suffix == "credentials"
-            ? (object)new { agentAppId = "agent_app_auth", botToken = "xoxb", appLevelToken = "xapp" }
-            : new { agentAppId = "agent_app_auth", helloAppId = "A_AUTH" };
+        var path = CredentialsPath(projectId);
+        var body = new { agentAppId = "agent_app_auth", botToken = "xoxb", appLevelToken = "xapp" };
 
         using var anonymous = _fixture.CreateUnauthenticatedClient();
         using var anonymousResponse = await anonymous.PostAsJsonAsync(path, body);
@@ -104,7 +100,22 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
     }
 
     [Fact]
-    public async Task Provision_then_socket_validation_drives_to_ready_and_binds_the_connection_once()
+    public async Task The_socket_validation_bypass_route_is_removed_and_cannot_drive_to_ready()
+    {
+        var (projectId, agentId, team, enrollmentId) = UniqueIds();
+        await SeedAsync(projectId, agentId, AgentStatus.Active, team, enrollmentId);
+        using var client = _fixture.CreateOperatorClient();
+
+        // Even an operator-authenticated, loopback request must not find the
+        // bypass: the only Socket hello path is the validation lease.
+        using var response = await client.PostAsJsonAsync(
+            ValidationPath(projectId), new { agentAppId = "agent_app_gone", helloAppId = "A_GONE" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Provision_then_validation_lease_hello_drives_to_ready_and_binds_the_connection_once()
     {
         var (projectId, agentId, team, enrollmentId) = UniqueIds();
         await SeedAsync(projectId, agentId, AgentStatus.Active, team, enrollmentId);
@@ -114,6 +125,7 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
             InstallPath(projectId), new { enrollmentId, agentId }));
         var agentAppId = installed.GetProperty("agentApp").GetProperty("id").GetString()!;
         var appId = installed.GetProperty("agentApp").GetProperty("appId").GetString()!;
+        var connectionId = installed.GetProperty("connection").GetProperty("id").GetString()!;
 
         _fixture.BotIdentity.Result = new SlackBotIdentityVerificationResult(
             Verified: true,
@@ -127,19 +139,24 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
         provisioned.EnsureSuccessStatusCode();
         Assert.DoesNotContain("xoxb-live", await provisioned.Content.ReadAsStringAsync(), StringComparison.Ordinal);
 
-        using var validated = await client.PostAsJsonAsync(
-            ValidationPath(projectId), new { agentAppId, helloAppId = appId });
-        validated.EnsureSuccessStatusCode();
+        // The only Socket hello path is the validation lease; the deleted
+        // /install-agent/validation route can no longer reach ApplySocketValidation.
+        var targetRef = new SlackLeaseTargetRef.Connection(projectId, connectionId);
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var leases = scope.ServiceProvider.GetRequiredService<SlackAdapterLeaseService>();
+            var validation = await leases.AcquireValidationLeaseAsync("operator-1", targetRef, "adapter-A");
+            Assert.NotNull(validation);
+            Assert.Equal(appId, validation!.ExpectedAppId);
+            Assert.Equal(SlackHelloOutcome.Verified,
+                await leases.ReportHelloAsync("operator-1", targetRef, validation.LeaseId, appId));
+        }
 
         var ready = await ReadDataAsync(await client.PostAsJsonAsync(
             InstallPath(projectId), new { enrollmentId, agentId }));
         Assert.Equal("ready", ready.GetProperty("nextAction").GetString());
         Assert.Equal(appId, ready.GetProperty("connection").GetProperty("appId").GetString());
         Assert.Equal("U_INSTALL_BOT", ready.GetProperty("connection").GetProperty("botUserId").GetString());
-
-        using var replay = await client.PostAsJsonAsync(
-            ValidationPath(projectId), new { agentAppId, helloAppId = appId });
-        replay.EnsureSuccessStatusCode();
     }
 
     [Fact]
