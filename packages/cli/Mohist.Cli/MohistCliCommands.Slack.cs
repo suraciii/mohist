@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -15,66 +16,69 @@ internal static class SlackCommands
         ResourceCardinality.Single,
         ["enrollment", "connections", "managedApps", "nextAction"]);
 
-    private static readonly ResourceDescriptor ManagerCredentialDescriptor = new(
+    private static readonly ResourceDescriptor InstallAgentDescriptor = new(
         ResourceCardinality.Single,
-        ["workspaceTeamId", "credentialProvisioned"]);
+        ["connection", "managedApp", "nextAction"]);
+
+    private const int WizardStepBudget = 8;
 
     public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
     {
         var group = new Command("slack", "Manage Slack integrations");
         group.Subcommands.Add(BuildSetup(api, credentials));
-        group.Subcommands.Add(BuildConfigureManager(api, credentials));
         group.Subcommands.Add(BuildStatus(api, credentials));
-        group.Subcommands.Add(BuildCreate(api));
-        group.Subcommands.Add(BuildConfigure(api));
-        group.Subcommands.Add(BuildRotateCredentials(api));
-        group.Subcommands.Add(BuildClaimOwner(api));
-        group.Subcommands.Add(BuildTransferOwner(api));
-        group.Subcommands.Add(BuildDisable(api));
-        group.Subcommands.Add(BuildEnable(api));
-        group.Subcommands.Add(BuildView(api));
+        group.Subcommands.Add(BuildInstallAgent(api));
         group.Subcommands.Add(BuildList(api));
-        group.Subcommands.Add(BuildCreateChildApp(api));
-        group.Subcommands.Add(BuildReconcileCreate(api));
-        group.Subcommands.Add(BuildReconcileDelete(api));
+        group.Subcommands.Add(BuildView(api));
+        group.Subcommands.Add(BuildClaimOwner(api));
+        group.Subcommands.Add(BuildEdit(api));
+        group.Subcommands.Add(BuildTransferOwner(api));
+        group.Subcommands.Add(BuildEnable(api));
+        group.Subcommands.Add(BuildDisable(api));
         group.Subcommands.Add(BuildRemoveBinding(api));
         group.Subcommands.Add(BuildPermanentDelete(api));
         group.Subcommands.Add(BuildListDeliveries(api));
         group.Subcommands.Add(BuildResendDelivery(api));
         group.Subcommands.Add(BuildClearGap(api));
-        group.Subcommands.Add(BuildEdit(api));
-        group.Subcommands.Add(BuildDelete(api));
+        group.Subcommands.Add(BuildReconcileCreate(api));
+        group.Subcommands.Add(BuildReconcileDelete(api));
         return group;
     }
 
     private static Command BuildSetup(MohistCliApi api, OperatorCredentialProvider credentials)
     {
-        var command = new Command("setup", "Set up the workspace-level Mohist Slack App");
-        var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
+        var command = new Command("setup", "Install or resume the workspace-level Mohist Slack App (idempotent wizard)");
+        var workspaceTeam = new Option<string?>("--workspace-team")
         {
-            Description = "Slack workspace team id",
+            Description = "Slack workspace team id; required when it cannot be determined interactively.",
         };
-        var managerApp = new Option<string?>("--manager-app-id")
+        var configurationTokenFile = new Option<string?>("--configuration-token-file")
         {
-            Description = "Mohist App id",
+            Description = "Protected JSON file containing exactly configurationToken and configurationRefreshToken strings, accepted for workspace App provisioning.",
         };
-        var managerBot = new Option<string?>("--manager-bot-user-id")
+        var credentialsFile = new Option<string?>("--credentials-file")
         {
-            Description = "Mohist App bot user id",
+            Description = "Protected JSON file containing exactly one non-empty botToken string. Re-supplying it on a ready workspace rotates the stored credential.",
         };
-        var credentialRef = new Option<string?>("--manager-credential-ref")
+        var managerAppId = new Option<string?>("--manager-app-id")
         {
-            Description = "Reference to the stored Mohist App credential",
+            Description = "Mohist App id in Slack, required for the enrollment step.",
         };
-        var transport = new Option<string>("--transport") { DefaultValueFactory = _ => "socket" };
-        var readiness = new Option<string>("--readiness") { DefaultValueFactory = _ => "ready" };
+        var managerBotUserId = new Option<string?>("--manager-bot-user-id")
+        {
+            Description = "Mohist App bot user id in Slack, required for the enrollment step.",
+        };
+        var managerCredentialRef = new Option<string?>("--manager-credential-ref")
+        {
+            Description = "Reference to the stored Mohist App credential, required for the enrollment step.",
+        };
         var output = MohistCliCommands.OutputOption(SetupDescriptor);
         command.Options.Add(workspaceTeam);
-        command.Options.Add(managerApp);
-        command.Options.Add(managerBot);
-        command.Options.Add(credentialRef);
-        command.Options.Add(transport);
-        command.Options.Add(readiness);
+        command.Options.Add(configurationTokenFile);
+        command.Options.Add(credentialsFile);
+        command.Options.Add(managerAppId);
+        command.Options.Add(managerBotUserId);
+        command.Options.Add(managerCredentialRef);
         command.Options.Add(output);
         command.SetAction(async ctx =>
         {
@@ -82,89 +86,496 @@ internal static class SlackCommands
             if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                 return api.WriteJsonSelectionResult(SetupDescriptor, selection);
 
-            var missing = new[]
-            {
-                (Name: "--workspace-team", Value: ctx.GetValue(workspaceTeam)),
-                (Name: "--manager-app-id", Value: ctx.GetValue(managerApp)),
-                (Name: "--manager-bot-user-id", Value: ctx.GetValue(managerBot)),
-                (Name: "--manager-credential-ref", Value: ctx.GetValue(credentialRef)),
-            }.Where(item => string.IsNullOrWhiteSpace(item.Value)).Select(item => item.Name).ToArray();
-            if (missing.Length > 0)
-                return CommandHelpHook.RenderUsageFailure(
-                    ctx,
-                    api.Error,
-                    $"slack setup requires {string.Join(", ", missing)} in non-interactive mode.");
+            var configurationTokenPath = ctx.GetValue(configurationTokenFile);
+            if (!string.IsNullOrWhiteSpace(configurationTokenPath)
+                && !await ReadConfigurationTokenAsync(api, configurationTokenPath).ConfigureAwait(false))
+                return CliExitCode.For(CliExitOutcome.UsageFailure);
 
-            var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
-            if (headers is null) return 1;
-            return await api.PrintMutationResourceAsync(
-                HttpMethod.Post,
-                "/api/slack-manager/setup",
-                new
-                {
-                    workspaceTeamId = ctx.GetValue(workspaceTeam),
-                    managerAppId = ctx.GetValue(managerApp),
-                    managerBotUserId = ctx.GetValue(managerBot),
-                    managerCredentialRef = ctx.GetValue(credentialRef),
-                    transportKind = ctx.GetValue(transport),
-                    readiness = ctx.GetValue(readiness),
-                },
-                SetupDescriptor,
-                selection,
-                api.WriteJsonDataAsync,
-                headers: headers).ConfigureAwait(false);
+            var (state, exit) = await RunSetupWizardAsync(
+                api, credentials, ctx, workspaceTeam, credentialsFile,
+                managerAppId, managerBotUserId, managerCredentialRef,
+                jsonMode: selection.Kind == JsonSelectionKind.Selected).ConfigureAwait(false);
+            if (state is null || exit != 0) return exit;
+            if (selection.Kind != JsonSelectionKind.Selected) return 0;
+            return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                selection.Project(state, SetupDescriptor.Cardinality)).ConfigureAwait(false);
         });
         return command;
     }
 
-    private static Command BuildConfigureManager(
+    private static async Task<(JsonObject? State, int Exit)> RunSetupWizardAsync(
         MohistCliApi api,
-        OperatorCredentialProvider credentials)
+        OperatorCredentialProvider credentials,
+        ParseResult ctx,
+        Option<string?> workspaceTeam,
+        Option<string?> credentialsFile,
+        Option<string?> managerAppId,
+        Option<string?> managerBotUserId,
+        Option<string?> managerCredentialRef,
+        bool jsonMode)
     {
-        var command = new Command("configure-manager", "Provide or rotate the workspace Manager Bot credential");
-        var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
+        var team = await ResolveWorkspaceTeamAsync(api, ctx, workspaceTeam, "slack setup").ConfigureAwait(false);
+        if (team is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+
+        var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
+        if (headers is null) return (null, 1);
+
+        JsonObject? enrollment = null;
+        string? nextAction = null;
+        string? claimCode = null;
+        string? claimExpiresAt = null;
+        var rotated = false;
+        var credentialsFileProvided = !string.IsNullOrWhiteSpace(ctx.GetValue(credentialsFile));
+
+        for (var step = 0; step < WizardStepBudget; step++)
         {
-            Description = "Slack workspace team id",
-        };
-        var file = new Option<string?>("--credentials-file")
+            var status = await ReadEnrollmentStatusAsync(api, team, headers).ConfigureAwait(false);
+            if (status is null) return (null, 1);
+            if (status.Failure is not null)
+            {
+                if (status.StatusCode != HttpStatusCode.NotFound)
+                    return (null, await new CliResultWriter(api.Invocation).WriteFailureAsync(status.Failure).ConfigureAwait(false));
+                nextAction = "setup";
+            }
+            else
+            {
+                enrollment = (status.Data as JsonObject)?["enrollment"]?.DeepClone() as JsonObject ?? enrollment;
+                nextAction = ValueOf(status.Data as JsonObject, "nextAction");
+            }
+
+            switch (nextAction)
+            {
+                case "setup":
+                case "configure_manager_app":
+                {
+                    var facts = await ResolveManagerFactsAsync(api, ctx, managerAppId, managerBotUserId, managerCredentialRef).ConfigureAwait(false);
+                    if (facts is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+                    var result = await PostSetupAsync(api, team, facts, headers).ConfigureAwait(false);
+                    if (result.Failure is not null)
+                        return (null, await new CliResultWriter(api.Invocation).WriteFailureAsync(result.Failure).ConfigureAwait(false));
+                    await api.Error.WriteLineAsync($"Workspace {team} is enrolled.").ConfigureAwait(false);
+                    if (result.Data is JsonObject setupData)
+                    {
+                        enrollment = setupData["enrollment"]?.DeepClone() as JsonObject ?? enrollment;
+                        var code = ValueOf(setupData, "claimCode");
+                        if (!string.IsNullOrEmpty(code))
+                        {
+                            claimCode = code;
+                            claimExpiresAt = ValueOf(setupData, "claimExpiresAt");
+                        }
+
+                        var responseNextAction = ValueOf(setupData, "nextAction");
+                        if (!string.IsNullOrEmpty(responseNextAction)) nextAction = responseNextAction;
+                    }
+
+                    break;
+                }
+
+                case "configure_manager_credentials":
+                {
+                    var token = await ReadManagerCredentialAsync(api, ctx.GetValue(credentialsFile)).ConfigureAwait(false);
+                    if (token is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+                    var provision = await api.ResponseReader.ReadAsync(
+                        HttpMethod.Post,
+                        "/api/slack-manager/credentials",
+                        new { workspaceTeamId = team, managerBotToken = token },
+                        mutating: true,
+                        headers: headers,
+                        cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+                    if (provision.Failure is not null)
+                        return (null, await new CliResultWriter(api.Invocation).WriteFailureAsync(provision.Failure).ConfigureAwait(false));
+                    await api.Error.WriteLineAsync($"Manager credential provisioned for {team}.").ConfigureAwait(false);
+                    break;
+                }
+
+                case "claim_manager":
+                {
+                    if (claimCode is null)
+                    {
+                        var facts = await ResolveManagerFactsAsync(api, ctx, managerAppId, managerBotUserId, managerCredentialRef).ConfigureAwait(false);
+                        if (facts is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+                        var result = await PostSetupAsync(api, team, facts, headers).ConfigureAwait(false);
+                        if (result.Failure is not null)
+                            return (null, await new CliResultWriter(api.Invocation).WriteFailureAsync(result.Failure).ConfigureAwait(false));
+                        if (result.Data is JsonObject setupData)
+                        {
+                            claimCode = ValueOf(setupData, "claimCode");
+                            claimExpiresAt = ValueOf(setupData, "claimExpiresAt");
+                            var responseNextAction = ValueOf(setupData, "nextAction");
+                            if (!string.IsNullOrEmpty(responseNextAction)) nextAction = responseNextAction;
+                        }
+
+                        if (string.IsNullOrEmpty(claimCode)) break;
+                    }
+
+                    if (!jsonMode) RenderSetupClaim(api, team, claimCode, claimExpiresAt);
+                    return (BuildSetupState(enrollment, claimCode, claimExpiresAt, "claim_manager"), 0);
+                }
+
+                case "ready":
+                {
+                    if (credentialsFileProvided && !rotated)
+                    {
+                        rotated = true;
+                        var token = await ReadManagerCredentialAsync(api, ctx.GetValue(credentialsFile)).ConfigureAwait(false);
+                        if (token is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+                        var provision = await api.ResponseReader.ReadAsync(
+                            HttpMethod.Post,
+                            "/api/slack-manager/credentials",
+                            new { workspaceTeamId = team, managerBotToken = token },
+                            mutating: true,
+                            headers: headers,
+                            cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+                        if (provision.Failure is not null)
+                            return (null, await new CliResultWriter(api.Invocation).WriteFailureAsync(provision.Failure).ConfigureAwait(false));
+                        await api.Error.WriteLineAsync($"Manager credential rotated for {team}.").ConfigureAwait(false);
+                        break;
+                    }
+
+                    if (!jsonMode) RenderSetupReady(api, team, enrollment);
+                    return (BuildSetupState(enrollment, claimCode, claimExpiresAt, "ready"), 0);
+                }
+
+                default:
+                {
+                    if (!jsonMode) RenderSetupNextAction(api, team, nextAction);
+                    return (BuildSetupState(enrollment, claimCode, claimExpiresAt, nextAction), 0);
+                }
+            }
+        }
+
+        api.Error.WriteLine("Slack setup did not converge; re-run `mo slack setup` to continue.");
+        return (BuildSetupState(enrollment, claimCode, claimExpiresAt, nextAction), 1);
+    }
+
+    private static JsonObject BuildSetupState(
+        JsonObject? enrollment,
+        string? claimCode,
+        string? claimExpiresAt,
+        string? nextAction) => new()
+    {
+        ["enrollment"] = enrollment?.DeepClone(),
+        ["claimCode"] = claimCode,
+        ["claimExpiresAt"] = claimExpiresAt,
+        ["nextAction"] = nextAction,
+    };
+
+    private static void RenderSetupClaim(MohistCliApi api, string team, string? claimCode, string? claimExpiresAt)
+    {
+        api.Output.WriteLine($"Workspace {team} is enrolled and waiting for its Slack Owner claim.");
+        WriteValue(api.Output, "  code", claimCode ?? "");
+        WriteValue(api.Output, "  valid until", claimExpiresAt ?? "");
+        api.Output.WriteLine("  1. Open Slack and DM the Mohist App bot.");
+        api.Output.WriteLine("  2. Send the code above as the only message.");
+        api.Output.WriteLine("  The code is single-use. Re-running `mo slack setup` issues a fresh code that invalidates this one.");
+    }
+
+    private static void RenderSetupReady(MohistCliApi api, string team, JsonObject? enrollment)
+    {
+        api.Output.WriteLine($"Slack workspace {team} is ready.");
+        WriteValue(api.Output, "  enrollment", ValueOf(enrollment, "id"));
+        api.Output.WriteLine("  The Mohist App is installed, its credential is provisioned and the workspace is claimed.");
+    }
+
+    private static void RenderSetupNextAction(MohistCliApi api, string team, string? nextAction)
+    {
+        api.Output.WriteLine($"Slack workspace {team}: next action is '{nextAction}'.");
+        api.Output.WriteLine("Re-run `mo slack setup` to continue from the current step.");
+    }
+
+    private static async Task<CliResponseResult?> ReadEnrollmentStatusAsync(
+        MohistCliApi api,
+        string team,
+        IReadOnlyDictionary<string, string> headers)
+    {
+        var status = await api.ResponseReader.ReadAsync(
+            HttpMethod.Get,
+            $"/api/slack-manager/status?workspaceTeamId={Uri.EscapeDataString(team)}",
+            headers: headers,
+            cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+        if (status.Failure is not null
+            && status.StatusCode != HttpStatusCode.NotFound
+            && status.StatusCode != (HttpStatusCode)0)
+            return status;
+        return status;
+    }
+
+    private static async Task<CliResponseResult> PostSetupAsync(
+        MohistCliApi api,
+        string team,
+        ManagerEnrollmentFacts facts,
+        IReadOnlyDictionary<string, string> headers)
+    {
+        var result = await api.ResponseReader.ReadAsync(
+            HttpMethod.Post,
+            "/api/slack-manager/setup",
+            new
+            {
+                workspaceTeamId = team,
+                managerAppId = facts.AppId,
+                managerBotUserId = facts.BotUserId,
+                managerCredentialRef = facts.CredentialRef,
+                transportKind = "socket",
+                readiness = "ready",
+            },
+            mutating: true,
+            headers: headers,
+            cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
+        if (result.Failure is null)
+            return result;
+        if (result.StatusCode == HttpStatusCode.Conflict && result.Failure.Code == "enrollment_removed")
         {
-            Description = "Protected UTF-8 JSON file containing exactly one non-empty Bot credential field",
+            await api.Error.WriteLineAsync(
+                "The workspace enrollment was removed and cannot be reused; choose another workspace or re-enroll from scratch.").ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    private static Command BuildInstallAgent(MohistCliApi api)
+    {
+        var command = new Command("install-agent", "Install or resume an existing Agent's Slack installation (idempotent wizard)");
+        var agent = new Argument<string>("agent") { Description = "Agent name or id" };
+        var workspaceTeam = new Option<string?>("--workspace-team")
+        {
+            Description = "Slack workspace team id; required when it cannot be determined interactively.",
         };
-        var output = MohistCliCommands.OutputOption(ManagerCredentialDescriptor);
+        var credentialsFile = new Option<string?>("--credentials-file")
+        {
+            Description = "Protected JSON file containing exactly appToken and botToken strings, validated when the credential step is reached.",
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption(InstallAgentDescriptor);
+        command.Arguments.Add(agent);
         command.Options.Add(workspaceTeam);
-        command.Options.Add(file);
+        command.Options.Add(credentialsFile);
+        command.Options.Add(project);
         command.Options.Add(output);
         command.SetAction(async ctx =>
         {
-            var selection = ResolveSelection(ctx, output, ManagerCredentialDescriptor);
+            var selection = ResolveSelection(ctx, output, InstallAgentDescriptor);
             if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
-                return api.WriteJsonSelectionResult(ManagerCredentialDescriptor, selection);
+                return api.WriteJsonSelectionResult(InstallAgentDescriptor, selection);
 
-            var team = ctx.GetValue(workspaceTeam);
-            if (string.IsNullOrWhiteSpace(team))
-                return CommandHelpHook.RenderUsageFailure(
-                    ctx,
-                    api.Error,
-                    "slack configure-manager requires --workspace-team in non-interactive mode.");
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project)).ConfigureAwait(false);
+            if (exit != 0 || projectId is null) return exit;
 
-            var managerBotToken = await ReadManagerCredentialAsync(api, ctx.GetValue(file)).ConfigureAwait(false);
-            if (managerBotToken is null) return 2;
-            var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
-            if (headers is null) return 1;
-            return await api.PrintMutationResourceAsync(
-                HttpMethod.Post,
-                "/api/slack-manager/credentials",
-                new
-                {
-                    workspaceTeamId = team,
-                    managerBotToken,
-                },
-                ManagerCredentialDescriptor,
-                selection,
-                api.WriteJsonDataAsync,
-                headers: headers).ConfigureAwait(false);
+            var (state, wizardExit) = await RunInstallAgentWizardAsync(
+                api, ctx, workspaceTeam, credentialsFile, ctx.GetValue(agent)!, projectId,
+                jsonMode: selection.Kind == JsonSelectionKind.Selected).ConfigureAwait(false);
+            if (state is null || wizardExit != 0) return wizardExit;
+            if (selection.Kind != JsonSelectionKind.Selected) return 0;
+            return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                selection.Project(state, InstallAgentDescriptor.Cardinality)).ConfigureAwait(false);
         });
         return command;
+    }
+
+    private static async Task<(JsonObject? State, int Exit)> RunInstallAgentWizardAsync(
+        MohistCliApi api,
+        ParseResult ctx,
+        Option<string?> workspaceTeam,
+        Option<string?> credentialsFile,
+        string agentReference,
+        string projectId,
+        bool jsonMode)
+    {
+        var agentId = await ResolveAgentIdAsync(api, projectId, agentReference).ConfigureAwait(false);
+        if (agentId is null) return (null, 1);
+
+        var team = await ResolveWorkspaceTeamAsync(api, ctx, workspaceTeam, "slack install-agent").ConfigureAwait(false);
+        if (team is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+
+        var optionsPath =
+            $"/api/projects/{Uri.EscapeDataString(projectId)}/slack-manager/agents?workspaceTeamId={Uri.EscapeDataString(team)}";
+
+        JsonObject? connection = null;
+        JsonObject? managedApp = null;
+        var nextAction = string.Empty;
+
+        for (var step = 0; step < WizardStepBudget; step++)
+        {
+            var options = await api.GetDataOrPrintErrorAsync(optionsPath).ConfigureAwait(false);
+            if (options.ExitCode != 0) return (null, options.ExitCode);
+            var option = FindAgentOption(options.Data, agentId);
+            if (option is null)
+            {
+                api.Error.WriteLine($"Agent '{agentReference}' is not available for Slack installation in workspace '{team}'.");
+                return (null, 1);
+            }
+
+            connection = option["connection"] as JsonObject;
+            managedApp = option["managedApp"] as JsonObject;
+            nextAction = ValueOf(managedApp, "nextAction");
+
+            if (connection is null)
+            {
+                var created = await api.PostAndReadAsync(
+                    $"/api/projects/{Uri.EscapeDataString(projectId)}/slack-manager/apps",
+                    new { agentId, workspaceTeamId = team, accessPolicy = "owner_only" }).ConfigureAwait(false);
+                if (created.ExitCode != 0) return (null, created.ExitCode);
+                connection = created.Data?["connection"] as JsonObject;
+                managedApp = created.Data?["managedApp"] as JsonObject;
+                nextAction = ValueOf(managedApp, "nextAction");
+                await api.Error.WriteLineAsync($"Created the Slack Connection and Agent App for '{agentReference}'.").ConfigureAwait(false);
+                if (managedApp is null)
+                {
+                    api.Error.WriteLine("The Agent App record was not returned; re-run `mo slack install-agent` to continue.");
+                    return (null, 1);
+                }
+            }
+
+            switch (nextAction)
+            {
+                case "create_child_app":
+                {
+                    var result = await api.PrintPostAsync(
+                        ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(ValueOf(connection, "id"))}/create"),
+                        new { }).ConfigureAwait(false);
+                    if (result != 0) return (null, result);
+                    await api.Error.WriteLineAsync($"Agent App creation started for '{agentReference}'.").ConfigureAwait(false);
+                    break;
+                }
+
+                case "reconcile_create":
+                {
+                    var result = await api.PrintPostAsync(
+                        ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(ValueOf(connection, "id"))}/reconcile-create"),
+                        new { }).ConfigureAwait(false);
+                    if (result != 0) return (null, result);
+                    await api.Error.WriteLineAsync($"Agent App create outcome reconciled for '{agentReference}'.").ConfigureAwait(false);
+                    break;
+                }
+
+                case "reconcile_delete":
+                {
+                    var result = await api.PrintPostAsync(
+                        ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(ValueOf(connection, "id"))}/reconcile-delete"),
+                        new { }).ConfigureAwait(false);
+                    if (result != 0) return (null, result);
+                    await api.Error.WriteLineAsync($"Agent App delete outcome reconciled for '{agentReference}'.").ConfigureAwait(false);
+                    break;
+                }
+
+                case "authorize_child_app":
+                {
+                    var connectionId = ValueOf(connection, "id");
+                    var issued = await api.PostAndReadAsync(
+                        ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(connectionId)}/begin-authorization"),
+                        new { }).ConfigureAwait(false);
+                    if (issued.ExitCode != 0) return (null, issued.ExitCode);
+                    var oauthState = ValueOf(issued.Data as JsonObject, "state");
+                    var expiresAt = ValueOf(issued.Data as JsonObject, "expiresAt");
+                    var progress = await api.PostAndReadAsync(
+                        ManagerPath(projectId, $"/connections/{Uri.EscapeDataString(connectionId)}/authorization-progress"),
+                        new { authorization = "awaiting_user" }).ConfigureAwait(false);
+                    if (progress.ExitCode != 0) return (null, progress.ExitCode);
+
+                    if (!string.IsNullOrWhiteSpace(ctx.GetValue(credentialsFile)))
+                    {
+                        var credentials = await ReadCredentialsAsync(api, ctx.GetValue(credentialsFile)).ConfigureAwait(false);
+                        if (credentials is null) return (null, CliExitCode.For(CliExitOutcome.UsageFailure));
+                        // TODO(slack install-agent): submitting the run credentials to
+                        // /connections/{id}/authorize also requires the Slack bot user id,
+                        // which has no spec-confirmed CLI input yet. The credential file is
+                        // validated here and reserved for that step.
+                    }
+
+                    if (!jsonMode) RenderInstallAuthorization(api, agentReference, team, oauthState, expiresAt, connectionId);
+                    return (BuildInstallState(connection, managedApp, "authorize_child_app"), 0);
+                }
+
+                case "apply_manifest":
+                case "bind_connection":
+                case "configure_socket_credentials":
+                case "wait_for_operation":
+                {
+                    if (!jsonMode) RenderInstallResume(api, agentReference, team, nextAction);
+                    return (BuildInstallState(connection, managedApp, nextAction), 0);
+                }
+
+                case "deleted":
+                {
+                    if (!jsonMode)
+                    {
+                        api.Output.WriteLine($"The Agent App for '{agentReference}' was permanently deleted.");
+                        api.Output.WriteLine("The Connection binding was removed; nothing else to install.");
+                    }
+
+                    return (BuildInstallState(connection, managedApp, nextAction), 0);
+                }
+
+                case "ready":
+                {
+                    if (!jsonMode) RenderInstallReady(api, agentReference, team, connection);
+                    return (BuildInstallState(connection, managedApp, nextAction), 0);
+                }
+
+                default:
+                {
+                    if (!jsonMode) RenderInstallResume(api, agentReference, team, nextAction);
+                    return (BuildInstallState(connection, managedApp, nextAction), 0);
+                }
+            }
+        }
+
+        api.Error.WriteLine("Slack install-agent did not converge; re-run `mo slack install-agent` to continue.");
+        return (BuildInstallState(connection, managedApp, nextAction), 1);
+    }
+
+    private static JsonObject BuildInstallState(
+        JsonObject? connection,
+        JsonObject? managedApp,
+        string? nextAction) => new()
+    {
+        ["connection"] = connection?.DeepClone(),
+        ["managedApp"] = managedApp?.DeepClone(),
+        ["nextAction"] = nextAction,
+    };
+
+    private static void RenderInstallAuthorization(
+        MohistCliApi api,
+        string agentReference,
+        string team,
+        string oauthState,
+        string expiresAt,
+        string connectionId)
+    {
+        api.Output.WriteLine($"Installation authorization is required for '{agentReference}' in workspace {team}.");
+        WriteValue(api.Output, "  OAuth state", oauthState);
+        WriteValue(api.Output, "  valid until", expiresAt);
+        api.Output.WriteLine("  1. Open the Agent App in Slack App management and complete Install to Workspace (Allow).");
+        api.Output.WriteLine("  2. Workspace admin approval may be required before the install is accepted.");
+        api.Output.WriteLine("  3. Re-run `mo slack install-agent <agent>` to verify and finish the installation.");
+        api.Error.WriteLine($"Connection {connectionId} is waiting for the Slack install confirmation.");
+    }
+
+    private static void RenderInstallResume(MohistCliApi api, string agentReference, string team, string nextAction)
+    {
+        api.Output.WriteLine($"Installation of '{agentReference}' in workspace {team} is in progress.");
+        WriteValue(api.Output, "  next action", nextAction);
+        api.Output.WriteLine("Re-run `mo slack install-agent <agent>` to continue from the current step.");
+    }
+
+    private static void RenderInstallReady(MohistCliApi api, string agentReference, string team, JsonObject? connection)
+    {
+        api.Output.WriteLine($"Agent '{agentReference}' is installed and ready in workspace {team}.");
+        WriteValue(api.Output, "  connection", ValueOf(connection, "id"));
+        WriteValue(api.Output, "  bot", ValueOf(connection, "botName"));
+        api.Output.WriteLine("Invite the bot to a channel, or DM it to start a task.");
+    }
+
+    private static JsonObject? FindAgentOption(JsonNode? data, string agentId)
+    {
+        if (data is not JsonArray options) return null;
+        foreach (var candidate in options.OfType<JsonObject>())
+        {
+            if (string.Equals(ValueOf(candidate, "agentId"), agentId, StringComparison.Ordinal)
+                || string.Equals(ValueOf(candidate, "id"), agentId, StringComparison.Ordinal))
+                return candidate;
+        }
+
+        return null;
     }
 
     private static Command BuildStatus(MohistCliApi api, OperatorCredentialProvider credentials)
@@ -227,85 +638,104 @@ internal static class SlackCommands
         return (resolved.ProjectId, resolved.Exit);
     }
 
-    private static Command BuildCreate(MohistCliApi api)
+    private static async Task<string?> ResolveWorkspaceTeamAsync(
+        MohistCliApi api,
+        ParseResult ctx,
+        Option<string?> workspaceTeam,
+        string commandName)
     {
-        var command = new Command("create", "Create a Slack Connection");
-        var agent = new Argument<string>("agent") { Description = "Agent name or id" };
-        var provider = new Option<string>("--provider") { DefaultValueFactory = _ => "slack" };
-        var botName = new Option<string?>("--bot-name");
-        var workspaceTeam = new Option<string?>("--workspace-team")
+        var team = ctx.GetValue(workspaceTeam);
+        if (!string.IsNullOrWhiteSpace(team)) return team.Trim();
+
+        var accepted = await api.Invocation.RequirePromptAsync(
+            "Slack workspace team id",
+            "--workspace-team <team-id>",
+            () => Task.FromResult(true)).ConfigureAwait(false);
+        if (!accepted)
         {
-            Description = "Create a Manager-owned Agent App in this Slack workspace.",
-        };
-        var accessPolicy = new Option<string>("--access-policy") { DefaultValueFactory = _ => "owner_only" };
-        var owner = new Option<string?>("--owner-slack-user-id");
-        var transport = new Option<string>("--transport") { DefaultValueFactory = _ => "socket" };
-        var ingress = new Option<string?>("--public-ingress");
-        var project = MohistCliCommands.ProjectRefOption();
-        command.Arguments.Add(agent);
-        command.Options.Add(provider);
-        command.Options.Add(botName);
-        command.Options.Add(workspaceTeam);
-        command.Options.Add(accessPolicy);
-        command.Options.Add(owner);
-        command.Options.Add(transport);
-        command.Options.Add(ingress);
-        command.Options.Add(project);
-        command.SetAction(async ctx =>
-        {
-            if (!string.Equals(ctx.GetValue(provider), "slack", StringComparison.OrdinalIgnoreCase))
-                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "Only --provider slack is supported.");
-            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            if (exit != 0 || projectId is null) return exit;
-            var agentId = await ResolveAgentIdAsync(api, projectId, ctx.GetValue(agent));
-            if (agentId is null) return 1;
-            var team = ctx.GetValue(workspaceTeam);
-            if (!string.IsNullOrWhiteSpace(team))
-            {
-                var managerResult = await api.PostAndReadAsync(ManagerPath(projectId, "/apps"), new
-                {
-                    agentId,
-                    workspaceTeamId = team,
-                    accessPolicy = ctx.GetValue(accessPolicy),
-                    ownerSlackUserId = ctx.GetValue(owner),
-                    botName = ctx.GetValue(botName),
-                    transportKind = ctx.GetValue(transport),
-                    publicIngressBaseUrl = ctx.GetValue(ingress),
-                });
-                return managerResult.ExitCode;
-            }
-            var result = await api.PostAndReadAsync(Path(projectId), new
-            {
-                agentId,
-                botName = ctx.GetValue(botName),
-            });
-            return result.ExitCode;
-        });
-        return command;
+            await api.Error.WriteLineAsync(
+                $"slack {commandName} requires --workspace-team <team-id> when the workspace cannot be determined interactively.").ConfigureAwait(false);
+            return null;
+        }
+
+        await api.Error.WriteAsync("Slack workspace team id: ").ConfigureAwait(false);
+        var value = await api.Invocation.Input
+            .ReadLineAsync(api.Invocation.CancellationToken).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
-    private static Command BuildConfigure(MohistCliApi api)
+    private static async Task<ManagerEnrollmentFacts?> ResolveManagerFactsAsync(
+        MohistCliApi api,
+        ParseResult ctx,
+        Option<string?> managerAppId,
+        Option<string?> managerBotUserId,
+        Option<string?> managerCredentialRef)
     {
-        var command = new Command("configure", "Store Slack App and Bot credentials");
-        var id = new Argument<string>("connection-id");
-        var file = new Option<string?>("--credentials-file")
+        var appId = ctx.GetValue(managerAppId);
+        var botUserId = ctx.GetValue(managerBotUserId);
+        var credentialRef = ctx.GetValue(managerCredentialRef);
+
+        if (string.IsNullOrWhiteSpace(appId))
+            appId = await PromptLineAsync(api, "Mohist App id", "--manager-app-id <id>").ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(botUserId))
+            botUserId = await PromptLineAsync(api, "Mohist App bot user id", "--manager-bot-user-id <id>").ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(credentialRef))
+            credentialRef = await PromptLineAsync(api, "Mohist App credential reference", "--manager-credential-ref <ref>").ConfigureAwait(false);
+
+        if (string.IsNullOrWhiteSpace(appId) || string.IsNullOrWhiteSpace(botUserId) || string.IsNullOrWhiteSpace(credentialRef))
         {
-            Description = "UTF-8 JSON file containing exactly appToken and botToken",
-        };
-        var project = MohistCliCommands.ProjectRefOption();
-        command.Arguments.Add(id);
-        command.Options.Add(file);
-        command.Options.Add(project);
-        command.SetAction(async ctx =>
+            var missing = new List<string>();
+            if (string.IsNullOrWhiteSpace(appId)) missing.Add("--manager-app-id");
+            if (string.IsNullOrWhiteSpace(botUserId)) missing.Add("--manager-bot-user-id");
+            if (string.IsNullOrWhiteSpace(credentialRef)) missing.Add("--manager-credential-ref");
+            api.Error.WriteLine($"slack setup requires {string.Join(", ", missing)} for the enrollment step in non-interactive mode.");
+            return null;
+        }
+
+        return new ManagerEnrollmentFacts(appId.Trim(), botUserId.Trim(), credentialRef.Trim());
+    }
+
+    private static async Task<string?> PromptLineAsync(MohistCliApi api, string requirement, string explicitInput)
+    {
+        var accepted = await api.Invocation.RequirePromptAsync(
+            requirement,
+            explicitInput,
+            () => Task.FromResult(true)).ConfigureAwait(false);
+        if (!accepted) return null;
+        await api.Error.WriteAsync($"{requirement}: ").ConfigureAwait(false);
+        var line = await api.Invocation.Input
+            .ReadLineAsync(api.Invocation.CancellationToken).ConfigureAwait(false);
+        return string.IsNullOrWhiteSpace(line) ? null : line.Trim();
+    }
+
+    private sealed record ManagerEnrollmentFacts(string AppId, string BotUserId, string CredentialRef);
+
+    private static async Task<bool> ReadConfigurationTokenAsync(MohistCliApi api, string path)
+    {
+        try
         {
-            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            if (exit != 0 || projectId is null) return exit;
-            var credentials = await ReadCredentialsAsync(api, ctx.GetValue(file));
-            if (credentials is null) return 2;
-            var result = await api.PostAndReadAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/configure"), credentials);
-            return result.ExitCode;
-        });
-        return command;
+            if (!IsProtectedFile(api.FileSystem, path))
+                throw new InvalidOperationException("Configuration token file must be a regular, non-symlink file readable and writable only by the current user.");
+            var json = await api.FileSystem.ReadAllTextAsync(path).ConfigureAwait(false);
+            using var document = JsonDocument.Parse(json);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || root.EnumerateObject().Count() != 2
+                || !root.TryGetProperty("configurationToken", out var token)
+                || !root.TryGetProperty("configurationRefreshToken", out var refresh)
+                || token.ValueKind != JsonValueKind.String
+                || refresh.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(token.GetString())
+                || string.IsNullOrWhiteSpace(refresh.GetString()))
+                throw new InvalidOperationException("Configuration token file must contain exactly non-empty configurationToken and configurationRefreshToken strings.");
+            await api.Error.WriteLineAsync("Configuration token pair accepted for workspace App provisioning.").ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or InvalidOperationException)
+        {
+            api.Error.WriteLine(ex.Message);
+            return false;
+        }
     }
 
     private static Command BuildClaimOwner(MohistCliApi api)
@@ -320,32 +750,6 @@ internal static class SlackCommands
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
             if (exit != 0 || projectId is null) return exit;
             var result = await api.PostAndReadAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/claim-owner"), new { });
-            return result.ExitCode;
-        });
-        return command;
-    }
-
-    private static Command BuildRotateCredentials(MohistCliApi api)
-    {
-        var command = new Command("rotate-credentials", "Verify and rotate Slack App and Bot credentials");
-        var id = new Argument<string>("connection-id");
-        var file = new Option<string?>("--credentials-file")
-        {
-            Description = "UTF-8 JSON file containing exactly appToken and botToken",
-        };
-        var project = MohistCliCommands.ProjectRefOption();
-        command.Arguments.Add(id);
-        command.Options.Add(file);
-        command.Options.Add(project);
-        command.SetAction(async ctx =>
-        {
-            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            if (exit != 0 || projectId is null) return exit;
-            var credentials = await ReadCredentialsAsync(api, ctx.GetValue(file));
-            if (credentials is null) return 2;
-            var result = await api.PostAndReadAsync(
-                Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/rotate-credentials"),
-                credentials);
             return result.ExitCode;
         });
         return command;
@@ -452,16 +856,13 @@ internal static class SlackCommands
     }
 
     private static Command BuildReconcileCreate(MohistCliApi api) => BuildManagerOperation(
-        api, "reconcile-create", "Reconcile an unknown managed Child App create", "/reconcile-create");
-
-    private static Command BuildCreateChildApp(MohistCliApi api) => BuildManagerOperation(
-        api, "create-child-app", "Start creating the managed Slack Child App", "/create");
+        api, "reconcile-create", "Reconcile an unknown managed Agent App create", "/reconcile-create");
 
     private static Command BuildReconcileDelete(MohistCliApi api) => BuildManagerOperation(
-        api, "reconcile-delete", "Reconcile an unknown managed Child App delete", "/reconcile-delete");
+        api, "reconcile-delete", "Reconcile an unknown managed Agent App delete", "/reconcile-delete");
 
     private static Command BuildRemoveBinding(MohistCliApi api) => BuildManagerOperation(
-        api, "remove-binding", "Remove the Mohist Connection binding while retaining Child App facts", "/remove-binding");
+        api, "remove-binding", "Remove the Mohist Connection binding while retaining Agent App facts", "/remove-binding");
 
     private static Command BuildManagerOperation(
         MohistCliApi api,
@@ -487,7 +888,7 @@ internal static class SlackCommands
 
     private static Command BuildPermanentDelete(MohistCliApi api)
     {
-        var command = new Command("permanent-delete", "Delete the managed Slack Child App after its Connection binding was removed");
+        var command = new Command("permanent-delete", "Permanently delete the managed Agent App after its Connection binding was removed");
         var id = new Argument<string>("connection-id");
         var confirmation = new Option<string?>("--confirm")
         {
@@ -983,22 +1384,6 @@ internal static class SlackCommands
             accessPolicy = policy ?? OwnerOnlyPolicy,
             allowMembers = members,
         });
-    }
-
-
-    private static Command BuildDelete(MohistCliApi api)
-    {
-        var command = new Command("delete", "Delete a Slack Connection");
-        var id = new Argument<string>("connection-id");
-        var project = MohistCliCommands.ProjectRefOption();
-        command.Arguments.Add(id);
-        command.Options.Add(project);
-        command.SetAction(async ctx =>
-        {
-            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
-            return exit != 0 || projectId is null ? exit : await api.PrintDeleteAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!) }"));
-        });
-        return command;
     }
 
     private static async Task<string?> ResolveAgentIdAsync(MohistCliApi api, string projectId, string? reference)
