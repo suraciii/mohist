@@ -156,9 +156,10 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var originalInputId = launchPayload.GetProperty("data").GetProperty("inputId").GetString()!;
             var originalTurnId = launchPayload.GetProperty("data").GetProperty("turnId").GetString()!;
 
-            var jobGrain = await FindAgentJobGrainAsync(sessionId);
-            Assert.NotNull(jobGrain);
-            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId);
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            var claim = await jobGrain.ClaimNextAsync(runnerId);
+            Assert.NotNull(claim);
 
             // Drive past the configured 8s timeout via fake time.
             await WaitForJobTerminalAsync(
