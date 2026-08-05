@@ -106,6 +106,82 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         CancellationToken ct = default) =>
         UpdateAsync(id, enrollment => enrollment.EnsureManagerActor(actorId, _timeProvider.GetUtcNow()), ct);
 
+    public async Task<ManagerAppCreateBeginResult> BeginManagerAppCreateAsync(
+        string id,
+        int expectedFence,
+        string operationId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == id, ct);
+        if (row is null)
+            return ManagerAppCreateBeginResult.NotFound;
+        var enrollment = ToDomain(row);
+        if (enrollment.ManagerAppOperationFence != expectedFence)
+            return ManagerAppCreateBeginResult.Stale(enrollment);
+        enrollment.BeginManagerAppCreate(operationId, expectedFence, _timeProvider.GetUtcNow());
+
+        var updated = await db.SlackWorkspaceEnrollments
+            .Where(item => item.Id == id
+                && item.ManagerAppOperationFence == expectedFence
+                && (item.ManagerAppLifecycle == SlackManagerAppLifecycle.NotCreated
+                    || item.ManagerAppLifecycle == SlackManagerAppLifecycle.CreateUnknown))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ManagerAppLifecycle, enrollment.ManagerAppLifecycle)
+                .SetProperty(item => item.ManagerAppOperationFence, enrollment.ManagerAppOperationFence)
+                .SetProperty(item => item.ManagerAppOperationId, enrollment.ManagerAppOperationId)
+                .SetProperty(item => item.ManagerAppOperationOutcome, enrollment.ManagerAppOperationOutcome)
+                .SetProperty(item => item.UpdatedAt, enrollment.UpdatedAt), ct);
+        return updated == 1
+            ? new(enrollment, true)
+            : ManagerAppCreateBeginResult.Stale(await CurrentOrNullAsync(db, id, ct));
+    }
+
+    public async Task<ManagerAppCreateApplyResult> ApplyManagerAppCreateResultAsync(
+        string id,
+        int expectedFence,
+        string lifecycle,
+        string redactedOutcome,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == id, ct);
+        if (row is null)
+            return ManagerAppCreateApplyResult.NotFound;
+        var enrollment = ToDomain(row);
+        if (enrollment.ManagerAppOperationFence != expectedFence
+            || enrollment.ManagerAppLifecycle != SlackManagerAppLifecycle.Creating)
+            return ManagerAppCreateApplyResult.Stale(enrollment);
+        enrollment.ApplyManagerAppCreateResult(lifecycle, redactedOutcome, expectedFence, _timeProvider.GetUtcNow());
+
+        var updated = await db.SlackWorkspaceEnrollments
+            .Where(item => item.Id == id && item.ManagerAppOperationFence == expectedFence)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ManagerAppLifecycle, enrollment.ManagerAppLifecycle)
+                .SetProperty(item => item.ManagerAppOperationOutcome, enrollment.ManagerAppOperationOutcome)
+                .SetProperty(item => item.UpdatedAt, enrollment.UpdatedAt), ct);
+        return updated == 1
+            ? new(enrollment, true)
+            : ManagerAppCreateApplyResult.Stale(await CurrentOrNullAsync(db, id, ct));
+    }
+
+    public Task<SlackWorkspaceEnrollment?> StageRuntimeCredentialsAsync(string id, CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.StageRuntimeCredentials(_timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> ApplySocketValidationAsync(
+        string id,
+        string validationState,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.ApplySocketValidation(validationState, _timeProvider.GetUtcNow()), ct);
+
     public async Task<SlackManagerClaimIssuance> IssueManagerClaimAsync(
         string id,
         string claimHash,
@@ -246,6 +322,34 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         public static SlackManagerClaimIssuance NotFound { get; } = new(null, false);
     }
 
+    public sealed record ManagerAppCreateBeginResult(
+        SlackWorkspaceEnrollment? Enrollment,
+        bool Accepted)
+    {
+        public static ManagerAppCreateBeginResult NotFound { get; } = new(null, false);
+
+        public static ManagerAppCreateBeginResult Stale(SlackWorkspaceEnrollment? current) => new(current, false);
+    }
+
+    public sealed record ManagerAppCreateApplyResult(
+        SlackWorkspaceEnrollment? Enrollment,
+        bool Accepted)
+    {
+        public static ManagerAppCreateApplyResult NotFound { get; } = new(null, false);
+
+        public static ManagerAppCreateApplyResult Stale(SlackWorkspaceEnrollment? current) => new(current, false);
+    }
+
+    private async Task<SlackWorkspaceEnrollment?> CurrentOrNullAsync(
+        MohistDbContext db,
+        string id,
+        CancellationToken ct)
+    {
+        var current = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == id, ct);
+        return current is null ? null : ToDomain(current);
+    }
+
     private async Task<SlackWorkspaceEnrollment?> UpdateAsync(
         string id,
         Action<SlackWorkspaceEnrollment> transition,
@@ -282,6 +386,11 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         ManagerBotUserId = row.ManagerBotUserId,
         ManagerTransportKind = row.ManagerTransportKind,
         ManagerReadiness = row.ManagerReadiness,
+        ManagerAppLifecycle = row.ManagerAppLifecycle,
+        ManagerAppOperationFence = row.ManagerAppOperationFence,
+        ManagerAppOperationId = row.ManagerAppOperationId,
+        ManagerAppOperationOutcome = row.ManagerAppOperationOutcome,
+        RuntimeCredentialValidationState = row.RuntimeCredentialValidationState,
         ManagerActorId = row.ManagerActorId,
         ClaimedSlackUserId = row.ClaimedSlackUserId,
         ManagerClaimHash = row.ManagerClaimHash,
@@ -312,6 +421,11 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         ManagerBotUserId = enrollment.ManagerBotUserId,
         ManagerTransportKind = enrollment.ManagerTransportKind,
         ManagerReadiness = enrollment.ManagerReadiness,
+        ManagerAppLifecycle = enrollment.ManagerAppLifecycle,
+        ManagerAppOperationFence = enrollment.ManagerAppOperationFence,
+        ManagerAppOperationId = enrollment.ManagerAppOperationId,
+        ManagerAppOperationOutcome = enrollment.ManagerAppOperationOutcome,
+        RuntimeCredentialValidationState = enrollment.RuntimeCredentialValidationState,
         ManagerActorId = enrollment.ManagerActorId,
         ClaimedSlackUserId = enrollment.ClaimedSlackUserId,
         ManagerClaimHash = enrollment.ManagerClaimHash,
@@ -340,6 +454,11 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         row.ManagerBotUserId = enrollment.ManagerBotUserId;
         row.ManagerTransportKind = enrollment.ManagerTransportKind;
         row.ManagerReadiness = enrollment.ManagerReadiness;
+        row.ManagerAppLifecycle = enrollment.ManagerAppLifecycle;
+        row.ManagerAppOperationFence = enrollment.ManagerAppOperationFence;
+        row.ManagerAppOperationId = enrollment.ManagerAppOperationId;
+        row.ManagerAppOperationOutcome = enrollment.ManagerAppOperationOutcome;
+        row.RuntimeCredentialValidationState = enrollment.RuntimeCredentialValidationState;
         row.ManagerActorId = enrollment.ManagerActorId;
         row.ClaimedSlackUserId = enrollment.ClaimedSlackUserId;
         row.ManagerClaimHash = enrollment.ManagerClaimHash;

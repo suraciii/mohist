@@ -20,6 +20,11 @@ public sealed class SlackWorkspaceEnrollmentRow
     public string ManagerBotUserId { get; set; } = string.Empty;
     public string ManagerTransportKind { get; set; } = SlackManagerTransportKind.Socket;
     public string ManagerReadiness { get; set; } = SlackManagerReadiness.Unknown;
+    public string ManagerAppLifecycle { get; set; } = SlackManagerAppLifecycle.NotCreated;
+    public int ManagerAppOperationFence { get; set; }
+    public string? ManagerAppOperationId { get; set; }
+    public string? ManagerAppOperationOutcome { get; set; }
+    public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }
     public string? ManagerClaimHash { get; set; }

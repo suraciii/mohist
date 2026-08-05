@@ -623,6 +623,12 @@ public class MohistDbContext : DbContext
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerReadiness",
                     "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_ManagerAppLifecycle",
+                    "\"ManagerAppLifecycle\" IN ('not_created', 'creating', 'created', 'create_unknown')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_RuntimeCredentialValidationState",
+                    "\"RuntimeCredentialValidationState\" IN ('not_provided', 'candidate', 'awaiting_socket', 'verified', 'failed')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
@@ -640,6 +646,11 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ManagerBotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ManagerTransportKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerReadiness).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerAppLifecycle).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerAppOperationFence).IsRequired();
+            entity.Property(e => e.ManagerAppOperationId).HasMaxLength(256);
+            entity.Property(e => e.ManagerAppOperationOutcome).HasMaxLength(1024);
+            entity.Property(e => e.RuntimeCredentialValidationState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerActorId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ClaimedSlackUserId).HasMaxLength(256);
             entity.Property(e => e.ManagerClaimHash).HasMaxLength(128);

@@ -103,6 +103,54 @@ public static class SlackStateTransitions
             SlackManagerReadiness.NotReady,
             SlackManagerReadiness.Degraded);
 
+    public static void RequireManagerAppLifecycleTransition(string current, string next)
+    {
+        var known = new[]
+        {
+            SlackManagerAppLifecycle.NotCreated,
+            SlackManagerAppLifecycle.Creating,
+            SlackManagerAppLifecycle.Created,
+            SlackManagerAppLifecycle.CreateUnknown,
+        };
+        RequireKnown(current, known);
+        RequireKnown(next, known);
+        if (current == next)
+            return;
+        if (current == SlackManagerAppLifecycle.NotCreated && next == SlackManagerAppLifecycle.Creating
+            || current == SlackManagerAppLifecycle.Creating
+            && IsOneOf(next, SlackManagerAppLifecycle.Created, SlackManagerAppLifecycle.CreateUnknown)
+            || current == SlackManagerAppLifecycle.CreateUnknown
+            && IsOneOf(next, SlackManagerAppLifecycle.Creating, SlackManagerAppLifecycle.Created))
+            return;
+        throw InvalidTransition("Manager App lifecycle", current, next);
+    }
+
+    public static void RequireRuntimeCredentialValidationTransition(string current, string next)
+    {
+        var known = new[]
+        {
+            SlackRuntimeCredentialValidationState.NotProvided,
+            SlackRuntimeCredentialValidationState.Candidate,
+            SlackRuntimeCredentialValidationState.AwaitingSocket,
+            SlackRuntimeCredentialValidationState.Verified,
+            SlackRuntimeCredentialValidationState.Failed,
+        };
+        RequireKnown(current, known);
+        RequireKnown(next, known);
+        if (current == next)
+            return;
+        if (current == SlackRuntimeCredentialValidationState.NotProvided
+            && next == SlackRuntimeCredentialValidationState.Candidate
+            || current == SlackRuntimeCredentialValidationState.Candidate
+            && IsOneOf(next, SlackRuntimeCredentialValidationState.AwaitingSocket, SlackRuntimeCredentialValidationState.Failed)
+            || current == SlackRuntimeCredentialValidationState.AwaitingSocket
+            && IsOneOf(next, SlackRuntimeCredentialValidationState.Verified, SlackRuntimeCredentialValidationState.Failed)
+            || current == SlackRuntimeCredentialValidationState.Failed
+            && next == SlackRuntimeCredentialValidationState.Candidate)
+            return;
+        throw InvalidTransition("runtime credential validation", current, next);
+    }
+
     public static void RequireBindingTransition(string current, string next)
     {
         RequireKnownBinding(current);

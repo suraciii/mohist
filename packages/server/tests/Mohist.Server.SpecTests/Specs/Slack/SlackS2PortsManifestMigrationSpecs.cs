@@ -26,20 +26,18 @@ public sealed class SlackS2PortsManifestMigrationSpecs
 
         await using (var after = database.CreateDbContext())
         {
-            var enrollment = await after.SlackWorkspaceEnrollments.SingleAsync(row => row.Id == "enrollment_https");
-            Assert.Equal("T_HTTPS", enrollment.WorkspaceTeamId);
-            Assert.Equal("manager-credential", enrollment.ManagerCredentialRef);
-            Assert.Equal("A_MANAGER", enrollment.ManagerAppId);
-            Assert.Equal("U_MANAGER", enrollment.ManagerBotUserId);
-            Assert.Equal("socket", enrollment.ManagerTransportKind);
-            Assert.Equal("not_ready", enrollment.ManagerReadiness);
-            Assert.Equal("[]", enrollment.AuditJson);
+            Assert.Equal("T_HTTPS", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "WorkspaceTeamId", "enrollment_https"));
+            Assert.Equal("manager-credential", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "ManagerCredentialRef", "enrollment_https"));
+            Assert.Equal("A_MANAGER", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "ManagerAppId", "enrollment_https"));
+            Assert.Equal("U_MANAGER", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "ManagerBotUserId", "enrollment_https"));
+            Assert.Equal("socket", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "ManagerTransportKind", "enrollment_https"));
+            Assert.Equal("not_ready", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "ManagerReadiness", "enrollment_https"));
+            Assert.Equal("[]", await ReadTextAsync(after, "SlackWorkspaceEnrollments", "AuditJson", "enrollment_https"));
 
-            var app = await after.ManagedSlackAgentApps.SingleAsync(row => row.Id == "agent_app_https");
-            Assert.Equal("enrollment_https", app.EnrollmentId);
-            Assert.Equal("connection_https", app.AgentConnectionId);
-            Assert.Equal("A_AGENT", app.AppId);
-            Assert.Equal("U_AGENT", app.BotUserId);
+            Assert.Equal("enrollment_https", await ReadTextAsync(after, "ManagedSlackAgentApps", "EnrollmentId", "agent_app_https"));
+            Assert.Equal("connection_https", await ReadTextAsync(after, "ManagedSlackAgentApps", "AgentConnectionId", "agent_app_https"));
+            Assert.Equal("A_AGENT", await ReadTextAsync(after, "ManagedSlackAgentApps", "AppId", "agent_app_https"));
+            Assert.Equal("U_AGENT", await ReadTextAsync(after, "ManagedSlackAgentApps", "BotUserId", "agent_app_https"));
 
             await Assert.ThrowsAsync<SqliteException>(() => after.Database.ExecuteSqlRawAsync(
                 "UPDATE \"SlackWorkspaceEnrollments\" SET \"ManagerTransportKind\" = 'https' WHERE \"Id\" = 'enrollment_https'"));

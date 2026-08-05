@@ -2726,6 +2726,22 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ManagerAppLifecycle")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ManagerAppOperationFence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ManagerAppOperationId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppOperationOutcome")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ManagerBotUserId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -2768,6 +2784,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RuntimeCredentialValidationState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -2795,6 +2816,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" = 'socket'");
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerReadiness", "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerAppLifecycle", "\"ManagerAppLifecycle\" IN ('not_created', 'creating', 'created', 'create_unknown')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_RuntimeCredentialValidationState", "\"RuntimeCredentialValidationState\" IN ('not_provided', 'candidate', 'awaiting_socket', 'verified', 'failed')");
                         });
                 });
 

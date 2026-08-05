@@ -18,6 +18,11 @@ public sealed class SlackWorkspaceEnrollment
     public string ManagerBotUserId { get; set; } = string.Empty;
     public string ManagerTransportKind { get; set; } = SlackManagerTransportKind.Socket;
     public string ManagerReadiness { get; set; } = SlackManagerReadiness.Unknown;
+    public string ManagerAppLifecycle { get; set; } = SlackManagerAppLifecycle.NotCreated;
+    public int ManagerAppOperationFence { get; set; }
+    public string? ManagerAppOperationId { get; set; }
+    public string? ManagerAppOperationOutcome { get; set; }
+    public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }
     public string? ManagerClaimHash { get; set; }
@@ -107,6 +112,48 @@ public sealed class SlackWorkspaceEnrollment
         UpdatedAt = now;
     }
 
+    public void BeginManagerAppCreate(string operationId, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, SlackManagerAppLifecycle.Creating);
+        ManagerAppLifecycle = SlackManagerAppLifecycle.Creating;
+        ManagerAppOperationFence = expectedFence + 1;
+        ManagerAppOperationId = operationId.Trim();
+        ManagerAppOperationOutcome = null;
+        UpdatedAt = now;
+    }
+
+    public void ApplyManagerAppCreateResult(string lifecycle, string redactedOutcome, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+        if (lifecycle is not (SlackManagerAppLifecycle.Created or SlackManagerAppLifecycle.CreateUnknown))
+            throw new ArgumentException("A Manager App create result must be 'created' or 'create_unknown'.", nameof(lifecycle));
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, lifecycle);
+        ManagerAppLifecycle = lifecycle;
+        ManagerAppOperationOutcome = redactedOutcome.Trim();
+        UpdatedAt = now;
+    }
+
+    public void StageRuntimeCredentials(DateTimeOffset now)
+    {
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState,
+            SlackRuntimeCredentialValidationState.Candidate);
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Candidate;
+        UpdatedAt = now;
+    }
+
+    public void ApplySocketValidation(string validationState, DateTimeOffset now)
+    {
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(RuntimeCredentialValidationState, validationState);
+        RuntimeCredentialValidationState = validationState;
+        UpdatedAt = now;
+    }
+
     public void EnsureManagerActor(string actorId, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(actorId);
@@ -164,6 +211,23 @@ public static class SlackManagerReadiness
     public const string Ready = "ready";
     public const string NotReady = "not_ready";
     public const string Degraded = "degraded";
+}
+
+public static class SlackManagerAppLifecycle
+{
+    public const string NotCreated = "not_created";
+    public const string Creating = "creating";
+    public const string Created = "created";
+    public const string CreateUnknown = "create_unknown";
+}
+
+public static class SlackRuntimeCredentialValidationState
+{
+    public const string NotProvided = "not_provided";
+    public const string Candidate = "candidate";
+    public const string AwaitingSocket = "awaiting_socket";
+    public const string Verified = "verified";
+    public const string Failed = "failed";
 }
 
 public static class SlackManagerClaimOutcome
