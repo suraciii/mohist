@@ -13,6 +13,10 @@ describe("agent session startup envelope", () => {
         descriptionAtLaunch: "does child work",
       }],
       spawnCommand: "mo agent spawn <agent-ref> ...",
+      workDir: "/inherited/agent-workspace",
+      pinnedRunnerId: "runner_pinned",
+      agentId: "agent_target",
+      agentName: "target-agent",
     })
 
     expect(envelope).toMatch(
@@ -20,7 +24,14 @@ describe("agent session startup envelope", () => {
     )
     expect(envelope).not.toContain("mohist-system-facts")
     expect(envelope).toContain('"projectId":"proj_1"')
+    expect(envelope).toContain('"sessionId":"sess_1"')
+    expect(envelope).toContain('"parentSessionId":"sess_parent"')
     expect(envelope).toContain('"allowedSubagents":[{"agentId":"agent_child"')
+    expect(envelope).toContain('"spawnCommand":"mo agent spawn <agent-ref> ..."')
+    expect(envelope).toContain('"workDir":"/inherited/agent-workspace"')
+    expect(envelope).toContain('"pinnedRunnerId":"runner_pinned"')
+    expect(envelope).toContain('"agentId":"agent_target"')
+    expect(envelope).toContain('"agentName":"target-agent"')
   })
 
   it("keeps startup ahead of the existing Slack and execution blocks", () => {

@@ -93,6 +93,10 @@ export interface AgentSessionStartup {
     descriptionAtLaunch: string
   }[]
   spawnCommand: string
+  workDir?: string | null
+  pinnedRunnerId?: string | null
+  agentId?: string | null
+  agentName?: string | null
 }
 
 export type WorkDispatchResponse = {
