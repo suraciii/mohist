@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { mock, test } from 'node:test'
 
-import { commandFor, main, parseArgs } from './guard.js'
-import type { TrackConfig } from './types.js'
+import { commandFor, createTimeout, main, parseArgs } from './guard.js'
+import { formatEvaluation, formatSummary, summarize } from './diagnostics.js'
+import type { TrackConfig, TrackEvaluation, TrackRun } from './types.js'
 
 function captureStderr(): { calls: () => string; restore: () => void } {
   const stderrMock = mock.method(process.stderr, 'write', () => true)
@@ -32,6 +33,54 @@ test('commandFor appends dotnet apphost arguments after the default report argum
   }
   const command = commandFor(track)
   assert.deepEqual(command.args.slice(-6), ['-noColor', '-noLogo', '-trx', `${process.cwd()}/reports/unit.trx`, '-parallel', 'none'])
+})
+
+test('createTimeout can be cancelled so completed tracks do not retain deadline timers', () => {
+  let scheduledCallback: (() => void) | undefined
+  let clearedTimer: unknown
+  const timeout = createTimeout(60_000, {
+    set: (callback) => {
+      scheduledCallback = callback
+      return 'timer'
+    },
+    clear: (timer) => {
+      clearedTimer = timer
+    },
+  })
+
+  timeout.cancel()
+
+  assert.equal(typeof scheduledCallback, 'function')
+  assert.equal(clearedTimer, 'timer')
+})
+
+test('suite deadline breach remains visible in summary and report errors fail the track', () => {
+  const run: TrackRun = {
+    trackId: 'slow',
+    timedOut: true,
+    timeoutReason: 'suite',
+    exitCode: null,
+    elapsedMs: 1000,
+    deadlineMs: 1000,
+    command: 'not started: suite deadline',
+    reportReady: false,
+    reportError: 'report reports/slow.trx was not refreshed because the suite deadline expired',
+  }
+  const evaluation: TrackEvaluation = {
+    trackId: 'slow',
+    enforce: true,
+    reportError: run.reportError,
+    total: 0,
+    failedTests: [],
+    rules: [],
+    passed: false,
+  }
+  const summary = summarize([run], [evaluation], true, 1250)
+  const output = [formatSummary(summary, 1000), ...formatEvaluation(evaluation)].join('\n')
+
+  assert.match(output, /1 failing, 1 timed out/)
+  assert.match(output, /suite deadline: 1\.00s BREACHED after 1\.25s/)
+  assert.match(output, /REPORT ERROR: report reports\/slow\.trx was not refreshed/)
 })
 
 test('parseArgs: focused without any argument leaves the request unresolved', () => {

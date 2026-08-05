@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { dirname, resolve, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -61,30 +61,45 @@ export function commandFor(track: TrackConfig): { command: string; args: readonl
   throw new Error(`track "${track.id}": no run command`)
 }
 
-function killTree(pid: number, graceMs: number): Promise<void> {
-  return new Promise((done) => {
-    const signal = (sig: NodeJS.Signals) => {
-      try {
-        if (process.platform === 'win32') {
-          execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
-        } else {
-          process.kill(-pid, sig)
-        }
-      } catch {
-        // already gone or not permitted
-      }
+function signalTree(pid: number, signal: NodeJS.Signals): void {
+  if (pid <= 1) return
+  try {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore' })
+    } else {
+      process.kill(-pid, signal)
     }
-    signal('SIGTERM')
-    setTimeout(() => {
-      signal('SIGKILL')
-      done()
-    }, graceMs).unref()
-  })
+  } catch {
+    // already gone or not permitted
+  }
 }
 
 interface SpawnedChild {
   readonly done: Promise<{ exitCode: number | null }>
   readonly pid: number
+}
+
+export interface TimeoutHandle {
+  readonly promise: Promise<void>
+  readonly cancel: () => void
+}
+
+export interface TimeoutScheduler {
+  readonly set: (callback: () => void, delayMs: number) => unknown
+  readonly clear: (timer: unknown) => void
+}
+
+const nativeTimeoutScheduler: TimeoutScheduler = {
+  set: (callback, delayMs) => setTimeout(callback, delayMs),
+  clear: (timer) => clearTimeout(timer as ReturnType<typeof setTimeout>),
+}
+
+export function createTimeout(delayMs: number, scheduler: TimeoutScheduler = nativeTimeoutScheduler): TimeoutHandle {
+  let timer: unknown
+  const promise = new Promise<void>((resolvePromise) => {
+    timer = scheduler.set(() => resolvePromise(), delayMs)
+  })
+  return { promise, cancel: () => scheduler.clear(timer) }
 }
 
 function spawnChild(command: string, args: readonly string[]): SpawnedChild {
@@ -101,35 +116,139 @@ function spawnChild(command: string, args: readonly string[]): SpawnedChild {
   return { done, pid: child.pid ?? -1 }
 }
 
+export function reportFileReady(reportPath: string): boolean {
+  return existsSync(reportPath) && statSync(reportPath).isFile()
+}
+
+function failedRun(track: TrackConfig, command: string, reportError: string): TrackRun {
+  return {
+    trackId: track.id,
+    timedOut: false,
+    exitCode: 1,
+    elapsedMs: 0,
+    deadlineMs: track.deadlineMs,
+    command,
+    reportReady: false,
+    reportError,
+  }
+}
+
+function suiteTimeoutRun(track: TrackConfig): TrackRun {
+  return {
+    trackId: track.id,
+    timedOut: true,
+    timeoutReason: 'suite',
+    exitCode: null,
+    elapsedMs: 0,
+    deadlineMs: track.deadlineMs,
+    command: 'not started: suite deadline',
+    reportReady: false,
+    reportError: `report ${track.report} was not refreshed because the suite deadline expired`,
+  }
+}
+
+async function killTree(child: SpawnedChild, graceMs: number): Promise<void> {
+  if (process.platform === 'win32') {
+    signalTree(child.pid, 'SIGKILL')
+    return
+  }
+
+  signalTree(child.pid, 'SIGTERM')
+  const termGrace = createTimeout(graceMs)
+  const exited = await Promise.race([
+    child.done.then(() => true),
+    termGrace.promise.then(() => false),
+  ])
+  termGrace.cancel()
+  signalTree(child.pid, 'SIGKILL')
+  if (!exited) {
+    const killGrace = createTimeout(graceMs)
+    await Promise.race([
+      child.done,
+      killGrace.promise,
+    ])
+    killGrace.cancel()
+  }
+}
+
 function runTrack(track: TrackConfig, graceMs: number, suiteDeadline: Promise<void>): Promise<TrackRun> {
-  const { command, args } = commandFor(track)
+  const reportPath = resolve(repoRoot, track.report)
+  let command: string
+  let args: readonly string[]
+  try {
+    try {
+      unlinkSync(reportPath)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+    ({ command, args } = commandFor(track))
+  } catch (error) {
+    return Promise.resolve(failedRun(track, 'not started', `could not prepare report ${track.report}: ${(error as Error).message}`))
+  }
+
   const cmdString = `${command} ${args.join(' ')}`
-  const child = spawnChild(command, args)
-  const trackDeadline = new Promise<void>((fire) => setTimeout(() => fire(), track.deadlineMs).unref())
+  let child: SpawnedChild
+  try {
+    child = spawnChild(command, args)
+  } catch (error) {
+    return Promise.resolve(failedRun(track, cmdString, `could not start track: ${(error as Error).message}`))
+  }
+  const trackDeadline = createTimeout(track.deadlineMs)
   const outcome = runWithDeadline({
     start: () => child.done,
-    kill: () => killTree(child.pid, graceMs),
+    kill: () => killTree(child, graceMs),
     timeout: Promise.race([
-      trackDeadline.then(() => 'track' as const),
+      trackDeadline.promise.then(() => 'track' as const),
       suiteDeadline.then(() => 'suite' as const),
     ]),
     now: () => Date.now(),
   })
-  return outcome.then((result) => ({
-    trackId: track.id,
-    timedOut: result.status === 'timeout',
-    timeoutReason: result.timeoutReason,
-    exitCode: result.exitCode,
-    elapsedMs: result.elapsedMs,
-    deadlineMs: track.deadlineMs,
-    command: cmdString,
-  }))
+  return outcome.then((result) => {
+    let ready = false
+    try {
+      ready = reportFileReady(reportPath)
+    } catch {
+      ready = false
+    }
+    return {
+      trackId: track.id,
+      timedOut: result.status === 'timeout',
+      timeoutReason: result.timeoutReason,
+      exitCode: result.exitCode,
+      elapsedMs: result.elapsedMs,
+      deadlineMs: track.deadlineMs,
+      command: cmdString,
+      reportReady: ready,
+      reportError: ready ? undefined : `report ${track.report} was not created or refreshed by the track`,
+    }
+  }).finally(trackDeadline.cancel)
 }
 
-function evaluateFromFile(track: TrackConfig): TrackEvaluation {
-  const content = readFileSync(resolve(repoRoot, track.report), 'utf8')
-  const cases = parseReport(track.reportFormat, content)
-  return evaluateTrack(track, cases, new Date())
+function failedEvaluation(track: TrackConfig, reportError: string): TrackEvaluation {
+  return {
+    trackId: track.id,
+    enforce: track.enforce,
+    status: track.status,
+    reason: track.reason,
+    reportError,
+    total: 0,
+    failedTests: [],
+    rules: [],
+    passed: false,
+  }
+}
+
+function evaluateFromFile(track: TrackConfig, run?: TrackRun): TrackEvaluation {
+  if (run && !run.reportReady) {
+    return failedEvaluation(track, run.reportError ?? `report ${track.report} was not refreshed`)
+  }
+  try {
+    const content = readFileSync(resolve(repoRoot, track.report), 'utf8')
+    const cases = parseReport(track.reportFormat, content)
+    return evaluateTrack(track, cases, new Date())
+  } catch (error) {
+    return failedEvaluation(track, `could not read report ${track.report}: ${(error as Error).message}`)
+  }
 }
 
 function focusedFlow(csprojPath: string, className: string): number {
@@ -236,45 +355,58 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   if (mode === 'run') {
     const suiteStart = Date.now()
     let suiteExpired = false
-    const suiteTimer = new Promise<void>((fire) => {
-      setTimeout(() => {
-        suiteExpired = true
-        fire()
-      }, config.suiteDeadlineMs).unref()
+    const suiteTimer = createTimeout(config.suiteDeadlineMs)
+    const suiteDeadline = suiteTimer.promise.then(() => {
+      suiteExpired = true
     })
-    for (const track of selected) {
-      if (suiteExpired) break
-      const run = await runTrack(track, graceMs, suiteTimer)
-      runs.push(run)
-      if (run.timeoutReason === 'track') console.error(`  ${track.id}: exceeded ${track.deadlineMs}ms deadline`)
-      if (suiteExpired) break
+    try {
+      for (let i = 0; i < selected.length; i++) {
+        const track = selected[i]
+        if (suiteExpired) {
+          runs.push(suiteTimeoutRun(track))
+          continue
+        }
+        const run = await runTrack(track, graceMs, suiteDeadline)
+        runs.push(run)
+        if (run.timeoutReason === 'track') console.error(`  ${track.id}: exceeded ${track.deadlineMs}ms deadline`)
+        if (suiteExpired) {
+          for (const skipped of selected.slice(i + 1)) runs.push(suiteTimeoutRun(skipped))
+          break
+        }
+      }
+    } finally {
+      suiteTimer.cancel()
     }
     const suiteElapsed = Date.now() - suiteStart
-    if (suiteExpired || suiteElapsed >= config.suiteDeadlineMs) {
+    const suiteDeadlineBreached = suiteExpired || suiteElapsed >= config.suiteDeadlineMs
+    if (suiteDeadlineBreached) {
       console.error(`suite deadline breached after ${suiteElapsed}ms`)
-      return 1
     }
+
+    const runsByTrack = new Map(runs.map((run) => [run.trackId, run]))
+    for (const track of selected) {
+      try {
+        evaluations.push(evaluateFromFile(track, runsByTrack.get(track.id)))
+      } catch (error) {
+        evaluations.push(failedEvaluation(track, `could not evaluate report ${track.report}: ${(error as Error).message}`))
+      }
+    }
+
+    console.log('runs:')
+    for (const run of runs) console.log(formatTrackRun(run))
+    console.log('budget:')
+    for (const evaluation of evaluations) {
+      for (const line of formatEvaluation(evaluation)) console.log(line)
+    }
+    const summary = summarize(runs, evaluations, suiteDeadlineBreached, suiteElapsed)
+    console.log(formatSummary(summary, config.suiteDeadlineMs))
+    const runFailed = suiteDeadlineBreached || runs.some((r) => r.timedOut || r.exitCode !== 0)
+    const budgetFailed = evaluations.some((e) => !e.passed)
+    return runFailed || budgetFailed ? 1 : 0
   }
 
   for (const track of selected) {
-    try {
-      evaluations.push(evaluateFromFile(track))
-    } catch (error) {
-      process.stderr.write(`  ${track.id}: could not read report ${track.report}: ${(error as Error).message}\n`)
-      evaluations.push({
-        trackId: track.id,
-        enforce: track.enforce,
-        total: 0,
-        failedTests: [],
-        rules: [],
-        passed: false,
-      })
-    }
-  }
-
-  if (mode === 'run') {
-    console.log('runs:')
-    for (const run of runs) console.log(formatTrackRun(run))
+    evaluations.push(evaluateFromFile(track))
   }
   console.log('budget:')
   for (const evaluation of evaluations) {
@@ -290,5 +422,8 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
 
 const isMain = process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
 if (isMain) {
-  void main().then((code) => process.exit(code))
+  void main().then((code) => process.exit(code), (error) => {
+    console.error(`test-duration: fatal guard error: ${(error as Error).message}`)
+    process.exit(1)
+  })
 }

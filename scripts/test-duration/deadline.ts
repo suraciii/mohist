@@ -26,11 +26,11 @@ export async function runWithDeadline<TimeoutReason = void>(
     deps.start().then((result) => ({ kind: 'done' as const, result })),
     deps.timeout.then((reason) => ({ kind: 'timeout' as const, reason })),
   ])
-  const elapsedMs = deps.now() - t0
   if (settled.kind === 'timeout') {
     await deps.kill()
-    return { status: 'timeout', exitCode: null, elapsedMs, timeoutReason: settled.reason }
+    return { status: 'timeout', exitCode: null, elapsedMs: deps.now() - t0, timeoutReason: settled.reason }
   }
+  const elapsedMs = deps.now() - t0
   const status: DeadlineStatus = settled.result.exitCode === 0 ? 'passed' : 'failed'
   return { status, exitCode: settled.result.exitCode, elapsedMs }
 }

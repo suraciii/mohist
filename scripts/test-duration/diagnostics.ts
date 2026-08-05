@@ -17,7 +17,8 @@ export function formatTrackRun(run: TrackRun): string {
   const flag = run.timedOut
     ? run.timeoutReason === 'suite' ? 'SUITE TIMEOUT' : 'TIMEOUT'
     : run.exitCode === 0 ? 'ok' : `exit ${run.exitCode}`
-  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]  ${run.command}`
+  const report = run.reportReady ? '' : '  [report missing/stale]'
+  return `  ${run.trackId}: ${ms(run.elapsedMs)} / ${ms(run.deadlineMs)} deadline  [${flag}]${report}  ${run.command}`
 }
 
 export function formatEvaluation(eval_: TrackEvaluation): string[] {
@@ -27,6 +28,7 @@ export function formatEvaluation(eval_: TrackEvaluation): string[] {
     : `${eval_.trackId}: ${eval_.total} tests  ratchet ${eval_.status ?? 'baseline-pending'} (deadline-governed only)`
   lines.push(`  ${head}`)
   if (eval_.reason) lines.push(`    reason: ${eval_.reason}`)
+  if (eval_.reportError) lines.push(`      >> REPORT ERROR: ${eval_.reportError}`)
   if (!eval_.enforce) return lines
   for (const rule of eval_.rules) {
     lines.push(`    ${rule.ruleId} (n=${rule.total}): ${describeRule(rule)}`)
@@ -60,14 +62,21 @@ export interface GuardSummary {
   readonly timeoutTracks: number
   readonly governed: number
   readonly overBudget: number
+  readonly suiteDeadlineBreached: boolean
+  readonly suiteElapsedMs?: number
 }
 
 export function summarize(
   runs: readonly TrackRun[],
   evaluations: readonly TrackEvaluation[],
+  suiteDeadlineBreached = false,
+  suiteElapsedMs?: number,
 ): GuardSummary {
   const timeoutTracks = runs.filter((r) => r.timedOut).length
-  const failedTracks = evaluations.filter((e) => !e.passed).length + timeoutTracks
+  const failedTrackIds = new Set([
+    ...evaluations.filter((e) => !e.passed).map((e) => e.trackId),
+    ...runs.filter((r) => r.timedOut || r.exitCode !== 0).map((r) => r.trackId),
+  ])
   const governed = evaluations.reduce(
     (sum, e) => sum + e.rules.reduce((s, r) => s + r.governed.length, 0),
     0,
@@ -78,17 +87,22 @@ export function summarize(
   )
   return {
     totalTracks: Math.max(runs.length, evaluations.length),
-    failedTracks,
+    failedTracks: failedTrackIds.size + (suiteDeadlineBreached && failedTrackIds.size === 0 ? 1 : 0),
     timeoutTracks,
     governed,
     overBudget,
+    suiteDeadlineBreached,
+    suiteElapsedMs,
   }
 }
 
 export function formatSummary(summary: GuardSummary, suiteDeadlineMs: number): string {
+  const suite = summary.suiteDeadlineBreached && summary.suiteElapsedMs !== undefined
+    ? `${ms(suiteDeadlineMs)} BREACHED after ${ms(summary.suiteElapsedMs)}`
+    : ms(suiteDeadlineMs)
   return [
     `test-duration: ${summary.totalTracks} tracks, ${summary.failedTracks} failing, ${summary.timeoutTracks} timed out`,
     `  governed (allowlisted) slow tests: ${summary.governed}  | over-budget (not allowlisted): ${summary.overBudget}`,
-    `  suite deadline: ${ms(suiteDeadlineMs)}`,
+    `  suite deadline: ${suite}`,
   ].join('\n')
 }
