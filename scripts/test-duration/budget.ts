@@ -152,6 +152,8 @@ export function evaluateTrack(track: TrackConfig, cases: readonly TestCase[], to
       d.expiredAllowlist.length > 0 ||
       d.percentileViolation !== undefined,
   )
-  const passed = failedTests.length === 0 && !ruleFailing
+  // An enforced track with a parseable but empty report produced no evidence;
+  // treat it as failed so a broken producer cannot fake green.
+  const passed = cases.length > 0 && failedTests.length === 0 && !ruleFailing
   return { trackId: track.id, enforce: true, total: cases.length, failedTests, rules: diagnoses, passed }
 }
