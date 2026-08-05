@@ -37,8 +37,17 @@ public sealed class AgentJobSubagentTerminalHandler : ICloudEventHandler
         var claim = await child.ClaimSubagentTerminalReportAsync(
             new ClaimSubagentTerminalReportCommand(report.EdgeId, report.ChildLaunchJobId));
         if (claim.Disposition is SubagentTerminalReportClaimDisposition.Suppressed
-            or SubagentTerminalReportClaimDisposition.Delivered)
+            or SubagentTerminalReportClaimDisposition.Delivered
+            or SubagentTerminalReportClaimDisposition.Rejected)
+        {
+            // Suppressed/Delivered settle an already-resolved report. Rejected
+            // means no attached parent link: the delegation was never accepted
+            // (reservation rejected, aborted before acceptance, or a historical
+            // event), so there is no delivery obligation and no parent Input
+            // may be appended. Returning here settles the event for good
+            // instead of masking an error or leaving an unbounded retry.
             return;
+        }
 
         var key = SubagentTerminalReportIdempotencyKeys.For(
             report.EdgeId,
