@@ -1,4 +1,4 @@
-import type { AdapterTransport, AdapterSession, Delivery, DeliveryAck, IngressResult, InteractionResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, InteractionResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef } from "./types.js"
 
 export interface HttpTransportOptions {
   readonly serverUrl: string
@@ -12,54 +12,59 @@ export class HttpAdapterTransport implements AdapterTransport {
 
   constructor(private readonly options: HttpTransportOptions) {
     this.request = options.fetch ?? fetch
-    this.baseUrl = options.serverUrl.replace(/\/$/, "")
+    this.baseUrl = loopbackBaseUrl(options.serverUrl)
   }
 
-  discoverConnections(signal: AbortSignal) {
+  discover(signal: AbortSignal) {
     return Promise.all([
       this.get<SlackConnectionRef[]>("/api/slack-connections/adapter", signal),
       this.get<SlackManagerRef[]>("/api/slack-manager/adapter", signal),
-    ]).then(([connections, managers]) => [...connections, ...managers])
+    ]).then(([connections, managers]) => [
+      ...connections.map(connectionTarget),
+      ...managers.map(managerTarget),
+    ])
   }
 
-  lease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal) {
+  acquireLease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal) {
+    return this.postTarget<AdapterLease | null>(ref, "leases/acquire", { adapterId }, signal)
+  }
+
+  renewLease(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal) {
+    return this.postTarget<AdapterLease | null>(ref, `leases/${encodeURIComponent(leaseId)}/renew`, { adapterId }, signal)
+  }
+
+  async reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string, signal: AbortSignal) {
+    await this.postTarget(ref, `leases/${encodeURIComponent(leaseId)}/hello`, { appId }, signal)
+  }
+
+  ingress(ref: SlackAdapterTarget, leaseId: string, envelope: SlackEnvelope, signal: AbortSignal) {
+    return this.postTarget<IngressResult>(ref, `leases/${encodeURIComponent(leaseId)}/ingress`, envelope, signal)
+  }
+
+  interaction(ref: SlackAdapterTarget, leaseId: string, envelope: SlackInteractionEnvelope, signal: AbortSignal) {
+    return this.postTarget<InteractionResult>(ref, `leases/${encodeURIComponent(leaseId)}/interactions`, envelope, signal)
+  }
+
+  claimDelivery(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal) {
+    return this.postTarget<Delivery | null>(ref, `leases/${encodeURIComponent(leaseId)}/deliveries/claim`, { adapterId }, signal)
+  }
+
+  claimUncertainDelivery(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal) {
+    return this.postTarget<Delivery | null>(ref, `leases/${encodeURIComponent(leaseId)}/deliveries/claim-uncertain`, { adapterId }, signal)
+  }
+
+  async ackDelivery(ref: SlackAdapterTarget, leaseId: string, ack: DeliveryAck, signal: AbortSignal) {
+    await this.postTarget(ref, `leases/${encodeURIComponent(leaseId)}/deliveries/ack`, ack, signal)
+  }
+
+  private postTarget<T>(ref: SlackAdapterTarget, route: string, body: unknown, signal: AbortSignal): Promise<T> {
     return isManagerTarget(ref)
-      ? this.postManager<AdapterSession>(ref, "session", { adapterId }, signal)
-      : this.postConnection<AdapterSession>(ref, "adapter-session", { adapterId }, signal)
-  }
-
-  ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal) {
-    if (isManagerTarget(ref)) throw new Error("Manager targets do not accept Connection ingress")
-    return this.postConnection<IngressResult>(ref, "ingress", envelope, signal)
-  }
-
-  interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal) {
-    if (isManagerTarget(ref)) throw new Error("Manager targets do not accept Connection interactions")
-    return this.postConnection<InteractionResult>(ref, "interactions", envelope, signal)
-  }
-
-  claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal) {
-    return isManagerTarget(ref)
-      ? this.postManager<Delivery | null>(ref, "deliveries/claim", { adapterId }, signal)
-      : this.postConnection<Delivery | null>(ref, "deliveries/claim", { adapterId }, signal)
-  }
-
-  claimUncertainDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal) {
-    return isManagerTarget(ref)
-      ? this.postManager<Delivery | null>(ref, "deliveries/claim-uncertain", { adapterId }, signal)
-      : this.postConnection<Delivery | null>(ref, "deliveries/claim-uncertain", { adapterId }, signal)
-  }
-
-  async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, signal: AbortSignal) {
-    if (isManagerTarget(ref)) {
-      await this.postManager(ref, "deliveries/ack", ack, signal)
-      return
-    }
-    await this.postConnection(ref, "deliveries/ack", ack, signal)
+      ? this.postManager(ref, route, body, signal)
+      : this.postConnection(ref, route, body, signal)
   }
 
   private async postConnection<T>(ref: SlackConnectionRef, route: string, body: unknown, signal: AbortSignal): Promise<T> {
-    const response = await this.request(`${this.baseUrl}/api/projects/${encodeURIComponent(ref.projectId)}/slack-connections/${encodeURIComponent(ref.connectionId)}/${route}`, {
+    const response = await this.request(`${this.baseUrl}/api/projects/${encodeURIComponent(ref.projectId)}/slack-connections/${encodeURIComponent(ref.connectionId)}/adapter/${route}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -94,9 +99,9 @@ export class HttpAdapterTransport implements AdapterTransport {
 
   private async read<T>(response: Response): Promise<T> {
     const text = await response.text()
+    if (!response.ok) throw new Error(`Slack adapter request failed: ${response.status}`)
     let payload: unknown = null
     if (text) payload = JSON.parse(text) as unknown
-    if (!response.ok) throw new Error(`Slack adapter request failed: ${response.status} ${text}`)
     if (!isRecord(payload) || payload.success !== true) throw new Error("Slack adapter returned an unsuccessful response")
     return payload.data as T
   }
@@ -108,4 +113,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
   return value.ownerKind === "manager"
+}
+
+function connectionTarget(value: SlackConnectionRef): SlackConnectionRef {
+  if (!isRecord(value) || typeof value.projectId !== "string" || typeof value.connectionId !== "string")
+    throw new Error("Slack adapter discovery returned an invalid Connection target")
+  return { projectId: value.projectId, connectionId: value.connectionId }
+}
+
+function managerTarget(value: SlackManagerRef): SlackManagerRef {
+  if (!isRecord(value) || value.ownerKind !== "manager" || typeof value.enrollmentId !== "string" || typeof value.workspaceTeamId !== "string")
+    throw new Error("Slack adapter discovery returned an invalid Manager target")
+  return {
+    ownerKind: "manager",
+    enrollmentId: value.enrollmentId,
+    workspaceTeamId: value.workspaceTeamId,
+  }
+}
+
+function loopbackBaseUrl(value: string): string {
+  const url = new URL(value)
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !isLoopbackHost(url.hostname))
+    throw new Error("Slack adapter Server URL must be loopback")
+  return url.toString().replace(/\/$/, "")
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  if (hostname === "localhost" || hostname === "[::1]") return true
+  const octets = hostname.split(".")
+  return octets.length === 4
+    && octets[0] === "127"
+    && octets.every((octet) => /^\d+$/.test(octet) && Number(octet) <= 255)
 }

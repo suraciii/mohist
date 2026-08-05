@@ -47,7 +47,9 @@ vi.mock("@slack/socket-mode", () => ({
 
     async start() {
       this.starts += 1
+      this.emit("ws_message", JSON.stringify({ type: "hello", app_id: "A1" }), false)
       this.emit("connected")
+      return { url: "wss://socket.test" }
     }
 
     async disconnect() {
@@ -123,10 +125,10 @@ function compositionServerFetch(withManagerDelivery = true): typeof fetch {
       data = [{ projectId: "p", connectionId: "c" }]
     } else if (url.endsWith("/api/slack-manager/adapter")) {
       data = [{ ownerKind: "manager", enrollmentId: "m", workspaceTeamId: "T" }]
-    } else if (url.endsWith("/api/projects/p/slack-connections/c/adapter-session")) {
-      data = { adapterId: "a", appToken: "xapp-c", botToken: "xoxb-c" }
-    } else if (url.endsWith("/api/slack-manager/adapter/m/session")) {
-      data = { adapterId: "a", ownerKind: "manager", workspaceTeamId: "T", botToken: "xoxb-manager" }
+    } else if (url.endsWith("/api/projects/p/slack-connections/c/adapter/leases/acquire")) {
+      data = { kind: "runtime", leaseId: "lease-c", appToken: "xapp-c", botToken: "xoxb-c" }
+    } else if (url.endsWith("/api/slack-manager/adapter/m/leases/acquire")) {
+      data = { kind: "runtime", leaseId: "lease-m", appToken: "xapp-m", botToken: "xoxb-manager" }
     } else if (url.endsWith("/deliveries/claim-uncertain")) {
       data = null
     } else if (url.endsWith("/deliveries/claim")) {
@@ -235,8 +237,8 @@ describe("mohist-slack CLI composition", () => {
         data = []
       } else if (url.endsWith("/api/slack-manager/adapter")) {
         data = [manager]
-      } else if (url.endsWith("/session")) {
-        data = { adapterId: "adapter-manager", ownerKind: "manager", workspaceTeamId: manager.workspaceTeamId, botToken: managerCredential }
+      } else if (url.endsWith("/leases/acquire")) {
+        data = { kind: "runtime", leaseId: "lease-manager", appToken: "xapp-manager", botToken: managerCredential }
       } else if (url.endsWith("/deliveries/claim-uncertain")) {
         data = null
       } else if (url.endsWith("/deliveries/claim")) {
@@ -263,7 +265,7 @@ describe("mohist-slack CLI composition", () => {
     const controller = new AbortController()
     const adapter = createSlackAdapter({
       adapterId: "adapter-manager",
-      serverUrl: "http://server",
+      serverUrl: "http://localhost",
       operatorToken: "test-operator",
       serverFetch,
       slackFetch,
@@ -289,7 +291,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-manager",
       providerMessageIdentity: { conversationId: "D_MANAGER", messageTs: "1700000000.001" },
     }])
-    expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)
+    expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/leases/lease-manager/deliveries/ack"))).toBe(true)
     controller.abort()
     await adapter.stop()
     expect(slackSdkMocks.proxyCloseCalls).toBe(0)
@@ -299,7 +301,7 @@ describe("mohist-slack CLI composition", () => {
     const controller = new AbortController()
     const adapter = createSlackAdapter({
       adapterId: "adapter-proxy",
-      serverUrl: "http://server",
+      serverUrl: "http://localhost",
       operatorToken: "test-operator",
       slackProxyUrl: "http://proxy.test:3128",
       serverFetch: compositionServerFetch(),
@@ -333,7 +335,7 @@ describe("mohist-slack CLI composition", () => {
     const controller = new AbortController()
     const adapter = createSlackAdapter({
       adapterId: "adapter-proxy-reconnect",
-      serverUrl: "http://server",
+      serverUrl: "http://localhost",
       operatorToken: "test-operator",
       slackProxyUrl: "http://proxy.test:3128",
       serverFetch: compositionServerFetch(false),
@@ -361,7 +363,7 @@ describe("mohist-slack CLI composition", () => {
     const controller = new AbortController()
     const adapter = createSlackAdapter({
       adapterId: "adapter-direct",
-      serverUrl: "http://server",
+      serverUrl: "http://localhost",
       operatorToken: "test-operator",
       serverFetch: compositionServerFetch(),
       heartbeatIntervalMs: 60_000,
@@ -372,7 +374,10 @@ describe("mohist-slack CLI composition", () => {
     await adapter.start(controller.signal)
 
     expect(slackSdkMocks.proxyUrls).toEqual([])
-    expect(slackSdkMocks.socketOptions).toEqual([{ appToken: "xapp-c" }])
+    expect(slackSdkMocks.socketOptions).toEqual([
+      { appToken: "xapp-c", dispatcher: undefined, autoReconnectEnabled: false },
+      { appToken: "xapp-m", dispatcher: undefined, autoReconnectEnabled: false },
+    ])
     expect(slackSdkMocks.webOptions).toHaveLength(2)
     expect(slackSdkMocks.webOptions.every((options) => options.fetch === undefined)).toBe(true)
     expect(slackSdkMocks.undiciFetchCalls).toEqual([])

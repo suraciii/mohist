@@ -1,4 +1,4 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, RuntimeLease, SlackAdapterTarget, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 import { slackLogger } from "./logger.js"
 
 export interface SlackAdapterOptions {
@@ -15,6 +15,7 @@ export interface SlackAdapterOptions {
 
 interface ConnectionRuntime {
   readonly target: SlackAdapterTarget
+  lease: RuntimeLease
   socket?: SocketClient
   web?: SlackWebClient
   heartbeatTimer?: ReturnType<typeof setInterval>
@@ -58,25 +59,35 @@ export class SlackAdapter {
 
   async refreshConnections(signal: AbortSignal): Promise<void> {
     if (this.stopped || signal.aborted) return
-    const connections = await this.options.transport.discoverConnections(signal)
-    const currentKeys = new Set(connections.map(connectionKey))
+    const targets = await this.options.transport.discover(signal)
+    const currentKeys = new Set(targets.map(connectionKey))
     for (const [key, runtime] of this.runtimes) {
       if (!currentKeys.has(key)) {
         void this.disconnect(runtime)
         this.runtimes.delete(key)
       }
     }
-    await Promise.all(connections.map(async (ref) => {
+    await Promise.all(targets.map(async (ref) => {
       const key = connectionKey(ref)
       if (this.runtimes.has(key)) return
-      const runtime: ConnectionRuntime = { target: ref, draining: false }
-      this.runtimes.set(key, runtime)
       try {
-        await this.connect(runtime, signal)
+        const lease = await this.options.transport.acquireLease(ref, this.options.adapterId, signal)
+        if (!lease) return
+        if (lease.kind === "validation") {
+          await this.validate(ref, lease, signal)
+          return
+        }
+        const runtime: ConnectionRuntime = { target: ref, lease, draining: false }
+        this.runtimes.set(key, runtime)
+        try {
+          await this.startRuntime(runtime, signal)
+        } catch (error) {
+          await this.removeRuntime(runtime)
+          throw error
+        }
       } catch (error) {
         this.log.error("target connection failed", { target: key, reason: safeErrorMessage(error) })
         this.runtimes.delete(key)
-        void this.disconnect(runtime)
       }
     }))
   }
@@ -94,33 +105,22 @@ export class SlackAdapter {
     }
   }
 
-  private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
-    const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
-    if (isManagerTarget(runtime.target)) {
-      if (!session.botToken) throw new Error("Manager lease did not return Slack credentials")
-      runtime.web = this.options.webFactory(session.botToken, runtime.target)
-    } else {
-      if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
-      runtime.web = this.options.webFactory(session.botToken, runtime.target)
-      runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
-      this.observeSocket(runtime.socket, runtime.target)
-      runtime.socket.on("slack_event", async (event) => {
-        const interaction = isSlackInteraction(event.body)
-        const eventType = slackEventType(event.body)
-        const target = connectionKey(runtime.target)
-        this.log.info("envelope received", { target, event: eventType })
-        try {
-          await this.handleEvent(runtime, event.body, event.ack, eventType, signal)
-        } catch (error) {
-          this.log.error(
-            interaction
-              ? "interaction processing failed after acknowledgement"
-              : "event handling failed before acknowledgement",
-            { target, event: eventType, reason: safeErrorMessage(error) },
-          )
-        }
-      })
-      await runtime.socket.start()
+  private async validate(target: SlackAdapterTarget, lease: Extract<AdapterLease, { kind: "validation" }>, signal: AbortSignal) {
+    const socket = this.options.socketFactory(lease.appToken, target)
+    try {
+      this.observeSocket(socket, target)
+      const hello = await socket.start()
+      await this.options.transport.reportHello(target, lease.leaseId, hello.appId, signal)
+    } finally {
+      await socket.disconnect?.()
+    }
+  }
+
+  private async startRuntime(runtime: ConnectionRuntime, signal: AbortSignal) {
+    await this.openRuntimeSocket(runtime, signal)
+    if (this.runtimes.get(connectionKey(runtime.target)) !== runtime) {
+      await this.disconnect(runtime)
+      return
     }
     const heartbeatMs = Math.max(1_000, this.options.heartbeatIntervalMs ?? 15_000)
     const pollMs = Math.max(100, this.options.deliveryPollIntervalMs ?? 1_000)
@@ -129,16 +129,46 @@ export class SlackAdapter {
     await this.drain(runtime, signal)
   }
 
+  private async openRuntimeSocket(runtime: ConnectionRuntime, signal: AbortSignal) {
+    runtime.web = this.options.webFactory(runtime.lease.botToken, runtime.target)
+    const socket = this.options.socketFactory(runtime.lease.appToken, runtime.target)
+    runtime.socket = socket
+    this.observeSocket(socket, runtime.target)
+    socket.on("slack_event", async (event) => {
+      const interaction = isSlackInteraction(event.body)
+      const eventType = slackEventType(event.body)
+      const target = connectionKey(runtime.target)
+      if (this.stopped || signal.aborted || this.runtimes.get(target) !== runtime || runtime.socket !== socket) return
+      this.log.info("envelope received", { target, event: eventType })
+      try {
+        await this.handleEvent(runtime, event.body, event.ack, eventType, signal)
+      } catch (error) {
+        this.log.error(
+          interaction
+            ? "interaction processing failed after acknowledgement"
+            : "event handling failed before acknowledgement",
+          { target, event: eventType, reason: safeErrorMessage(error) },
+        )
+      }
+    })
+    await socket.start()
+  }
+
   private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
-    if (this.stopped || signal.aborted) return
+    const key = connectionKey(runtime.target)
+    if (this.stopped || signal.aborted || this.runtimes.get(key) !== runtime) return
     try {
-      const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
-      if (isManagerTarget(runtime.target)) {
-        runtime.web = session.botToken
-          ? this.options.webFactory(session.botToken, runtime.target)
-          : undefined
-      } else if (session.botToken) {
-        runtime.web = this.options.webFactory(session.botToken, runtime.target)
+      const lease = await this.options.transport.renewLease(runtime.target, runtime.lease.leaseId, this.options.adapterId, signal)
+      if (this.runtimes.get(key) !== runtime) return
+      if (!lease || lease.kind !== "runtime") {
+        await this.removeRuntime(runtime)
+        return
+      }
+      const credentialsChanged = runtime.lease.appToken !== lease.appToken || runtime.lease.botToken !== lease.botToken
+      runtime.lease = lease
+      if (credentialsChanged) {
+        await runtime.socket?.disconnect?.()
+        await this.openRuntimeSocket(runtime, signal)
       }
       await this.drain(runtime, signal)
     } catch (error) {
@@ -147,10 +177,16 @@ export class SlackAdapter {
         target: connectionKey(runtime.target),
         reason: safeErrorMessage(error),
       })
+      await this.removeRuntime(runtime)
     }
   }
 
-  private observeSocket(socket: SocketClient, target: SlackConnectionRef) {
+  private async removeRuntime(runtime: ConnectionRuntime): Promise<void> {
+    this.runtimes.delete(connectionKey(runtime.target))
+    await this.disconnect(runtime)
+  }
+
+  private observeSocket(socket: SocketClient, target: SlackAdapterTarget) {
     const key = connectionKey(target)
     for (const state of ["connecting", "connected", "reconnecting", "disconnected"] as const) {
       socket.onState?.(state, () => this.log.info("socket state changed", { target: key, state }))
@@ -171,16 +207,20 @@ export class SlackAdapter {
     if (interaction) await ack()
     await this.acquire(signal)
     const target = connectionKey(runtime.target)
+    if (this.stopped || signal.aborted || this.runtimes.get(target) !== runtime) {
+      this.inFlight -= 1
+      return
+    }
     this.log.info("envelope forwarding", { target, event: eventType })
     try {
       if (interaction) {
-        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
+        await this.options.transport.interaction(runtime.target, runtime.lease.leaseId, normalizeSlackInteraction(body), signal)
         this.log.info("interaction forwarded", { target, event: eventType })
         await this.drain(runtime, signal)
         return
       }
       const envelope = normalizeSocketEvent(body)
-      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
+      const result = await this.options.transport.ingress(runtime.target, runtime.lease.leaseId, envelope, signal)
       this.log.info("ingress accepted", { target, event: eventType, kind: result.kind })
       await this.renderUserFacingRejection(runtime, envelope, result, signal)
       await ack()
@@ -208,18 +248,21 @@ export class SlackAdapter {
   }
 
   private async drain(runtime: ConnectionRuntime, signal: AbortSignal) {
-    if (runtime.draining || this.stopped || !runtime.web) return
+    const key = connectionKey(runtime.target)
+    if (runtime.draining || this.stopped || this.runtimes.get(key) !== runtime || !runtime.web) return
+    const { leaseId } = runtime.lease
+    const web = runtime.web
     runtime.draining = true
     try {
-      await this.drainUncertain(runtime, signal)
+      await this.drainUncertain(runtime, leaseId, web, signal)
       while (!signal.aborted) {
-        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, leaseId, this.options.adapterId, signal)
         if (!delivery) break
         try {
-          const ack = await this.mutateDelivery(runtime.web, delivery)
-          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+          const ack = await this.mutateDelivery(web, delivery)
+          await this.options.transport.ackDelivery(runtime.target, leaseId, withAdapterId(ack, this.options.adapterId), signal)
         } catch (error) {
-          await this.options.transport.ackDelivery(runtime.target, withAdapterId({
+          await this.options.transport.ackDelivery(runtime.target, leaseId, withAdapterId({
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
@@ -378,17 +421,17 @@ export class SlackAdapter {
     return await this.reconcile(web, delivery)
   }
 
-  private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
+  private async drainUncertain(runtime: ConnectionRuntime, leaseId: string, web: SlackWebClient, signal: AbortSignal) {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, leaseId, this.options.adapterId, signal)
       if (!delivery) return
       try {
-        const ack = await this.reconcile(runtime.web, delivery)
-        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+        const ack = await this.reconcile(web, delivery)
+        await this.options.transport.ackDelivery(runtime.target, leaseId, withAdapterId(ack, this.options.adapterId), signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
-        await this.options.transport.ackDelivery(runtime.target, withAdapterId({
+        await this.options.transport.ackDelivery(runtime.target, leaseId, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
@@ -425,13 +468,15 @@ function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {
   const event = isRecord(body) && isRecord(body.event) ? body.event : body
   if (!isRecord(event)) throw new Error("Slack Socket Mode event is malformed")
+  const apiAppId = stringValue(event.api_app_id) ?? stringValue(body, "api_app_id")
   const teamId = stringValue(event.team_id) ?? stringValue(body, "team_id")
   const conversationId = stringValue(event.channel)
   const messageTs = stringValue(event.ts) ?? stringValue(event.event_ts)
-  if (!teamId || !conversationId || !messageTs) throw new Error("Slack event is missing its stable identity")
+  if (!apiAppId || !teamId || !conversationId || !messageTs) throw new Error("Slack event is missing its stable identity")
   const senderSlackUserId = stringValue(event.user)
   return {
     eventType: stringValue(event.type) ?? "message",
+    apiAppId,
     isDirectMessage: event.channel_type === "im" || conversationId.startsWith("D"),
     teamId,
     conversationId,
@@ -448,6 +493,7 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
 export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelope {
   const payload = interactionPayload(body)
   if (!payload || payload.type !== "block_actions") throw new Error("Slack interaction is malformed")
+  const apiAppId = stringValue(payload.api_app_id)
   const team = isRecord(payload.team) ? stringValue(payload.team.id) : stringValue(payload, "team_id")
   const user = isRecord(payload.user) ? stringValue(payload.user.id) : null
   const container = isRecord(payload.container) ? payload.container : undefined
@@ -458,10 +504,11 @@ export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelo
   const interactionId = stringValue(payload.trigger_id) ?? stringValue(action?.action_ts) ?? stringValue(payload, "event_id")
   const actionId = stringValue(action?.action_id)
   const actionValue = stringValue(action?.value)
-  if (!team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
+  if (!apiAppId || !team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
     throw new Error("Slack interaction is missing its stable identity")
   return {
     eventType: "block_actions",
+    apiAppId,
     interactionId,
     teamId: team,
     conversationId,
