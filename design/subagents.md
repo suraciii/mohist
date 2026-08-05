@@ -213,6 +213,7 @@ workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
 | parent binding 缺失、unknown、过期或没有可用 Runner | `parent_runner_binding_unavailable`；request fence 保持 `validation-pending`，不创建 child；同 key 重试会重新确认。 |
 | target 不在 snapshot | terminal pre-plan result `subagent_not_allowed`；不创建 child。 |
 | target 已 archive | terminal pre-plan result `target_agent_archived`；不创建 child。 |
+| target AgentReadiness 为 `NeedsSetup` | terminal pre-plan result `agent_needs_setup`；不创建 child。 |
 | 有尚未达到 terminal outcome 的 cascade stop | `parent_tree_stop_in_progress`；request fence 保持 `validation-pending`，不创建 child；同 key 重试会重新确认。 |
 
 Runner 离线但 binding 仍是当前事实不构成换 Runner 的许可；它仍是
@@ -239,14 +240,15 @@ SpawnRequestFence
 它始终冻结 caller/key/fingerprint，不创建也不预留 Job、Session、Input、Turn、edge 或
 reservation identity。`validation-pending` 是尚未接受 child 的可重试 observation：相同
 fingerprint 的 replay 重新验证当前事实，并在条件恢复时推进到同一个 request 的 admitted
-plan。`parent_runner_binding_unavailable`、未知或暂时无法确认的普通 launch readiness，以及
-`parent_tree_stop_in_progress` 都只能保留这个 outcome；它们不能把同一个 key 冻结为
-rejection。
+plan。`parent_runner_binding_unavailable`、`AgentReadiness.Unknown` 或其它暂时无法确认的普通
+launch readiness，以及 `parent_tree_stop_in_progress` 都只能保留这个 outcome；它们不能把同一
+个 key 冻结为 rejection。
 
 只有确定的 canonical/authorization invalidity 才能从这里推进为 `preplan-rejected`：caller
 不属于该 Project 或不是可委托的 Mohist Agent Session、parent 没有 authoritative workDir、
 target ref 不能解析为 parent immutable snapshot 中的 Agent ID、target 不在该 snapshot，或 target
-已 archive。相同 fingerprint 的 replay 固定返回这个 terminal pre-plan result；不同 fingerprint
+已 archive，或 target AgentReadiness 为 `NeedsSetup`（例如 Instructions、Model 或 Runtime 无效
+或缺失）。相同 fingerprint 的 replay 固定返回这个 terminal pre-plan result；不同 fingerprint
 始终返回 HTTP 409 idempotency conflict。
 
 只有 request fence validation 通过后，coordinator 才把它推进为带 child identities 的 launch
@@ -498,10 +500,11 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 - SpawnOrigin 的 parent identity、缺失/unknown/stale binding 的 `validation-pending` observation、
   同 key revalidation、authoritative workDir 的 terminal pre-plan rejection、workDir inheritance 与
   exact Runner pin，且 Job admission 不会改选其它 eligible Runner；
-- terminal pre-plan workDir/authorization/archive rejection 只持久化 request fence、同 key stable
-  replay、mismatched payload conflict，以及每个 temporary pre-plan observation 都以同 key
-  revalidate，不留任何 child artifact；post-plan reservation/final-check rejection 的 Job cancelled、
-  initial Turn cancelled、Session idle、无 visible link/input/callback 和 replay must-not-submit；
+- terminal pre-plan workDir/authorization/archive/NeedsSetup rejection（`agent_needs_setup`）只持久化
+  request fence、同 key stable replay、mismatched payload conflict，以及 `AgentReadiness.Unknown` 和
+  每个 temporary pre-plan observation 都以同 key revalidate，不留任何 child artifact；post-plan
+  reservation/final-check rejection 的 Job cancelled、initial Turn cancelled、Session idle、无 visible
+  link/input/callback 和 replay must-not-submit；
 - coordinator 每个 durable fence 的 activation loss/retry，确保一个 Job、Session、Input、
   Turn、edge 和 dispatch，或同一 durable rejection；
 - 单 parent、无 reparent/cycle、detach 后 subtree query 的 indexed read cost、batch、revision-
