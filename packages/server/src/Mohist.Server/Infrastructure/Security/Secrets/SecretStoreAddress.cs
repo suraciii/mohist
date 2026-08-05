@@ -97,8 +97,10 @@ public readonly record struct SecretStoreAddress
                 or SecretKind.AppToken
                 or SecretKind.BotToken
                 or SecretKind.ClientSecret
-                or SecretKind.SigningSecret,
-            SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken,
+                or SecretKind.SigningSecret
+                or SecretKind.PreviousBotToken
+                or SecretKind.PreviousAppToken,
+            SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken or SecretKind.PreviousBotToken or SecretKind.PreviousAppToken,
             _ => false,
         };
         if (!valid)

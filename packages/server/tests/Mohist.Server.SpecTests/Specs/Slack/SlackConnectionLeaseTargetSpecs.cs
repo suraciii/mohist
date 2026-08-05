@@ -46,7 +46,7 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
         _agentApps = new ManagedSlackAgentAppStore(_factory, _time);
         _binding = new SlackAgentAppBindingService(_factory, _connections, _time);
         _provider = new EnrollmentSlackLeaseTargetProvider(
-            new SlackWorkspaceEnrollmentStore(_factory, _time), _agentApps, _binding, _factory);
+            new SlackWorkspaceEnrollmentStore(_factory, _time), _agentApps, _binding, _factory, _secrets);
         _leases = new SlackAdapterLeaseService(
             new SlackAdapterLeaseStore(_factory), _provider, new SlackLeaseSecretResolver(_secrets), _time);
         return ValueTask.CompletedTask;
@@ -101,6 +101,32 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
         Assert.Equal(SlackHelloOutcome.Verified, outcome);
         await AssertAgentAppStateAsync(seeded.AgentAppId, SlackRuntimeCredentialValidationState.Verified, SlackAgentAppBindingState.Bound);
         await AssertConnectionIdentityAsync(seeded.ConnectionId, seeded.AppId);
+    }
+
+    [Fact]
+    public async Task A_matching_hello_clears_a_rotation_parked_previous_pair()
+    {
+        var seeded = await SeedAsync(SlackRuntimeCredentialValidationState.Candidate, bound: false);
+        var targetRef = seeded.TargetRef;
+
+        // A ready rotation in flight parks the previous verified pair while the
+        // new candidate awaits its Socket hello; the confirmed hello must drop it.
+        await _secrets.StoreAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(seeded.AgentAppId, SecretKind.PreviousBotToken),
+            Encoding.UTF8.GetBytes("xoxb-previous"));
+        await _secrets.StoreAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(seeded.AgentAppId, SecretKind.PreviousAppToken),
+            Encoding.UTF8.GetBytes("xapp-previous"));
+
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", targetRef, "adapter-A");
+        var outcome = await _leases.ReportHelloAsync("operator-1", targetRef, validation!.LeaseId, seeded.AppId);
+
+        Assert.Equal(SlackHelloOutcome.Verified, outcome);
+        await AssertAgentAppStateAsync(seeded.AgentAppId, SlackRuntimeCredentialValidationState.Verified, SlackAgentAppBindingState.Bound);
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(seeded.AgentAppId, SecretKind.PreviousBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(seeded.AgentAppId, SecretKind.PreviousAppToken)));
     }
 
     [Fact]

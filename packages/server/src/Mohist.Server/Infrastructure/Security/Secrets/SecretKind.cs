@@ -9,6 +9,8 @@ public enum SecretKind
     SigningSecret = 4,
     ConfigurationAccessToken = 5,
     ConfigurationRefreshToken = 6,
+    PreviousBotToken = 7,
+    PreviousAppToken = 8,
 }
 
 public static class SecretKinds
@@ -20,6 +22,8 @@ public static class SecretKinds
     public const string SigningSecret = "signingSecret";
     public const string ConfigurationAccessToken = "configurationAccessToken";
     public const string ConfigurationRefreshToken = "configurationRefreshToken";
+    public const string PreviousBotToken = "previousBotToken";
+    public const string PreviousAppToken = "previousAppToken";
 
     public static string ToWire(SecretKind kind) => kind switch
     {
@@ -30,6 +34,8 @@ public static class SecretKinds
         SecretKind.SigningSecret => SigningSecret,
         SecretKind.ConfigurationAccessToken => ConfigurationAccessToken,
         SecretKind.ConfigurationRefreshToken => ConfigurationRefreshToken,
+        SecretKind.PreviousBotToken => PreviousBotToken,
+        SecretKind.PreviousAppToken => PreviousAppToken,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -57,6 +63,12 @@ public static class SecretKinds
                 return true;
             case ConfigurationRefreshToken:
                 kind = SecretKind.ConfigurationRefreshToken;
+                return true;
+            case PreviousBotToken:
+                kind = SecretKind.PreviousBotToken;
+                return true;
+            case PreviousAppToken:
+                kind = SecretKind.PreviousAppToken;
                 return true;
             default:
                 kind = default;

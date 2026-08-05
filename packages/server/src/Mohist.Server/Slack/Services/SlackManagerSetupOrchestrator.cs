@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
@@ -112,7 +113,12 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             throw new SlackManagerConflictException(
                 "The Mohist App must be created before providing runtime credentials.",
                 "manager_app_not_created");
-        if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
+
+        // A ready enrollment re-supplying the exact verified credentials is a
+        // no-op; anything else re-validates and rotates through the same
+        // candidate -> Socket hello path as the first provision.
+        if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified
+            && await IsUnchangedRuntimeCredentialsAsync(enrollment.Id, request, ct))
             return await ProjectAsync(enrollment.WorkspaceTeamId, ct);
 
         var verified = await _botIdentity.VerifyAsync(new(request.BotToken), ct);
@@ -122,7 +128,17 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             || verified.BotUserId is null
             || !HasRequiredScopes(verified.GrantedScopes))
         {
-            await DeleteCandidateSecretsAsync(enrollment.Id, ct);
+            if (await HasPreviousRuntimeSecretsAsync(enrollment.Id, ct))
+            {
+                // A rotation was in flight; restore the previous verified pair.
+                await RestorePreviousRuntimeSecretsAsync(enrollment.Id, ct);
+                await _enrollments.CompleteSocketVerificationAsync(enrollment.Id, ct);
+            }
+            else if (enrollment.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified)
+            {
+                await DeleteCandidateSecretsAsync(enrollment.Id, ct);
+            }
+
             return new(
                 enrollment.Id,
                 enrollment.WorkspaceTeamId,
@@ -133,15 +149,28 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 ErrorClass: "runtime_credential_mismatch");
         }
 
-        await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
-
-        if (enrollment.RuntimeCredentialValidationState
-            is SlackRuntimeCredentialValidationState.NotProvided
-            or SlackRuntimeCredentialValidationState.Candidate
-            or SlackRuntimeCredentialValidationState.Failed)
+        if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
         {
+            // Rotate: park the verified pair in the previous slot before the
+            // new candidate overwrites the runtime addresses, so the old
+            // credentials survive until the new Socket hello verifies.
+            await PreserveRuntimeSecretsAsync(enrollment.Id, ct);
+            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
             await _enrollments.StageManagerRuntimeCredentialsAsync(enrollment.Id, verified.BotUserId!, ct);
             await _enrollments.ApplySocketValidationAsync(enrollment.Id, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
+        }
+        else
+        {
+            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
+
+            if (enrollment.RuntimeCredentialValidationState
+                is SlackRuntimeCredentialValidationState.NotProvided
+                or SlackRuntimeCredentialValidationState.Candidate
+                or SlackRuntimeCredentialValidationState.Failed)
+            {
+                await _enrollments.StageManagerRuntimeCredentialsAsync(enrollment.Id, verified.BotUserId!, ct);
+                await _enrollments.ApplySocketValidationAsync(enrollment.Id, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
+            }
         }
 
         return await ProjectAsync(enrollment.WorkspaceTeamId, ct);
@@ -282,6 +311,62 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), ct);
         await _secrets.DeleteAsync(
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), ct);
+    }
+
+    private async Task<bool> IsUnchangedRuntimeCredentialsAsync(
+        string enrollmentId,
+        SlackSetupRuntimeRequest request,
+        CancellationToken ct)
+    {
+        // A pending rotation parks the previous pair in the previous slot;
+        // while it exists the runtime addresses are not the verified pair,
+        // so a resubmission must never be treated as unchanged.
+        if (await HasPreviousRuntimeSecretsAsync(enrollmentId, ct))
+            return false;
+        var storedBot = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), ct);
+        var storedApp = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), ct);
+        return storedBot is not null
+            && storedApp is not null
+            && CryptographicOperations.FixedTimeEquals(storedBot, Encoding.UTF8.GetBytes(request.BotToken.Trim()))
+            && CryptographicOperations.FixedTimeEquals(storedApp, Encoding.UTF8.GetBytes(request.AppLevelToken.Trim()));
+    }
+
+    private async Task<bool> HasPreviousRuntimeSecretsAsync(string enrollmentId, CancellationToken ct) =>
+        await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), ct) is not null;
+
+    private async Task PreserveRuntimeSecretsAsync(string enrollmentId, CancellationToken ct)
+    {
+        var bot = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), ct);
+        var app = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), ct);
+        if (bot is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), bot, ct);
+        if (app is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken), app, ct);
+    }
+
+    private async Task RestorePreviousRuntimeSecretsAsync(string enrollmentId, CancellationToken ct)
+    {
+        var bot = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), ct);
+        var app = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken), ct);
+        if (bot is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), bot, ct);
+        if (app is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), app, ct);
+        await _secrets.DeleteAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken), ct);
+        await _secrets.DeleteAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken), ct);
     }
 
     private static bool HasRequiredScopes(IReadOnlySet<string>? granted) =>

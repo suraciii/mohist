@@ -233,6 +233,118 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal("xoxb-live", runtime.BotToken);
     }
 
+    [Fact]
+    public async Task Verified_agent_app_rotation_stages_new_candidates_and_verifies_the_new_pair()
+    {
+        var (agentAppId, connectionId, appId) = await DriveToVerifiedAsync("xoxb-live", "xapp-live");
+        _botIdentity.Result = VerifiedAgentBot(appId);
+
+        var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-rotated", "xapp-rotated");
+
+        Assert.True(staged.Accepted);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
+        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-rotated", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.PreviousBotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.PreviousAppToken));
+
+        var verified = await _service.ApplySocketValidationAsync(agentAppId, appId);
+
+        Assert.Equal(SlackInstallAgentValidationOutcome.Verified, verified.Outcome);
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, verified.Binding);
+        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-rotated", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousAppToken)));
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == agentAppId);
+            Assert.Equal(SlackRuntimeCredentialValidationState.Verified, row.RuntimeCredentialValidationState);
+            var connection = await db.AgentConnections.SingleAsync(item => item.Id == connectionId);
+            Assert.Equal(appId, connection.AppId);
+            Assert.Equal("U_REVIEW_BOT", connection.BotUserId);
+        }
+    }
+
+    [Fact]
+    public async Task Verified_agent_app_resupplying_the_same_credentials_is_an_idempotent_noop()
+    {
+        var (agentAppId, _, appId) = await DriveToVerifiedAsync("xoxb-live", "xapp-live");
+        var verifyCalls = _botIdentity.Requests.Count;
+        _botIdentity.Result = VerifiedAgentBot(appId);
+
+        var again = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-live", "xapp-live");
+
+        Assert.True(again.Accepted);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Verified, again.RuntimeCredentialValidationState);
+        Assert.Equal(verifyCalls, _botIdentity.Requests.Count);
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
+    }
+
+    [Fact]
+    public async Task Verified_agent_app_rotation_with_mismatched_identity_keeps_the_previous_verified_state()
+    {
+        var (agentAppId, _, _) = await DriveToVerifiedAsync("xoxb-live", "xapp-live");
+        _botIdentity.Result = new SlackBotIdentityVerificationResult(
+            true, WorkspaceTeamId: "T_OTHER", BotUserId: "U_REVIEW_BOT", AppId: "A_OTHER");
+
+        var rejected = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-bad", "xapp-bad");
+
+        Assert.False(rejected.Accepted);
+        Assert.Equal("identity_mismatch", rejected.ErrorClass);
+        Assert.Equal(SlackRuntimeCredentialValidationState.Verified, rejected.RuntimeCredentialValidationState);
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
+    }
+
+    [Fact]
+    public async Task In_flight_agent_app_rotation_with_mismatched_hello_restores_the_previous_verified_pair()
+    {
+        var (agentAppId, connectionId, appId) = await DriveToVerifiedAsync("xoxb-live", "xapp-live");
+        _botIdentity.Result = VerifiedAgentBot(appId);
+        var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-rotated", "xapp-rotated");
+        Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
+
+        var mismatch = await _service.ApplySocketValidationAsync(agentAppId, "A_WRONG_APP");
+
+        Assert.Equal(SlackInstallAgentValidationOutcome.Mismatch, mismatch.Outcome);
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
+        await using (var db = _factory.CreateDbContext())
+        {
+            var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == agentAppId);
+            Assert.Equal(SlackRuntimeCredentialValidationState.Verified, row.RuntimeCredentialValidationState);
+            Assert.Equal(SlackAgentAppBindingState.Bound, row.BindingState);
+            var connection = await db.AgentConnections.SingleAsync(item => item.Id == connectionId);
+            Assert.Equal(appId, connection.AppId);
+            Assert.Equal("U_REVIEW_BOT", connection.BotUserId);
+        }
+    }
+
+    private async Task<(string AgentAppId, string ConnectionId, string AppId)> DriveToVerifiedAsync(string botToken, string appToken)
+    {
+        await SeedAgentAsync(AgentStatus.Active);
+        await SeedEnrollmentAsync("enrollment-1");
+        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+        _botIdentity.Result = VerifiedAgentBot(installed.AgentApp.AppId);
+        var staged = await _service.ProvisionCredentialsAsync(installed.AgentApp.Id, botToken, appToken);
+        Assert.True(staged.Accepted);
+        var verified = await _service.ApplySocketValidationAsync(installed.AgentApp.Id, installed.AgentApp.AppId);
+        Assert.Equal(SlackInstallAgentValidationOutcome.Verified, verified.Outcome);
+        return (installed.AgentApp.Id, installed.Connection.Id, installed.AgentApp.AppId);
+    }
+
+    private static SlackBotIdentityVerificationResult VerifiedAgentBot(string appId) => new(
+        true,
+        WorkspaceTeamId: TeamId,
+        BotUserId: "U_REVIEW_BOT",
+        AppId: appId,
+        GrantedScopes: new HashSet<string>(["chat:write", "users:read"]));
+
     private bool HasCandidateSecretsAsync(string agentAppId) =>
         _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken))
         || _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken));

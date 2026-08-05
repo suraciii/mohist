@@ -56,7 +56,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             _time);
         _leases = new SlackAdapterLeaseService(
             new SlackAdapterLeaseStore(_factory),
-            new EnrollmentSlackLeaseTargetProvider(enrollmentStore, agentApps, binding, _factory),
+            new EnrollmentSlackLeaseTargetProvider(enrollmentStore, agentApps, binding, _factory, _secrets),
             new SlackLeaseSecretResolver(_secrets),
             _time);
     }
@@ -260,6 +260,150 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertEnrollmentRuntimeStateAsync(runtime.EnrollmentId!, SlackRuntimeCredentialValidationState.AwaitingSocket);
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             _enrollments.CompleteSocketVerificationAsync(runtime.EnrollmentId!));
+    }
+
+    [Fact]
+    public async Task Ready_enrollment_resupplying_new_credentials_rotates_and_verifies_the_new_pair()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_ROTATE");
+
+        _botIdentity.Result = VerifiedBot("T_ROTATE", managerAppId);
+        var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_ROTATE", "xoxb-rotated", "xapp-rotated"));
+
+        Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
+        Assert.Equal(SlackSetupNextAction.ReportSocketHello, rotated.NextAction);
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousBotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
+
+        var manager = new SlackLeaseTargetRef.Manager(enrollmentId, "T_ROTATE");
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+        Assert.Equal("xapp-rotated", validation!.AppToken);
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await _leases.ReportHelloAsync("operator-1", manager, validation.LeaseId, managerAppId));
+
+        var ready = await _orchestrator.GetProgressAsync("T_ROTATE");
+        Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
+        Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken)));
+    }
+
+    [Fact]
+    public async Task Ready_enrollment_resupplying_the_same_credentials_is_an_idempotent_noop()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_NOOP");
+        var verifyCalls = _botIdentity.Requests.Count;
+
+        _botIdentity.Result = VerifiedBot("T_NOOP", managerAppId);
+        var again = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_NOOP", "xoxb-runtime", "xapp-candidate"));
+
+        Assert.Equal(SlackSetupPhase.Ready, again.Phase);
+        Assert.Equal(SlackSetupNextAction.Ready, again.NextAction);
+        Assert.Equal(verifyCalls, _botIdentity.Requests.Count);
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
+    }
+
+    [Fact]
+    public async Task Ready_enrollment_rotation_with_mismatched_identity_keeps_the_previous_verified_state()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_BAD_ROTATE");
+
+        _botIdentity.Result = VerifiedBot("T_OTHER", managerAppId);
+        var rejected = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_BAD_ROTATE", "xoxb-bad", "xapp-bad"));
+
+        Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
+        Assert.Equal("runtime_credential_mismatch", rejected.ErrorClass);
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
+    }
+
+    [Fact]
+    public async Task In_flight_rotation_with_mismatched_resupply_restores_the_previous_verified_pair()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_RESTORE");
+        _botIdentity.Result = VerifiedBot("T_RESTORE", managerAppId);
+        var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_RESTORE", "xoxb-rotated", "xapp-rotated"));
+        Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
+
+        _botIdentity.Result = VerifiedBot("T_OTHER", managerAppId);
+        var rejected = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_RESTORE", "xoxb-bad", "xapp-bad"));
+
+        Assert.Equal(SlackSetupPhase.Failed, rejected.Phase);
+        Assert.Equal("runtime_credential_mismatch", rejected.ErrorClass);
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
+    }
+
+    [Fact]
+    public async Task In_flight_rotation_survives_a_mismatched_hello_with_the_previous_pair_intact()
+    {
+        var (enrollmentId, managerAppId) = await DriveToReadyAsync("T_HELLO_ROTATE");
+        _botIdentity.Result = VerifiedBot("T_HELLO_ROTATE", managerAppId);
+        var rotated = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new("T_HELLO_ROTATE", "xoxb-rotated", "xapp-rotated"));
+        Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
+
+        var manager = new SlackLeaseTargetRef.Manager(enrollmentId, "T_HELLO_ROTATE");
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+
+        // A mismatched hello intentionally does not roll back a rotation:
+        // the parked previous pair stays put so the enrollment remains
+        // recoverable until a correct hello or a fresh credential re-supply.
+        Assert.Equal(SlackHelloOutcome.AppIdMismatch,
+            await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, "A_WRONG_APP"));
+        await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousBotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
+    }
+
+    private async Task<(string EnrollmentId, string ManagerAppId)> DriveToReadyAsync(string teamId)
+    {
+        _configurationPort.Enqueue(ConfigurationRotation(teamId));
+        var configuration = await _orchestrator.SupplyConfigurationAsync(
+            new(teamId, new("xoxe-current", "xoxr-current")));
+        _botIdentity.Result = VerifiedBot(teamId, configuration.ManagerAppId!);
+        var runtime = await _orchestrator.SupplyRuntimeCredentialsAsync(
+            new(teamId, "xoxb-runtime", "xapp-candidate"));
+        var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, teamId);
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, configuration.ManagerAppId!));
+        var ready = await _orchestrator.GetProgressAsync(teamId);
+        Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
+        return (runtime.EnrollmentId!, configuration.ManagerAppId!);
+    }
+
+    private async Task AssertRuntimeSecretAsync(string enrollmentId, SecretKind kind, string expected)
+    {
+        var stored = await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, kind));
+        Assert.Equal(expected, stored is null ? null : Encoding.UTF8.GetString(stored));
     }
 
     private static SlackConfigurationCredentialRotationResult ConfigurationRotation(string teamId, DateTimeOffset? expiresAt = null) => new(

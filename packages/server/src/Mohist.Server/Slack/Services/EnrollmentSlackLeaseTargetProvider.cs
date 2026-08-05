@@ -20,7 +20,8 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
     SlackWorkspaceEnrollmentStore enrollments,
     ManagedSlackAgentAppStore agentApps,
     SlackAgentAppBindingService binding,
-    IDbContextFactory<MohistDbContext> dbFactory) : ISlackLeaseTargetProvider, IScopedService
+    IDbContextFactory<MohistDbContext> dbFactory,
+    ISecretStore secrets) : ISlackLeaseTargetProvider, IScopedService
 {
     public async Task<IReadOnlyList<SlackLeaseTarget>> GetTargetsAsync(string operatorId, CancellationToken ct = default)
     {
@@ -55,6 +56,13 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
         switch (targetRef)
         {
             case SlackLeaseTargetRef.Manager manager:
+                // A rotation parks the previous verified pair in the previous slot;
+                // the confirmed hello makes the candidate the runtime pair, so the
+                // parked pair is no longer needed.
+                await secrets.DeleteAsync(
+                    SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.PreviousBotToken), ct);
+                await secrets.DeleteAsync(
+                    SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.PreviousAppToken), ct);
                 await enrollments.CompleteSocketVerificationAsync(manager.EnrollmentId, ct);
                 return;
             case SlackLeaseTargetRef.Connection connection:
@@ -219,6 +227,13 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
             return;
         }
 
+        // A rotation parks the previous verified pair in the previous slot;
+        // the confirmed hello makes the candidate the runtime pair, so the
+        // parked pair is no longer needed.
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousBotToken), ct);
+        await secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousAppToken), ct);
         await binding.ReconcileAsync(agentApp.Id, ct);
     }
 

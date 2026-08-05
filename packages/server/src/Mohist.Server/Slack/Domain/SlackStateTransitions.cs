@@ -143,10 +143,12 @@ public static class SlackStateTransitions
         if (current == SlackRuntimeCredentialValidationState.NotProvided
             && next == SlackRuntimeCredentialValidationState.Candidate
             || current == SlackRuntimeCredentialValidationState.Candidate
-            && IsOneOf(next, SlackRuntimeCredentialValidationState.AwaitingSocket, SlackRuntimeCredentialValidationState.Failed)
+            && IsOneOf(next, SlackRuntimeCredentialValidationState.AwaitingSocket, SlackRuntimeCredentialValidationState.Verified, SlackRuntimeCredentialValidationState.Failed)
             || current == SlackRuntimeCredentialValidationState.AwaitingSocket
             && IsOneOf(next, SlackRuntimeCredentialValidationState.Verified, SlackRuntimeCredentialValidationState.Failed)
             || current == SlackRuntimeCredentialValidationState.Failed
+            && next == SlackRuntimeCredentialValidationState.Candidate
+            || current == SlackRuntimeCredentialValidationState.Verified
             && next == SlackRuntimeCredentialValidationState.Candidate)
             return;
         throw InvalidTransition("runtime credential validation", current, next);
