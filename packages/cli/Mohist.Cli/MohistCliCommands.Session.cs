@@ -174,12 +174,14 @@ internal static class SessionCommands
             var limit = ctx.GetValue(limitOpt);
             var continuation = ctx.GetValue(continuationOpt);
             var output = ctx.GetValue(outputOpt);
-            if (string.IsNullOrWhiteSpace(project))
-                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--project is required");
 
             var (mode, exit) = api.ResolveOutputMode(output);
             if (exit != 0)
                 return exit;
+
+            var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
+            if (resolveExit != 0)
+                return resolveExit;
 
             var query = new List<string>();
             if (limit is not null)
@@ -188,7 +190,7 @@ internal static class SessionCommands
                 query.Add($"continuation={Uri.EscapeDataString(continuation)}");
             var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);
             return await api.PrintWithOutputAsync(
-                $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(sessionId!)}/tree{suffix}",
+                $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/agent-sessions/{MohistCliCommands.Escape(sessionId!)}/tree{suffix}",
                 mode,
                 nameof(MohistCliApi.TableShape.SessionTree));
         }
