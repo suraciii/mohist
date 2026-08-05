@@ -137,9 +137,9 @@ public sealed class SlackInstallAgentSpecs
 
         Assert.True(staged.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
-        Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken)));
-        Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken)));
-        Assert.Equal("xoxb-candidate", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken)));
+        Assert.True(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken)));
+        Assert.Equal("xoxb-candidate", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
         Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForAgentConnection(ProjectId, installed.Connection.Id, SecretKind.BotToken)));
 
         var rerun = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-candidate", "xapp-candidate");
@@ -221,7 +221,8 @@ public sealed class SlackInstallAgentSpecs
             BotTokenProvisioned: true,
             CredentialVerified: true,
             SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
-            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken)));
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+            CandidateAppLevelTokenAddress: null));
         var lease = new SlackAdapterLeaseService(
             new InMemorySlackLeaseStore(), provider, new SlackLeaseSecretResolver(_secrets), _time);
 
@@ -242,10 +243,13 @@ public sealed class SlackInstallAgentSpecs
 
         Assert.True(staged.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
-        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
-        Assert.Equal("xapp-rotated", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
+        Assert.Equal("xapp-rotated", ReadSecretAsync(agentAppId, SecretKind.CandidateAppToken));
         Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.PreviousBotToken));
         Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.PreviousAppToken));
+        // The runtime addresses keep serving the old verified pair until hello.
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
 
         var verified = await _service.ApplySocketValidationAsync(agentAppId, appId);
 
@@ -253,6 +257,8 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal(SlackAgentAppBindingStatus.Bound, verified.Binding);
         Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
         Assert.Equal("xapp-rotated", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken)));
+        Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken)));
         Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken)));
         Assert.False(_secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousAppToken)));
         await using (var db = _factory.CreateDbContext())
@@ -353,6 +359,8 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.AppToken));
         Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.PreviousBotToken));
         Assert.Equal("xapp-live", ReadSecretAsync(agentAppId, SecretKind.PreviousAppToken));
+        Assert.False(_secrets.Addresses.ContainsKey(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken)));
 
         // Resume with the working store converges; after a correct hello the
         // runtime lease serves the new pair.
@@ -360,7 +368,8 @@ public sealed class SlackInstallAgentSpecs
         var resumed = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-rotated", "xapp-rotated");
         Assert.True(resumed.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, resumed.RuntimeCredentialValidationState);
-        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xoxb-rotated", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
+        Assert.Equal("xoxb-live", ReadSecretAsync(agentAppId, SecretKind.BotToken));
 
         var verified = await _service.ApplySocketValidationAsync(agentAppId, appId);
         Assert.Equal(SlackInstallAgentValidationOutcome.Verified, verified.Outcome);
@@ -424,8 +433,8 @@ public sealed class SlackInstallAgentSpecs
 
         Assert.True(staged.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
-        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.BotToken));
-        Assert.Equal("xapp-full", ReadSecretAsync(agentAppId, SecretKind.AppToken));
+        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
+        Assert.Equal("xapp-full", ReadSecretAsync(agentAppId, SecretKind.CandidateAppToken));
     }
 
     [Fact]
@@ -458,7 +467,7 @@ public sealed class SlackInstallAgentSpecs
         var staged = await _service.ProvisionCredentialsAsync(agentAppId, "xoxb-full", "xapp-full");
         Assert.True(staged.Accepted);
         Assert.Equal(SlackRuntimeCredentialValidationState.Candidate, staged.RuntimeCredentialValidationState);
-        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.BotToken));
+        Assert.Equal("xoxb-full", ReadSecretAsync(agentAppId, SecretKind.CandidateBotToken));
     }
 
     private async Task<(string AgentAppId, string ConnectionId, string AppId)> DriveToVerifiedAsync(string botToken, string appToken)
@@ -485,8 +494,8 @@ public sealed class SlackInstallAgentSpecs
         GrantedScopes: new HashSet<string>(AgentAppBotScopes));
 
     private bool HasCandidateSecretsAsync(string agentAppId) =>
-        _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken))
-        || _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken));
+        _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken))
+        || _secrets.Addresses.ContainsKey(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken));
 
     private string ReadSecretAsync(string agentAppId, SecretKind kind) =>
         Encoding.UTF8.GetString(_secrets.Addresses[SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, kind)]);
@@ -572,9 +581,9 @@ public sealed class SlackInstallAgentSpecs
         public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
         {
             // Preserve (previous slot) and every load/delete still succeed, but
-            // storing the new runtime Bot token fails after the state has left
+            // storing the candidate Bot token fails after the state has left
             // Verified — the boundary the old ordering got wrong.
-            if (address.Kind == SecretKind.BotToken)
+            if (address.Kind == SecretKind.CandidateBotToken)
                 throw new InvalidOperationException("fault-injected secret store failure");
             return _inner.StoreAsync(address, plaintext, ct);
         }

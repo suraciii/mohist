@@ -39,7 +39,7 @@ public sealed class SlackAdapterLeaseServiceTests
         var lease = NewService(out var provider, out var secrets, out var clock);
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
-        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
 
         var result = await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
 
@@ -61,7 +61,7 @@ public sealed class SlackAdapterLeaseServiceTests
         Assert.Null(await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A"));
 
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
-        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
         var first = await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.NotNull(first);
         await lease.ReportHelloAsync("operator-1", manager, first!.LeaseId, "A123");
@@ -76,7 +76,7 @@ public sealed class SlackAdapterLeaseServiceTests
         var lease = NewService(out var provider, out var secrets, out var clock);
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
-        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
 
         var validation = await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
 
@@ -94,6 +94,9 @@ public sealed class SlackAdapterLeaseServiceTests
         var lease = NewService(out var provider, out var secrets, out var clock);
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: false, appToken: true, botToken: true, verified: false, secrets));
+        // The candidate lives at the candidate address; the runtime addresses
+        // hold the pair only once a verified hello has promoted it.
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-live");
         secrets.Put(manager, SecretKind.AppToken, "xapp-live");
         secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
 
@@ -147,6 +150,67 @@ public sealed class SlackAdapterLeaseServiceTests
         Assert.Null(await lease.RenewLeaseAsync("operator-1", manager, runtime.LeaseId, "adapter-A"));
     }
 
+    [Fact]
+    public async Task RenewLease_refuses_a_runtime_lease_once_the_target_leaves_verified()
+    {
+        var lease = NewService(out var provider, out var secrets, out var clock);
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(manager, SecretKind.AppToken, "xapp-live");
+        secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
+
+        var runtime = (await lease.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A"))!;
+        // A rotation closes the Verified state; renewing the runtime lease on
+        // an unverified target must fail even though the lease itself is active.
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+
+        Assert.Null(await lease.RenewLeaseAsync("operator-1", manager, runtime.LeaseId, "adapter-A"));
+    }
+
+    [Fact]
+    public async Task RenewLease_refuses_a_validation_lease_once_the_target_is_verified()
+    {
+        var lease = NewService(out var provider, out var secrets, out var clock);
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
+
+        var validation = (await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A"))!;
+        Assert.NotNull(await lease.RenewLeaseAsync("operator-1", manager, validation.LeaseId, "adapter-A"));
+
+        // A verified target no longer has anything to validate; renewing the
+        // validation lease must fail once the state leaves the candidate phase.
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        Assert.Null(await lease.RenewLeaseAsync("operator-1", manager, validation.LeaseId, "adapter-A"));
+    }
+
+    [Fact]
+    public async Task Mismatch_hello_under_a_stale_or_unknown_lease_returns_NoLease_without_rejecting()
+    {
+        var lease = NewService(out var provider, out var secrets, out var clock);
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
+
+        var first = (await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A"))!;
+        var second = (await lease.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A"))!;
+        Assert.NotEqual(first.LeaseId, second.LeaseId);
+
+        // The superseded lease can no longer open the Socket, so its mismatched
+        // hello must not trigger rejection side effects.
+        Assert.Equal(SlackHelloOutcome.NoLease,
+            await lease.ReportHelloAsync("operator-1", manager, first.LeaseId, "WRONG"));
+        Assert.Empty(provider.RejectedTargets);
+        Assert.Equal(SlackHelloOutcome.NoLease,
+            await lease.ReportHelloAsync("operator-1", manager, "lease_unknown", "WRONG"));
+        Assert.Empty(provider.RejectedTargets);
+
+        // The active validation lease still rejects on a mismatched app id.
+        Assert.Equal(SlackHelloOutcome.AppIdMismatch,
+            await lease.ReportHelloAsync("operator-1", manager, second.LeaseId, "WRONG"));
+        Assert.Contains(manager.TargetKey, provider.RejectedTargets);
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -183,10 +247,13 @@ public sealed class SlackAdapterLeaseServiceTests
         bool appToken,
         bool botToken,
         bool verified,
-        FakeSecretResolver secrets) =>
+        FakeSecretResolver _) =>
         new(@ref, appId, active, appToken, botToken, verified,
             SecretStoreAddressFor(@ref, SecretKind.AppToken),
-            SecretStoreAddressFor(@ref, SecretKind.BotToken));
+            SecretStoreAddressFor(@ref, SecretKind.BotToken),
+            CandidateAppLevelTokenAddress: verified
+                ? null
+                : SecretStoreAddressFor(@ref, SecretKind.CandidateAppToken));
 
     private static SecretStoreAddress SecretStoreAddressFor(SlackLeaseTargetRef @ref, SecretKind kind) =>
         @ref switch

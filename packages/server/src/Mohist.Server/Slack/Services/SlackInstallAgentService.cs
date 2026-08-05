@@ -146,12 +146,13 @@ public sealed class SlackInstallAgentService : IScopedService
             : "[]";
         var botUserId = verification.BotUserId ?? string.Empty;
 
-        // Rotation must leave Verified (closing the runtime lease while the
-        // runtime address still holds the old verified pair) BEFORE the new
-        // unverified candidate overwrites it. Preserve first; stage Verified
-        // -> Candidate; only then store the new pair. A crash at any boundary
-        // leaves the state non-Verified, so the runtime lease never serves an
-        // unverified pair and the old pair stays restorable from Previous.
+        // Rotation: the runtime addresses keep serving the verified pair
+        // while the new pair waits as an unverified candidate. Preserve the
+        // verified pair for recovery, stage Verified -> Candidate, then
+        // store the new pair at the candidate addresses. The runtime lease is
+        // closed from the moment the state leaves Verified until a matching
+        // Socket hello promotes the candidate, so it can never serve the
+        // unverified pair, and the old pair stays restorable from Previous.
         if (agentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
         {
             await PreserveRuntimeSecretsAsync(agentApp.Id, ct);
@@ -163,15 +164,15 @@ public sealed class SlackInstallAgentService : IScopedService
                 verifiedScopesJson: scopes,
                 ct)
                 ?? throw new InvalidOperationException("The Agent App disappeared while staging credentials.");
-            await StoreAgentAppRuntimeSecretsAsync(agentAppId, botToken, appLevelToken, ct);
+            await StoreAgentAppCandidateSecretsAsync(agentAppId, botToken, appLevelToken, ct);
             return new SlackInstallAgentCredentialResult(true, stagedRotation.RuntimeCredentialValidationState);
         }
 
-        // Not Verified: the runtime lease is already closed, so storing the
-        // candidate at the runtime address is safe. A Candidate/AwaitingSocket
-        // state with a parked Previous is a resumed rotation: keep the
-        // non-Verified state and never stage back from AwaitingSocket.
-        await StoreAgentAppRuntimeSecretsAsync(agentAppId, botToken, appLevelToken, ct);
+        // Not Verified: the runtime lease is already closed. A
+        // Candidate/AwaitingSocket state with a parked Previous is a resumed
+        // rotation: keep the non-Verified state, (re)store the candidate, and
+        // never stage back from AwaitingSocket.
+        await StoreAgentAppCandidateSecretsAsync(agentAppId, botToken, appLevelToken, ct);
 
         if (agentApp.RuntimeCredentialValidationState
             is SlackRuntimeCredentialValidationState.NotProvided
@@ -219,8 +220,12 @@ public sealed class SlackInstallAgentService : IScopedService
             await _agentApps.ApplyCredentialValidationAsync(
                 agentAppId, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
         }
-        // The confirmed hello makes the candidate the runtime pair; the
-        // previous pair parked by a rotation is no longer needed.
+        // The confirmed hello promotes the candidate to the runtime pair; the
+        // candidate slot and the previous pair parked by a rotation are no
+        // longer needed. Promote before marking Verified so a crash between
+        // the two can never serve a stale pair from a Verified state.
+        await PromoteCandidateSecretsAsync(agentApp.Id, ct);
+        await DeleteCandidateSecretsAsync(agentApp.Id, ct);
         await DeletePreviousSecretsAsync(agentApp.Id, ct);
         await _agentApps.ApplyCredentialValidationAsync(agentAppId, SlackRuntimeCredentialValidationState.Verified, ct);
         var binding = await _binding.ReconcileAsync(agentAppId, ct);
@@ -363,9 +368,11 @@ public sealed class SlackInstallAgentService : IScopedService
         if (agentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
             return agentApp.RuntimeCredentialValidationState;
         // A rotation in flight parks the verified pair in the previous slot;
-        // restore it so the App keeps its previously verified credentials.
+        // drop the failed candidate and restore the parked pair so the App
+        // keeps its previously verified credentials.
         if (await HasPreviousSecretsAsync(agentApp.Id, ct))
         {
+            await DeleteCandidateSecretsAsync(agentApp.Id, ct);
             await RestorePreviousSecretsAsync(agentApp.Id, ct);
             return (await _agentApps.ApplyCredentialValidationAsync(
                 agentApp.Id, SlackRuntimeCredentialValidationState.Verified, ct))
@@ -404,17 +411,39 @@ public sealed class SlackInstallAgentService : IScopedService
         await _secrets.LoadAsync(
             SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.PreviousBotToken), ct) is not null;
 
-    private async Task StoreAgentAppRuntimeSecretsAsync(
+    private async Task StoreAgentAppCandidateSecretsAsync(
         string agentAppId, string botToken, string appLevelToken, CancellationToken ct)
     {
         await _secrets.StoreAsync(
-            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken),
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken),
             Encoding.UTF8.GetBytes(botToken),
             ct);
         await _secrets.StoreAsync(
-            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken),
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken),
             Encoding.UTF8.GetBytes(appLevelToken),
             ct);
+    }
+
+    private async Task PromoteCandidateSecretsAsync(string agentAppId, CancellationToken ct)
+    {
+        var bot = await _secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken), ct);
+        var app = await _secrets.LoadAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken), ct);
+        if (bot is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), bot, ct);
+        if (app is not null)
+            await _secrets.StoreAsync(
+                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), app, ct);
+    }
+
+    private async Task DeleteCandidateSecretsAsync(string agentAppId, CancellationToken ct)
+    {
+        await _secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken), ct);
+        await _secrets.DeleteAsync(
+            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken), ct);
     }
 
     private async Task PreserveRuntimeSecretsAsync(string agentAppId, CancellationToken ct)
@@ -458,8 +487,8 @@ public sealed class SlackInstallAgentService : IScopedService
     {
         if (agentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
             return;
-        await _secrets.DeleteAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.BotToken), ct);
-        await _secrets.DeleteAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.AppToken), ct);
+        await _secrets.DeleteAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.CandidateBotToken), ct);
+        await _secrets.DeleteAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.CandidateAppToken), ct);
         if (agentApp.RuntimeCredentialValidationState is SlackRuntimeCredentialValidationState.Candidate
             or SlackRuntimeCredentialValidationState.AwaitingSocket)
             await _agentApps.ApplyCredentialValidationAsync(agentApp.Id, SlackRuntimeCredentialValidationState.Failed, ct);

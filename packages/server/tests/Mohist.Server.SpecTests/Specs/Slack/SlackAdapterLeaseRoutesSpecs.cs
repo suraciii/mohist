@@ -74,7 +74,7 @@ public sealed class SlackAdapterLeaseRoutesSpecs
     {
         var manager = new SlackLeaseTargetRef.Manager(NewId("enr"), "T_VALIDATE");
         _fixture.Targets.Add(Target(manager, "A_VALIDATE", active: true, appToken: true, botToken: true, verified: false));
-        _fixture.Secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        _fixture.Secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
 
         using var client = _fixture.CreateOperatorClient(OperatorId);
         using var response = await client.PostAsJsonAsync(AcquirePath, AcquireBody(manager, "adapter-A"));
@@ -92,6 +92,7 @@ public sealed class SlackAdapterLeaseRoutesSpecs
     {
         var manager = new SlackLeaseTargetRef.Manager(NewId("enr"), "T_RUNTIME");
         _fixture.Targets.Add(Target(manager, "A_RUNTIME", active: true, appToken: true, botToken: true, verified: false));
+        _fixture.Secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-live");
         _fixture.Secrets.Put(manager, SecretKind.AppToken, "xapp-live");
         _fixture.Secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
 
@@ -129,7 +130,7 @@ public sealed class SlackAdapterLeaseRoutesSpecs
     {
         var manager = new SlackLeaseTargetRef.Manager(NewId("enr"), "T_HELLO");
         _fixture.Targets.Add(Target(manager, "A_HELLO", active: true, appToken: true, botToken: true, verified: false));
-        _fixture.Secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        _fixture.Secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
 
         using var client = _fixture.CreateOperatorClient(OperatorId);
         var leaseId = (await DataAsync(
@@ -343,7 +344,21 @@ public sealed class SlackAdapterLeaseRoutesSpecs
         SlackLeaseTargetRef @ref, string appId, bool active, bool appToken, bool botToken, bool verified) =>
         new(@ref, appId, active, appToken, botToken, verified,
             SecretStoreAddressFor(@ref, SecretKind.AppToken),
-            SecretStoreAddressFor(@ref, SecretKind.BotToken));
+            SecretStoreAddressFor(@ref, SecretKind.BotToken),
+            CandidateAppLevelTokenAddress: verified
+                ? null
+                : CandidateAddressFor(@ref));
+
+    private static SecretStoreAddress? CandidateAddressFor(SlackLeaseTargetRef @ref) =>
+        @ref switch
+        {
+            // Agent-connection owners have no candidate kinds; only the manager
+            // enrollment / managed agent app owners stage candidates.
+            SlackLeaseTargetRef.Manager manager =>
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(manager.EnrollmentId, SecretKind.CandidateAppToken),
+            SlackLeaseTargetRef.Connection => null,
+            _ => throw new InvalidOperationException("Unsupported lease target ref."),
+        };
 
     private static SecretStoreAddress SecretStoreAddressFor(SlackLeaseTargetRef @ref, SecretKind kind) =>
         @ref switch

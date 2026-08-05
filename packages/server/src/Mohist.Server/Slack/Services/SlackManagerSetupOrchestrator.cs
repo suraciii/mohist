@@ -130,13 +130,18 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         {
             if (await HasPreviousRuntimeSecretsAsync(enrollment.Id, ct))
             {
-                // A rotation was in flight; restore the previous verified pair.
+                // A rotation was in flight; drop the failed candidate and
+                // restore the previous verified pair.
+                await DeleteCandidateSecretsAsync(enrollment.Id, ct);
                 await RestorePreviousRuntimeSecretsAsync(enrollment.Id, ct);
                 await _enrollments.CompleteSocketVerificationAsync(enrollment.Id, ct);
             }
-            else if (enrollment.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified)
+            else if (enrollment.RuntimeCredentialValidationState
+                is SlackRuntimeCredentialValidationState.Candidate
+                or SlackRuntimeCredentialValidationState.AwaitingSocket)
             {
                 await DeleteCandidateSecretsAsync(enrollment.Id, ct);
+                await _enrollments.ApplySocketValidationAsync(enrollment.Id, SlackRuntimeCredentialValidationState.Failed, ct);
             }
 
             return new(
@@ -151,28 +156,27 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
 
         if (enrollment.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
         {
-            // Rotation must leave Verified (closing the runtime lease while the
-            // runtime address still holds the old verified pair) BEFORE the new
-            // unverified candidate overwrites that address. Preserve first so
-            // the old pair is recoverable; stage Verified -> Candidate; only
-            // then store the new pair; then advance to AwaitingSocket. A crash
-            // at any boundary leaves the state non-Verified while the runtime
-            // address holds either the old pair (before Store) or the new
-            // candidate (after Store), so the runtime lease can never serve an
-            // unverified pair, and the old pair stays restorable.
+            // Rotation: the runtime addresses keep serving the verified pair
+            // while the new pair waits as an unverified candidate. Preserve the
+            // verified pair for recovery, stage Verified -> Candidate, then
+            // store the new pair at the candidate addresses and advance to
+            // AwaitingSocket. The runtime lease is closed from the moment the
+            // state leaves Verified until a matching Socket hello promotes the
+            // candidate, so it can never serve the unverified pair, and the old
+            // pair stays restorable from Previous at every boundary.
             await PreserveRuntimeSecretsAsync(enrollment.Id, ct);
             await _enrollments.StageManagerRuntimeCredentialsAsync(enrollment.Id, verified.BotUserId!, ct);
-            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
+            await StoreCandidateSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
             await _enrollments.ApplySocketValidationAsync(enrollment.Id, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
         }
         else
         {
-            // Not Verified: the runtime lease is already closed, so storing the
-            // candidate at the runtime address is safe. A Candidate/AwaitingSocket
-            // state with a parked Previous is a resumed rotation: keep the
-            // non-Verified state, (re)store the candidate, and only push
-            // Candidate -> AwaitingSocket (never stage back from AwaitingSocket).
-            await StoreRuntimeSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
+            // Not Verified: the runtime lease is already closed. A
+            // Candidate/AwaitingSocket state with a parked Previous is a
+            // resumed rotation: keep the non-Verified state, (re)store the
+            // candidate, and only push Candidate -> AwaitingSocket (never stage
+            // back from AwaitingSocket).
+            await StoreCandidateSecretsAsync(enrollment.Id, request.BotToken, request.AppLevelToken, ct);
 
             if (enrollment.RuntimeCredentialValidationState
                 is SlackRuntimeCredentialValidationState.NotProvided
@@ -319,23 +323,23 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 Encoding.UTF8.GetBytes(signingSecret), ct);
     }
 
-    private async Task StoreRuntimeSecretsAsync(
+    private async Task StoreCandidateSecretsAsync(
         string enrollmentId, string botToken, string appLevelToken, CancellationToken ct)
     {
         await _secrets.StoreAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken),
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken),
             Encoding.UTF8.GetBytes(botToken.Trim()), ct);
         await _secrets.StoreAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken),
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateAppToken),
             Encoding.UTF8.GetBytes(appLevelToken.Trim()), ct);
     }
 
     private async Task DeleteCandidateSecretsAsync(string enrollmentId, CancellationToken ct)
     {
         await _secrets.DeleteAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken), ct);
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateAppToken), ct);
         await _secrets.DeleteAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken), ct);
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken), ct);
     }
 
     private async Task<bool> IsUnchangedRuntimeCredentialsAsync(

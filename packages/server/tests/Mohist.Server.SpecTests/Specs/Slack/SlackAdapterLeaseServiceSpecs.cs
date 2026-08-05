@@ -21,7 +21,7 @@ public sealed class SlackAdapterLeaseServiceSpecs
         var secrets = new FakeSecretResolver();
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T_WORKSPACE");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
-        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
         secrets.Put(manager, SecretKind.BotToken, "xoxb-runtime");
         var service = new SlackAdapterLeaseService(
             new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
@@ -36,6 +36,9 @@ public sealed class SlackAdapterLeaseServiceSpecs
         Assert.Equal(SlackHelloOutcome.Verified,
             await service.ReportHelloAsync("operator-1", manager, validation.LeaseId, "A123"));
 
+        // The confirmed hello promotes the candidate to the runtime address; the
+        // runtime lease then serves the promoted pair.
+        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
         var runtime = await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A");
         Assert.NotNull(runtime);
         Assert.Equal("xapp-candidate", runtime!.AppToken);
@@ -59,7 +62,7 @@ public sealed class SlackAdapterLeaseServiceSpecs
         var secrets = new FakeSecretResolver();
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
-        secrets.Put(manager, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
         var service = new SlackAdapterLeaseService(
             new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
 
@@ -74,11 +77,41 @@ public sealed class SlackAdapterLeaseServiceSpecs
             await service.ReportHelloAsync("operator-1", manager, validation.LeaseId, "A123"));
     }
 
+    [Fact]
+    public async Task Mismatch_hello_under_a_stale_lease_returns_NoLease_without_rejecting()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
+        var service = new SlackAdapterLeaseService(
+            new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
+
+        var first = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        var second = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+
+        // A stale lease id can no longer have opened the Socket, so its
+        // mismatched hello must not trigger the rejection side effects.
+        Assert.Equal(SlackHelloOutcome.NoLease,
+            await service.ReportHelloAsync("operator-1", manager, first!.LeaseId, "WRONG"));
+        Assert.Empty(provider.RejectedTargets);
+
+        Assert.Equal(SlackHelloOutcome.AppIdMismatch,
+            await service.ReportHelloAsync("operator-1", manager, second!.LeaseId, "WRONG"));
+        Assert.Contains(manager.TargetKey, provider.RejectedTargets);
+    }
+
     private static SlackLeaseTarget Target(
         SlackLeaseTargetRef @ref, string appId, bool active, bool appToken, bool botToken, bool verified, FakeSecretResolver _) =>
         new(@ref, appId, active, appToken, botToken, verified,
             SecretStoreAddressFor(@ref, SecretKind.AppToken),
-            SecretStoreAddressFor(@ref, SecretKind.BotToken));
+            SecretStoreAddressFor(@ref, SecretKind.BotToken),
+            CandidateAppLevelTokenAddress: verified
+                ? null
+                : SecretStoreAddressFor(@ref, SecretKind.CandidateAppToken));
 
     private static SecretStoreAddress SecretStoreAddressFor(SlackLeaseTargetRef @ref, SecretKind kind) =>
         @ref switch

@@ -8,6 +8,15 @@ namespace Mohist.Server.Slack.Services;
 /// secret <em>addresses</em> (never plaintext) the service resolves at
 /// issuance time. Addresses are references, not secrets, and never appear
 /// in discovery / state / list DTOs.
+/// <para>
+/// Runtime addresses (<see cref="AppLevelTokenAddress"/> /
+/// <see cref="BotTokenAddress"/>) only ever hold a verified pair once the
+/// target is <see cref="CredentialVerified"/>: an unverified candidate is
+/// staged under <see cref="CandidateAppLevelTokenAddress"/> and only copied
+/// to the runtime addresses after a matching Socket hello. The validation
+/// lease therefore always resolves the candidate, never the runtime pair, so
+/// a hello can only prove the candidate actually being validated.
+/// </para>
 /// </summary>
 public sealed record SlackLeaseTarget(
     SlackLeaseTargetRef Ref,
@@ -17,7 +26,8 @@ public sealed record SlackLeaseTarget(
     bool BotTokenProvisioned,
     bool CredentialVerified,
     SecretStoreAddress AppLevelTokenAddress,
-    SecretStoreAddress BotTokenAddress);
+    SecretStoreAddress BotTokenAddress,
+    SecretStoreAddress? CandidateAppLevelTokenAddress);
 
 /// <summary>
 /// Reads lease targets and writes back the Socket hello verification fact.
@@ -69,6 +79,8 @@ public sealed class InMemorySlackLeaseTargetProvider : ISlackLeaseTargetProvider
         _targets[target.Ref.TargetKey] = target;
         if (target.CredentialVerified)
             _verified.Add(target.Ref.TargetKey);
+        else
+            _verified.Remove(target.Ref.TargetKey);
         return this;
     }
 

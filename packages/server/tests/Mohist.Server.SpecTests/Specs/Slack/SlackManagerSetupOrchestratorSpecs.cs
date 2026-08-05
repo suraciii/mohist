@@ -89,7 +89,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, runtime.Phase);
         Assert.Equal(SlackSetupNextAction.ReportSocketHello, runtime.NextAction);
-        await AssertRuntimeSecretsPersistedAsync(runtime.EnrollmentId!);
+        await AssertCandidateSecretsPersistedAsync(runtime.EnrollmentId!);
 
         var manager = new SlackLeaseTargetRef.Manager(runtime.EnrollmentId!, "T_SETUP");
         var validation = await _leases.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
@@ -103,6 +103,12 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackSetupPhase.Ready, ready!.Phase);
         Assert.Equal(SlackSetupNextAction.Ready, ready.NextAction);
         await AssertEnrollmentReadinessAsync(runtime.EnrollmentId!, SlackManagerReadiness.Ready);
+        // The verified hello promoted the candidate pair to the runtime
+        // addresses; the candidate slot is no longer needed.
+        await AssertRuntimeSecretAsync(runtime.EnrollmentId!, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(runtime.EnrollmentId!, SecretKind.AppToken, "xapp-candidate");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.CandidateAppToken)));
     }
 
     [Fact]
@@ -137,9 +143,9 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackSetupPhase.Failed, runtime.Phase);
         Assert.Equal("runtime_credential_mismatch", runtime.ErrorClass);
         Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.AppToken)));
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.CandidateAppToken)));
         Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.BotToken)));
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.CandidateBotToken)));
         await AssertEnrollmentRuntimeStateAsync(runtime.EnrollmentId!, SlackRuntimeCredentialValidationState.NotProvided);
     }
 
@@ -164,9 +170,9 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertEnrollmentRuntimeStateAsync(runtime.EnrollmentId!, SlackRuntimeCredentialValidationState.Failed);
         await AssertEnrollmentReadinessAsync(runtime.EnrollmentId!, SlackManagerReadiness.Unknown);
         Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.AppToken)));
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.CandidateAppToken)));
         Assert.Null(await _secrets.LoadAsync(
-            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.BotToken)));
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(runtime.EnrollmentId!, SecretKind.CandidateBotToken)));
     }
 
     [Fact]
@@ -280,8 +286,13 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackSetupPhase.AwaitingSocketValidation, rotated.Phase);
         Assert.Equal(SlackSetupNextAction.ReportSocketHello, rotated.NextAction);
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.AwaitingSocket);
-        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
-        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        // The runtime addresses keep serving the old verified pair; the new
+        // pair waits at the candidate addresses; the old pair is parked in
+        // Previous for recovery.
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-runtime");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.CandidateBotToken, "xoxb-rotated");
+        await AssertRuntimeSecretAsync(enrollmentId, SecretKind.CandidateAppToken, "xapp-rotated");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousBotToken, "xoxb-runtime");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
 
@@ -298,6 +309,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.BotToken, "xoxb-rotated");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-rotated");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateAppToken)));
         Assert.Null(await _secrets.LoadAsync(
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
         Assert.Null(await _secrets.LoadAsync(
@@ -360,6 +375,8 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
         Assert.Null(await _secrets.LoadAsync(
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken)));
     }
 
     [Fact]
@@ -376,8 +393,8 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.NotNull(validation);
 
         // A mismatched hello rejects like the control-plane route: the candidate
-        // is bad, so restore the parked previous verified pair and return the
-        // enrollment to Verified serving the old pair.
+        // is bad, so drop it, restore the parked previous verified pair and
+        // return the enrollment to Verified serving the old pair.
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
             await _leases.ReportHelloAsync("operator-1", manager, validation!.LeaseId, "A_WRONG_APP"));
         await AssertEnrollmentRuntimeStateAsync(enrollmentId, SlackRuntimeCredentialValidationState.Verified);
@@ -387,6 +404,10 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousBotToken)));
         Assert.Null(await _secrets.LoadAsync(
             SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.PreviousAppToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateAppToken)));
     }
 
     [Fact]
@@ -397,7 +418,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         // A faulting secret store simulates a process crash at the boundary the
         // old ordering got wrong: after the state has left Verified but while
-        // the new candidate is being written to the runtime address.
+        // the new candidate is being written to the candidate address.
         var faulting = new SlackManagerSetupOrchestrator(
             _configurationPort,
             new ProtectedSlackConfigurationCredentialStore(_factory, _secrets),
@@ -421,6 +442,8 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.AppToken, "xapp-candidate");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousBotToken, "xoxb-runtime");
         await AssertRuntimeSecretAsync(enrollmentId, SecretKind.PreviousAppToken, "xapp-candidate");
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken)));
 
         // Resume with the working store converges to the new pair after hello.
         _botIdentity.Result = VerifiedBot("T_CRASH_STORE", managerAppId);
@@ -550,12 +573,17 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.DoesNotContain("xoxe-rotated", enrollment.AuditJson, StringComparison.Ordinal);
     }
 
-    private async Task AssertRuntimeSecretsPersistedAsync(string enrollmentId)
+    private async Task AssertCandidateSecretsPersistedAsync(string enrollmentId)
     {
         Assert.Equal("xoxb-runtime", Encoding.UTF8.GetString(
-            (await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken)))!));
+            (await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateBotToken)))!));
         Assert.Equal("xapp-candidate", Encoding.UTF8.GetString(
-            (await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken)))!));
+            (await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.CandidateAppToken)))!));
+        // The runtime addresses stay empty until the hello promotes the pair.
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken)));
+        Assert.Null(await _secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken)));
     }
 
     private async Task AssertSingleEnrollmentAsync(string teamId, string expectedId)
@@ -641,10 +669,11 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
 
         public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
         {
-            // Simulate a crash at the runtime candidate write: Preserve (previous
+            // Simulate a crash at the candidate write: Preserve (previous
             // slot) and every load/delete still succeed, but storing the new
-            // runtime Bot token fails after the state has already left Verified.
-            if (address.Kind == SecretKind.BotToken)
+            // candidate Bot token fails after the state has already left
+            // Verified.
+            if (address.Kind == SecretKind.CandidateBotToken)
                 throw new InvalidOperationException("fault-injected secret store failure");
             return _inner.StoreAsync(address, plaintext, ct);
         }

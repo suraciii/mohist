@@ -11,6 +11,8 @@ public enum SecretKind
     ConfigurationRefreshToken = 6,
     PreviousBotToken = 7,
     PreviousAppToken = 8,
+    CandidateBotToken = 9,
+    CandidateAppToken = 10,
 }
 
 public static class SecretKinds
@@ -24,6 +26,8 @@ public static class SecretKinds
     public const string ConfigurationRefreshToken = "configurationRefreshToken";
     public const string PreviousBotToken = "previousBotToken";
     public const string PreviousAppToken = "previousAppToken";
+    public const string CandidateBotToken = "candidateBotToken";
+    public const string CandidateAppToken = "candidateAppToken";
 
     public static string ToWire(SecretKind kind) => kind switch
     {
@@ -36,6 +40,8 @@ public static class SecretKinds
         SecretKind.ConfigurationRefreshToken => ConfigurationRefreshToken,
         SecretKind.PreviousBotToken => PreviousBotToken,
         SecretKind.PreviousAppToken => PreviousAppToken,
+        SecretKind.CandidateBotToken => CandidateBotToken,
+        SecretKind.CandidateAppToken => CandidateAppToken,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -69,6 +75,12 @@ public static class SecretKinds
                 return true;
             case PreviousAppToken:
                 kind = SecretKind.PreviousAppToken;
+                return true;
+            case CandidateBotToken:
+                kind = SecretKind.CandidateBotToken;
+                return true;
+            case CandidateAppToken:
+                kind = SecretKind.CandidateAppToken;
                 return true;
             default:
                 kind = default;
