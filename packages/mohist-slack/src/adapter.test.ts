@@ -10,6 +10,8 @@ class FakeSocket implements SocketClient {
   disconnected = false
   acknowledged = false
   disconnectError?: Error
+  disconnectGate?: Promise<void>
+  disconnectStarted?: () => void
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -29,6 +31,8 @@ class FakeSocket implements SocketClient {
 
   async disconnect() {
     this.disconnected = true
+    this.disconnectStarted?.()
+    await this.disconnectGate
     if (this.disconnectError) throw this.disconnectError
   }
 }
@@ -382,6 +386,112 @@ describe("mohist-slack adapter", () => {
     expect(sockets[1]?.starts).toBe(1)
     expect(JSON.stringify(logger.entries)).not.toContain("xapp-rotated")
     expect(JSON.stringify(logger.entries)).not.toContain("xoxb-rotated")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("fences the old Web client while credential rotation waits for its Socket to disconnect", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ kind: "runtime", leaseId: "lease-rotated", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    const sockets: FakeSocket[] = []
+    const webs: FakeWeb[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => {
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let releaseDisconnect!: () => void
+    let markDisconnectStarted!: () => void
+    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
+    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
+    sockets[0]!.disconnectGate = disconnectGate
+    sockets[0]!.disconnectStarted = markDisconnectStarted
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await disconnectStarted
+    const claimsWhileDisconnected = transport.claimDeliveryCalls
+    transport.deliveries.push({ id: "rotation-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(transport.claimDeliveryCalls).toBe(claimsWhileDisconnected)
+    expect(webs[0]?.posted).toEqual([])
+    expect(transport.acks).toEqual([])
+
+    transport.deliveries.length = 0
+    releaseDisconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("does not let a stale concurrent renewal reopen or replace the current Socket", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [
+      { kind: "runtime", leaseId: "lease-first", appToken: "xapp-first", botToken: "xoxb-first" },
+      { kind: "runtime", leaseId: "lease-second", appToken: "xapp-second", botToken: "xoxb-second" },
+    ]
+    const sockets: FakeSocket[] = []
+    const socketTokens: string[] = []
+    const webTokens: string[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: (token) => {
+        socketTokens.push(token)
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: (token) => {
+        webTokens.push(token)
+        return new FakeWeb()
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let releaseDisconnect!: () => void
+    let markDisconnectStarted!: () => void
+    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
+    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
+    sockets[0]!.disconnectGate = disconnectGate
+    sockets[0]!.disconnectStarted = markDisconnectStarted
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await disconnectStarted
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(socketTokens).toEqual(["xapp-c", "xapp-second"])
+    expect(webTokens).toEqual(["xoxb-c", "xoxb-second"])
+    expect(sockets).toHaveLength(2)
+    expect(await sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "old", user: "U", text: "late" } })).toBe(false)
+    expect(transport.envelopes).toEqual([])
+
+    releaseDisconnect()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(sockets).toHaveLength(2)
+    expect(sockets[1]?.starts).toBe(1)
     controller.abort()
     await adapter.stop()
   })

@@ -28,6 +28,7 @@ interface ConnectionRuntime {
 interface RuntimeSnapshot {
   readonly generation: number
   readonly lease: RuntimeLease
+  readonly socket: SocketClient
   readonly web: SlackWebClient
 }
 
@@ -106,11 +107,15 @@ export class SlackAdapter {
   private async disconnect(runtime: ConnectionRuntime): Promise<void> {
     if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer)
     if (runtime.deliveryTimer) clearInterval(runtime.deliveryTimer)
+    await this.disconnectSocket(runtime.socket, runtime.target)
+  }
+
+  private async disconnectSocket(socket: SocketClient | undefined, target: SlackAdapterTarget): Promise<void> {
     try {
-      await runtime.socket?.disconnect?.()
+      await socket?.disconnect?.()
     } catch (error) {
       this.log.error("socket disconnect failed", {
-        target: connectionKey(runtime.target),
+        target: connectionKey(target),
         reason: safeErrorMessage(error),
       })
     }
@@ -128,7 +133,7 @@ export class SlackAdapter {
   }
 
   private async startRuntime(runtime: ConnectionRuntime, signal: AbortSignal) {
-    await this.openRuntimeSocket(runtime, signal)
+    if (!await this.openRuntimeSocket(runtime, signal, runtime.generation)) return
     if (!this.isActive(runtime, signal)) {
       await this.disconnect(runtime)
       return
@@ -140,10 +145,9 @@ export class SlackAdapter {
     await this.drain(runtime, signal)
   }
 
-  private async openRuntimeSocket(runtime: ConnectionRuntime, signal: AbortSignal) {
-    runtime.web = this.options.webFactory(runtime.lease.botToken, runtime.target)
+  private async openRuntimeSocket(runtime: ConnectionRuntime, signal: AbortSignal, generation: number): Promise<boolean> {
+    const web = this.options.webFactory(runtime.lease.botToken, runtime.target)
     const socket = this.options.socketFactory(runtime.lease.appToken, runtime.target)
-    runtime.socket = socket
     this.observeSocket(socket, runtime.target)
     socket.on("slack_event", async (event) => {
       const interaction = isSlackInteraction(event.body)
@@ -162,7 +166,20 @@ export class SlackAdapter {
         )
       }
     })
-    await socket.start()
+    try {
+      await socket.start()
+    } catch (error) {
+      if (this.isGenerationCurrent(runtime, generation, signal)) throw error
+      await this.disconnectSocket(socket, runtime.target)
+      return false
+    }
+    if (!this.isGenerationCurrent(runtime, generation, signal)) {
+      await this.disconnectSocket(socket, runtime.target)
+      return false
+    }
+    runtime.web = web
+    runtime.socket = socket
+    return true
   }
 
   private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
@@ -181,12 +198,14 @@ export class SlackAdapter {
       if (leaseChanged) runtime.generation += 1
       runtime.lease = lease
       if (credentialsChanged) {
+        const refreshGeneration = runtime.generation
         const socket = runtime.socket
         runtime.socket = undefined
+        runtime.web = undefined
         await socket?.disconnect?.()
-        if (!this.isActive(runtime, signal)) return
-        await this.openRuntimeSocket(runtime, signal)
-        if (!this.isActive(runtime, signal)) return
+        if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return
+        if (!await this.openRuntimeSocket(runtime, signal, refreshGeneration)) return
+        if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return
       }
       await this.drain(runtime, signal)
     } catch (error) {
@@ -208,13 +227,19 @@ export class SlackAdapter {
     return !this.stopped && !signal.aborted && this.runtimes.get(connectionKey(runtime.target)) === runtime
   }
 
+  private isGenerationCurrent(runtime: ConnectionRuntime, generation: number, signal: AbortSignal): boolean {
+    return this.isActive(runtime, signal) && runtime.generation === generation
+  }
+
   private snapshot(runtime: ConnectionRuntime, signal: AbortSignal): RuntimeSnapshot | undefined {
-    if (!this.isActive(runtime, signal) || !runtime.web) return
-    return { generation: runtime.generation, lease: runtime.lease, web: runtime.web }
+    if (!this.isActive(runtime, signal) || !runtime.socket || !runtime.web) return
+    return { generation: runtime.generation, lease: runtime.lease, socket: runtime.socket, web: runtime.web }
   }
 
   private isCurrent(runtime: ConnectionRuntime, snapshot: RuntimeSnapshot, signal: AbortSignal): boolean {
-    return this.isActive(runtime, signal) && runtime.generation === snapshot.generation
+    return this.isGenerationCurrent(runtime, snapshot.generation, signal)
+      && runtime.socket === snapshot.socket
+      && runtime.web === snapshot.web
   }
 
   private assertCurrent(runtime: ConnectionRuntime, snapshot: RuntimeSnapshot, signal: AbortSignal): void {
