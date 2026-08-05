@@ -41,6 +41,7 @@ export interface TrackConfig {
   readonly kind: TrackKind
   readonly csproj?: string
   readonly apphost?: string
+  readonly apphostArgs?: readonly string[]
   readonly tfm?: string
   readonly run?: readonly string[]
   readonly report: string

@@ -29,10 +29,13 @@ function apphostFor(track: TrackConfig): string {
   return resolve(csprojDir, resolveApphostPath({ csprojXml: xml, projectDir: csprojDir, assemblyName }))
 }
 
-function commandFor(track: TrackConfig): { command: string; args: readonly string[] } {
+export function commandFor(track: TrackConfig): { command: string; args: readonly string[] } {
   if (track.kind === 'dotnet-apphost') {
     const apphost = apphostFor(track)
-    return { command: apphost, args: ['-noColor', '-noLogo', '-trx', resolve(repoRoot, track.report)] }
+    return {
+      command: apphost,
+      args: ['-noColor', '-noLogo', '-trx', resolve(repoRoot, track.report), ...(track.apphostArgs ?? [])],
+    }
   }
   if (track.kind === 'dotnet-vstest') {
     if (!track.csproj) throw new Error(`track "${track.id}": dotnet-vstest needs csproj`)

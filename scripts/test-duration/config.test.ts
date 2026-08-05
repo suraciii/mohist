@@ -42,6 +42,28 @@ test('validateConfig accepts a well-formed enforce track with a default rule', (
   assert.deepEqual(validateConfig(config), [])
 })
 
+test('validateConfig rejects non-array apphostArgs', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 't', kind: 'dotnet-apphost', apphostArgs: '-parallel', report: 'r', reportFormat: 'trx',
+      deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must be an array of strings')))
+})
+
+test('validateConfig rejects non-string apphostArgs items', () => {
+  const config = parseSuiteConfig(JSON.stringify({
+    suiteDeadlineMs: 1000,
+    tracks: [{
+      id: 't', kind: 'dotnet-apphost', apphostArgs: ['-parallel', 1], report: 'r', reportFormat: 'trx',
+      deadlineMs: 100, enforce: false,
+    }],
+  }))
+  assert.ok(validateConfig(config).some((e) => e.includes('apphostArgs must contain only strings')))
+})
+
 test('validateConfig rejects enforce=true without rules', () => {
   const config = parseSuiteConfig(
     JSON.stringify({
