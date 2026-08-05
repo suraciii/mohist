@@ -52,7 +52,7 @@ AllowedSubagentSnapshot
 |---|---|
 | 配置声明 | 只保存目标的稳定 ID；目标必须属于同一 Project。 |
 | 父 launch 后目标改名 | 父 snapshot 保留原 name/description；spawn 时用当前 name 或 ID 解析到同一 Agent ID 后仍可授权。 |
-| 父 launch 后目标 archive | 尚未接受的 spawn 被拒绝为 `target_agent_archived`；已被 launch coordinator 接受的 child 不因后续 archive 被撤销。 |
+| 父 launch 后目标 archive | 尚未接受的 spawn 以 terminal pre-plan result `target_agent_archived` 拒绝；已被 launch coordinator 接受的 child 不因后续 archive 被撤销。 |
 | 目标恢复 active | 新的 spawn 可再次使用该已声明 ID；已有 snapshot 不需要修改。 |
 | self-spawn | 只有本 Agent 的稳定 ID 被显式列入声明时才允许；它和其它 target 一样走普通 launch scheduling。 |
 | 跨 Project | 一律拒绝。父 Session、目标 Agent、child Job 和 child Session 必须属于同一 Project。 |
@@ -165,7 +165,7 @@ Idempotency-Key: {key}
 path 中的 `parentSessionId` 与 idempotency header 共同构成一次 spawn 的 caller 和重放
 边界。body 不接受 `workDir`、`workspacePath`、Runner、Runtime、Instructions、Model、
 Skills 或任意 filesystem path。一个 key 在 `(ProjectId, ParentSessionId)` 内只能表达一种
-canonical request；prompt、target 或 caller 不同的重放返回 conflict。
+canonical request；prompt、target 或 caller 不同的重放返回 HTTP 409 idempotency conflict。
 
 `parentSessionId` 是委托 authority 的显式身份，不是新的 bearer credential。现有调用方
 认证先决定它能否操作 Project；Server 再从该 Session 持久化的 launch snapshot 验证它能否
@@ -209,14 +209,15 @@ workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
 
 | 条件 | 结果 |
 |---|---|
-| parent 没有 workDir | `parent_workdir_unavailable`；不创建 child。 |
-| parent binding 缺失、unknown、过期或没有可用 Runner | `parent_runner_binding_unavailable`；不创建 child。 |
-| target 不在 snapshot 或已 archive | `subagent_not_allowed` 或 `target_agent_archived`；不创建 child。 |
-| 有尚未达到 terminal outcome 的 cascade stop | `parent_tree_stop_in_progress`；不创建 child。 |
+| parent 没有 workDir | `parent_workdir_unavailable`；request fence 保持 `validation-pending`，不创建 child；同 key 重试会重新确认。 |
+| parent binding 缺失、unknown、过期或没有可用 Runner | `parent_runner_binding_unavailable`；request fence 保持 `validation-pending`，不创建 child；同 key 重试会重新确认。 |
+| target 不在 snapshot | terminal pre-plan result `subagent_not_allowed`；不创建 child。 |
+| target 已 archive | terminal pre-plan result `target_agent_archived`；不创建 child。 |
+| 有尚未达到 terminal outcome 的 cascade stop | `parent_tree_stop_in_progress`；request fence 保持 `validation-pending`，不创建 child；同 key 重试会重新确认。 |
 
 Runner 离线但 binding 仍是当前事实不构成换 Runner 的许可；它仍是
-`parent_runner_binding_unavailable`。该 pre-plan rejection 已冻结原 idempotency key；等待
-Runner 恢复后，调用方必须使用新 key 重新请求，而不是把 child 投到另一个 Runner。
+`parent_runner_binding_unavailable`。它只记录在 `validation-pending` request fence；等待
+Runner 恢复后，同一个 key 重试会重新确认 binding，绝不把 child 投到另一个 Runner。
 
 ### Coordinator、原子性与恢复
 
@@ -230,16 +231,23 @@ SpawnRequestFence
   ParentSessionId
   IdempotencyKey
   RequestFingerprint
-  Outcome: validating | rejected | admitted
-  RejectionReason?
+  Outcome: validation-pending | preplan-rejected | admitted
+  PreplanRejectionReason?
 ```
 
 这个 fence 是 `(ProjectId, ParentSessionId, IdempotencyKey)` 的 canonical request authority。
-它只冻结 caller/key/fingerprint 与 rejection，不创建也不预留 Job、Session、Input、Turn、edge
-或 reservation identity。相同 fingerprint 的 replay 返回已持久化的 rejection，或恢复同一个
-admitted plan；不同 fingerprint 返回 idempotency conflict。包括 binding unavailable 和
-`parent_tree_stop_in_progress` 在内的 transient pre-plan rejection 也不以同一 key 重试；调用方
-必须使用新 key 重新请求。
+它始终冻结 caller/key/fingerprint，不创建也不预留 Job、Session、Input、Turn、edge 或
+reservation identity。`validation-pending` 是尚未接受 child 的可重试 observation：相同
+fingerprint 的 replay 重新验证当前事实，并在条件恢复时推进到同一个 request 的 admitted
+plan。`parent_workdir_unavailable`、`parent_runner_binding_unavailable`、未知或暂时无法确认的
+普通 launch readiness，以及 `parent_tree_stop_in_progress` 都只能保留这个 outcome；它们不能
+把同一个 key 冻结为 rejection。
+
+只有确定的 canonical/authorization invalidity 才能从这里推进为 `preplan-rejected`：caller
+不属于该 Project 或不是可委托的 Mohist Agent Session、target ref 不能解析为 parent immutable
+snapshot 中的 Agent ID、target 不在该 snapshot，或 target 已 archive。相同 fingerprint 的
+replay 固定返回这个 terminal pre-plan result；不同 fingerprint 始终返回 HTTP 409 idempotency
+conflict。
 
 只有 request fence validation 通过后，coordinator 才把它推进为带 child identities 的 launch
 plan。plan 额外持久化：
@@ -256,7 +264,8 @@ plan 写入后不重新读取 mutable target Agent 或 parent capability snapsho
 ```text
 persist request fence with fingerprint
   -> pre-plan validation
-  -> reject request fence with no child artifacts, or persist launch plan and reserve EdgeId
+  -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
+       or persist launch plan and reserve EdgeId
        at SessionTreeMutationFence
   -> prepare child AgentJob with pinned RunnerId and inherited workDir
   -> create child AgentSession + initial SessionInput + initial AgentTurn
@@ -265,14 +274,19 @@ persist request fence with fingerprint
   -> submit the same prepared AgentJob to its pinned Runner
 ```
 
-pre-plan validation 失败时，`SpawnRequestFence` 持久化同一 canonical rejection，但不持久化
-launch plan、reservation 或 child identity，也不创建 Job、Session、Input、Turn 或 link。这是
-一次未接受的 validation rejection，不是可恢复的 launch；同一 key 只会重放它，不能重新验证。
+pre-plan validation 观察到暂时不可用时，`SpawnRequestFence` 保持 `validation-pending`，不持久化
+launch plan、reservation 或 child identity，也不创建 Job、Session、Input、Turn 或 link。同一 key
+重试重新验证这些事实，直到它推进为 admitted plan 或上述 terminal `preplan-rejected`。后者同样
+不创建 child artifact，但同 key 只重放这个固定结果；新的 key 才表达一次新的委托。
 
 plan 一经持久化就保存 immutable child identities、expected workDir/binding 和
 `LinkReservation`。同 key 的重放只能恢复它的相同结果，不能重新选择 parent、target、
 workDir 或 Runner。每个后续命令都有稳定 command identity，重复执行必须得到
 already-applied acknowledgement；coordinator reminder 从该 durable fence 恢复。
+
+plan 后的 final check 或 abort rejection 是 durable terminal outcome。即使 parent binding、
+workDir 或 cascade stop admission 随后恢复，同 key 的 replay 仍只收敛该 plan 的原结果；新的
+key 才能表达后续 delegation。
 
 reservation 先占住 EdgeId，但不是 tree edge，也不让 child 对外可见。child Job、Session、
 Input 与 Turn 在 final check 前都只是 provisional artifacts：`mo session tree`、正常 spawn
@@ -402,7 +416,7 @@ reservation、final attachment 和 detach，顺序定义如下：
 | finalized attachment 先于 stop snapshot | child 在 snapshot 内；它的 current work 按普通 target 规则处理。 |
 | stop snapshot 先于 detach | 当时 attached subtree 的 IDs 固定写入 snapshot；之后 detach 也不将其移出，仍按该 snapshot 停止。 |
 | stop snapshot 遇到较早但尚未 finalized 的 reservation | reservation 记为 rejected，child 不进 snapshot，coordinator 只能 abort，绝不 submit。 |
-| stop operation 尚未 terminal 时的新 reservation 或 final attachment | 拒绝为 `parent_tree_stop_in_progress`；operation terminal 后必须用新 key 创建新的 child，它不属于旧 snapshot。 |
+| stop operation 尚未 terminal 时的新 spawn、reservation 或 final attachment | 尚无 plan 的 request fence 返回 `parent_tree_stop_in_progress` 并保持 `validation-pending`；operation terminal 后同 key 重试会重新验证。已有 plan/reservation 只能 abort，绝不 submit。 |
 
 因此并发操作没有“读取一棵正在变化的树”这个中间状态。stop retry 从持久化的 target IDs、
 expected turn/binding 与 child stop-operation IDs 恢复；它不重新遍历树，也不重新决定 detach
@@ -461,8 +475,9 @@ reparent 到另一个 Session。终态 report 与 detach 的竞争规则以本�
 
 Increment 1 不需要等待后续生命周期能力即可交付。它必须用 coordinator recovery 证明：在
 reserve、prepare、initial Session creation、final link check、abort 和 submit 任一步中断后，
-同一个 idempotency key 恢复同一 accepted child 或同一 durable rejection；child 永远不会在
-缺 link、rejected reservation、已被 snapshot 取消或错误 Runner 上 dispatch。
+同一个 idempotency key 在 pre-plan 暂时不可用时重新验证，或在 plan 后恢复同一 accepted child
+或同一 durable rejection；child 永远不会在缺 link、rejected reservation、已被 snapshot 取消
+或错误 Runner 上 dispatch。
 
 ## Non-goals
 
@@ -480,12 +495,13 @@ reserve、prepare、initial Session creation、final link check、abort 和 subm
 Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少以下行为：
 
 - capability snapshot 对 rename、archive、self-spawn、cross-Project 和同 key conflict 的结果；
-- SpawnOrigin 的 parent identity、缺失/unknown/stale binding 或 authoritative workDir 拒绝、
-  workDir inheritance 与 exact Runner pin，且 Job admission 不会改选其它 eligible Runner；
-- pre-plan validation rejection 只持久化 request fence、同 key stable replay、mismatched payload
-  conflict 和新 key retry，不留任何 child artifact；post-plan reservation/final-check rejection 的
-  Job cancelled、initial Turn cancelled、Session idle、无 visible link/input/callback 和 replay
-  must-not-submit；
+- SpawnOrigin 的 parent identity、缺失/unknown/stale binding 或 authoritative workDir 的
+  `validation-pending` observation、同 key revalidation、workDir inheritance 与 exact Runner pin，
+  且 Job admission 不会改选其它 eligible Runner；
+- terminal pre-plan authorization/archive rejection 只持久化 request fence、同 key stable replay、
+  mismatched payload conflict，以及每个 temporary pre-plan observation 都以同 key revalidate，
+  不留任何 child artifact；post-plan reservation/final-check rejection 的 Job cancelled、initial
+  Turn cancelled、Session idle、无 visible link/input/callback 和 replay must-not-submit；
 - coordinator 每个 durable fence 的 activation loss/retry，确保一个 Job、Session、Input、
   Turn、edge 和 dispatch，或同一 durable rejection；
 - 单 parent、无 reparent/cycle、detach 后 subtree query 的 indexed read cost、batch、revision-
