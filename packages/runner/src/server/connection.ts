@@ -514,6 +514,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
     agentDefinition: dispatch.agentDefinition ?? undefined,
+    agentSessionStartup: dispatch.agentSessionStartup ?? undefined,
   }
   if (Object.prototype.hasOwnProperty.call(dispatch, "parentIssueContext"))
     work.parentIssueContext = dispatch.parentIssueContext

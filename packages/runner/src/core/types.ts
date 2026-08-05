@@ -83,6 +83,18 @@ export interface AgentExecutionDefinition {
   skills: readonly string[]
 }
 
+export interface AgentSessionStartup {
+  projectId: string
+  sessionId: string
+  parentSessionId?: string | null
+  allowedSubagents: readonly {
+    agentId: string
+    nameAtLaunch: string
+    descriptionAtLaunch: string
+  }[]
+  spawnCommand: string
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -119,6 +131,7 @@ export type WorkDispatchResponse = {
   recovery?: string | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  agentSessionStartup?: AgentSessionStartup | null
   /**
    * Launch-time `SessionInput` id the coordinator durably recorded
    * on the AgentSession before the AgentJob dispatched. The runner
@@ -210,6 +223,7 @@ export interface DispatchWorkItem {
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  agentSessionStartup?: AgentSessionStartup | null
   /**
    * Launch-time `SessionInput` id the coordinator durably recorded
    * on the AgentSession before the AgentJob dispatched. When set,

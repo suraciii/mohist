@@ -141,6 +141,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.SessionShow:
                 RenderSessionShow(data);
                 break;
+            case MohistCliApi.TableShape.SessionTree:
+                RenderSessionTree(data);
+                break;
             case MohistCliApi.TableShape.SessionTranscript:
                 RenderSessionTranscript(data);
                 break;

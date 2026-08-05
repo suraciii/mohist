@@ -130,7 +130,8 @@ export class AgentJobExecutor {
         prompt ?? "",
         instructions,
         skills,
-        slackContext.kind === "resolved" ? slackContext.value : null),
+        slackContext.kind === "resolved" ? slackContext.value : null,
+        work.agentSessionStartup),
       attachmentDelivery)
 
     let binding: BindingResolution
