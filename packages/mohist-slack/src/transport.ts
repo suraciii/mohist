@@ -3,11 +3,13 @@ import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResu
 export interface HttpTransportOptions {
   readonly serverUrl: string
   readonly operatorToken: string
+  readonly operatorId: string
   readonly fetch?: typeof fetch
 }
 
 const LEASE_ROUTES = "/api/slack-adapter/leases"
 const OPERATOR_TOKEN_HEADER = "x-mohist-operator-token"
+const OPERATOR_ID_HEADER = "x-mohist-operator-id"
 
 export class HttpAdapterTransport implements AdapterTransport {
   private readonly request: typeof fetch
@@ -81,9 +83,16 @@ export class HttpAdapterTransport implements AdapterTransport {
     await this.post<unknown>(deliveryRoute(ref, "ack"), ack, signal)
   }
 
+  private operatorHeaders(): Record<string, string> {
+    return {
+      [OPERATOR_TOKEN_HEADER]: this.options.operatorToken,
+      [OPERATOR_ID_HEADER]: this.options.operatorId,
+    }
+  }
+
   private async get<T>(path: string, signal: AbortSignal): Promise<T> {
     const response = await this.request(`${this.baseUrl}${path}`, {
-      headers: { [OPERATOR_TOKEN_HEADER]: this.options.operatorToken },
+      headers: this.operatorHeaders(),
       signal,
     })
     const payload = await this.envelope(response)
@@ -111,7 +120,7 @@ export class HttpAdapterTransport implements AdapterTransport {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        [OPERATOR_TOKEN_HEADER]: this.options.operatorToken,
+        ...this.operatorHeaders(),
       },
       body: JSON.stringify(body),
       signal,

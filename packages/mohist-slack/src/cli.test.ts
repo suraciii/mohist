@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FetchFunction } from "@slack/web-api"
-import { createSlackAdapter, resolveOperatorToken } from "./cli.js"
+import { createSlackAdapter, resolveOperatorId, resolveOperatorToken } from "./cli.js"
 
 type SocketModeOptionsForTest = {
   appToken: string
@@ -217,6 +217,18 @@ describe("mohist-slack CLI composition", () => {
     expect(result.message).toBe("Mohist operator credential is invalid")
   })
 
+  it("resolves the operator identity from MOHIST_OPERATOR_ID, trimmed", () => {
+    expect(resolveOperatorId({ MOHIST_OPERATOR_ID: "  host-operator  " })).toBe("host-operator")
+  })
+
+  it("falls back to the stable mohist-slack identity when the variable is unset", () => {
+    expect(resolveOperatorId({})).toBe("mohist-slack")
+  })
+
+  it("falls back to the stable identity when the variable is blank", () => {
+    expect(resolveOperatorId({ MOHIST_OPERATOR_ID: "   " })).toBe("mohist-slack")
+  })
+
   it("delivers a Manager message through the production WebClient and acknowledges it on the Manager route", async () => {
     const managerCredential = "test-manager-credential"
     const manager = { kind: "manager" as const, enrollmentId: "manager-enrollment", workspaceTeamId: "T_MANAGER" }
@@ -227,7 +239,7 @@ describe("mohist-slack CLI composition", () => {
       threadTs: null,
       payloadJson: JSON.stringify({ text: "manager reply" }),
     }
-    const serverCalls: Array<{ url: string; body?: string; operatorToken: string | null }> = []
+    const serverCalls: Array<{ url: string; body?: string; operatorToken: string | null; operatorId: string | null }> = []
     const ackBodies: unknown[] = []
     let deliveryClaimed = false
     const serverFetch: typeof fetch = async (input, init) => {
@@ -237,6 +249,7 @@ describe("mohist-slack CLI composition", () => {
         url,
         body,
         operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
+        operatorId: new Headers(init?.headers).get("x-mohist-operator-id"),
       })
       let data: unknown
       if (url.endsWith("/api/slack-adapter/leases/targets")) {
@@ -273,6 +286,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-manager",
       serverUrl: "http://localhost",
       operatorToken: "test-operator",
+      operatorId: "mohist-slack",
       serverFetch,
       slackFetch,
       heartbeatIntervalMs: 60_000,
@@ -284,6 +298,7 @@ describe("mohist-slack CLI composition", () => {
 
     expect(serverCalls.length).toBeGreaterThan(0)
     expect(serverCalls.every((call) => call.operatorToken === "test-operator")).toBe(true)
+    expect(serverCalls.every((call) => call.operatorId === "mohist-slack")).toBe(true)
     expect(slackCalls).toHaveLength(1)
     expect(slackCalls[0]).toMatchObject({
       url: "https://slack.com/api/chat.postMessage",
@@ -309,6 +324,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-proxy",
       serverUrl: "http://localhost",
       operatorToken: "test-operator",
+      operatorId: "mohist-slack",
       slackProxyUrl: "http://proxy.test:3128",
       serverFetch: compositionServerFetch(),
       heartbeatIntervalMs: 60_000,
@@ -343,6 +359,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-proxy-reconnect",
       serverUrl: "http://localhost",
       operatorToken: "test-operator",
+      operatorId: "mohist-slack",
       slackProxyUrl: "http://proxy.test:3128",
       serverFetch: compositionServerFetch(false),
       heartbeatIntervalMs: 60_000,
@@ -371,6 +388,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-direct",
       serverUrl: "http://localhost",
       operatorToken: "test-operator",
+      operatorId: "mohist-slack",
       serverFetch: compositionServerFetch(),
       heartbeatIntervalMs: 60_000,
       deliveryPollIntervalMs: 60_000,

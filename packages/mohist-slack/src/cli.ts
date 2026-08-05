@@ -13,6 +13,7 @@ export interface SlackCliOptions {
   readonly adapterId: string
   readonly serverUrl: string
   readonly operatorToken: string
+  readonly operatorId: string
   readonly serverFetch?: typeof fetch
   readonly slackFetch?: FetchFunction
   readonly slackProxyUrl?: string
@@ -23,6 +24,8 @@ export interface SlackCliOptions {
 }
 
 export type OperatorCredentialFileReader = (path: string) => Promise<string>
+
+export const DEFAULT_OPERATOR_ID = "mohist-slack"
 
 const PROXIED_CLIENT_PING_TIMEOUT_MS = 24 * 60 * 60 * 1_000
 const SOCKET_RECONNECT_MAX_DELAY_MS = 30_000
@@ -39,6 +42,7 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
     transport: new HttpAdapterTransport({
       serverUrl: options.serverUrl,
       operatorToken: options.operatorToken,
+      operatorId: options.operatorId,
       fetch: options.serverFetch,
     }),
     socketFactory: (appToken) => socketClient(appToken, dispatcher),
@@ -145,6 +149,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+export function resolveOperatorId(environment: NodeJS.ProcessEnv = process.env): string {
+  const configured = environment.MOHIST_OPERATOR_ID?.trim()
+  return configured ? configured : DEFAULT_OPERATOR_ID
+}
+
 export async function resolveOperatorToken(
   environment: NodeJS.ProcessEnv = process.env,
   readCredentialFile: OperatorCredentialFileReader = (path) => readFile(path, "utf8"),
@@ -178,6 +187,7 @@ export async function runCli() {
       adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
       serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
       operatorToken: await resolveOperatorToken(),
+      operatorId: resolveOperatorId(),
       slackProxyUrl: env("SLACK_PROXY_URL"),
       heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
       deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),

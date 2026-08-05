@@ -32,10 +32,11 @@ const interaction: SlackInteractionEnvelope = {
 
 describe("HttpAdapterTransport", () => {
   it("uses the canonical operator-authenticated lease endpoints for discovery, hello, renew, ingress, and deliveries", async () => {
-    const calls: Array<{ url: string; method: string; body: string; operatorToken: string | null }> = []
+    const calls: Array<{ url: string; method: string; body: string; operatorToken: string | null; operatorId: string | null }> = []
     const transport = new HttpAdapterTransport({
       serverUrl: "http://localhost/",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async (input, init) => {
         const url = String(input)
         const requestBody = JSON.parse(String(init?.body ?? "{}")) as { kind?: string }
@@ -44,6 +45,7 @@ describe("HttpAdapterTransport", () => {
           method: String(init?.method ?? "GET"),
           body: String(init?.body ?? ""),
           operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
+          operatorId: new Headers(init?.headers).get("x-mohist-operator-id"),
         })
         const data = url.endsWith("/api/slack-adapter/leases/targets")
           ? [
@@ -139,6 +141,8 @@ describe("HttpAdapterTransport", () => {
       "GET", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST",
     ])
     expect(calls.every((call) => call.operatorToken === "operator")).toBe(true)
+    expect(calls.every((call) => call.operatorId === "operator-id")).toBe(true)
+    expect(calls.every((call) => call.operatorToken !== null && call.operatorId !== null)).toBe(true)
     expect(JSON.parse(calls[1]!.body)).toEqual({
       kind: "validation",
       target: { kind: "connection", projectId: "p", connectionId: "c" },
@@ -188,6 +192,7 @@ describe("HttpAdapterTransport", () => {
     const transport = new HttpAdapterTransport({
       serverUrl: "http://localhost",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async () => {
         const next = responses.shift()!
         return new Response(JSON.stringify(next.body), { status: next.status })
@@ -219,6 +224,7 @@ describe("HttpAdapterTransport", () => {
     const transport = new HttpAdapterTransport({
       serverUrl: "http://localhost",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async () => new Response(JSON.stringify({ success: true, data: [{ kind: "manager" }] }), { status: 200 }),
     })
     await expect(transport.discover(new AbortController().signal)).rejects.toThrow("invalid Manager target")
@@ -226,6 +232,7 @@ describe("HttpAdapterTransport", () => {
     const transport2 = new HttpAdapterTransport({
       serverUrl: "http://localhost",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async () => new Response(JSON.stringify({ success: true, data: { leaseId: "x" } }), { status: 200 }),
     })
     await expect(transport2.acquireLease({ projectId: "p", connectionId: "c" }, "runtime", "a", new AbortController().signal))
@@ -234,6 +241,7 @@ describe("HttpAdapterTransport", () => {
     const transport3 = new HttpAdapterTransport({
       serverUrl: "http://localhost",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async () => new Response(JSON.stringify({ success: true, data: { id: "x" } }), { status: 200 }),
     })
     await expect(transport3.claimDelivery({ projectId: "p", connectionId: "c" }, "a", new AbortController().signal))
@@ -244,15 +252,59 @@ describe("HttpAdapterTransport", () => {
     expect(() => new HttpAdapterTransport({
       serverUrl: "https://127.operator-token.example.test",
       operatorToken: "operator",
+      operatorId: "operator-id",
     })).toThrow("loopback")
 
     const transport = new HttpAdapterTransport({
       serverUrl: "http://127.0.0.1:3456",
       operatorToken: "operator",
+      operatorId: "operator-id",
       fetch: async () => new Response("xapp-server-error-secret", { status: 500 }),
     })
     const error = await transport.discover(new AbortController().signal).catch((reason: unknown) => String(reason))
     expect(error).toContain("500")
     expect(error).not.toContain("xapp-server-error-secret")
+  })
+
+  it("sends the operator identity header alongside the token on every lease request", async () => {
+    const leaseHeaders: Array<{ url: string; token: string | null; id: string | null }> = []
+    const transport = new HttpAdapterTransport({
+      serverUrl: "http://127.0.0.1:3456",
+      operatorToken: "shared-token",
+      operatorId: "mohist-slack",
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers)
+        leaseHeaders.push({
+          url: String(input),
+          token: headers.get("x-mohist-operator-token"),
+          id: headers.get("x-mohist-operator-id"),
+        })
+        const url = String(input)
+        const data = url.endsWith("/api/slack-adapter/leases/targets")
+          ? [{ kind: "connection", projectId: "p", connectionId: "c", expectedAppId: "A1" }]
+          : url.endsWith("/leases/acquire")
+            ? { leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp", botToken: "xoxb" }
+            : url.endsWith("/leases/hello") ? { outcome: "verified" }
+              : url.endsWith("/leases/renew")
+                ? { leaseId: "lease", kind: "runtime", generation: 2, expiresAt: "2026-01-01T00:10:00Z" }
+                : null
+        return new Response(JSON.stringify({ success: true, data }), { status: 200 })
+      },
+    })
+    const ref = { projectId: "p", connectionId: "c" }
+    const signal = new AbortController().signal
+    await transport.discover(signal)
+    await transport.acquireLease(ref, "runtime", "a", signal)
+    await transport.reportHello(ref, "lease", "A1", signal)
+    await transport.renewLease(ref, "lease", "a", signal)
+
+    expect(leaseHeaders.map((headers) => headers.url)).toEqual([
+      "http://127.0.0.1:3456/api/slack-adapter/leases/targets",
+      "http://127.0.0.1:3456/api/slack-adapter/leases/acquire",
+      "http://127.0.0.1:3456/api/slack-adapter/leases/hello",
+      "http://127.0.0.1:3456/api/slack-adapter/leases/renew",
+    ])
+    expect(leaseHeaders.every((headers) => headers.token === "shared-token")).toBe(true)
+    expect(leaseHeaders.every((headers) => headers.id === "mohist-slack")).toBe(true)
   })
 })
