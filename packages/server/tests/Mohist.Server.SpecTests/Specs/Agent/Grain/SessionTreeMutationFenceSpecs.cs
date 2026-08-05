@@ -251,6 +251,38 @@ public sealed class SessionTreeMutationFenceSpecs
     }
 
     [Fact]
+    public async Task CommitFinalizeReleaseMismatchDoesNotReturnAttachedOrUnlockFence()
+    {
+        var projectId = $"tree-fence-release-gate-{Guid.NewGuid():N}";
+        var parentId = $"parent-{projectId}";
+        var parent = await OpenParentAsync(projectId, parentId);
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        var command = Command(projectId, "edge-release-gate", "command-release-gate", parentId);
+        await fence.ReserveAsync(command);
+        var binding = await AcquireAsync(parentId, projectId, command);
+        var begun = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId, binding);
+        await AcknowledgeAttachAsync(fence, command, binding, begun.Revision);
+
+        var releasedWithWrongOutcome = await parent.ReleaseChildAttachBindingAsync(
+            new ReleaseChildAttachBindingCommand(binding, "wrong-outcome"));
+        Assert.Equal(SessionTreeBindingReleaseState.Released, releasedWithWrongOutcome.State);
+
+        var committed = await fence.CommitFinalizeAsync(
+            command.CommandId,
+            command.EdgeId,
+            begun.Revision);
+
+        Assert.True(committed.ReconciliationRequired);
+        Assert.NotEqual(LinkReservationState.Attached, committed.State);
+        var state = await fence.GetAsync();
+        Assert.True(state.ReconciliationRequired);
+        Assert.Equal(begun.Revision, state.GraphRevision);
+        Assert.Equal(LinkReservationState.Attached, Assert.Single(state.Reservations!).State);
+        Assert.NotNull(state.ReleaseObligation);
+        Assert.Equal("attached", state.ReleaseObligation!.Outcome);
+    }
+
+    [Fact]
     public async Task ReservationReplayWithDifferentBodyIsConflict_AndRejectedReplayIsStable()
     {
         var projectId = $"tree-fence-replay-{Guid.NewGuid():N}";

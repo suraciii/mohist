@@ -656,6 +656,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         var finalized = await _grains
             .GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId)
             .CommitFinalizeAsync(commandId, edgeId, begun.Revision);
+        if (finalized.ReconciliationRequired)
+            throw new AgentSpawnPostPlanRejectedException(
+                finalized.RejectionReason ?? "parent_link_reconciliation_required");
         if (finalized.State != LinkReservationState.Attached)
             throw new AgentSpawnValidationPendingException("parent_tree_link_not_attached");
 
@@ -677,6 +680,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
     private async Task PromoteAndQueueSubmitAsync(AgentLaunchCoordinatorPlan plan)
     {
+        await EnsureParentLinkReadyForPromotionAsync(plan);
         await _grains.GetGrain<IAgentSessionGrain>(plan.SessionId).PromoteProvisionalLaunchAsync();
         await _grains.GetGrain<IAgentJobGrain>(plan.JobKey).PromotePreparedLaunchAsync();
 
@@ -690,6 +694,27 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         };
         await SaveStateAsync();
         await AdvanceAsync();
+    }
+
+    private async Task EnsureParentLinkReadyForPromotionAsync(AgentLaunchCoordinatorPlan plan)
+    {
+        if (plan.ParentSessionId is null)
+            return;
+
+        var fence = await _grains.GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId).GetAsync();
+        if (fence.ReconciliationRequired)
+            throw new AgentSpawnPostPlanRejectedException(
+                fence.ReconciliationReason ?? "parent_link_reconciliation_required");
+        if (fence.ReleaseObligation is not null)
+            throw new AgentSpawnValidationPendingException("parent_tree_release_pending");
+
+        var reservation = (fence.Reservations
+            ?? (fence.Reservation is { } legacy ? [legacy] : []))
+            .FirstOrDefault(item => item.EdgeId == plan.ParentLinkEdgeId);
+        if (reservation?.State == LinkReservationState.Rejected)
+            throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
+        if (reservation?.State != LinkReservationState.Attached)
+            throw new AgentSpawnValidationPendingException("parent_tree_link_not_attached");
     }
 
     private async Task BeginAbortLaunchAsync(AgentLaunchCoordinatorPlan plan)
@@ -774,6 +799,11 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ?? (fence.Reservation is { } legacy ? [legacy] : []))
                 .FirstOrDefault(item =>
                 string.Equals(item.EdgeId, plan.ParentLinkEdgeId, StringComparison.Ordinal));
+            if (fence.ReconciliationRequired)
+                throw new AgentSpawnPostPlanRejectedException(
+                    fence.ReconciliationReason ?? "parent_link_reconciliation_required");
+            if (fence.ReleaseObligation is not null)
+                throw new AgentSpawnValidationPendingException("parent_tree_release_pending");
             if (reservation?.State != LinkReservationState.Attached)
                 throw new AgentSpawnValidationPendingException("parent_tree_link_not_attached");
         }

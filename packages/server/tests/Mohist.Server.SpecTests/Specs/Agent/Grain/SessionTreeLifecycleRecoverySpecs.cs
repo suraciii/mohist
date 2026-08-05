@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -277,6 +279,103 @@ public sealed class SessionTreeLifecycleRecoverySpecs
             (await setup.Fence.CommitDetachAsync(setup.Command.CommandId, setup.Command.EdgeId, begun.Revision)).State);
         await setup.Fence.RunRecoveryTickAsync();
         Assert.Equal(2, (await setup.Fence.GetAsync()).GraphRevision);
+    }
+
+    [Fact]
+    public async Task CommitAfterReleaseExceptionLeavesExactReceiptForReminderRecovery()
+    {
+        var projectId = $"tree-release-recovery-{Guid.NewGuid():N}";
+        var parentId = $"tree-release-parent-{Guid.NewGuid():N}";
+        var childId = $"tree-release-child-{Guid.NewGuid():N}";
+        var parent = await OpenSessionAsync(projectId, parentId, "root-agent");
+        var child = await OpenSessionAsync(projectId, childId, "child-agent");
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        var command = new ReserveSessionTreeLinkCommand(
+            projectId,
+            "edge-release-recovery",
+            parentId,
+            childId,
+            "/workspace",
+            "runner-1",
+            "opencode",
+            "runtime-session",
+            "command-release-recovery",
+            "job-release-recovery",
+            "root-agent",
+            1,
+            SessionTreeExpectedLinkState.Absent);
+
+        await fence.ReserveAsync(command);
+        var binding = (await parent.AcquireChildAttachBindingAsync(
+            new AcquireChildAttachBindingCommand(
+                projectId,
+                command.CommandId,
+                command.EdgeId,
+                parentId,
+                command.ExpectedWorkDir,
+                command.ExpectedRunnerId,
+                command.ExpectedRuntime,
+                command.ExpectedRuntimeSessionId,
+                command.ExpectedBindingEpoch!.Value,
+                command.ParentAgentId!))).Receipt!;
+        var begun = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId, binding);
+        var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+            command.CommandId,
+            command.EdgeId,
+            parentId,
+            command.ParentAgentId!,
+            command.ChildLaunchJobId!,
+            begun.Revision,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            projectId,
+            binding.BindingEpoch,
+            binding.ReceiptId,
+            SessionTreeExpectedLinkState.Absent));
+        await fence.AcknowledgeFinalizeAsync(attached.Receipt!);
+
+        var store = _fixture.Cluster
+            .GetSiloServiceProvider(null)
+            .GetRequiredService<IAgentSessionStore>();
+        var parentSnapshot = await store.LoadAsync(parentId);
+        Assert.NotNull(parentSnapshot);
+        await parent.DeactivateAndWait(_fixture.Grains);
+        await store.DeleteAsync(parentId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fence.CommitFinalizeAsync(
+            command.CommandId,
+            command.EdgeId,
+            begun.Revision));
+
+        var afterException = await fence.GetAsync();
+        Assert.Equal(begun.Revision, afterException.GraphRevision);
+        Assert.Equal(LinkReservationState.Attached, Assert.Single(afterException.Reservations!).State);
+        Assert.NotNull(afterException.ReleaseObligation);
+        Assert.Equal(attached.Receipt, afterException.ReleaseObligation!.Receipt);
+        Assert.Equal("attached", afterException.ReleaseObligation.Outcome);
+        var blockedDetach = await fence.BeginDetachAsync(new BeginSessionTreeDetachCommand(
+            projectId,
+            command.EdgeId,
+            parentId,
+            childId,
+            "command-release-recovery-detach",
+            command.ChildLaunchJobId!,
+            begun.Revision));
+        Assert.Equal(SessionTreeDetachMutationState.ReconciliationRequired, blockedDetach.State);
+        Assert.Equal(begun.Revision, blockedDetach.Revision);
+
+        await store.SaveAsync(parentId, parentSnapshot!);
+        await fence.RunRecoveryTickAsync();
+
+        var releasedByRecovery = await parent.ReleaseChildAttachBindingAsync(
+            new ReleaseChildAttachBindingCommand(binding, "attached"));
+        Assert.Equal(SessionTreeBindingReleaseState.AlreadyReleased, releasedByRecovery.State);
+        var afterRecovery = await fence.GetAsync();
+        Assert.Equal(afterException.GraphRevision, afterRecovery.GraphRevision);
+        Assert.Equal(afterException.Reservations, afterRecovery.Reservations);
+        Assert.Null(afterRecovery.ReleaseObligation);
     }
 
     private async Task<(
