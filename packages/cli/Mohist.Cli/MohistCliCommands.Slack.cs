@@ -78,14 +78,9 @@ internal static class SlackCommands
         command.Options.Add(output);
         command.SetAction(async ctx =>
         {
-            var outputValue = ctx.GetValue(output);
-            if (MohistCliCommands.OutputOptionState.Explicit
-                && string.Equals(outputValue, "table", StringComparison.Ordinal))
-                return api.WriteJsonSelectionResult(
-                    SetupDescriptor,
-                    new JsonSelection(JsonSelectionKind.Discovery, SetupDescriptor.Fields, null));
-            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
-            if (outputExit != 0) return outputExit;
+            var selection = ResolveSelection(ctx, output, SetupDescriptor);
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(SetupDescriptor, selection);
 
             var missing = new[]
             {
@@ -102,7 +97,8 @@ internal static class SlackCommands
 
             var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
             if (headers is null) return 1;
-            return await api.PrintPostWithOutputAsync(
+            return await api.PrintMutationResourceAsync(
+                HttpMethod.Post,
                 "/api/slack-manager/setup",
                 new
                 {
@@ -113,7 +109,9 @@ internal static class SlackCommands
                     transportKind = ctx.GetValue(transport),
                     readiness = ctx.GetValue(readiness),
                 },
-                resolvedMode,
+                SetupDescriptor,
+                selection,
+                api.WriteJsonDataAsync,
                 headers: headers).ConfigureAwait(false);
         });
         return command;
@@ -138,14 +136,9 @@ internal static class SlackCommands
         command.Options.Add(output);
         command.SetAction(async ctx =>
         {
-            var outputValue = ctx.GetValue(output);
-            if (MohistCliCommands.OutputOptionState.Explicit
-                && string.Equals(outputValue, "table", StringComparison.Ordinal))
-                return api.WriteJsonSelectionResult(
-                    ManagerCredentialDescriptor,
-                    new JsonSelection(JsonSelectionKind.Discovery, ManagerCredentialDescriptor.Fields, null));
-            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
-            if (outputExit != 0) return outputExit;
+            var selection = ResolveSelection(ctx, output, ManagerCredentialDescriptor);
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(ManagerCredentialDescriptor, selection);
 
             var team = ctx.GetValue(workspaceTeam);
             if (string.IsNullOrWhiteSpace(team))
@@ -158,14 +151,17 @@ internal static class SlackCommands
             if (managerBotToken is null) return 2;
             var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
             if (headers is null) return 1;
-            return await api.PrintPostWithOutputAsync(
+            return await api.PrintMutationResourceAsync(
+                HttpMethod.Post,
                 "/api/slack-manager/credentials",
                 new
                 {
                     workspaceTeamId = team,
                     managerBotToken,
                 },
-                resolvedMode,
+                ManagerCredentialDescriptor,
+                selection,
+                api.WriteJsonDataAsync,
                 headers: headers).ConfigureAwait(false);
         });
         return command;
@@ -183,14 +179,9 @@ internal static class SlackCommands
         command.Options.Add(output);
         command.SetAction(async ctx =>
         {
-            var outputValue = ctx.GetValue(output);
-            if (MohistCliCommands.OutputOptionState.Explicit
-                && string.Equals(outputValue, "table", StringComparison.Ordinal))
-                return api.WriteJsonSelectionResult(
-                    StatusDescriptor,
-                    new JsonSelection(JsonSelectionKind.Discovery, StatusDescriptor.Fields, null));
-            var (resolvedMode, outputExit) = api.ResolveOutputMode(ctx.GetValue(output));
-            if (outputExit != 0) return outputExit;
+            var selection = ResolveSelection(ctx, output, StatusDescriptor);
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(StatusDescriptor, selection);
 
             var team = ctx.GetValue(workspaceTeam);
             if (string.IsNullOrWhiteSpace(team))
@@ -201,12 +192,27 @@ internal static class SlackCommands
 
             var headers = await GetOperatorHeadersAsync(api, credentials).ConfigureAwait(false);
             if (headers is null) return 1;
-            return await api.PrintWithOutputAsync(
+            return await api.PrintResourceAsync(
                 $"/api/slack-manager/status?workspaceTeamId={Uri.EscapeDataString(team)}",
-                resolvedMode,
-                headers: headers).ConfigureAwait(false);
+                StatusDescriptor,
+                selection,
+                api.WriteJsonDataAsync,
+                headers).ConfigureAwait(false);
         });
         return command;
+    }
+
+    private static JsonSelection ResolveSelection(
+        ParseResult context,
+        Option<string?> output,
+        ResourceDescriptor descriptor)
+    {
+        var explicitOutput = MohistCliCommands.OutputOptionState.Explicit;
+        var value = context.GetValue(output);
+        return JsonSelection.Parse(
+            descriptor,
+            explicitOutput,
+            explicitOutput && string.Equals(value, "table", StringComparison.Ordinal) ? null : value);
     }
 
     private static string Path(string projectId, string suffix = "") =>
