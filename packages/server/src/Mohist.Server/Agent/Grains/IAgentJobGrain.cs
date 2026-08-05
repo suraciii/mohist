@@ -92,6 +92,8 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// belongs to a different plan.
     /// </summary>
     Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
+    Task PromotePreparedLaunchAsync() => Task.CompletedTask;
+    Task AbortPreparedLaunchAsync(string reason) => Task.CompletedTask;
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
     /// Used when a Runner disconnect, a status
@@ -165,7 +167,10 @@ public sealed record PrepareManualLaunchCommand(
     /// capability existed. Append-only Orleans field id (next free
     /// after <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(17)] AgentStartupContext? StartupContext = null);
+    [property: Id(17)] AgentStartupContext? StartupContext = null,
+    [property: Id(18)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(19)] string? PinnedRunnerId = null,
+    [property: Id(20)] AgentSessionStartup? AgentSessionStartup = null);
 
 [GenerateSerializer]
 public sealed record PendingTerminalDeliveryEvent(
@@ -541,7 +546,10 @@ public sealed record AgentJobInput(
     /// <see cref="Attachments"/>).
     /// </summary>
     [property: Id(17)] AgentStartupContext? StartupContext = null,
-    [property: Id(18)] AgentSlackExecutionContext? SlackExecutionContext = null);
+    [property: Id(18)] AgentSlackExecutionContext? SlackExecutionContext = null,
+    [property: Id(19)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(20)] string? PinnedRunnerId = null,
+    [property: Id(21)] AgentSessionStartup? AgentSessionStartup = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

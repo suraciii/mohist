@@ -44,17 +44,23 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
     private readonly AgentReadinessService _readiness;
+    private readonly AgentExecutionSnapshotResolver _snapshots;
+    private readonly AgentSpawnAdmissionService _spawnAdmission;
 
     public AgentLauncher(
         AgentSessionResolver sessions,
         IGrainFactory grains,
         TimeProvider timeProvider,
-        AgentReadinessService readiness)
+        AgentReadinessService readiness,
+        AgentExecutionSnapshotResolver snapshots,
+        AgentSpawnAdmissionService spawnAdmission)
     {
         _sessions = sessions;
         _grains = grains;
         _timeProvider = timeProvider;
         _readiness = readiness;
+        _snapshots = snapshots;
+        _spawnAdmission = spawnAdmission;
     }
 
     public async Task<AgentLaunchResult> LaunchAsync(
@@ -85,7 +91,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ? metadata
             : WithTriggerLabels(metadata, triggerLabels);
 
-        var definition = ResolveExecutionDefinition(agent);
+        var definition = await ResolveDefinitionAsync(agent);
+        var startup = BuildStartup(context.ProjectId, sessionId, definition);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -94,7 +101,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 AgentRuntime: definition.Runtime,
                 WorkDir: context.WorkspacePath,
                 Metadata: durableMetadata,
-                Definition: definition));
+                Definition: definition,
+                AgentSessionStartup: startup));
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var jobInput = new AgentJobInput(
@@ -110,7 +118,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Variant: definition.Variant,
             Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
-            EpicNumber: context.EpicNumber);
+            EpicNumber: context.EpicNumber,
+            AllowedSubagents: definition.AllowedSubagents,
+            AgentSessionStartup: startup);
         if (triggerLabels is null)
             await jobGrain.SubmitAsync(jobInput);
         else
@@ -125,7 +135,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AgentName: agent.Name);
     }
 
-    public async Task<AgentLaunchResult> LaunchIdempotentAsync(
+    public Task<AgentLaunchResult> LaunchIdempotentAsync(
         AgentInfo agent,
         string prompt,
         AgentLaunchContext context,
@@ -135,7 +145,41 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        LaunchIdempotentCoreAsync(
+            agent,
+            prompt,
+            context,
+            idempotencyKey,
+            request,
+            attachments,
+            preMintedSessionId,
+            preMintedInputId,
+            preMintedTurnId,
+            ct: ct,
+            definitionOverride: null,
+            skipLaunchability: false);
+
+    private async Task<AgentLaunchResult> LaunchIdempotentCoreAsync(
+        AgentInfo agent,
+        string prompt,
+        AgentLaunchContext context,
+        string idempotencyKey,
+        AgentLaunchCoordinatorRequest request,
+        IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
+        string? preMintedSessionId = null,
+        string? preMintedInputId = null,
+        string? preMintedTurnId = null,
+        CancellationToken ct = default,
+        string? parentSessionId = null,
+        string? parentAgentId = null,
+        string? parentExpectedWorkDir = null,
+        string? parentExpectedRunnerId = null,
+        string? parentExpectedRuntime = null,
+        string? parentExpectedRuntimeSessionId = null,
+        string? parentLinkEdgeId = null,
+        AgentExecutionDefinition? definitionOverride = null,
+        bool skipLaunchability = false)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(context);
@@ -147,6 +191,41 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(idempotencyKey));
         }
 
+        var spawnRequestFingerprint = parentSessionId is null
+            ? null
+            : AgentLaunchCoordinatorCodec.SpawnFingerprint(
+                request.AgentRef ?? string.Empty,
+                request.Prompt);
+        if (parentSessionId is not null)
+        {
+            var spawnFence = await _spawnAdmission.StartOrValidateFenceAsync(
+                context.ProjectId,
+                parentSessionId,
+                idempotencyKey,
+                request.AgentRef ?? string.Empty,
+                request.Prompt);
+            if (spawnFence.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
+                throw new AgentSpawnPreplanRejectedException(
+                    spawnFence.PreplanRejectionReason ?? "spawn_rejected");
+
+            var existingSpawn = await _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+                    AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, parentSessionId, idempotencyKey))
+                .ResumeExistingSpawnAsync(spawnRequestFingerprint!);
+            if (existingSpawn is not null)
+            {
+                return new AgentLaunchResult(
+                    existingSpawn.SessionId,
+                    existingSpawn.JobKey,
+                    existingSpawn.InputId,
+                    existingSpawn.TurnId,
+                    existingSpawn.AgentId,
+                    existingSpawn.AgentName,
+                    existingSpawn.ParentLinkEdgeId);
+            }
+            if (spawnFence.Outcome == SpawnRequestFenceOutcome.Admitted)
+                throw new LaunchSetupPendingException(idempotencyKey);
+        }
+
         var hasAttachments = attachments is { Count: > 0 };
         var trimmedPrompt = prompt?.Trim() ?? string.Empty;
         if (string.IsNullOrWhiteSpace(trimmedPrompt) && !hasAttachments)
@@ -156,16 +235,21 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(prompt));
         }
 
-        await EnsureLaunchableAsync(agent, ct);
+        if (!skipLaunchability)
+            await EnsureLaunchableAsync(agent, ct);
 
-        var resolvedRuntime = ResolveRuntime(agent.AgentConfig);
-        var (resolvedModel, resolvedVariant) = ResolveModelAndVariant(agent.AgentConfig);
+        var definition = definitionOverride ?? await ResolveDefinitionAsync(agent);
+        var resolvedRuntime = definition.Runtime;
+        var resolvedModel = definition.Model;
+        var resolvedVariant = definition.Variant;
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
 
-        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
-            AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, idempotencyKey));
+        var coordinatorKey = parentSessionId is null
+            ? AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, idempotencyKey)
+            : AgentLaunchCoordinatorCodec.KeyFor(context.ProjectId, parentSessionId, idempotencyKey);
+        var coordinator = _grains.GetGrain<IAgentLaunchCoordinatorGrain>(coordinatorKey);
         var outcome = await coordinator.LaunchAsync(new AgentLaunchCoordinatorCommandEnvelope(
             ProjectId: context.ProjectId,
             IdempotencyKey: idempotencyKey,
@@ -176,7 +260,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Model: resolvedModel,
             Variant: resolvedVariant,
             Runtime: resolvedRuntime,
-            Prompt: trimmedPrompt,
+            Prompt: request.ExactPromptFingerprint ? prompt! : trimmedPrompt,
             WorkspacePath: context.WorkspacePath,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
@@ -186,7 +270,19 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             PreMintedSessionId: preMintedSessionId,
             PreMintedInputId: preMintedInputId,
             PreMintedTurnId: preMintedTurnId,
-            Attachments: attachments));
+            Attachments: attachments,
+            AllowedSubagents: definition.AllowedSubagents,
+            AgentSessionStartup: preMintedSessionId is null
+                ? null
+                : BuildStartup(context.ProjectId, preMintedSessionId, definition, parentSessionId, request.AgentRef),
+            ParentSessionId: parentSessionId,
+            ParentAgentId: parentAgentId,
+            ParentExpectedWorkDir: parentExpectedWorkDir,
+            ParentExpectedRunnerId: parentExpectedRunnerId,
+            ParentExpectedRuntime: parentExpectedRuntime,
+            ParentExpectedRuntimeSessionId: parentExpectedRuntimeSessionId,
+            ParentLinkEdgeId: parentLinkEdgeId,
+            SpawnRequestFingerprint: spawnRequestFingerprint));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -194,7 +290,82 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             InputId: outcome.InputId,
             TurnId: outcome.TurnId,
             AgentId: outcome.AgentId,
-            AgentName: outcome.AgentName);
+            AgentName: outcome.AgentName,
+            ParentLinkEdgeId: outcome.ParentLinkEdgeId);
+    }
+
+    public async Task<AgentLaunchResult> LaunchSubagentAsync(
+        string projectId,
+        string parentSessionId,
+        string targetAgentRef,
+        string prompt,
+        string idempotencyKey,
+        CancellationToken ct = default)
+    {
+        var normalizedTargetAgentRef = targetAgentRef.Trim();
+        var spawnFence = await _spawnAdmission.StartOrValidateFenceAsync(
+            projectId,
+            parentSessionId,
+            idempotencyKey,
+            normalizedTargetAgentRef,
+            prompt);
+        if (spawnFence.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
+            throw new AgentSpawnPreplanRejectedException(
+                spawnFence.PreplanRejectionReason ?? "spawn_rejected");
+
+        var existingSpawn = await _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
+                AgentLaunchCoordinatorCodec.KeyFor(projectId, parentSessionId, idempotencyKey))
+            .ResumeExistingSpawnAsync(
+                AgentLaunchCoordinatorCodec.SpawnFingerprint(normalizedTargetAgentRef, prompt));
+        if (existingSpawn is not null)
+        {
+            return new AgentLaunchResult(
+                existingSpawn.SessionId,
+                existingSpawn.JobKey,
+                existingSpawn.InputId,
+                existingSpawn.TurnId,
+                existingSpawn.AgentId,
+                existingSpawn.AgentName,
+                existingSpawn.ParentLinkEdgeId);
+        }
+        if (spawnFence.Outcome == SpawnRequestFenceOutcome.Admitted)
+            throw new LaunchSetupPendingException(idempotencyKey);
+
+        var admission = await _spawnAdmission.AdmitAsync(
+            projectId,
+            parentSessionId,
+            idempotencyKey,
+            normalizedTargetAgentRef,
+            prompt,
+            ct);
+        var edgeId = $"agent-edge-{AgentLaunchCoordinatorCodec.StableToken(
+            $"{projectId}\n{parentSessionId}\n{idempotencyKey}")}";
+        var request = new AgentLaunchCoordinatorRequest(
+            prompt,
+            normalizedTargetAgentRef,
+            admission.Definition.Runtime,
+            admission.WorkDir,
+            null,
+            null,
+            null,
+            null,
+            ExactPromptFingerprint: true);
+        return await LaunchIdempotentCoreAsync(
+            admission.TargetAgent,
+            prompt,
+            new AgentLaunchContext(projectId, WorkspacePath: admission.WorkDir),
+            idempotencyKey,
+            request,
+            ct: ct,
+            parentSessionId: parentSessionId,
+            parentAgentId: admission.ParentAgentId,
+            parentExpectedWorkDir: admission.WorkDir,
+            parentExpectedRunnerId: admission.RunnerId,
+            parentExpectedRuntime: admission.Runtime,
+            parentExpectedRuntimeSessionId: admission.RuntimeSessionId,
+            parentLinkEdgeId: edgeId,
+            definitionOverride: admission.Definition,
+            skipLaunchability: true);
     }
 
     public async Task<AgentLaunchResult> LaunchConnectionAsync(
@@ -345,7 +516,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var sessionId = _sessions.StableSessionId(executionContext.ProjectId, triggeringEvent.Id, ruleId);
         var jobKey = _sessions.StableJobKey(executionContext.ProjectId, triggeringEvent.Id, ruleId);
 
-        var definition = ResolveExecutionDefinition(agent);
+        var definition = await ResolveDefinitionAsync(agent);
         var agentConfigJson = agent.AgentConfig is { ValueKind: not JsonValueKind.Undefined }
             ? agent.AgentConfig.Value.GetRawText()
             : null;
@@ -436,7 +607,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         };
         var durableMetadata = WithTriggerLabels(metadata, triggerLabels);
 
-        var definition = ResolveExecutionDefinition(agent);
+        var definition = await ResolveDefinitionAsync(agent);
+        var startup = BuildStartup(context.ProjectId, sessionId, definition);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -445,7 +617,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 AgentRuntime: definition.Runtime,
                 WorkDir: context.WorkspacePath,
                 Metadata: durableMetadata,
-                Definition: definition));
+                Definition: definition,
+                AgentSessionStartup: startup));
 
         var jobGrain = _grains.GetGrain<IAgentJobGrain>(jobKey);
         var jobInput = new AgentJobInput(
@@ -461,7 +634,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Variant: definition.Variant,
             Skills: definition.Skills,
             IssueNumber: context.IssueNumber,
-            EpicNumber: context.EpicNumber);
+            EpicNumber: context.EpicNumber,
+            AllowedSubagents: definition.AllowedSubagents,
+            AgentSessionStartup: startup);
         await jobGrain.EnsureSubmittedAsync(jobInput);
 
         return new AgentLaunchResult(
@@ -490,6 +665,25 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         if (readiness.Conclusion == AgentReadinessConclusions.NeedsSetup)
             throw new AgentReadinessException(readiness);
     }
+
+    private async Task<AgentExecutionDefinition> ResolveDefinitionAsync(AgentInfo agent)
+    {
+        var resolved = await _snapshots.ResolveAsync(agent.ProjectId, agent.Id);
+        return resolved ?? ResolveExecutionDefinition(agent);
+    }
+
+    private static AgentSessionStartup BuildStartup(
+        string projectId,
+        string sessionId,
+        AgentExecutionDefinition definition,
+        string? parentSessionId = null,
+        string? agentRef = null) =>
+        new(
+            ProjectId: projectId,
+            SessionId: sessionId,
+            ParentSessionId: parentSessionId,
+            AllowedSubagents: definition.AllowedSubagents ?? [],
+            SpawnCommand: $"mo agent spawn {agentRef ?? "<agent-ref>"} --project {projectId} --parent-session {parentSessionId ?? sessionId} --prompt \"<brief>\" --idempotency-key <key>");
 
     private static string? BuildTriggerIdentity(
         string projectId,
@@ -587,7 +781,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Runtime: runtime,
             Model: model,
             Variant: variant,
-            Skills: skills);
+            Skills: skills,
+            AllowedSubagents: null);
     }
 
     private static string? TryReadString(JsonElement obj, string propertyName)

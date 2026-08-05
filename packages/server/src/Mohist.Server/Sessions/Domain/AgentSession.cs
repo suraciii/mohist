@@ -10,6 +10,8 @@ public sealed class AgentSession
     public AgentSessionMetadata Metadata { get; set; } = new();
     public required AgentSessionRuntime Runtime { get; set; }
     public AgentSessionSettings Settings { get; set; } = new();
+    public SessionParentLink? ParentLink { get; set; }
+    public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
     [JsonInclude]
     [JsonPropertyName("activitySummary")]
     internal AgentSessionActivitySummaryState PersistedActivitySummary { get; set; } = AgentSessionActivitySummaryState.Empty;
@@ -305,7 +307,8 @@ public sealed record AgentSessionRuntime(
 
 public sealed record AgentSessionSettings(
     string? Model = null,
-    AgentExecutionDefinition? Definition = null);
+    AgentExecutionDefinition? Definition = null,
+    AgentSessionStartup? AgentSessionStartup = null);
 
 public enum AgentSessionActivity
 {

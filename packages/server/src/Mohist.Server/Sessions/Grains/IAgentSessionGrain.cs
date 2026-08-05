@@ -83,6 +83,9 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// dispatch with the durable session artifacts.
     /// </summary>
     Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command);
+    Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command);
+    Task PromoteProvisionalLaunchAsync();
+    Task AbortProvisionalLaunchAsync(string jobId, string turnId, string reason);
 
     /// <summary>
     /// Mark the initial turn for the given job id as executing.
@@ -114,7 +117,9 @@ public sealed record OpenAgentSessionCommand(
     [property: Id(2)] string? WorkDir = null,
     [property: Id(3)] string? Model = null,
     [property: Id(4)] AgentSessionMetadata? Metadata = null,
-    [property: Id(5)] AgentExecutionDefinition? Definition = null);
+    [property: Id(5)] AgentExecutionDefinition? Definition = null,
+    [property: Id(6)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(7)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible);
 
 [GenerateSerializer]
 public sealed record AttachPhysicalSessionCommand(
@@ -347,7 +352,10 @@ public sealed record EnsureInitialLaunchCommand(
     /// Append-only Orleans field id (next free after
     /// <see cref="Provenance"/>).
     /// </summary>
-    [property: Id(10)] AgentStartupContext? StartupContext = null);
+    [property: Id(10)] AgentStartupContext? StartupContext = null,
+    [property: Id(11)] AgentExecutionDefinition? Definition = null,
+    [property: Id(12)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(
@@ -355,6 +363,20 @@ public sealed record EnsureInitialLaunchResult(
     [property: Id(1)] string InputId,
     [property: Id(2)] string TurnId,
     [property: Id(3)] bool AlreadyPersisted);
+
+[GenerateSerializer]
+public sealed record EnsureParentLinkCommand(
+    [property: Id(0)] SessionParentLink Link,
+    [property: Id(1)] string? ExpectedWorkDir,
+    [property: Id(2)] string? ExpectedRunnerId,
+    [property: Id(3)] string? ExpectedRuntime,
+    [property: Id(4)] string? ExpectedRuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record EnsureParentLinkResult(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string EdgeId,
+    [property: Id(2)] bool AlreadyPersisted);
 
 [GenerateSerializer]
 public sealed record AgentInitialLaunchSnapshot(

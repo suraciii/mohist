@@ -281,6 +281,10 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_LabelSlackConversationId");
             entity.HasIndex(e => e.LabelSlackThreadTs)
                 .HasDatabaseName("IX_AgentSessions_LabelSlackThreadTs");
+            entity.HasIndex(e => new { e.LabelProjectId, e.ParentSessionId, e.ParentLinkState, e.ParentLinkAttachedRevision, e.ParentLinkEdgeId })
+                .HasDatabaseName("IX_AgentSessions_TreeParent_AttachedRevision_Edge");
+            entity.HasIndex(e => new { e.LabelProjectId, e.LaunchVisibility, e.ParentSessionId, e.ParentLinkAttachedRevision, e.ParentLinkEdgeId })
+                .HasDatabaseName("IX_AgentSessions_TreeVisibleParent_AttachedRevision_Edge");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>
@@ -321,6 +325,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.AgentSessionId).HasMaxLength(512);
             entity.Property(e => e.InitialInputId).HasMaxLength(128);
             entity.Property(e => e.InitialTurnId).HasMaxLength(128);
+            entity.Property(e => e.PinnedRunnerId).HasMaxLength(256);
             entity.HasIndex(e => new { e.AgentId, e.ProjectId, e.SubmittedAt })
                 .HasDatabaseName("IX_AgentJobs_AgentId_ProjectId_SubmittedAt");
             // Poll-time queries: assigned running, assigned pending by
@@ -333,6 +338,10 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
             entity.HasIndex(e => new { e.Status, e.ReadySince })
                 .HasDatabaseName("IX_AgentJobs_Status_ReadySince");
+            entity.HasIndex(e => new { e.PinnedRunnerId, e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_PinnedRunner_Status_ReadySince");
+            entity.HasIndex(e => new { e.LaunchVisibility, e.Status, e.ReadySince })
+                .HasDatabaseName("IX_AgentJobs_LaunchVisibility_Status_ReadySince");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>

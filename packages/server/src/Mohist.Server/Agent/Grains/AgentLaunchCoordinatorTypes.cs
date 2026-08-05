@@ -3,6 +3,7 @@ using System.Text;
 using Mohist.Server.Contracts;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Agent.Grains;
 
@@ -14,10 +15,13 @@ namespace Mohist.Server.Agent.Grains;
 /// </summary>
 public enum AgentLaunchCoordinatorCommand
 {
-    None,
-    PrepareJob,
-    EnsureInitialLaunch,
-    SubmitJob,
+    None = 0,
+    PrepareJob = 1,
+    EnsureInitialLaunch = 2,
+    SubmitJob = 3,
+    ReserveLink = 4,
+    EnsureParentLink = 5,
+    AbortLaunch = 6,
 }
 
 /// <summary>
@@ -97,7 +101,23 @@ public sealed record AgentLaunchCoordinatorPlan(
     /// Append-only Orleans field id (next free after
     /// <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(25)] AgentStartupContext? StartupContext = null);
+    [property: Id(25)] AgentStartupContext? StartupContext = null,
+    [property: Id(26)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(27)] string? PinnedRunnerId = null,
+    [property: Id(28)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(29)] string? ParentSessionId = null,
+    [property: Id(30)] string? ParentAgentId = null,
+    [property: Id(31)] string? ParentExpectedWorkDir = null,
+    [property: Id(32)] string? ParentExpectedRunnerId = null,
+    [property: Id(33)] string? ParentExpectedRuntime = null,
+    [property: Id(34)] string? ParentExpectedRuntimeSessionId = null,
+    [property: Id(35)] string? ParentLinkEdgeId = null,
+    [property: Id(36)] long? ParentLinkRevision = null,
+    [property: Id(37)] string? RejectionReason = null,
+    [property: Id(38)] bool AbortFenceAcknowledged = false,
+    [property: Id(39)] bool AbortJobAcknowledged = false,
+    [property: Id(40)] bool AbortSessionAcknowledged = false,
+    [property: Id(41)] string? SpawnRequestFingerprint = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -140,7 +160,8 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// Append-only Orleans field id (next free after
     /// <see cref="AttachmentIds"/>).
     /// </summary>
-    [property: Id(9)] AgentStartupContext? StartupContext = null);
+    [property: Id(9)] AgentStartupContext? StartupContext = null,
+    [property: Id(10)] bool ExactPromptFingerprint = false);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -155,7 +176,8 @@ public sealed record AgentLaunchCoordinatorResult(
     [property: Id(3)] string TurnId,
     [property: Id(4)] string AgentId,
     [property: Id(5)] string AgentName,
-    [property: Id(6)] bool AlreadyPersisted);
+    [property: Id(6)] bool AlreadyPersisted,
+    [property: Id(7)] string? ParentLinkEdgeId = null);
 
 /// <summary>
 /// Raised when the supplied idempotency key has already accepted a
@@ -163,6 +185,8 @@ public sealed record AgentLaunchCoordinatorResult(
 /// replay. The route translates this to a 409 with the
 /// <c>launch_idempotency_conflict</c> code.
 /// </summary>
+[Serializable]
+[Orleans.GenerateSerializer]
 public sealed class LaunchIdempotencyConflictException : Exception
 {
     public LaunchIdempotencyConflictException(string idempotencyKey, string existingFingerprint)
@@ -172,13 +196,17 @@ public sealed class LaunchIdempotencyConflictException : Exception
         ExistingFingerprint = existingFingerprint;
     }
 
+    [Orleans.Id(0)]
     public string IdempotencyKey { get; }
+    [Orleans.Id(1)]
     public string ExistingFingerprint { get; }
 
     [Orleans.GenerateSerializer]
     public sealed record Serialized(string IdempotencyKey, string ExistingFingerprint);
 }
 
+[Serializable]
+[Orleans.GenerateSerializer]
 public sealed class LaunchSetupPendingException : Exception
 {
     public LaunchSetupPendingException(string idempotencyKey)
@@ -187,6 +215,7 @@ public sealed class LaunchSetupPendingException : Exception
         IdempotencyKey = idempotencyKey;
     }
 
+    [Orleans.Id(0)]
     public string IdempotencyKey { get; }
 }
 
@@ -201,6 +230,9 @@ public static class AgentLaunchCoordinatorCodec
     public static string KeyFor(string projectId, string idempotencyKey) =>
         $"agent-launch-coord/{projectId}/{Normalize(idempotencyKey)}";
 
+    public static string KeyFor(string projectId, string parentSessionId, string idempotencyKey) =>
+        $"agent-launch-coord/{projectId}/{parentSessionId}/{Normalize(idempotencyKey)}";
+
     public static string StableToken(string identity)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(identity);
@@ -210,9 +242,9 @@ public static class AgentLaunchCoordinatorCodec
 
     /// <summary>
     /// Stable fingerprint the coordinator compares replays against.
-    /// Canonicalises the request by sorting optional fields and
-    /// trimming whitespace so two clients sending the same logical
-    /// intent get the same fingerprint.
+    /// Canonicalises target and optional reference fields according to
+    /// their command contracts. Spawn prompts can opt into exact
+    /// string identity because whitespace is part of the request.
     /// </summary>
     /// <remarks>
     /// The fingerprint <strong>deliberately excludes</strong>
@@ -241,7 +273,9 @@ public static class AgentLaunchCoordinatorCodec
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim()));
         var canonical = string.Join('\u001f',
-            request.Prompt?.Trim() ?? string.Empty,
+            request.ExactPromptFingerprint
+                ? request.Prompt ?? string.Empty
+                : request.Prompt?.Trim() ?? string.Empty,
             request.AgentRef?.Trim() ?? string.Empty,
             request.Runtime?.Trim() ?? string.Empty,
             request.WorkspacePath?.Trim() ?? string.Empty,
@@ -266,5 +300,12 @@ public static class AgentLaunchCoordinatorCodec
         if (trimmed.Length == 0)
             throw new ArgumentException("Idempotency-Key is required.", nameof(idempotencyKey));
         return trimmed;
+    }
+
+    public static string SpawnFingerprint(string targetAgentRef, string prompt)
+    {
+        var canonical = $"{targetAgentRef.Trim()}\u001f{prompt}";
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 }

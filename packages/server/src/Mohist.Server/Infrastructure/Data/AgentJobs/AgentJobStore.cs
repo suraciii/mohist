@@ -282,7 +282,8 @@ public class AgentJobStore : IAgentJobStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.AgentJobs.AsNoTracking()
-            .Where(r => r.Status == "pending" && r.AssignedRunnerId == null);
+            .Where(r => r.Status == "pending" && r.AssignedRunnerId == null
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"));
 
         if (!string.IsNullOrWhiteSpace(projectId))
         {
@@ -305,7 +306,8 @@ public class AgentJobStore : IAgentJobStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "running")
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "running"
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
             .ToListAsync(ct);
         return rows.Select(ToRecord).ToList();
     }
@@ -317,7 +319,8 @@ public class AgentJobStore : IAgentJobStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "pending")
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "pending"
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
             .Take(limit)
@@ -333,7 +336,8 @@ public class AgentJobStore : IAgentJobStore
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var cutoffText = FormatTimestamp(cutoff);
         var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.Status == "pending" && r.ReadySince != null && r.ReadySince.CompareTo(cutoffText) <= 0)
+            .Where(r => r.Status == "pending" && r.ReadySince != null && r.ReadySince.CompareTo(cutoffText) <= 0
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
             .Take(limit)
@@ -359,6 +363,8 @@ public class AgentJobStore : IAgentJobStore
         AgentSessionId = record.AgentSessionId,
         InitialInputId = record.InitialInputId,
         InitialTurnId = record.InitialTurnId,
+        PinnedRunnerId = record.PinnedRunnerId,
+        LaunchVisibility = record.LaunchVisibility,
     };
 
     private static AgentJobLedgerRecord ToRecord(AgentJobRow row) => new(
@@ -377,7 +383,9 @@ public class AgentJobStore : IAgentJobStore
         row.IssueNumber,
         row.AgentSessionId,
         row.InitialInputId,
-        row.InitialTurnId);
+        row.InitialTurnId,
+        row.PinnedRunnerId,
+        row.LaunchVisibility);
 
     private static void ApplyTo(AgentJobRow existing, AgentJobLedgerRecord record)
     {
@@ -395,6 +403,8 @@ public class AgentJobStore : IAgentJobStore
         existing.AgentSessionId = record.AgentSessionId;
         existing.InitialInputId = record.InitialInputId;
         existing.InitialTurnId = record.InitialTurnId;
+        existing.PinnedRunnerId = record.PinnedRunnerId;
+        existing.LaunchVisibility = record.LaunchVisibility;
     }
 
     internal static string? FormatTimestamp(DateTimeOffset? value) =>
