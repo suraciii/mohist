@@ -104,6 +104,8 @@ internal sealed partial class TableRenderer
 
         var skills = data["skills"] as JsonArray;
         var skillText = skills is null ? "" : string.Join(",", skills.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
+        var allowedSubagents = data["allowedSubagentAgentIds"] as JsonArray;
+        var allowedSubagentText = allowedSubagents is null ? "" : string.Join(",", allowedSubagents.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
 
         _out.WriteLine($"id:                  {StringOf(data, "id")}");
         _out.WriteLine($"name:                {StringOf(data, "name")}");
@@ -111,6 +113,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"description:         {Truncate(StringOf(data, "description"), TitleSoftCap)}");
         _out.WriteLine($"max concurrent runs: {NumberOf(data, "maxConcurrentRuns")}");
         _out.WriteLine($"skills:              {skillText}");
+        _out.WriteLine($"allowed subagents:   {allowedSubagentText}");
         _out.WriteLine($"createdAt:           {Truncate(StringOf(data, "createdAt"), TitleSoftCap)}");
         _out.WriteLine($"updatedAt:           {Truncate(StringOf(data, "updatedAt"), TitleSoftCap)}");
         var instructions = StringOf(data, "instructions");
@@ -232,6 +235,8 @@ internal sealed partial class TableRenderer
 
         _out.WriteLine($"job id:     {StringOf(data, "jobId")}");
         _out.WriteLine($"session id: {StringOf(data, "sessionId")}");
+        _out.WriteLine($"parent session: {StringOf(data, "parentSessionId")}");
+        _out.WriteLine($"edge id:    {StringOf(data, "edgeId")}");
         _out.WriteLine($"input id:   {StringOf(data, "inputId")}");
         _out.WriteLine($"turn id:    {StringOf(data, "turnId")}");
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
@@ -241,6 +246,31 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
         _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
         _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");
+    }
+
+    private void RenderSessionTree(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"root:         {data["root"]?.ToJsonString() ?? ""}");
+        _out.WriteLine($"revision:     {StringOf(data, "revision")}");
+        _out.WriteLine("nodes:");
+        if (data["nodes"] is JsonArray nodes)
+        {
+            foreach (var node in nodes)
+                _out.WriteLine($"  {node?.ToJsonString() ?? "null"}");
+        }
+        _out.WriteLine("edges:");
+        if (data["edges"] is JsonArray edges)
+        {
+            foreach (var edge in edges)
+                _out.WriteLine($"  {edge?.ToJsonString() ?? "null"}");
+        }
+        _out.WriteLine($"continuation: {StringOf(data, "continuation")}");
     }
 
     private void RenderAgentSessionFollowup(JsonNode? data)

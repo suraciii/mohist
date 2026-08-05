@@ -40,6 +40,7 @@ internal static class SessionCommands
              "compact <session-id>, reset <session-id>, cancel <session-id>, stop <session-id>.");
 
         session.Subcommands.Add(BuildList(api));
+        session.Subcommands.Add(BuildTree(api));
         session.Subcommands.Add(BuildView(api));
         session.Subcommands.Add(BuildTranscript(api));
         session.Subcommands.Add(BuildFollowup(api));
@@ -147,6 +148,51 @@ internal static class SessionCommands
                     nameof(MohistCliApi.TableShape.SessionList));
             }
         });
+        return cmd;
+    }
+
+    private static Command BuildTree(MohistCliApi api)
+    {
+        var cmd = new Command("tree", "Show the Server-authoritative AgentSession tree rooted at a session.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Root AgentSession id" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var limitOpt = new Option<int?>("--limit") { Description = "Maximum number of tree nodes/edges" };
+        var continuationOpt = new Option<string?>("--continuation") { Description = "Continuation token returned by the Server" };
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTree)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(limitOpt);
+        cmd.Options.Add(continuationOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => TreeAsync(ctx));
+
+        async Task<int> TreeAsync(ParseResult ctx)
+        {
+            var project = ctx.GetValue(projectOpt);
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var limit = ctx.GetValue(limitOpt);
+            var continuation = ctx.GetValue(continuationOpt);
+            var output = ctx.GetValue(outputOpt);
+            if (string.IsNullOrWhiteSpace(project))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--project is required");
+
+            var (mode, exit) = api.ResolveOutputMode(output);
+            if (exit != 0)
+                return exit;
+
+            var query = new List<string>();
+            if (limit is not null)
+                query.Add($"limit={limit.Value}");
+            if (continuation is not null)
+                query.Add($"continuation={Uri.EscapeDataString(continuation)}");
+            var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);
+            return await api.PrintWithOutputAsync(
+                $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(sessionId!)}/tree{suffix}",
+                mode,
+                nameof(MohistCliApi.TableShape.SessionTree));
+        }
+
         return cmd;
     }
 

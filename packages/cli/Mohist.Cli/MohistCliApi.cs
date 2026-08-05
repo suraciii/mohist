@@ -1177,6 +1177,7 @@ internal sealed class MohistCliApi
         AgentJobView,
         SessionList,
         SessionShow,
+        SessionTree,
         SessionTranscript,
         SessionFollowup,
         SessionCancel,

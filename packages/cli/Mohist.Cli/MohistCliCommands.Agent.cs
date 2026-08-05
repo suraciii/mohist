@@ -27,6 +27,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildEdit(api));
         agent.Subcommands.Add(BuildArchive(api));
         agent.Subcommands.Add(BuildLaunch(api));
+        agent.Subcommands.Add(BuildSpawn(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
         agent.Subcommands.Add(AgentModelCommands.Build(api));
@@ -253,6 +254,7 @@ internal static class AgentCommands
         var descriptionOpt = new Option<string?>("--description") { Description = "Agent description" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config as inline JSON" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
+        var allowedSubagentOpt = AllowedSubagentOption();
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
         var projectOpt = MohistCliCommands.ProjectRefOption();
@@ -263,6 +265,7 @@ internal static class AgentCommands
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
+        cmd.Options.Add(allowedSubagentOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
         cmd.Options.Add(jsonOpt);
         cmd.Options.Add(projectOpt);
@@ -274,6 +277,7 @@ internal static class AgentCommands
                     var description = ctx.GetValue(descriptionOpt);
                     var agentConfig = ctx.GetValue(agentConfigOpt);
                     var skills = ctx.GetValue(skillsOpt);
+                    var allowedSubagentAgentIds = ctx.GetValue(allowedSubagentOpt);
                     var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
                     var selection = JsonSelection.Parse(AgentDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
                     var project = ctx.GetValue(projectOpt);
@@ -315,6 +319,7 @@ internal static class AgentCommands
                             instructions = resolvedInstructions,
                             agentConfig = ((ResolveJsonResult.Valid)config).Value,
                             skills = ParseSkills(skills),
+                            allowedSubagentAgentIds,
                             maxConcurrentRuns,
                         };
                         return selection.Kind == JsonSelectionKind.Selected
@@ -464,10 +469,12 @@ internal static class AgentCommands
         var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read new Agent instructions from a UTF-8 file path, or - for stdin" };
         var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config as inline JSON" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
+        var allowedSubagentOpt = AllowedSubagentOption();
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
         var clearDescriptionOpt = new Option<bool>("--clear-description") { Description = "Clear the agent description" };
         var clearAgentConfigOpt = new Option<bool>("--clear-agent-config") { Description = "Clear the agent config" };
         var clearSkillsOpt = new Option<bool>("--clear-skills") { Description = "Clear the agent skills" };
+        var clearAllowedSubagentOpt = new Option<bool>("--clear-allowed-subagents") { Description = "Clear the allowed subagent agent ids" };
         var clearMaxConcurrentRunsOpt = new Option<bool>("--clear-max-concurrent-runs") { Description = "Clear the maximum concurrent runs" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
         var projectOpt = MohistCliCommands.ProjectRefOption();
@@ -479,10 +486,12 @@ internal static class AgentCommands
         cmd.Options.Add(instructionsFileOpt);
         cmd.Options.Add(agentConfigOpt);
         cmd.Options.Add(skillsOpt);
+        cmd.Options.Add(allowedSubagentOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
         cmd.Options.Add(clearDescriptionOpt);
         cmd.Options.Add(clearAgentConfigOpt);
         cmd.Options.Add(clearSkillsOpt);
+        cmd.Options.Add(clearAllowedSubagentOpt);
         cmd.Options.Add(clearMaxConcurrentRunsOpt);
         cmd.Options.Add(jsonOpt);
         cmd.Options.Add(projectOpt);
@@ -495,10 +504,12 @@ internal static class AgentCommands
                     var instructionsFile = ctx.GetValue(instructionsFileOpt);
                     var agentConfig = ctx.GetValue(agentConfigOpt);
                     var skills = ctx.GetValue(skillsOpt);
+                    var allowedSubagentAgentIds = ctx.GetValue(allowedSubagentOpt);
                     var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
                     var clearDescription = ctx.GetValue(clearDescriptionOpt);
                     var clearAgentConfig = ctx.GetValue(clearAgentConfigOpt);
                     var clearSkills = ctx.GetValue(clearSkillsOpt);
+                    var clearAllowedSubagents = ctx.GetValue(clearAllowedSubagentOpt);
                     var clearMaxConcurrentRuns = ctx.GetValue(clearMaxConcurrentRunsOpt);
                     var selection = JsonSelection.Parse(AgentDescriptor, ctx.GetResult(jsonOpt) is not null, ctx.GetValue(jsonOpt));
                     var project = ctx.GetValue(projectOpt);
@@ -511,6 +522,7 @@ internal static class AgentCommands
                         var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
                             ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
                             ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
+                            ?? ValidateClearSetPair("--allowed-subagent", allowedSubagentAgentIds is not null, "--clear-allowed-subagents", clearAllowedSubagents)
                             ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
                         if (clearSetConflict is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
@@ -550,6 +562,7 @@ internal static class AgentCommands
                         AddIfProvided(body, "instructions", resolvedInstructions, instructionsResult is BodyInputResolver.Result.Success);
                         AddIfProvided(body, "agentConfig", clearAgentConfig ? null : ((ResolveJsonResult.Valid)config).Value, clearAgentConfig || agentConfig is not null);
                         AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
+                        AddIfProvided(body, "allowedSubagentAgentIds", clearAllowedSubagents ? null : JsonSerializer.SerializeToNode(allowedSubagentAgentIds, JsonOptions), clearAllowedSubagents || allowedSubagentAgentIds is not null);
                         AddIfProvided(body, "maxConcurrentRuns", clearMaxConcurrentRuns ? null : maxConcurrentRuns, clearMaxConcurrentRuns || maxConcurrentRuns is not null);
 
                         var path = ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}");
@@ -749,6 +762,61 @@ internal static class AgentCommands
         return cmd;
     }
 
+    private static Command BuildSpawn(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "spawn",
+            "Spawn an allowed child AgentSession from a parent session. Sends only targetAgentRef and prompt to the Server spawn endpoint.");
+        var agentRefArg = new Argument<string>("agent-ref") { Description = "Stable target Agent ref" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var parentSessionOpt = new Option<string?>("--parent-session") { Description = "Parent AgentSession id" };
+        var promptOpt = new Option<string?>("--prompt") { Description = "Child session prompt" };
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Required stable retry key" };
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
+
+        cmd.Arguments.Add(agentRefArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(parentSessionOpt);
+        cmd.Options.Add(promptOpt);
+        cmd.Options.Add(idempotencyKeyOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => SpawnAsync(ctx));
+
+        async Task<int> SpawnAsync(ParseResult ctx)
+        {
+            var project = ctx.GetValue(projectOpt);
+            var parentSessionId = ctx.GetValue(parentSessionOpt);
+            var prompt = ctx.GetValue(promptOpt);
+            var idempotencyKey = ctx.GetValue(idempotencyKeyOpt);
+            var agentRef = ctx.GetValue(agentRefArg);
+            var output = ctx.GetValue(outputOpt);
+
+            if (string.IsNullOrWhiteSpace(project))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--project is required");
+            if (string.IsNullOrWhiteSpace(parentSessionId))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--parent-session is required");
+            if (string.IsNullOrWhiteSpace(prompt))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--prompt is required");
+            if (string.IsNullOrWhiteSpace(idempotencyKey))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--idempotency-key is required");
+
+            var (mode, exit) = api.ResolveOutputMode(output);
+            if (exit != 0)
+                return exit;
+
+            return await api.PrintPostWithOutputAsync(
+                $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(parentSessionId)}/spawns",
+                new { targetAgentRef = agentRef, prompt },
+                mode,
+                nameof(MohistCliApi.TableShape.AgentSessionLaunch),
+                rawJson: true,
+                headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey },
+                retries: 1);
+        }
+
+        return cmd;
+    }
+
     private static async Task RenderNeedsSetupAsync(MohistCliApi api, JsonObject envelope)
     {
         var error = envelope["error"]?.GetValue<string>()
@@ -837,6 +905,12 @@ internal static class AgentCommands
     private static string[]? ParseSkills(string? value) => string.IsNullOrWhiteSpace(value)
         ? null
         : value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static Option<string[]?> AllowedSubagentOption() => new("--allowed-subagent")
+    {
+        Description = "Allowed subagent stable agent id/ref. Repeat for multiple subagents.",
+        AllowMultipleArgumentsPerToken = true,
+    };
 
     private static string AgentQuery(bool? all = null, string? status = null)
     {
