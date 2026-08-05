@@ -52,7 +52,18 @@ jobs:
 
       - name: Test
         run: dotnet test Mohist.sln -p:SkipWebBuild=true --no-build
-        timeout-minutes: 6
+        timeout-minutes: 5
+
+      - name: Setup Node.js (test-duration guard)
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install Node dependencies (guard)
+        run: npm ci
+      - name: C# test-duration budget (cli, workflow-def, server-unit, server-spec, server-arch)
+        run: npm run test:budget -- --track=cli --track=workflow-def --track=server-unit --track=server-spec --track=server-arch
 
       - name: Upload failed test results
         if: failure()
@@ -119,3 +130,6 @@ jobs:
 
       - name: Test web
         run: npm run test:ci -w packages/web
+
+      - name: Node test-duration budget (mohist-slack, runner)
+        run: npm run test:budget -- --track=mohist-slack --track=runner
