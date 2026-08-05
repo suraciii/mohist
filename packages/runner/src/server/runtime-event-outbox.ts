@@ -35,7 +35,10 @@
 //     in-flight HTTP attempts but never deletes durable records.
 
 import { errorMessage } from "../core/errors.js"
+import { runnerLogger } from "../system/logger.js"
 import type { AgentSessionRuntimeEventReceipt } from "./connection.js"
+
+const log = runnerLogger.child("session")
 
 export const RUNTIME_EVENT_OUTBOX_FILE = ".mohist/runner-state/runtime-events.json"
 const RUNTIME_EVENT_OUTBOX_VERSION = 1
@@ -370,9 +373,10 @@ class AgentSessionRuntimeEventOutboxImpl implements AgentSessionRuntimeEventOutb
       overflow -= 1
     }
     if (this.records.size > this.maxRetentionEntries) {
-      console.warn(
-        `runtime-event outbox retention cap ${this.maxRetentionEntries} exceeded; ${this.records.size} records remain after dropping all streaming deltas`,
-      )
+      log.warn("runtime-event outbox retention cap exceeded", {
+        reason: `limit=${this.maxRetentionEntries} remaining=${this.records.size}`,
+        session: "outbox",
+      })
     }
   }
 
