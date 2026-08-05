@@ -13,7 +13,6 @@ public sealed class SlackS2PortsManifestMigrationSpecs
 {
     private const string S1Migration = "20260805120000_RenameManagedSlackAgentAppAndGeneralizeSecrets";
     private const string S2Migration = "20260805130000_AddSlackS2PortsManifestRotation";
-    private const string HttpsMigrationAuditAction = "manager_transport_migrated_https_to_socket_not_ready";
 
     [Fact]
     public async Task SQLite_upgrade_converts_S1_https_manager_to_not_ready_socket_and_down_restores_https_target()
@@ -34,7 +33,7 @@ public sealed class SlackS2PortsManifestMigrationSpecs
             Assert.Equal("U_MANAGER", enrollment.ManagerBotUserId);
             Assert.Equal("socket", enrollment.ManagerTransportKind);
             Assert.Equal("not_ready", enrollment.ManagerReadiness);
-            Assert.Contains(HttpsMigrationAuditAction, enrollment.AuditJson, StringComparison.Ordinal);
+            Assert.Equal("[]", enrollment.AuditJson);
 
             var app = await after.ManagedSlackAgentApps.SingleAsync(row => row.Id == "agent_app_https");
             Assert.Equal("enrollment_https", app.EnrollmentId);
@@ -55,10 +54,41 @@ public sealed class SlackS2PortsManifestMigrationSpecs
         Assert.Equal("https", await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "ManagerTransportKind", "enrollment_https"));
         Assert.Equal("not_ready", await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "ManagerReadiness", "enrollment_https"));
         Assert.Equal("manager-credential", await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "ManagerCredentialRef", "enrollment_https"));
-        Assert.Contains(HttpsMigrationAuditAction, await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "AuditJson", "enrollment_https")!);
+        Assert.Equal("[]", await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "AuditJson", "enrollment_https"));
         Assert.Equal("enrollment_https", await ReadTextAsync(reverted, "ManagedSlackAgentApps", "EnrollmentId", "agent_app_https"));
         Assert.Equal("connection_https", await ReadTextAsync(reverted, "ManagedSlackAgentApps", "AgentConnectionId", "agent_app_https"));
         Assert.Equal("socket", await ReadTextAsync(reverted, "ManagedSlackAgentApps", "TransportKind", "agent_app_https"));
+    }
+
+    [Fact]
+    public async Task Repeated_S2_upgrade_and_downgrade_restores_the_current_transport_not_a_stale_marker()
+    {
+        await using var database = CreateS1Database();
+        await using (var seed = database.CreateDbContext())
+        {
+            await SeedS1HttpsEnrollmentAsync(seed);
+            await seed.GetService<IMigrator>().MigrateAsync(S2Migration);
+        }
+        await using (var firstDown = database.CreateDbContext())
+        {
+            await firstDown.GetService<IMigrator>().MigrateAsync(S1Migration);
+        }
+
+        await using (var s1 = database.CreateDbContext())
+        {
+            await s1.Database.ExecuteSqlRawAsync(
+                "UPDATE \"SlackWorkspaceEnrollments\" SET \"ManagerTransportKind\" = 'socket' WHERE \"Id\" = 'enrollment_https'");
+        }
+
+        await using (var secondUp = database.CreateDbContext())
+        {
+            await secondUp.GetService<IMigrator>().MigrateAsync(S2Migration);
+        }
+        await using var secondDown = database.CreateDbContext();
+        await secondDown.GetService<IMigrator>().MigrateAsync(S1Migration);
+
+        await using var reverted = database.CreateDbContext();
+        Assert.Equal("socket", await ReadTextAsync(reverted, "SlackWorkspaceEnrollments", "ManagerTransportKind", "enrollment_https"));
     }
 
     private static TestDatabase CreateS1Database()

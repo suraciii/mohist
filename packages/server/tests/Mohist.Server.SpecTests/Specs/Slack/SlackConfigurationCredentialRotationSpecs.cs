@@ -94,6 +94,35 @@ public sealed class SlackConfigurationCredentialRotationSpecs : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_rotation_losing_the_generation_race_writes_no_pair_or_expiry()
+    {
+        var store = new ProtectedSlackConfigurationCredentialStore(_factory, _secrets);
+        var firstExpiresAt = _time.GetUtcNow().AddHours(12);
+        var first = await store.StoreVerifiedRotationAsync(
+            "enrollment-rotation", "T_ROTATION", 0,
+            new("xoxe-first", "xoxr-first"), firstExpiresAt, _time.GetUtcNow());
+        Assert.True(first.Stored);
+
+        var secondExpiresAt = _time.GetUtcNow().AddHours(24);
+        var second = await store.StoreVerifiedRotationAsync(
+            "enrollment-rotation", "T_ROTATION", 0,
+            new("xoxe-second", "xoxr-second"), secondExpiresAt, _time.GetUtcNow());
+
+        Assert.False(second.Stored);
+        Assert.Equal("configuration_credential_generation_conflict", second.ErrorClass);
+
+        var access = await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationAccessToken));
+        var refresh = await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationRefreshToken));
+        Assert.Equal("xoxe-first", Encoding.UTF8.GetString(access!));
+        Assert.Equal("xoxr-first", Encoding.UTF8.GetString(refresh!));
+
+        await using var db = _factory.CreateDbContext();
+        var enrollment = await db.SlackWorkspaceEnrollments.SingleAsync();
+        Assert.Equal(1, enrollment.ConfigurationCredentialGeneration);
+        Assert.Equal(firstExpiresAt, enrollment.ConfigurationCredentialExpiresAt);
+    }
+
+    [Fact]
     public async Task Unknown_rotation_outcome_does_not_write_credentials_or_enrollment()
     {
         _port.Enqueue(new(SlackConfigurationCredentialRotationOutcome.Unknown, ErrorClass: "timeout"));
@@ -148,10 +177,14 @@ public sealed class SlackConfigurationCredentialRotationSpecs : IAsyncLifetime
             "enrollment-rotation",
             new("xoxe-current", "xoxr-current")));
         Assert.NotNull(error);
-        if ((RotationSaveFailurePoint)failurePoint == RotationSaveFailurePoint.SaveChanges)
-            Assert.IsType<InvalidOperationException>(error);
-        else
-            Assert.IsType<DbUpdateException>(error);
+        // The enrollment CAS now writes first via ExecuteUpdateAsync, so a failure on the
+        // enrollment command surfaces the interceptor exception directly; only a failure
+        // inside SaveChanges is wrapped by EF as DbUpdateException.
+        Assert.IsType(
+            failurePoint == (int)RotationSaveFailurePoint.SecondSecret
+                ? typeof(DbUpdateException)
+                : typeof(InvalidOperationException),
+            error);
         Assert.Equal((RotationSaveFailurePoint)failurePoint, faultingFactory.FailurePoint);
 
         var access = await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationAccessToken));

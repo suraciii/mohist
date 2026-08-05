@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.WebSockets;
 using System.Reflection;
 using System.Reflection.Emit;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Slack.Services;
 using Xunit;
@@ -83,6 +84,54 @@ public sealed class SlackOutboundPortTests
         Assert.Equal([new SlackBotIdentityVerificationRequest("xoxb-candidate")], port.Requests);
     }
 
+    [Fact]
+    public void Named_non_generic_AddHttpClient_is_flagged_as_a_direct_protocol_leak()
+        => Assert.True(HasDirectProtocolCall(typeof(NamedHttpClientBypass), nameof(NamedHttpClientBypass.Register)));
+
+    [Fact]
+    public void IHttpClientFactory_CreateClient_is_flagged_as_a_direct_protocol_leak()
+    {
+        Assert.True(IsDirectProtocolType(typeof(IHttpClientFactory)));
+        Assert.True(HasDirectProtocolCall(typeof(HttpClientFactoryBypass), nameof(HttpClientFactoryBypass.Resolve)));
+    }
+
+    [Fact]
+    public void Generic_Slack_typed_HttpClient_is_flagged_as_a_direct_protocol_leak()
+        => Assert.True(HasDirectProtocolCall(typeof(GenericTypedHttpClientBypass), nameof(GenericTypedHttpClientBypass.Register)));
+
+    [Fact]
+    public void An_external_Slack_sdk_type_is_direct_protocol_but_server_ports_and_fakes_are_not()
+    {
+        Assert.True(IsDirectProtocolType(typeof(ExternalSlackSdkProbe)));
+        Assert.False(IsDirectProtocolType(typeof(ISlackConfigurationCredentialPort)));
+        Assert.False(IsDirectProtocolType(typeof(FakeSlackConfigurationCredentialPort)));
+    }
+
+    private static bool HasDirectProtocolCall(Type type, string methodName)
+    {
+        var method = type.GetMethod(methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        return method is not null && ReferencedMethods(method).Any(IsDirectProtocolCall);
+    }
+
+    private sealed class NamedHttpClientBypass
+    {
+        public void Register(IServiceCollection services) => services.AddHttpClient("Slack");
+    }
+
+    private sealed class HttpClientFactoryBypass
+    {
+        public void Resolve(IHttpClientFactory factory) => factory.CreateClient("Slack");
+    }
+
+    private sealed class SlackApiClient;
+
+    private sealed class GenericTypedHttpClientBypass
+    {
+        public void Register(IServiceCollection services) => services.AddHttpClient<SlackApiClient>();
+    }
+
+    private sealed class ExternalSlackSdkProbe;
+
     private static IEnumerable<Type> SlackBoundaryTypes() => typeof(ISlackAppManagementPort).Assembly
         .GetTypes()
         .Where(type => type == typeof(MohistServiceRegistration)
@@ -137,11 +186,29 @@ public sealed class SlackOutboundPortTests
                     yield return referenced;
     }
 
-    private static bool IsDirectProtocolType(Type type) =>
-        type == typeof(HttpClient)
-        || type == typeof(WebSocket)
-        || type.Namespace?.StartsWith("System.Net.Http", StringComparison.Ordinal) == true
-        || type.Namespace?.StartsWith("System.Net.WebSockets", StringComparison.Ordinal) == true;
+    private static bool IsDirectProtocolType(Type type)
+    {
+        if (type == typeof(HttpClient)
+            || type == typeof(WebSocket)
+            || type == typeof(IHttpClientFactory)
+            || type.Namespace?.StartsWith("System.Net.Http", StringComparison.Ordinal) == true
+            || type.Namespace?.StartsWith("System.Net.WebSockets", StringComparison.Ordinal) == true)
+            return true;
+
+        return IsExternalSlackClient(type);
+    }
+
+    // The three outbound ports and their fakes live in the server assembly; any other type
+    // whose name or namespace mentions Slack is an external SDK dependency the boundary must
+    // not reach directly.
+    private static bool IsExternalSlackClient(Type type)
+    {
+        if (type.Assembly == typeof(ISlackAppManagementPort).Assembly)
+            return false;
+
+        return type.Name.Contains("Slack", StringComparison.Ordinal)
+            || (type.Namespace?.Contains("Slack", StringComparison.Ordinal) ?? false);
+    }
 
     private static IEnumerable<MethodBase> ReferencedMethods(MethodBase method)
     {
@@ -180,10 +247,16 @@ public sealed class SlackOutboundPortTests
         if (method.DeclaringType is { } declaringType && IsDirectProtocolType(declaringType))
             return true;
 
-        return method.DeclaringType?.Name == "HttpClientFactoryServiceCollectionExtensions"
-            && method.Name == "AddHttpClient"
-            && method.IsGenericMethod
-            && method.GetGenericArguments().Any(type => type.Name.Contains("Slack", StringComparison.Ordinal));
+        if (method.DeclaringType?.Name != "HttpClientFactoryServiceCollectionExtensions"
+            || method.Name != "AddHttpClient")
+            return false;
+
+        if (method.IsGenericMethod)
+            return method.GetGenericArguments().Any(type => type.Name.Contains("Slack", StringComparison.Ordinal));
+
+        // Named overload AddHttpClient("Slack", ...): the client name is a string operand the
+        // method token cannot expose, and the boundary must not register a named HTTP client.
+        return true;
     }
 
     private static OpCode ReadOpcode(byte[] body, ref int offset)

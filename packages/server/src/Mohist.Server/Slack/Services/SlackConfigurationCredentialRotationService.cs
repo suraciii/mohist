@@ -12,6 +12,7 @@ public interface ISlackConfigurationCredentialStore
     Task<SlackConfigurationCredentialPersistence> StoreVerifiedRotationAsync(
         string enrollmentId,
         string workspaceTeamId,
+        int expectedGeneration,
         SlackConfigurationCredentialPair credentials,
         DateTimeOffset expiresAt,
         DateTimeOffset now,
@@ -30,6 +31,7 @@ public sealed class ProtectedSlackConfigurationCredentialStore(
     public async Task<SlackConfigurationCredentialPersistence> StoreVerifiedRotationAsync(
         string enrollmentId,
         string workspaceTeamId,
+        int expectedGeneration,
         SlackConfigurationCredentialPair credentials,
         DateTimeOffset expiresAt,
         DateTimeOffset now,
@@ -38,42 +40,34 @@ public sealed class ProtectedSlackConfigurationCredentialStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(enrollmentId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
         credentials.Validate();
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var row = await db.SlackWorkspaceEnrollments.SingleOrDefaultAsync(item => item.Id == enrollmentId, ct);
-        if (row is null)
-            return SlackConfigurationCredentialPersistence.NotFound;
-
-        var enrollment = new SlackWorkspaceEnrollment
-        {
-            Id = row.Id,
-            WorkspaceTeamId = row.WorkspaceTeamId,
-            ConfigurationCredentialRef = row.ConfigurationCredentialRef,
-            ConfigurationCredentialGeneration = row.ConfigurationCredentialGeneration,
-            ConfigurationCredentialExpiresAt = row.ConfigurationCredentialExpiresAt,
-        };
-        try
-        {
-            enrollment.RecordConfigurationCredentialRotation(workspaceTeamId, expiresAt, now);
-        }
-        catch (ArgumentOutOfRangeException)
-        {
+        if (expectedGeneration < 0 || expiresAt <= now)
             return new(false, "invalid_rotation_result");
-        }
-        catch (InvalidOperationException)
-        {
-            return new(false, "workspace_mismatch");
-        }
-
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var updated = await db.SlackWorkspaceEnrollments
+            .Where(item => item.Id == enrollmentId
+                && item.WorkspaceTeamId == workspaceTeamId
+                && item.ConfigurationCredentialGeneration == expectedGeneration)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ConfigurationCredentialRef, enrollmentId)
+                .SetProperty(item => item.ConfigurationCredentialGeneration, expectedGeneration + 1)
+                .SetProperty(item => item.ConfigurationCredentialExpiresAt, expiresAt)
+                .SetProperty(item => item.UpdatedAt, now), ct);
+        if (updated != 1)
+        {
+            var current = await db.SlackWorkspaceEnrollments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == enrollmentId, ct);
+            if (current is null)
+                return SlackConfigurationCredentialPersistence.NotFound;
+            if (!string.Equals(current.WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal))
+                return new(false, "workspace_mismatch");
+            return new(false, "configuration_credential_generation_conflict");
+        }
         await secrets.StoreAtomicallyAsync(db,
         [
             new(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ConfigurationAccessToken), System.Text.Encoding.UTF8.GetBytes(credentials.AccessToken)),
             new(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ConfigurationRefreshToken), System.Text.Encoding.UTF8.GetBytes(credentials.RefreshToken)),
         ], ct);
-        row.ConfigurationCredentialRef = enrollment.ConfigurationCredentialRef;
-        row.ConfigurationCredentialGeneration = enrollment.ConfigurationCredentialGeneration;
-        row.ConfigurationCredentialExpiresAt = enrollment.ConfigurationCredentialExpiresAt;
-        row.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return new(true);
@@ -112,6 +106,7 @@ public sealed class SlackConfigurationCredentialRotationService : IScopedService
         var persisted = await _credentials.StoreVerifiedRotationAsync(
             enrollment.Id,
             result.WorkspaceTeamId,
+            enrollment.ConfigurationCredentialGeneration,
             result.Credentials,
             result.ExpiresAt.Value,
             _timeProvider.GetUtcNow(),
