@@ -37,4 +37,5 @@ public sealed class AgentJobState
     [Id(22)] public string? WaitingReason { get; set; }
     [Id(23)] public DateTimeOffset? ReadySince { get; set; }
     [Id(24)] public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
+    [Id(25)] public PendingSubagentTerminalEvent? PendingSubagentTerminalEvent { get; set; }
 }

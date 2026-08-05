@@ -331,7 +331,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             StartupContext: plan.StartupContext,
             AllowedSubagents: plan.AllowedSubagents,
             PinnedRunnerId: plan.PinnedRunnerId,
-            AgentSessionStartup: plan.AgentSessionStartup));
+            AgentSessionStartup: plan.AgentSessionStartup,
+            SpawnOrigin: SpawnOriginFor(plan)));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
@@ -346,6 +347,22 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         };
         await SaveStateAsync();
         await AdvanceAsync();
+    }
+
+    private static AgentJobSpawnOrigin? SpawnOriginFor(AgentLaunchCoordinatorPlan plan)
+    {
+        if (string.IsNullOrWhiteSpace(plan.ParentSessionId)
+            || string.IsNullOrWhiteSpace(plan.ParentAgentId)
+            || string.IsNullOrWhiteSpace(plan.ParentLinkEdgeId))
+            return null;
+
+        return new AgentJobSpawnOrigin(
+            plan.ParentSessionId,
+            plan.ParentAgentId,
+            plan.ParentLinkEdgeId,
+            plan.SessionId,
+            plan.JobKey,
+            plan.TurnId);
     }
 
     private async Task BeginAbortAfterRejectionAsync(
