@@ -11,7 +11,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Security;
 
-public class ConnectionSecretsMigrationSpecs
+public partial class ConnectionSecretsMigrationSpecs
 {
     private static readonly string[] ManagedSlackAgentAppConstraints =
     [
@@ -234,6 +234,7 @@ public class ConnectionSecretsMigrationSpecs
                 INSERT INTO "ConnectionSecrets" ("ProjectId", "ConnectionId", "Kind", "Blob", "UpdatedAt")
                 VALUES ('proj_a', 'conn_a', 'appToken', X'01', '2026-08-05T00:00:00.0000000+00:00');
                 """);
+            await SeedRebuildRowsAsync(before);
             var migrator = before.GetService<IMigrator>();
             await migrator.MigrateAsync();
         }
@@ -247,6 +248,7 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ManagedSlackAgentApps"));
         Assert.False(await TableExistsAsync(after, "ManagedSlackChildApps"));
         Assert.False(await TableExistsAsync(after, "ConnectionSecrets"));
+        await AssertRebuiltRowsAsync(after, "ManagedSlackAgentApps");
         var indexes = await ReadIndexesAsync(after, "ManagedSlackAgentApps");
         Assert.DoesNotContain("IX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
@@ -289,6 +291,7 @@ public class ConnectionSecretsMigrationSpecs
                 INSERT INTO "ConnectionSecrets" ("ProjectId", "ConnectionId", "Kind", "Blob", "UpdatedAt")
                 VALUES ('proj_down', 'conn_down', 'botToken', X'02', '2026-08-05T00:00:00.0000000+00:00');
                 """);
+            await SeedRebuildRowsAsync(before);
             var migrator = before.GetService<IMigrator>();
             await migrator.MigrateAsync();
             await migrator.MigrateAsync("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
@@ -298,6 +301,7 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ConnectionSecrets"));
         Assert.False(await TableExistsAsync(after, "StoredSecrets"));
         Assert.Equal(1, await CountRowsAsync(after, "ConnectionSecrets"));
+        await AssertRebuiltRowsAsync(after, "ManagedSlackChildApps");
         var indexes = await ReadIndexesAsync(after, "ManagedSlackChildApps");
         Assert.DoesNotContain("IX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
