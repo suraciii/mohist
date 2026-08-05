@@ -2434,14 +2434,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return new AgentInitialLaunchSnapshot(
             SessionId: SessionId,
             Input: inputs.Count > 0 ? inputs[0] : null,
-            Turn: turn is null ? null : turn with { InputIds = turn.InputIds.ToArray() });
+            Turn: turn is null ? null : CopyTurnForBoundary(turn));
     }
 
     public async Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync()
     {
         var session = await GetRequiredAsync();
-        return session.Status.Turns ?? (IReadOnlyList<AgentTurnRecord>)[];
+        return session.Status.Turns is { } turns
+            ? turns.Select(CopyTurnForBoundary).ToArray()
+            : Array.Empty<AgentTurnRecord>();
     }
+
+    private static AgentTurnRecord CopyTurnForBoundary(AgentTurnRecord turn) =>
+        turn with { InputIds = turn.InputIds.ToArray() };
 
     private static Dictionary<string, AgentTurnStatus> SnapshotNonLaunchTurnStatuses(AgentSession session)
     {

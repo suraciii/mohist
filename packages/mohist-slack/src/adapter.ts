@@ -85,7 +85,13 @@ export class SlackAdapter {
       if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
       runtime.web = this.options.webFactory(session.botToken, runtime.target)
       runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
-      runtime.socket.on("slack_event", async (event) => this.handleEvent(runtime, event.body, event.ack, signal))
+      runtime.socket.on("slack_event", async (event) => {
+        try {
+          await this.handleEvent(runtime, event.body, event.ack, signal)
+        } catch (error) {
+          console.error("Slack event handling failed; the event remains unacknowledged for retry.", safeErrorMessage(error))
+        }
+      })
       await runtime.socket.start()
     }
     const heartbeatMs = Math.max(1_000, this.options.heartbeatIntervalMs ?? 15_000)
@@ -352,6 +358,11 @@ function connectionKey(ref: SlackAdapterTarget) {
   return isManagerTarget(ref)
     ? `manager:${ref.enrollmentId}`
     : `connection:${ref.projectId}:${ref.connectionId}`
+}
+
+function safeErrorMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/(?:xapp|xoxb|xoxp|xoxe)[.A-Za-z0-9_-]*/gi, "<redacted>")
 }
 
 function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
