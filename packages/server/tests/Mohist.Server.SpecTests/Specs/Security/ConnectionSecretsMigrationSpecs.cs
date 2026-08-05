@@ -71,6 +71,26 @@ public class ConnectionSecretsMigrationSpecs
         "IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt",
     ];
 
+    private static readonly string[] SlackChildAppBindingObligationIndexes =
+    [
+        "UX_SlackChildAppBindingObligations_ChildAppId",
+        "IX_SlackChildAppBindingObligations_AgentConnectionId",
+        "IX_SlackChildAppBindingObligations_Status_UpdatedAt",
+    ];
+
+    private static readonly string[] SlackOAuthAttemptIndexes =
+    [
+        "UX_SlackOAuthAttempts_StateHash",
+        "IX_SlackOAuthAttempts_ChildAppId_Status_UpdatedAt",
+    ];
+
+    private static readonly string[] SlackOAuthStateIndexes =
+    [
+        "UX_SlackOAuthStates_StateHash",
+        "IX_SlackOAuthStates_AuthorizationAttemptId",
+        "IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt",
+    ];
+
     [Fact]
     public async Task Up_CreatesConnectionSecretsTableWithExpectedColumns()
     {
@@ -231,6 +251,11 @@ public class ConnectionSecretsMigrationSpecs
         Assert.DoesNotContain("IX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
         AssertIndexNames(ManagedSlackAgentAppIndexes, indexes);
+        AssertIndexNames(
+            SlackChildAppBindingObligationIndexes,
+            await ReadIndexesAsync(after, "SlackChildAppBindingObligations"));
+        AssertIndexNames(SlackOAuthAttemptIndexes, await ReadIndexesAsync(after, "SlackOAuthAttempts"));
+        AssertIndexNames(SlackOAuthStateIndexes, await ReadIndexesAsync(after, "SlackOAuthStates"));
         await AssertConstraintNamesAsync(after, "ManagedSlackAgentApps", ManagedSlackAgentAppConstraints);
         await AssertConstraintNamesAsync(
             after,
@@ -277,6 +302,11 @@ public class ConnectionSecretsMigrationSpecs
         Assert.DoesNotContain("IX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
         AssertIndexNames(ManagedSlackChildAppIndexes, indexes);
+        AssertIndexNames(
+            SlackChildAppBindingObligationIndexes,
+            await ReadIndexesAsync(after, "SlackChildAppBindingObligations"));
+        AssertIndexNames(SlackOAuthAttemptIndexes, await ReadIndexesAsync(after, "SlackOAuthAttempts"));
+        AssertIndexNames(SlackOAuthStateIndexes, await ReadIndexesAsync(after, "SlackOAuthStates"));
         await AssertConstraintNamesAsync(after, "ManagedSlackChildApps", ManagedSlackChildAppConstraints);
         await AssertConstraintNamesAsync(
             after,

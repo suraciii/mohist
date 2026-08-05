@@ -463,6 +463,10 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
             column: "ChildAppId",
             unique: true);
         migrationBuilder.CreateIndex(
+            name: "IX_SlackChildAppBindingObligations_AgentConnectionId",
+            table: "SlackChildAppBindingObligations",
+            column: "AgentConnectionId");
+        migrationBuilder.CreateIndex(
             name: "IX_SlackChildAppBindingObligations_Status_UpdatedAt",
             table: "SlackChildAppBindingObligations",
             columns: new[] { "Status", "UpdatedAt" });
@@ -480,6 +484,10 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
             table: "SlackOAuthStates",
             column: "StateHash",
             unique: true);
+        migrationBuilder.CreateIndex(
+            name: "IX_SlackOAuthStates_AuthorizationAttemptId",
+            table: "SlackOAuthStates",
+            column: "AuthorizationAttemptId");
         migrationBuilder.CreateIndex(
             name: "IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt",
             table: "SlackOAuthStates",
