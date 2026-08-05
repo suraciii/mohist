@@ -86,10 +86,16 @@ export class SlackAdapter {
       runtime.web = this.options.webFactory(session.botToken, runtime.target)
       runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
       runtime.socket.on("slack_event", async (event) => {
+        const interaction = isSlackInteraction(event.body)
         try {
           await this.handleEvent(runtime, event.body, event.ack, signal)
         } catch (error) {
-          console.error("Slack event handling failed; the event remains unacknowledged for retry.", safeErrorMessage(error))
+          console.error(
+            interaction
+              ? "Slack interaction processing failed after acknowledgement."
+              : "Slack event handling failed; the event remains unacknowledged for retry.",
+            safeErrorMessage(error),
+          )
         }
       })
       await runtime.socket.start()
@@ -119,11 +125,12 @@ export class SlackAdapter {
   }
 
   private async handleEvent(runtime: ConnectionRuntime, body: unknown, ack: () => Promise<void> | void, signal: AbortSignal): Promise<void> {
+    const interaction = isSlackInteraction(body)
+    if (interaction) await ack()
     await this.acquire(signal)
     try {
-      if (isSlackInteraction(body)) {
+      if (interaction) {
         await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
-        await ack()
         await this.drain(runtime, signal)
         return
       }
