@@ -210,7 +210,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
             "missing-recovery",
-            now);
+            now,
+            session.BindingEpoch);
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "missing-recovery", now));
         return await ToInfoAsync(session);
     }
@@ -268,6 +269,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
+        EnsureBindingChangeAllowed(session, command.ExpectedBindingEpoch);
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
@@ -277,7 +279,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, command.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
             "reset",
-            now);
+            now,
+            command.ExpectedBindingEpoch ?? session.BindingEpoch);
 
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now));
 
@@ -312,6 +315,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
+        if (command == SessionCommandKind.Reset)
+            EnsureBindingChangeAllowed(session, null);
         var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
 
@@ -363,7 +368,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             runtime,
             Now(),
             commandName,
-            IdempotencyKey: key);
+            IdempotencyKey: key,
+            ExpectedBindingEpoch: session.BindingEpoch);
         session.Status = session.Status with { PendingReset = reservation };
         await CommitAsync(session, []);
         return BuildSessionCommandRequest(session, command, reservation);
@@ -405,6 +411,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new InvalidOperationException($"Reset replacement runtime for AgentSession {session.Id} does not match its reservation.");
 
         EnsureSessionIdleForRecovery(session);
+        EnsureBindingChangeAllowed(session, reservation.ExpectedBindingEpoch);
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
@@ -413,7 +420,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, reservation.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
             "reset",
-            now);
+            now,
+            reservation.ExpectedBindingEpoch);
         var result = BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
         session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now), reservation.OperationId);
@@ -907,6 +915,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
         || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
+
+    private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
+    {
+        if (expectedEpoch is not null && expectedEpoch.Value != session.BindingEpoch)
+            throw new InvalidOperationException("binding_epoch_changed");
+        if (session.BindingUseReceipts?.Any(item => item.State == SessionTreeBindingUseState.Held) == true)
+            throw new InvalidOperationException("binding_attach_in_progress");
+    }
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
@@ -1825,7 +1841,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
-            usage.CachedWriteTokens);
+            usage.CachedWriteTokens,
+            s.BindingEpoch);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
@@ -2200,7 +2217,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             || string.IsNullOrWhiteSpace(command.EdgeId)
             || string.IsNullOrWhiteSpace(command.ParentSessionId)
             || string.IsNullOrWhiteSpace(command.ParentAgentId)
-            || string.IsNullOrWhiteSpace(command.ChildLaunchJobId))
+            || string.IsNullOrWhiteSpace(command.ChildLaunchJobId)
+            || string.IsNullOrWhiteSpace(command.ProjectId)
+            || command.ExpectedBindingEpoch <= 0
+            || string.IsNullOrWhiteSpace(command.BindingUseReceiptId)
+            || command.ExpectedLinkState != SessionTreeExpectedLinkState.Absent)
         {
             return new ApplyParentLinkAttachResult(
                 SessionTreeAttachMutationState.Rejected,
@@ -2208,21 +2229,37 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
 
         var session = await GetRequiredAsync();
-        var receipt = new SessionTreeAttachReceipt(
-            command.CommandId,
-            command.EdgeId,
-            command.ParentSessionId,
-            SessionId,
-            command.ChildLaunchJobId,
-            command.AttachedRevision);
+        if (!string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId),
+                command.ProjectId,
+                StringComparison.Ordinal))
+        {
+            return new ApplyParentLinkAttachResult(
+                SessionTreeAttachMutationState.ReconciliationRequired,
+                RejectionReason: "parent_link_project_mismatch");
+        }
+
         if (session.ParentLink is { } existing)
         {
-            return existing.EdgeId == command.EdgeId
+            var replayMatches = existing.EdgeId == command.EdgeId
                 && existing.ParentSessionId == command.ParentSessionId
+                && existing.ParentAgentId == command.ParentAgentId
                 && existing.ChildLaunchJobId == command.ChildLaunchJobId
                 && existing.State == SessionParentLinkState.Attached
                 && existing.AttachedRevision == command.AttachedRevision
-                ? new ApplyParentLinkAttachResult(SessionTreeAttachMutationState.Attached, existing, receipt)
+                && existing.AttachCommandId == command.CommandId
+                && existing.ParentWorkDir == command.ExpectedWorkDir
+                && existing.ParentRunnerId == command.ExpectedRunnerId
+                && existing.ParentRuntime == command.ExpectedRuntime
+                && existing.ParentRuntimeSessionId == command.ExpectedRuntimeSessionId
+                && existing.BindingEpoch == command.ExpectedBindingEpoch
+                && existing.BindingUseReceiptId == command.BindingUseReceiptId
+                && existing.ExpectedLinkState == command.ExpectedLinkState;
+            return replayMatches
+                ? new ApplyParentLinkAttachResult(
+                    SessionTreeAttachMutationState.Attached,
+                    existing,
+                    AttachReceipt(command))
                 : new ApplyParentLinkAttachResult(
                     SessionTreeAttachMutationState.ReconciliationRequired,
                     RejectionReason: "parent_link_identity_mismatch");
@@ -2235,10 +2272,165 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.ChildLaunchJobId,
             _timeProvider.GetUtcNow(),
             command.AttachedRevision,
-            SessionParentLinkState.Attached);
+            SessionParentLinkState.Attached,
+            AttachCommandId: command.CommandId,
+            ParentWorkDir: command.ExpectedWorkDir,
+            ParentRunnerId: command.ExpectedRunnerId,
+            ParentRuntime: command.ExpectedRuntime,
+            ParentRuntimeSessionId: command.ExpectedRuntimeSessionId,
+            BindingEpoch: command.ExpectedBindingEpoch,
+            BindingUseReceiptId: command.BindingUseReceiptId,
+            ExpectedLinkState: command.ExpectedLinkState);
         await CommitAsync(session, []);
-        return new ApplyParentLinkAttachResult(SessionTreeAttachMutationState.Attached, session.ParentLink, receipt);
+        return new ApplyParentLinkAttachResult(
+            SessionTreeAttachMutationState.Attached,
+            session.ParentLink,
+            AttachReceipt(command));
     }
+
+    public async Task<AcquireChildAttachBindingResult> AcquireChildAttachBindingAsync(
+        AcquireChildAttachBindingCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var projectId = session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(command.ParentSessionId, SessionId, StringComparison.Ordinal)
+            || !string.Equals(command.ProjectId, projectId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(command.ParentAgentId)
+            || command.ExpectedBindingEpoch <= 0)
+        {
+            return new AcquireChildAttachBindingResult(
+                SessionTreeBindingAcquireState.BindingChanged,
+                RejectionReason: "parent_binding_changed");
+        }
+
+        var receipts = session.BindingUseReceipts?.ToList() ?? [];
+        var existing = receipts.FirstOrDefault(item =>
+            item.CommandId == command.CommandId && item.EdgeId == command.EdgeId);
+        if (existing is not null)
+        {
+            return BindingUseMatches(existing, command)
+                && existing.State == SessionTreeBindingUseState.Held
+                ? new AcquireChildAttachBindingResult(SessionTreeBindingAcquireState.AlreadyAcquired, existing)
+                : new AcquireChildAttachBindingResult(
+                    SessionTreeBindingAcquireState.ReconciliationRequired,
+                    RejectionReason: "parent_binding_use_mismatch");
+        }
+
+        if (!BindingMatches(session, command))
+        {
+            return new AcquireChildAttachBindingResult(
+                SessionTreeBindingAcquireState.BindingChanged,
+                RejectionReason: "parent_binding_changed");
+        }
+
+        var receipt = new SessionTreeBindingUseReceipt(
+            Guid.NewGuid().ToString("N"),
+            command.ProjectId,
+            command.CommandId,
+            command.EdgeId,
+            SessionId,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            command.ExpectedBindingEpoch,
+            ParentAgentId: command.ParentAgentId);
+        session.BindingUseReceipts = receipts.Append(receipt).ToArray();
+        await CommitAsync(session, []);
+        return new AcquireChildAttachBindingResult(SessionTreeBindingAcquireState.Acquired, receipt);
+    }
+
+    public async Task<ReleaseChildAttachBindingResult> ReleaseChildAttachBindingAsync(
+        ReleaseChildAttachBindingCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var receipts = session.BindingUseReceipts?.ToList() ?? [];
+        var index = receipts.FindIndex(item => item.ReceiptId == command.Receipt.ReceiptId);
+        if (index < 0)
+            return new ReleaseChildAttachBindingResult(
+                SessionTreeBindingReleaseState.ReconciliationRequired,
+                "parent_binding_use_missing");
+
+        var current = receipts[index];
+        if (!BindingUseMatches(current, command.Receipt))
+            return new ReleaseChildAttachBindingResult(
+                SessionTreeBindingReleaseState.ReconciliationRequired,
+                "parent_binding_use_mismatch");
+        if (current.State == SessionTreeBindingUseState.Released)
+        {
+            return current.ReleaseOutcome == command.Outcome
+                ? new ReleaseChildAttachBindingResult(SessionTreeBindingReleaseState.AlreadyReleased)
+                : new ReleaseChildAttachBindingResult(
+                    SessionTreeBindingReleaseState.ReconciliationRequired,
+                    "parent_binding_release_mismatch");
+        }
+
+        receipts[index] = current with
+        {
+            State = SessionTreeBindingUseState.Released,
+            ReleaseOutcome = command.Outcome,
+        };
+        session.BindingUseReceipts = receipts;
+        await CommitAsync(session, []);
+        return new ReleaseChildAttachBindingResult(SessionTreeBindingReleaseState.Released);
+    }
+
+    private SessionTreeAttachReceipt AttachReceipt(ApplyParentLinkAttachCommand command) =>
+        new(
+            command.CommandId,
+            command.EdgeId,
+            command.ParentSessionId,
+            SessionId,
+            command.ChildLaunchJobId,
+            command.AttachedRevision,
+            command.ProjectId,
+            SessionTreeMutationKind.Attach,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            command.ExpectedBindingEpoch,
+            command.BindingUseReceiptId,
+            command.ExpectedLinkState,
+            command.ParentAgentId);
+
+    private bool BindingMatches(AgentSession session, AcquireChildAttachBindingCommand command) =>
+        session.BindingEpoch == command.ExpectedBindingEpoch
+        && session.Runtime.WorkDir == command.ExpectedWorkDir
+        && session.Runtime.RunnerId == command.ExpectedRunnerId
+        && string.Equals(session.Runtime.Runtime, command.ExpectedRuntime, StringComparison.Ordinal)
+        && session.Status.AgentRuntimeSessionId == command.ExpectedRuntimeSessionId;
+
+    private static bool BindingUseMatches(
+        SessionTreeBindingUseReceipt receipt,
+        AcquireChildAttachBindingCommand command) =>
+        receipt.ProjectId == command.ProjectId
+        && receipt.CommandId == command.CommandId
+        && receipt.EdgeId == command.EdgeId
+        && receipt.ParentSessionId == command.ParentSessionId
+        && receipt.ParentWorkDir == command.ExpectedWorkDir
+        && receipt.RunnerId == command.ExpectedRunnerId
+        && receipt.Runtime == command.ExpectedRuntime
+        && receipt.RuntimeSessionId == command.ExpectedRuntimeSessionId
+        && receipt.BindingEpoch == command.ExpectedBindingEpoch
+        && receipt.ParentAgentId == command.ParentAgentId;
+
+    private static bool BindingUseMatches(
+        SessionTreeBindingUseReceipt current,
+        SessionTreeBindingUseReceipt expected) =>
+        current.ReceiptId == expected.ReceiptId
+        && current.ProjectId == expected.ProjectId
+        && current.CommandId == expected.CommandId
+        && current.EdgeId == expected.EdgeId
+        && current.ParentSessionId == expected.ParentSessionId
+        && current.ParentWorkDir == expected.ParentWorkDir
+        && current.RunnerId == expected.RunnerId
+        && current.Runtime == expected.Runtime
+        && current.RuntimeSessionId == expected.RuntimeSessionId
+        && current.BindingEpoch == expected.BindingEpoch
+        && current.ParentAgentId == expected.ParentAgentId;
 
     public async Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(
         ClaimSubagentTerminalReportCommand command)

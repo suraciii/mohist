@@ -23,6 +23,7 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Runner.Subscriptions;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
@@ -217,6 +218,11 @@ public static class GrainTestConfig
         siloBuilder.Configure<ReminderOptions>(options =>
         {
             options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100);
+        });
+        siloBuilder.Services.Configure<SessionTreeMutationFenceReminderOptions>(options =>
+        {
+            options.Due = TimeSpan.FromHours(1);
+            options.Period = TimeSpan.FromHours(1);
         });
         siloBuilder.AddMemoryGrainStorageAsDefault();
         siloBuilder.AddIncomingGrainCallFilter<RequestWorkIncomingGrainCallFilter>();

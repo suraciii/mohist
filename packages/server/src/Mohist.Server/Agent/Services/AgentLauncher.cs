@@ -183,6 +183,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? parentExpectedRunnerId = null,
         string? parentExpectedRuntime = null,
         string? parentExpectedRuntimeSessionId = null,
+        long? parentExpectedBindingEpoch = null,
         string? parentLinkEdgeId = null,
         string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
@@ -298,6 +299,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentExpectedRunnerId: parentExpectedRunnerId,
             ParentExpectedRuntime: parentExpectedRuntime,
             ParentExpectedRuntimeSessionId: parentExpectedRuntimeSessionId,
+            ParentExpectedBindingEpoch: parentExpectedBindingEpoch,
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint));
 
@@ -381,6 +383,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             parentExpectedRunnerId: admission.RunnerId,
             parentExpectedRuntime: admission.Runtime,
             parentExpectedRuntimeSessionId: admission.RuntimeSessionId,
+            parentExpectedBindingEpoch: admission.BindingEpoch,
             parentLinkEdgeId: edgeId,
             pinnedRunnerId: admission.RunnerId,
             preMintedSessionId: childSessionId,

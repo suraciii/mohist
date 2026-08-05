@@ -66,10 +66,9 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
             throw new InvalidOperationException("The requested session tree root is not visible at the fence revision.");
 
         var records = new List<(AgentSessionRow Row, AgentSession Session, int Depth)>();
-        var rootSession = AgentSessionJson.Deserialize(root)
-            ?? throw new InvalidOperationException("The requested session tree root has invalid durable state.");
-        if (!string.Equals(root.LabelProjectId, projectId, StringComparison.Ordinal)
-            || !IsVisibleAt(root, graphRevision))
+        var rootRecord = SessionTreeTopology.ReadCandidate(projectId, root);
+        var rootSession = rootRecord.Session;
+        if (!SessionTreeTopology.IsVisibleAt(root, graphRevision, asRoot: true))
             throw new InvalidOperationException("The requested session tree root is not visible at the fence revision.");
         records.Add((root, rootSession, 0));
 
@@ -80,12 +79,7 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
         {
             var parentIds = frontier.Select(item => item.SessionId).ToArray();
             var children = await db.AgentSessions.AsNoTracking()
-                .Where(row => row.ParentSessionId != null
-                    && parentIds.Contains(row.ParentSessionId)
-                    && row.ParentLinkAttachedRevision != null
-                    && row.ParentLinkAttachedRevision <= graphRevision
-                    && (row.ParentLinkDetachedRevision == null
-                        || row.ParentLinkDetachedRevision > graphRevision))
+                .Where(row => row.ParentSessionId != null && parentIds.Contains(row.ParentSessionId))
                 .OrderBy(row => row.ParentSessionId)
                 .ThenBy(row => row.ParentLinkAttachedRevision)
                 .ThenBy(row => row.ParentLinkEdgeId)
@@ -101,17 +95,16 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
                     continue;
                 foreach (var child in siblings)
                 {
-                    var session = AgentSessionJson.Deserialize(child)
-                        ?? throw new InvalidOperationException("The requested session tree contains invalid durable state.");
-                    if (!string.Equals(child.LabelProjectId, projectId, StringComparison.Ordinal))
-                        throw new InvalidOperationException("The requested session tree contains a cross-project durable edge.");
+                    var record = SessionTreeTopology.ReadCandidate(projectId, child);
                     if (!visitedSessions.Add(child.Id)
-                        || (child.ParentLinkEdgeId is not null
-                            && !visitedEdges.Add(child.ParentLinkEdgeId)))
+                        || !visitedEdges.Add(child.ParentLinkEdgeId!))
                     {
-                        throw new InvalidOperationException("The requested session tree contains a cycle or duplicate durable edge.");
+                        throw new SessionTreeProjectionInconsistentException(
+                            "session_tree_projection_inconsistent: cycle or duplicate durable edge");
                     }
-                    records.Add((child, session, parent.Depth + 1));
+                    if (!SessionTreeTopology.IsVisibleAt(child, graphRevision, asRoot: false))
+                        continue;
+                    records.Add((child, record.Session, parent.Depth + 1));
                     next.Add((child.Id, parent.Depth + 1));
                 }
             }
@@ -124,7 +117,9 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
                 item.Row.ParentSessionId,
                 item.Row.ParentLinkEdgeId,
                 item.Row.ChildLaunchJobId,
-                item.Row.ParentLinkAttachedRevision ?? 0))
+                item.Row.ParentSessionId is null
+                    ? 0
+                    : item.Row.ParentLinkAttachedRevision!.Value))
             .ToArray();
         var targets = records
             .Select(item =>
@@ -168,23 +163,17 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
         if (row is null)
             return null;
 
-        var session = AgentSessionJson.Deserialize(row)
-            ?? throw new InvalidOperationException("The requested parent session has invalid durable state.");
-        if (!string.Equals(row.LabelProjectId, projectId, StringComparison.Ordinal))
+        if (row.LabelProjectId is not null
+            && !string.Equals(row.LabelProjectId, projectId, StringComparison.Ordinal))
             return null;
+        var session = SessionTreeTopology.ReadCandidate(projectId, row).Session;
         return new SessionTreeSessionBindingFact(
             row.LabelProjectId ?? string.Empty,
             row.Id,
             session.Runtime.WorkDir,
             session.Runtime.RunnerId,
             session.Runtime.Runtime,
-            session.Status.AgentRuntimeSessionId);
+            session.Status.AgentRuntimeSessionId,
+            session.BindingEpoch);
     }
-
-    private static bool IsVisibleAt(AgentSessionRow row, long graphRevision) =>
-        row.ParentLinkAttachedRevision is null
-            ? row.LaunchVisibility is null or "visible"
-            : row.ParentLinkAttachedRevision <= graphRevision
-                && (row.ParentLinkDetachedRevision is null
-                    || row.ParentLinkDetachedRevision > graphRevision);
 }

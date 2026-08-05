@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
+using Microsoft.Extensions.Options;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -9,39 +10,70 @@ public interface ISessionTreeMutationFenceGrain : IGrainWithStringKey
 {
     Task<SessionTreeMutationFence> GetAsync();
     Task<SessionTreeMutationResult> ReserveAsync(ReserveSessionTreeLinkCommand command);
-    Task<SessionTreeMutationResult> BeginFinalizeAsync(string commandId, string edgeId);
+    Task<SessionTreeMutationResult> BeginFinalizeAsync(
+        string commandId,
+        string edgeId,
+        SessionTreeBindingUseReceipt receipt);
     Task<SessionTreeMutationResult> AcknowledgeFinalizeAsync(SessionTreeAttachReceipt receipt);
     Task<SessionTreeMutationResult> CommitFinalizeAsync(string commandId, string edgeId, long revision);
     Task<SessionTreeMutationResult> RejectAsync(string commandId, string edgeId, string reason);
     Task<SessionTreeDetachMutationResult> BeginDetachAsync(BeginSessionTreeDetachCommand command);
     Task<SessionTreeDetachMutationResult> AcknowledgeDetachAsync(SessionTreeDetachReceipt receipt);
     Task<SessionTreeDetachMutationResult> CommitDetachAsync(string commandId, string edgeId, long revision);
+    Task RunRecoveryTickAsync();
     Task<SessionTreeStopSnapshotResult> BeginStopSnapshotAsync(BeginSessionTreeStopSnapshotCommand command);
     Task<SessionTreeStopAdmissionResult> SetStopAdmissionAsync(string operationId, SessionTreeStopAdmissionOutcome outcome);
+}
+
+public sealed class SessionTreeMutationFenceReminderOptions
+{
+    public TimeSpan Due { get; set; } = TimeSpan.FromSeconds(1);
+    public TimeSpan Period { get; set; } = TimeSpan.FromSeconds(1);
 }
 
 public sealed class SessionTreeMutationFenceGrain(
     [PersistentState("session-tree-mutation-fence")] IPersistentState<SessionTreeMutationFence> state,
     IDbContextFactory<MohistDbContext> dbFactory,
     TimeProvider timeProvider,
-    ISessionTreeMutationFenceReadPort snapshotReader)
-    : Grain, ISessionTreeMutationFenceGrain
+    ISessionTreeMutationFenceReadPort snapshotReader,
+    IOptions<SessionTreeMutationFenceReminderOptions> reminderOptions)
+    : Grain, ISessionTreeMutationFenceGrain, IRemindable
 {
+    internal const string RecoveryReminderName = "session-tree-mutation-recovery";
+
+    private readonly SessionTreeMutationFenceReminderOptions _reminderOptions = reminderOptions.Value;
+
     public override async Task OnActivateAsync(CancellationToken ct)
     {
+        await base.OnActivateAsync(ct);
         if (!state.RecordExists)
             await state.ReadStateAsync();
         var revision = state.State?.GraphRevision ?? 0;
         if (revision > 0)
             await SessionTreeGraphRevisionWatermark.PublishAsync(
                 dbFactory, this.GetPrimaryKeyString(), revision, timeProvider.GetUtcNow(), ct);
+        await EnsureRecoveryReminderAsync();
     }
+
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (string.Equals(reminderName, RecoveryReminderName, StringComparison.Ordinal))
+            await RunRecoveryTickAsync();
+    }
+
+    public Task RunRecoveryTickAsync() => RecoverPendingMutationAsync();
 
     public async Task<SessionTreeMutationFence> GetAsync()
     {
         if (!state.RecordExists)
             await state.ReadStateAsync();
-        return state.State ?? new SessionTreeMutationFence(this.GetPrimaryKeyString(), 0);
+        var projectId = this.GetPrimaryKeyString();
+        var current = state.State ?? new SessionTreeMutationFence(projectId, 0);
+        if (string.IsNullOrWhiteSpace(current.ProjectId))
+            return current with { ProjectId = projectId };
+        if (!string.Equals(current.ProjectId, projectId, StringComparison.Ordinal))
+            throw new InvalidOperationException("Session tree fence state project does not match its grain key.");
+        return current;
     }
 
     public async Task<SessionTreeMutationResult> ReserveAsync(ReserveSessionTreeLinkCommand command)
@@ -50,20 +82,17 @@ public sealed class SessionTreeMutationFenceGrain(
         var current = await GetAsync();
         ValidateProject(command.ProjectId);
 
+        if (current.ReconciliationRequired)
+            return Reconciliation(command.EdgeId, current.GraphRevision, LinkReservationState.Reserved);
+
         var reservations = ReservationsOf(current);
         var existing = reservations.FirstOrDefault(item => item.EdgeId == command.EdgeId);
         if (existing is not null)
         {
             return ReservationMatches(existing, command)
                 ? new SessionTreeMutationResult(command.EdgeId, current.GraphRevision, existing.State, existing.RejectionReason)
-                : new SessionTreeMutationResult(
-                    command.EdgeId,
-                    current.GraphRevision,
-                    existing.State,
-                    "parent_tree_link_command_mismatch",
-                    ReconciliationRequired: true);
+                : await ReconciliationAsync(current, command.EdgeId, existing.State);
         }
-
         if (HasMaterializingSnapshot(current))
             return MutationRejected(command.EdgeId, current.GraphRevision, "stop_snapshot_materializing");
         if (IsParentBlockedByPublishedStop(current, command.ParentSessionId))
@@ -84,29 +113,39 @@ public sealed class SessionTreeMutationFenceGrain(
                     ExpectedWorkDir: command.ExpectedWorkDir,
                     ExpectedRunnerId: command.ExpectedRunnerId,
                     ExpectedRuntime: command.ExpectedRuntime,
-                    ExpectedRuntimeSessionId: command.ExpectedRuntimeSessionId))
+                    ExpectedRuntimeSessionId: command.ExpectedRuntimeSessionId,
+                    ParentAgentId: command.ParentAgentId,
+                    ExpectedBindingEpoch: command.ExpectedBindingEpoch,
+                    ExpectedLinkState: command.ExpectedLinkState))
                 .ToArray(),
         };
         await state.WriteStateAsync();
         return new SessionTreeMutationResult(command.EdgeId, current.GraphRevision, LinkReservationState.Reserved);
     }
 
-    public async Task<SessionTreeMutationResult> BeginFinalizeAsync(string commandId, string edgeId)
+    public async Task<SessionTreeMutationResult> BeginFinalizeAsync(
+        string commandId,
+        string edgeId,
+        SessionTreeBindingUseReceipt receipt)
     {
+        ArgumentNullException.ThrowIfNull(receipt);
         var current = await GetAsync();
         var reservations = ReservationsOf(current);
         var reservation = reservations.FirstOrDefault(item => item.EdgeId == edgeId);
         if (reservation is null)
             return MutationRejected(edgeId, current.GraphRevision, "parent_tree_link_not_reserved");
+        if (current.ReconciliationRequired)
+            return Reconciliation(edgeId, current.GraphRevision, reservation.State);
         if (!string.Equals(reservation.CommandId, commandId, StringComparison.Ordinal))
-            return new SessionTreeMutationResult(
-                edgeId,
-                current.GraphRevision,
-                reservation.State,
-                "parent_tree_link_command_mismatch",
-                ReconciliationRequired: true);
+            return await ReconciliationAsync(current, edgeId, reservation.State);
+        if (!ReservationReceiptMatches(this.GetPrimaryKeyString(), reservation, receipt))
+            return await ReconciliationAsync(current, edgeId, reservation.State);
         if (reservation.State == LinkReservationState.Attached)
-            return new SessionTreeMutationResult(edgeId, reservation.AttachedRevision ?? current.GraphRevision, reservation.State);
+            return FinalizeReceiptMatches(
+                FinalizeReceiptsOf(current).FirstOrDefault(item => item.EdgeId == edgeId),
+                receipt)
+                ? new SessionTreeMutationResult(edgeId, reservation.AttachedRevision ?? current.GraphRevision, reservation.State)
+                : await ReconciliationAsync(current, edgeId, reservation.State);
         if (reservation.State == LinkReservationState.Rejected)
             return MutationRejected(edgeId, current.GraphRevision, reservation.RejectionReason ?? "parent_tree_link_rejected");
         var pending = PendingOf(current);
@@ -114,15 +153,8 @@ public sealed class SessionTreeMutationFenceGrain(
         if (existing is not null)
         {
             if (existing.Kind != SessionTreeMutationKind.Attach
-                || !string.Equals(existing.CommandId, commandId, StringComparison.Ordinal))
-            {
-                return new SessionTreeMutationResult(
-                    edgeId,
-                    current.GraphRevision,
-                    reservation.State,
-                    "parent_tree_link_command_mismatch",
-                    ReconciliationRequired: true);
-            }
+                || !AttachMutationMatches(current.ProjectId, existing, reservation, receipt))
+                return await ReconciliationAsync(current, edgeId, reservation.State);
             return new SessionTreeMutationResult(edgeId, existing.AssignedRevision, reservation.State);
         }
 
@@ -135,12 +167,26 @@ public sealed class SessionTreeMutationFenceGrain(
         if (pending.Any(item => item.AssignedRevision > current.GraphRevision))
             return MutationBusy(edgeId, current.GraphRevision, reservation.State);
 
-        var binding = await snapshotReader.ReadBindingAsync(
-            this.GetPrimaryKeyString(),
-            reservation.ParentSessionId);
-        if (!ParentBindingMatches(this.GetPrimaryKeyString(), reservation, binding))
+        var acquired = await GrainFactory
+            .GetGrain<IAgentSessionGrain>(reservation.ParentSessionId)
+            .AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+                this.GetPrimaryKeyString(),
+                receipt.CommandId,
+                receipt.EdgeId,
+                receipt.ParentSessionId,
+                receipt.ParentWorkDir,
+                receipt.RunnerId,
+                receipt.Runtime,
+                receipt.RuntimeSessionId,
+                receipt.BindingEpoch,
+                reservation.ParentAgentId ?? string.Empty));
+        if (acquired.State != SessionTreeBindingAcquireState.AlreadyAcquired
+            || acquired.Receipt is null
+            || acquired.Receipt.ReceiptId != receipt.ReceiptId)
         {
-            const string reason = "parent_binding_changed";
+            var reason = acquired.State == SessionTreeBindingAcquireState.BindingChanged
+                ? "parent_binding_changed"
+                : "session_tree_reconciliation_required";
             state.State = current with
             {
                 Reservation = null,
@@ -151,7 +197,20 @@ public sealed class SessionTreeMutationFenceGrain(
                     .ToArray(),
             };
             await state.WriteStateAsync();
-            return MutationRejected(edgeId, current.GraphRevision, reason);
+            return reason == "parent_binding_changed"
+                ? MutationRejected(edgeId, current.GraphRevision, reason)
+                : await ReconciliationAsync(
+                    current with
+                    {
+                        Reservation = null,
+                        Reservations = reservations
+                            .Select(item => item.EdgeId == edgeId
+                                ? item with { State = LinkReservationState.Rejected, RejectionReason = reason }
+                                : item)
+                            .ToArray(),
+                    },
+                    edgeId,
+                    reservation.State);
         }
 
         var mutation = new PendingSessionTreeMutation(
@@ -167,11 +226,24 @@ public sealed class SessionTreeMutationFenceGrain(
             reservation.ExpectedRuntimeSessionId,
             StopAdmissionActive: false,
             ParticipantAcknowledged: false,
-            ChildLaunchJobId: reservation.ChildLaunchJobId);
+            ChildLaunchJobId: reservation.ChildLaunchJobId,
+            ParentAgentId: reservation.ParentAgentId,
+            BindingEpoch: receipt.BindingEpoch,
+            BindingUseReceiptId: receipt.ReceiptId,
+            ExpectedLinkState: SessionTreeExpectedLinkState.Absent);
         state.State = current with
         {
             PendingMutation = null,
             PendingMutations = pending.Append(mutation).ToArray(),
+            Reservations = reservations
+                .Select(item => item.EdgeId == edgeId
+                    ? item with
+                    {
+                        BindingUseReceiptId = receipt.ReceiptId,
+                        ExpectedBindingEpoch = receipt.BindingEpoch,
+                    }
+                    : item)
+                .ToArray(),
         };
         await state.WriteStateAsync();
         return new SessionTreeMutationResult(edgeId, mutation.AssignedRevision, reservation.State);
@@ -181,25 +253,27 @@ public sealed class SessionTreeMutationFenceGrain(
     {
         ArgumentNullException.ThrowIfNull(receipt);
         var current = await GetAsync();
+        if (!string.Equals(receipt.ProjectId, current.ProjectId, StringComparison.Ordinal))
+            return await ReconciliationAsync(current, receipt.EdgeId, LinkReservationState.Reserved);
         var reservation = ReservationsOf(current).FirstOrDefault(item => item.EdgeId == receipt.EdgeId)
             ?? ReservationsOf(current).FirstOrDefault(item => item.CommandId == receipt.CommandId);
         if (reservation is null)
             return MutationRejected(receipt.EdgeId, current.GraphRevision, "parent_tree_link_not_reserved");
-        if (reservation.EdgeId != receipt.EdgeId)
-            return Reconciliation(receipt.EdgeId, current.GraphRevision, reservation.State);
+        if (current.ReconciliationRequired || reservation.EdgeId != receipt.EdgeId)
+            return await ReconciliationAsync(current, receipt.EdgeId, reservation.State);
         if (reservation.State == LinkReservationState.Attached)
         {
-            return AttachMatches(reservation, receipt)
+            return AttachMatches(current.ProjectId, reservation, receipt)
                 ? new SessionTreeMutationResult(receipt.EdgeId, receipt.Revision, LinkReservationState.Attached)
-                : Reconciliation(receipt.EdgeId, current.GraphRevision, reservation.State);
+                : await ReconciliationAsync(current, receipt.EdgeId, reservation.State);
         }
 
         var pending = PendingOf(current);
         var mutation = pending.FirstOrDefault(item => item.EdgeId == receipt.EdgeId);
         if (mutation is null || mutation.Kind != SessionTreeMutationKind.Attach)
             return MutationRejected(receipt.EdgeId, current.GraphRevision, "parent_tree_link_finalize_not_pending");
-        if (!AttachMatches(mutation, receipt))
-            return Reconciliation(receipt.EdgeId, current.GraphRevision, reservation.State);
+        if (!AttachMatches(current.ProjectId, mutation, receipt))
+            return await ReconciliationAsync(current, receipt.EdgeId, reservation.State);
         if (mutation.ParticipantAcknowledged)
             return new SessionTreeMutationResult(receipt.EdgeId, receipt.Revision, reservation.State);
 
@@ -225,19 +299,25 @@ public sealed class SessionTreeMutationFenceGrain(
         long revision)
     {
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return Reconciliation(edgeId, current.GraphRevision, LinkReservationState.Reserved);
         var reservations = ReservationsOf(current);
         var reservation = reservations.FirstOrDefault(item => item.EdgeId == edgeId)
             ?? reservations.FirstOrDefault(item => item.CommandId == commandId);
         if (reservation is null)
             return MutationRejected(edgeId, current.GraphRevision, "parent_tree_link_not_reserved");
         if (reservation.EdgeId != edgeId)
-            return Reconciliation(edgeId, current.GraphRevision, reservation.State);
+            return await ReconciliationAsync(current, edgeId, reservation.State);
         if (!string.Equals(reservation.CommandId, commandId, StringComparison.Ordinal))
-            return Reconciliation(edgeId, current.GraphRevision, reservation.State);
+            return await ReconciliationAsync(current, edgeId, reservation.State);
         if (reservation.State == LinkReservationState.Attached)
         {
-            if (reservation.AttachedRevision != revision)
-                return Reconciliation(edgeId, current.GraphRevision, reservation.State);
+            var attachedReceipt = FinalizeReceiptsOf(current).FirstOrDefault(item => item.EdgeId == edgeId);
+            if (attachedReceipt is null
+                || attachedReceipt.Revision != revision
+                || !AttachMatches(current.ProjectId, reservation, attachedReceipt))
+                return await ReconciliationAsync(current, edgeId, reservation.State);
+            await ReleaseParentBindingAsync(attachedReceipt, "attached");
             await SessionTreeGraphRevisionWatermark.PublishAsync(
                 dbFactory, this.GetPrimaryKeyString(), revision, timeProvider.GetUtcNow(), default);
             return new SessionTreeMutationResult(edgeId, revision, LinkReservationState.Attached);
@@ -253,10 +333,13 @@ public sealed class SessionTreeMutationFenceGrain(
             || !string.Equals(mutation.CommandId, commandId, StringComparison.Ordinal)
             || mutation.AssignedRevision != revision)
         {
-            return Reconciliation(edgeId, current.GraphRevision, reservation.State);
+            return await ReconciliationAsync(current, edgeId, reservation.State);
         }
-        if (!mutation.ParticipantAcknowledged || receipt is null || !AttachMatches(mutation, receipt))
+        if (!mutation.ParticipantAcknowledged || receipt is null)
             return MutationRejected(edgeId, current.GraphRevision, "parent_tree_link_not_acknowledged");
+        if (!AttachMatches(current.ProjectId, mutation, receipt)
+            || !AttachMatches(current.ProjectId, reservation, receipt, mutation.AssignedRevision))
+            return await ReconciliationAsync(current, edgeId, reservation.State);
 
         state.State = current with
         {
@@ -271,6 +354,7 @@ public sealed class SessionTreeMutationFenceGrain(
             PendingMutations = pending.Where(item => item.EdgeId != edgeId).ToArray(),
         };
         await state.WriteStateAsync();
+        await ReleaseParentBindingAsync(receipt, "attached");
         await SessionTreeGraphRevisionWatermark.PublishAsync(
             dbFactory, this.GetPrimaryKeyString(), revision, timeProvider.GetUtcNow(), default);
         return new SessionTreeMutationResult(edgeId, revision, LinkReservationState.Attached);
@@ -279,6 +363,8 @@ public sealed class SessionTreeMutationFenceGrain(
     public async Task<SessionTreeMutationResult> RejectAsync(string commandId, string edgeId, string reason)
     {
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return Reconciliation(edgeId, current.GraphRevision, LinkReservationState.Reserved);
         var reservations = ReservationsOf(current);
         var reservation = reservations.FirstOrDefault(item => item.EdgeId == edgeId);
         if (reservation is null)
@@ -312,6 +398,8 @@ public sealed class SessionTreeMutationFenceGrain(
 
         var current = await GetAsync();
         var receipts = DetachReceiptsOf(current);
+        if (current.ReconciliationRequired)
+            return ReconciliationDetach(command.EdgeId, current.GraphRevision);
         var receipt = receipts.FirstOrDefault(item => item.EdgeId == command.EdgeId);
         if (receipt is not null)
             return DetachReceiptMatches(receipt, command)
@@ -369,6 +457,7 @@ public sealed class SessionTreeMutationFenceGrain(
             PendingMutation = null,
             PendingMutations = pending.Append(mutation).ToArray(),
         };
+        await EnsureRecoveryReminderAsync();
         await state.WriteStateAsync();
         return new SessionTreeDetachMutationResult(
             SessionTreeDetachMutationState.Pending,
@@ -380,6 +469,8 @@ public sealed class SessionTreeMutationFenceGrain(
     {
         ArgumentNullException.ThrowIfNull(receipt);
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return ReconciliationDetach(receipt.EdgeId, current.GraphRevision);
         var committed = DetachReceiptsOf(current).FirstOrDefault(item => item.EdgeId == receipt.EdgeId);
         if (committed is not null)
             return DetachReceiptMatches(committed, receipt)
@@ -393,7 +484,10 @@ public sealed class SessionTreeMutationFenceGrain(
         if (mutation.EdgeId != receipt.EdgeId)
             return ReconciliationDetach(receipt.EdgeId, current.GraphRevision);
         if (!DetachMatches(mutation, receipt))
+        {
+            await MarkReconciliationAsync(current, receipt.EdgeId);
             return ReconciliationDetach(receipt.EdgeId, current.GraphRevision);
+        }
         if (mutation.ParticipantAcknowledged)
             return new SessionTreeDetachMutationResult(SessionTreeDetachMutationState.Acknowledged, receipt.EdgeId, receipt.Revision);
 
@@ -415,6 +509,8 @@ public sealed class SessionTreeMutationFenceGrain(
         long revision)
     {
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return ReconciliationDetach(edgeId, current.GraphRevision);
         var committed = DetachReceiptsOf(current).FirstOrDefault(item => item.EdgeId == edgeId);
         if (committed is not null)
             return committed.CommandId == commandId && committed.Revision == revision
@@ -461,6 +557,10 @@ public sealed class SessionTreeMutationFenceGrain(
         ValidateStopIdentity(command);
 
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return new SessionTreeStopSnapshotResult(
+                SessionTreeStopSnapshotDisposition.Blocked,
+                RejectionReason: "session_tree_reconciliation_required");
         var snapshots = StopSnapshotsOf(current);
         var prior = snapshots.FirstOrDefault(item =>
             item.OperationId == command.OperationId || item.IdempotencyKey == command.IdempotencyKey);
@@ -609,6 +709,178 @@ public sealed class SessionTreeMutationFenceGrain(
             throw new InvalidOperationException("Session tree snapshot target facts must belong to the membership.");
     }
 
+    private async Task RecoverPendingMutationAsync()
+    {
+        var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return;
+
+        var mutation = PendingOf(current)
+            .Where(item => item.AssignedRevision > current.GraphRevision)
+            .OrderBy(item => item.AssignedRevision)
+            .FirstOrDefault();
+        if (mutation is null)
+            return;
+
+        try
+        {
+            if (mutation.Kind == SessionTreeMutationKind.Attach)
+            {
+                var receipt = FinalizeReceiptsOf(current).FirstOrDefault(item => item.EdgeId == mutation.EdgeId)
+                    ?? BuildAttachReceipt(current, mutation);
+                if (receipt is null)
+                {
+                    await ReconciliationAsync(current, mutation.EdgeId, LinkReservationState.Reserved);
+                    return;
+                }
+
+                var applied = await GrainFactory
+                    .GetGrain<IAgentSessionGrain>(mutation.ChildSessionId)
+                    .ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+                        mutation.CommandId,
+                        mutation.EdgeId,
+                        mutation.ParentSessionId,
+                        mutation.ParentAgentId ?? string.Empty,
+                        mutation.ChildLaunchJobId ?? string.Empty,
+                        mutation.AssignedRevision,
+                        mutation.ExpectedWorkDir,
+                        mutation.ExpectedRunnerId,
+                        mutation.ExpectedRuntime,
+                        mutation.ExpectedRuntimeSessionId,
+                        this.GetPrimaryKeyString(),
+                        mutation.BindingEpoch ?? 0,
+                        mutation.BindingUseReceiptId ?? string.Empty,
+                        mutation.ExpectedLinkState));
+                if (applied.State != SessionTreeAttachMutationState.Attached || applied.Receipt is null)
+                {
+                    await ReconciliationAsync(current, mutation.EdgeId, LinkReservationState.Reserved);
+                    return;
+                }
+
+                var acknowledged = await AcknowledgeFinalizeAsync(applied.Receipt);
+                if (acknowledged.ReconciliationRequired)
+                    return;
+                await CommitFinalizeAsync(
+                    mutation.CommandId,
+                    mutation.EdgeId,
+                    mutation.AssignedRevision);
+                return;
+            }
+
+            if (mutation.Kind == SessionTreeMutationKind.Detach)
+            {
+                var applied = await GrainFactory
+                    .GetGrain<IAgentSessionGrain>(mutation.ChildSessionId)
+                    .ApplyParentLinkDetachAsync(new ApplyParentLinkDetachCommand(
+                        mutation.EdgeId,
+                        mutation.ParentSessionId,
+                        mutation.ChildLaunchJobId ?? string.Empty,
+                        mutation.AssignedRevision,
+                        mutation.CommandId,
+                        mutation.ChildSessionId,
+                        mutation.ExpectedAttachedRevision));
+                if (applied.State != SessionTreeDetachMutationState.Detached || applied.Receipt is null)
+                {
+                    await MarkReconciliationAsync(current, mutation.EdgeId);
+                    return;
+                }
+
+                var acknowledged = await AcknowledgeDetachAsync(applied.Receipt);
+                if (acknowledged.State == SessionTreeDetachMutationState.ReconciliationRequired)
+                    return;
+                await CommitDetachAsync(
+                    mutation.CommandId,
+                    mutation.EdgeId,
+                    mutation.AssignedRevision);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static SessionTreeAttachReceipt? BuildAttachReceipt(
+        SessionTreeMutationFence current,
+        PendingSessionTreeMutation mutation)
+    {
+        if (mutation.BindingEpoch is null || string.IsNullOrWhiteSpace(mutation.BindingUseReceiptId))
+            return null;
+        var reservation = ReservationsOf(current).FirstOrDefault(item => item.EdgeId == mutation.EdgeId);
+        return reservation is null
+            ? null
+            : new SessionTreeAttachReceipt(
+                mutation.CommandId,
+                mutation.EdgeId,
+                mutation.ParentSessionId,
+                mutation.ChildSessionId,
+                mutation.ChildLaunchJobId ?? string.Empty,
+                mutation.AssignedRevision,
+                current.ProjectId,
+                SessionTreeMutationKind.Attach,
+                mutation.ExpectedWorkDir,
+                mutation.ExpectedRunnerId,
+                mutation.ExpectedRuntime,
+                mutation.ExpectedRuntimeSessionId,
+                mutation.BindingEpoch.Value,
+                mutation.BindingUseReceiptId,
+                mutation.ExpectedLinkState,
+                mutation.ParentAgentId ?? string.Empty);
+    }
+
+    private async Task ReleaseParentBindingAsync(SessionTreeAttachReceipt receipt, string outcome)
+    {
+        if (string.IsNullOrWhiteSpace(receipt.BindingUseReceiptId))
+            return;
+        var release = await GrainFactory
+            .GetGrain<IAgentSessionGrain>(receipt.ParentSessionId)
+            .ReleaseChildAttachBindingAsync(new ReleaseChildAttachBindingCommand(
+                new SessionTreeBindingUseReceipt(
+                    receipt.BindingUseReceiptId,
+                    receipt.ProjectId,
+                    receipt.CommandId,
+                    receipt.EdgeId,
+                    receipt.ParentSessionId,
+                    receipt.ParentWorkDir,
+                    receipt.RunnerId,
+                    receipt.Runtime,
+                    receipt.RuntimeSessionId,
+                    receipt.BindingEpoch,
+                    ParentAgentId: receipt.ParentAgentId),
+                outcome));
+        if (release.State == SessionTreeBindingReleaseState.ReconciliationRequired)
+            await ReconciliationAsync(await GetAsync(), receipt.EdgeId, LinkReservationState.Attached);
+    }
+
+    private async Task<SessionTreeMutationResult> ReconciliationAsync(
+        SessionTreeMutationFence current,
+        string edgeId,
+        LinkReservationState reservationState)
+    {
+        if (!current.ReconciliationRequired)
+        {
+            state.State = current with
+            {
+                ReconciliationRequired = true,
+                ReconciliationReason = "session_tree_reconciliation_required",
+            };
+            await state.WriteStateAsync();
+        }
+        return Reconciliation(edgeId, current.GraphRevision, reservationState);
+    }
+
+    private async Task MarkReconciliationAsync(SessionTreeMutationFence current, string edgeId)
+    {
+        _ = await ReconciliationAsync(current, edgeId, LinkReservationState.Reserved);
+    }
+
+    private async Task EnsureRecoveryReminderAsync()
+    {
+        await this.RegisterOrUpdateReminder(
+            RecoveryReminderName,
+            _reminderOptions.Due,
+            _reminderOptions.Period);
+    }
+
     private static bool ReservationMatches(LinkReservation item, ReserveSessionTreeLinkCommand command) =>
         item.CommandId == command.CommandId
         && item.ParentSessionId == command.ParentSessionId
@@ -617,23 +889,119 @@ public sealed class SessionTreeMutationFenceGrain(
         && item.ExpectedWorkDir == command.ExpectedWorkDir
         && item.ExpectedRunnerId == command.ExpectedRunnerId
         && item.ExpectedRuntime == command.ExpectedRuntime
-        && item.ExpectedRuntimeSessionId == command.ExpectedRuntimeSessionId;
+        && item.ExpectedRuntimeSessionId == command.ExpectedRuntimeSessionId
+        && item.ParentAgentId == command.ParentAgentId
+        && item.ExpectedBindingEpoch == command.ExpectedBindingEpoch
+        && item.ExpectedLinkState == command.ExpectedLinkState;
 
-    private static bool AttachMatches(PendingSessionTreeMutation mutation, SessionTreeAttachReceipt receipt) =>
-        mutation.CommandId == receipt.CommandId
+    private static bool ReservationReceiptMatches(
+        string projectId,
+        LinkReservation reservation,
+        SessionTreeBindingUseReceipt receipt) =>
+        receipt.State == SessionTreeBindingUseState.Held
+        && receipt.ProjectId == projectId
+        && receipt.CommandId == reservation.CommandId
+        && receipt.EdgeId == reservation.EdgeId
+        && receipt.ParentSessionId == reservation.ParentSessionId
+        && receipt.ParentWorkDir == reservation.ExpectedWorkDir
+        && receipt.RunnerId == reservation.ExpectedRunnerId
+        && receipt.Runtime == reservation.ExpectedRuntime
+        && receipt.RuntimeSessionId == reservation.ExpectedRuntimeSessionId
+        && receipt.BindingEpoch == reservation.ExpectedBindingEpoch
+        && receipt.ParentAgentId == reservation.ParentAgentId
+        && (reservation.BindingUseReceiptId is null
+            || receipt.ReceiptId == reservation.BindingUseReceiptId)
+        && reservation.ExpectedLinkState == SessionTreeExpectedLinkState.Absent;
+
+    private static bool AttachMatches(
+        string projectId,
+        PendingSessionTreeMutation mutation,
+        SessionTreeAttachReceipt receipt) =>
+        receipt.ProjectId == projectId
+        && mutation.ParentAgentId == receipt.ParentAgentId
+        && mutation.BindingEpoch == receipt.BindingEpoch
+        && mutation.BindingUseReceiptId == receipt.BindingUseReceiptId
+        && mutation.ExpectedLinkState == receipt.ExpectedLinkState
+        && mutation.CommandId == receipt.CommandId
         && mutation.EdgeId == receipt.EdgeId
         && mutation.ParentSessionId == receipt.ParentSessionId
         && mutation.ChildSessionId == receipt.ChildSessionId
         && mutation.ChildLaunchJobId == receipt.ChildLaunchJobId
-        && mutation.AssignedRevision == receipt.Revision;
+        && mutation.AssignedRevision == receipt.Revision
+        && mutation.ExpectedWorkDir == receipt.ParentWorkDir
+        && mutation.ExpectedRunnerId == receipt.RunnerId
+        && mutation.ExpectedRuntime == receipt.Runtime
+        && mutation.ExpectedRuntimeSessionId == receipt.RuntimeSessionId
+        && receipt.MutationKind == SessionTreeMutationKind.Attach;
 
-    private static bool AttachMatches(LinkReservation reservation, SessionTreeAttachReceipt receipt) =>
-        reservation.CommandId == receipt.CommandId
+    private static bool AttachMatches(
+        string projectId,
+        LinkReservation reservation,
+        SessionTreeAttachReceipt receipt,
+        long? expectedRevision = null) =>
+        receipt.ProjectId == projectId
+        && reservation.ParentAgentId == receipt.ParentAgentId
+        && reservation.ExpectedBindingEpoch == receipt.BindingEpoch
+        && reservation.BindingUseReceiptId == receipt.BindingUseReceiptId
+        && reservation.ExpectedLinkState == receipt.ExpectedLinkState
+        && reservation.CommandId == receipt.CommandId
         && reservation.EdgeId == receipt.EdgeId
         && reservation.ParentSessionId == receipt.ParentSessionId
         && reservation.ChildSessionId == receipt.ChildSessionId
         && reservation.ChildLaunchJobId == receipt.ChildLaunchJobId
-        && reservation.AttachedRevision == receipt.Revision;
+        && (expectedRevision ?? reservation.AttachedRevision) == receipt.Revision
+        && reservation.ExpectedWorkDir == receipt.ParentWorkDir
+        && reservation.ExpectedRunnerId == receipt.RunnerId
+        && reservation.ExpectedRuntime == receipt.Runtime
+        && reservation.ExpectedRuntimeSessionId == receipt.RuntimeSessionId
+        && receipt.MutationKind == SessionTreeMutationKind.Attach;
+
+    private static bool AttachMutationMatches(
+        string projectId,
+        PendingSessionTreeMutation mutation,
+        LinkReservation reservation,
+        SessionTreeBindingUseReceipt receipt) =>
+        mutation.Kind == SessionTreeMutationKind.Attach
+        && mutation.CommandId == reservation.CommandId
+        && mutation.EdgeId == reservation.EdgeId
+        && mutation.ParentSessionId == reservation.ParentSessionId
+        && mutation.ChildSessionId == reservation.ChildSessionId
+        && mutation.ChildLaunchJobId == reservation.ChildLaunchJobId
+        && AttachMatches(projectId, mutation, new SessionTreeAttachReceipt(
+            receipt.CommandId,
+            receipt.EdgeId,
+            reservation.ParentSessionId,
+            reservation.ChildSessionId,
+            reservation.ChildLaunchJobId ?? string.Empty,
+            mutation.AssignedRevision,
+            receipt.ProjectId,
+            SessionTreeMutationKind.Attach,
+            receipt.ParentWorkDir,
+            receipt.RunnerId,
+            receipt.Runtime,
+            receipt.RuntimeSessionId,
+            receipt.BindingEpoch,
+            receipt.ReceiptId,
+            reservation.ExpectedLinkState,
+            reservation.ParentAgentId ?? string.Empty));
+
+    private static bool FinalizeReceiptMatches(
+        SessionTreeAttachReceipt? stored,
+        SessionTreeBindingUseReceipt receipt) =>
+        stored is not null
+        && stored.ProjectId == receipt.ProjectId
+        && stored.CommandId == receipt.CommandId
+        && stored.EdgeId == receipt.EdgeId
+        && stored.ParentSessionId == receipt.ParentSessionId
+        && stored.ParentWorkDir == receipt.ParentWorkDir
+        && stored.RunnerId == receipt.RunnerId
+        && stored.Runtime == receipt.Runtime
+        && stored.RuntimeSessionId == receipt.RuntimeSessionId
+        && stored.BindingEpoch == receipt.BindingEpoch
+        && stored.ParentAgentId == receipt.ParentAgentId
+        && stored.BindingUseReceiptId == receipt.ReceiptId
+        && stored.ExpectedLinkState == SessionTreeExpectedLinkState.Absent
+        && stored.MutationKind == SessionTreeMutationKind.Attach;
 
     private static bool ParentBindingMatches(
         string projectId,

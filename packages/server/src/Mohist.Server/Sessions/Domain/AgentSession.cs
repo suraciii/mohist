@@ -11,6 +11,8 @@ public sealed class AgentSession
     public required AgentSessionRuntime Runtime { get; set; }
     public AgentSessionSettings Settings { get; set; } = new();
     public SessionParentLink? ParentLink { get; set; }
+    public long BindingEpoch { get; set; }
+    public IReadOnlyList<SessionTreeBindingUseReceipt>? BindingUseReceipts { get; set; }
     public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
     [JsonInclude]
     [JsonPropertyName("activitySummary")]
@@ -49,6 +51,8 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a non-empty Id.");
         if (Runtime is null)
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
+        if (BindingEpoch < 0)
+            throw new InvalidOperationException("AgentSession state requires a non-negative binding epoch.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
         PersistedActivitySummary = (PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
@@ -387,7 +391,8 @@ public sealed record AgentSessionResetReservation(
     string Command = "reset",
     AgentSessionRecoveryOutcome? Outcome = null,
     string? IdempotencyKey = null,
-    IReadOnlyList<string>? AdditionalIdempotencyKeys = null);
+    IReadOnlyList<string>? AdditionalIdempotencyKeys = null,
+    long ExpectedBindingEpoch = 0);
 
 public sealed record AgentSessionRecoveryOutcome(
     string Id,
