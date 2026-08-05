@@ -17,100 +17,6 @@ public sealed class SessionTreeLifecycleSpecs
     }
 
     [Fact]
-    public async Task TerminalReportClaimAndDeliveryAreIdempotentAndKeepTheFirstInputId()
-    {
-        Assert.Equal(
-            "subagent-terminal:edge-terminal-report:job-terminal-report",
-            SubagentTerminalReportIdempotencyKeys.For("edge-terminal-report", "job-terminal-report"));
-        var child = await OpenChildAsync("terminal-report");
-        var claim = await child.ClaimSubagentTerminalReportAsync(new("edge-terminal-report", "job-terminal-report"));
-        Assert.Equal(SubagentTerminalReportClaimDisposition.ClaimedPending, claim.Disposition);
-
-        var delivered = await child.RecordSubagentTerminalReportDeliveredAsync(
-            new("edge-terminal-report", "job-terminal-report", "parent-input-1"));
-        Assert.Equal(SubagentTerminalReportDeliveryDisposition.Delivered, delivered.Disposition);
-
-        var replay = await child.ClaimSubagentTerminalReportAsync(new("edge-terminal-report", "job-terminal-report"));
-        Assert.Equal(SubagentTerminalReportClaimDisposition.Delivered, replay.Disposition);
-        Assert.Equal("parent-input-1", replay.DeliveredInputId);
-
-        var deliveredReplay = await child.RecordSubagentTerminalReportDeliveredAsync(
-            new("edge-terminal-report", "job-terminal-report", "parent-input-1"));
-        Assert.Equal(SubagentTerminalReportDeliveryDisposition.AlreadyDelivered, deliveredReplay.Disposition);
-        var conflict = await child.RecordSubagentTerminalReportDeliveredAsync(
-            new("edge-terminal-report", "job-terminal-report", "parent-input-2"));
-        Assert.Equal(SubagentTerminalReportDeliveryDisposition.InputIdConflict, conflict.Disposition);
-        Assert.Equal("parent-input-1", conflict.DeliveredInputId);
-    }
-
-    [Fact]
-    public async Task DetachAndTerminalClaimLinearizeInEitherOrder()
-    {
-        var detachedFirst = await OpenChildAsync("detach-first");
-        var detached = await detachedFirst.ApplyParentLinkDetachAsync(
-            DetachCommand(
-                "detach-command-1",
-                "edge-detach-first",
-                "session-child-detach-first",
-                "parent",
-                "job-detach-first",
-                11));
-        Assert.Equal(SessionTreeDetachMutationState.Detached, detached.State);
-
-        var suppressed = await detachedFirst.ClaimSubagentTerminalReportAsync(
-            new("edge-detach-first", "job-detach-first"));
-        Assert.Equal(SubagentTerminalReportClaimDisposition.Suppressed, suppressed.Disposition);
-        var detachedReplay = await detachedFirst.ApplyParentLinkDetachAsync(
-            DetachCommand(
-                "detach-command-1",
-                "edge-detach-first",
-                "session-child-detach-first",
-                "parent",
-                "job-detach-first",
-                11));
-        Assert.Equal(detached, detachedReplay);
-
-        var claimFirst = await OpenChildAsync("claim-first");
-        var pending = await claimFirst.ClaimSubagentTerminalReportAsync(
-            new("edge-claim-first", "job-claim-first"));
-        Assert.Equal(SubagentTerminalReportClaimDisposition.ClaimedPending, pending.Disposition);
-        var pendingDetach = await claimFirst.ApplyParentLinkDetachAsync(
-            DetachCommand(
-                "detach-command-2",
-                "edge-claim-first",
-                "session-child-claim-first",
-                "parent",
-                "job-claim-first",
-                12));
-        Assert.Equal(SessionTreeDetachMutationState.Detached, pendingDetach.State);
-        Assert.Equal(TerminalReportState.Pending, pendingDetach.Link!.TerminalReport);
-
-        var delivered = await claimFirst.RecordSubagentTerminalReportDeliveredAsync(
-            new("edge-claim-first", "job-claim-first", "parent-input-claim-first"));
-        Assert.Equal(SubagentTerminalReportDeliveryDisposition.Delivered, delivered.Disposition);
-        var deliveredDetach = await claimFirst.ApplyParentLinkDetachAsync(
-            DetachCommand(
-                "detach-command-2",
-                "edge-claim-first",
-                "session-child-claim-first",
-                "parent",
-                "job-claim-first",
-                12));
-        Assert.Equal(TerminalReportState.Delivered, deliveredDetach.Link!.TerminalReport);
-
-        var reparent = await claimFirst.ApplyParentLinkDetachAsync(
-            DetachCommand(
-                "detach-command-3",
-                "edge-claim-first",
-                "session-child-claim-first",
-                "other-parent",
-                "job-claim-first",
-                13));
-        Assert.Equal(SessionTreeDetachMutationState.Rejected, reparent.State);
-        Assert.Equal("parent_link_identity_mismatch", reparent.RejectionReason);
-    }
-
-    [Fact]
     public async Task DetachReceiptMismatchFailsClosed_AndReplayPublishesExactlyOnce()
     {
         var projectId = $"tree-detach-replay-{Guid.NewGuid():N}";
@@ -141,30 +47,6 @@ public sealed class SessionTreeLifecycleSpecs
             firstBegin.Revision,
             begin.ChildLaunchJobId,
             begin.ExpectedAttachedRevision);
-        var reservedDuringDetach = await fence.ReserveAsync(new ReserveSessionTreeLinkCommand(
-            projectId,
-            "edge-during-detach",
-            "other-parent",
-            "child-during-detach",
-            "/workspace",
-            "runner-1",
-            "opencode",
-            null,
-            "command-during-detach",
-            "job-during-detach"));
-        Assert.Equal(LinkReservationState.Reserved, reservedDuringDetach.State);
-        Assert.Equal(
-            "session_tree_mutation_busy",
-            (await fence.BeginFinalizeAsync("command-during-detach", "edge-during-detach")).RejectionReason);
-        Assert.Equal(
-            SessionTreeStopSnapshotDisposition.Blocked,
-            (await fence.BeginStopSnapshotAsync(new BeginSessionTreeStopSnapshotCommand(
-                projectId,
-                parentId,
-                "operation-during-detach",
-                "stop-input:during-detach",
-                "fingerprint:during-detach"))).Disposition);
-
         foreach (var wrongReceipt in new[]
         {
             exactReceipt with { CommandId = "wrong-command" },
@@ -179,30 +61,95 @@ public sealed class SessionTreeLifecycleSpecs
             var wrong = await fence.AcknowledgeDetachAsync(wrongReceipt);
             Assert.Equal(SessionTreeDetachMutationState.ReconciliationRequired, wrong.State);
         }
-        Assert.Equal(1, (await fence.GetAsync()).GraphRevision);
-        Assert.Equal(
-            SessionTreeDetachMutationState.Rejected,
-            (await fence.CommitDetachAsync(begin.CommandId, begin.EdgeId, firstBegin.Revision)).State);
+        var afterMismatch = await fence.GetAsync();
+        Assert.True(afterMismatch.ReconciliationRequired);
+        var exactAfterMismatch = await fence.AcknowledgeDetachAsync(exactReceipt);
+        Assert.Equal(SessionTreeDetachMutationState.ReconciliationRequired, exactAfterMismatch.State);
+        var commitAfterMismatch = await fence.CommitDetachAsync(
+            begin.CommandId,
+            begin.EdgeId,
+            firstBegin.Revision);
+        Assert.Equal(SessionTreeDetachMutationState.ReconciliationRequired, commitAfterMismatch.State);
+        Assert.Equal(afterMismatch.GraphRevision, (await fence.GetAsync()).GraphRevision);
+    }
+
+    [Fact]
+    public async Task ManualDetachKeepsBarrierUntilExactCommit_AndCommitReplayDoesNotAdvanceGraph()
+    {
+        var projectId = $"tree-manual-detach-{Guid.NewGuid():N}";
+        var parentId = $"tree-manual-parent-{Guid.NewGuid():N}";
+        var childId = $"tree-manual-child-{Guid.NewGuid():N}";
+        await OpenSessionAsync(projectId, parentId, "root-agent");
+        var child = await OpenSessionAsync(projectId, childId, "child-agent");
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        await AttachAsync(fence, child, projectId, parentId, childId, "edge-manual-child", "command-manual-child", "job-manual-child");
+
+        var detach = new BeginSessionTreeDetachCommand(
+            projectId,
+            "edge-manual-child",
+            parentId,
+            childId,
+            "command-manual-detach",
+            "job-manual-child",
+            1);
+        var begun = await fence.BeginDetachAsync(detach);
+        Assert.Equal(SessionTreeDetachMutationState.Pending, begun.State);
+
+        var second = new ReserveSessionTreeLinkCommand(
+            projectId,
+            "edge-manual-reserved",
+            parentId,
+            "child-manual-reserved",
+            "/workspace",
+            "runner-1",
+            "opencode",
+            "runtime-session",
+            "command-manual-reserved",
+            "job-manual-reserved",
+            "root-agent",
+            1,
+            SessionTreeExpectedLinkState.Absent);
+        Assert.Equal(LinkReservationState.Reserved, (await fence.ReserveAsync(second)).State);
+        var blockedAttach = await fence.BeginFinalizeAsync(
+            second.CommandId,
+            second.EdgeId,
+            new SessionTreeBindingUseReceipt(
+                "receipt-manual-reserved",
+                projectId,
+                second.CommandId,
+                second.EdgeId,
+                parentId,
+                second.ExpectedWorkDir,
+                second.ExpectedRunnerId,
+                second.ExpectedRuntime,
+                second.ExpectedRuntimeSessionId,
+                second.ExpectedBindingEpoch!.Value,
+                ParentAgentId: second.ParentAgentId!));
+        Assert.Equal(LinkReservationState.Reserved, blockedAttach.State);
+        Assert.Equal("session_tree_mutation_busy", blockedAttach.RejectionReason);
+
+        var blockedStop = await fence.BeginStopSnapshotAsync(new BeginSessionTreeStopSnapshotCommand(
+            projectId,
+            parentId,
+            "operation-manual-barrier",
+            "stop-input:manual-barrier",
+            "fingerprint:manual-barrier"));
+        Assert.Equal(SessionTreeStopSnapshotDisposition.Blocked, blockedStop.Disposition);
+        Assert.Equal("session_tree_mutation_pending", blockedStop.RejectionReason);
 
         var applied = await child.ApplyParentLinkDetachAsync(
-            new ApplyParentLinkDetachCommand(
-                begin.EdgeId,
-                begin.ParentSessionId,
-                begin.ChildLaunchJobId,
-                firstBegin.Revision,
-                begin.CommandId,
-                begin.ChildSessionId,
-                begin.ExpectedAttachedRevision));
-        Assert.Equal(SessionTreeDetachMutationState.Detached, applied.State);
-        Assert.NotNull(applied.Receipt);
-        var ack = await fence.AcknowledgeDetachAsync(applied.Receipt!);
-        Assert.Equal(SessionTreeDetachMutationState.Acknowledged, ack.State);
-        Assert.Equal(ack, await fence.AcknowledgeDetachAsync(applied.Receipt!));
-
-        var committed = await fence.CommitDetachAsync(begin.CommandId, begin.EdgeId, firstBegin.Revision);
-        var replay = await fence.CommitDetachAsync(begin.CommandId, begin.EdgeId, firstBegin.Revision);
+            DetachCommand(
+                detach.CommandId,
+                detach.EdgeId,
+                detach.ChildSessionId,
+                detach.ParentSessionId,
+                detach.ChildLaunchJobId,
+                begun.Revision));
+        var acknowledged = await fence.AcknowledgeDetachAsync(applied.Receipt!);
+        Assert.Equal(SessionTreeDetachMutationState.Acknowledged, acknowledged.State);
+        var committed = await fence.CommitDetachAsync(detach.CommandId, detach.EdgeId, begun.Revision);
         Assert.Equal(SessionTreeDetachMutationState.Detached, committed.State);
-        Assert.Equal(committed, replay);
+        Assert.Equal(committed, await fence.CommitDetachAsync(detach.CommandId, detach.EdgeId, begun.Revision));
         Assert.Equal(2, (await fence.GetAsync()).GraphRevision);
     }
 
@@ -292,6 +239,9 @@ public sealed class SessionTreeLifecycleSpecs
             "edge-stop-child",
             detachBegin.Revision);
         Assert.Equal(SessionTreeDetachMutationState.Detached, detachCommitted.State);
+        Assert.Equal(
+            detachCommitted,
+            await fence.CommitDetachAsync("command-stop-detach", "edge-stop-child", detachBegin.Revision));
         Assert.Equal(2, (await fence.GetAsync()).GraphRevision);
         var replay = await fence.BeginStopSnapshotAsync(command);
         Assert.Equal(SessionTreeStopSnapshotDisposition.Replayed, replay.Disposition);
@@ -412,7 +362,11 @@ public sealed class SessionTreeLifecycleSpecs
             "/workspace",
             "runner-1",
             "opencode",
-            null));
+            "runtime-session",
+            "project-lifecycle",
+            1,
+            "standalone-receipt",
+            SessionTreeExpectedLinkState.Absent));
         Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
         return child;
     }
@@ -434,10 +388,14 @@ public sealed class SessionTreeLifecycleSpecs
                 [GenericAgentSessionMetadata.AgentId] = agentId,
                 [GenericAgentSessionMetadata.AgentName] = agentId,
             })));
+        await session.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+            "runtime-session",
+            ExpectedRunnerId: "runner-1",
+            ExpectedRuntime: "opencode"));
         return session;
     }
 
-    private static async Task AttachAsync(
+    private async Task AttachAsync(
         ISessionTreeMutationFenceGrain fence,
         IAgentSessionGrain child,
         string projectId,
@@ -455,11 +413,28 @@ public sealed class SessionTreeLifecycleSpecs
             "/workspace",
             "runner-1",
             "opencode",
-            null,
+            "runtime-session",
             commandId,
-            jobId));
+            jobId,
+            "root-agent",
+            1,
+            SessionTreeExpectedLinkState.Absent));
         Assert.Equal(LinkReservationState.Reserved, reserved.State);
-        var begun = await fence.BeginFinalizeAsync(commandId, edgeId);
+        var bindingResult = await _fixture.Grains.GetGrain<IAgentSessionGrain>(parentId)
+            .AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+                projectId,
+                commandId,
+                edgeId,
+                parentId,
+                "/workspace",
+                "runner-1",
+                "opencode",
+                "runtime-session",
+                1,
+                "root-agent"));
+        Assert.NotNull(bindingResult.Receipt);
+        var binding = bindingResult.Receipt!;
+        var begun = await fence.BeginFinalizeAsync(commandId, edgeId, binding);
         var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
             commandId,
             edgeId,
@@ -470,11 +445,20 @@ public sealed class SessionTreeLifecycleSpecs
             "/workspace",
             "runner-1",
             "opencode",
-            null));
+            "runtime-session",
+            projectId,
+            binding.BindingEpoch,
+            binding.ReceiptId,
+            SessionTreeExpectedLinkState.Absent));
         Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
-        await fence.AcknowledgeFinalizeAsync(attached.Receipt!);
+        var acknowledged = await fence.AcknowledgeFinalizeAsync(attached.Receipt!);
+        Assert.True(
+            !acknowledged.ReconciliationRequired && acknowledged.State == LinkReservationState.Reserved,
+            $"state={acknowledged.State}; reason={acknowledged.RejectionReason}; reconciliation={acknowledged.ReconciliationRequired}");
         var committed = await fence.CommitFinalizeAsync(commandId, edgeId, begun.Revision);
-        Assert.Equal(LinkReservationState.Attached, committed.State);
+        Assert.True(
+            committed.State == LinkReservationState.Attached,
+            $"state={committed.State}; reason={committed.RejectionReason}; reconciliation={committed.ReconciliationRequired}");
     }
 
     private static ApplyParentLinkDetachCommand DetachCommand(

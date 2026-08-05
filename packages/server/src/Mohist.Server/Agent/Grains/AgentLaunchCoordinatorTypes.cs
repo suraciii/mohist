@@ -118,7 +118,11 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(39)] bool AbortJobAcknowledged = false,
     [property: Id(40)] bool AbortSessionAcknowledged = false,
     [property: Id(41)] string? SpawnRequestFingerprint = null,
-    [property: Id(42)] bool PostPlanRejected = false);
+    [property: Id(42)] bool PostPlanRejected = false,
+    [property: Id(43)] long? ParentExpectedBindingEpoch = null,
+    [property: Id(44)] SessionTreeBindingUseReceipt? ParentBindingUseReceipt = null,
+    [property: Id(45)] bool ParentBindingReleased = false,
+    [property: Id(46)] bool AbortParentBindingAcknowledged = false);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The

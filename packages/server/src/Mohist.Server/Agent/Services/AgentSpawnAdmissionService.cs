@@ -16,7 +16,8 @@ public sealed record AgentSpawnAdmission(
     string WorkDir,
     string RunnerId,
     string Runtime,
-    string RuntimeSessionId);
+    string RuntimeSessionId,
+    long BindingEpoch);
 
 [Serializable]
 [Orleans.GenerateSerializer]
@@ -177,7 +178,8 @@ public sealed class AgentSpawnAdmissionService(
             parent.Session.Runtime.WorkDir!,
             runnerId,
             runtime,
-            runtimeSessionId);
+            runtimeSessionId,
+            parent.Session.BindingEpoch);
     }
 
     private static async Task<AgentSpawnAdmission> RejectAsync(

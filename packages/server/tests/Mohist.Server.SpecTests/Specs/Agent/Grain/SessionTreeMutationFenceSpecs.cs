@@ -24,6 +24,8 @@ public sealed class SessionTreeMutationFenceSpecs
         await OpenParentAsync(projectId, parentId);
         var firstCommand = Command(projectId, "edge-1", "command-1", parentId);
         var secondCommand = Command(projectId, "edge-2", "command-2", parentId);
+        var firstBinding = await AcquireAsync(parentId, projectId, firstCommand);
+        var secondBinding = await AcquireAsync(parentId, projectId, secondCommand);
 
         var first = await fence.ReserveAsync(firstCommand);
         var second = await fence.ReserveAsync(secondCommand);
@@ -35,9 +37,9 @@ public sealed class SessionTreeMutationFenceSpecs
         Assert.Empty(reserved.PendingMutations ?? []);
         Assert.Equal(0, reserved.GraphRevision);
 
-        var assignedFirst = await fence.BeginFinalizeAsync("command-1", "edge-1");
+        var assignedFirst = await fence.BeginFinalizeAsync("command-1", "edge-1", firstBinding);
         var reservedDuringFinalize = await fence.ReserveAsync(Command(projectId, "edge-3", "command-3", parentId));
-        var busySecond = await fence.BeginFinalizeAsync("command-2", "edge-2");
+        var busySecond = await fence.BeginFinalizeAsync("command-2", "edge-2", secondBinding);
         Assert.Equal(1, assignedFirst.Revision);
         Assert.Equal(LinkReservationState.Reserved, reservedDuringFinalize.State);
         Assert.Equal("session_tree_mutation_busy", busySecond.RejectionReason);
@@ -47,13 +49,13 @@ public sealed class SessionTreeMutationFenceSpecs
         Assert.Equal("parent_tree_link_not_acknowledged", unacknowledged.RejectionReason);
         Assert.Equal(0, (await fence.GetAsync()).GraphRevision);
 
-        await AcknowledgeAttachAsync(fence, firstCommand, 1);
+        await AcknowledgeAttachAsync(fence, firstCommand, firstBinding, 1);
         var attachedFirst = await fence.CommitFinalizeAsync("command-1", "edge-1", 1);
         Assert.Equal(1, attachedFirst.Revision);
 
-        var assignedSecond = await fence.BeginFinalizeAsync("command-2", "edge-2");
+        var assignedSecond = await fence.BeginFinalizeAsync("command-2", "edge-2", secondBinding);
         Assert.Equal(2, assignedSecond.Revision);
-        await AcknowledgeAttachAsync(fence, secondCommand, 2);
+        await AcknowledgeAttachAsync(fence, secondCommand, secondBinding, 2);
         var attachedSecond = await fence.CommitFinalizeAsync("command-2", "edge-2", 2);
         Assert.Equal(2, attachedSecond.Revision);
 
@@ -79,7 +81,8 @@ public sealed class SessionTreeMutationFenceSpecs
         await OpenParentAsync(projectId, parentId);
         var command = Command(projectId, "edge-receipt", "command-receipt", parentId);
         await fence.ReserveAsync(command);
-        var begun = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId);
+        var binding = await AcquireAsync(parentId, projectId, command);
+        var begun = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId, binding);
 
         var exactReceipt = new SessionTreeAttachReceipt(
             command.CommandId,
@@ -87,7 +90,17 @@ public sealed class SessionTreeMutationFenceSpecs
             command.ParentSessionId,
             command.ChildSessionId,
             command.ChildLaunchJobId!,
-            begun.Revision);
+            begun.Revision,
+            projectId,
+            SessionTreeMutationKind.Attach,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            binding.BindingEpoch,
+            binding.ReceiptId,
+            SessionTreeExpectedLinkState.Absent,
+            command.ParentAgentId!);
         foreach (var wrongReceipt in new[]
         {
             exactReceipt with { CommandId = "wrong-command" },
@@ -96,6 +109,16 @@ public sealed class SessionTreeMutationFenceSpecs
             exactReceipt with { ChildSessionId = "wrong-child" },
             exactReceipt with { ChildLaunchJobId = "wrong-job" },
             exactReceipt with { Revision = begun.Revision + 1 },
+            exactReceipt with { ProjectId = "wrong-project" },
+            exactReceipt with { MutationKind = SessionTreeMutationKind.Detach },
+            exactReceipt with { ParentWorkDir = "/wrong-workspace" },
+            exactReceipt with { RunnerId = "wrong-runner" },
+            exactReceipt with { Runtime = "wrong-runtime" },
+            exactReceipt with { RuntimeSessionId = "wrong-runtime-session" },
+            exactReceipt with { BindingEpoch = binding.BindingEpoch + 1 },
+            exactReceipt with { BindingUseReceiptId = "wrong-receipt" },
+            exactReceipt with { ExpectedLinkState = SessionTreeExpectedLinkState.Attached },
+            exactReceipt with { ParentAgentId = "wrong-agent" },
         })
         {
             var wrong = await fence.AcknowledgeFinalizeAsync(wrongReceipt);
@@ -103,15 +126,15 @@ public sealed class SessionTreeMutationFenceSpecs
         }
         Assert.Equal(0, (await fence.GetAsync()).GraphRevision);
         var blocked = await fence.CommitFinalizeAsync(command.CommandId, command.EdgeId, begun.Revision);
-        Assert.Equal("parent_tree_link_not_acknowledged", blocked.RejectionReason);
+        Assert.True(blocked.ReconciliationRequired);
 
         var exact = await fence.AcknowledgeFinalizeAsync(exactReceipt);
-        Assert.False(exact.ReconciliationRequired);
+        Assert.True(exact.ReconciliationRequired);
         var committed = await fence.CommitFinalizeAsync(command.CommandId, command.EdgeId, begun.Revision);
         var replay = await fence.CommitFinalizeAsync(command.CommandId, command.EdgeId, begun.Revision);
-        Assert.Equal(LinkReservationState.Attached, committed.State);
+        Assert.True(committed.ReconciliationRequired);
         Assert.Equal(committed, replay);
-        Assert.Equal(1, (await fence.GetAsync()).GraphRevision);
+        Assert.Equal(0, (await fence.GetAsync()).GraphRevision);
 
         foreach (var wrongReceipt in new[]
         {
@@ -127,8 +150,7 @@ public sealed class SessionTreeMutationFenceSpecs
             Assert.True(wrongReplay.ReconciliationRequired);
         }
         var attachedReplay = await fence.AcknowledgeFinalizeAsync(exactReceipt);
-        Assert.Equal(LinkReservationState.Attached, attachedReplay.State);
-        Assert.False(attachedReplay.ReconciliationRequired);
+        Assert.True(attachedReplay.ReconciliationRequired);
     }
 
     [Fact]
@@ -145,13 +167,87 @@ public sealed class SessionTreeMutationFenceSpecs
             "runtime-session",
             "runtime-session-replaced"));
 
-        var rejected = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId);
+        var rejected = await fence.BeginFinalizeAsync(
+            command.CommandId,
+            command.EdgeId,
+            new SessionTreeBindingUseReceipt(
+                "unacquired",
+                projectId,
+                command.CommandId,
+                command.EdgeId,
+                parentId,
+                command.ExpectedWorkDir,
+                command.ExpectedRunnerId,
+                command.ExpectedRuntime,
+                command.ExpectedRuntimeSessionId,
+                command.ExpectedBindingEpoch!.Value,
+                ParentAgentId: command.ParentAgentId!));
         Assert.Equal(LinkReservationState.Rejected, rejected.State);
         Assert.Equal("parent_binding_changed", rejected.RejectionReason);
         var state = await fence.GetAsync();
         Assert.Equal(0, state.GraphRevision);
         Assert.Equal(LinkReservationState.Rejected, Assert.Single(state.Reservations!).State);
-        Assert.Equal(rejected, await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId));
+        Assert.Equal(
+            rejected,
+            await fence.BeginFinalizeAsync(
+                command.CommandId,
+                command.EdgeId,
+                new SessionTreeBindingUseReceipt(
+                    "unacquired",
+                    projectId,
+                    command.CommandId,
+                    command.EdgeId,
+                    parentId,
+                    command.ExpectedWorkDir,
+                    command.ExpectedRunnerId,
+                    command.ExpectedRuntime,
+                    command.ExpectedRuntimeSessionId,
+                    command.ExpectedBindingEpoch!.Value,
+                    ParentAgentId: command.ParentAgentId!)));
+    }
+
+    [Fact]
+    public async Task AcquiredBindingBlocksResetUntilRelease_AndResetUsesEpochCas()
+    {
+        var projectId = $"tree-fence-reset-race-{Guid.NewGuid():N}";
+        var parentId = $"parent-{projectId}";
+        var parent = await OpenParentAsync(projectId, parentId);
+        var command = Command(projectId, "edge-reset-race", "command-reset-race", parentId);
+        var binding = await AcquireAsync(parentId, projectId, command);
+
+        var heldReset = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            parent.ResetAsync(new ResetAgentSessionCommand(
+                "runtime-session",
+                "runtime-session-replacement",
+                "opencode",
+                binding.BindingEpoch)));
+        Assert.Equal("binding_attach_in_progress", heldReset.Message);
+
+        var released = await parent.ReleaseChildAttachBindingAsync(new ReleaseChildAttachBindingCommand(
+            binding,
+            "rejected"));
+        Assert.Equal(SessionTreeBindingReleaseState.Released, released.State);
+        var reset = await parent.ResetAsync(new ResetAgentSessionCommand(
+            "runtime-session",
+            "runtime-session-replacement",
+            "opencode",
+            binding.BindingEpoch));
+        Assert.Equal("reset", reset.Operation);
+        Assert.Equal(binding.BindingEpoch + 1, (await parent.GetAsync())!.BindingEpoch);
+
+        var staleAcquire = await parent.AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+            projectId,
+            "command-reset-race-stale",
+            "edge-reset-race-stale",
+            parentId,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            "runtime-session-replacement",
+            binding.BindingEpoch,
+            command.ParentAgentId!));
+        Assert.Equal(SessionTreeBindingAcquireState.BindingChanged, staleAcquire.State);
+        Assert.Equal("parent_binding_changed", staleAcquire.RejectionReason);
     }
 
     [Fact]
@@ -166,18 +262,19 @@ public sealed class SessionTreeMutationFenceSpecs
 
         var conflict = await fence.ReserveAsync(command with { ParentSessionId = "other-parent" });
         Assert.True(conflict.ReconciliationRequired);
-        Assert.Equal("parent_tree_link_command_mismatch", conflict.RejectionReason);
+        Assert.Equal("reconciliation_required", conflict.RejectionReason);
 
         var rejected = await fence.RejectAsync(command.CommandId, command.EdgeId, "parent_binding_changed");
+        Assert.True(rejected.ReconciliationRequired);
         var replay = await fence.ReserveAsync(command);
-        Assert.Equal(LinkReservationState.Rejected, rejected.State);
-        Assert.Equal(rejected, replay);
+        Assert.True(replay.ReconciliationRequired);
         Assert.Equal(0, (await fence.GetAsync()).GraphRevision);
     }
 
     private async Task AcknowledgeAttachAsync(
         ISessionTreeMutationFenceGrain fence,
         ReserveSessionTreeLinkCommand command,
+        SessionTreeBindingUseReceipt binding,
         long revision)
     {
         var result = await fence.AcknowledgeFinalizeAsync(new SessionTreeAttachReceipt(
@@ -186,8 +283,39 @@ public sealed class SessionTreeMutationFenceSpecs
             command.ParentSessionId,
             command.ChildSessionId,
             command.ChildLaunchJobId!,
-            revision));
+            revision,
+            binding.ProjectId,
+            SessionTreeMutationKind.Attach,
+            binding.ParentWorkDir,
+            binding.RunnerId,
+            binding.Runtime,
+            binding.RuntimeSessionId,
+            binding.BindingEpoch,
+            binding.ReceiptId,
+            SessionTreeExpectedLinkState.Absent,
+            command.ParentAgentId!));
         Assert.False(result.ReconciliationRequired);
+    }
+
+    private async Task<SessionTreeBindingUseReceipt> AcquireAsync(
+        string parentId,
+        string projectId,
+        ReserveSessionTreeLinkCommand command)
+    {
+        var result = await _fixture.Grains.GetGrain<IAgentSessionGrain>(parentId)
+            .AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+                projectId,
+                command.CommandId,
+                command.EdgeId,
+                parentId,
+                command.ExpectedWorkDir,
+                command.ExpectedRunnerId,
+                command.ExpectedRuntime,
+                command.ExpectedRuntimeSessionId,
+                command.ExpectedBindingEpoch!.Value,
+                command.ParentAgentId!));
+        Assert.NotNull(result.Receipt);
+        return result.Receipt!;
     }
 
     private async Task<IAgentSessionGrain> OpenParentAsync(string projectId, string parentId)
@@ -226,5 +354,8 @@ public sealed class SessionTreeMutationFenceSpecs
             "opencode",
             "runtime-session",
             commandId,
-            $"job-{edgeId}");
+            $"job-{edgeId}",
+            "parent-agent",
+            1,
+            SessionTreeExpectedLinkState.Absent);
 }

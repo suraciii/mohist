@@ -152,7 +152,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedRuntime: command.ParentExpectedRuntime,
                 ParentExpectedRuntimeSessionId: command.ParentExpectedRuntimeSessionId,
                 ParentLinkEdgeId: command.ParentLinkEdgeId,
-                SpawnRequestFingerprint: command.SpawnRequestFingerprint);
+                SpawnRequestFingerprint: command.SpawnRequestFingerprint,
+                ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -275,12 +276,18 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         {
             if (ex is AgentSpawnPostPlanRejectedException postPlanRejection)
             {
-                await BeginAbortAfterRejectionAsync(plan, postPlanRejection.Reason, postPlan: true);
+                await BeginAbortAfterRejectionAsync(
+                    _state.State.Plan ?? plan,
+                    postPlanRejection.Reason,
+                    postPlan: true);
                 return;
             }
             if (ex is AgentSpawnPreplanRejectedException rejection)
             {
-                await BeginAbortAfterRejectionAsync(plan, rejection.Reason, postPlan: false);
+                await BeginAbortAfterRejectionAsync(
+                    _state.State.Plan ?? plan,
+                    rejection.Reason,
+                    postPlan: false);
                 return;
             }
             _log.LogWarning(ex,
@@ -358,6 +365,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AbortFenceAcknowledged = false,
             AbortJobAcknowledged = false,
             AbortSessionAcknowledged = false,
+            AbortParentBindingAcknowledged = false,
         };
         _state.State.Plan = abortPlan;
         await SaveStateAsync();
@@ -392,7 +400,10 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 plan.ParentExpectedRuntime,
                 plan.ParentExpectedRuntimeSessionId,
                 commandId,
-                plan.JobKey));
+                plan.JobKey,
+                plan.ParentAgentId,
+                plan.ParentExpectedBindingEpoch,
+                SessionTreeExpectedLinkState.Absent));
         if (result.State == LinkReservationState.Rejected)
             throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
 
@@ -555,9 +566,47 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         var edgeId = plan.ParentLinkEdgeId
             ?? throw new AgentSpawnPreplanRejectedException("parent_link_edge_missing");
+        var parentSessionId = plan.ParentSessionId
+            ?? throw new AgentSpawnPreplanRejectedException("parent_session_missing");
+        var bindingReceipt = plan.ParentBindingUseReceipt;
+        if (bindingReceipt is null)
+        {
+            if (plan.ParentExpectedBindingEpoch is not > 0
+                || string.IsNullOrWhiteSpace(plan.ParentAgentId))
+            {
+                throw new AgentSpawnPostPlanRejectedException("parent_binding_changed");
+            }
+
+            var acquired = await _grains
+                .GetGrain<IAgentSessionGrain>(parentSessionId)
+                .AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+                    plan.ProjectId,
+                    commandId,
+                    edgeId,
+                    parentSessionId,
+                    plan.ParentExpectedWorkDir,
+                    plan.ParentExpectedRunnerId,
+                    plan.ParentExpectedRuntime,
+                    plan.ParentExpectedRuntimeSessionId,
+                    plan.ParentExpectedBindingEpoch.Value,
+                    plan.ParentAgentId));
+            if (acquired.State == SessionTreeBindingAcquireState.BindingChanged)
+                throw new AgentSpawnPostPlanRejectedException("parent_binding_changed");
+            if (acquired.State == SessionTreeBindingAcquireState.ReconciliationRequired
+                || acquired.Receipt is null
+                || acquired.Receipt.State != SessionTreeBindingUseState.Held)
+            {
+                throw new AgentSpawnPostPlanRejectedException("session_tree_reconciliation_required");
+            }
+
+            bindingReceipt = acquired.Receipt;
+            plan = plan with { ParentBindingUseReceipt = bindingReceipt };
+            _state.State.Plan = plan;
+            await SaveStateAsync();
+        }
         var begun = await _grains
             .GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId)
-            .BeginFinalizeAsync(commandId, edgeId);
+            .BeginFinalizeAsync(commandId, edgeId, bindingReceipt);
         if (begun.RejectionReason is "finalize_busy" or "session_tree_mutation_busy" or "parent_tree_mutation_busy")
             throw new AgentSpawnValidationPendingException("finalize_busy");
         if (begun.ReconciliationRequired || begun.RejectionReason == "parent_binding_changed")
@@ -587,7 +636,11 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 plan.ParentExpectedWorkDir,
                 plan.ParentExpectedRunnerId,
                 plan.ParentExpectedRuntime,
-                plan.ParentExpectedRuntimeSessionId));
+                plan.ParentExpectedRuntimeSessionId,
+                plan.ProjectId,
+                plan.ParentExpectedBindingEpoch ?? 0,
+                bindingReceipt.ReceiptId,
+                SessionTreeExpectedLinkState.Absent));
         if (attached.State == SessionTreeAttachMutationState.ReconciliationRequired)
             throw new AgentSpawnPostPlanRejectedException(attached.RejectionReason ?? "parent_link_reconciliation_required");
         if (attached.State != SessionTreeAttachMutationState.Attached || attached.Receipt is null)
@@ -656,12 +709,31 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 var pending = (snapshot.PendingMutations
                     ?? (snapshot.PendingMutation is { } legacyPending ? [legacyPending] : []))
                     .FirstOrDefault(item => item.EdgeId == plan.ParentLinkEdgeId);
-                await fence.RejectAsync(
+                var rejected = await fence.RejectAsync(
                     pending?.CommandId ?? reservation.CommandId ?? string.Empty,
                     plan.ParentLinkEdgeId!,
                     reason);
+                if (rejected.ReconciliationRequired)
+                    return;
             }
             current = current with { AbortFenceAcknowledged = true };
+            _state.State.Plan = current;
+            await SaveStateAsync();
+        }
+
+        if (!current.AbortParentBindingAcknowledged)
+        {
+            if (current.ParentBindingUseReceipt is not null)
+            {
+                var released = await _grains
+                    .GetGrain<IAgentSessionGrain>(current.ParentBindingUseReceipt.ParentSessionId)
+                    .ReleaseChildAttachBindingAsync(new ReleaseChildAttachBindingCommand(
+                        current.ParentBindingUseReceipt,
+                        "rejected"));
+                if (released.State == SessionTreeBindingReleaseState.ReconciliationRequired)
+                    return;
+            }
+            current = current with { AbortParentBindingAcknowledged = true };
             _state.State.Plan = current;
             await SaveStateAsync();
         }
@@ -856,4 +928,5 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(29)] string? ParentExpectedRuntime = null,
     [property: Id(30)] string? ParentExpectedRuntimeSessionId = null,
     [property: Id(31)] string? ParentLinkEdgeId = null,
-    [property: Id(32)] string? SpawnRequestFingerprint = null);
+    [property: Id(32)] string? SpawnRequestFingerprint = null,
+    [property: Id(33)] long? ParentExpectedBindingEpoch = null);

@@ -85,6 +85,8 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command);
     Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command);
     Task<ApplyParentLinkAttachResult> ApplyParentLinkAttachAsync(ApplyParentLinkAttachCommand command);
+    Task<AcquireChildAttachBindingResult> AcquireChildAttachBindingAsync(AcquireChildAttachBindingCommand command);
+    Task<ReleaseChildAttachBindingResult> ReleaseChildAttachBindingAsync(ReleaseChildAttachBindingCommand command);
     Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(ClaimSubagentTerminalReportCommand command);
     Task<RecordSubagentTerminalReportDeliveredResult> RecordSubagentTerminalReportDeliveredAsync(RecordSubagentTerminalReportDeliveredCommand command);
     Task<ApplyParentLinkDetachResult> ApplyParentLinkDetachAsync(ApplyParentLinkDetachCommand command);
@@ -202,7 +204,8 @@ public sealed record CompactAgentSessionCommand(
 public sealed record ResetAgentSessionCommand(
     [property: Id(0)] string? ExpectedRuntimeSessionId,
     [property: Id(1)] string ReplacementRuntimeSessionId,
-    [property: Id(2)] string ReplacementRuntime = "opencode");
+    [property: Id(2)] string ReplacementRuntime = "opencode",
+    [property: Id(3)] long? ExpectedBindingEpoch = null);
 
 [GenerateSerializer]
 public sealed record CompleteResetAgentSessionCommand(
@@ -291,7 +294,8 @@ public sealed record AgentSessionInfo(
     [property: Id(20)] int? ToolCallCount,
     [property: Id(21)] int? ToolErrorCount,
     [property: Id(22)] string? Runtime,
-    [property: Id(23)] long? CachedWriteTokens);
+    [property: Id(23)] long? CachedWriteTokens,
+    [property: Id(24)] long BindingEpoch = 0);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(
