@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -12,6 +13,50 @@ namespace Mohist.Server.SpecTests.Specs.Security;
 
 public class ConnectionSecretsMigrationSpecs
 {
+    private static readonly string[] ManagedSlackAgentAppConstraints =
+    [
+        "CK_ManagedSlackAgentApps_AppliedManifestPair",
+        "CK_ManagedSlackAgentApps_AppLifecycle",
+        "CK_ManagedSlackAgentApps_Authorization",
+        "CK_ManagedSlackAgentApps_BindingState",
+        "CK_ManagedSlackAgentApps_DesiredManifest",
+        "CK_ManagedSlackAgentApps_IdentityPair",
+        "CK_ManagedSlackAgentApps_TransportKind",
+        "FK_ManagedSlackAgentApps_AgentConnections_AgentConnectionId",
+        "FK_ManagedSlackAgentApps_SlackWorkspaceEnrollments_EnrollmentId",
+    ];
+
+    private static readonly string[] ManagedSlackChildAppConstraints =
+    [
+        "CK_ManagedSlackChildApps_AppliedManifestPair",
+        "CK_ManagedSlackChildApps_AppLifecycle",
+        "CK_ManagedSlackChildApps_Authorization",
+        "CK_ManagedSlackChildApps_BindingState",
+        "CK_ManagedSlackChildApps_DesiredManifest",
+        "CK_ManagedSlackChildApps_IdentityPair",
+        "CK_ManagedSlackChildApps_TransportKind",
+        "FK_ManagedSlackChildApps_AgentConnections_AgentConnectionId",
+        "FK_ManagedSlackChildApps_SlackWorkspaceEnrollments_EnrollmentId",
+    ];
+
+    private static readonly string[] ManagedSlackAgentAppDependentConstraints =
+    [
+        "FK_SlackChildAppBindingObligations_ManagedSlackAgentApps_ChildAppId",
+        "FK_SlackOAuthAttempts_ManagedSlackAgentApps_ChildAppId",
+        "FK_SlackOAuthStates_ManagedSlackAgentApps_ChildAppId",
+    ];
+
+    private static readonly string[] ManagedSlackChildAppDependentConstraints =
+    [
+        "FK_SlackChildAppBindingObligations_ManagedSlackChildApps_ChildAppId",
+        "FK_SlackOAuthAttempts_ManagedSlackChildApps_ChildAppId",
+        "FK_SlackOAuthStates_ManagedSlackChildApps_ChildAppId",
+    ];
+
+    private static readonly Regex NamedConstraint = new(
+        "CONSTRAINT\\s+\\\"(?<name>[^\\\"]+)\\\"",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
     private static readonly string[] ManagedSlackAgentAppIndexes =
     [
         "UX_ManagedSlackAgentApps_AgentConnectionId",
@@ -186,6 +231,27 @@ public class ConnectionSecretsMigrationSpecs
         Assert.DoesNotContain("IX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
         AssertIndexNames(ManagedSlackAgentAppIndexes, indexes);
+        await AssertConstraintNamesAsync(after, "ManagedSlackAgentApps", ManagedSlackAgentAppConstraints);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackChildAppBindingObligations",
+            [
+                "CK_SlackChildAppBindingObligations_Status",
+                "FK_SlackChildAppBindingObligations_AgentConnections_AgentConnectionId",
+                ManagedSlackAgentAppDependentConstraints[0],
+            ]);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackOAuthAttempts",
+            ["CK_SlackOAuthAttempts_Status", ManagedSlackAgentAppDependentConstraints[1]]);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackOAuthStates",
+            [
+                "CK_SlackOAuthStates_Outcome",
+                ManagedSlackAgentAppDependentConstraints[2],
+                "FK_SlackOAuthStates_SlackOAuthAttempts_AuthorizationAttemptId",
+            ]);
     }
 
     [Fact]
@@ -211,6 +277,27 @@ public class ConnectionSecretsMigrationSpecs
         Assert.DoesNotContain("IX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
         Assert.Contains("UX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
         AssertIndexNames(ManagedSlackChildAppIndexes, indexes);
+        await AssertConstraintNamesAsync(after, "ManagedSlackChildApps", ManagedSlackChildAppConstraints);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackChildAppBindingObligations",
+            [
+                "CK_SlackChildAppBindingObligations_Status",
+                "FK_SlackChildAppBindingObligations_AgentConnections_AgentConnectionId",
+                ManagedSlackChildAppDependentConstraints[0],
+            ]);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackOAuthAttempts",
+            ["CK_SlackOAuthAttempts_Status", ManagedSlackChildAppDependentConstraints[1]]);
+        await AssertConstraintNamesAsync(
+            after,
+            "SlackOAuthStates",
+            [
+                "CK_SlackOAuthStates_Outcome",
+                ManagedSlackChildAppDependentConstraints[2],
+                "FK_SlackOAuthStates_SlackOAuthAttempts_AuthorizationAttemptId",
+            ]);
     }
 
     [Fact]
@@ -248,6 +335,29 @@ public class ConnectionSecretsMigrationSpecs
         Assert.Equal(
             expected.OrderBy(name => name, StringComparer.Ordinal),
             actual.Keys.OrderBy(name => name, StringComparer.Ordinal));
+
+    private static async Task AssertConstraintNamesAsync(
+        MohistDbContext context,
+        string tableName,
+        string[] expected)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT \"sql\" FROM sqlite_master WHERE \"type\" = 'table' AND \"name\" = $name";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "$name";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        var sql = Convert.ToString(await command.ExecuteScalarAsync());
+        Assert.NotNull(sql);
+        var actual = NamedConstraint.Matches(sql)
+            .Select(match => match.Groups["name"].Value)
+            .Where(name => name.StartsWith("CK_", StringComparison.Ordinal) || name.StartsWith("FK_", StringComparison.Ordinal));
+        Assert.Equal(
+            expected.OrderBy(name => name, StringComparer.Ordinal),
+            actual.OrderBy(name => name, StringComparer.Ordinal));
+    }
 
     private static async Task<IDictionary<string, string>> ReadColumnTypesAsync(
         MohistDbContext context,
