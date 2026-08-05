@@ -86,10 +86,10 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
             _timeProvider.GetUtcNow(),
             ct);
         if (!persisted.Stored)
-        {
-            enrollment = await _enrollments.GetAsync(enrollment.Id, ct)
-                ?? throw new InvalidOperationException("The workspace enrollment disappeared during setup.");
-        }
+            return Failed(
+                request.WorkspaceTeamId,
+                SlackConfigurationCredentialRotationOutcome.DefiniteFailure,
+                persisted.ErrorClass);
 
         await EnsureManagerAppCreatedAsync(enrollment, ct);
         return await ProjectAsync(enrollment.WorkspaceTeamId, ct);
@@ -200,7 +200,8 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
 
     private async Task EnsureManagerAppCreatedAsync(SlackWorkspaceEnrollment enrollment, CancellationToken ct)
     {
-        if (enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.Created)
+        if (enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.Created
+            && !string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
             return;
 
         var manifest = _manifests.Generate(new SlackManifestInput(
@@ -217,7 +218,21 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
         var begin = await _enrollments.BeginManagerAppCreateAsync(
             enrollment.Id, enrollment.ManagerAppOperationFence, $"manager_create_{Guid.NewGuid():N}", ct);
         if (!begin.Accepted)
+        {
+            var current = begin.Enrollment;
+            if (current is not null
+                && (current.ManagerAppLifecycle == SlackManagerAppLifecycle.Creating
+                    || current.ManagerAppLifecycle == SlackManagerAppLifecycle.Created
+                    && string.IsNullOrWhiteSpace(current.ManagerAppId)))
+            {
+                await _enrollments.RecoverManagerAppCreateAsync(
+                    enrollment.Id,
+                    current.ManagerAppOperationFence,
+                    SlackSecretRedactor.Redact("interrupted_create"),
+                    ct);
+            }
             return;
+        }
 
         var request = new SlackAppManagementRequest(enrollment.Id, enrollment.Id, enrollment.WorkspaceTeamId);
         var external = await _appManagement.CreateAsync(request, ct);
@@ -228,6 +243,13 @@ public sealed class SlackManagerSetupOrchestrator : IScopedService
                 enrollment.Id, fence, SlackManagerAppLifecycle.Created, "created", ct);
             await _enrollments.RecordManagerAppCreatedAsync(
                 enrollment.Id, external.AppId, manifest.Hash, external.InstallUrl, ct);
+        }
+        else if (external.Outcome == SlackAppManagementOutcome.Succeeded && external.AppId is not null)
+        {
+            await _enrollments.ApplyManagerAppCreateResultAsync(
+                enrollment.Id, fence, SlackManagerAppLifecycle.CreateUnknown,
+                SlackSecretRedactor.Redact(external.ErrorMessage ?? external.ErrorClass ?? "install_url_missing"), ct);
+            await _enrollments.RecordManagerAppIdentityAsync(enrollment.Id, external.AppId, ct);
         }
         else if (external.Outcome == SlackAppManagementOutcome.Unknown)
         {

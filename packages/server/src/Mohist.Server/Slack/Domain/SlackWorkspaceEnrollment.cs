@@ -158,6 +158,34 @@ public sealed class SlackWorkspaceEnrollment
         UpdatedAt = now;
     }
 
+    public void RecordManagerAppIdentity(string appId, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown)
+            throw new InvalidOperationException("The Manager App identity can only be recorded while the create outcome is unknown.");
+        if (!string.IsNullOrWhiteSpace(ManagerAppId)
+            && !string.Equals(ManagerAppId, appId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager App identity cannot be changed after setup.");
+        ManagerAppId = appId.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecoverManagerAppCreate(string redactedOutcome, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        if (ManagerAppLifecycle == SlackManagerAppLifecycle.Created
+            && !string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App is created and recorded; it needs no recovery.");
+        if (ManagerAppLifecycle is not (SlackManagerAppLifecycle.Creating or SlackManagerAppLifecycle.Created))
+            throw new InvalidOperationException("The Manager App create cannot be recovered from its current lifecycle.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, SlackManagerAppLifecycle.CreateUnknown);
+        ManagerAppLifecycle = SlackManagerAppLifecycle.CreateUnknown;
+        ManagerAppOperationOutcome = redactedOutcome.Trim();
+        UpdatedAt = now;
+    }
+
     public void StageManagerRuntimeCredentials(string botUserId, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(botUserId);
@@ -175,6 +203,8 @@ public sealed class SlackWorkspaceEnrollment
 
     public void CompleteSocketVerification(DateTimeOffset now)
     {
+        if (Lifecycle != SlackEnrollmentLifecycle.Active)
+            throw new InvalidOperationException("The Manager App can only be verified while the enrollment is active.");
         if (string.IsNullOrWhiteSpace(ManagerAppId))
             throw new InvalidOperationException("The Manager App must be created before Socket verification.");
         SlackStateTransitions.RequireRuntimeCredentialValidationTransition(

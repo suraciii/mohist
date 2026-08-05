@@ -36,7 +36,9 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
         if (targetRef is not SlackLeaseTargetRef.Manager manager)
             return null;
         var enrollment = await enrollments.GetAsync(manager.EnrollmentId, ct);
-        return enrollment is null ? null : ToTarget(enrollment);
+        return enrollment is null || enrollment.Lifecycle != SlackEnrollmentLifecycle.Active
+            ? null
+            : ToTarget(enrollment);
     }
 
     public async Task MarkVerifiedAsync(

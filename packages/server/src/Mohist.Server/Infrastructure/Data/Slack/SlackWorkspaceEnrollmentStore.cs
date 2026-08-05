@@ -121,7 +121,8 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         if (row is null)
             return ManagerAppCreateBeginResult.NotFound;
         var enrollment = ToDomain(row);
-        if (enrollment.ManagerAppOperationFence != expectedFence)
+        if (enrollment.ManagerAppOperationFence != expectedFence
+            || enrollment.ManagerAppLifecycle is not (SlackManagerAppLifecycle.NotCreated or SlackManagerAppLifecycle.CreateUnknown))
             return ManagerAppCreateBeginResult.Stale(enrollment);
         enrollment.BeginManagerAppCreate(operationId, expectedFence, _timeProvider.GetUtcNow());
 
@@ -190,6 +191,46 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         CancellationToken ct = default) =>
         UpdateAsync(id, enrollment => enrollment.RecordManagerAppCreated(
             appId, manifestHash, installUrl, _timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> RecordManagerAppIdentityAsync(
+        string id,
+        string appId,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.RecordManagerAppIdentity(appId, _timeProvider.GetUtcNow()), ct);
+
+    public async Task<SlackWorkspaceEnrollment?> RecoverManagerAppCreateAsync(
+        string id,
+        int expectedFence,
+        string redactedOutcome,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.SlackWorkspaceEnrollments.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == id, ct);
+        if (row is null)
+            return null;
+        var enrollment = ToDomain(row);
+        if (enrollment.ManagerAppOperationFence != expectedFence
+            || enrollment.ManagerAppLifecycle != SlackManagerAppLifecycle.Creating
+            && !(enrollment.ManagerAppLifecycle == SlackManagerAppLifecycle.Created
+                && string.IsNullOrWhiteSpace(enrollment.ManagerAppId)))
+            return enrollment;
+        enrollment.RecoverManagerAppCreate(redactedOutcome, expectedFence, _timeProvider.GetUtcNow());
+
+        await db.SlackWorkspaceEnrollments
+            .Where(item => item.Id == id
+                && item.ManagerAppOperationFence == expectedFence
+                && (item.ManagerAppLifecycle == SlackManagerAppLifecycle.Creating
+                    || item.ManagerAppLifecycle == SlackManagerAppLifecycle.Created && item.ManagerAppId == ""))
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.ManagerAppLifecycle, enrollment.ManagerAppLifecycle)
+                .SetProperty(item => item.ManagerAppOperationOutcome, enrollment.ManagerAppOperationOutcome)
+                .SetProperty(item => item.UpdatedAt, enrollment.UpdatedAt), ct);
+        return await CurrentOrNullAsync(db, id, ct);
+    }
 
     public Task<SlackWorkspaceEnrollment?> StageManagerRuntimeCredentialsAsync(
         string id,
