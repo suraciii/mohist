@@ -179,6 +179,28 @@ public partial class AgentJobOwnerLedger : Migration
             name: "IX_AgentJobs_AssignedRunnerId_Status",
             table: "AgentJobs");
 
+        if (migrationBuilder.ActiveProvider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE "AgentJobs" DROP COLUMN "InitialTurnId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "InitialInputId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "AgentSessionId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "IssueNumber";
+                ALTER TABLE "AgentJobs" DROP COLUMN "IssueProjectId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "Title";
+                ALTER TABLE "AgentJobs" DROP COLUMN "Stage";
+                ALTER TABLE "AgentJobs" DROP COLUMN "WorkType";
+                ALTER TABLE "AgentJobs" DROP COLUMN "DispatchJson";
+                ALTER TABLE "AgentJobs" DROP COLUMN "RunningSince";
+                ALTER TABLE "AgentJobs" DROP COLUMN "ReadySince";
+                ALTER TABLE "AgentJobs" DROP COLUMN "WorkId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "AssignedRunnerId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "Revision";
+                """);
+            return;
+        }
+
         migrationBuilder.DropColumn(name: "InitialTurnId", table: "AgentJobs");
         migrationBuilder.DropColumn(name: "InitialInputId", table: "AgentJobs");
         migrationBuilder.DropColumn(name: "AgentSessionId", table: "AgentJobs");
