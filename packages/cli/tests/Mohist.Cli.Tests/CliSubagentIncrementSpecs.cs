@@ -86,7 +86,7 @@ public sealed class CliSubagentIncrementSpecs
     }
 
     [Fact]
-    public async Task SessionTree_UsesServerOrderAndLockedQuery()
+    public async Task SessionTree_WithExplicitProject_UsesServerOrderAndLockedQuery()
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
@@ -125,5 +125,49 @@ public sealed class CliSubagentIncrementSpecs
         Assert.Equal("sess_root", data["nodes"]![0]!["sessionId"]!.GetValue<string>());
         Assert.Equal("sess_child", data["nodes"]![1]!["sessionId"]!.GetValue<string>());
         Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task SessionTree_UsesActiveProjectWhenProjectIsOmitted()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    root = new { sessionId = "sess_root" },
+                    revision = "rev_active",
+                    nodes = Array.Empty<object>(),
+                    edges = Array.Empty<object>(),
+                    continuation = (string?)null,
+                },
+            })),
+            activeProjectId: "proj_active");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["session", "tree", "sess_root", "--json", "root,revision,nodes,edges,continuation"],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(
+            "/api/projects/proj_active/agent-sessions/sess_root/tree",
+            request.RequestUri?.PathAndQuery);
+        var data = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("rev_active", data["revision"]!.GetValue<string>());
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public void SessionTree_OutputCatalogMatchesLockedContract()
+    {
+        Assert.Equal(
+            ["root", "revision", "nodes", "edges", "continuation"],
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTree)).Fields);
     }
 }
