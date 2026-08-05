@@ -119,6 +119,11 @@ public sealed record PendingSessionTreeMutation(
     [property: Id(17)] SessionTreeExpectedLinkState ExpectedLinkState = SessionTreeExpectedLinkState.Absent);
 
 [GenerateSerializer]
+public sealed record SessionTreeBindingReleaseObligation(
+    [property: Id(0)] SessionTreeAttachReceipt Receipt,
+    [property: Id(1)] string Outcome);
+
+[GenerateSerializer]
 public sealed record SessionTreeMutationFence(
     [property: Id(0)] string ProjectId,
     [property: Id(1)] long GraphRevision,
@@ -131,7 +136,8 @@ public sealed record SessionTreeMutationFence(
     [property: Id(8)] IReadOnlyList<SessionTreeStopSnapshot>? StopSnapshots = null,
     [property: Id(9)] IReadOnlyList<SessionTreeAttachReceipt>? FinalizeReceipts = null,
     [property: Id(10)] bool ReconciliationRequired = false,
-    [property: Id(11)] string? ReconciliationReason = null);
+    [property: Id(11)] string? ReconciliationReason = null,
+    [property: Id(12)] SessionTreeBindingReleaseObligation? ReleaseObligation = null);
 
 [GenerateSerializer]
 public sealed record ReserveSessionTreeLinkCommand(
