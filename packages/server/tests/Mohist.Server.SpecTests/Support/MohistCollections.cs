@@ -25,6 +25,9 @@ namespace Mohist.Server.SpecTests.Support;
 [CollectionDefinition("MohistIntegration")]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
+public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
@@ -39,6 +42,12 @@ public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixtur
 
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("WorkspaceSpecs", DisableParallelization = true)]
+public class WorkspaceSpecsCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("PathContractRegression", DisableParallelization = true)]
+public class PathContractRegressionCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationSessions")]
 public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
