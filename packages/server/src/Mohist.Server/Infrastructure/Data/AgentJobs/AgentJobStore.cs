@@ -141,8 +141,11 @@ public class AgentJobStore : IAgentJobStore
     public async Task<AgentJobLedgerRecord?> LoadLedgerAsync(string key, CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.AgentJobs.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.JobKey == key, ct);
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.JobKey == key);
+        var rows = await ProjectRows(query, includeSubagentTreeFields, ct);
+        var row = rows.FirstOrDefault();
         return row is null ? null : ToRecord(row);
     }
 
@@ -281,9 +284,12 @@ public class AgentJobStore : IAgentJobStore
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
         var query = db.AgentJobs.AsNoTracking()
-            .Where(r => r.Status == "pending" && r.AssignedRunnerId == null
-                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"));
+            .Where(r => r.Status == "pending" && r.AssignedRunnerId == null);
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
 
         if (!string.IsNullOrWhiteSpace(projectId))
         {
@@ -291,11 +297,10 @@ public class AgentJobStore : IAgentJobStore
             query = query.Where(r => r.ProjectId == pid);
         }
 
-        var rows = await query
+        var rows = await ProjectRows(query
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
-            .Take(limit)
-            .ToListAsync(ct);
+            .Take(limit), includeSubagentTreeFields, ct);
 
         return rows.Select(ToRecord).ToList();
     }
@@ -305,10 +310,14 @@ public class AgentJobStore : IAgentJobStore
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "running"
-                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
-            .ToListAsync(ct);
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "running");
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
+
+        var rows = await ProjectRows(query, includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
     }
 
@@ -318,13 +327,17 @@ public class AgentJobStore : IAgentJobStore
         CancellationToken ct = default)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "pending"
-                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.AssignedRunnerId == runnerId && r.Status == "pending");
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
+
+        var rows = await ProjectRows(query
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
-            .Take(limit)
-            .ToListAsync(ct);
+            .Take(limit), includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
     }
 
@@ -335,15 +348,76 @@ public class AgentJobStore : IAgentJobStore
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var cutoffText = FormatTimestamp(cutoff);
-        var rows = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.Status == "pending" && r.ReadySince != null && r.ReadySince.CompareTo(cutoffText) <= 0
-                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
+        var includeSubagentTreeFields = await HasLaunchVisibilityColumnAsync(db, ct);
+        var query = db.AgentJobs.AsNoTracking()
+            .Where(r => r.Status == "pending" && r.ReadySince != null && r.ReadySince.CompareTo(cutoffText) <= 0);
+
+        if (includeSubagentTreeFields)
+            query = query.Where(r => r.LaunchVisibility == null || r.LaunchVisibility == "visible");
+
+        var rows = await ProjectRows(query
             .OrderBy(r => r.ReadySince)
             .ThenBy(r => r.JobKey)
-            .Take(limit)
-            .ToListAsync(ct);
+            .Take(limit), includeSubagentTreeFields, ct);
         return rows.Select(ToRecord).ToList();
     }
+
+    private static async Task<bool> HasLaunchVisibilityColumnAsync(
+        MohistDbContext db,
+        CancellationToken ct)
+    {
+        await db.Database.OpenConnectionAsync(ct);
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText =
+            "SELECT 1 FROM pragma_table_info('AgentJobs') WHERE name = 'LaunchVisibility' LIMIT 1";
+        return await command.ExecuteScalarAsync(ct) is not null;
+    }
+
+    private static Task<List<LedgerQueryRow>> ProjectRows(
+        IQueryable<AgentJobRow> query,
+        bool includeSubagentTreeFields,
+        CancellationToken ct) =>
+        includeSubagentTreeFields
+            ? query.Select(row => new LedgerQueryRow
+            {
+                JobKey = row.JobKey,
+                State = row.State,
+                Revision = row.Revision,
+                AssignedRunnerId = row.AssignedRunnerId,
+                WorkId = row.WorkId,
+                ReadySince = row.ReadySince,
+                RunningSince = row.RunningSince,
+                DispatchJson = row.DispatchJson,
+                WorkType = row.WorkType,
+                Stage = row.Stage,
+                Title = row.Title,
+                IssueProjectId = row.IssueProjectId,
+                IssueNumber = row.IssueNumber,
+                AgentSessionId = row.AgentSessionId,
+                InitialInputId = row.InitialInputId,
+                InitialTurnId = row.InitialTurnId,
+                PinnedRunnerId = row.PinnedRunnerId,
+                LaunchVisibility = row.LaunchVisibility,
+            }).ToListAsync(ct)
+            : query.Select(row => new LedgerQueryRow
+            {
+                JobKey = row.JobKey,
+                State = row.State,
+                Revision = row.Revision,
+                AssignedRunnerId = row.AssignedRunnerId,
+                WorkId = row.WorkId,
+                ReadySince = row.ReadySince,
+                RunningSince = row.RunningSince,
+                DispatchJson = row.DispatchJson,
+                WorkType = row.WorkType,
+                Stage = row.Stage,
+                Title = row.Title,
+                IssueProjectId = row.IssueProjectId,
+                IssueNumber = row.IssueNumber,
+                AgentSessionId = row.AgentSessionId,
+                InitialInputId = row.InitialInputId,
+                InitialTurnId = row.InitialTurnId,
+            }).ToListAsync(ct);
 
     private static AgentJobRow ToRow(AgentJobLedgerRecord record) => new()
     {
@@ -386,6 +460,48 @@ public class AgentJobStore : IAgentJobStore
         row.InitialTurnId,
         row.PinnedRunnerId,
         row.LaunchVisibility);
+
+    private static AgentJobLedgerRecord ToRecord(LedgerQueryRow row) => new(
+        row.JobKey,
+        row.State,
+        row.Revision,
+        row.AssignedRunnerId,
+        row.WorkId,
+        ParseTimestamp(row.ReadySince),
+        ParseTimestamp(row.RunningSince),
+        row.DispatchJson,
+        row.WorkType,
+        row.Stage,
+        row.Title,
+        row.IssueProjectId,
+        row.IssueNumber,
+        row.AgentSessionId,
+        row.InitialInputId,
+        row.InitialTurnId,
+        row.PinnedRunnerId,
+        row.LaunchVisibility);
+
+    private sealed class LedgerQueryRow
+    {
+        public string JobKey { get; init; } = string.Empty;
+        public string State { get; init; } = string.Empty;
+        public long Revision { get; init; }
+        public string? AssignedRunnerId { get; init; }
+        public string? WorkId { get; init; }
+        public string? ReadySince { get; init; }
+        public string? RunningSince { get; init; }
+        public string? DispatchJson { get; init; }
+        public string? WorkType { get; init; }
+        public string? Stage { get; init; }
+        public string? Title { get; init; }
+        public string? IssueProjectId { get; init; }
+        public int? IssueNumber { get; init; }
+        public string? AgentSessionId { get; init; }
+        public string? InitialInputId { get; init; }
+        public string? InitialTurnId { get; init; }
+        public string? PinnedRunnerId { get; init; }
+        public string LaunchVisibility { get; init; } = "visible";
+    }
 
     private static void ApplyTo(AgentJobRow existing, AgentJobLedgerRecord record)
     {

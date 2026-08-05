@@ -14,6 +14,46 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Storage;
 
 public sealed class AgentSubagentTreeMigrationSpecs
 {
+    private const string BeforeMigration = "20260804110000_AddSlackManagerToolExecutionFence";
+    private const string Migration = "20260805120000_AddAgentSubagentTreeContracts";
+
+    [Fact]
+    public async Task UpgradeDowngradeAndReupgrade_PreservesLegacyRows()
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
+
+        await using (var seed = database.CreateContext())
+        {
+            await seed.Database.ExecuteSqlRawAsync(
+                """
+                INSERT INTO "AgentJobs" ("JobKey", "State")
+                VALUES ('migration-job', json_object('status', 'pending'));
+                INSERT INTO "AgentSessions" ("Id", "State", "RunnerId", "AgentSessionId", "Status", "CreatedAt")
+                VALUES ('migration-session', json_object(), 'runner-migration', 'agent-session-migration', 'opened', '2026-01-01T00:00:00.0000000');
+                """);
+        }
+
+        await using var db = database.CreateContext();
+        var migrator = db.Database.GetService<IMigrator>();
+
+        await migrator.MigrateAsync(Migration);
+        Assert.Contains("LaunchVisibility", await ReadColumnNamesAsync(db, "AgentJobs"));
+        Assert.Contains("ParentSessionId", await ReadColumnNamesAsync(db, "AgentSessions"));
+
+        await migrator.MigrateAsync(BeforeMigration);
+        Assert.DoesNotContain("LaunchVisibility", await ReadColumnNamesAsync(db, "AgentJobs"));
+        Assert.DoesNotContain("ParentSessionId", await ReadColumnNamesAsync(db, "AgentSessions"));
+        Assert.Equal("{\"status\":\"pending\"}", await ReadScalarAsync(db, "SELECT \"State\" FROM \"AgentJobs\" WHERE \"JobKey\" = 'migration-job'"));
+        Assert.Equal("{}", await ReadScalarAsync(db, "SELECT \"State\" FROM \"AgentSessions\" WHERE \"Id\" = 'migration-session'"));
+
+        await migrator.MigrateAsync(Migration);
+        Assert.Contains("LaunchVisibility", await ReadColumnNamesAsync(db, "AgentJobs"));
+        Assert.Contains("ParentSessionId", await ReadColumnNamesAsync(db, "AgentSessions"));
+        Assert.Equal("{\"status\":\"pending\"}", await ReadScalarAsync(db, "SELECT \"State\" FROM \"AgentJobs\" WHERE \"JobKey\" = 'migration-job'"));
+        Assert.Equal("{}", await ReadScalarAsync(db, "SELECT \"State\" FROM \"AgentSessions\" WHERE \"Id\" = 'migration-session'"));
+    }
+
     [Fact]
     public async Task LatestMigration_MetadataSnapshotAndSqliteSchemaAgree()
     {
@@ -160,5 +200,21 @@ public sealed class AgentSubagentTreeMigrationSpecs
         }
         await db.Database.CloseConnectionAsync();
         return columns;
+    }
+
+    private static async Task<string[]> ReadColumnNamesAsync(MohistDbContext db, string table)
+    {
+        var columns = await ReadTableColumnsAsync(db, table);
+        return columns.Keys.ToArray();
+    }
+
+    private static async Task<string?> ReadScalarAsync(MohistDbContext db, string sql)
+    {
+        await db.Database.OpenConnectionAsync();
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandText = sql;
+        var value = await command.ExecuteScalarAsync();
+        await db.Database.CloseConnectionAsync();
+        return value as string;
     }
 }
