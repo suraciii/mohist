@@ -24,6 +24,8 @@ public sealed class SlackWorkspaceEnrollmentRow
     public int ManagerAppOperationFence { get; set; }
     public string? ManagerAppOperationId { get; set; }
     public string? ManagerAppOperationOutcome { get; set; }
+    public string ManagerAppManifestHash { get; set; } = string.Empty;
+    public string ManagerAppInstallUrl { get; set; } = string.Empty;
     public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }

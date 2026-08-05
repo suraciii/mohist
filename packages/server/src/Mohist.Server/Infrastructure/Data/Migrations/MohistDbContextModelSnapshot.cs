@@ -2791,6 +2791,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ManagerAppManifestHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppInstallUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ManagerBotUserId")
                         .IsRequired()
                         .HasMaxLength(256)

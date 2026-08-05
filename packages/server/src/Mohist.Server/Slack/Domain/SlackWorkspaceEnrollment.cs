@@ -22,6 +22,8 @@ public sealed class SlackWorkspaceEnrollment
     public int ManagerAppOperationFence { get; set; }
     public string? ManagerAppOperationId { get; set; }
     public string? ManagerAppOperationOutcome { get; set; }
+    public string ManagerAppManifestHash { get; set; } = string.Empty;
+    public string ManagerAppInstallUrl { get; set; } = string.Empty;
     public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }
@@ -128,13 +130,57 @@ public sealed class SlackWorkspaceEnrollment
     public void ApplyManagerAppCreateResult(string lifecycle, string redactedOutcome, int expectedFence, DateTimeOffset now)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
-        if (lifecycle is not (SlackManagerAppLifecycle.Created or SlackManagerAppLifecycle.CreateUnknown))
-            throw new ArgumentException("A Manager App create result must be 'created' or 'create_unknown'.", nameof(lifecycle));
+        if (lifecycle is not (SlackManagerAppLifecycle.Created
+            or SlackManagerAppLifecycle.CreateUnknown
+            or SlackManagerAppLifecycle.NotCreated))
+            throw new ArgumentException("A Manager App create result must be 'created', 'create_unknown' or 'not_created'.", nameof(lifecycle));
         if (ManagerAppOperationFence != expectedFence)
             throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
         SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, lifecycle);
         ManagerAppLifecycle = lifecycle;
         ManagerAppOperationOutcome = redactedOutcome.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecordManagerAppCreated(string appId, string manifestHash, string installUrl, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installUrl);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created)
+            throw new InvalidOperationException("The Manager App must be created before recording its identity.");
+        if (!string.IsNullOrWhiteSpace(ManagerAppId)
+            && !string.Equals(ManagerAppId, appId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager App identity cannot be changed after setup.");
+        ManagerAppId = appId.Trim();
+        ManagerAppManifestHash = manifestHash.Trim();
+        ManagerAppInstallUrl = installUrl.Trim();
+        UpdatedAt = now;
+    }
+
+    public void StageManagerRuntimeCredentials(string botUserId, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(botUserId);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created || string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App must be created before staging runtime credentials.");
+        if (!string.IsNullOrWhiteSpace(ManagerBotUserId)
+            && !string.Equals(ManagerBotUserId, botUserId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager Bot identity cannot be changed after setup.");
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState, SlackRuntimeCredentialValidationState.Candidate);
+        ManagerBotUserId = botUserId.Trim();
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Candidate;
+        UpdatedAt = now;
+    }
+
+    public void CompleteSocketVerification(DateTimeOffset now)
+    {
+        if (string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App must be created before Socket verification.");
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState, SlackRuntimeCredentialValidationState.Verified);
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified;
+        ManagerReadiness = SlackManagerReadiness.Ready;
         UpdatedAt = now;
     }
 

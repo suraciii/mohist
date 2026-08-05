@@ -40,9 +40,9 @@ public enum SlackAppManagementFactOutcome
 public sealed record SlackAppManagementResult(
     SlackAppManagementOutcome Outcome,
     string? AppId = null,
+    string? InstallUrl = null,
     string? ErrorClass = null,
     string? ErrorMessage = null,
-    string? InstallUrl = null,
     string? ClientSecret = null,
     string? SigningSecret = null);
 

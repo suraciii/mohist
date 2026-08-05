@@ -169,10 +169,8 @@ public static class MohistServiceRegistration
 
         // Socket lease core: the conventional scan registers concrete stores
         // as themselves only, so the lease interfaces need explicit bindings.
-        // The target provider is the in-memory registry until a future slice
-        // binds the enrollment/connection-backed provider.
         services.AddScoped<ISlackLeaseStore>(sp => sp.GetRequiredService<SlackAdapterLeaseStore>());
-        services.AddSingleton<ISlackLeaseTargetProvider, InMemorySlackLeaseTargetProvider>();
+        services.AddScoped<ISlackLeaseTargetProvider, EnrollmentSlackLeaseTargetProvider>();
         services.AddScoped<ISlackLeaseSecretResolver>(sp => sp.GetRequiredService<SlackLeaseSecretResolver>());
         services.AddScoped<ISlackAdapterOperatorAuthenticator>(sp => sp.GetRequiredService<SlackAdapterOperatorAuthenticator>());
 

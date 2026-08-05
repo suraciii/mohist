@@ -651,6 +651,8 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ManagerAppOperationFence).IsRequired();
             entity.Property(e => e.ManagerAppOperationId).HasMaxLength(256);
             entity.Property(e => e.ManagerAppOperationOutcome).HasMaxLength(1024);
+            entity.Property(e => e.ManagerAppManifestHash).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ManagerAppInstallUrl).HasMaxLength(2048).IsRequired();
             entity.Property(e => e.RuntimeCredentialValidationState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerActorId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ClaimedSlackUserId).HasMaxLength(256);

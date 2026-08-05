@@ -27,7 +27,19 @@ public sealed class SlackManagerAppSetupFactsMigrationSpecs
 
         await using (var after = database.CreateDbContext())
         {
-            var enrollment = await after.SlackWorkspaceEnrollments.SingleAsync(row => row.Id == "enrollment-setup");
+            var enrollment = await after.SlackWorkspaceEnrollments
+                .Where(row => row.Id == "enrollment-setup")
+                .Select(row => new
+                {
+                    row.WorkspaceTeamId,
+                    row.ManagerCredentialRef,
+                    row.ManagerAppLifecycle,
+                    row.ManagerAppOperationFence,
+                    row.ManagerAppOperationId,
+                    row.ManagerAppOperationOutcome,
+                    row.RuntimeCredentialValidationState,
+                })
+                .SingleAsync();
             Assert.Equal("T_SETUP", enrollment.WorkspaceTeamId);
             Assert.Equal("manager-credential", enrollment.ManagerCredentialRef);
             Assert.Equal(SlackManagerAppLifecycle.NotCreated, enrollment.ManagerAppLifecycle);
@@ -70,7 +82,17 @@ public sealed class SlackManagerAppSetupFactsMigrationSpecs
         }
 
         await using var after = database.CreateDbContext();
-        var row = await after.SlackWorkspaceEnrollments.SingleAsync(item => item.Id == "enrollment-fresh");
+        var row = await after.SlackWorkspaceEnrollments
+            .Where(item => item.Id == "enrollment-fresh")
+            .Select(item => new
+            {
+                item.ManagerAppLifecycle,
+                item.ManagerAppOperationFence,
+                item.ManagerAppOperationId,
+                item.ManagerAppOperationOutcome,
+                item.RuntimeCredentialValidationState,
+            })
+            .SingleAsync();
         Assert.Equal(SlackManagerAppLifecycle.NotCreated, row.ManagerAppLifecycle);
         Assert.Equal(0, row.ManagerAppOperationFence);
         Assert.Null(row.ManagerAppOperationId);
@@ -105,7 +127,10 @@ public sealed class SlackManagerAppSetupFactsMigrationSpecs
         }
 
         await using var final = database.CreateDbContext();
-        var enrollment = await final.SlackWorkspaceEnrollments.SingleAsync(row => row.Id == "enrollment-setup");
+        var enrollment = await final.SlackWorkspaceEnrollments
+            .Where(row => row.Id == "enrollment-setup")
+            .Select(row => new { row.WorkspaceTeamId, row.ManagerCredentialRef, row.ManagerAppLifecycle })
+            .SingleAsync();
         Assert.Equal("T_SETUP", enrollment.WorkspaceTeamId);
         Assert.Equal("manager-credential", enrollment.ManagerCredentialRef);
         Assert.Equal(SlackManagerAppLifecycle.NotCreated, enrollment.ManagerAppLifecycle);

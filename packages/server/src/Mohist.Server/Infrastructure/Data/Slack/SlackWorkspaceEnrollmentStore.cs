@@ -182,6 +182,27 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         CancellationToken ct = default) =>
         UpdateAsync(id, enrollment => enrollment.ApplySocketValidation(validationState, _timeProvider.GetUtcNow()), ct);
 
+    public Task<SlackWorkspaceEnrollment?> RecordManagerAppCreatedAsync(
+        string id,
+        string appId,
+        string manifestHash,
+        string installUrl,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.RecordManagerAppCreated(
+            appId, manifestHash, installUrl, _timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> StageManagerRuntimeCredentialsAsync(
+        string id,
+        string botUserId,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.StageManagerRuntimeCredentials(
+            botUserId, _timeProvider.GetUtcNow()), ct);
+
+    public Task<SlackWorkspaceEnrollment?> CompleteSocketVerificationAsync(
+        string id,
+        CancellationToken ct = default) =>
+        UpdateAsync(id, enrollment => enrollment.CompleteSocketVerification(_timeProvider.GetUtcNow()), ct);
+
     public async Task<SlackManagerClaimIssuance> IssueManagerClaimAsync(
         string id,
         string claimHash,
@@ -390,6 +411,8 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         ManagerAppOperationFence = row.ManagerAppOperationFence,
         ManagerAppOperationId = row.ManagerAppOperationId,
         ManagerAppOperationOutcome = row.ManagerAppOperationOutcome,
+        ManagerAppManifestHash = row.ManagerAppManifestHash,
+        ManagerAppInstallUrl = row.ManagerAppInstallUrl,
         RuntimeCredentialValidationState = row.RuntimeCredentialValidationState,
         ManagerActorId = row.ManagerActorId,
         ClaimedSlackUserId = row.ClaimedSlackUserId,
@@ -425,6 +448,8 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         ManagerAppOperationFence = enrollment.ManagerAppOperationFence,
         ManagerAppOperationId = enrollment.ManagerAppOperationId,
         ManagerAppOperationOutcome = enrollment.ManagerAppOperationOutcome,
+        ManagerAppManifestHash = enrollment.ManagerAppManifestHash,
+        ManagerAppInstallUrl = enrollment.ManagerAppInstallUrl,
         RuntimeCredentialValidationState = enrollment.RuntimeCredentialValidationState,
         ManagerActorId = enrollment.ManagerActorId,
         ClaimedSlackUserId = enrollment.ClaimedSlackUserId,
@@ -458,6 +483,8 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         row.ManagerAppOperationFence = enrollment.ManagerAppOperationFence;
         row.ManagerAppOperationId = enrollment.ManagerAppOperationId;
         row.ManagerAppOperationOutcome = enrollment.ManagerAppOperationOutcome;
+        row.ManagerAppManifestHash = enrollment.ManagerAppManifestHash;
+        row.ManagerAppInstallUrl = enrollment.ManagerAppInstallUrl;
         row.RuntimeCredentialValidationState = enrollment.RuntimeCredentialValidationState;
         row.ManagerActorId = enrollment.ManagerActorId;
         row.ClaimedSlackUserId = enrollment.ClaimedSlackUserId;
