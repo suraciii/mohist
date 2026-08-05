@@ -46,6 +46,7 @@ public class MohistDbContext : DbContext
     public DbSet<WorkflowProfileRecordRow> WorkflowProfileRecords { get; set; } = null!;
     public DbSet<WorkflowRunEventRow> WorkflowRunEvents { get; set; } = null!;
     public DbSet<AgentSessionRow> AgentSessions { get; set; } = null!;
+    public DbSet<SessionTreeGraphRevisionRow> SessionTreeGraphRevisions { get; set; } = null!;
     public DbSet<AgentSessionTranscriptTurnRow> AgentSessionTranscriptTurns { get; set; } = null!;
     public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
@@ -285,6 +286,15 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentSessions_TreeParent_AttachedRevision_Edge");
             entity.HasIndex(e => new { e.LabelProjectId, e.LaunchVisibility, e.ParentSessionId, e.ParentLinkAttachedRevision, e.ParentLinkEdgeId })
                 .HasDatabaseName("IX_AgentSessions_TreeVisibleParent_AttachedRevision_Edge");
+        });
+
+        modelBuilder.Entity<SessionTreeGraphRevisionRow>(entity =>
+        {
+            entity.ToTable("SessionTreeGraphRevisions");
+            entity.HasKey(e => e.ProjectId);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.PublishedRevision);
+            entity.Property(e => e.PublishedAt).IsRequired();
         });
 
         modelBuilder.Entity<AgentSessionTranscriptTurnRow>(entity =>

@@ -1,4 +1,7 @@
+using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Services;
 
 namespace Mohist.Server.Sessions.Grains;
 
@@ -13,9 +16,21 @@ public interface ISessionTreeMutationFenceGrain : IGrainWithStringKey
 }
 
 public sealed class SessionTreeMutationFenceGrain(
-    [PersistentState("session-tree-mutation-fence")] IPersistentState<SessionTreeMutationFence> state)
+    [PersistentState("session-tree-mutation-fence")] IPersistentState<SessionTreeMutationFence> state,
+    IDbContextFactory<MohistDbContext> dbFactory,
+    TimeProvider timeProvider)
     : Grain, ISessionTreeMutationFenceGrain
 {
+    public override async Task OnActivateAsync(CancellationToken ct)
+    {
+        if (!state.RecordExists)
+            await state.ReadStateAsync();
+        var revision = state.State?.GraphRevision ?? 0;
+        if (revision > 0)
+            await SessionTreeGraphRevisionWatermark.PublishAsync(
+                dbFactory, this.GetPrimaryKeyString(), revision, timeProvider.GetUtcNow(), ct);
+    }
+
     public async Task<SessionTreeMutationFence> GetAsync()
     {
         if (!state.RecordExists)
@@ -145,7 +160,12 @@ public sealed class SessionTreeMutationFenceGrain(
                 LinkReservationState.Rejected,
                 "parent_tree_link_command_mismatch");
         if (reservation.State == LinkReservationState.Attached)
-            return new SessionTreeMutationResult(edgeId, reservation.AttachedRevision ?? current.GraphRevision, reservation.State);
+        {
+            var replayRevision = reservation.AttachedRevision ?? current.GraphRevision;
+            await SessionTreeGraphRevisionWatermark.PublishAsync(
+                dbFactory, this.GetPrimaryKeyString(), replayRevision, timeProvider.GetUtcNow(), default);
+            return new SessionTreeMutationResult(edgeId, replayRevision, reservation.State);
+        }
         if (reservation.State == LinkReservationState.Rejected)
             return new SessionTreeMutationResult(edgeId, current.GraphRevision, reservation.State, reservation.RejectionReason);
         var mutation = pending.FirstOrDefault(item => item.EdgeId == edgeId);
@@ -168,6 +188,8 @@ public sealed class SessionTreeMutationFenceGrain(
             PendingMutations = pending.Where(item => item.EdgeId != edgeId).ToArray(),
         };
         await state.WriteStateAsync();
+        await SessionTreeGraphRevisionWatermark.PublishAsync(
+            dbFactory, this.GetPrimaryKeyString(), attachedRevision, timeProvider.GetUtcNow(), default);
         return new SessionTreeMutationResult(edgeId, attachedRevision, LinkReservationState.Attached);
     }
 

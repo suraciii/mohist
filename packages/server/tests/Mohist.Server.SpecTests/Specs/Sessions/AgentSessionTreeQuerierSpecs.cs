@@ -154,12 +154,104 @@ public sealed class AgentSessionTreeQuerierSpecs
             querier.GetAsync(projectId, rootId, 1, future));
     }
 
+    [Fact]
+    public async Task WatermarkIsMonotonicAndIdempotentAcrossRepeatsAndLowerPublishes()
+    {
+        var projectId = $"tree-watermark-{Guid.NewGuid():N}";
+        var factory = DbFactory();
+
+        Assert.Equal(0, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(factory, projectId));
+
+        await SessionTreeGraphRevisionWatermark.PublishAsync(factory, projectId, 3, _fixture.TimeProvider.GetUtcNow());
+        await SessionTreeGraphRevisionWatermark.PublishAsync(factory, projectId, 3, _fixture.TimeProvider.GetUtcNow());
+        await SessionTreeGraphRevisionWatermark.PublishAsync(factory, projectId, 1, _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(3, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(factory, projectId));
+    }
+
+    [Fact]
+    public async Task CommitFinalizePublishesWatermarkSoQuerierDecouplesFromFenceGrain()
+    {
+        var projectId = $"tree-publish-{Guid.NewGuid():N}";
+        var rootId = $"session-root-{Guid.NewGuid():N}";
+        var childId = $"session-child-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId).OpenAsync(new OpenAgentSessionCommand(
+            "runner-tree",
+            "opencode",
+            "/workspace",
+            Metadata: Metadata(projectId, "agent-root", "agent-launch")));
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).OpenAsync(new OpenAgentSessionCommand(
+            string.Empty,
+            "pi",
+            "/workspace",
+            Metadata: Metadata(projectId, "agent-child", "agent-launch"),
+            LaunchVisibility: AgentLaunchVisibility.Provisional));
+
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        await fence.ReserveAsync(LinkCommand(projectId, "edge-1", "command-1", rootId, childId));
+        var assigned = await fence.BeginFinalizeAsync("command-1", "edge-1");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
+            new SessionParentLink(
+                "edge-1",
+                rootId,
+                "agent-root",
+                "job-1",
+                _fixture.TimeProvider.GetUtcNow(),
+                assigned.Revision,
+                SessionParentLinkState.Attached),
+            "/workspace",
+            "runner-tree",
+            "opencode",
+            null));
+        await fence.CommitFinalizeAsync("command-1", "edge-1");
+
+        Assert.Equal(1, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(DbFactory(), projectId));
+
+        var page = await CreateQuerier().GetAsync(projectId, rootId, 10, null);
+        Assert.NotNull(page);
+        Assert.Equal(1, page!.Revision);
+        Assert.Equal(new[] { rootId, childId }, page.Nodes.Select(node => node.SessionId).ToArray());
+    }
+
+    [Fact]
+    public async Task ReachableMalformedCandidateFailsClosedInsteadOfPartialTree()
+    {
+        var projectId = $"tree-failclosed-{Guid.NewGuid():N}";
+        var rootId = $"session-root-{Guid.NewGuid():N}";
+        var childId = $"session-child-{Guid.NewGuid():N}";
+        await AttachChildAsync(projectId, rootId, childId, "edge-malformed", "command-malformed", "job-malformed");
+
+        await CorruptRowColumnAsync(childId, row => row.ChildLaunchJobId = null);
+
+        await Assert.ThrowsAsync<SessionTreeProjectionInconsistentException>(() =>
+            CreateQuerier().GetAsync(projectId, rootId, 10, null));
+    }
+
+    [Fact]
+    public async Task UnreachableMalformedCandidateDoesNotFailAReachableTree()
+    {
+        var projectId = $"tree-unreachable-{Guid.NewGuid():N}";
+        var reachableRoot = $"session-root-{Guid.NewGuid():N}";
+        var reachableChild = $"session-child-{Guid.NewGuid():N}";
+        var orphanRoot = $"session-orphan-{Guid.NewGuid():N}";
+        var orphanChild = $"session-orphan-child-{Guid.NewGuid():N}";
+
+        await AttachChildAsync(projectId, reachableRoot, reachableChild, "edge-a", "command-a", "job-a");
+        await AttachChildAsync(projectId, orphanRoot, orphanChild, "edge-b", "command-b", "job-b");
+        await CorruptRowColumnAsync(orphanChild, row => row.ChildLaunchJobId = null);
+
+        var page = await CreateQuerier().GetAsync(projectId, reachableRoot, 10, null);
+        Assert.NotNull(page);
+        Assert.Equal(
+            new[] { reachableRoot, reachableChild },
+            page!.Nodes.Select(node => node.SessionId).ToArray());
+    }
+
     private AgentSessionTreeQuerier CreateQuerier()
     {
         var services = _fixture.Cluster.GetSiloServiceProvider(null);
         return new AgentSessionTreeQuerier(
-            services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
-            _fixture.Grains);
+            services.GetRequiredService<IDbContextFactory<MohistDbContext>>());
     }
 
     private async Task MarkDetachedAsync(string sessionId, long revision)
@@ -179,6 +271,50 @@ public sealed class AgentSessionTreeQuerierSpecs
         row.ParentLinkState = "detached";
         row.ParentLinkDetachedRevision = revision;
         row.ParentLinkDetachedAt = session.ParentLink.DetachedAt?.ToString("O");
+        await db.SaveChangesAsync();
+    }
+
+    private IDbContextFactory<MohistDbContext> DbFactory() =>
+        _fixture.Cluster.GetSiloServiceProvider(null).GetRequiredService<IDbContextFactory<MohistDbContext>>();
+
+    private async Task AttachChildAsync(
+        string projectId, string rootId, string childId, string edgeId, string commandId, string jobId)
+    {
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId).OpenAsync(new OpenAgentSessionCommand(
+            "runner-tree",
+            "opencode",
+            "/workspace",
+            Metadata: Metadata(projectId, "agent-root", "agent-launch")));
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).OpenAsync(new OpenAgentSessionCommand(
+            string.Empty,
+            "pi",
+            "/workspace",
+            Metadata: Metadata(projectId, "agent-child", "agent-launch"),
+            LaunchVisibility: AgentLaunchVisibility.Provisional));
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        await fence.ReserveAsync(LinkCommand(projectId, edgeId, commandId, rootId, childId));
+        var assigned = await fence.BeginFinalizeAsync(commandId, edgeId);
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
+            new SessionParentLink(
+                edgeId,
+                rootId,
+                "agent-root",
+                jobId,
+                _fixture.TimeProvider.GetUtcNow(),
+                assigned.Revision,
+                SessionParentLinkState.Attached),
+            "/workspace",
+            "runner-tree",
+            "opencode",
+            null));
+        await fence.CommitFinalizeAsync(commandId, edgeId);
+    }
+
+    private async Task CorruptRowColumnAsync(string sessionId, Action<AgentSessionRow> mutate)
+    {
+        await using var db = await DbFactory().CreateDbContextAsync();
+        var row = await db.AgentSessions.SingleAsync(item => item.Id == sessionId);
+        mutate(row);
         await db.SaveChangesAsync();
     }
 
