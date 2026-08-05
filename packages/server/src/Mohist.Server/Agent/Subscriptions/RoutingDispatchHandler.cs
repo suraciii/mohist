@@ -101,7 +101,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             if (IsMutedForEvent(mutedAgentIds, issueNumber, agent.Id))
             {
                 _log.LogWarning(
-                    "Routing rule {RuleId} hit suppressed by mute for event {EventId} issue {IssueNumber} agent {AgentId}",
+                    "Routing rule {RuleId} hit suppressed by mute for event {EventId} issue {issue} agent {AgentId}",
                     outcome.Rule.Id, evt.Id, issueNumber, agent.Id);
                 launchedAgentIds.Add(agent.Id);
                 continue;
@@ -197,7 +197,7 @@ public sealed class RoutingDispatchHandler : ICloudEventHandler
             if (!launchedAgentIds.Add(entry.AgentId))
             {
                 _log.LogDebug(
-                    "Watch launch skipped for event {EventId} issue {IssueNumber} agent {AgentId}: already launched in this delivery",
+                    "Watch launch skipped for event {EventId} issue {issue} agent {AgentId}: already launched in this delivery",
                     evt.Id, issueNumber, entry.AgentId);
                 continue;
             }

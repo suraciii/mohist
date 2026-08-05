@@ -265,7 +265,7 @@ public sealed class DispatchService : IScopedService
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "DispatchService failed to render redelivery dispatch for workflow {WorkflowId} work {WorkId}",
+                "failed to render redelivery dispatch for run {run} work {work}",
                 workflowRunId,
                 workId);
             return (workKey, null);
@@ -288,7 +288,7 @@ public sealed class DispatchService : IScopedService
         catch (Exception ex)
         {
             _log.LogDebug(ex,
-                "DispatchService skipped workflow claim for {WorkflowId}",
+                "skipped dispatch claim for run {run}",
                 workflowRunId);
             return null;
         }
@@ -317,7 +317,7 @@ public sealed class DispatchService : IScopedService
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "DispatchService failed to render dispatch for workflow {WorkflowId} after claim",
+                "failed to render dispatch for run {run} after claim",
                 workflowRunId);
             return null;
         }
@@ -353,7 +353,7 @@ public sealed class DispatchService : IScopedService
         WorkflowDispatchRejectedException exception)
     {
         _log.LogWarning(exception,
-            "DispatchService rejected dispatch for workflow {WorkflowId} work {WorkId}: {Code} {Message}",
+            "rejected dispatch for run {run} work {work}: {code} {reason}",
             workflowRunId,
             workId,
             exception.Error.Code,
