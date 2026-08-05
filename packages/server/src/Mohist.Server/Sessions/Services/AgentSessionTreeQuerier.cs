@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -193,7 +194,7 @@ public sealed record AgentSessionTreePage(
     long Revision,
     IReadOnlyList<AgentSessionTreeNode> Nodes,
     IReadOnlyList<AgentSessionTreeEdge> Edges,
-    string? Continuation);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Continuation);
 
 public sealed record AgentSessionTreeRoot(string SessionId);
 

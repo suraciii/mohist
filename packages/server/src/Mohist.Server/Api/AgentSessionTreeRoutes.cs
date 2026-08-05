@@ -26,7 +26,7 @@ public static class AgentSessionTreeRoutes
                     limit ?? 50,
                     continuation,
                     ct);
-                return page is null ? ApiResults.NotFound("Agent session tree root not found") : Results.Ok(page);
+                return page is null ? ApiResults.NotFound("Agent session tree root not found") : ApiResults.Ok(page);
             }
             catch (AgentSessionTreeContinuationException)
             {

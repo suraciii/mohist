@@ -92,7 +92,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             : WithTriggerLabels(metadata, triggerLabels);
 
         var definition = await ResolveDefinitionAsync(agent);
-        var startup = BuildStartup(context.ProjectId, sessionId, definition);
+        var startup = BuildStartup(
+            context.ProjectId,
+            sessionId,
+            definition,
+            workDir: context.WorkspacePath,
+            agentId: agent.Id,
+            agentName: agent.Name);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -178,6 +184,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? parentExpectedRuntime = null,
         string? parentExpectedRuntimeSessionId = null,
         string? parentLinkEdgeId = null,
+        string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
         bool skipLaunchability = false)
     {
@@ -274,7 +281,17 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             AllowedSubagents: definition.AllowedSubagents,
             AgentSessionStartup: preMintedSessionId is null
                 ? null
-                : BuildStartup(context.ProjectId, preMintedSessionId, definition, parentSessionId, request.AgentRef),
+                : BuildStartup(
+                    context.ProjectId,
+                    preMintedSessionId,
+                    definition,
+                    parentSessionId,
+                    request.AgentRef,
+                    context.WorkspacePath,
+                    pinnedRunnerId,
+                    agent.Id,
+                    agent.Name),
+            PinnedRunnerId: pinnedRunnerId,
             ParentSessionId: parentSessionId,
             ParentAgentId: parentAgentId,
             ParentExpectedWorkDir: parentExpectedWorkDir,
@@ -338,6 +355,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             normalizedTargetAgentRef,
             prompt,
             ct);
+        var childSessionId = _sessions.NewSessionId();
         var edgeId = $"agent-edge-{AgentLaunchCoordinatorCodec.StableToken(
             $"{projectId}\n{parentSessionId}\n{idempotencyKey}")}";
         var request = new AgentLaunchCoordinatorRequest(
@@ -364,6 +382,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             parentExpectedRuntime: admission.Runtime,
             parentExpectedRuntimeSessionId: admission.RuntimeSessionId,
             parentLinkEdgeId: edgeId,
+            pinnedRunnerId: admission.RunnerId,
+            preMintedSessionId: childSessionId,
             definitionOverride: admission.Definition,
             skipLaunchability: true);
     }
@@ -608,7 +628,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var durableMetadata = WithTriggerLabels(metadata, triggerLabels);
 
         var definition = await ResolveDefinitionAsync(agent);
-        var startup = BuildStartup(context.ProjectId, sessionId, definition);
+        var startup = BuildStartup(
+            context.ProjectId,
+            sessionId,
+            definition,
+            workDir: context.WorkspacePath,
+            agentId: agent.Id,
+            agentName: agent.Name);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -677,13 +703,21 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string sessionId,
         AgentExecutionDefinition definition,
         string? parentSessionId = null,
-        string? agentRef = null) =>
+        string? agentRef = null,
+        string? workDir = null,
+        string? pinnedRunnerId = null,
+        string? agentId = null,
+        string? agentName = null) =>
         new(
             ProjectId: projectId,
             SessionId: sessionId,
             ParentSessionId: parentSessionId,
             AllowedSubagents: definition.AllowedSubagents ?? [],
-            SpawnCommand: $"mo agent spawn {agentRef ?? "<agent-ref>"} --project {projectId} --parent-session {parentSessionId ?? sessionId} --prompt \"<brief>\" --idempotency-key <key>");
+            SpawnCommand: $"mo agent spawn {agentRef ?? "<agent-ref>"} --project {projectId} --parent-session {parentSessionId ?? sessionId} --prompt \"<brief>\" --idempotency-key <key>",
+            WorkDir: workDir,
+            PinnedRunnerId: pinnedRunnerId,
+            AgentId: agentId,
+            AgentName: agentName);
 
     private static string? BuildTriggerIdentity(
         string projectId,

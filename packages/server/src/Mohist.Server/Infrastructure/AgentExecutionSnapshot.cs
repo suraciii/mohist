@@ -38,7 +38,11 @@ public sealed record AgentSessionStartup(
     [property: Id(1)] string SessionId,
     [property: Id(2)] string? ParentSessionId,
     [property: Id(3)] AllowedSubagentSnapshot[] AllowedSubagents,
-    [property: Id(4)] string SpawnCommand);
+    [property: Id(4)] string SpawnCommand,
+    [property: Id(5)] string? WorkDir = null,
+    [property: Id(6)] string? PinnedRunnerId = null,
+    [property: Id(7)] string? AgentId = null,
+    [property: Id(8)] string? AgentName = null);
 
 public interface IAgentExecutionSnapshotResolver
 {
