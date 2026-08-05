@@ -486,6 +486,15 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 
+    public Task<AgentLaunchResult> LaunchSubagentAsync(
+        string projectId,
+        string parentSessionId,
+        string targetAgentRef,
+        string prompt,
+        string idempotencyKey,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException("RecordingAgentLauncher does not exercise the subagent launch path.");
+
     public Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,

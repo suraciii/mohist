@@ -47,6 +47,7 @@ public class AgentSessionQuery : IScopedService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = QueryRowsByLabels(db.AgentSessions.AsNoTracking(), labels);
+        query = query.Where(session => session.LaunchVisibility == null || session.LaunchVisibility == "visible");
         if (from is not null)
             query = query.Where(session => session.CreatedAt >= from.Value);
         if (to is not null)
@@ -69,7 +70,8 @@ public class AgentSessionQuery : IScopedService
         if (sessionIds.Count == 0) return [];
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var rows = await db.AgentSessions.AsNoTracking()
-            .Where(session => sessionIds.Contains(session.Id))
+            .Where(session => sessionIds.Contains(session.Id)
+                && (session.LaunchVisibility == null || session.LaunchVisibility == "visible"))
             .OrderBy(session => session.CreatedAt)
             .ToListAsync(ct);
         return ToRecords(rows);

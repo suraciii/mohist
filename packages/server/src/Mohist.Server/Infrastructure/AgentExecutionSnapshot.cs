@@ -23,7 +23,22 @@ public sealed record AgentExecutionDefinition(
     [property: Id(1)] string Runtime,
     [property: Id(2)] string? Model,
     [property: Id(3)] string? Variant,
-    [property: Id(4)] IReadOnlyList<string> Skills);
+    [property: Id(4)] IReadOnlyList<string> Skills,
+    [property: Id(5)] AllowedSubagentSnapshot[]? AllowedSubagents = null);
+
+[GenerateSerializer]
+public sealed record AllowedSubagentSnapshot(
+    [property: Id(0)] string AgentId,
+    [property: Id(1)] string NameAtLaunch,
+    [property: Id(2)] string DescriptionAtLaunch);
+
+[GenerateSerializer]
+public sealed record AgentSessionStartup(
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] string SessionId,
+    [property: Id(2)] string? ParentSessionId,
+    [property: Id(3)] AllowedSubagentSnapshot[] AllowedSubagents,
+    [property: Id(4)] string SpawnCommand);
 
 public interface IAgentExecutionSnapshotResolver
 {

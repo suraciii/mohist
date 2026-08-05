@@ -103,6 +103,14 @@ public interface IAgentLauncher
         string? preMintedTurnId = null,
         CancellationToken ct = default);
 
+    Task<AgentLaunchResult> LaunchSubagentAsync(
+        string projectId,
+        string parentSessionId,
+        string targetAgentRef,
+        string prompt,
+        string idempotencyKey,
+        CancellationToken ct = default);
+
     Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
@@ -183,7 +191,8 @@ public sealed record AgentLaunchResult(
     string InputId,
     string TurnId,
     string AgentId,
-    string AgentName);
+    string AgentName,
+    string? ParentLinkEdgeId = null);
 
 /// <summary>
 /// Outcome of a routed launch. Carries the session id the AgentJob

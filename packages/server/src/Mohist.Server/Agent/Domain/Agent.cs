@@ -11,6 +11,7 @@ public class Agent
     public string Instructions { get; set; } = string.Empty;
     public JsonElement? AgentConfig { get; set; }
     public IReadOnlyList<string> Skills { get; set; } = [];
+    public IReadOnlyList<string> AllowedSubagentAgentIds { get; set; } = [];
     public int? MaxConcurrentRuns { get; set; }
     public string Status { get; set; } = AgentStatus.Active;
     public DateTimeOffset CreatedAt { get; set; }

@@ -151,7 +151,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.Metadata,
             Now(),
             runtime: command.AgentRuntime);
-        session.Settings = new AgentSessionSettings(command.Model, command.Definition);
+        session.LaunchVisibility = command.LaunchVisibility;
+        session.Settings = new AgentSessionSettings(command.Model, command.Definition, command.AgentSessionStartup);
         return session;
     }
 
@@ -2151,7 +2152,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 RunnerId: string.Empty,
                 AgentRuntime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 WorkDir: command.WorkDir,
-                Metadata: command.Metadata));
+                Metadata: command.Metadata,
+                Definition: command.Definition,
+                AgentSessionStartup: command.AgentSessionStartup,
+                LaunchVisibility: command.LaunchVisibility));
         }
         else
         {
@@ -2180,6 +2184,76 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             InputId: command.InputId,
             TurnId: command.TurnId,
             AlreadyPersisted: alreadyPersisted);
+    }
+
+    public async Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(command.Link);
+        var session = await GetRequiredAsync();
+        if (command.ExpectedWorkDir is null
+            || !string.Equals(session.Runtime.WorkDir, command.ExpectedWorkDir, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Parent link workDir no longer matches the launch plan.");
+        }
+        if (!string.IsNullOrWhiteSpace(session.Runtime.RunnerId)
+            && !string.Equals(session.Runtime.RunnerId, command.ExpectedRunnerId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Parent link Runner binding no longer matches the launch plan.");
+        }
+
+        if (session.ParentLink is { } existing)
+        {
+            if (existing == command.Link)
+                return new EnsureParentLinkResult(SessionId, existing.EdgeId, true);
+            if (existing.EdgeId == command.Link.EdgeId
+                && existing.ParentSessionId == command.Link.ParentSessionId
+                && existing.ChildLaunchJobId == command.Link.ChildLaunchJobId
+                && existing.AttachedRevision == 0
+                && command.Link.AttachedRevision > 0)
+            {
+                session.ParentLink = command.Link;
+                await _stateStore.SaveAsync(SessionId, session);
+                _session = session;
+                return new EnsureParentLinkResult(SessionId, existing.EdgeId, true);
+            }
+            throw new InvalidOperationException($"AgentSession {SessionId} already has a different parent link.");
+        }
+
+        session.ParentLink = command.Link;
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+        return new EnsureParentLinkResult(SessionId, command.Link.EdgeId, false);
+    }
+
+    public async Task PromoteProvisionalLaunchAsync()
+    {
+        var session = await GetRequiredAsync();
+        if (session.LaunchVisibility == AgentLaunchVisibility.Rejected)
+            throw new InvalidOperationException("Rejected AgentSession launch cannot be promoted.");
+        if (session.LaunchVisibility == AgentLaunchVisibility.Visible)
+            return;
+        session.LaunchVisibility = AgentLaunchVisibility.Visible;
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+    }
+
+    public async Task AbortProvisionalLaunchAsync(string jobId, string turnId, string reason)
+    {
+        var info = await GetAsync();
+        if (info is null)
+            return;
+        var session = await GetRequiredAsync();
+        if (session.LaunchVisibility == AgentLaunchVisibility.Rejected)
+            return;
+        if (!string.IsNullOrWhiteSpace(turnId))
+            await CancelQueuedTurnAsync(turnId);
+        session = await GetRequiredAsync();
+        session.LaunchVisibility = AgentLaunchVisibility.Rejected;
+        session.ParentLink = null;
+        session.Status = session.Status with { Activity = AgentSessionActivity.Idle };
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
     }
 
     private void CheckInputsAndTurns(EnsureInitialLaunchCommand command, out bool alreadyPersisted)
