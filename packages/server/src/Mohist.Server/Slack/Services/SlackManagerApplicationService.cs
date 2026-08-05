@@ -345,7 +345,7 @@ public sealed class SlackManagerApplicationService : IScopedService
     {
         var agentApp = await RequireChildAsync(projectId, connectionId, ct);
         if (agentApp.AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(agentApp.AppId))
-            throw new SlackManagerConflictException("The Agent App must be created before authorization.", "child_app_not_created");
+            throw new SlackManagerConflictException("The Agent App must be created before authorization.", "agent_app_not_created");
         await _oauthAuthorization.RecordProgressAsync(agentApp.Id, SlackAuthorizationState.AwaitingUser, ct);
         return await _oauthStates.IssueAsync(agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId, ct: ct);
     }

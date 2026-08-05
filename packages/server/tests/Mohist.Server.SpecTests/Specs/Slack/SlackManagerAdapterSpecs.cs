@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -67,17 +68,6 @@ public sealed class SlackManagerAdapterSpecs
         Assert.False(target.TryGetProperty("projectId", out _));
         Assert.False(target.TryGetProperty("connectionId", out _));
 
-        using var session = await _fixture.Client.PostAsJsonAsync(
-            $"/api/slack-manager/adapter/{enrollmentId}/session",
-            new { adapterId = "adapter-manager" });
-        session.EnsureSuccessStatusCode();
-        using var sessionDocument = JsonDocument.Parse(await session.Content.ReadAsStringAsync());
-        var sessionData = sessionDocument.RootElement.GetProperty("data");
-        Assert.Equal("manager", sessionData.GetProperty("ownerKind").GetString());
-        Assert.Equal(teamId, sessionData.GetProperty("workspaceTeamId").GetString());
-        Assert.False(sessionData.TryGetProperty("appToken", out _));
-        Assert.Equal(managerCredential, sessionData.GetProperty("botToken").GetString());
-
         string deliveryId;
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
@@ -130,5 +120,14 @@ public sealed class SlackManagerAdapterSpecs
         Assert.Equal(enrollmentId, row.ConnectionId);
         Assert.Equal(SlackDeliveryOwnerKinds.Manager, row.OwnerKind);
         Assert.Equal(SlackOutboxStates.Delivered, row.State);
+    }
+
+    [Fact]
+    public async Task Legacy_manager_adapter_session_route_is_removed()
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/slack-manager/adapter/enrollment-legacy/session",
+            new { adapterId = "adapter-legacy" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

@@ -628,36 +628,6 @@ public static class SlackConnectionRoutes
             }).ToArray());
         });
 
-        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/session", async (
-            HttpContext http,
-            string enrollmentId,
-            AdapterSessionBody body,
-            SlackManagerAdapterQuerier adapters,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            if (string.IsNullOrWhiteSpace(body?.AdapterId))
-                return ApiResults.BadRequest("adapterId is required.");
-
-            var session = await adapters.GetSessionAsync(enrollmentId, ct);
-            if (session.State == SlackManagerAdapterSessionStates.NotFound)
-                return ApiResults.NotFound("Slack Manager enrollment was not found.");
-            if (session.State == SlackManagerAdapterSessionStates.Inactive)
-                return ApiResults.Conflict("The Slack Manager enrollment is not active.", "manager_enrollment_inactive");
-            if (session.State == SlackManagerAdapterSessionStates.NotReady)
-                return ApiResults.Conflict("The Slack Manager adapter is not ready.", "manager_adapter_not_ready");
-
-            return ApiResults.Ok(new
-            {
-                adapterId = body.AdapterId,
-                ownerKind = SlackDeliveryOwnerKinds.Manager,
-                workspaceTeamId = session.WorkspaceTeamId,
-                botToken = session.BotToken,
-            });
-        });
-
         app.MapPost("/api/slack-manager/adapter/{enrollmentId}/deliveries/claim", async (
             HttpContext http,
             string enrollmentId,

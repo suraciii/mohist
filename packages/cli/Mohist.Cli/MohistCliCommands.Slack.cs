@@ -1486,7 +1486,7 @@ internal static class SlackCommands
     private const string SlackSetupActionReady = "ready";
 
     private const string SlackInstallActionProvideCredentials = "provide_credentials";
-    private const string SlackInstallActionCreateAgentApp = "create_child_app";
+    private const string SlackInstallActionCreateAgentApp = "create_agent_app";
     private const string SlackInstallActionWaitForOperation = "wait_for_operation";
     private const string SlackInstallActionReconcileCreate = "reconcile_create";
     private const string SlackInstallActionBindConnection = "bind_connection";

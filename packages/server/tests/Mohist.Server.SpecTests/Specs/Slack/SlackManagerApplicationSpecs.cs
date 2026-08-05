@@ -45,7 +45,7 @@ public sealed class SlackManagerApplicationSpecs
         var childId = first.GetProperty("managedApp").GetProperty("id").GetString()!;
         Assert.Equal("release_helper", first.GetProperty("preview").GetProperty("botName").GetString());
         Assert.Equal("not_created", first.GetProperty("managedApp").GetProperty("appLifecycle").GetString());
-        Assert.Equal("create_child_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
+        Assert.Equal("create_agent_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
 
         using var secondResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), request);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);

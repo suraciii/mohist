@@ -121,9 +121,9 @@ public static class SlackAgentAppNextAction
 {
     public const string ReconcileCreate = "reconcile_create";
     public const string ReconcileDelete = "reconcile_delete";
-    public const string CreateAgentApp = "create_child_app";
+    public const string CreateAgentApp = "create_agent_app";
     public const string WaitForOperation = "wait_for_operation";
-    public const string AuthorizeAgentApp = "authorize_child_app";
+    public const string AuthorizeAgentApp = "authorize_agent_app";
     public const string ApplyManifest = "apply_manifest";
     public const string ConfigureSocketCredentials = "configure_socket_credentials";
     public const string ProvideCredentials = "provide_credentials";
