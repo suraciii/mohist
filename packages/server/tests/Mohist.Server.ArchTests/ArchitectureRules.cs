@@ -768,20 +768,7 @@ public class ArchitectureRules
     }
 
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
-    {
-        var assembly = typeof(ArchitectureRules).Assembly;
-        return assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal))
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .Select(name =>
-            {
-                using var stream = assembly.GetManifestResourceStream(name)!;
-                var byteLength = checked((int)stream.Length);
-                using var reader = new StreamReader(stream);
-                return new EmbeddedSource(name[prefix.Length..], reader.ReadToEnd(), byteLength);
-            })
-            .ToArray();
-    }
+        => ArchitectureRulesSupport.EmbeddedSources(prefix);
 
-    private sealed record EmbeddedSource(string Path, string Content, int ByteLength);
+    internal sealed record EmbeddedSource(string Path, string Content, int ByteLength);
 }
