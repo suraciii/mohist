@@ -715,8 +715,6 @@ public class MohistDbContext : DbContext
                 .HasForeignKey(e => e.AgentConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.AgentConnectionId)
-                .HasDatabaseName("IX_ManagedSlackAgentApps_AgentConnectionId");
-            entity.HasIndex(e => e.AgentConnectionId)
                 .IsUnique()
                 .HasFilter("\"DeletedAt\" IS NULL")
                 .HasDatabaseName("UX_ManagedSlackAgentApps_AgentConnectionId");

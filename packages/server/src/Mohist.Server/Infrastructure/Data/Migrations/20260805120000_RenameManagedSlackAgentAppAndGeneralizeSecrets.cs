@@ -25,10 +25,6 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
             name: "IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt",
             table: "ManagedSlackAgentApps");
         migrationBuilder.CreateIndex(
-            name: "IX_ManagedSlackAgentApps_AgentConnectionId",
-            table: "ManagedSlackAgentApps",
-            column: "AgentConnectionId");
-        migrationBuilder.CreateIndex(
             name: "UX_ManagedSlackAgentApps_AgentConnectionId",
             table: "ManagedSlackAgentApps",
             column: "AgentConnectionId",
@@ -150,9 +146,6 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
 
         migrationBuilder.DropTable(name: "StoredSecrets");
 
-        migrationBuilder.DropIndex(
-            name: "IX_ManagedSlackAgentApps_AgentConnectionId",
-            table: "ManagedSlackAgentApps");
         migrationBuilder.DropIndex(
             name: "UX_ManagedSlackAgentApps_AgentConnectionId",
             table: "ManagedSlackAgentApps");

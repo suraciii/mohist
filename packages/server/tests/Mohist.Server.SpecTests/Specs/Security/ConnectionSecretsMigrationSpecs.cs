@@ -14,7 +14,6 @@ public class ConnectionSecretsMigrationSpecs
 {
     private static readonly string[] ManagedSlackAgentAppIndexes =
     [
-        "IX_ManagedSlackAgentApps_AgentConnectionId",
         "UX_ManagedSlackAgentApps_AgentConnectionId",
         "UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId",
         "IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt",
@@ -183,9 +182,10 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ManagedSlackAgentApps"));
         Assert.False(await TableExistsAsync(after, "ManagedSlackChildApps"));
         Assert.False(await TableExistsAsync(after, "ConnectionSecrets"));
-        AssertIndexNames(
-            ManagedSlackAgentAppIndexes,
-            await ReadIndexesAsync(after, "ManagedSlackAgentApps"));
+        var indexes = await ReadIndexesAsync(after, "ManagedSlackAgentApps");
+        Assert.DoesNotContain("IX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
+        Assert.Contains("UX_ManagedSlackAgentApps_AgentConnectionId", indexes.Keys);
+        AssertIndexNames(ManagedSlackAgentAppIndexes, indexes);
     }
 
     [Fact]
@@ -207,9 +207,10 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ConnectionSecrets"));
         Assert.False(await TableExistsAsync(after, "StoredSecrets"));
         Assert.Equal(1, await CountRowsAsync(after, "ConnectionSecrets"));
-        AssertIndexNames(
-            ManagedSlackChildAppIndexes,
-            await ReadIndexesAsync(after, "ManagedSlackChildApps"));
+        var indexes = await ReadIndexesAsync(after, "ManagedSlackChildApps");
+        Assert.DoesNotContain("IX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
+        Assert.Contains("UX_ManagedSlackChildApps_AgentConnectionId", indexes.Keys);
+        AssertIndexNames(ManagedSlackChildAppIndexes, indexes);
     }
 
     [Fact]
