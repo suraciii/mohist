@@ -538,7 +538,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             catch (Exception ex)
             {
                 _log.LogWarning(ex,
-                    "Runner {RunnerId} failed to close active workflow work for workflow {WorkflowId}",
+                    "runner {runner} failed to close active workflow work for run {run}",
                     RunnerId, workflowRunId);
             }
         }
@@ -554,7 +554,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             catch (Exception ex)
             {
                 _log.LogWarning(ex,
-                    "Runner {RunnerId} failed to synthesize failed report for agent-job {AgentJobId} work {WorkId}",
+                    "runner {runner} failed to synthesize failed report for job {job} work {work}",
                     RunnerId, entry.JobKey, entry.WorkId);
             }
         }

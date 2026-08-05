@@ -482,7 +482,7 @@ EpicNumber: ReadEpicNumber(run),
             if (!bindResult.IsSuccess)
             {
                 _log.LogWarning(
-                    "Workflow {Id} task {TaskId} artifact binding failed: {Error}",
+                    "run {run} work {work} artifact binding failed: {reason}",
                     workflowRunId, workId, bindResult.Error);
                 return new InboundReport.Task(new TaskReport(
                     WorkId: workId,

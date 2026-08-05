@@ -39,11 +39,16 @@ import type { DispatchWorkItem } from "../core/types.js"
 import type { WorkItemResult } from "../core/types.js"
 import { WorkflowSessionTurnCoordinator } from "./workflow-session-turn-coordinator.js"
 import { SkillResolver } from "./skill-resolver.js"
+import { runnerLogger } from "../system/logger.js"
 import {
   type FollowupTarget,
   type FollowupTargetResolution,
   type SessionTarget,
 } from "../server/session-target.js"
+
+const log = runnerLogger.child("host")
+const cleanupLog = runnerLogger.child("cleanup")
+const modelLog = runnerLogger.child("models")
 
 export interface ReportResult {
   workflowRunId?: string | null
@@ -257,7 +262,7 @@ export class RunnerHost {
       try {
         await this.workspaceRegistry.load()
       } catch (error) {
-        console.error("failed to load workspace registry; starting empty:", error)
+        log.error("failed to load workspace registry; starting empty", { exception: error })
       }
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
@@ -281,11 +286,11 @@ export class RunnerHost {
       // push channel is available in parallel.
       await this.runConvergenceOnce(signal)
       await this.runBindingConvergenceOnce(signal)
-      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => console.error(error)), this.options.heartbeatIntervalMs)
+      const heartbeat = setInterval(() => void this.connection.heartbeat(this.registrationState(), signal).catch((error) => log.error("runner heartbeat failed", { exception: error })), this.options.heartbeatIntervalMs)
       const selfCheck = setInterval(() => void this.runSelfCheck(signal), this.options.dispatchLivenessProbeIntervalMs)
       const convergenceTimer = setInterval(() => void this.runConvergenceOnce(signal), this.cleanupConvergenceIntervalMs)
       const cleanupTimer = setInterval(() => void this.runCleanupOnce(signal), this.cleanupLoopIntervalMs)
-      const rediscoveryTimer = setInterval(() => void this.runModelRediscoveryOnce(signal).catch((error) => console.error("model rediscovery fire failed", error)), this.modelRediscoveryIntervalMs)
+      const rediscoveryTimer = setInterval(() => void this.runModelRediscoveryOnce(signal).catch((error) => modelLog.error("model rediscovery failed", { exception: error })), this.modelRediscoveryIntervalMs)
       try {
         await this.runWorkerPool(signal)
       } finally {
@@ -307,7 +312,7 @@ export class RunnerHost {
       await this.convergence.runOnce(signal)
     } catch (error) {
       // Convergence is best-effort; the next tick or reconnect retries.
-      console.error("workspace cleanup convergence pass failed:", error)
+      cleanupLog.error("workspace cleanup convergence pass failed", { exception: error })
     }
   }
 
@@ -316,7 +321,7 @@ export class RunnerHost {
     try {
       await this.bindingConvergence.runOnce(signal)
     } catch (error) {
-      console.error("agent-session binding convergence pass failed:", error)
+      log.error("agent-session binding convergence pass failed", { exception: error, session: "binding" })
     }
   }
 
@@ -339,7 +344,7 @@ export class RunnerHost {
     try {
       return await getOpencodeModelDiscovery()(signal)
     } catch (error) {
-      console.error("failed to discover opencode models", error)
+      modelLog.error("failed to discover opencode models", { exception: error })
       return { models: [], variants: {}, complete: false }
     }
   }
@@ -373,24 +378,24 @@ export class RunnerHost {
             return entry?.phase === "eligible" || entry?.phase === "stuck"
           })
         } catch (error) {
-          console.error("workspace cleanup runtime reclamation failed:", error)
+          cleanupLog.error("workspace cleanup runtime reclamation failed", { exception: error })
           return
         }
-        if (reclaim.candidates > 0) console.log(formatDirectoryReclaimSummary(reclaim))
+        if (reclaim.candidates > 0) cleanupLog.info("workspace reclaim completed", { reason: formatDirectoryReclaimSummary(reclaim) })
         blockedPaths = new Set(reclaim.blockedDirectories)
       }
       const policy = await this.connection.fetchConfig(signal)
       const result = await this.cleanupLoop.runOnce(policy, signal, blockedPaths)
       if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0 || result.stuckResolved > 0) {
-        console.log(
-          `workspace cleanup: retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? "unknown"}`,
-        )
+        cleanupLog.info("workspace cleanup completed", {
+          reason: `retention=${result.retentionRemoved} budget=${result.budgetRemoved} guardAborted=${result.guardAborted} stuck=${result.stuckResolved} usage=${result.workspaceUsageBytes ?? "unknown"}`,
+        })
       }
     } catch (error) {
       // Cleanup is best-effort; the next tick retries. fetchConfig failures
       // (network blip, server restart) flow through this same catch so the
       // loop stays resilient without a stale-policy fallback.
-      console.error("workspace cleanup loop failed:", error)
+      cleanupLog.error("workspace cleanup loop failed", { exception: error })
     }
   }
 
@@ -399,11 +404,11 @@ export class RunnerHost {
     const alive = await this.signalR.probeLiveness(signal).catch(() => false)
     if (signal.aborted) return
     if (alive) return
-    console.warn("dispatch liveness probe failed; forcing reconnect")
+    log.warn("dispatch liveness probe failed; forcing reconnect", { reason: "liveness" })
     try {
       await this.signalR.forceReconnect(signal)
     } catch (error) {
-      console.error("forceReconnect failed:", error)
+      log.error("forceReconnect failed", { exception: error, reason: "reconnect" })
     }
   }
 
@@ -428,7 +433,7 @@ export class RunnerHost {
     try {
       await this.connection.heartbeat(this.registrationState(), signal)
     } catch (error) {
-      console.error("immediate runner heartbeat failed:", error)
+      log.error("immediate runner heartbeat failed", { exception: error })
     }
   }
 
@@ -443,7 +448,7 @@ export class RunnerHost {
     const policy = parseProviderErrorPolicy(process.env as Record<string, string | undefined>)
     if (!policy.ok) {
       this.providerPolicyDiagnostic = `provider error policy invalid (${policy.error.code}): ${policy.error.message}`
-      console.error(this.providerPolicyDiagnostic)
+      log.error("provider error policy invalid", { reason: this.providerPolicyDiagnostic })
     } else {
       this.providerPolicyDiagnostic = null
     }
@@ -454,12 +459,12 @@ export class RunnerHost {
     })
     const startResult = await this.openCodeRuntime.start(signal)
     if (!startResult.ok) {
-      console.error("opencode runtime not ready at startup; claiming gated until it recovers:", startResult.error.message)
+      log.error("opencode runtime not ready at startup; claiming gated until it recovers", { reason: startResult.error.message })
     }
     this.piRuntime = getPiRuntimeFactory()({ agentDir: this.options.runnerRoot, ...(policy.ok ? { providerErrorPolicy: policy.value } : {}) })
     const piStart = await this.piRuntime.start()
     if (!piStart.ok) {
-      console.error("pi runtime not ready at startup; claiming gated until it recovers:", piStart.error.message)
+      log.error("pi runtime not ready at startup; claiming gated until it recovers", { reason: piStart.error.message })
     }
     this.workExecutor = new WorkExecutor(
       this.actions,
@@ -488,11 +493,11 @@ export class RunnerHost {
       // Loading itself is best effort — `outbox.ready()` reflects the
       // actual durable state and gates the follow-up handler and claim
       // loop.
-      console.error("agent-session runtime event outbox failed to load:", error)
+      log.error("agent-session runtime event outbox failed to load", { exception: error, session: "outbox" })
     }
     if (signal.aborted) return
     if (!outbox.ready()) {
-      console.warn("agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers")
+      log.warn("agent-session runtime event outbox unhealthy at startup; runner admission gated until it recovers", { session: "outbox" })
     }
   }
 
@@ -533,7 +538,7 @@ export class RunnerHost {
         const diagnosticChanged = diagnostic !== lastReadinessDiagnostic
         const reLogDue = now - lastReadinessLoggedAt > READINESS_DIAGNOSTIC_RELOG_INTERVAL_MS
         if (diagnosticChanged || reLogDue) {
-          console.warn(diagnostic ?? "opencode runtime not ready; skipping poll")
+          log.warn("runner not ready; skipping poll", { reason: diagnostic ?? "opencode runtime not ready" })
           lastReadinessDiagnostic = diagnostic
           lastReadinessLoggedAt = now
         }
@@ -548,7 +553,7 @@ export class RunnerHost {
         works = await this.pollOnce(signal)
       } catch (error) {
         if (signal.aborted) break
-        console.warn(`runner poll failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+        log.warn("runner poll failed; retrying", { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
         await raceInterval(this.nextReconciliationInterval(), signal, [])
         continue
       }
@@ -663,7 +668,7 @@ export class RunnerHost {
       result = await this.executeWork(work, signal)
     } catch (error) {
       if (signal.aborted) return
-      console.error(`work ${work.workId} failed before report:`, error)
+      log.error("work failed before report", { work: work.workId, exception: error })
       result = { status: "failed", message: String(error) }
     }
 
@@ -677,7 +682,7 @@ export class RunnerHost {
       await this.reportOnce(key)
     } catch (error) {
       this.scheduleReportRetry(key)
-      console.warn(`first report for work ${work.workId} failed; will retry`, error)
+      log.warn("first work report failed; will retry", { work: work.workId, exception: error })
     }
   }
 
@@ -718,7 +723,7 @@ export class RunnerHost {
         await this.reportOnce(key)
       } catch (error) {
         this.scheduleReportRetry(key)
-        console.warn(`retry report for work ${held.work.workId} failed (attempt ${held.entry.attempts})`, error)
+      log.warn("work report retry failed", { work: held.work.workId, attempt: held.entry.attempts, exception: error })
       }
     }))
   }
@@ -804,7 +809,7 @@ export class RunnerHost {
           }),
         ])
       } catch (flushError) {
-        console.error(`task-log ${label} upload failed for work`, work.workId, flushError)
+        log.error("task-log upload failed", { work: work.workId, path: label, exception: flushError })
       } finally {
         if (timeout) clearTimeout(timeout)
       }
@@ -925,7 +930,7 @@ export class RunnerHost {
         await this.signalR.start()
         return
       } catch (error) {
-        console.error(`runner connection failed; retrying in ${this.options.pollIntervalMs}ms`, error)
+      log.error("runner connection failed; retrying", { reason: `in ${this.options.pollIntervalMs}ms`, exception: error })
         await this.disconnectForReconnect()
         await delay(this.options.pollIntervalMs, signal)
       }
@@ -1058,7 +1063,7 @@ export function startTaskLogFlushTrigger(
       const result = flush()
       inFlight = Promise.resolve(result)
         .catch((error) => {
-          console.error("task-log incremental flush failed", error)
+          log.error("task-log incremental flush failed", { exception: error })
         })
         .finally(() => {
           inFlight = null
@@ -1068,7 +1073,7 @@ export function startTaskLogFlushTrigger(
           }
         })
     } catch (error) {
-      console.error("task-log incremental flush failed", error)
+      log.error("task-log incremental flush failed", { exception: error })
       inFlight = null
     }
 

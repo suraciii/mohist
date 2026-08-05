@@ -8,6 +8,7 @@ import {
   type ModelsProcessExecutor,
   type OpencodeModelCatalog,
 } from "./opencode-models.js"
+import { capturedLogs } from "../../tests/support/logger-test.js"
 
 afterEach(() => {
   vi.unstubAllEnvs()
@@ -198,80 +199,65 @@ describe("discoverOpencodeModels", () => {
     ["abort", { error: Object.assign(new Error("aborted"), { name: "AbortError" }), status: null, stdout: "" }],
     ["non-zero exit", { status: 2, stdout: "openai/gpt-5\n" }],
   ])("logs and normalizes %s", async (_name, processResult) => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const executor: ModelsProcessExecutor = () => processResult
-    try {
-      await expect(discoverOpencodeModels(
-        new AbortController().signal,
-        createOpencodeModelsCommandAdapter(executor),
-      )).resolves.toEqual({ models: [], variants: {}, complete: false })
-      expect(errorSpy).toHaveBeenCalledOnce()
-      expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", expect.any(Error))
-    } finally {
-      errorSpy.mockRestore()
-    }
+    await expect(discoverOpencodeModels(
+      new AbortController().signal,
+      createOpencodeModelsCommandAdapter(executor),
+    )).resolves.toEqual({ models: [], variants: {}, complete: false })
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
+    ]))
   })
 
   it("keeps valid model output when the CLI times out after writing it", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const executor: ModelsProcessExecutor = () => ({
       error: Object.assign(new Error("timed out"), { code: "ETIMEDOUT" }),
       status: null,
       stdout: "kimi-for-coding/kimi-for-coding-highspeed\n",
     })
 
-    try {
-      await expect(discoverOpencodeModels(
-        new AbortController().signal,
-        createOpencodeModelsCommandAdapter(executor),
-      )).resolves.toEqual({
-        models: ["kimi-for-coding/kimi-for-coding-highspeed"],
-        variants: {},
-        complete: false,
-      })
-      expect(warnSpy).toHaveBeenCalledWith("opencode model discovery timed out; using an incomplete catalog")
-    } finally {
-      warnSpy.mockRestore()
-    }
+    await expect(discoverOpencodeModels(
+      new AbortController().signal,
+      createOpencodeModelsCommandAdapter(executor),
+    )).resolves.toEqual({
+      models: ["kimi-for-coding/kimi-for-coding-highspeed"],
+      variants: {},
+      complete: false,
+    })
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "WARN", message: "opencode model discovery timed out; using an incomplete catalog", fields: { reason: "timeout" } }),
+    ]))
   })
 
   it("logs and normalizes successful output with no valid header", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const executor: ModelsProcessExecutor = () => ({ status: 0, stdout: "warning: no providers\n" })
-    try {
-      await expect(discoverOpencodeModels(
-        new AbortController().signal,
-        createOpencodeModelsCommandAdapter(executor),
-      )).resolves.toEqual({ models: [], variants: {}, complete: false })
-      expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", expect.any(Error))
-    } finally {
-      errorSpy.mockRestore()
-    }
+    await expect(discoverOpencodeModels(
+      new AbortController().signal,
+      createOpencodeModelsCommandAdapter(executor),
+    )).resolves.toEqual({ models: [], variants: {}, complete: false })
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
+    ]))
   })
 
   it("can succeed on a later invocation after a process failure", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const processResults = [
       { error: new Error("ENOENT"), status: null, stdout: "" },
       { status: 0, stdout: "openai/gpt-5\n" + JSON.stringify({ variants: { high: {} } }) },
     ]
     const executor: ModelsProcessExecutor = () => processResults.shift()!
     const adapter = createOpencodeModelsCommandAdapter(executor)
-    try {
-      await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
-        models: [],
-        variants: {},
-        complete: false,
-      })
-      await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
-        models: ["openai/gpt-5"],
-        variants: { "openai/gpt-5": ["high"] },
-        complete: true,
-      })
-      expect(errorSpy).toHaveBeenCalledOnce()
-    } finally {
-      errorSpy.mockRestore()
-    }
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+      models: [],
+      variants: {},
+      complete: false,
+    })
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+      models: ["openai/gpt-5"],
+      variants: { "openai/gpt-5": ["high"] },
+      complete: true,
+    })
+    expect(capturedLogs().filter((record) => record.message === "failed to discover opencode models")).toHaveLength(1)
   })
 })
 

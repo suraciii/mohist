@@ -52,6 +52,9 @@ import {
   resolveCommandRuntime,
   type CommandRuntimeAccessors,
 } from "./command-runtime.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("connection")
 
 export {
   isUnderRunnerRoot,
@@ -168,21 +171,21 @@ export class RunnerSignalRClient {
       try {
         await this.sessionCommandJournal.load()
       } catch (error) {
-        console.error("session command journal failed to load:", error)
+        log.error("session command journal failed to load", { session: "command", exception: error })
       }
     }
     if (this.followupOperationJournal) {
       try {
         await this.followupOperationJournal.load()
       } catch (error) {
-        console.error("followup operation journal failed to load:", error)
+        log.error("followup operation journal failed to load", { session: "followup", exception: error })
       }
     }
     if (this.cancelOperationJournal) {
       try {
         await this.cancelOperationJournal.load()
       } catch (error) {
-        console.error("cancel operation journal failed to load:", error)
+        log.error("cancel operation journal failed to load", { session: "cancel", exception: error })
       }
     }
     await this.connection.start()

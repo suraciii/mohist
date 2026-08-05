@@ -242,7 +242,7 @@ public sealed class EventDispatcherService : IDisposable
                 }
                 _log.LogWarning(
                     ex,
-                    "Event dispatcher handler {Handler} failed for {Type} {EventId} on attempt {Attempt}/{MaxAttempts}",
+                    "Event dispatcher handler {Handler} failed for {Type} {EventId} on attempt {attempt}/{MaxAttempts}",
                     item.Subscription.Identity,
                     envelope.Type,
                     envelope.Id,

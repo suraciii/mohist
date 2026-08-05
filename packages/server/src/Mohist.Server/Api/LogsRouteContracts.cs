@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using Mohist.Server.Infrastructure;
 using Mohist.Server.Logging;
 
 namespace Mohist.Server.Api;
@@ -12,9 +11,8 @@ namespace Mohist.Server.Api;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Raw"/> is the faithful original serialized line; search and
-/// export operate on it even when structured fields are absent (e.g. for
-/// non-JSON lines).
+/// <see cref="Raw"/> is the faithful original logfmt line; search and export
+/// operate on it even when structured fields are absent.
 /// </para>
 /// <para>
 /// Every property carries <c>[JsonIgnore(Condition = JsonIgnoreCondition.Never)]</c>
@@ -63,40 +61,18 @@ public sealed record LogTailResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ExpectedLocation,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Reason);
 
-/// <summary>
-/// Internal projection from a parsed NDJSON line on disk into the wire
-/// element. The file logger writes <see cref="LogRecord"/> directly; the
-/// tail reader parses each line into one of these and reattaches the
-/// faithful original line as <see cref="LogEntry.Raw"/>.
-/// </summary>
 internal static class LogEntryProjection
 {
-    /// <summary>
-    /// Project one physical log line into a <see cref="LogEntry"/>. If
-    /// the line is valid JSON matching <see cref="LogRecord"/>, the
-    /// structured fields are populated; otherwise the line degrades to
-    /// an element whose <c>message</c> is the raw line and whose
-    /// structured fields are null. Either way, <see cref="LogEntry.Raw"/>
-    /// holds the original line.
-    /// </summary>
     public static LogEntry Project(string rawLine)
     {
-        try
+        if (Logfmt.TryParse(rawLine, out var values))
         {
-            var record = JSON.Deserialize<LogRecord>(rawLine);
-            if (record is not null && IsValidRecord(record))
-            {
-                return new LogEntry(
-                    Level: record.Level,
-                    Time: record.Time.ToString("O"),
-                    Service: record.Service,
-                    Message: record.Message,
-                    Raw: rawLine);
-            }
-        }
-        catch
-        {
-            // fall through to degraded element
+            return new LogEntry(
+                Level: values["level"],
+                Time: values["time"],
+                Service: values["service"],
+                Message: values["msg"],
+                Raw: rawLine);
         }
 
         return new LogEntry(
@@ -106,7 +82,4 @@ internal static class LogEntryProjection
             Message: rawLine,
             Raw: rawLine);
     }
-
-    private static bool IsValidRecord(LogRecord record)
-        => record.Time != default && record.Message is not null;
 }

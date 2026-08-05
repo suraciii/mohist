@@ -3,6 +3,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCleanupLoopFixture, type CleanupLoopFixture } from "./support/cleanup-loop-fixture.js"
 import type { CleanupPolicy } from "../src/core/types.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 describe("CleanupLoop", () => {
   let fixture: CleanupLoopFixture
@@ -208,21 +209,13 @@ describe("CleanupLoop", () => {
       const entry = await fixture.registerActive("wr-1", 1, path)
       fixture.runner.failedDeletePaths.add(path)
 
-      const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-      try {
-        const removed = await fixture.loop.safeRemove(entry)
+      const removed = await fixture.loop.safeRemove(entry)
 
-        expect(removed).toBe(false)
-        expect(fixture.registry.get("wr-1")).not.toBeNull()
-        expect(errorSpy).toHaveBeenCalledTimes(1)
-        expect(errorSpy).toHaveBeenNthCalledWith(
-          1,
-          `workspace cleanup: failed to remove ${path}:`,
-          expect.objectContaining({ name: "Error", message: `stub delete failed: ${path}` }),
-        )
-      } finally {
-        errorSpy.mockRestore()
-      }
+      expect(removed).toBe(false)
+      expect(fixture.registry.get("wr-1")).not.toBeNull()
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "workspace cleanup failed to remove path", fields: expect.objectContaining({ path, exception: expect.objectContaining({ name: "Error", message: `stub delete failed: ${path}` }) }) }),
+      ]))
     })
 
     it("out-of-root path aborts before any deletion", async () => {

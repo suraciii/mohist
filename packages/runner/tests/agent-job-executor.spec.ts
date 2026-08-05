@@ -12,6 +12,7 @@ import type {
   RuntimeTurnRequest,
   RuntimeTurnResult,
 } from "../src/runtime/opencode/index.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 interface FakeRuntimeHandles {
   runtime: OpenCodeRuntime
@@ -388,16 +389,12 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
       const type = (body.runtimeEvents as Array<{ type: string }>)[0]?.type
       if (type === "message.delta") throw new Error("transcript endpoint offline")
     })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
 
-    try {
-      const result = await executor.execute(buildAgentJobWork(), new AbortController().signal)
-
-      expect(result.status).toBe("completed")
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("transcript endpoint offline"))
-    } finally {
-      errorSpy.mockRestore()
-    }
+    expect(result.status).toBe("completed")
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "agent-session runtime event failed", fields: expect.objectContaining({ exception: expect.objectContaining({ message: "transcript endpoint offline" }) }) }),
+    ]))
   })
 
   it("writes runtime events in observation order", async () => {

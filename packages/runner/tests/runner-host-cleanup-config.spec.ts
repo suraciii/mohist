@@ -6,6 +6,7 @@ import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 import type { FakeRuntimeHandles } from "./support/opencode-runtime-factory.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
@@ -378,14 +379,13 @@ describe("RunnerHost idle-system cleanup", () => {
       stuckResolved: 0,
       workspaceUsageBytes: 100_000,
     }
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
 
-    try {
+    {
       await waitForHostStartup(hostEvents)
       await advanceFetchTick(cleanupEvents)
       expect(mocks.state.cleanupCalls).toHaveLength(0)
@@ -394,13 +394,12 @@ describe("RunnerHost idle-system cleanup", () => {
       expect(mocks.state.fetchConfigCalls).toHaveLength(2)
       expect(mocks.state.cleanupCalls).toEqual([successfulCall])
       expect(successfulCall.policy).toEqual({ retentionDays: 7 })
-      expect(errorSpy).toHaveBeenCalledOnce()
-      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup loop failed:", failure)
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "workspace cleanup loop failed", fields: { exception: failure } }),
+      ]))
 
       controller.abort()
       await expect(run).resolves.toBeUndefined()
-    } finally {
-      errorSpy.mockRestore()
     }
   })
 
@@ -476,17 +475,15 @@ describe("RunnerHost idle-system cleanup", () => {
           { severity: "warning", code: "omega", message: "hidden" },
         ],
       })
-    const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
-
     try {
       await advanceCleanupTick(cleanupEvents)
-      expect(log).not.toHaveBeenCalled()
+      expect(capturedLogs().filter((record) => record.message === "workspace reclaim completed")).toHaveLength(0)
       await advanceCleanupTick(cleanupEvents)
-      expect(log).toHaveBeenCalledOnce()
-      expect(log).toHaveBeenCalledWith("workspace reclaim: tracked=6 candidates=2 disposed=1 busy=1 failed=0 diagnostics=alpha:2,beta:1,delta:1,omega:1 omitted=1")
+      expect(capturedLogs().filter((record) => record.message === "workspace reclaim completed")).toEqual([
+        expect.objectContaining({ level: "INFO", fields: { reason: "workspace reclaim: tracked=6 candidates=2 disposed=1 busy=1 failed=0 diagnostics=alpha:2,beta:1,delta:1,omega:1 omitted=1" } }),
+      ])
       expect(reclaim).toHaveBeenCalledTimes(2)
     } finally {
-      log.mockRestore()
       controller.abort()
       await expect(run).resolves.toBeUndefined()
     }
@@ -497,7 +494,6 @@ describe("RunnerHost idle-system cleanup", () => {
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     const failure = new Error("runtime reclaim failed")
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
@@ -510,10 +506,11 @@ describe("RunnerHost idle-system cleanup", () => {
 
     expect(mocks.state.fetchConfigCalls).toHaveLength(0)
     expect(mocks.state.cleanupCalls).toHaveLength(0)
-    expect(errorSpy).toHaveBeenCalledWith("workspace cleanup runtime reclamation failed:", failure)
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "workspace cleanup runtime reclamation failed", fields: { exception: failure } }),
+    ]))
     controller.abort()
     await expect(run).resolves.toBeUndefined()
-    errorSpy.mockRestore()
   })
 
   it("SingleFlightsOverlappingTimerInvocations", async () => {

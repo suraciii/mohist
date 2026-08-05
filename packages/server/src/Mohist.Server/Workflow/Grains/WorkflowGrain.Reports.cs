@@ -50,7 +50,7 @@ public partial class WorkflowGrain
         if (events.Count == 0) return ReportAck.Stale;
 
         _log.LogWarning(
-            "Workflow {Id} rejected dispatch for {WorkId}: {Code} {Message}",
+            "run {run} rejected dispatch for work {work}: {code} {reason}",
             GrainKey, workId, error.Code, error.Message);
         await CommitAsync(events);
         await DeleteSnapshotBestEffortAsync(workId);
@@ -65,7 +65,7 @@ public partial class WorkflowGrain
         if (activeWork is null || !activeWork.IsTask || activeWork.TaskRunId is null)
             return ReportAck.Stale;
 
-        _log.LogInformation("Workflow {Id} received task report for {WorkId}: {Status} detail={Detail}",
+        _log.LogInformation("run {run} received task report for work {work}: {status} detail={detail}",
             GrainKey, workId, report.Status, report.Detail ?? "(none)");
 
         var events = await _workLifecycle.ApplyTaskReportAsync(_run, report, activeWork.TaskRunId);
@@ -83,7 +83,7 @@ public partial class WorkflowGrain
         if (activeWork is null || !activeWork.IsChecks)
             return ReportAck.Stale;
 
-        _log.LogInformation("Workflow {Id} received check report for stage {Stage}: {Count} results",
+        _log.LogInformation("run {run} received check report for stage {Stage}: {Count} results",
             GrainKey, report.Stage, report.Results.Count);
 
         var events = await _workLifecycle.ApplyCheckReportAsync(_run, report);
@@ -102,7 +102,7 @@ public partial class WorkflowGrain
         catch (Exception ex)
         {
             _log.LogWarning(ex,
-                "Workflow {Id} failed to delete dispatch snapshot for {WorkId}; orphaned row will be swept at startup",
+                "run {run} failed to delete dispatch snapshot for work {work}; orphaned row will be swept at startup",
                 GrainKey, workId);
         }
     }

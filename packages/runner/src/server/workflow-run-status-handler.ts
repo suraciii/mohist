@@ -29,6 +29,9 @@ import * as signalR from "@microsoft/signalr"
 import { isTerminalWorkflowStatus } from "../runtime/workflow-terminal-status.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import type { ReceiveWorkflowRunStatusPayload } from "./session-target.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("cleanup")
 
 export interface WorkflowRunStatusHandlerDeps {
   registry?: WorkspaceRegistry | null
@@ -68,10 +71,8 @@ async function handleWorkflowRunStatus(
       // only tracks workspaces it owns; nothing to do.
       return
     }
-    console.log(
-      `workspace cleanup: ${workflowRunId} transitioned to eligible (status=${status}, terminalAt=${updated.terminalAt})`,
-    )
+    log.info("workspace transitioned to eligible", { run: workflowRunId, reason: `status=${status} terminalAt=${updated.terminalAt}` })
   } catch (error) {
-    console.error(`workspace cleanup: failed to mark ${workflowRunId} eligible from push:`, error)
+    log.error("workspace cleanup failed to mark eligible from push", { run: workflowRunId, exception: error })
   }
 }

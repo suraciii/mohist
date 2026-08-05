@@ -26,6 +26,7 @@ import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime
 import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
+import { runnerLogger } from "../system/logger.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
 import {
@@ -36,6 +37,8 @@ import {
   type AttachmentDescriptor,
   type DeliveredAttachment,
 } from "./attachment-delivery.js"
+
+const log = runnerLogger.child("job")
 
 /**
  * Agent-owned execution entry for `ownerKind === "agent-job"` work.
@@ -501,7 +504,7 @@ function createAgentSessionEventSink(
           signal,
         )
       } catch (error) {
-        console.error(`agent-session open/attach failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+        log.error("agent-session open/attach failed", { job: work.agentJobId, session: agentSessionId, exception: error })
         throw error
       }
     },
@@ -529,7 +532,7 @@ function createAgentSessionEventSink(
           signal,
         )
       } catch (error) {
-        console.error(`agent-session input publish failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+        log.error("agent-session input publish failed", { job: work.agentJobId, session: agentSessionId, exception: error })
         throw error
       }
     },
@@ -548,7 +551,7 @@ function createAgentSessionEventSink(
           signal,
         ).then(() => undefined))
         .catch((error) => {
-          console.error(`agent-session runtime event failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+          log.error("agent-session runtime event failed", { job: work.agentJobId, session: agentSessionId, exception: error })
         })
     },
     observePiEvent(event) {
@@ -566,7 +569,7 @@ function createAgentSessionEventSink(
           signal,
         ).then(() => undefined))
         .catch((error) => {
-          console.error(`agent-session runtime event failed for job ${work.agentJobId ?? "?"}: ${errorMessage(error)}`)
+          log.error("agent-session runtime event failed", { job: work.agentJobId, session: agentSessionId, exception: error })
         })
     },
     async drain() {

@@ -105,7 +105,7 @@ public class LogsRouteSpecs
     public async Task Get_OnFirstRead_AlwaysCarriesTheAgreedResponseShape()
     {
         ResetState();
-        var line = """{"level":"INFO","time":"2026-06-30T12:00:00.0000000+00:00","service":"Mohist.Server","message":"hello"}""";
+        var line = "time=2026-06-30T12:00:00.000Z level=INFO msg=hello service=server component=logs";
         await SeedServerLogAsync(line);
 
         var data = await GetTailAsync(_fixture.Client);
@@ -147,7 +147,7 @@ public class LogsRouteSpecs
     {
         ResetState();
         var lines = Enumerable.Range(1, 5)
-            .Select(i => $$"""{"level":"INFO","time":"2026-06-30T12:00:0{{i}}.0000000+00:00","service":"Mohist.Server","message":"line {{i}}"}""")
+            .Select(i => $$"""time=2026-06-30T12:00:0{{i}}.000Z level=INFO msg="line {{i}}" service=server component=logs""")
             .ToArray();
         await SeedServerLogAsync(lines);
 
@@ -192,7 +192,7 @@ public class LogsRouteSpecs
     {
         ResetState();
         var lines = Enumerable.Range(1, 5)
-            .Select(i => $$"""{"level":"INFO","time":"2026-06-30T12:00:0{{i}}.0000000+00:00","service":"Mohist.Server","message":"line {{i}}"}""")
+            .Select(i => $$"""time=2026-06-30T12:00:0{{i}}.000Z level=INFO msg="line {{i}}" service=server component=logs""")
             .ToArray();
         await SeedServerLogAsync(lines);
 
@@ -222,7 +222,7 @@ public class LogsRouteSpecs
     {
         ResetState();
         var lines = Enumerable.Range(1, 3)
-            .Select(i => $$"""{"level":"INFO","time":"2026-06-30T12:00:0{{i}}.0000000+00:00","service":"Mohist.Server","message":"line {{i}}"}""")
+            .Select(i => $$"""time=2026-06-30T12:00:0{{i}}.000Z level=INFO msg="line {{i}}" service=server component=logs""")
             .ToArray();
         await SeedServerLogAsync(lines);
 
@@ -248,8 +248,8 @@ public class LogsRouteSpecs
     public async Task Get_AutoFollowFromEof_DoesNotReplayAndReturnsOnlyAppendedLines()
     {
         ResetState();
-        var initialLine = """{"level":"INFO","time":"2026-06-30T12:00:01.0000000+00:00","service":"Mohist.Server","message":"initial"}""";
-        var appendedLine = """{"level":"WARN","time":"2026-06-30T12:00:02.0000000+00:00","service":"Mohist.Server","message":"appended"}""";
+        var initialLine = "time=2026-06-30T12:00:01.000Z level=INFO msg=initial service=server component=logs";
+        var appendedLine = "time=2026-06-30T12:00:02.000Z level=WARN msg=appended service=server component=logs";
         await SeedServerLogAsync(initialLine);
 
         var first = await GetTailAsync(_fixture.Client, "?limit=10");
@@ -294,7 +294,7 @@ public class LogsRouteSpecs
     {
         ResetState();
         var oversizedLine = new string('x', 4096);
-        var followingLine = """{"level":"INFO","time":"2026-06-30T12:00:01.0000000+00:00","service":"Mohist.Server","message":"after oversized"}""";
+        var followingLine = "time=2026-06-30T12:00:01.000Z level=INFO msg=\"after oversized\" service=server component=logs";
         await SeedServerLogAsync(oversizedLine, followingLine);
 
         var first = await GetTailAsync(_fixture.Client, "?maxBytes=64");
@@ -335,7 +335,7 @@ public class LogsRouteSpecs
     [Theory]
     [InlineData("{}")]
     [InlineData("{\"raw\":\"x\"}")]
-    public async Task Get_ValidJsonThatDoesNotMatchLogRecord_DegradesToRawElement(string line)
+    public async Task Get_InvalidStructuredLine_DegradesToRawElement(string line)
     {
         ResetState();
         await SeedServerLogAsync(line);
@@ -353,13 +353,13 @@ public class LogsRouteSpecs
     }
 
     [Fact]
-    public async Task Get_MixedJsonAndNonJsonLines_BothProjectToTheSameElementType()
+    public async Task Get_MixedLogfmtAndInvalidLines_BothProjectToTheSameElementType()
     {
         ResetState();
         await SeedServerLogAsync(
-            """{"level":"INFO","time":"2026-06-30T12:00:01.0000000+00:00","service":"Mohist.Server","message":"structured"}""",
+            "time=2026-06-30T12:00:01.000Z level=INFO msg=structured service=server component=logs",
             "not-json-blob",
-            """{"level":"WARN","time":"2026-06-30T12:00:03.0000000+00:00","service":"Mohist.Server","message":"also structured"}""");
+            "time=2026-06-30T12:00:03.000Z level=WARN msg=structured service=server component=logs");
 
         var data = await GetTailAsync(_fixture.Client);
         var lines = data.GetProperty("lines").EnumerateArray().ToList();
@@ -375,7 +375,7 @@ public class LogsRouteSpecs
 
         var structured1 = AssertEntry(lines[0]);
         Assert.Equal("INFO", structured1.Level);
-        Assert.Equal("Mohist.Server", structured1.Service);
+        Assert.Equal("server", structured1.Service);
         Assert.Equal("structured", structured1.Message);
         Assert.NotNull(structured1.Time);
 
@@ -388,28 +388,22 @@ public class LogsRouteSpecs
 
         var structured2 = AssertEntry(lines[2]);
         Assert.Equal("WARN", structured2.Level);
-        Assert.Equal("also structured", structured2.Message);
+        Assert.Equal("structured", structured2.Message);
     }
 
     [Fact]
-    public async Task Get_SerializedLogRecord_RoundTripsWithoutFieldLoss()
+    public async Task Get_LogfmtLine_RoundTripsWithoutFieldLoss()
     {
-        var record = new LogRecord(
-            "INFO",
-            _fixture.TimeProvider.GetUtcNow(),
-            "Mohist.Server",
-            "logger-roundtrip 42");
-        Source.SetLines(JsonSerializer.Serialize(record, Mohist.Server.Infrastructure.JSON.Options));
+        var line = "time=2026-06-30T12:00:00.000Z level=INFO msg=\"logger-roundtrip 42\" service=server component=logs work=w_abc";
+        Source.SetLines(line);
 
         var data = await GetTailAsync(_fixture.Client);
         var entry = AssertEntry(Assert.Single(data.GetProperty("lines").EnumerateArray()));
 
         Assert.Equal("INFO", entry.Level);
-        Assert.Equal("Mohist.Server", entry.Service);
+        Assert.Equal("server", entry.Service);
         Assert.Equal("logger-roundtrip 42", entry.Message);
-        var parsedBack = JsonSerializer.Deserialize<LogRecord>(entry.Raw, Mohist.Server.Infrastructure.JSON.Options);
-        Assert.NotNull(parsedBack);
-        Assert.Equal(record, parsedBack);
+        Assert.Equal(line, entry.Raw);
     }
 
     [Fact]
@@ -418,7 +412,7 @@ public class LogsRouteSpecs
         ResetState();
         // Drop a server.log with one record and verify source is the
         // file name (not the absolute path).
-        var firstLine = """{"level":"INFO","time":"2026-06-30T12:00:00.0000000+00:00","service":"Mohist.Server","message":"x"}""";
+        var firstLine = "time=2026-06-30T12:00:00.000Z level=INFO msg=x service=server component=logs";
         await SeedServerLogAsync(firstLine);
 
         var data = await GetTailAsync(_fixture.Client);

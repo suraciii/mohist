@@ -11,6 +11,7 @@ import {
   type CapturedBuilder,
 } from "./support/followup-handler-fixture.js"
 import { setRunnerSignalRExistsCheckerForTest, setRunnerSignalRGitRunnerForTest } from "../src/server/runner-signalr.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 // `vi.mock("@microsoft/signalr", ...)` lives in `./support/followup-handler-fixture.ts`.
 // It activates once any test file imports from that fixture, so the
@@ -329,7 +330,6 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
   })
 
   it("Cancel_FailedEnqueue_LeavesStopRequested", async () => {
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const failingOutbox: AgentSessionRuntimeEventOutbox = {
       ready: () => true,
       load: async () => {},
@@ -341,25 +341,20 @@ describe("RunnerSignalRClient CancelAgentSession activity-fact settlement", () =
       stop: async () => {},
       snapshot() { return [] },
     }
-    try {
-      const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
-      buildClient({
-        resolver,
-        outbox: failingOutbox,
-        openCodeRuntime: opencode.runtime,
-        piRuntime: pi.runtime,
-      })
-      const builder = lastBuilder()
+    const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
+    buildClient({
+      resolver,
+      outbox: failingOutbox,
+      openCodeRuntime: opencode.runtime,
+      piRuntime: pi.runtime,
+    })
+    const builder = lastBuilder()
 
-      const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
+    const reply = (await emitCancel(builder, opencodePayload())) as { state: string; interruptUnconfirmed?: boolean }
 
-      expect(reply).toEqual({ state: "stop-requested" })
-      expect(errorSpy).toHaveBeenCalledWith(
-        "failed to persist cancel activity:",
-        expect.any(Error),
-      )
-    } finally {
-      errorSpy.mockRestore()
-    }
+    expect(reply).toEqual({ state: "stop-requested" })
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "failed to persist cancel activity", fields: expect.objectContaining({ session: "runtime-1", exception: expect.any(Error) }) }),
+    ]))
   })
 })

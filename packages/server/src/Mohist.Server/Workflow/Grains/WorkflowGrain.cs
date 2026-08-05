@@ -747,7 +747,7 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
         }
         catch (Exception ex)
         {
-            _log.LogError(ex, "Workflow {Id} cleanup after failed startup could not remove the persisted run", GrainKey);
+            _log.LogError(ex, "run {run} cleanup after failed startup could not remove the persisted run", GrainKey);
         }
         finally
         {

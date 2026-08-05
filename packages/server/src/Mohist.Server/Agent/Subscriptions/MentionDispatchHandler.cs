@@ -100,7 +100,7 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
         if (tokens.Count == 0)
         {
             _log.LogDebug(
-                "Mention dispatch: comment {CommentId} on issue {IssueNumber} contains no @-mention tokens",
+                "Mention dispatch: comment {CommentId} on issue {issue} contains no @-mention tokens",
                 payload.CommentId,
                 issueContext.IssueNumber);
             return;
@@ -114,7 +114,7 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
             if (!nameIndex.TryGetValue(token, out var agent))
             {
                 _log.LogInformation(
-                    "Mention dispatch: @-mention '{Token}' in comment {CommentId} on issue {IssueNumber} did not resolve to any active Agent in project {ProjectId}; no launch",
+                    "Mention dispatch: @-mention '{Token}' in comment {CommentId} on issue {issue} did not resolve to any active Agent in project {ProjectId}; no launch",
                     token,
                     payload.CommentId,
                     issueContext.IssueNumber,
@@ -148,7 +148,7 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
                 evt.Id,
                 ct);
             _log.LogInformation(
-                "Mention dispatch: launched Agent {AgentId} ({AgentName}) for comment {CommentId} on issue {IssueNumber} in project {ProjectId}",
+                "Mention dispatch: launched Agent {AgentId} ({AgentName}) for comment {CommentId} on issue {issue} in project {ProjectId}",
                 agent.Id,
                 agent.Name,
                 payload.CommentId,

@@ -50,12 +50,15 @@ import type { ServerConnection } from "./connection.js"
 import { SkillResolver } from "../runtime/skill-resolver.js"
 import { buildExecutionEnvelope } from "../runtime/execution-envelope.js"
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "../runtime/slack-execution-context.js"
+import { runnerLogger } from "../system/logger.js"
 import {
   attachmentManifestEnvelope,
   deliverAcceptedAttachments,
   parseAttachmentDescriptors,
   type DeliveredAttachment,
 } from "../runtime/attachment-delivery.js"
+
+const log = runnerLogger.child("session")
 
 export interface FollowupHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
@@ -125,7 +128,7 @@ async function handleFollowup(
     const resolved = resolver(sessionTarget)
     target = isPromise(resolved) ? await resolved : resolved
   } catch (error) {
-    console.error("followup target resolver threw:", error)
+    log.error("followup target resolver threw", { exception: error })
     return unavailable()
   }
   if (!target) return { accepted: false, error: "missing" }
@@ -198,7 +201,7 @@ async function handleFollowup(
       if (claim === "submitted") return { accepted: true }
       if (claim === "claimed") return unavailable()
     } catch (error) {
-      console.error("followup operation journal claim failed:", error instanceof Error ? error.message : String(error))
+      log.error("followup operation journal claim failed", { exception: error, session: sessionTarget.kind })
       return unavailable()
     }
   }
@@ -232,7 +235,7 @@ async function handleFollowup(
     if (operationId && operationKey && deps.followupOperationJournal) {
       await deps.followupOperationJournal.release(operationKey, operationId).catch(() => undefined)
     }
-    console.error("followup durable input enqueue failed:", error instanceof Error ? error.message : String(error))
+    log.error("followup durable input enqueue failed", { exception: error, session: sessionTarget.kind })
     return unavailable()
   }
 
@@ -263,7 +266,7 @@ async function handleFollowup(
             message,
           )
           if (readErrorKind(result) === "unavailable-runtime") {
-            console.error("followup runtime unavailable:", message)
+            log.error("followup runtime unavailable", { reason: message, session: selectedTarget.runtimeSessionId })
           }
           return
         }
@@ -291,7 +294,7 @@ async function handleFollowup(
         )
       },
       (error) => {
-        console.error("followup runtime.followup rejected:", error instanceof Error ? error.message : String(error))
+        log.error("followup runtime.followup rejected", { exception: error, session: selectedTarget.runtimeSessionId })
         recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "unknown", error)
       },
     )
@@ -299,13 +302,13 @@ async function handleFollowup(
       try {
         await deps.followupOperationJournal.markSubmitted(operationKey, operationId)
       } catch (error) {
-        console.error("followup operation journal submission mark failed:", error instanceof Error ? error.message : String(error))
+        log.error("followup operation journal submission mark failed", { exception: error, session: sessionTarget.kind })
         return unavailable()
       }
     }
     void completion
   } catch (error) {
-    console.error("followup runtime.followup threw:", error instanceof Error ? error.message : String(error))
+    log.error("followup runtime.followup threw", { exception: error, session: selectedTarget.runtimeSessionId })
     recordFollowupActivity(outbox, sessionTarget, selectedTarget, payload.operationId, payload.turnId, "unknown", error)
     return unavailable()
   }
@@ -361,7 +364,7 @@ function buildFollowupObserver(
       pending.push(enqueue)
       enqueue.catch((outboxError) => {
         observerError ??= outboxError
-        console.error("failed to persist followup runtime event:", outboxError)
+        log.error("failed to persist followup runtime event", { session: target.runtimeSessionId, exception: outboxError })
       })
     },
   }
@@ -472,7 +475,7 @@ function recordFollowupActivity(
     acknowledgementPolicy: "successful-response",
   }
   outbox.enqueueProducedFact(record).catch((outboxError) => {
-    console.error("failed to persist followup terminal:", outboxError)
+    log.error("failed to persist followup terminal", { session: target.runtimeSessionId, exception: outboxError })
   })
 }
 

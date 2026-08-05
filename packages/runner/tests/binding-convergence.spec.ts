@@ -3,6 +3,7 @@ import { BindingConvergence, type BindingConvergenceConnection } from "../src/ru
 import type { OpenCodeRuntime } from "../src/runtime/opencode/index.js"
 import type { AgentSessionReconcileBinding } from "../src/server/connection.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 const FIXED_DATE = new Date("2026-07-24T00:00:00.000Z")
 
@@ -197,13 +198,10 @@ describe("Runner reconnect AgentSession binding convergence", () => {
       vi.fn(async () => { throw new Error("409 stale_binding") }),
     )
 
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     await convergence(handle, server, records).runOnce(new AbortController().signal)
-    expect(errorSpy).toHaveBeenCalledWith(
-      "agent-session binding reconciliation failed for session-1:",
-      expect.objectContaining({ message: "409 stale_binding" }),
-    )
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "agent-session binding reconciliation failed", fields: expect.objectContaining({ session: "session-1", exception: expect.objectContaining({ message: "409 stale_binding" }) }) }),
+    ]))
     expect(records).toEqual([])
   })
 

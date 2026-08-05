@@ -1,6 +1,9 @@
 import type { ServerConnection } from "../server/connection.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import { isTerminalWorkflowStatus } from "./workflow-terminal-status.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("cleanup")
 
 // Convergence backstop for missed workflow terminal events.
 //
@@ -56,7 +59,7 @@ export class ConvergenceBackstop {
     } catch (error) {
       // Convergence is best-effort. The next tick (or reconnect) will
       // retry. Push may still be working in parallel.
-      console.error("workspace cleanup convergence query failed:", error)
+      log.error("workspace cleanup convergence query failed", { exception: error })
       return { queried: workflowRunIds.length, transitioned: 0, dropped: 0 }
     }
 

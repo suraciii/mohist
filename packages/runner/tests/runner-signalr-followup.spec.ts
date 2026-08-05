@@ -16,6 +16,7 @@ import {
 import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event-outbox.js"
 import type { FollowupOperationJournalStore } from "../src/runtime/followup-operation-journal.js"
 import type { FollowupOperationClaim, FollowupOperationState } from "../src/runtime/followup-operation-journal.js"
+import { capturedLogs } from "./support/logger-test.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
 
 let runtime: FakeRuntimeHandles
@@ -191,23 +192,17 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       stop: async () => {},
       snapshot() { return [] },
     }
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
     buildClient({ resolver, outbox, openCodeRuntime: runtime.runtime })
 
     await expect(invokeFollowup(lastBuilder(), workflowPayload("resume"))).resolves.toEqual({ accepted: false, error: "unavailable" })
     expect(runtime.followupCalls).toHaveLength(0)
-    expect(errorSpy).toHaveBeenCalledWith(
-      "followup durable input enqueue failed:",
-      expect.stringContaining("disk full"),
-    )
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "followup durable input enqueue failed", fields: expect.objectContaining({ exception: expect.objectContaining({ message: "disk full" }) }) }),
+    ]))
   })
 
   it("Followup_DropsWhenResolverThrows", async () => {
     const resolver = vi.fn(() => { throw new Error("resolver boom") })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
     buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
 
@@ -216,8 +211,9 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
 
     expect(runtime.followupCalls).toHaveLength(0)
     expect(recording.beforeExecutionCalls).toHaveLength(0)
-    expect(errorSpy).toHaveBeenCalled()
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "followup target resolver threw" }),
+    ]))
   })
 
   it("Followup_Completion_RecordsIdleActivity", async () => {
@@ -308,9 +304,7 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
       diagnostics: [{ severity: "error", code: "turn-failed", message: "opencode crashed" }],
     })
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    try {
-      buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
+    buildClient({ resolver, outbox: recording.outbox, openCodeRuntime: runtime.runtime })
 
       emitFollowup(lastBuilder(), {
         target: { kind: "generic", projectId: "proj-1", sessionId: "session-1", binding: { runtime: "opencode", runtimeSessionId: "runtime-1", runnerId: "runner-1", workDir: "/work/project" } },
@@ -333,9 +327,6 @@ describe("RunnerSignalRClient ReceiveFollowup handler", () => {
           }),
         },
       })
-    } finally {
-      errorSpy.mockRestore()
-    }
   })
 
   it("Followup_DuplicateOperationIdDoesNotEnqueueOrInvokeAgain", async () => {

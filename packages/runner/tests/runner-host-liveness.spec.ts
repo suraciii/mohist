@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
+import { capturedLogs } from "./support/logger-test.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
@@ -196,7 +197,6 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: SELF_CHECK_INTERVAL_MS,
     })
 
-    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
     try {
       await pollStarted.promise
@@ -207,13 +207,13 @@ describe("RunnerHost", () => {
       pollRelease.resolve([])
       await expect(run).resolves.toBeUndefined()
 
-      expect(warningSpy).toHaveBeenCalledTimes(1)
-      expect(warningSpy).toHaveBeenNthCalledWith(1, "dispatch liveness probe failed; forcing reconnect")
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "dispatch liveness probe failed; forcing reconnect", fields: { reason: "liveness" } }),
+      ]))
     } finally {
       controller.abort()
       pollRelease.resolve([])
       await run.catch(() => undefined)
-      warningSpy.mockRestore()
     }
   })
 
@@ -252,7 +252,6 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: SELF_CHECK_INTERVAL_MS,
     })
 
-    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
     try {
       await pollStarted.promise
@@ -267,13 +266,13 @@ describe("RunnerHost", () => {
       pollRelease.resolve([])
       await expect(run).resolves.toBeUndefined()
 
-      expect(warningSpy).toHaveBeenCalledTimes(1)
-      expect(warningSpy).toHaveBeenNthCalledWith(1, "dispatch liveness probe failed; forcing reconnect")
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "dispatch liveness probe failed; forcing reconnect", fields: { reason: "liveness" } }),
+      ]))
     } finally {
       controller.abort()
       pollRelease.resolve([])
       await run.catch(() => undefined)
-      warningSpy.mockRestore()
     }
   })
 

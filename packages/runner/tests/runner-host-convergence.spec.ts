@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
@@ -490,7 +491,6 @@ describe("RunnerHost converges active workflow runs", () => {
       ...defaultOptions(),
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     try {
       const run = host.run(controller.signal)
       expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
@@ -501,10 +501,10 @@ describe("RunnerHost converges active workflow runs", () => {
 
       controller.abort()
       await expect(run).resolves.toBeUndefined()
-      expect(errorSpy).toHaveBeenCalledOnce()
-      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "workspace cleanup convergence query failed", fields: { exception: failure } }),
+      ]))
     } finally {
-      errorSpy.mockRestore()
     }
   })
 

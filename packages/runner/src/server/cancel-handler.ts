@@ -45,6 +45,9 @@ import type {
   RuntimeEventRecord,
 } from "./runtime-event-outbox.js"
 import type { CancelOperationJournalStore } from "../runtime/cancel-operation-journal.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("session")
 
 export interface CancelHandlerDeps {
   followupTargetResolver?: FollowupTargetResolver | null
@@ -97,7 +100,7 @@ async function handleJournaledCancel(
     await journal.complete(sessionId, payload, reply)
     return reply
   } catch (error) {
-    console.error("cancel operation journal failed:", error instanceof Error ? error.message : String(error))
+    log.error("cancel operation journal failed", { exception: error, session: "cancel" })
     return { state: "unavailable" }
   }
 }
@@ -132,7 +135,7 @@ async function handleCancel(
   try {
     resolved = await resolver(sessionTarget)
   } catch (error) {
-    console.error("cancel target resolver threw:", error)
+    log.error("cancel target resolver threw", { exception: error })
     return { state: "not-cancellable" }
   }
 
@@ -157,7 +160,7 @@ async function handleCancel(
       if (kind === "missing-session") {
         return { state: "not-cancellable" }
       }
-      console.error("cancel runtime.cancel rejected:", readErrorMessage(result))
+      log.error("cancel runtime.cancel rejected", { reason: readErrorMessage(result), session: binding.runtimeSessionId })
       return { state: "stop-requested" }
     }
     const facts = readCancelFacts(result)
@@ -175,7 +178,7 @@ async function handleCancel(
         { ...facts, stopConfirmed: confirmed },
       )
     } catch (outboxError) {
-      console.error("failed to persist cancel activity:", outboxError)
+      log.error("failed to persist cancel activity", { session: binding.runtimeSessionId, exception: outboxError })
       return { state: "stop-requested" }
     }
     return facts.stopConfirmed === false
@@ -184,7 +187,7 @@ async function handleCancel(
         ? { state: "stopped" }
         : { state: "stop-requested" }
   } catch (error) {
-    console.error("cancel runtime.cancel threw:", error instanceof Error ? error.message : String(error))
+    log.error("cancel runtime.cancel threw", { exception: error, session: binding.runtimeSessionId })
     return { state: "stop-requested" }
   }
 }
