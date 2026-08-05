@@ -71,7 +71,8 @@
         { "id": "arch", "absoluteMs": 500, "allowlist": [
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.Migrations_AreInInfrastructureData", "observedMs": 5257.4, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.DbContexts_AreInInfrastructureData", "observedMs": 5085.2, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
-          { "id": "Mohist.Server.ArchTests.CommentReferenceRules.ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline", "observedMs": 3336.9, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" }
+          { "id": "Mohist.Server.ArchTests.CommentReferenceRules.ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline", "observedMs": 3336.9, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
+          { "id": "Mohist.Server.ArchTests.ArchitectureRules.Domain_ShouldNotDependOnApi", "observedMs": 6477.2, "reason": "first ArchitectureRules static ArchUnitNET Architecture.Build() shared initialization cost", "owner": "arch", "deadline": "2026-10-31" }
           ] }
       ]
     },
