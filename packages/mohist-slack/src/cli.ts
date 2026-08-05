@@ -6,7 +6,8 @@ import { readFile } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import { SlackAdapter } from "./adapter.js"
 import { HttpAdapterTransport } from "./transport.js"
-import type { SocketClient } from "./types.js"
+import { configureSlackLogger } from "./logger.js"
+import type { SocketClient, SocketEvent } from "./types.js"
 
 export interface SlackCliOptions {
   readonly adapterId: string
@@ -23,6 +24,9 @@ export interface SlackCliOptions {
 
 export type OperatorCredentialFileReader = (path: string) => Promise<string>
 
+const PROXIED_CLIENT_PING_TIMEOUT_MS = 24 * 60 * 60 * 1_000
+const SOCKET_RECONNECT_MAX_DELAY_MS = 30_000
+
 export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
   const proxyUrl = options.slackProxyUrl?.trim()
   const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined
@@ -37,13 +41,92 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
       operatorToken: options.operatorToken,
       fetch: options.serverFetch,
     }),
-    socketFactory: (appToken) => new SocketModeClient({ appToken, ...(dispatcher ? { dispatcher } : {}) }) as unknown as SocketClient,
+    socketFactory: (appToken) => socketClient(appToken, dispatcher),
     webFactory: (botToken) => new WebClient(botToken, slackFetch ? { fetch: slackFetch } : undefined),
     heartbeatIntervalMs: options.heartbeatIntervalMs ?? 15_000,
     deliveryPollIntervalMs: options.deliveryPollIntervalMs ?? 1_000,
     discoveryIntervalMs: options.discoveryIntervalMs ?? 15_000,
     maxInFlight: options.maxInFlight ?? 8,
+    dispose: dispatcher ? () => dispatcher.close() : undefined,
   })
+}
+
+function socketClient(appToken: string, dispatcher?: ProxyAgent): SocketClient {
+  if (dispatcher) return new ProxiedSocketClient(appToken, dispatcher)
+  const client = new SocketModeClient({
+    appToken,
+  })
+  return {
+    on: (event, handler) => client.on(event, handler),
+    onState: (event, handler) => client.on(event, handler),
+    start: async () => { await client.start() },
+    disconnect: async () => { await client.disconnect() },
+  }
+}
+
+class ProxiedSocketClient implements SocketClient {
+  private readonly client: SocketModeClient
+  private reconnectTimer?: ReturnType<typeof setTimeout>
+  private reconnectAttempts = 0
+  private startPromise?: Promise<void>
+  private stopped = true
+
+  constructor(appToken: string, dispatcher: ProxyAgent) {
+    this.client = new SocketModeClient({
+      appToken,
+      dispatcher,
+      autoReconnectEnabled: false,
+      // CONNECT proxies can relay Slack traffic while hiding client pong diagnostics.
+      // Slack's independent server-ping watchdog remains the liveness authority.
+      clientPingTimeout: PROXIED_CLIENT_PING_TIMEOUT_MS,
+    })
+    this.client.on("connected", () => { this.reconnectAttempts = 0 })
+    this.client.on("disconnected", () => this.scheduleReconnect())
+  }
+
+  on(event: "slack_event", handler: (event: SocketEvent) => Promise<void>): void {
+    this.client.on(event, handler)
+  }
+
+  onState(
+    event: "connecting" | "connected" | "reconnecting" | "disconnected" | "error",
+    handler: (error?: unknown) => void,
+  ): void {
+    this.client.on(event, handler)
+  }
+
+  async start(): Promise<void> {
+    this.stopped = false
+    await this.startNow()
+  }
+
+  async disconnect(): Promise<void> {
+    this.stopped = true
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer)
+    this.reconnectTimer = undefined
+    await this.client.disconnect()
+  }
+
+  private async startNow(): Promise<void> {
+    if (this.startPromise) return await this.startPromise
+    const pending = this.client.start().then(() => undefined)
+    this.startPromise = pending
+    try {
+      await pending
+    } finally {
+      if (this.startPromise === pending) this.startPromise = undefined
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer) return
+    const delay = Math.min(1_000 * 2 ** this.reconnectAttempts, SOCKET_RECONNECT_MAX_DELAY_MS)
+    this.reconnectAttempts += 1
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined
+      void this.startNow().catch(() => this.scheduleReconnect())
+    }, delay)
+  }
 }
 
 export async function resolveOperatorToken(
@@ -72,18 +155,25 @@ export async function runCli() {
   process.on("SIGINT", () => controller.abort())
   process.on("SIGTERM", () => controller.abort())
 
-  const adapter = createSlackAdapter({
-    adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
-    serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
-    operatorToken: await resolveOperatorToken(),
-    slackProxyUrl: env("SLACK_PROXY_URL"),
-    heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
-    deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),
-    discoveryIntervalMs: positiveNumberEnv("DISCOVERY_POLL_INTERVAL_MS"),
-    maxInFlight: positiveNumberEnv("MAX_IN_FLIGHT"),
-  })
-  await adapter.start(controller.signal)
-  await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve(), { once: true }))
+  const logger = configureSlackLogger()
+  let adapter: SlackAdapter | undefined
+  try {
+    adapter = createSlackAdapter({
+      adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
+      serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
+      operatorToken: await resolveOperatorToken(),
+      slackProxyUrl: env("SLACK_PROXY_URL"),
+      heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
+      deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),
+      discoveryIntervalMs: positiveNumberEnv("DISCOVERY_POLL_INTERVAL_MS"),
+      maxInFlight: positiveNumberEnv("MAX_IN_FLIGHT"),
+    })
+    await adapter.start(controller.signal)
+    await new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve(), { once: true }))
+  } finally {
+    await adapter?.stop()
+    await logger.flush()
+  }
 }
 
 function firstNonBlank(...values: Array<string | undefined>): string | undefined {

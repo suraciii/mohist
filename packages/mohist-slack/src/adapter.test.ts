@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
+import { setSlackLoggerForTest, type SlackLogFields, type SlackLogger } from "./logger.js"
 import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class FakeSocket implements SocketClient {
@@ -7,6 +8,7 @@ class FakeSocket implements SocketClient {
   started = false
   disconnected = false
   acknowledged = false
+  disconnectError?: Error
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -24,7 +26,26 @@ class FakeSocket implements SocketClient {
 
   async disconnect() {
     this.disconnected = true
+    if (this.disconnectError) throw this.disconnectError
   }
+}
+
+class RecordingLogger implements SlackLogger {
+  readonly entries: Array<{ level: "info" | "error"; message: string; fields?: SlackLogFields }> = []
+
+  info(message: string, fields?: SlackLogFields): void {
+    this.entries.push({ level: "info", message, fields })
+  }
+
+  error(message: string, fields?: SlackLogFields): void {
+    this.entries.push({ level: "error", message, fields })
+  }
+
+  child(): SlackLogger {
+    return this
+  }
+
+  async flush(): Promise<void> {}
 }
 
 class FakeTransport implements AdapterTransport {
@@ -39,6 +60,7 @@ class FakeTransport implements AdapterTransport {
   ingressError?: Error
   interactionError?: Error
   interactionGate?: Promise<void>
+  leaseError?: Error
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
   async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
@@ -47,6 +69,7 @@ class FakeTransport implements AdapterTransport {
 
   async lease(ref: SlackAdapterTarget): Promise<AdapterSession> {
     this.leases.push(ref)
+    if (this.leaseError) throw this.leaseError
     const session = ref.ownerKind === "manager"
       ? { adapterId: "adapter-1", ownerKind: "manager" as const, botToken: "manager credential" }
       : { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
@@ -99,6 +122,114 @@ class FakeWeb implements SlackWebClient {
 }
 
 describe("mohist-slack adapter", () => {
+  let logger: RecordingLogger
+  let restoreLogger: () => void
+
+  beforeEach(() => {
+    logger = new RecordingLogger()
+    restoreLogger = setSlackLoggerForTest(logger)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    restoreLogger()
+  })
+
+  it("logs a failed target connection with its identity and redacted credential", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.leaseError = new Error("Slack rejected xapp-secret-value")
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => new FakeWeb(),
+    })
+
+    await adapter.start(new AbortController().signal)
+
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "target connection failed",
+      fields: {
+        target: "connection:p1:c1",
+        reason: "Slack rejected <redacted>",
+      },
+    })
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-secret-value")
+    await adapter.stop()
+  })
+
+  it("contains and redacts a Socket disconnect failure", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    const socket = new FakeSocket()
+    socket.disconnectError = new Error("disconnect rejected xapp-secret-value")
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+    })
+
+    await adapter.start(new AbortController().signal)
+    await adapter.stop()
+
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "socket disconnect failed",
+      fields: {
+        target: "connection:p1:c1",
+        reason: "disconnect rejected <redacted>",
+      },
+    })
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-secret-value")
+  })
+
+  it("does not log an in-flight lease cancellation during shutdown", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let markLeaseStarted!: () => void
+    let markLeaseSettled!: () => void
+    const leaseStarted = new Promise<void>((resolve) => { markLeaseStarted = resolve })
+    const leaseSettled = new Promise<void>((resolve) => { markLeaseSettled = resolve })
+    vi.spyOn(transport, "lease").mockImplementation(async (_ref, _adapterId, signal) => {
+      markLeaseStarted()
+      try {
+        await new Promise<void>((_resolve, reject) => signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("This operation was aborted", "AbortError")),
+          { once: true },
+        ))
+      } finally {
+        markLeaseSettled()
+      }
+      throw new Error("unreachable")
+    })
+
+    vi.advanceTimersByTime(1_000)
+    await leaseStarted
+    controller.abort()
+    await leaseSettled
+    await Promise.resolve()
+    await adapter.stop()
+    expect(logger.entries).not.toContainEqual(expect.objectContaining({
+      level: "error",
+      message: "target lease refresh failed",
+    }))
+  })
+
   it("normalizes the Socket Mode interactive payload without copying its raw body", () => {
     const interaction = normalizeSlackInteraction({
       type: "interactive",
@@ -166,7 +297,6 @@ describe("mohist-slack adapter", () => {
     transport.deliveries.length = 0
     transport.interactionError = new Error("Server returned 500 with xoxb-secret")
     const socket = new FakeSocket()
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
@@ -187,10 +317,15 @@ describe("mohist-slack adapter", () => {
     }
 
     await expect(socket.emit(body)).resolves.toBe(true)
-    expect(error).toHaveBeenCalledWith(
-      "Slack interaction processing failed after acknowledgement.",
-      "Server returned 500 with <redacted>",
-    )
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "interaction processing failed after acknowledgement",
+      fields: {
+        target: "connection:p:c",
+        event: "block_actions",
+        reason: "Server returned 500 with <redacted>",
+      },
+    })
 
     transport.interactionError = undefined
     await expect(socket.emit(body)).resolves.toBe(true)
@@ -203,7 +338,6 @@ describe("mohist-slack adapter", () => {
     transport.deliveries.length = 0
     transport.ingressError = new Error("Server returned 500")
     const socket = new FakeSocket()
-    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
@@ -219,10 +353,15 @@ describe("mohist-slack adapter", () => {
       team_id: "T1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", user: "U1", text: "do work" },
     })).resolves.toBe(false)
-    expect(error).toHaveBeenCalledWith(
-      "Slack event handling failed; the event remains unacknowledged for retry.",
-      "Server returned 500",
-    )
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "event handling failed before acknowledgement",
+      fields: {
+        target: "connection:p:c",
+        event: "message",
+        reason: "Server returned 500",
+      },
+    })
     controller.abort()
   })
 
@@ -386,6 +525,21 @@ describe("mohist-slack adapter", () => {
     expect(await sockets.get("c1")?.emit({ team_id: "T1", event: { type: "message", channel: "D1", channel_type: "im", ts: "1.2", user: "U1", text: "task" } })).toBe(true)
     expect(transport.envelopes).toHaveLength(1)
     expect(transport.envelopes[0]?.text).toBe("task")
+    expect(logger.entries).toContainEqual({
+      level: "info",
+      message: "envelope received",
+      fields: { target: "connection:p1:c1", event: "message" },
+    })
+    expect(logger.entries).toContainEqual({
+      level: "info",
+      message: "envelope forwarding",
+      fields: { target: "connection:p1:c1", event: "message" },
+    })
+    expect(logger.entries).toContainEqual({
+      level: "info",
+      message: "ingress accepted",
+      fields: { target: "connection:p1:c1", event: "message", kind: "accepted" },
+    })
     expect(webs.get("c1")?.posted).toEqual([{ channel: "D1", text: "accepted" }])
     expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-1", outcome: "delivered" }])
     controller.abort()

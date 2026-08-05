@@ -529,7 +529,6 @@ public static class SlackConnectionRoutes
             ISecretStore secrets,
             SlackSetupVerifier verifier,
             OperatorCredential credential,
-            TimeProvider time,
             CancellationToken ct) =>
         {
             if (!credential.Authorizes(http.Request.Headers))
@@ -546,9 +545,7 @@ public static class SlackConnectionRoutes
             var botToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), ct);
             if (appToken is null || botToken is null)
                 return ApiResults.Conflict("Configure both Slack credentials before starting the adapter.", "credentials_required");
-            await connections.UpdateAsync(projectId, connectionId, new HashSet<string>(StringComparer.Ordinal) { "lastHeartbeatAt" },
-                lastHeartbeatAt: time.GetUtcNow(), ct: ct);
-            await verifier.VerifyAsync(projectId, connectionId, ct);
+            await verifier.RecordAdapterHeartbeatAsync(projectId, connectionId, ct);
             return ApiResults.Ok(new
             {
                 adapterId = body.AdapterId,
