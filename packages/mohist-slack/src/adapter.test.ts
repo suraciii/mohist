@@ -64,9 +64,14 @@ class FakeTransport implements AdapterTransport {
   nextRenewals: Array<AdapterLease | null> = []
   nextIngressResults: IngressResult[] = []
   ingressError?: Error
+  ingressGate?: Promise<void>
+  ingressStarted?: () => void
   interactionError?: Error
   interactionGate?: Promise<void>
   interactionStarted?: () => void
+  uncertainGate?: Promise<void>
+  uncertainStarted?: () => void
+  claimDeliveryCalls = 0
   leaseError?: Error
 
   async discover(): Promise<readonly SlackAdapterTarget[]> {
@@ -90,6 +95,8 @@ class FakeTransport implements AdapterTransport {
 
   async ingress(_ref: SlackAdapterTarget, _leaseId: string, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
+    this.ingressStarted?.()
+    await this.ingressGate
     if (this.ingressError) throw this.ingressError
     const queued = this.nextIngressResults.shift()
     return queued ?? { kind: "accepted" }
@@ -104,10 +111,13 @@ class FakeTransport implements AdapterTransport {
   }
 
   async claimDelivery(): Promise<Delivery | null> {
+    this.claimDeliveryCalls += 1
     return this.deliveries.shift() ?? null
   }
 
   async claimUncertainDelivery(): Promise<Delivery | null> {
+    this.uncertainStarted?.()
+    await this.uncertainGate
     return this.uncertainDeliveries.shift() ?? null
   }
 
@@ -372,6 +382,87 @@ describe("mohist-slack adapter", () => {
     expect(sockets[1]?.starts).toBe(1)
     expect(JSON.stringify(logger.entries)).not.toContain("xapp-rotated")
     expect(JSON.stringify(logger.entries)).not.toContain("xoxb-rotated")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("does not forward an old Socket event that was waiting when credentials rotate", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ kind: "runtime", leaseId: "lease-rotated", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    let releaseIngress!: () => void
+    let markIngressStarted!: () => void
+    transport.ingressGate = new Promise<void>((resolve) => { releaseIngress = resolve })
+    const ingressStarted = new Promise<void>((resolve) => { markIngressStarted = resolve })
+    transport.ingressStarted = markIngressStarted
+    const sockets: FakeSocket[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+      maxInFlight: 1,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    const first = sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "first" } })
+    await ingressStarted
+    const old = sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "2", user: "U", text: "old" } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    releaseIngress()
+    await first
+    await vi.advanceTimersByTimeAsync(5)
+    await old
+
+    expect(transport.envelopes.map((envelope) => envelope.messageTs)).toEqual(["1"])
+    expect(sockets).toHaveLength(2)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("stops an old drain before claim, mutation, or acknowledgement when renewal expires", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const claimsBefore = transport.claimDeliveryCalls
+    transport.deliveries.push({ id: "old-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "old" }) })
+    let releaseUncertain!: () => void
+    let markUncertainStarted!: () => void
+    transport.uncertainGate = new Promise<void>((resolve) => { releaseUncertain = resolve })
+    const uncertainStarted = new Promise<void>((resolve) => { markUncertainStarted = resolve })
+    transport.uncertainStarted = markUncertainStarted
+
+    vi.advanceTimersByTime(100)
+    await uncertainStarted
+    transport.nextRenewals = [null]
+    await vi.advanceTimersByTimeAsync(900)
+    releaseUncertain()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(transport.claimDeliveryCalls).toBe(claimsBefore)
+    expect(web.posted).toEqual([])
+    expect(transport.acks).toEqual([])
     controller.abort()
     await adapter.stop()
   })
