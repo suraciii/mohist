@@ -20,6 +20,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -99,6 +100,8 @@ public static class MohistServiceRegistration
             new SessionTreeMutationFenceReadPort(
                 sp.GetRequiredService<IGrainFactory>(),
                 sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
+        services.AddScoped<ISessionTreeStopTargetAdapter>(sp =>
+            sp.GetRequiredService<SessionTreeStopTargetAdapter>());
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());

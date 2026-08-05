@@ -91,6 +91,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.SessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.SessionCancel => ["state", "interruptUnconfirmed"],
+            MohistCliApi.TableShape.SessionStop => ["operationId", "rootSessionId", "status", "admissionFenceActive", "graphRevision", "membership", "targets"],
+            MohistCliApi.TableShape.SessionDetach => ["state", "childSessionId", "parentSessionId", "edgeId", "childLaunchJobId", "attachedRevision", "detachedRevision", "historic", "reason"],
             MohistCliApi.TableShape.SessionRecovery =>
                 ["id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"],
             MohistCliApi.TableShape.IssueTemplateList => ["id", "name", "description", "source"],

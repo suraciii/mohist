@@ -48,6 +48,7 @@ internal static class SessionCommands
         session.Subcommands.Add(BuildReset(api));
         session.Subcommands.Add(BuildCancel(api));
         session.Subcommands.Add(BuildStop(api));
+        session.Subcommands.Add(BuildDetach(api));
 
         return session;
     }
@@ -405,10 +406,73 @@ internal static class SessionCommands
         "cancel",
         "Deterministically cancel a queued Turn. Sends a Server-only cancel request; use stop for an executing Turn.");
 
-    private static Command BuildStop(MohistCliApi api) => BuildTurnControl(
-        api,
-        "stop",
-        "Request that the Runtime stop an executing Turn. This is a best-effort request; use cancel for a queued Turn.");
+    private static Command BuildStop(MohistCliApi api)
+    {
+        var cmd = new Command("stop", "Cascade stop a session tree with a durable idempotency key.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Root AgentSession id" };
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key")
+        {
+            Description = "Stable key used to retry the same cascade stop operation",
+        };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionStop)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(idempotencyKeyOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => StopAsync(ctx));
+
+        async Task<int> StopAsync(ParseResult ctx)
+        {
+            var key = ctx.GetValue(idempotencyKeyOpt);
+            if (string.IsNullOrWhiteSpace(key))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--idempotency-key is required.");
+
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(sessionIdArg)!)}/stop"),
+                null,
+                mode,
+                nameof(MohistCliApi.TableShape.SessionStop),
+                rawJson: true,
+                headers: new Dictionary<string, string> { ["Idempotency-Key"] = key });
+        }
+
+        return cmd;
+    }
+
+    private static Command BuildDetach(MohistCliApi api)
+    {
+        var cmd = new Command("detach", "Detach a child session using its durable parent-link tuple.");
+        var childSessionIdArg = new Argument<string>("child-session-id") { Description = "Attached child AgentSession id" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionDetach)));
+
+        cmd.Arguments.Add(childSessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => DetachAsync(ctx));
+
+        async Task<int> DetachAsync(ParseResult ctx)
+        {
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(childSessionIdArg)!)}/detach"),
+                null,
+                mode,
+                nameof(MohistCliApi.TableShape.SessionDetach),
+                rawJson: true);
+        }
+
+        return cmd;
+    }
 
     private static Command BuildTurnControl(MohistCliApi api, string operation, string description)
     {

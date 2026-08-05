@@ -659,7 +659,8 @@ public sealed class SessionTreeMutationFenceGrain(
                 item.Runtime,
                 item.RuntimeSessionId,
                 item.WorkDir,
-                SessionTreeStopOperationIds.ForTarget(command.OperationId, item.SessionId)))
+                SessionTreeStopOperationIds.ForTarget(command.OperationId, item.SessionId),
+                item.BindingEpoch))
             .ToArray();
         var frozen = materializing with
         {

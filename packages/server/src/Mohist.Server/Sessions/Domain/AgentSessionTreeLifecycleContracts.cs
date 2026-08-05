@@ -73,6 +73,25 @@ public enum SessionTreeStopAdmissionOutcome
     Partial,
 }
 
+public enum SessionTreeStopOperationStatus
+{
+    Materializing,
+    Running,
+    Unknown,
+    Completed,
+    Partial,
+}
+
+public enum SessionTreeStopTargetOutcome
+{
+    Pending,
+    AlreadyIdle,
+    Cancelled,
+    StopRequested,
+    Unknown,
+    Rejected,
+}
+
 public static class SubagentTerminalReportIdempotencyKeys
 {
     public static string For(string edgeId, string childLaunchJobId) =>
@@ -252,7 +271,8 @@ public sealed record SessionTreeStopTargetSnapshot(
     [property: Id(5)] string? Runtime,
     [property: Id(6)] string? RuntimeSessionId,
     [property: Id(7)] string? WorkDir,
-    [property: Id(8)] string StopOperationId);
+    [property: Id(8)] string StopOperationId,
+    [property: Id(9)] long BindingEpoch = 0);
 
 [GenerateSerializer]
 public sealed record SessionTreeStopSnapshot(
@@ -284,7 +304,8 @@ public sealed record SessionTreeStopTargetFact(
     [property: Id(4)] string? RunnerId,
     [property: Id(5)] string? Runtime,
     [property: Id(6)] string? RuntimeSessionId,
-    [property: Id(7)] string? WorkDir);
+    [property: Id(7)] string? WorkDir,
+    [property: Id(8)] long BindingEpoch = 0);
 
 [GenerateSerializer]
 public sealed record SessionTreeStopSnapshotFacts(
@@ -304,6 +325,11 @@ public sealed record SessionTreeSessionBindingFact(
     [property: Id(5)] string? RuntimeSessionId,
     [property: Id(6)] long BindingEpoch);
 
+public sealed record SessionTreeDetachLinkFact(
+    string ProjectId,
+    string ChildSessionId,
+    SessionParentLink Link);
+
 [GenerateSerializer]
 public sealed record SessionTreeStopSnapshotResult(
     [property: Id(0)] SessionTreeStopSnapshotDisposition Disposition,
@@ -316,8 +342,137 @@ public sealed record SessionTreeStopAdmissionResult(
     [property: Id(1)] string? OperationId = null,
     [property: Id(2)] string? RejectionReason = null);
 
+[GenerateSerializer]
+public sealed record SessionTreeStopRequest(
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] string RootSessionId,
+    [property: Id(2)] string OperationId,
+    [property: Id(3)] string IdempotencyKey,
+    [property: Id(4)] string RequestFingerprint);
+
+[GenerateSerializer]
+public sealed record SessionTreeStopTargetResult(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string StopOperationId,
+    [property: Id(2)] SessionTreeStopTargetOutcome Outcome,
+    [property: Id(3)] string? Detail = null);
+
+[GenerateSerializer]
+public sealed record SessionTreeStopOperation(
+    [property: Id(0)] string ProjectId,
+    [property: Id(1)] string RootSessionId,
+    [property: Id(2)] string OperationId,
+    [property: Id(3)] string IdempotencyKey,
+    [property: Id(4)] string RequestFingerprint,
+    [property: Id(5)] SessionTreeStopOperationStatus Status,
+    [property: Id(6)] SessionTreeStopSnapshot? Snapshot = null,
+    [property: Id(7)] IReadOnlyList<SessionTreeStopTargetResult>? TargetResults = null)
+{
+    public bool AdmissionFenceActive =>
+        Status is SessionTreeStopOperationStatus.Running or SessionTreeStopOperationStatus.Unknown;
+
+    public static SessionTreeStopOperation Create(SessionTreeStopRequest request) => new(
+        request.ProjectId,
+        request.RootSessionId,
+        request.OperationId,
+        request.IdempotencyKey,
+        request.RequestFingerprint,
+        SessionTreeStopOperationStatus.Materializing,
+        TargetResults: []);
+
+    public SessionTreeStopOperation Publish(SessionTreeStopSnapshot snapshot)
+    {
+        EnsureIdentity(snapshot.ProjectId, snapshot.RootSessionId, snapshot.OperationId);
+        return this with
+        {
+            Status = snapshot.Targets.Count == 0
+                ? SessionTreeStopOperationStatus.Completed
+                : SessionTreeStopOperationStatus.Running,
+            Snapshot = snapshot,
+        };
+    }
+
+    public SessionTreeStopOperation Replay(SessionTreeStopSnapshot snapshot)
+    {
+        EnsureIdentity(snapshot.ProjectId, snapshot.RootSessionId, snapshot.OperationId);
+        if (Snapshot is not null && !SameSnapshot(Snapshot, snapshot))
+            throw new InvalidOperationException("A stop operation cannot replace its frozen snapshot.");
+        return this with { Snapshot = snapshot };
+    }
+
+    public SessionTreeStopOperation RecordTarget(SessionTreeStopTargetResult result)
+    {
+        if (Snapshot is null || !Snapshot.Targets.Any(target =>
+                target.SessionId == result.SessionId
+                && target.StopOperationId == result.StopOperationId))
+        {
+            throw new InvalidOperationException("A stop result must target the operation's frozen target.");
+        }
+
+        var results = (TargetResults ?? []).ToList();
+        var existing = results.FindIndex(item => item.SessionId == result.SessionId);
+        if (existing >= 0)
+            results[existing] = result;
+        else
+            results.Add(result);
+
+        var status = DeriveStatus(Snapshot, results);
+        return this with { Status = status, TargetResults = results.ToArray() };
+    }
+
+    private static SessionTreeStopOperationStatus DeriveStatus(
+        SessionTreeStopSnapshot snapshot,
+        IReadOnlyList<SessionTreeStopTargetResult> results)
+    {
+        if (results.Any(item => item.Outcome == SessionTreeStopTargetOutcome.Unknown))
+            return SessionTreeStopOperationStatus.Unknown;
+        if (results.Count < snapshot.Targets.Count
+            || results.Any(item => item.Outcome is SessionTreeStopTargetOutcome.Pending or SessionTreeStopTargetOutcome.StopRequested))
+        {
+            return SessionTreeStopOperationStatus.Running;
+        }
+        if (results.Any(item => item.Outcome == SessionTreeStopTargetOutcome.Rejected))
+            return SessionTreeStopOperationStatus.Partial;
+        return SessionTreeStopOperationStatus.Completed;
+    }
+
+    private static bool SameSnapshot(SessionTreeStopSnapshot left, SessionTreeStopSnapshot right) =>
+        left.ProjectId == right.ProjectId
+        && left.RootSessionId == right.RootSessionId
+        && left.OperationId == right.OperationId
+        && left.IdempotencyKey == right.IdempotencyKey
+        && left.RequestFingerprint == right.RequestFingerprint
+        && left.GraphRevision == right.GraphRevision
+        && left.Phase == right.Phase
+        && left.Membership.SequenceEqual(right.Membership)
+        && left.Targets.SequenceEqual(right.Targets);
+
+    private void EnsureIdentity(string projectId, string rootSessionId, string operationId)
+    {
+        if (ProjectId != projectId || RootSessionId != rootSessionId || OperationId != operationId)
+            throw new InvalidOperationException("A stop operation cannot replace its identity.");
+    }
+}
+
+public sealed class SessionTreeStopOperationConflictException : InvalidOperationException
+{
+    public SessionTreeStopOperationConflictException(string operationId)
+        : base($"Session tree stop operation {operationId} conflicts with the existing request.")
+    {
+        OperationId = operationId;
+    }
+
+    public string OperationId { get; }
+}
+
 public static class SessionTreeStopOperationIds
 {
+    public static string For(string projectId, string rootSessionId, string idempotencyKey) =>
+        $"session-tree-stop:{projectId}:{rootSessionId}:{idempotencyKey}";
+
     public static string ForTarget(string operationId, string sessionId) =>
         $"session-tree-stop:{operationId}:{sessionId}";
+
+    public static string ForDetach(string projectId, string childSessionId, long attachedRevision) =>
+        $"session-tree-detach:{projectId}:{childSessionId}:{attachedRevision}";
 }
