@@ -427,8 +427,11 @@ rejected 时完全没有 callback 的 abort。
 
 operation summary 只从 per-target facts 推导：全部确定为 `completed`；确定成功与
 `rejected` 混合为 `partial`；任一不可确认结果为 `unknown`；尚有安全投递为 `running`。
-重试只重新核对或重发原 target 的同一 persistent sub-operation ID。它不会重新遍历树、
-创建 child、重放输入，或停止 operation snapshot 之外后来开始的 Turn。
+只有 `completed` 与 `partial` 是 terminal outcome。`running` 与 `unknown` 都保留 stop
+admission fence；后者不是安全完成，必须以原 operation retry/reconcile 到确定结果，期间
+新的 spawn 继续拒绝为 `parent_tree_stop_in_progress`。重试只重新核对或重发原 target 的
+同一 persistent sub-operation ID。它不会重新遍历树、创建 child、重放输入，或停止 operation
+snapshot 之外后来开始的 Turn。
 
 Session 因此没有 terminal lifecycle：cascade stop 结束的是 snapshot 中的 current work，
 不是关闭会话。完成后 parent 或 child 可以在另一次明确 follow-up 中继续；那是新的 Turn，
@@ -493,8 +496,8 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 - AgentJob terminal 而非 Session/Turn terminal 触发一次 parent SessionInput，含 handler
   replay、parent busy/capacity、unknown 与 detach race；
 - cascade snapshot 与 reservation/final attachment/detach 的两两顺序、queued/executing/idle/
-  unknown targets、pre-submit child cancellation、partial outcome、同 operation retry 及 later
-  Turn 不被旧 operation 停止；
+  unknown targets、pre-submit child cancellation、partial outcome、同 operation retry、unknown
+  保持 spawn admission fence 及 later Turn 不被旧 operation 停止；
 - startup context 在第一轮前包含 own Session ID、parent ID（若有）、snapshot 和规范 CLI
   command，且 dispatch 不依赖 per-session environment variable。
 
