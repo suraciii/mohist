@@ -28,7 +28,7 @@ public sealed class SlackBotIdentityVerificationPortAdapterTests
     }
 
     [Fact]
-    public async Task Verify_does_not_fabricate_scopes_slack_auth_test_does_not_expose()
+    public async Task Verify_keeps_granted_scopes_null_when_x_oauth_scopes_header_absent()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse(
             """{"ok":true,"team_id":"T123","user_id":"U_BOT","app_id":"A9"}"""));
@@ -39,6 +39,100 @@ public sealed class SlackBotIdentityVerificationPortAdapterTests
 
         Assert.True(result.Verified);
         Assert.Null(result.GrantedScopes);
+    }
+
+    [Fact]
+    public async Task Verify_reads_granted_scopes_from_x_oauth_scopes_header()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponseWithScopes(
+            """{"ok":true,"team_id":"T123","user_id":"U_BOT","app_id":"A9"}""",
+            "chat:write,im:history,users:read,app_mentions:read"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.True(result.Verified);
+        Assert.NotNull(result.GrantedScopes);
+        var granted = result.GrantedScopes!;
+        Assert.Equal(
+            new[] { "app_mentions:read", "chat:write", "im:history", "users:read" },
+            granted.OrderBy(scope => scope, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task Verify_trims_and_drops_empty_entries_in_x_oauth_scopes_header()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponseWithScopes(
+            """{"ok":true,"team_id":"T123","user_id":"U_BOT","app_id":"A9"}""",
+            " chat:write , , im:history ,, users:read "));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.True(result.Verified);
+        Assert.NotNull(result.GrantedScopes);
+        var granted = result.GrantedScopes!;
+        Assert.Equal(
+            new[] { "chat:write", "im:history", "users:read" },
+            granted.OrderBy(scope => scope, StringComparer.Ordinal).ToArray());
+    }
+
+    [Fact]
+    public async Task Verify_ok_false_is_not_verified_and_carries_no_granted_scopes_even_with_header()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponseWithScopes(
+            """{"ok":false,"error":"invalid_auth"}""",
+            scopesHeader: "chat:write"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.False(result.Verified);
+        Assert.Equal("invalid_auth", result.ErrorClass);
+        Assert.Null(result.GrantedScopes);
+    }
+
+    [Fact]
+    public async Task Verify_unparseable_body_is_not_verified()
+    {
+        var handler = new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"ok":""", Encoding.UTF8, "application/json"),
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.False(result.Verified);
+        Assert.Equal("unparseable_response", result.ErrorClass);
+        Assert.Null(result.GrantedScopes);
+    }
+
+    // The adapter never substitutes team/app; it surfaces exactly what Slack confirmed so a
+    // caller comparing to the expected enrollment / Agent App detects the mismatch itself.
+    [Fact]
+    public async Task Verify_surfaces_provider_confirmed_team_and_app_so_callers_can_detect_mismatch()
+    {
+        var handler = new StubHttpMessageHandler(_ => JsonResponseWithScopes(
+            """{"ok":true,"team_id":"T_OTHER","user_id":"U_BOT","app_id":"A_UNEXPECTED"}""",
+            scopesHeader: "chat:write,users:read"));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.True(result.Verified);
+        Assert.Equal("T_OTHER", result.WorkspaceTeamId);
+        Assert.Equal("A_UNEXPECTED", result.AppId);
+        Assert.NotNull(result.GrantedScopes);
+        var granted = result.GrantedScopes!;
+        Assert.Equal(
+            new[] { "chat:write", "users:read" },
+            granted.OrderBy(scope => scope, StringComparer.Ordinal).ToArray());
     }
 
     [Fact]
@@ -91,10 +185,18 @@ public sealed class SlackBotIdentityVerificationPortAdapterTests
         Assert.Empty(handler.Requests);
     }
 
-    private static HttpResponseMessage JsonResponse(string json) => new(HttpStatusCode.OK)
+    private static HttpResponseMessage JsonResponse(string json) => JsonResponseWithScopes(json, scopesHeader: null);
+
+    private static HttpResponseMessage JsonResponseWithScopes(string json, string? scopesHeader)
     {
-        Content = new StringContent(json, Encoding.UTF8, "application/json"),
-    };
+        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        if (scopesHeader is not null)
+            response.Headers.Add("x-oauth-scopes", scopesHeader);
+        return response;
+    }
 
     private sealed class StubHttpMessageHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
     {

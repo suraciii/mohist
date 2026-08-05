@@ -5,10 +5,11 @@ namespace Mohist.Server.Infrastructure.Slack.Ports;
 /// <summary>
 /// Production <see cref="ISlackBotIdentityVerificationPort"/>: verifies a
 /// candidate Bot token against <c>auth.test</c> and returns the provider
-/// confirmed team / Bot / App facts. Slack's <c>auth.test</c> does not expose
-/// granted scopes and no bot-token-authenticated endpoint does, so
-/// <see cref="SlackBotIdentityVerificationResult.GrantedScopes"/> stays null —
-/// the adapter never fabricates scope facts it cannot verify.
+/// confirmed team / Bot / App facts plus the granted Bot scopes read from
+/// Slack's <c>x-oauth-scopes</c> response header. When the header is absent
+/// <see cref="SlackBotIdentityVerificationResult.GrantedScopes"/> stays null
+/// (unverifiable), so the adapter never substitutes the canonical desired
+/// scopes for an unconfirmed grant.
 /// </summary>
 public sealed class SlackBotIdentityVerificationPortAdapter(
     SlackApiTransport transport) : ISlackBotIdentityVerificationPort
@@ -31,7 +32,7 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
         switch (response.Outcome)
         {
             case SlackApiCallOutcome.Ok:
-                return ParseVerified(response.Body);
+                return ParseVerified(response.Body, response.GrantedScopesHeader);
             case SlackApiCallOutcome.Rejected:
                 return new(false, ErrorClass: response.Error ?? "auth_rejected");
             case SlackApiCallOutcome.Unparseable:
@@ -41,7 +42,7 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
         }
     }
 
-    private static SlackBotIdentityVerificationResult ParseVerified(System.Text.Json.JsonDocument? body)
+    private static SlackBotIdentityVerificationResult ParseVerified(System.Text.Json.JsonDocument? body, string? grantedScopesHeader)
     {
         if (body is null)
             return new(false, ErrorClass: "unparseable_response");
@@ -53,9 +54,16 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
             var appId = ReadString(root, "app_id");
             if (teamId is null || botUserId is null)
                 return new(false, ErrorClass: "invalid_identity_response");
-            return new(true, teamId, botUserId, appId, GrantedScopes: null);
+            return new(true, teamId, botUserId, appId, GrantedScopes: ParseGrantedScopes(grantedScopesHeader));
         }
     }
+
+    private static IReadOnlySet<string>? ParseGrantedScopes(string? header) =>
+        string.IsNullOrWhiteSpace(header)
+            ? null
+            : new HashSet<string>(
+                header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+                StringComparer.Ordinal);
 
     private static string? ReadString(System.Text.Json.JsonElement root, string propertyName) =>
         root.TryGetProperty(propertyName, out var element) && element.ValueKind == System.Text.Json.JsonValueKind.String

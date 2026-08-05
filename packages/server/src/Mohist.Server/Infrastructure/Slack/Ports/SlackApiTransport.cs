@@ -42,6 +42,7 @@ public sealed class SlackApiTransport(HttpClient http)
 
         using (response)
         {
+            var grantedScopesHeader = ReadGrantedScopesHeader(response);
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             if (response.StatusCode != HttpStatusCode.OK)
                 return SlackApiResponse.Rejected(ExtractError(body) ?? $"http_{(int)response.StatusCode}");
@@ -73,8 +74,16 @@ public sealed class SlackApiTransport(HttpClient http)
                 return SlackApiResponse.Rejected(error ?? "unknown_error");
             }
 
-            return SlackApiResponse.Ok(document);
+            return SlackApiResponse.Ok(document, grantedScopesHeader);
         }
+    }
+
+    private static string? ReadGrantedScopesHeader(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("x-oauth-scopes", out var values))
+            return null;
+        var joined = string.Join(",", values.Where(value => !string.IsNullOrWhiteSpace(value)));
+        return string.IsNullOrWhiteSpace(joined) ? null : joined;
     }
 
     private static string? ExtractError(string body)
@@ -105,9 +114,11 @@ public enum SlackApiCallOutcome
 public sealed record SlackApiResponse(
     SlackApiCallOutcome Outcome,
     JsonDocument? Body = null,
-    string? Error = null)
+    string? Error = null,
+    string? GrantedScopesHeader = null)
 {
-    public static SlackApiResponse Ok(JsonDocument body) => new(SlackApiCallOutcome.Ok, body);
+    public static SlackApiResponse Ok(JsonDocument body, string? grantedScopesHeader = null) =>
+        new(SlackApiCallOutcome.Ok, body, GrantedScopesHeader: grantedScopesHeader);
 
     public static SlackApiResponse Rejected(string error) => new(SlackApiCallOutcome.Rejected, Error: error);
 
