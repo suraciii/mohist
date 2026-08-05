@@ -101,6 +101,7 @@ export interface TrackEvaluation {
   readonly enforce: boolean
   readonly status?: string
   readonly reason?: string
+  readonly reportError?: string
   readonly total: number
   readonly failedTests: readonly string[]
   readonly rules: readonly RuleDiagnosis[]
@@ -115,4 +116,6 @@ export interface TrackRun {
   readonly elapsedMs: number
   readonly deadlineMs: number
   readonly command: string
+  readonly reportReady: boolean
+  readonly reportError?: string
 }
