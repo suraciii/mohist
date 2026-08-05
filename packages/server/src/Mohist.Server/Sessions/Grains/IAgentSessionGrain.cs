@@ -59,7 +59,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId);
     Task CancelTurnAsync(string turnId);
 
-    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId);
+    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null);
     Task MarkTurnStopDispatchedAsync(string turnId, string operationId);
     Task AbandonUndispatchedTurnStopAsync(string turnId, string operationId);
     Task CompleteTurnStopAsync(string turnId, string operationId);

@@ -19,6 +19,10 @@ public interface ISessionTreeMutationFenceReadPort
         string projectId,
         string sessionId,
         CancellationToken cancellationToken = default);
+    Task<SessionTreeDetachLinkFact?> ReadLinkAsync(
+        string projectId,
+        string childSessionId,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFenceReadPort, IScopedService
@@ -133,7 +137,8 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
                     item.Session.Runtime.RunnerId,
                     item.Session.Runtime.Runtime,
                     item.Session.Status.AgentRuntimeSessionId,
-                    item.Session.Runtime.WorkDir);
+                    item.Session.Runtime.WorkDir,
+                    item.Session.BindingEpoch);
             })
             .ToArray();
         return new SessionTreeStopSnapshotFacts(
@@ -175,5 +180,30 @@ public sealed class SessionTreeMutationFenceReadPort : ISessionTreeMutationFence
             session.Runtime.Runtime,
             session.Status.AgentRuntimeSessionId,
             session.BindingEpoch);
+    }
+
+    public async Task<SessionTreeDetachLinkFact?> ReadLinkAsync(
+        string projectId,
+        string childSessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(projectId))
+            throw new ArgumentException("ProjectId is required.", nameof(projectId));
+        if (string.IsNullOrWhiteSpace(childSessionId))
+            throw new ArgumentException("ChildSessionId is required.", nameof(childSessionId));
+        if (_dbFactory is null)
+            throw new InvalidOperationException("ReadLinkAsync requires the persistence-backed fence read port.");
+
+        await using var db = await _dbFactory.CreateDbContextAsync(cancellationToken);
+        var row = await db.AgentSessions.AsNoTracking()
+            .Where(item => item.Id == childSessionId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (row is null
+            || row.ParentSessionId is null
+            || !string.Equals(row.LabelProjectId, projectId, StringComparison.Ordinal))
+            return null;
+
+        var record = SessionTreeTopology.ReadCandidate(projectId, row);
+        return new SessionTreeDetachLinkFact(projectId, childSessionId, record.Session.ParentLink!);
     }
 }

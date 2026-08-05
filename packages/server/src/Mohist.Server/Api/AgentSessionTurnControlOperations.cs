@@ -25,7 +25,8 @@ internal sealed record TurnControlResult(
     TurnControlResultKind Kind,
     AgentTurnStatus? Status = null,
     bool? InterruptUnconfirmed = null,
-    string? StatusText = null);
+    string? StatusText = null,
+    bool DispatchStarted = false);
 
 internal static class AgentSessionTurnControlOperations
 {
@@ -67,10 +68,11 @@ internal static class AgentSessionTurnControlOperations
         RunnerConnectionTracker connections,
         SessionCancelTarget target,
         string turnId,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? expectedOperationId = null)
     {
         var session = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
-        var claim = await session.ClaimTurnStopAsync(turnId);
+        var claim = await session.ClaimTurnStopAsync(turnId, expectedOperationId);
         var control = claim.Control;
         if (control is null)
             return new(TurnControlResultKind.NotFound);
@@ -88,7 +90,7 @@ internal static class AgentSessionTurnControlOperations
             || string.IsNullOrWhiteSpace(target.WorkDir))
         {
             await session.AbandonUndispatchedTurnStopAsync(control.TurnId, claim.OperationId);
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status);
+            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: false);
         }
 
         object binding = new
@@ -131,11 +133,11 @@ internal static class AgentSessionTurnControlOperations
         }
         catch
         {
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status);
+            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: true);
         }
 
         if (reply is null)
-            return new(TurnControlResultKind.RunnerUnavailable, control.Status);
+            return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: true);
 
         if (control.IsLaunchTurn
             && string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))

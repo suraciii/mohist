@@ -904,7 +904,7 @@ internal sealed class MohistCliApi
 
     public async Task<int> PrintPostWithOutputAsync(
         string path,
-        object body,
+        object? body,
         string mode,
         string? tableShape = null,
         bool rawJson = false,
@@ -1191,6 +1191,8 @@ internal sealed class MohistCliApi
         SessionTranscript,
         SessionFollowup,
         SessionCancel,
+        SessionStop,
+        SessionDetach,
         OtelTracesList,
         WebhookSubscriptionList,
         WebhookSubscription,

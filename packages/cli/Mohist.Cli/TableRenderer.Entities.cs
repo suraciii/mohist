@@ -660,6 +660,35 @@ internal sealed partial class TableRenderer
             _out.WriteLine("verification: Session view");
     }
 
+    private void RenderSessionStop(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"operation: {StringOf(data, "operationId")}");
+        _out.WriteLine($"status:    {StringOf(data, "status")}");
+        _out.WriteLine($"fence:     {StringOf(data, "admissionFenceActive")}");
+        _out.WriteLine($"revision:  {StringOf(data, "graphRevision")}");
+    }
+
+    private void RenderSessionDetach(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"child:     {StringOf(data, "childSessionId")}");
+        _out.WriteLine($"parent:    {StringOf(data, "parentSessionId")}");
+        _out.WriteLine($"edge:      {StringOf(data, "edgeId")}");
+        _out.WriteLine($"revision:  {StringOf(data, "detachedRevision")}");
+        _out.WriteLine($"historic:  {StringOf(data, "historic")}");
+    }
+
     private static string FormatSessionOwner(JsonObject obj)
     {
         var source = StringOf(obj, "source");

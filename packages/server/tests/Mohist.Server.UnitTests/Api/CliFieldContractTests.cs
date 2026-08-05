@@ -15,6 +15,7 @@ using Mohist.Server.Project.Services;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Prompts;
@@ -99,6 +100,8 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.SessionTranscript] = D<AgentSessionTranscriptResponse>(),
             [MohistCliApi.TableShape.SessionFollowup] = D<AgentSessionFollowupResult>(),
             [MohistCliApi.TableShape.SessionCancel] = D<AgentSessionCancelReply>(),
+            [MohistCliApi.TableShape.SessionStop] = D<SessionTreeStopResponse>(),
+            [MohistCliApi.TableShape.SessionDetach] = D<SessionTreeDetachResult>(),
         };
 
     private static readonly IReadOnlyList<FieldDeviation> Deviations =

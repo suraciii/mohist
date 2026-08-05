@@ -2819,10 +2819,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _ = await CancelQueuedTurnAsync(turnId);
     }
 
-    public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId)
+    public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null)
     {
         var session = await GetRequiredAsync();
-        var result = session.ClaimTurnStop(turnId);
+        var result = session.ClaimTurnStop(turnId, operationId);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         return result;

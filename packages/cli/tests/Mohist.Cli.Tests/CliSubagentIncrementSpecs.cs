@@ -170,4 +170,94 @@ public sealed class CliSubagentIncrementSpecs
             ["root", "revision", "nodes", "edges", "continuation"],
             ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTree)).Fields);
     }
+
+    [Fact]
+    public async Task SessionStop_SendsOnlyIdempotencyKeyAndNoSnapshotInputs()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    operationId = "stop-op-1",
+                    rootSessionId = "sess_root",
+                    status = "unknown",
+                    graphRevision = 7,
+                    membership = new[] { new { sessionId = "sess_root" } },
+                    targets = new[] { new { sessionId = "sess_root", outcome = "unknown" } },
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "session", "stop", "sess_root",
+                "--project", "proj_parent",
+                "--idempotency-key", "stop-key-1",
+                "--json", "operationId,status",
+            ],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(
+            "/api/projects/proj_parent/agent-sessions/sess_root/stop",
+            request.RequestUri?.PathAndQuery);
+        Assert.Equal("stop-key-1", request.Headers["Idempotency-Key"].Single());
+        Assert.True(string.IsNullOrEmpty(request.Body));
+        Assert.Equal("stop-op-1", JsonNode.Parse(output.ToString())!["operationId"]!.GetValue<string>());
+        Assert.Equal("unknown", JsonNode.Parse(output.ToString())!["status"]!.GetValue<string>());
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task SessionDetach_PostsOnlyChildSessionIdAndRendersHistoricTuple()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    childSessionId = "sess_child",
+                    parentSessionId = "sess_parent",
+                    edgeId = "edge_1",
+                    childLaunchJobId = "job_child",
+                    attachedRevision = 3,
+                    detachedRevision = 8,
+                    historic = true,
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "session", "detach", "sess_child",
+                "--project", "proj_parent",
+                "--json", "childSessionId,parentSessionId,edgeId,detachedRevision",
+            ],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(
+            "/api/projects/proj_parent/agent-sessions/sess_child/detach",
+            request.RequestUri?.PathAndQuery);
+        Assert.True(string.IsNullOrEmpty(request.Body));
+        var data = JsonNode.Parse(output.ToString())!;
+        Assert.Equal("sess_child", data["childSessionId"]!.GetValue<string>());
+        Assert.Equal("sess_parent", data["parentSessionId"]!.GetValue<string>());
+        Assert.Equal("edge_1", data["edgeId"]!.GetValue<string>());
+        Assert.Equal(8, data["detachedRevision"]!.GetValue<long>());
+        Assert.Empty(error.ToString());
+    }
 }

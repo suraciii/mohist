@@ -766,7 +766,7 @@ public static partial class AgentSessionExtensions
             return new AgentTurnCancelResult(session.ResolveTurnControl(turnId), true);
         }
 
-        public AgentTurnStopClaimResult ClaimTurnStop(string turnId)
+        public AgentTurnStopClaimResult ClaimTurnStop(string turnId, string? operationId = null)
         {
             var control = session.ResolveTurnControl(turnId);
             var pending = session.Status.PendingStop;
@@ -785,7 +785,9 @@ public static partial class AgentSessionExtensions
 
             if (pending is null)
             {
-                pending = new AgentSessionStopClaim(turnId, Guid.NewGuid().ToString("N"));
+                pending = new AgentSessionStopClaim(
+                    turnId,
+                    string.IsNullOrWhiteSpace(operationId) ? Guid.NewGuid().ToString("N") : operationId);
                 session.Status = session.Status with { PendingStop = pending };
             }
 
