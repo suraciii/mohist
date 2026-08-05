@@ -29,38 +29,9 @@ public sealed class AgentSessionTreeQuerierSpecs
         var projectId = $"tree-query-{Guid.NewGuid():N}";
         var rootId = $"session-root-{Guid.NewGuid():N}";
         var childId = $"session-child-{Guid.NewGuid():N}";
-        var root = _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId);
+        await AttachChildAsync(projectId, rootId, childId, "edge-1", "command-1", "job-1");
+
         var child = _fixture.Grains.GetGrain<IAgentSessionGrain>(childId);
-        await root.OpenAsync(new OpenAgentSessionCommand(
-            "runner-tree",
-            "opencode",
-            "/workspace",
-            Metadata: Metadata(projectId, "agent-root", "agent-launch")));
-        await child.OpenAsync(new OpenAgentSessionCommand(
-            string.Empty,
-            "pi",
-            "/workspace",
-            Metadata: Metadata(projectId, "agent-child", "agent-launch"),
-            LaunchVisibility: AgentLaunchVisibility.Provisional));
-
-        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        await fence.ReserveAsync(LinkCommand(projectId, "edge-1", "command-1", rootId, childId));
-        var assigned = await fence.BeginFinalizeAsync("command-1", "edge-1");
-        await child.EnsureParentLinkAsync(new EnsureParentLinkCommand(
-            new SessionParentLink(
-                "edge-1",
-                rootId,
-                "agent-root",
-                "job-1",
-                _fixture.TimeProvider.GetUtcNow(),
-                assigned.Revision,
-                SessionParentLinkState.Attached),
-            "/workspace",
-            "runner-tree",
-            "opencode",
-            null));
-        await fence.CommitFinalizeAsync("command-1", "edge-1");
-
         var querier = CreateQuerier();
         var beforePromote = await querier.GetAsync(projectId, rootId, 10, null);
         Assert.NotNull(beforePromote);
@@ -88,10 +59,9 @@ public sealed class AgentSessionTreeQuerierSpecs
         Assert.Single(first.Nodes);
         Assert.NotNull(first.Continuation);
 
-        await fence.ReserveAsync(LinkCommand(projectId, "edge-2", "command-2", rootId, $"unused-{Guid.NewGuid():N}"));
-        await fence.BeginFinalizeAsync("command-2", "edge-2");
-        await fence.CommitFinalizeAsync("command-2", "edge-2");
-        await MarkDetachedAsync(childId, 2);
+        var secondChildId = $"session-second-child-{Guid.NewGuid():N}";
+        await AttachChildAsync(projectId, rootId, secondChildId, "edge-2", "command-2", "job-2");
+        await MarkDetachedAsync(childId, 3);
 
         var continued = await querier.GetAsync(projectId, rootId, 1, first.Continuation);
         Assert.NotNull(continued);
@@ -175,35 +145,7 @@ public sealed class AgentSessionTreeQuerierSpecs
         var projectId = $"tree-publish-{Guid.NewGuid():N}";
         var rootId = $"session-root-{Guid.NewGuid():N}";
         var childId = $"session-child-{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId).OpenAsync(new OpenAgentSessionCommand(
-            "runner-tree",
-            "opencode",
-            "/workspace",
-            Metadata: Metadata(projectId, "agent-root", "agent-launch")));
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).OpenAsync(new OpenAgentSessionCommand(
-            string.Empty,
-            "pi",
-            "/workspace",
-            Metadata: Metadata(projectId, "agent-child", "agent-launch"),
-            LaunchVisibility: AgentLaunchVisibility.Provisional));
-
-        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        await fence.ReserveAsync(LinkCommand(projectId, "edge-1", "command-1", rootId, childId));
-        var assigned = await fence.BeginFinalizeAsync("command-1", "edge-1");
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
-            new SessionParentLink(
-                "edge-1",
-                rootId,
-                "agent-root",
-                "job-1",
-                _fixture.TimeProvider.GetUtcNow(),
-                assigned.Revision,
-                SessionParentLinkState.Attached),
-            "/workspace",
-            "runner-tree",
-            "opencode",
-            null));
-        await fence.CommitFinalizeAsync("command-1", "edge-1");
+        await AttachChildAsync(projectId, rootId, childId, "edge-1", "command-1", "job-1");
 
         Assert.Equal(1, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(DbFactory(), projectId));
 
@@ -276,35 +218,12 @@ public sealed class AgentSessionTreeQuerierSpecs
         Assert.Equal(1, snapshot!.Revision);
         Assert.NotNull(snapshot.Continuation);
 
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(futureChildId).OpenAsync(new OpenAgentSessionCommand(
-            string.Empty,
-            "pi",
-            "/workspace",
-            Metadata: Metadata(projectId, "agent-future", "agent-launch"),
-            LaunchVisibility: AgentLaunchVisibility.Provisional));
-        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        await fence.ReserveAsync(LinkCommand(projectId, "edge-b", "command-b", rootId, futureChildId));
-        var assigned = await fence.BeginFinalizeAsync("command-b", "edge-b");
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(futureChildId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
-            new SessionParentLink(
-                "edge-b",
-                rootId,
-                "agent-root",
-                "job-b",
-                _fixture.TimeProvider.GetUtcNow(),
-                assigned.Revision,
-                SessionParentLinkState.Attached),
-            "/workspace",
-            "runner-tree",
-            "opencode",
-            null));
+        await AttachChildAsync(projectId, rootId, futureChildId, "edge-b", "command-b", "job-b");
 
         var pinned = await querier.GetAsync(projectId, rootId, 10, snapshot.Continuation);
         Assert.NotNull(pinned);
         Assert.Equal(1, pinned!.Revision);
         Assert.Equal(childId, Assert.Single(pinned.Nodes).SessionId);
-
-        await fence.CommitFinalizeAsync("command-b", "edge-b");
 
         var current = await querier.GetAsync(projectId, rootId, 10, null);
         Assert.NotNull(current);
@@ -323,12 +242,30 @@ public sealed class AgentSessionTreeQuerierSpecs
         await AttachChildAsync(projectId, rootId, childId, "edge-d", "command-d", "job-d");
 
         var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        await fence.ReserveAsync(LinkCommand(projectId, "edge-x", "command-x", rootId, $"unused-{Guid.NewGuid():N}"));
-        await fence.BeginFinalizeAsync("command-x", "edge-x");
-        await fence.CommitFinalizeAsync("command-x", "edge-x");
-        Assert.Equal(2, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(DbFactory(), projectId));
-
-        await MarkDetachedAsync(childId, 2);
+        var begun = await fence.BeginDetachAsync(new BeginSessionTreeDetachCommand(
+            projectId,
+            "edge-d",
+            rootId,
+            childId,
+            "command-detach",
+            "job-d",
+            1));
+        Assert.Equal(SessionTreeDetachMutationState.Pending, begun.State);
+        var applied = await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId)
+            .ApplyParentLinkDetachAsync(new ApplyParentLinkDetachCommand(
+                "edge-d",
+                rootId,
+                "job-d",
+                begun.Revision,
+                "command-detach",
+                childId,
+                1));
+        Assert.Equal(SessionTreeDetachMutationState.Detached, applied.State);
+        Assert.NotNull(applied.Receipt);
+        var acknowledged = await fence.AcknowledgeDetachAsync(applied.Receipt!);
+        Assert.Equal(SessionTreeDetachMutationState.Acknowledged, acknowledged.State);
+        var committed = await fence.CommitDetachAsync("command-detach", "edge-d", begun.Revision);
+        Assert.Equal(SessionTreeDetachMutationState.Detached, committed.State);
 
         var page = await CreateQuerier().GetAsync(projectId, rootId, 10, null);
         Assert.NotNull(page);
@@ -370,11 +307,25 @@ public sealed class AgentSessionTreeQuerierSpecs
     private async Task AttachChildAsync(
         string projectId, string rootId, string childId, string edgeId, string commandId, string jobId)
     {
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId).OpenAsync(new OpenAgentSessionCommand(
+        var root = _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId);
+        await root.OpenAsync(new OpenAgentSessionCommand(
             "runner-tree",
             "opencode",
             "/workspace",
             Metadata: Metadata(projectId, "agent-root", "agent-launch")));
+        var existing = await root.GetAsync();
+        if (string.IsNullOrWhiteSpace(existing?.AgentSessionId))
+        {
+            await root.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                "runtime-session",
+                ExpectedRunnerId: "runner-tree",
+                ExpectedRuntime: "opencode"));
+        }
+        else
+        {
+            Assert.Equal(1, existing.BindingEpoch);
+            Assert.Equal("runtime-session", existing.AgentSessionId);
+        }
         await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).OpenAsync(new OpenAgentSessionCommand(
             string.Empty,
             "pi",
@@ -382,22 +333,45 @@ public sealed class AgentSessionTreeQuerierSpecs
             Metadata: Metadata(projectId, "agent-child", "agent-launch"),
             LaunchVisibility: AgentLaunchVisibility.Provisional));
         var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
-        await fence.ReserveAsync(LinkCommand(projectId, edgeId, commandId, rootId, childId));
-        var assigned = await fence.BeginFinalizeAsync(commandId, edgeId);
-        await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
-            new SessionParentLink(
-                edgeId,
+        var command = LinkCommand(projectId, edgeId, commandId, rootId, childId, jobId);
+        await fence.ReserveAsync(command);
+        var bindingResult = await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootId)
+            .AcquireChildAttachBindingAsync(new AcquireChildAttachBindingCommand(
+                projectId,
+                command.CommandId,
+                command.EdgeId,
                 rootId,
-                "agent-root",
-                jobId,
-                _fixture.TimeProvider.GetUtcNow(),
+                command.ExpectedWorkDir,
+                command.ExpectedRunnerId,
+                command.ExpectedRuntime,
+                command.ExpectedRuntimeSessionId,
+                command.ExpectedBindingEpoch!.Value,
+                command.ParentAgentId!));
+        Assert.Equal(SessionTreeBindingAcquireState.Acquired, bindingResult.State);
+        Assert.NotNull(bindingResult.Receipt);
+        var binding = bindingResult.Receipt!;
+        var assigned = await fence.BeginFinalizeAsync(commandId, edgeId, binding);
+        var applied = await _fixture.Grains.GetGrain<IAgentSessionGrain>(childId).ApplyParentLinkAttachAsync(
+            new ApplyParentLinkAttachCommand(
+                command.CommandId,
+                command.EdgeId,
+                command.ParentSessionId,
+                command.ParentAgentId!,
+                command.ChildLaunchJobId!,
                 assigned.Revision,
-                SessionParentLinkState.Attached),
-            "/workspace",
-            "runner-tree",
-            "opencode",
-            null));
-        await fence.CommitFinalizeAsync(commandId, edgeId);
+                command.ExpectedWorkDir,
+                command.ExpectedRunnerId,
+                command.ExpectedRuntime,
+                command.ExpectedRuntimeSessionId,
+                projectId,
+                binding.BindingEpoch,
+                binding.ReceiptId,
+                SessionTreeExpectedLinkState.Absent));
+        Assert.Equal(SessionTreeAttachMutationState.Attached, applied.State);
+        var acknowledged = await fence.AcknowledgeFinalizeAsync(applied.Receipt!);
+        Assert.False(acknowledged.ReconciliationRequired);
+        var committed = await fence.CommitFinalizeAsync(commandId, edgeId, assigned.Revision);
+        Assert.Equal(LinkReservationState.Attached, committed.State);
     }
 
     private async Task CorruptRowColumnAsync(string sessionId, Action<AgentSessionRow> mutate)
@@ -422,7 +396,8 @@ public sealed class AgentSessionTreeQuerierSpecs
         string edgeId,
         string commandId,
         string parentSessionId,
-        string childSessionId) =>
+        string childSessionId,
+        string? childLaunchJobId = null) =>
         new(
             projectId,
             edgeId,
@@ -431,6 +406,10 @@ public sealed class AgentSessionTreeQuerierSpecs
             "/workspace",
             "runner-tree",
             "opencode",
-            null,
-            commandId);
+            "runtime-session",
+            commandId,
+            childLaunchJobId,
+            "agent-root",
+            1,
+            SessionTreeExpectedLinkState.Absent);
 }
