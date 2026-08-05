@@ -129,6 +129,8 @@ export function createRunnerLogger(options: RunnerLoggerOptions = {}): RunnerLog
   return createChild("runner")
 }
 
+const RESERVED_FIELD_KEYS = new Set(["time", "level", "msg", "service", "component"])
+
 function formatLogLine(date: Date, level: LogLevel, message: string, component: string, fields?: LogFields): string {
   const values: Array<[string, unknown]> = [
     ["time", date.toISOString()],
@@ -138,7 +140,7 @@ function formatLogLine(date: Date, level: LogLevel, message: string, component: 
     ["component", component],
   ]
   for (const [key, value] of Object.entries(fields ?? {})) {
-    if (key === "service" || key === "component") continue
+    if (RESERVED_FIELD_KEYS.has(key)) continue
     values.push([key, value])
   }
   return values

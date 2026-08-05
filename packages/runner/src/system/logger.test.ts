@@ -61,6 +61,37 @@ describe("runner logger", () => {
     expect(writer.appended).toEqual([{ path: "/virtual/logs/runner.log", content: expected }])
   })
 
+  it("drops fields colliding with fixed leading keys", async () => {
+    const writer = new FakeLogFileWriter()
+    const terminal: string[] = []
+    const logger = createRunnerLogger({
+      logsPath: "/virtual/logs",
+      clock: () => new Date("2026-01-01T00:00:00.123Z"),
+      fileWriter: writer,
+      terminal: { write: (line) => terminal.push(line) },
+    })
+
+    logger.child("work").error("report failed", {
+      time: "forged",
+      level: "TRACE",
+      msg: "forged",
+      service: "forged",
+      component: "forged",
+      exception: new Error("boom"),
+      work: "w_1",
+    })
+    await logger.flush()
+
+    const line = terminal[0]
+    expect(line).toMatch(/^time=2026-01-01T00:00:00\.123Z level=ERROR msg="report failed" service=runner component=work /)
+    expect(line).toContain("work=w_1")
+    expect(line).toContain('exception="Error: boom\\n')
+    expect(line).not.toContain("forged")
+    expect(line.match(/\btime=/g)).toHaveLength(1)
+    expect(line.match(/\blevel=/g)).toHaveLength(1)
+    expect(line.match(/\bmsg=/g)).toHaveLength(1)
+  })
+
   it("keeps exception type, message, and stack on one escaped line", async () => {
     const writer = new FakeLogFileWriter()
     const error = new Error("connection refused")

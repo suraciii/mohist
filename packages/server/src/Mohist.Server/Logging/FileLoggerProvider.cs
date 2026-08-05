@@ -9,6 +9,8 @@ public sealed class FileLoggerProvider : ILoggerProvider, ILogRecordSink
     public const string LogFileName = "server.log";
     public const long MaxLogFileBytes = 32L * 1024 * 1024;
 
+    private const int KeptGenerations = 2;
+
     private readonly object _writeLock = new();
     private readonly ConcurrentDictionary<string, FileLogger> _loggers = new(StringComparer.Ordinal);
     private readonly string _logFilePath;
@@ -135,7 +137,7 @@ public sealed class FileLoggerProvider : ILoggerProvider, ILogRecordSink
         _writer = null;
         _currentFileBytes = 0;
 
-        for (var generation = 2; generation >= 1; generation--)
+        for (var generation = KeptGenerations - 1; generation >= 1; generation--)
         {
             var source = _logFilePath + $".{generation}";
             var destination = _logFilePath + $".{generation + 1}";
