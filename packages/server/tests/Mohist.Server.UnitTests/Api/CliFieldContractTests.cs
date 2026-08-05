@@ -69,6 +69,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.SessionTranscriptSummary] = D<AgentSessionTranscriptResponse>(),
             [MohistCliApi.TableShape.SessionRecovery] = D<AgentSessionRecoveryResult>(),
             [MohistCliApi.TableShape.AgentSessionLaunch] = D<AgentSessionLaunchResponse>(),
+            [MohistCliApi.TableShape.AgentSessionSpawn] = D<AgentSessionSpawnRoutes.AgentSessionSpawnResponse>(),
             [MohistCliApi.TableShape.AgentSessionFollowup] = D<AgentSessionFollowupResult>(),
             [MohistCliApi.TableShape.AgentSessionCancel] = D<AgentSessionCancelReply>(),
             [MohistCliApi.TableShape.AgentSessionList] = D<AgentSessionListItemDto>(),
@@ -97,6 +98,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.AgentJobView] = D<AgentJobViewDto>(),
             [MohistCliApi.TableShape.SessionList] = D<UnifiedSessionListItemDto>(),
             [MohistCliApi.TableShape.SessionShow] = D<UnifiedSessionSummaryDto>(),
+            [MohistCliApi.TableShape.SessionTree] = D<AgentSessionTreePage>(),
             [MohistCliApi.TableShape.SessionTranscript] = D<AgentSessionTranscriptResponse>(),
             [MohistCliApi.TableShape.SessionFollowup] = D<AgentSessionFollowupResult>(),
             [MohistCliApi.TableShape.SessionCancel] = D<AgentSessionCancelReply>(),
@@ -108,6 +110,15 @@ public sealed class CliFieldContractTests
     [
         new(MohistCliApi.TableShape.SystemInfo, "degraded", DeviationKind.Local, "CLI emits degraded=true when the server is unavailable"),
         new(MohistCliApi.TableShape.SystemInfo, "cliVersion", DeviationKind.Local, "CLI emits its local version when the server is unavailable"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "inputId", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "agentId", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "agentName", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "status", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "attachments", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "rejectedAttachments", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "transcriptUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "jobUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.AgentSessionSpawn, "observationUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
     ];
 
     [Fact]

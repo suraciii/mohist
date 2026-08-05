@@ -16,10 +16,18 @@ public sealed class CliSubagentIncrementSpecs
                 success = true,
                 data = new
                 {
+                    jobId = "job_child",
                     sessionId = "sess_child",
+                    inputId = "input_child",
+                    turnId = "turn_child",
+                    agentId = "agent_child",
+                    agentName = "Child",
                     parentSessionId = "sess_parent",
                     edgeId = "edge_1",
                     status = "queued",
+                    transcriptUrl = "/transcript",
+                    jobUrl = "/job",
+                    observationUrl = "/observation",
                 },
             })));
 
@@ -48,6 +56,59 @@ public sealed class CliSubagentIncrementSpecs
         Assert.Equal("agent_child", body["targetAgentRef"]!.GetValue<string>());
         Assert.Equal("do the work", body["prompt"]!.GetValue<string>());
         Assert.Equal(2, body.Count);
+        Assert.Equal(
+            "job id:         job_child\nsession id:     sess_child\nturn id:        turn_child\nparent session: sess_parent\nedge id:        edge_1\n",
+            output.ToString());
+        Assert.Equal(
+            ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionSpawn)).Fields);
+        Assert.Empty(error.ToString());
+    }
+
+    [Fact]
+    public async Task AgentSpawn_JsonSelectionUsesTheFiveFieldSchema()
+    {
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    jobId = "job_child",
+                    sessionId = "sess_child",
+                    inputId = "input_child",
+                    turnId = "turn_child",
+                    agentId = "agent_child",
+                    agentName = "Child",
+                    status = "queued",
+                    parentSessionId = "sess_parent",
+                    edgeId = "edge_1",
+                    transcriptUrl = "/transcript",
+                    jobUrl = "/job",
+                    observationUrl = "/observation",
+                },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "agent", "spawn", "agent_child",
+                "--project", "proj_parent",
+                "--parent-session", "sess_parent",
+                "--prompt", "do the work",
+                "--idempotency-key", "spawn-1",
+                "--json", "jobId,sessionId,turnId,parentSessionId,edgeId",
+            ],
+            output,
+            error,
+            fileSystem,
+            executor);
+
+        Assert.Equal(0, exitCode);
+        var data = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal(
+            ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
+            data.Select(property => property.Key));
         Assert.Empty(error.ToString());
     }
 

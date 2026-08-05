@@ -1153,6 +1153,7 @@ internal sealed class MohistCliApi
         SessionTranscriptSummary,
         SessionRecovery,
         AgentSessionLaunch,
+        AgentSessionSpawn,
         AgentSessionFollowup,
         AgentSessionCancel,
         AgentSessionList,
