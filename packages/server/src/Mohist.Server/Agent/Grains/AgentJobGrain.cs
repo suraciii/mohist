@@ -1665,9 +1665,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         if (status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
             || State.Input?.SpawnOrigin is null
+            || State.LaunchVisibility != AgentLaunchVisibility.Visible
             || State.PendingSubagentTerminalEvent is not null)
             return;
 
+        // Only an accepted (visible) delegation owes a terminal callback;
+        // a provisional or rejected launch was never attached to a parent
+        // SessionParentLink, so a cancelled job here must stay silent.
         State.PendingSubagentTerminalEvent = new PendingSubagentTerminalEvent(
             AgentJobSessionDeliveryIds.SubagentTerminalEventId(Key),
             State.Input.SpawnOrigin,
