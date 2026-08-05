@@ -114,6 +114,7 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
             ParentExpectedRunnerId: runnerId,
             ParentExpectedRuntime: "opencode",
             ParentExpectedRuntimeSessionId: "parent-runtime",
+            ParentExpectedBindingEpoch: 1,
             ParentLinkEdgeId: edgeId,
             SpawnRequestFingerprint: AgentLaunchCoordinatorCodec.SpawnFingerprint(targetAgentId, prompt));
         var coordinator = Grains.GetGrain<IAgentLaunchCoordinatorGrain>(
