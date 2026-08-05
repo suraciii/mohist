@@ -123,6 +123,26 @@ public partial class AddAgentSubagentTreeContracts : Migration
             name: "IX_AgentSessions_TreeVisibleParent_AttachedRevision_Edge",
             table: "AgentSessions");
 
+        if (migrationBuilder.ActiveProvider.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+        {
+            migrationBuilder.Sql(
+                """
+                ALTER TABLE "AgentJobs" DROP COLUMN "PinnedRunnerId";
+                ALTER TABLE "AgentJobs" DROP COLUMN "LaunchVisibility";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ChildLaunchJobId";
+                ALTER TABLE "AgentSessions" DROP COLUMN "LaunchVisibility";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentAgentId";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkAttachedAt";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkAttachedRevision";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkDetachedAt";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkDetachedRevision";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkEdgeId";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentLinkState";
+                ALTER TABLE "AgentSessions" DROP COLUMN "ParentSessionId";
+                """);
+            return;
+        }
+
         migrationBuilder.DropColumn(name: "PinnedRunnerId", table: "AgentJobs");
         migrationBuilder.DropColumn(name: "LaunchVisibility", table: "AgentJobs");
         migrationBuilder.DropColumn(name: "ChildLaunchJobId", table: "AgentSessions");
