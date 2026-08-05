@@ -43,9 +43,7 @@ public static class SlackManagerRoutes
                     body.AccessPolicy ?? AccessPolicyKind.OwnerOnly,
                     body.OwnerSlackUserId,
                     body.BotName,
-                    body.AvatarHash,
-                    body.TransportKind ?? SlackTransportKind.Socket,
-                    body.PublicIngressBaseUrl), ct);
+                    body.AvatarHash), ct);
                 return Results.Json(new ApiResponse<object>(true, result), statusCode: result.Created ? 201 : 200);
             }
             catch (SlackManagerConflictException ex)
@@ -253,8 +251,6 @@ public sealed class SlackManagerCreateBody
     public string? OwnerSlackUserId { get; init; }
     public string? BotName { get; init; }
     public string? AvatarHash { get; init; }
-    public string? TransportKind { get; init; }
-    public string? PublicIngressBaseUrl { get; init; }
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

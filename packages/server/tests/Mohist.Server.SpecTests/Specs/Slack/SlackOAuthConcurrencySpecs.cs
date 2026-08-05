@@ -59,7 +59,6 @@ public sealed class SlackOAuthConcurrencySpecs : IAsyncLifetime
             AppId = "A_OAUTH_CONCURRENCY",
             AppLifecycle = SlackAppLifecycle.Created,
             Authorization = SlackAuthorizationState.NotStarted,
-            TransportKind = SlackTransportKind.Socket,
             DesiredManifestVersion = 2,
             DesiredManifestHash = "desired",
             VerifiedScopesJson = "[]",

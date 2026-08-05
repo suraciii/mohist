@@ -619,7 +619,7 @@ public class MohistDbContext : DbContext
                     "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerTransportKind",
-                    "\"ManagerTransportKind\" IN ('socket', 'https')");
+                    "\"ManagerTransportKind\" = 'socket'");
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerReadiness",
                     "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
@@ -632,6 +632,9 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CapabilityReason).HasMaxLength(1024);
             entity.Property(e => e.PlanCode).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ManagedAppLimit).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialRef).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialGeneration).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialExpiresAt);
             entity.Property(e => e.ManagerCredentialRef).HasMaxLength(512).IsRequired();
             entity.Property(e => e.ManagerAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ManagerBotUserId).HasMaxLength(256).IsRequired();
@@ -662,9 +665,6 @@ public class MohistDbContext : DbContext
                     "CK_ManagedSlackAgentApps_Authorization",
                     "\"Authorization\" IN ('not_started', 'awaiting_user', 'pending_admin', 'authorized', 'expired_or_cancelled', 'revoked')");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackAgentApps_TransportKind",
-                    "\"TransportKind\" IN ('socket', 'https')");
-                table.HasCheckConstraint(
                     "CK_ManagedSlackAgentApps_BindingState",
                     "\"BindingState\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
                 table.HasCheckConstraint(
@@ -682,12 +682,10 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.EnrollmentId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AgentConnectionId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.PublicIngressBaseUrl).HasMaxLength(2048);
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.BotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppLifecycle).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Authorization).HasMaxLength(32).IsRequired();
-            entity.Property(e => e.TransportKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.DesiredManifestHash).HasMaxLength(128).IsRequired();
             entity.Property(e => e.AppliedManifestHash).HasMaxLength(128);
             entity.Property(e => e.VerifiedScopesJson).HasColumnType("JSON").IsRequired();

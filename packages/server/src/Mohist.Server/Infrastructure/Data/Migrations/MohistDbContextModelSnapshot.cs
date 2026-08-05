@@ -1858,18 +1858,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("OperationStartedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PublicIngressBaseUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("SigningSecretRef")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TransportKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("UnknownOutcome")
@@ -1917,7 +1908,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_ManagedSlackAgentApps_IdentityPair", "\"BotUserId\" = '' OR \"AppId\" <> ''");
 
-                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_TransportKind", "\"TransportKind\" IN ('socket', 'https')");
                         });
                 });
 
@@ -2693,6 +2683,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConfigurationCredentialRef")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ConfigurationCredentialExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ConfigurationCredentialGeneration")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -2791,7 +2792,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerCapability", "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
 
-                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" IN ('socket', 'https')");
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" = 'socket'");
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerReadiness", "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
                         });

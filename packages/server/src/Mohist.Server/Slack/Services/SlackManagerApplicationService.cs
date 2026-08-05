@@ -232,8 +232,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(request.AgentId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.WorkspaceTeamId);
         ValidateAccessPolicy(request.AccessPolicy);
-        SlackStateTransitions.RequireTransportKind(request.TransportKind);
-
         var agent = await _agents.GetByIdAsync(request.ProjectId, request.AgentId, ct);
         if (agent is null)
             throw new SlackManagerValidationException("The Agent was not found.", "agent_not_found");
@@ -389,23 +387,16 @@ public sealed class SlackManagerApplicationService : IScopedService
         var manifest = _manifests.Generate(new SlackManifestInput(
             connection.BotName,
             preview.AppDescription,
-            BotScopes,
-            request.TransportKind == SlackTransportKind.Https
-                ? SlackManifestTransport.Https
-                : SlackManifestTransport.Socket,
-            request.PublicIngressBaseUrl,
             ProductCapabilityVersion,
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
-            ManifestVersion,
-            BotEvents));
+            SlackManifestKind.AgentApp,
+            ManifestVersion));
         return await _childApps.CreateAsync(new ManagedSlackAgentApp
         {
             Id = $"child_app_{Guid.NewGuid():N}",
             EnrollmentId = enrollment.Id,
             WorkspaceTeamId = connection.WorkspaceTeamId,
             AgentConnectionId = connection.Id,
-            PublicIngressBaseUrl = request.PublicIngressBaseUrl,
-            TransportKind = request.TransportKind,
             DesiredManifestVersion = manifest.Version,
             DesiredManifestHash = manifest.Hash,
         }, ct);
@@ -536,7 +527,7 @@ public sealed class SlackManagerApplicationService : IScopedService
             child.AppLifecycle,
             child.Authorization,
             status.ManifestState,
-            child.TransportKind,
+            SlackManagerTransportKind.Socket,
             status.TransportReadiness,
             status.NextAction,
             child.BindingState,
@@ -559,9 +550,7 @@ public sealed record SlackManagerCreateRequest(
     string AccessPolicy = AccessPolicyKind.OwnerOnly,
     string? OwnerSlackUserId = null,
     string? BotName = null,
-    string? AvatarHash = null,
-    string TransportKind = SlackTransportKind.Socket,
-    string? PublicIngressBaseUrl = null);
+    string? AvatarHash = null);
 
 public sealed record SlackManagerSetupRequest(
     string WorkspaceTeamId,

@@ -274,6 +274,9 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         LastVerifiedAt = row.LastVerifiedAt,
         PlanCode = row.PlanCode,
         ManagedAppLimit = row.ManagedAppLimit,
+        ConfigurationCredentialRef = row.ConfigurationCredentialRef,
+        ConfigurationCredentialGeneration = row.ConfigurationCredentialGeneration,
+        ConfigurationCredentialExpiresAt = row.ConfigurationCredentialExpiresAt,
         ManagerCredentialRef = row.ManagerCredentialRef,
         ManagerAppId = row.ManagerAppId,
         ManagerBotUserId = row.ManagerBotUserId,
@@ -301,6 +304,9 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         LastVerifiedAt = enrollment.LastVerifiedAt,
         PlanCode = enrollment.PlanCode,
         ManagedAppLimit = enrollment.ManagedAppLimit,
+        ConfigurationCredentialRef = enrollment.ConfigurationCredentialRef,
+        ConfigurationCredentialGeneration = enrollment.ConfigurationCredentialGeneration,
+        ConfigurationCredentialExpiresAt = enrollment.ConfigurationCredentialExpiresAt,
         ManagerCredentialRef = enrollment.ManagerCredentialRef,
         ManagerAppId = enrollment.ManagerAppId,
         ManagerBotUserId = enrollment.ManagerBotUserId,
@@ -326,6 +332,9 @@ public sealed class SlackWorkspaceEnrollmentStore : IScopedService
         row.LastVerifiedAt = enrollment.LastVerifiedAt;
         row.PlanCode = enrollment.PlanCode;
         row.ManagedAppLimit = enrollment.ManagedAppLimit;
+        row.ConfigurationCredentialRef = enrollment.ConfigurationCredentialRef;
+        row.ConfigurationCredentialGeneration = enrollment.ConfigurationCredentialGeneration;
+        row.ConfigurationCredentialExpiresAt = enrollment.ConfigurationCredentialExpiresAt;
         row.ManagerCredentialRef = enrollment.ManagerCredentialRef;
         row.ManagerAppId = enrollment.ManagerAppId;
         row.ManagerBotUserId = enrollment.ManagerBotUserId;

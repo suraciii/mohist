@@ -238,7 +238,7 @@ public partial class ConnectionSecretsMigrationSpecs
                 """);
             await SeedRebuildRowsAsync(before);
             var migrator = before.GetService<IMigrator>();
-            await migrator.MigrateAsync();
+            await migrator.MigrateAsync("20260805120000_RenameManagedSlackAgentAppAndGeneralizeSecrets");
         }
 
         await using var after = database.CreateDbContext();

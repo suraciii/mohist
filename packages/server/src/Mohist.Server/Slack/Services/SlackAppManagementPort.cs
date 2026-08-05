@@ -4,16 +4,26 @@ namespace Mohist.Server.Slack.Services;
 
 public interface ISlackAppManagementPort
 {
+    Task<SlackAppManagementResult> ValidateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default);
     Task<SlackAppManagementResult> CreateAsync(SlackAppManagementRequest request, CancellationToken ct = default);
+    Task<SlackAppManagementResult> UpdateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default);
     Task<SlackAppManagementResult> DeleteAsync(SlackAppManagementRequest request, CancellationToken ct = default);
 }
 
 public interface ISlackAppManagementFactPort
 {
     Task<SlackAppManagementFact> InspectAsync(SlackAppManagementRequest request, CancellationToken ct = default);
+    Task<SlackAppManifestExport> ExportManifestAsync(SlackAppManagementRequest request, CancellationToken ct = default);
 }
 
 public sealed record SlackAppManagementRequest(string EnrollmentId, string ChildAppId, string WorkspaceTeamId, string? AppId = null);
+
+public sealed record SlackAppManifestRequest(SlackAppManagementRequest App, SlackManifest Manifest);
+
+public sealed record SlackAppManifestExport(
+    SlackAppManagementFactOutcome Outcome,
+    string? ManifestJson = null,
+    string? ErrorClass = null);
 
 public sealed record SlackAppManagementFact(
     SlackAppManagementFactOutcome Outcome,
@@ -42,14 +52,23 @@ public enum SlackAppManagementOutcome
 
 public sealed class UnavailableSlackAppManagementPort : ISlackAppManagementPort, ISlackAppManagementFactPort, IScopedService
 {
+    public Task<SlackAppManagementResult> ValidateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default) =>
+        throw new NotSupportedException("Slack Manager manifest validation is not connected in this slice.");
+
     public Task<SlackAppManagementResult> CreateAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException("Slack Manager app management is not connected in this slice.");
+
+    public Task<SlackAppManagementResult> UpdateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default) =>
+        throw new NotSupportedException("Slack Manager manifest update is not connected in this slice.");
 
     public Task<SlackAppManagementResult> DeleteAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException("Slack Manager app management is not connected in this slice.");
 
     public Task<SlackAppManagementFact> InspectAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
         throw new NotSupportedException("Slack Manager app inspection is not connected in this slice.");
+
+    public Task<SlackAppManifestExport> ExportManifestAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
+        throw new NotSupportedException("Slack Manager manifest export is not connected in this slice.");
 }
 
 public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlackAppManagementFactPort
@@ -60,9 +79,11 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
     private int _managedAppLimit = int.MaxValue;
     private int _createCalls;
     private int _deleteCalls;
+    private int _manifestCalls;
 
     public int CreateCalls => Volatile.Read(ref _createCalls);
     public int DeleteCalls => Volatile.Read(ref _deleteCalls);
+    public int ManifestCalls => Volatile.Read(ref _manifestCalls);
 
     public void SetResponse(string childAppId, FakeSlackAppResponse response)
     {
@@ -70,6 +91,13 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
     }
 
     public void SetManagedAppLimit(int limit) => _managedAppLimit = limit;
+
+    public Task<SlackAppManagementResult> ValidateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _manifestCalls);
+        return Task.FromResult(ResponseFor(request.App.ChildAppId).Validate
+            ?? new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded));
+    }
 
     public Task<SlackAppManagementResult> CreateAsync(SlackAppManagementRequest request, CancellationToken ct = default)
     {
@@ -102,6 +130,17 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
         }
     }
 
+    public Task<SlackAppManagementResult> UpdateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default)
+    {
+        Interlocked.Increment(ref _manifestCalls);
+        return Task.FromResult(ResponseFor(request.App.ChildAppId).Update
+            ?? new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded, request.App.AppId));
+    }
+
+    public Task<SlackAppManifestExport> ExportManifestAsync(SlackAppManagementRequest request, CancellationToken ct = default) =>
+        Task.FromResult(ResponseFor(request.ChildAppId).Export
+            ?? new SlackAppManifestExport(SlackAppManagementFactOutcome.Absent, ErrorClass: "not_found"));
+
     public Task<SlackAppManagementResult> DeleteAsync(SlackAppManagementRequest request, CancellationToken ct = default)
     {
         Interlocked.Increment(ref _deleteCalls);
@@ -115,9 +154,18 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
             return Task.FromResult(new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded, request.AppId));
         }
     }
+
+    private FakeSlackAppResponse ResponseFor(string childAppId)
+    {
+        lock (_gate)
+            return _responses.TryGetValue(childAppId, out var response) ? response : new();
+    }
 }
 
 public sealed record FakeSlackAppResponse(
     SlackAppManagementResult? Create = null,
     SlackAppManagementResult? Delete = null,
-    SlackAppManagementFact? Inspect = null);
+    SlackAppManagementFact? Inspect = null,
+    SlackAppManagementResult? Validate = null,
+    SlackAppManagementResult? Update = null,
+    SlackAppManifestExport? Export = null);

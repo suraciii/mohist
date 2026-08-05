@@ -12,6 +12,9 @@ public sealed class SlackWorkspaceEnrollmentRow
     public DateTimeOffset? LastVerifiedAt { get; set; }
     public string PlanCode { get; set; } = string.Empty;
     public int ManagedAppLimit { get; set; }
+    public string ConfigurationCredentialRef { get; set; } = string.Empty;
+    public int ConfigurationCredentialGeneration { get; set; }
+    public DateTimeOffset? ConfigurationCredentialExpiresAt { get; set; }
     public string ManagerCredentialRef { get; set; } = string.Empty;
     public string ManagerAppId { get; set; } = string.Empty;
     public string ManagerBotUserId { get; set; } = string.Empty;

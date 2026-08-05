@@ -157,15 +157,13 @@ public static class MohistServiceRegistration
         services.AddSingleton<WebhookPayloadRenderer>();
         services.AddHttpClient<IWebhookHttpClient, WebhookHttpClient>()
             .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromSeconds(15));
-         services.AddHttpClient<ISlackApiClient, SlackApiClient>(client =>
-         {
-             client.BaseAddress = new Uri(configuration["Mohist:SlackApiUrl"] ?? "https://slack.com/api/");
-             client.Timeout = TimeSpan.FromSeconds(10);
-         });
          services.AddScoped<SlackAttachmentInputBinder>();
 
         services.AddScoped<ISlackAppManagementPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
         services.AddScoped<ISlackAppManagementFactPort>(sp => sp.GetRequiredService<UnavailableSlackAppManagementPort>());
+        services.AddScoped<ISlackConfigurationCredentialPort>(sp => sp.GetRequiredService<UnavailableSlackConfigurationCredentialPort>());
+        services.AddScoped<ISlackConfigurationCredentialStore>(sp => sp.GetRequiredService<ProtectedSlackConfigurationCredentialStore>());
+        services.AddScoped<ISlackBotIdentityVerificationPort>(sp => sp.GetRequiredService<UnavailableSlackBotIdentityVerificationPort>());
         services.AddScoped<ISlackOAuthCredentialSink>(sp => sp.GetRequiredService<UnavailableSlackOAuthCredentialSink>());
         services.AddScoped<ISlackChildAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
 
@@ -210,7 +208,8 @@ public static class MohistServiceRegistration
         services.Configure<SecretStoreOptions>(configuration.GetSection(SecretStoreOptions.SectionName));
         services.AddSingleton<ISecretKeyFileOperations>(PhysicalSecretKeyFileOperations.Instance);
         services.AddSingleton<ISecretKeyFile, PhysicalSecretKeyFile>();
-        services.AddSingleton<ISecretStore, AesGcmSecretStore>();
+        services.AddSingleton<AesGcmSecretStore>();
+        services.AddSingleton<ISecretStore>(sp => sp.GetRequiredService<AesGcmSecretStore>());
         services.Configure<SlackProviderOptions>(configuration.GetSection(SlackProviderOptions.SectionName));
         services.AddScoped<ISlackConnectionHealthBackpressurer>(sp =>
             sp.GetRequiredService<SlackConnectionHealthBackpressurer>());

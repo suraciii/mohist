@@ -93,11 +93,8 @@ public static class SlackStateTransitions
         throw InvalidTransition("authorization", current, next);
     }
 
-    public static void RequireTransportKind(string value) =>
-        RequireKnown(value, SlackTransportKind.Socket, SlackTransportKind.Https);
-
     public static void RequireManagerTransportKind(string value) =>
-        RequireKnown(value, SlackManagerTransportKind.Socket, SlackManagerTransportKind.Https);
+        RequireKnown(value, SlackManagerTransportKind.Socket);
 
     public static void RequireManagerReadiness(string value) =>
         RequireKnown(value,

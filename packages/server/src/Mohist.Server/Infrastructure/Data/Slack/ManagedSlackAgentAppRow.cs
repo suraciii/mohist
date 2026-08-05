@@ -6,13 +6,11 @@ public sealed class ManagedSlackAgentAppRow
     public string EnrollmentId { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
     public string AgentConnectionId { get; set; } = string.Empty;
-    public string? PublicIngressBaseUrl { get; set; }
     public string AppId { get; set; } = string.Empty;
     public string BotUserId { get; set; } = string.Empty;
 
     public string AppLifecycle { get; set; } = string.Empty;
     public string Authorization { get; set; } = string.Empty;
-    public string TransportKind { get; set; } = string.Empty;
 
     public int DesiredManifestVersion { get; set; }
     public string DesiredManifestHash { get; set; } = string.Empty;

@@ -6,14 +6,12 @@ public sealed class ManagedSlackAgentApp
     public string EnrollmentId { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
     public string AgentConnectionId { get; set; } = string.Empty;
-    public string? PublicIngressBaseUrl { get; set; }
     public string AppId { get; set; } = string.Empty;
     public string BotUserId { get; set; } = string.Empty;
 
     public string AppLifecycle { get; set; } = SlackAppLifecycle.NotCreated;
     public string Authorization { get; set; } = SlackAuthorizationState.NotStarted;
     public string ManifestState => ManagedSlackAgentAppStatusDeriver.DeriveManifestState(this);
-    public string TransportKind { get; set; } = SlackTransportKind.Socket;
     public string TransportReadiness => ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(this);
     public string NextAction => ManagedSlackAgentAppStatusDeriver.DeriveNextAction(
         this,
@@ -61,12 +59,6 @@ public sealed class ManagedSlackAgentApp
         Authorization = nextAuthorization;
     }
 
-    public void SetTransportKind(string transportKind)
-    {
-        SlackStateTransitions.RequireTransportKind(transportKind);
-        TransportKind = transportKind;
-    }
-
     public void TransitionBindingState(string nextBindingState)
     {
         SlackStateTransitions.RequireBindingTransition(BindingState, nextBindingState);
@@ -100,12 +92,6 @@ public static class SlackManifestState
     public const string Desired = "desired";
     public const string Applied = "applied";
     public const string DriftKnown = "drift_known";
-}
-
-public static class SlackTransportKind
-{
-    public const string Socket = "socket";
-    public const string Https = "https";
 }
 
 public static class SlackTransportReadiness

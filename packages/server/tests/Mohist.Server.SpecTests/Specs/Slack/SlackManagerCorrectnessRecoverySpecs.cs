@@ -271,11 +271,9 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         {
             AppLifecycle = SlackAppLifecycle.Created,
             Authorization = SlackAuthorizationState.Authorized,
-            TransportKind = SlackTransportKind.Socket,
             BindingState = SlackChildAppBindingState.Bound,
         };
         Assert.Throws<InvalidOperationException>(() => child.TransitionAppLifecycle(SlackAppLifecycle.NotCreated));
-        Assert.Throws<ArgumentException>(() => child.SetTransportKind("invalid"));
         child.AppLifecycle = "invalid";
         Assert.Throws<ArgumentException>(() => ManagedSlackAgentAppStatusDeriver.Derive(child));
 

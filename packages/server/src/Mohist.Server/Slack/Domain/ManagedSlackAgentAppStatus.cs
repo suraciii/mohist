@@ -23,7 +23,6 @@ public static class ManagedSlackAgentAppStatusDeriver
     {
         SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, child.AppLifecycle);
         SlackStateTransitions.RequireAuthorizationTransition(child.Authorization, child.Authorization);
-        SlackStateTransitions.RequireTransportKind(child.TransportKind);
         SlackStateTransitions.RequireBindingTransition(child.BindingState, child.BindingState);
     }
 
@@ -48,36 +47,17 @@ public static class ManagedSlackAgentAppStatusDeriver
                 : SlackManifestState.DriftKnown;
 
     public static string DeriveTransportReadiness(ManagedSlackAgentApp child) => DeriveTransportReadiness(
-        child.TransportKind,
-        child.PublicIngressBaseUrl,
-        child.SigningSecretRef,
         child.AppLevelTokenRef,
         child.BotTokenRef);
 
     public static string DeriveTransportReadiness(
-        string transportKind,
-        string? publicIngressBaseUrl,
-        string? signingSecretRef,
         string? appLevelTokenRef,
         string? botTokenRef)
     {
-        if (string.Equals(transportKind, SlackTransportKind.Https, StringComparison.Ordinal))
-        {
-            return IsHttpsIngressReady(publicIngressBaseUrl)
-                && !string.IsNullOrWhiteSpace(signingSecretRef)
-                ? SlackTransportReadiness.Ready
-                : SlackTransportReadiness.NotReady;
-        }
-
-        if (string.Equals(transportKind, SlackTransportKind.Socket, StringComparison.Ordinal))
-        {
-            return !string.IsNullOrWhiteSpace(appLevelTokenRef)
-                && !string.IsNullOrWhiteSpace(botTokenRef)
-                ? SlackTransportReadiness.Ready
-                : SlackTransportReadiness.NotReady;
-        }
-
-        return SlackTransportReadiness.NotReady;
+        return !string.IsNullOrWhiteSpace(appLevelTokenRef)
+            && !string.IsNullOrWhiteSpace(botTokenRef)
+            ? SlackTransportReadiness.Ready
+            : SlackTransportReadiness.NotReady;
     }
 
     public static string DeriveNextAction(
@@ -88,16 +68,14 @@ public static class ManagedSlackAgentAppStatusDeriver
             child.Authorization,
             manifestState,
             transportReadiness,
-            child.BindingState,
-            child.TransportKind);
+            child.BindingState);
 
     public static string DeriveNextAction(
         string appLifecycle,
         string authorization,
         string manifestState,
         string transportReadiness,
-        string bindingState,
-        string transportKind)
+        string bindingState)
     {
         if (appLifecycle == SlackAppLifecycle.CreateUnknown)
             return SlackChildAppNextAction.ReconcileCreate;
@@ -114,18 +92,11 @@ public static class ManagedSlackAgentAppStatusDeriver
         if (manifestState != SlackManifestState.Applied)
             return SlackChildAppNextAction.ApplyManifest;
         if (transportReadiness != SlackTransportReadiness.Ready)
-            return transportKind == SlackTransportKind.Https
-                ? SlackChildAppNextAction.ConfigureHttpsIngress
-                : SlackChildAppNextAction.ConfigureSocketCredentials;
+            return SlackChildAppNextAction.ConfigureSocketCredentials;
         if (bindingState != SlackChildAppBindingState.Bound)
             return SlackChildAppNextAction.BindConnection;
         return SlackChildAppNextAction.Ready;
     }
-
-    private static bool IsHttpsIngressReady(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-        && !string.IsNullOrWhiteSpace(uri.Host);
 }
 
 public static class SlackChildAppBindingState
@@ -154,7 +125,6 @@ public static class SlackChildAppNextAction
     public const string WaitForOperation = "wait_for_operation";
     public const string AuthorizeChildApp = "authorize_child_app";
     public const string ApplyManifest = "apply_manifest";
-    public const string ConfigureHttpsIngress = "configure_https_ingress";
     public const string ConfigureSocketCredentials = "configure_socket_credentials";
     public const string BindConnection = "bind_connection";
     public const string Ready = "ready";

@@ -10,6 +10,9 @@ public sealed class SlackWorkspaceEnrollment
     public DateTimeOffset? LastVerifiedAt { get; set; }
     public string PlanCode { get; set; } = string.Empty;
     public int ManagedAppLimit { get; set; }
+    public string ConfigurationCredentialRef { get; set; } = string.Empty;
+    public int ConfigurationCredentialGeneration { get; set; }
+    public DateTimeOffset? ConfigurationCredentialExpiresAt { get; set; }
     public string ManagerCredentialRef { get; set; } = string.Empty;
     public string ManagerAppId { get; set; } = string.Empty;
     public string ManagerBotUserId { get; set; } = string.Empty;
@@ -49,6 +52,23 @@ public sealed class SlackWorkspaceEnrollment
             throw new ArgumentOutOfRangeException(nameof(managedAppLimit));
         PlanCode = planCode;
         ManagedAppLimit = managedAppLimit;
+    }
+
+    public void RecordConfigurationCredentialRotation(
+        string workspaceTeamId,
+        DateTimeOffset expiresAt,
+        DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        if (!string.Equals(WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Configuration credential workspace does not match the enrollment.");
+        if (expiresAt <= now)
+            throw new ArgumentOutOfRangeException(nameof(expiresAt));
+
+        ConfigurationCredentialRef = Id;
+        ConfigurationCredentialGeneration++;
+        ConfigurationCredentialExpiresAt = expiresAt;
+        UpdatedAt = now;
     }
 
     public void ConfigureManagerApp(
@@ -136,7 +156,6 @@ public static class SlackManagerCapability
 public static class SlackManagerTransportKind
 {
     public const string Socket = "socket";
-    public const string Https = "https";
 }
 
 public static class SlackManagerReadiness

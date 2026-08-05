@@ -150,7 +150,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         {
             AppLifecycle = SlackAppLifecycle.NotCreated,
             Authorization = SlackAuthorizationState.NotStarted,
-            TransportKind = SlackTransportKind.Socket,
         };
         Assert.Equal(SlackChildAppNextAction.CreateChildApp, child.NextAction);
 
@@ -164,11 +163,8 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         child.AppliedManifestVersion = 1;
         child.AppliedManifestHash = "old";
         child.BindingState = SlackChildAppBindingState.Bound;
-        child.TransportKind = SlackTransportKind.Https;
-        child.PublicIngressBaseUrl = "https://mohist.example/slack";
-        child.SigningSecretRef = "secret-ref";
-        child.AppLevelTokenRef = string.Empty;
-        child.BotTokenRef = string.Empty;
+        child.AppLevelTokenRef = "app-token-ref";
+        child.BotTokenRef = "bot-token-ref";
 
         var status = ManagedSlackAgentAppStatusDeriver.Derive(child);
         Assert.Equal(SlackManifestState.DriftKnown, status.ManifestState);
@@ -180,89 +176,12 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         status = ManagedSlackAgentAppStatusDeriver.Derive(child);
         Assert.Equal(SlackChildAppNextAction.Ready, status.NextAction);
 
-        child.SigningSecretRef = string.Empty;
-        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
-        Assert.Equal(SlackChildAppNextAction.ConfigureHttpsIngress, child.NextAction);
-
-        child.TransportKind = SlackTransportKind.Socket;
         child.AppLevelTokenRef = string.Empty;
+        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
+        Assert.Equal(SlackChildAppNextAction.ConfigureSocketCredentials, child.NextAction);
+
         child.BotTokenRef = "bot-ref";
         Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
-    }
-
-    [Fact]
-    public void Manifest_is_canonical_and_drift_fingerprint_excludes_secrets_and_metadata_from_live_schema()
-    {
-        var generator = new SlackManifestGenerator();
-        var first = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["chat:write", "commands"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var reordered = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var capabilityDrift = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-2",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var identityDrift = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-2", "agent-1", "T123")));
-
-        Assert.Equal(first.CanonicalJson, reordered.CanonicalJson);
-        Assert.Equal(first.Hash, reordered.Hash);
-        Assert.NotEqual(first.Hash, capabilityDrift.Hash);
-        Assert.NotEqual(first.Hash, identityDrift.Hash);
-        Assert.DoesNotContain("product_capability_version", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.DoesNotContain("agent-1", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.DoesNotContain("xoxb-", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() => generator.Generate(new SlackManifestInput(
-            "HTTPS Agent", "Handles work", ["chat:write"], SlackManifestTransport.Https, null,
-            "capability-1", new SlackManifestIdentitySnapshot("c", "a", "T"))));
-
-        var https = generator.Generate(new SlackManifestInput(
-            "HTTPS Agent", "Handles work", ["chat:write"], SlackManifestTransport.Https,
-            "https://mohist.example", "capability-1", new SlackManifestIdentitySnapshot("c", "a", "T")));
-        Assert.Contains("request_url", https.CanonicalJson, StringComparison.Ordinal);
-        Assert.Contains("https://mohist.example/slack/events", https.CanonicalJson, StringComparison.Ordinal);
-
-        using var socketJson = JsonDocument.Parse(first.CanonicalJson);
-        var socketRoot = socketJson.RootElement;
-        Assert.Equal(["display_information", "features", "oauth_config", "settings"],
-            socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
-        var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention", "message.im"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
-        Assert.Contains("reactions:read", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
-        Assert.Contains("reactions:write", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
-        Assert.False(socketEvents.TryGetProperty("request_url", out _));
-        Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
-        var socketAppHome = socketRoot.GetProperty("features").GetProperty("app_home");
-        Assert.False(socketAppHome.GetProperty("home_tab_enabled").GetBoolean());
-        Assert.True(socketAppHome.GetProperty("messages_tab_enabled").GetBoolean());
-        Assert.False(socketAppHome.GetProperty("messages_tab_read_only_enabled").GetBoolean());
-
-        using var httpsJson = JsonDocument.Parse(https.CanonicalJson);
-        var httpsEvents = httpsJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention", "message.im"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
-        Assert.Equal("https://mohist.example/slack/events", httpsEvents.GetProperty("request_url").GetString());
     }
 
     [Fact]
@@ -507,7 +426,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             BotUserId = botUserId,
             AppLifecycle = lifecycle,
             Authorization = authorization,
-            TransportKind = SlackTransportKind.Socket,
             DesiredManifestVersion = 2,
             DesiredManifestHash = "desired",
             VerifiedScopesJson = "[]",

@@ -145,8 +145,6 @@ public static class SlackConnectionRoutes
             string connectionId,
             AgentConnectionStore connections,
             AgentQuerier agents,
-            ISecretStore secrets,
-            ISlackApiClient slack,
             SlackSetupVerifier verifier,
             CancellationToken ct) =>
         {
@@ -155,7 +153,7 @@ public static class SlackConnectionRoutes
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
 
-            var ownerAvailability = await ProbeOwnerAvailabilityAsync(connection, secrets, slack, ct);
+            var ownerAvailability = ProbeOwnerAvailability(connection);
             var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
             var agentReadiness = agent is null
                 ? connection.AgentReadiness
@@ -1156,37 +1154,11 @@ public static class SlackConnectionRoutes
             : new(SlackProviderInboxRouteKinds.Followup, sessionId);
     }
 
-    internal static async Task<string> ProbeOwnerAvailabilityAsync(
-        AgentConnection connection,
-        ISecretStore secrets,
-        ISlackApiClient slack,
-        CancellationToken ct)
+    internal static string ProbeOwnerAvailability(AgentConnection connection)
     {
         if (connection.OwnerSlackUserId is null)
             return OwnerAvailabilityKind.NotConfigured;
-
-        var token = await secrets.LoadAsync(
-            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-        if (token is null || token.Length == 0)
-            return OwnerAvailabilityKind.Unknown;
-
-        try
-        {
-            var response = await slack.UsersInfoAsync(
-                connection.OwnerSlackUserId,
-                Encoding.UTF8.GetString(token),
-                ct);
-            return SlackOwnerClaimService.IsEligibleMember(
-                response,
-                connection.WorkspaceTeamId,
-                connection.OwnerSlackUserId)
-                ? OwnerAvailabilityKind.Available
-                : OwnerAvailabilityKind.Unavailable;
-        }
-        catch (HttpRequestException)
-        {
-            return OwnerAvailabilityKind.Unknown;
-        }
+        return OwnerAvailabilityKind.Unknown;
     }
 
     private static bool IsCredentialRelatedHealthReason(string? reason)

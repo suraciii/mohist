@@ -72,7 +72,6 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         if (string.IsNullOrWhiteSpace(childApp.AgentConnectionId)) throw new ArgumentException("Agent connection id is required.", nameof(childApp));
         SlackStateTransitions.RequireChildAppLifecycleTransition(childApp.AppLifecycle, childApp.AppLifecycle);
         SlackStateTransitions.RequireAuthorizationTransition(childApp.Authorization, childApp.Authorization);
-        SlackStateTransitions.RequireTransportKind(childApp.TransportKind);
         SlackStateTransitions.RequireBindingTransition(childApp.BindingState, childApp.BindingState);
         if (childApp.AppLifecycle != SlackAppLifecycle.NotCreated)
             throw new InvalidOperationException("A new Child App must start not_created.");
@@ -114,12 +113,6 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         CancellationToken ct = default) =>
         UpdateAsync(id, childApp => childApp.TransitionAuthorization(nextAuthorization), ct);
 
-    public Task<ManagedSlackAgentApp?> SetTransportKindAsync(
-        string id,
-        string transportKind,
-        CancellationToken ct = default) =>
-        UpdateAsync(id, childApp => childApp.SetTransportKind(transportKind), ct);
-
     public Task<ManagedSlackAgentApp?> TransitionBindingStateAsync(
         string id,
         string nextBindingState,
@@ -150,12 +143,10 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         EnrollmentId = row.EnrollmentId,
         WorkspaceTeamId = row.WorkspaceTeamId,
         AgentConnectionId = row.AgentConnectionId,
-        PublicIngressBaseUrl = row.PublicIngressBaseUrl,
         AppId = row.AppId,
         BotUserId = row.BotUserId,
         AppLifecycle = row.AppLifecycle,
         Authorization = row.Authorization,
-        TransportKind = row.TransportKind,
         DesiredManifestVersion = row.DesiredManifestVersion,
         DesiredManifestHash = row.DesiredManifestHash,
         AppliedManifestVersion = row.AppliedManifestVersion,
@@ -188,12 +179,10 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
         EnrollmentId = childApp.EnrollmentId,
         WorkspaceTeamId = childApp.WorkspaceTeamId,
         AgentConnectionId = childApp.AgentConnectionId,
-        PublicIngressBaseUrl = childApp.PublicIngressBaseUrl,
         AppId = childApp.AppId,
         BotUserId = childApp.BotUserId,
         AppLifecycle = childApp.AppLifecycle,
         Authorization = childApp.Authorization,
-        TransportKind = childApp.TransportKind,
         DesiredManifestVersion = childApp.DesiredManifestVersion,
         DesiredManifestHash = childApp.DesiredManifestHash,
         AppliedManifestVersion = childApp.AppliedManifestVersion,
@@ -223,7 +212,6 @@ public sealed class ManagedSlackAgentAppStore : IScopedService
     {
         row.AppLifecycle = childApp.AppLifecycle;
         row.Authorization = childApp.Authorization;
-        row.TransportKind = childApp.TransportKind;
         row.BindingState = childApp.BindingState;
         row.DeletedAt = childApp.DeletedAt;
     }
