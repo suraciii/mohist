@@ -64,34 +64,7 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             sessionId,
             ct);
         if (target is null)
-        {
-            var launch = await _launcher.LaunchConnectionAsync(
-                agent,
-                ManagerPrompt(prompt),
-                new ConnectionLaunchOrigin(
-                    request.Actor.EnrollmentId,
-                    request.Actor.WorkspaceTeamId,
-                    request.Actor.SlackUserId,
-                    request.Message.Identity.ConversationId,
-                    request.Message.Identity.MessageTs,
-                    request.Message.ThreadTs),
-                StartupContext(request.Actor),
-                preMintedSessionId: sessionId,
-                ct: ct);
-            await _dmSessions.SetCurrentSessionIdAsync(
-                agent.ProjectId,
-                request.Actor.EnrollmentId,
-                request.Message.Identity.WorkspaceTeamId,
-                request.Actor.SlackUserId,
-                request.Message.Identity.ConversationId,
-                launch.SessionId,
-                request.Message.Identity.MessageTs,
-                ct);
-            return new SlackManagerConversationResult(
-                Text: "Manager request accepted.",
-                DispatchRef: $"manager:{launch.SessionId}:{request.Message.Identity.MessageTs}",
-                SessionId: launch.SessionId);
-        }
+            return await LaunchSessionAsync(request, agent, prompt, sessionId, ct);
 
         var idempotencyKey = $"manager:{request.Message.Identity.AsKey()}";
         var grain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
@@ -110,12 +83,52 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
         }
         catch (RuntimeSessionMissingException)
         {
-            return Reply(request, "The Manager session is not ready yet. Please retry after it connects.");
+            return await LaunchSessionAsync(
+                request,
+                agent,
+                prompt,
+                ReplacementManagerSessionId(request),
+                ct);
         }
         catch (SessionActivityUnknownException)
         {
             return Reply(request, "The Manager session state is uncertain. Please retry after it reconciles.");
         }
+    }
+
+    private async Task<SlackManagerConversationResult> LaunchSessionAsync(
+        SlackManagerConversationRequest request,
+        AgentInfo agent,
+        string prompt,
+        string sessionId,
+        CancellationToken ct)
+    {
+        var launch = await _launcher.LaunchConnectionAsync(
+            agent,
+            ManagerPrompt(prompt),
+            new ConnectionLaunchOrigin(
+                request.Actor.EnrollmentId,
+                request.Actor.WorkspaceTeamId,
+                request.Actor.SlackUserId,
+                request.Message.Identity.ConversationId,
+                request.Message.Identity.MessageTs,
+                request.Message.ThreadTs),
+            StartupContext(request.Actor),
+            preMintedSessionId: sessionId,
+            ct: ct);
+        await _dmSessions.SetCurrentSessionIdAsync(
+            agent.ProjectId,
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Actor.SlackUserId,
+            request.Message.Identity.ConversationId,
+            launch.SessionId,
+            request.Message.Identity.MessageTs,
+            ct);
+        return new SlackManagerConversationResult(
+            Text: "Manager request accepted.",
+            DispatchRef: $"manager:{launch.SessionId}:{request.Message.Identity.MessageTs}",
+            SessionId: launch.SessionId);
     }
 
     private static SlackManagerConversationResult Reply(
@@ -128,6 +141,13 @@ public sealed class SlackManagerConversationService : IScopedService, ISlackMana
             request.Actor.EnrollmentId,
             request.Message.Identity.WorkspaceTeamId,
             request.Message.Identity.ConversationId))}";
+
+    private static string ReplacementManagerSessionId(SlackManagerConversationRequest request) =>
+        $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            request.Actor.EnrollmentId,
+            request.Message.Identity.WorkspaceTeamId,
+            request.Message.Identity.ConversationId,
+            request.Message.Identity.MessageTs))}";
 
     private static AgentStartupContext StartupContext(ManagerActorContext actor) => new(
         $"Authenticated Manager actor for workspace {actor.WorkspaceTeamId}: {actor.SlackUserId}.",

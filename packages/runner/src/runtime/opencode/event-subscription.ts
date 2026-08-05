@@ -37,6 +37,7 @@ export function createEventSubscription(
   options: EventSubscriptionOptions = {},
 ): RuntimeEventSubscription {
   const listeners = new Set<RuntimeEventListener>()
+  const controller = new AbortController()
   let closed = false
   let pump: Promise<void> | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -54,7 +55,7 @@ export function createEventSubscription(
     if (pump !== null || reconnectTimer !== null || closed || listeners.size === 0) return
     pump = (async () => {
       try {
-        const result = await client.global.event({ throwOnError: true })
+        const result = await client.global.event({ throwOnError: true, signal: controller.signal })
         const stream = result.stream
         for await (const envelope of stream as AsyncIterable<{
           directory?: string
@@ -111,6 +112,7 @@ export function createEventSubscription(
         clearTimeout(reconnectTimer)
         reconnectTimer = null
       }
+      controller.abort()
       const pending = pump
       pump = null
       if (pending) await pending.catch(() => {})

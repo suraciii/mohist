@@ -121,6 +121,8 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal("credential_setup", body["managerCredentialRef"]!.GetValue<string>());
         Assert.Equal("socket", body["transportKind"]!.GetValue<string>());
         Assert.Equal("ready", body["readiness"]!.GetValue<string>());
+        Assert.Contains("Claim the Mohist App in Slack.", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("No projects", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -146,6 +148,82 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal(HttpMethod.Get, request.Method);
         Assert.Equal("/api/slack-manager/status?workspaceTeamId=T_STATUS", request.RequestUri?.PathAndQuery);
         Assert.Equal(token, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+        Assert.Contains("No action needed.", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("No projects", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Status_SelectedJson_ProjectsRequestedFieldsWithoutReadingResponseTwice()
+    {
+        const string token = "operator-token-for-slack-status-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    enrollment = new { id = "enrollment_1" },
+                    connections = new[] { new { id = "connection_1" } },
+                    managedApps = new[] { new { id = "app_1" } },
+                    nextAction = "No action needed.",
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            ["slack", "status", "--workspace-team", "T_STATUS", "--json", "enrollment,nextAction"],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var projected = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("enrollment_1", projected["enrollment"]!["id"]!.GetValue<string>());
+        Assert.Equal("No action needed.", projected["nextAction"]!.GetValue<string>());
+        Assert.DoesNotContain("connections", projected);
+        Assert.DoesNotContain("managedApps", projected);
+        Assert.Equal(token, Assert.Single(handler.Requests.Single().Headers[OperatorCredentialProvider.HeaderName]));
+        Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public async Task Setup_SelectedJson_ProjectsRequestedFields()
+    {
+        const string token = "operator-token-for-slack-setup-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new
+                {
+                    enrollment = new { id = "enrollment_1" },
+                    claimCode = "claim_1",
+                    claimExpiresAt = "2026-08-05T00:00:00Z",
+                    nextAction = "Claim the Mohist App in Slack.",
+                },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "slack", "setup",
+                "--workspace-team", "T_SETUP",
+                "--manager-app-id", "A_SETUP",
+                "--manager-bot-user-id", "U_SETUP",
+                "--manager-credential-ref", "credential_setup",
+                "--json", "claimCode,nextAction",
+            ],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var projected = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("claim_1", projected["claimCode"]!.GetValue<string>());
+        Assert.Equal("Claim the Mohist App in Slack.", projected["nextAction"]!.GetValue<string>());
+        Assert.Equal(2, projected.Count);
+        Assert.Equal(token, Assert.Single(handler.Requests.Single().Headers[OperatorCredentialProvider.HeaderName]));
+        Assert.Equal(string.Empty, error.ToString());
     }
 
     [Fact]
@@ -176,6 +254,40 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal(managerCredential, JsonNode.Parse(request.Body!)!["managerBotToken"]!.GetValue<string>());
         Assert.DoesNotContain(managerCredential, output.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(managerCredential, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ConfigureManager_SelectedJson_ProjectsRequestedFieldsWithoutEchoingCredential()
+    {
+        const string managerCredential = "manager-credential-selected-fixture";
+        const string operatorToken = "operator-token-for-manager-test-0123456789";
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { workspaceTeamId = "T_MANAGER", credentialProvisioned = true },
+            })));
+        fs.AddFile("/tmp/manager-credentials.json", $"{{\"botToken\":\"{managerCredential}\"}}");
+
+        var exit = await MohistCliCommands.RunAsync(
+            http,
+            [
+                "slack", "configure-manager",
+                "--workspace-team", "T_MANAGER",
+                "--credentials-file", "/tmp/manager-credentials.json",
+                "--json", "workspaceTeamId",
+            ],
+            output, error, fs, executor, env);
+
+        Assert.Equal(0, exit);
+        var projected = JsonNode.Parse(output.ToString())!.AsObject();
+        Assert.Equal("T_MANAGER", projected["workspaceTeamId"]!.GetValue<string>());
+        Assert.Single(projected);
+        Assert.DoesNotContain(managerCredential, output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(managerCredential, error.ToString(), StringComparison.Ordinal);
+        Assert.Equal(operatorToken, Assert.Single(handler.Requests.Single().Headers[OperatorCredentialProvider.HeaderName]));
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import { slackLogger } from "./logger.js"
 
 export interface SlackAdapterOptions {
   readonly adapterId: string
@@ -9,6 +10,7 @@ export interface SlackAdapterOptions {
   readonly heartbeatIntervalMs?: number
   readonly deliveryPollIntervalMs?: number
   readonly maxInFlight?: number
+  readonly dispose?: () => Promise<void>
 }
 
 interface ConnectionRuntime {
@@ -21,29 +23,37 @@ interface ConnectionRuntime {
 }
 
 export class SlackAdapter {
+  private readonly log = slackLogger.child("adapter")
   private readonly runtimes = new Map<string, ConnectionRuntime>()
   private readonly maxInFlight: number
   private discoveryTimer?: ReturnType<typeof setInterval>
   private inFlight = 0
   private stopped = false
+  private stopPromise?: Promise<void>
 
   constructor(private readonly options: SlackAdapterOptions) {
     this.maxInFlight = Math.max(1, Math.floor(options.maxInFlight ?? 8))
   }
 
   async start(signal: AbortSignal): Promise<void> {
-    signal.addEventListener("abort", () => this.stop(), { once: true })
+    signal.addEventListener("abort", () => void this.stop(), { once: true })
     await this.refreshConnections(signal)
     const discoveryMs = Math.max(1_000, this.options.discoveryIntervalMs ?? 15_000)
-    this.discoveryTimer = setInterval(() => void this.refreshConnections(signal).catch(() => undefined), discoveryMs)
+    this.discoveryTimer = setInterval(() => void this.refreshConnections(signal).catch((error) => {
+      this.log.error("target discovery failed", { reason: safeErrorMessage(error) })
+    }), discoveryMs)
   }
 
-  stop() {
+  async stop(): Promise<void> {
+    if (this.stopPromise) return await this.stopPromise
     if (this.stopped) return
     this.stopped = true
     if (this.discoveryTimer) clearInterval(this.discoveryTimer)
-    for (const runtime of this.runtimes.values()) this.disconnect(runtime)
+    const pending = [...this.runtimes.values()].map((runtime) => this.disconnect(runtime))
     this.runtimes.clear()
+    if (this.options.dispose) pending.push(this.options.dispose())
+    this.stopPromise = Promise.allSettled(pending).then(() => undefined)
+    await this.stopPromise
   }
 
   async refreshConnections(signal: AbortSignal): Promise<void> {
@@ -52,7 +62,7 @@ export class SlackAdapter {
     const currentKeys = new Set(connections.map(connectionKey))
     for (const [key, runtime] of this.runtimes) {
       if (!currentKeys.has(key)) {
-        this.disconnect(runtime)
+        void this.disconnect(runtime)
         this.runtimes.delete(key)
       }
     }
@@ -63,17 +73,25 @@ export class SlackAdapter {
       this.runtimes.set(key, runtime)
       try {
         await this.connect(runtime, signal)
-      } catch {
+      } catch (error) {
+        this.log.error("target connection failed", { target: key, reason: safeErrorMessage(error) })
         this.runtimes.delete(key)
-        this.disconnect(runtime)
+        void this.disconnect(runtime)
       }
     }))
   }
 
-  private disconnect(runtime: ConnectionRuntime) {
+  private async disconnect(runtime: ConnectionRuntime): Promise<void> {
     if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer)
     if (runtime.deliveryTimer) clearInterval(runtime.deliveryTimer)
-    void runtime.socket?.disconnect?.()
+    try {
+      await runtime.socket?.disconnect?.()
+    } catch (error) {
+      this.log.error("socket disconnect failed", {
+        target: connectionKey(runtime.target),
+        reason: safeErrorMessage(error),
+      })
+    }
   }
 
   private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
@@ -85,11 +103,21 @@ export class SlackAdapter {
       if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
       runtime.web = this.options.webFactory(session.botToken, runtime.target)
       runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
+      this.observeSocket(runtime.socket, runtime.target)
       runtime.socket.on("slack_event", async (event) => {
+        const interaction = isSlackInteraction(event.body)
+        const eventType = slackEventType(event.body)
+        const target = connectionKey(runtime.target)
+        this.log.info("envelope received", { target, event: eventType })
         try {
-          await this.handleEvent(runtime, event.body, event.ack, signal)
+          await this.handleEvent(runtime, event.body, event.ack, eventType, signal)
         } catch (error) {
-          console.error("Slack event handling failed; the event remains unacknowledged for retry.", safeErrorMessage(error))
+          this.log.error(
+            interaction
+              ? "interaction processing failed after acknowledgement"
+              : "event handling failed before acknowledgement",
+            { target, event: eventType, reason: safeErrorMessage(error) },
+          )
         }
       })
       await runtime.socket.start()
@@ -113,22 +141,47 @@ export class SlackAdapter {
         runtime.web = this.options.webFactory(session.botToken, runtime.target)
       }
       await this.drain(runtime, signal)
-    } catch {
-      // The next heartbeat retries the lease; Server state remains authoritative.
+    } catch (error) {
+      if (this.stopped || signal.aborted) return
+      this.log.error("target lease refresh failed", {
+        target: connectionKey(runtime.target),
+        reason: safeErrorMessage(error),
+      })
     }
   }
 
-  private async handleEvent(runtime: ConnectionRuntime, body: unknown, ack: () => Promise<void> | void, signal: AbortSignal): Promise<void> {
+  private observeSocket(socket: SocketClient, target: SlackConnectionRef) {
+    const key = connectionKey(target)
+    for (const state of ["connecting", "connected", "reconnecting", "disconnected"] as const) {
+      socket.onState?.(state, () => this.log.info("socket state changed", { target: key, state }))
+    }
+    socket.onState?.("error", (error) => {
+      this.log.error("socket failed", { target: key, reason: safeErrorMessage(error) })
+    })
+  }
+
+  private async handleEvent(
+    runtime: ConnectionRuntime,
+    body: unknown,
+    ack: () => Promise<void> | void,
+    eventType: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const interaction = isSlackInteraction(body)
+    if (interaction) await ack()
     await this.acquire(signal)
+    const target = connectionKey(runtime.target)
+    this.log.info("envelope forwarding", { target, event: eventType })
     try {
-      if (isSlackInteraction(body)) {
+      if (interaction) {
         await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
-        await ack()
+        this.log.info("interaction forwarded", { target, event: eventType })
         await this.drain(runtime, signal)
         return
       }
       const envelope = normalizeSocketEvent(body)
       const result = await this.options.transport.ingress(runtime.target, envelope, signal)
+      this.log.info("ingress accepted", { target, event: eventType, kind: result.kind })
       await this.renderUserFacingRejection(runtime, envelope, result, signal)
       await ack()
       await this.drain(runtime, signal)
@@ -422,6 +475,13 @@ export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelo
 
 function isSlackInteraction(value: unknown): value is Record<string, unknown> {
   return interactionPayload(value)?.type === "block_actions"
+}
+
+function slackEventType(value: unknown): string {
+  const interaction = interactionPayload(value)
+  if (interaction) return stringValue(interaction.type) ?? "interactive"
+  const event = isRecord(value) && isRecord(value.event) ? value.event : value
+  return stringValue(event, "type") ?? "unknown"
 }
 
 function interactionPayload(value: unknown): Record<string, unknown> | null {

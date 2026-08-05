@@ -231,11 +231,17 @@ internal sealed class CliResponseReader
         string path,
         object? body = null,
         bool mutating = false,
+        IReadOnlyDictionary<string, string>? headers = null,
         CancellationToken cancellationToken = default)
     {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null)
             request.Content = JsonContent.Create(body, options: JsonOptions);
+        if (headers is not null)
+        {
+            foreach (var (name, value) in headers)
+                request.Headers.TryAddWithoutValidation(name, value);
+        }
 
         try
         {

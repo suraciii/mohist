@@ -107,6 +107,7 @@ export interface SocketEvent {
 
 export interface SocketClient {
   on(event: "slack_event", handler: (event: SocketEvent) => Promise<void>): void
+  onState?(event: "connecting" | "connected" | "reconnecting" | "disconnected" | "error", handler: (error?: unknown) => void): void
   start(): Promise<void>
   disconnect?(): Promise<void>
 }

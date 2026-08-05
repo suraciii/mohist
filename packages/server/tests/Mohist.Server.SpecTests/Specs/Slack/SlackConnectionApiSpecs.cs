@@ -174,6 +174,27 @@ public sealed class SlackConnectionApiSpecs
     }
 
     [Fact]
+    public async Task Adapter_session_heartbeat_does_not_reverify_bound_credentials()
+    {
+        var connection = await CreateConnectionAsync();
+        _fixture.Slack.AuthTest = new(false, "invalid_auth", null, null, null, null, null, null);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(1));
+
+        using var renewal = await _fixture.Client.PostAsJsonAsync(
+            Path(connection, "/adapter-session"),
+            new { adapterId = "adapter-1" });
+
+        renewal.EnsureSuccessStatusCode();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var stored = await db.AgentConnections.AsNoTracking()
+            .SingleAsync(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id);
+        Assert.Equal(ConnectionHealthKind.Healthy, stored.ConnectionHealth);
+        Assert.Equal(SetupProgressKind.Complete, stored.SetupProgress);
+        Assert.Equal(_fixture.TimeProvider.GetUtcNow(), stored.LastHeartbeatAt);
+    }
+
+    [Fact]
     public async Task Enable_restores_the_desired_state()
     {
         var connection = await CreateConnectionAsync();

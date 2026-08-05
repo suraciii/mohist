@@ -1,29 +1,58 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { FetchFunction } from "@slack/web-api"
 import { createSlackAdapter, resolveOperatorToken } from "./cli.js"
 
-type SocketModeOptionsForTest = { appToken: string; dispatcher?: unknown }
+type SocketModeOptionsForTest = {
+  appToken: string
+  dispatcher?: unknown
+  autoReconnectEnabled?: boolean
+  clientPingTimeout?: number
+}
 type WebClientOptionsForTest = { fetch?: FetchFunction }
 type PostMessageInput = { channel: string; text: string; thread_ts?: string }
+type SocketHandler = (...args: unknown[]) => void
+type SocketInstanceForTest = {
+  starts: number
+  emit(event: string, ...args: unknown[]): void
+}
 
 const slackSdkMocks = vi.hoisted(() => ({
   proxyUrls: [] as string[],
   socketOptions: [] as SocketModeOptionsForTest[],
+  socketInstances: [] as SocketInstanceForTest[],
+  proxyCloseCalls: 0,
   webOptions: [] as Array<{ token: string; fetch?: FetchFunction }>,
   undiciFetchCalls: [] as Array<{ input: string; dispatcher: unknown }>,
 }))
 
 vi.mock("@slack/socket-mode", () => ({
   SocketModeClient: class {
+    readonly handlers = new Map<string, SocketHandler[]>()
+    starts = 0
+
     constructor(options: SocketModeOptionsForTest) {
       slackSdkMocks.socketOptions.push(options)
+      slackSdkMocks.socketInstances.push(this)
     }
 
-    on() {}
+    on(event: string, handler: SocketHandler) {
+      const handlers = this.handlers.get(event) ?? []
+      handlers.push(handler)
+      this.handlers.set(event, handlers)
+    }
 
-    async start() {}
+    emit(event: string, ...args: unknown[]) {
+      for (const handler of this.handlers.get(event) ?? []) handler(...args)
+    }
 
-    async disconnect() {}
+    async start() {
+      this.starts += 1
+      this.emit("connected")
+    }
+
+    async disconnect() {
+      this.emit("disconnected")
+    }
   },
 }))
 
@@ -61,6 +90,10 @@ vi.mock("undici", () => ({
     constructor(url: string) {
       slackSdkMocks.proxyUrls.push(url)
     }
+
+    async close() {
+      slackSdkMocks.proxyCloseCalls += 1
+    }
   },
   fetch: async (input: string | URL, init?: { dispatcher?: unknown }) => {
     slackSdkMocks.undiciFetchCalls.push({ input: String(input), dispatcher: init?.dispatcher })
@@ -73,9 +106,13 @@ const directToken = "direct-token"
 beforeEach(() => {
   slackSdkMocks.proxyUrls.length = 0
   slackSdkMocks.socketOptions.length = 0
+  slackSdkMocks.socketInstances.length = 0
+  slackSdkMocks.proxyCloseCalls = 0
   slackSdkMocks.webOptions.length = 0
   slackSdkMocks.undiciFetchCalls.length = 0
 })
+
+afterEach(() => vi.useRealTimers())
 
 function compositionServerFetch(withManagerDelivery = true): typeof fetch {
   let managerDeliveryClaimed = false
@@ -254,6 +291,8 @@ describe("mohist-slack CLI composition", () => {
     }])
     expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)
     controller.abort()
+    await adapter.stop()
+    expect(slackSdkMocks.proxyCloseCalls).toBe(0)
   })
 
   it("injects one explicit ProxyAgent dispatcher into Socket Mode and Web API fetch", async () => {
@@ -275,11 +314,47 @@ describe("mohist-slack CLI composition", () => {
     const webFetches = slackSdkMocks.webOptions.map((options) => options.fetch).filter((fetch): fetch is FetchFunction => fetch !== undefined)
     expect(slackSdkMocks.proxyUrls).toEqual(["http://proxy.test:3128"])
     expect(dispatcher).toBeDefined()
-    expect(slackSdkMocks.socketOptions[0]).toMatchObject({ appToken: "xapp-c", dispatcher })
+    expect(slackSdkMocks.socketOptions[0]).toMatchObject({
+      appToken: "xapp-c",
+      dispatcher,
+      autoReconnectEnabled: false,
+      clientPingTimeout: 86_400_000,
+    })
     expect(webFetches).toHaveLength(2)
     expect(new Set(webFetches).size).toBe(1)
     expect(slackSdkMocks.undiciFetchCalls).toEqual([{ input: "https://slack.com/api/chat.postMessage", dispatcher }])
     controller.abort()
+    await adapter.stop()
+    expect(slackSdkMocks.proxyCloseCalls).toBe(1)
+  })
+
+  it("reconnects a proxied Socket client with bounded adapter-owned backoff", async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const adapter = createSlackAdapter({
+      adapterId: "adapter-proxy-reconnect",
+      serverUrl: "http://server",
+      operatorToken: "test-operator",
+      slackProxyUrl: "http://proxy.test:3128",
+      serverFetch: compositionServerFetch(false),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+      discoveryIntervalMs: 60_000,
+    })
+
+    await adapter.start(controller.signal)
+    const socket = slackSdkMocks.socketInstances[0]
+    expect(socket?.starts).toBe(1)
+
+    socket?.emit("disconnected")
+    await vi.advanceTimersByTimeAsync(999)
+    expect(socket?.starts).toBe(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(socket?.starts).toBe(2)
+
+    controller.abort()
+    await adapter.stop()
+    expect(slackSdkMocks.proxyCloseCalls).toBe(1)
   })
 
   it("keeps both Slack SDK paths on their direct defaults when no proxy URL is supplied", async () => {
@@ -302,5 +377,7 @@ describe("mohist-slack CLI composition", () => {
     expect(slackSdkMocks.webOptions.every((options) => options.fetch === undefined)).toBe(true)
     expect(slackSdkMocks.undiciFetchCalls).toEqual([])
     controller.abort()
+    await adapter.stop()
+    expect(slackSdkMocks.proxyCloseCalls).toBe(0)
   })
 })
