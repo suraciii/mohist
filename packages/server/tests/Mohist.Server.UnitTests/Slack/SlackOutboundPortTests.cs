@@ -1,3 +1,8 @@
+using System.Net.Http;
+using System.Net.WebSockets;
+using System.Reflection;
+using System.Reflection.Emit;
+using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Slack.Services;
 using Xunit;
 
@@ -14,6 +19,26 @@ public sealed class SlackOutboundPortTests
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackConfigurationCredentialPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackAppManagementPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackBotIdentityVerificationPort).FullName!));
+    }
+
+    [Fact]
+    public void Server_Slack_boundary_does_not_directly_use_protocol_clients_or_register_Slack_http_clients()
+    {
+        var surfaceLeaks = SlackBoundaryTypes()
+            .SelectMany(ReferencedSurfaceTypes)
+            .Where(IsDirectProtocolType)
+            .Select(type => type.FullName)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Empty(surfaceLeaks);
+
+        var protocolCalls = SlackBoundaryMethods()
+            .SelectMany(ReferencedMethods)
+            .Where(IsDirectProtocolCall)
+            .Select(method => $"{method.DeclaringType?.FullName}.{method.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        Assert.Empty(protocolCalls);
     }
 
     [Fact]
@@ -57,4 +82,132 @@ public sealed class SlackOutboundPortTests
         Assert.True(result.Verified);
         Assert.Equal([new SlackBotIdentityVerificationRequest("xoxb-candidate")], port.Requests);
     }
+
+    private static IEnumerable<Type> SlackBoundaryTypes() => typeof(ISlackAppManagementPort).Assembly
+        .GetTypes()
+        .Where(type => type == typeof(MohistServiceRegistration)
+            || type.Namespace?.StartsWith("Mohist.Server.Slack", StringComparison.Ordinal) == true
+            || type.Namespace?.StartsWith("Mohist.Server.Infrastructure.Slack", StringComparison.Ordinal) == true);
+
+    private static IEnumerable<MethodBase> SlackBoundaryMethods() => SlackBoundaryTypes()
+        .SelectMany(type => type.GetConstructors(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+            .Cast<MethodBase>()
+            .Concat(type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)));
+
+    private static IEnumerable<Type> ReferencedSurfaceTypes(Type type)
+    {
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+            foreach (var referenced in Expand(field.FieldType))
+                yield return referenced;
+
+        foreach (var property in type.GetProperties(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic))
+        {
+            foreach (var referenced in Expand(property.PropertyType))
+                yield return referenced;
+            foreach (var parameter in property.GetIndexParameters())
+                foreach (var referenced in Expand(parameter.ParameterType))
+                    yield return referenced;
+        }
+
+        foreach (var method in type.GetConstructors(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                     .Cast<MethodBase>()
+                     .Concat(type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)))
+        {
+            if (method is MethodInfo methodInfo)
+                foreach (var referenced in Expand(methodInfo.ReturnType))
+                    yield return referenced;
+            foreach (var parameter in method.GetParameters())
+                foreach (var referenced in Expand(parameter.ParameterType))
+                    yield return referenced;
+        }
+    }
+
+    private static IEnumerable<Type> Expand(Type type)
+    {
+        if (type.HasElementType)
+        {
+            yield return type.GetElementType()!;
+            yield break;
+        }
+
+        yield return type;
+        if (type.IsGenericType)
+            foreach (var argument in type.GetGenericArguments())
+                foreach (var referenced in Expand(argument))
+                    yield return referenced;
+    }
+
+    private static bool IsDirectProtocolType(Type type) =>
+        type == typeof(HttpClient)
+        || type == typeof(WebSocket)
+        || type.Namespace?.StartsWith("System.Net.Http", StringComparison.Ordinal) == true
+        || type.Namespace?.StartsWith("System.Net.WebSockets", StringComparison.Ordinal) == true;
+
+    private static IEnumerable<MethodBase> ReferencedMethods(MethodBase method)
+    {
+        var body = method.GetMethodBody()?.GetILAsByteArray();
+        if (body is null)
+            yield break;
+
+        for (var offset = 0; offset < body.Length;)
+        {
+            var opcode = ReadOpcode(body, ref offset);
+            if (opcode.OperandType == OperandType.InlineMethod)
+            {
+                var token = BitConverter.ToInt32(body, offset);
+                MethodBase? referenced = null;
+                try
+                {
+                    referenced = method.Module.ResolveMethod(
+                        token,
+                        method.DeclaringType?.GetGenericArguments(),
+                        method is MethodInfo methodInfo ? methodInfo.GetGenericArguments() : null);
+                }
+                catch (ArgumentException)
+                {
+                }
+
+                if (referenced is not null)
+                    yield return referenced;
+            }
+
+            offset += OperandSize(opcode.OperandType, body, offset);
+        }
+    }
+
+    private static bool IsDirectProtocolCall(MethodBase method)
+    {
+        if (method.DeclaringType is { } declaringType && IsDirectProtocolType(declaringType))
+            return true;
+
+        return method.DeclaringType?.Name == "HttpClientFactoryServiceCollectionExtensions"
+            && method.Name == "AddHttpClient"
+            && method.IsGenericMethod
+            && method.GetGenericArguments().Any(type => type.Name.Contains("Slack", StringComparison.Ordinal));
+    }
+
+    private static OpCode ReadOpcode(byte[] body, ref int offset)
+    {
+        ushort value = body[offset++];
+        if (value == 0xfe)
+            value = (ushort)(0xfe00 | body[offset++]);
+        return Opcodes[value];
+    }
+
+    private static int OperandSize(OperandType operandType, byte[] body, int offset) => operandType switch
+    {
+        OperandType.InlineNone => 0,
+        OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+        OperandType.InlineVar => 2,
+        OperandType.InlineBrTarget or OperandType.InlineField or OperandType.InlineI or OperandType.InlineMethod or OperandType.InlineSig or OperandType.InlineString or OperandType.InlineTok or OperandType.InlineType or OperandType.ShortInlineR => 4,
+        OperandType.InlineI8 or OperandType.InlineR => 8,
+        OperandType.InlineSwitch => 4 + (BitConverter.ToInt32(body, offset) * 4),
+        _ => throw new ArgumentOutOfRangeException(nameof(operandType)),
+    };
+
+    private static IReadOnlyDictionary<ushort, OpCode> Opcodes { get; } = typeof(OpCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(field => field.FieldType == typeof(OpCode))
+        .Select(field => (OpCode)field.GetValue(null)!)
+        .ToDictionary(opcode => unchecked((ushort)opcode.Value));
 }

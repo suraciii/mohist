@@ -64,6 +64,7 @@ public sealed class ProtectedSlackConfigurationCredentialStore(
             return new(false, "workspace_mismatch");
         }
 
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
         await secrets.StoreAtomicallyAsync(db,
         [
             new(SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.ConfigurationAccessToken), System.Text.Encoding.UTF8.GetBytes(credentials.AccessToken)),
@@ -74,6 +75,7 @@ public sealed class ProtectedSlackConfigurationCredentialStore(
         row.ConfigurationCredentialExpiresAt = enrollment.ConfigurationCredentialExpiresAt;
         row.UpdatedAt = now;
         await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
         return new(true);
     }
 }

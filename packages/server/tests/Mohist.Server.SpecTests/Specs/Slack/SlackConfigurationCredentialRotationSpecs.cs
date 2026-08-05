@@ -1,9 +1,12 @@
 using System.Text;
+using System.Data.Common;
 using EnvironmentAbstractions.TestHelpers;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
@@ -117,6 +120,53 @@ public sealed class SlackConfigurationCredentialRotationSpecs : IAsyncLifetime
         await AssertNoRotationWritesAsync();
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public async Task Failed_rotation_save_keeps_existing_secrets_and_enrollment_metadata(int failurePoint)
+    {
+        var oldExpiresAt = _time.GetUtcNow().AddHours(1);
+        await SeedExistingRotationAsync(oldExpiresAt);
+        var faultingFactory = new FaultingRotationDbContextFactory(
+            _database.ConnectionString,
+            (RotationSaveFailurePoint)failurePoint);
+        var faultingSecrets = CreateSecretStore(faultingFactory);
+        var faultingService = new SlackConfigurationCredentialRotationService(
+            new SlackWorkspaceEnrollmentStore(_factory, _time),
+            _port,
+            new ProtectedSlackConfigurationCredentialStore(faultingFactory, faultingSecrets),
+            _time);
+        var nextExpiresAt = _time.GetUtcNow().AddHours(12);
+        _port.Enqueue(new(
+            SlackConfigurationCredentialRotationOutcome.Succeeded,
+            new("xoxe-next", "xoxr-next"),
+            "T_ROTATION",
+            nextExpiresAt));
+
+        var error = await Record.ExceptionAsync(() => faultingService.RotateAsync(
+            "enrollment-rotation",
+            new("xoxe-current", "xoxr-current")));
+        Assert.NotNull(error);
+        if ((RotationSaveFailurePoint)failurePoint == RotationSaveFailurePoint.SaveChanges)
+            Assert.IsType<InvalidOperationException>(error);
+        else
+            Assert.IsType<DbUpdateException>(error);
+        Assert.Equal((RotationSaveFailurePoint)failurePoint, faultingFactory.FailurePoint);
+
+        var access = await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationAccessToken));
+        var refresh = await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationRefreshToken));
+        Assert.Equal("xoxe-old", Encoding.UTF8.GetString(access!));
+        Assert.Equal("xoxr-old", Encoding.UTF8.GetString(refresh!));
+
+        await using var db = _factory.CreateDbContext();
+        var enrollment = await db.SlackWorkspaceEnrollments.SingleAsync();
+        Assert.Equal("T_ROTATION", enrollment.WorkspaceTeamId);
+        Assert.Equal("enrollment-rotation", enrollment.ConfigurationCredentialRef);
+        Assert.Equal(3, enrollment.ConfigurationCredentialGeneration);
+        Assert.Equal(oldExpiresAt, enrollment.ConfigurationCredentialExpiresAt);
+    }
+
     private async Task AssertNoRotationWritesAsync()
     {
         Assert.Null(await _secrets.LoadAsync(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationAccessToken)));
@@ -127,6 +177,124 @@ public sealed class SlackConfigurationCredentialRotationSpecs : IAsyncLifetime
         Assert.Equal(0, enrollment.ConfigurationCredentialGeneration);
         Assert.Null(enrollment.ConfigurationCredentialExpiresAt);
         Assert.Empty(db.StoredSecrets);
+    }
+
+    private async Task SeedExistingRotationAsync(DateTimeOffset expiresAt)
+    {
+        await _secrets.StoreAtomicallyAsync(
+        [
+            new(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationAccessToken), Encoding.UTF8.GetBytes("xoxe-old")),
+            new(SecretStoreAddress.ForSlackWorkspaceEnrollment("enrollment-rotation", SecretKind.ConfigurationRefreshToken), Encoding.UTF8.GetBytes("xoxr-old")),
+        ]);
+        await using var db = _factory.CreateDbContext();
+        var enrollment = await db.SlackWorkspaceEnrollments.SingleAsync();
+        enrollment.ConfigurationCredentialRef = "enrollment-rotation";
+        enrollment.ConfigurationCredentialGeneration = 3;
+        enrollment.ConfigurationCredentialExpiresAt = expiresAt;
+        await db.SaveChangesAsync();
+    }
+
+    private AesGcmSecretStore CreateSecretStore(IDbContextFactory<MohistDbContext> factory) => new(
+        factory,
+        new InMemorySecretKeyFile(),
+        Options.Create(new SecretStoreOptions()),
+        new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false),
+        _time,
+        NullLogger<AesGcmSecretStore>.Instance);
+
+    private enum RotationSaveFailurePoint
+    {
+        SecondSecret,
+        EnrollmentMetadata,
+        SaveChanges,
+    }
+
+    private sealed class FaultingRotationDbContextFactory(string connectionString, RotationSaveFailurePoint failurePoint)
+        : IDbContextFactory<MohistDbContext>
+    {
+        private int _storedSecretWrites;
+        private bool _failed;
+
+        public RotationSaveFailurePoint? FailurePoint { get; private set; }
+
+        public MohistDbContext CreateDbContext()
+        {
+            var options = new DbContextOptionsBuilder<MohistDbContext>()
+                .UseSqlite(connectionString)
+                .AddInterceptors(new RotationCommandFailureInterceptor(this), new RotationSaveChangesFailureInterceptor(this))
+                .Options;
+            return new MohistDbContext(options);
+        }
+
+        public Task<MohistDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateDbContext());
+
+        private void FailOnCommand(DbCommand command)
+        {
+            if (_failed)
+                return;
+
+            if (failurePoint == RotationSaveFailurePoint.SecondSecret
+                && command.CommandText.Contains("UPDATE \"StoredSecrets\"", StringComparison.Ordinal)
+                && ++_storedSecretWrites == 2)
+            {
+                ThrowFailure();
+            }
+
+            if (failurePoint == RotationSaveFailurePoint.EnrollmentMetadata
+                && command.CommandText.Contains("UPDATE \"SlackWorkspaceEnrollments\"", StringComparison.Ordinal))
+            {
+                ThrowFailure();
+            }
+        }
+
+        private void FailOnSaveChanges()
+        {
+            if (!_failed && failurePoint == RotationSaveFailurePoint.SaveChanges)
+                ThrowFailure();
+        }
+
+        private void ThrowFailure()
+        {
+            _failed = true;
+            FailurePoint = failurePoint;
+            throw new InvalidOperationException("rotation_persist_failure");
+        }
+
+        private sealed class RotationCommandFailureInterceptor(FaultingRotationDbContextFactory owner) : DbCommandInterceptor
+        {
+            public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+                DbCommand command,
+                CommandEventData eventData,
+                InterceptionResult<DbDataReader> result,
+                CancellationToken cancellationToken = default)
+            {
+                owner.FailOnCommand(command);
+                return ValueTask.FromResult(result);
+            }
+
+            public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+                DbCommand command,
+                CommandEventData eventData,
+                InterceptionResult<int> result,
+                CancellationToken cancellationToken = default)
+            {
+                owner.FailOnCommand(command);
+                return ValueTask.FromResult(result);
+            }
+        }
+
+        private sealed class RotationSaveChangesFailureInterceptor(FaultingRotationDbContextFactory owner) : SaveChangesInterceptor
+        {
+            public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+                DbContextEventData eventData,
+                InterceptionResult<int> result,
+                CancellationToken cancellationToken = default)
+            {
+                owner.FailOnSaveChanges();
+                return ValueTask.FromResult(result);
+            }
+        }
     }
 
     private sealed class InMemorySecretKeyFile : ISecretKeyFile
