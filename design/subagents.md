@@ -72,8 +72,12 @@ SessionParentLink
   ParentAgentId
   ChildLaunchJobId
   AttachedAt
+  AttachedRevision
   State: attached | detached
+  DetachedAt?
+  DetachedRevision?
   TerminalReport: none | pending | delivered | suppressed
+  TerminalReportDeliveredInputId?
 ```
 
 `ChildLaunchJobId` 是这次委托的初始 AgentJob，不是 child Session 的终态标志。
@@ -86,16 +90,46 @@ link 在 child 的初始 launch 建立，之后只允许 `attached -> detached`�
 - 新建 child 在建立 link 前没有祖先，且 link 永不改指向，因此不会形成 cycle；
 - detach 后 child 和它仍 attached 的 descendants 成为另一棵树，Source、workDir、
   Runtime binding、transcript 与 AgentJob 都保持不变；
-- 历史 link 保留 ParentSessionId、EdgeId 和 DetachedAt 供审计；默认 tree 查询只返回
-  `attached` 边。
+- 历史 link 保留 ParentSessionId、EdgeId、DetachedAt、DetachedRevision 和已投递的 parent
+  InputId 供审计；默认 tree 查询只返回 `attached` 边。
 
-Session 存储在写入 link 的同一事务维护 `(projectId, childSessionId)` 的唯一 current-link
-索引和 `(projectId, parentSessionId, state)` 子边索引。索引是 child Session 状态的
-同事务读模型，不是第二个父子权威。`mo session tree` 从该索引以递归查询取边，再批量
-关联 Session summary；它的读取量是返回节点和边数 `O(n)`，不逐节点激活 Session grain，
-也不扫描 Project 中无关 Session。读取按有界 database batch 和 response page 输出；
-continuation 继续读取其余节点。page/continuation 限制约束一次诊断读取，不定义或拒绝
-业务树的深度、宽度或总节点数。
+### Tree mutation fence 与 graph revision
+
+每个 Project 有一个持久化的 `SessionTreeMutationFence`。它是 attachment、detach 和
+cascade-stop snapshot 的唯一线性化点，同时维护严格递增的 `GraphRevision`。它不是第二份
+树模型：边的权威仍是 child-owned `SessionParentLink`，fence 只持有未完成计划的
+`LinkReservation`、pending mutation command 与一次 mutation 所需的短事务。
+
+```text
+LinkReservation
+  EdgeId
+  ParentSessionId
+  ChildSessionId
+  State: reserved | attached | rejected
+  RejectionReason?
+```
+
+reserve 不产生可见树边。finalize attachment 在同一 fence 内再次确认 parent 的 authoritative
+workDir、expected binding 和 stop admission。fence 自己不写 link：它先持久化带稳定 command
+identity 和 assigned revision 的 pending attach/detach mutation，再调用 child Session 的幂等 link
+transition。child 在自己的同一事务写 link/index acknowledgement 与 `AttachedRevision`，或
+`DetachedAt`/`DetachedRevision`；fence 收到 acknowledgement 后才把 `GraphRevision` 推进到该
+assigned revision 并使变更可见。crash 后先重放同一个 child mutation，直到它已确认，才执行
+后续 fence command。这样 child 仍是 link 的唯一写入权威，且不会把半完成的 cross-store
+mutation 暴露给 tree read。reserved/rejected reservation 永不出现在 `mo session tree`。
+
+tree read 先以当前 Project `GraphRevision` 固定一个 topology snapshot。edge 在 revision `R`
+存在，当且仅当 `AttachedRevision <= R` 且 `DetachedRevision` 为空或大于 `R`。查询从 root
+递归读取该集合，再批量关联当前 Session summary；不逐节点激活 Session grain，也不扫描
+Project 中无关 Session。
+
+返回顺序固定为 breadth-first。每一层的 sibling order 是 `(AttachedRevision, EdgeId)`；递归
+读取为每个节点构造该排序键的 ancestor path，最终按 `(depth, ancestor path)` 排序。首个
+page 的 opaque cursor 固定 Project、root、revision 和最后一个 `(depth, ancestor path)`；后续
+page 用该 cursor 重放同一 topology snapshot。因此同一 cursor 链不会重复或遗漏节点，detach
+或 attachment 的并发变更只会由没有 cursor 的新查询观察到。cursor 不匹配 Project/root 或
+无效时拒绝，不得悄悄改用最新 revision。page/continuation 只限制一次诊断读取，不定义或
+拒绝业务树的深度、宽度或总节点数。
 
 ### Operational bounds
 
@@ -147,22 +181,29 @@ parentSessionId 与 edgeId。
 Server 在写入 coordinator plan 前必须同时确认：
 
 1. parentSessionId 属于请求 Project，并带有不可变 Agent execution definition、capability
-   snapshot 与 canonical AgentId；直接 launch 和 Agent Connection 的 Mohist Agent Session
-   都可满足，Workflow inline Session 不满足；
+   snapshot 与 canonical AgentId；直接 launch 与 Agent Connection 的 Mohist Agent Session 都可
+   满足这一条，Workflow inline Session 不满足；
 2. parent Session 的 capability snapshot 含解析后 target 的稳定 Agent ID；
 3. target 当前为 active，且其 launch definition 与 readiness 可以被正常解析；
 4. 普通 Agent launch 的 readiness 与 queue acceptance 允许新 child；target 的
    `MaxConcurrentRuns` 只决定随后是否排队；
-5. parent Session 有可用的 authoritative `WorkDir`；
+5. parent Session 有当前可用的 authoritative `WorkDir`；spawn body、Agent Connection 对话、
+   调用方进程路径或其它 Session 的目录都不能提供、替换或升级它；
 6. parent Session 有当前、已确认、可用的 Runtime binding，含 `RunnerId`、runtime 和
    runtimeSessionId；activity 为 `unknown`、binding 缺失、Runner 不再存在，或 binding
    与 Session workDir 不一致时都不能 spawn；
-7. parent 所在 attached ancestor 没有已接受的 cascade stop fence。
+7. parent 所在 attached ancestor 没有尚未达到 terminal outcome 的 cascade stop operation。
 
-第 5、6 条一起定义 first-release shared-workdir：child 的 workDir 不是客户端给的路径，
-而是 parent AgentSession 已持久化的 authoritative workDir；child admission 还必须 pin 到
-该 parent binding 的 RunnerId。不能只复制 path 后让普通 AgentJob 在任意 eligible Runner
-上调度，因为该目录可能只存在于 parent Runner。
+第 5、6 条一起定义 first-release shared-workdir：child 的 workDir 来自 parent AgentSession
+已持久化的 authoritative workDir，不是客户端给的路径；child admission 还必须 pin 到该 parent
+binding 的 RunnerId。不能只复制 path 后让普通 AgentJob 在任意 eligible Runner 上调度，因为
+该目录可能只存在于 parent Runner。
+
+当前 Agent Connection launch 以 `WorkspacePath = null` 创建 Session，且没有可用的 authoritative
+workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
+`parent_workdir_unavailable` 或 `parent_runner_binding_unavailable`；不得以 Slack 对话、调用方
+路径或某个其它 Session 的目录补齐。后续若 Agent Connection launch 自身取得这两项既有事实，
+它即可按同一接受条件成为 parent，不另建 Connection 专用通道。
 
 不能确认上述事实时拒绝而不是回退：
 
@@ -171,17 +212,37 @@ Server 在写入 coordinator plan 前必须同时确认：
 | parent 没有 workDir | `parent_workdir_unavailable`；不创建 child。 |
 | parent binding 缺失、unknown、过期或没有可用 Runner | `parent_runner_binding_unavailable`；不创建 child。 |
 | target 不在 snapshot 或已 archive | `subagent_not_allowed` 或 `target_agent_archived`；不创建 child。 |
-| 有正在建立的 cascade stop | `parent_tree_stop_in_progress`；不创建 child。 |
+| 有尚未达到 terminal outcome 的 cascade stop | `parent_tree_stop_in_progress`；不创建 child。 |
 
 Runner 离线但 binding 仍是当前事实不构成换 Runner 的许可；它仍是
-`parent_runner_binding_unavailable`。调用方保留相同 idempotency key，等待该 Runner 恢复
-或选择其它明确的工作，而不是把 child 投到另一个 Runner。
+`parent_runner_binding_unavailable`。该 pre-plan rejection 已冻结原 idempotency key；等待
+Runner 恢复后，调用方必须使用新 key 重新请求，而不是把 child 投到另一个 Runner。
 
 ### Coordinator、原子性与恢复
 
 spawn 扩展现有按 idempotency key 持久化的 `AgentLaunchCoordinator`。它不新建
 `SubagentLauncher` 或第二个 Job pipeline。coordinator key 以 parentSessionId 作为 scope
-的一部分，plan 额外持久化：
+的一部分。它先持久化不带 child identity 的 `SpawnRequestFence`：
+
+```text
+SpawnRequestFence
+  ProjectId
+  ParentSessionId
+  IdempotencyKey
+  RequestFingerprint
+  Outcome: validating | rejected | admitted
+  RejectionReason?
+```
+
+这个 fence 是 `(ProjectId, ParentSessionId, IdempotencyKey)` 的 canonical request authority。
+它只冻结 caller/key/fingerprint 与 rejection，不创建也不预留 Job、Session、Input、Turn、edge
+或 reservation identity。相同 fingerprint 的 replay 返回已持久化的 rejection，或恢复同一个
+admitted plan；不同 fingerprint 返回 idempotency conflict。包括 binding unavailable 和
+`parent_tree_stop_in_progress` 在内的 transient pre-plan rejection 也不以同一 key 重试；调用方
+必须使用新 key 重新请求。
+
+只有 request fence validation 通过后，coordinator 才把它推进为带 child identities 的 launch
+plan。plan 额外持久化：
 
 - SpawnOrigin：parentSessionId、parent Agent ID、edgeId 和 caller key；
 - parent workDir、pinned RunnerId 与完整 expected parent binding；
@@ -189,25 +250,55 @@ spawn 扩展现有按 idempotency key 持久化的 `AgentLaunchCoordinator`。�
 - 正常 launch 已有的 Job、Session、Input、Turn identity。
 
 plan 写入后不重新读取 mutable target Agent 或 parent capability snapshot。它用既有的
-`PrepareJob -> EnsureInitialLaunch -> SubmitJob` fences，并在 `EnsureInitialLaunch` 与
-`SubmitJob` 之间增加 `EnsureParentLink`：
+`PrepareJob -> EnsureInitialLaunch -> SubmitJob` fences，并扩展为带 reservation、final check
+和 abort 的单一 launch pipeline：
 
 ```text
-persist plan
+persist request fence with fingerprint
+  -> pre-plan validation
+  -> reject request fence with no child artifacts, or persist launch plan and reserve EdgeId
+       at SessionTreeMutationFence
   -> prepare child AgentJob with pinned RunnerId and inherited workDir
   -> create child AgentSession + initial SessionInput + initial AgentTurn
-  -> create child-owned SessionParentLink
+  -> final check reservation, parent workDir, binding and stop admission
+  -> finalize the child-owned SessionParentLink through the fence mutation protocol
   -> submit the same prepared AgentJob to its pinned Runner
 ```
 
-每步都有稳定 command identity，重复执行必须得到 already-applied acknowledgement。link
-未确认前不得 submit child Job；因此部分失败只留下 coordinator 正在恢复的 prepared
-artifacts，绝不开始一段不可见的 child execution。coordinator reminder 从持久 fence 恢复。
+pre-plan validation 失败时，`SpawnRequestFence` 持久化同一 canonical rejection，但不持久化
+launch plan、reservation 或 child identity，也不创建 Job、Session、Input、Turn 或 link。这是
+一次未接受的 validation rejection，不是可恢复的 launch；同一 key 只会重放它，不能重新验证。
 
-link 建立时再次比较 parent 的 expected binding、workDir 与 cascade-stop
-fence。比较失败把这次 plan 终结为明确拒绝，不会在 parent 已 reset、换 binding 或开始
-cascade stop 后把旧计划投递出去。已成功建立 link 的 plan 重放不会因为目标 rename/archive
-或 parent 配置编辑而改变 child。
+plan 一经持久化就保存 immutable child identities、expected workDir/binding 和
+`LinkReservation`。同 key 的重放只能恢复它的相同结果，不能重新选择 parent、target、
+workDir 或 Runner。每个后续命令都有稳定 command identity，重复执行必须得到
+already-applied acknowledgement；coordinator reminder 从该 durable fence 恢复。
+
+reservation 先占住 EdgeId，但不是 tree edge，也不让 child 对外可见。child Job、Session、
+Input 与 Turn 在 final check 前都只是 provisional artifacts：`mo session tree`、正常 spawn
+success response 与普通 Session command 不能发现或操作它们。initial Turn 可以是 queued，
+Session activity 也可以因此为 active；它只表示 coordinator 正在恢复该计划，绝不表示 work
+已被提交给 Runner。
+
+finalize attachment 必须在 `SessionTreeMutationFence` 内再次比较 parent 的 expected workDir、
+binding 与 stop admission。成功的 child link acknowledgement 才写 attached `SessionParentLink`，使 child 对 tree 和
+success response 可见。`SubmitPreparedLaunch` 还必须携带该 plan 的 attached reservation；所有
+submit/recovery 路径都检查它。没有 attached reservation、或 plan 已进入 rejection fence 时
+一律 `must-not-submit`，即使 Job 仍是 pending。
+
+final check 发现 parent reset、workDir/binding 改变、reservation 被 stop snapshot 拒绝（reason 为
+`parent_tree_stop_in_progress`）或其它不可恢复冲突时，先把 plan 持久化为 `rejected`，再以稳定
+abort command 收敛 provisional artifacts：reservation 记为 `rejected`，prepared Job 终结为 `cancelled` 且 reason 为
+`parent_link_rejected`，initial Turn 终结为 `cancelled`，Session activity 回到 `idle` 而
+AgentSession 仍非终态。已写的 initial Input 只保留作该 rejected plan 的审计，不对普通
+Session 输入、tree 或 launch success 可见。没有 `SessionParentLink`，所以这个取消不是一次
+已接受 delegation 的 terminal report，也绝不向 parent 追加 Input。
+
+abort 本身可在任一 participant 调用后中断；重放同一 abort command 必须完成其余 participant
+并保留相同 cancelled/rejected 结果。若 rejection 发生在某个 provisional artifact 之前，该
+artifact 不创建，其余已创建 artifact 仍按上述状态收敛。replay 返回相同的 durable rejected
+outcome 和 reason，不暴露未被接受 child 的常规 Job/Session 成功引用。已成功 finalize
+attachment 的 plan 重放不会因为目标 rename/archive 或 parent 配置编辑而改变 child。
 
 child Job dispatch envelope 带 `PinnedRunnerId`。AgentJob admission 只能 claim 这个 Runner；
 它不可用时 Job 保持普通的 pending/retry 状态，不能被全 Project eligible-runner 选择逻辑
@@ -298,11 +389,30 @@ parent idle 时，这条 Input 按普通 follow-up 创建新的 Turn；parent ac
 创建可读取的 operation resource；同 key 的重试恢复同一 operation，新的 key 才表示
 新的 stop 请求。
 
-Server 在 operation 被接受时持久化 root、tree membership snapshot、每个 target 的当时
-current turn/binding 和稳定 child stop-operation IDs。membership 是 root 及当时所有 attached
-descendants。operation 建立与新 link attachment 在 tree stop fence 上串行：先接受的
-spawn 被纳入 snapshot，后接受的 spawn 被拒绝为 `parent_tree_stop_in_progress`。这使
-“整棵子树”有确定的并发边界，而不依赖一次会变化的递归读取。
+Server 在 operation 被接受时，以一个已排在所有先前 fence mutation 之后的
+`SessionTreeMutationFence` command 持久化 root、tree membership snapshot、snapshot
+`GraphRevision`、每个 target 的当时 current turn/binding 和稳定 child stop-operation IDs。
+membership 是 root 及该 revision 的所有 attached descendants。已开始的 attachment/detach
+mutation 必须先恢复到 acknowledgement，才可接受 stop snapshot；同一 fence 也处理
+reservation、final attachment 和 detach，顺序定义如下：
+
+| 先线性化的操作 | 后果 |
+|---|---|
+| detach 先于 stop snapshot | subtree 在 snapshot 之外；之后的 stop 不影响它。 |
+| finalized attachment 先于 stop snapshot | child 在 snapshot 内；它的 current work 按普通 target 规则处理。 |
+| stop snapshot 先于 detach | 当时 attached subtree 的 IDs 固定写入 snapshot；之后 detach 也不将其移出，仍按该 snapshot 停止。 |
+| stop snapshot 遇到较早但尚未 finalized 的 reservation | reservation 记为 rejected，child 不进 snapshot，coordinator 只能 abort，绝不 submit。 |
+| stop operation 尚未 terminal 时的新 reservation 或 final attachment | 拒绝为 `parent_tree_stop_in_progress`；operation terminal 后必须用新 key 创建新的 child，它不属于旧 snapshot。 |
+
+因此并发操作没有“读取一棵正在变化的树”这个中间状态。stop retry 从持久化的 target IDs、
+expected turn/binding 与 child stop-operation IDs 恢复；它不重新遍历树，也不重新决定 detach
+或 attachment 是否属于该次 stop。
+
+若 snapshot 包含一个已经 attached、但尚未 Submit 的 child，target sub-operation 以它的
+initial Job/Turn identity 取消该 queued work，并把该 cancellation 写入同一 plan 的 submission
+gate。之后 coordinator 或 reminder 都不得 submit。此时 link 已经 accepted，所以 Job 的
+`cancelled` terminal result 仍按 normal terminal-report 规则处理；这不同于 reservation 被
+rejected 时完全没有 callback 的 abort。
 
 每个 target 只执行 Server 的现有 turn-control 语义：
 
@@ -327,9 +437,11 @@ Session 因此没有 terminal lifecycle：cascade stop 结束的是 snapshot 中
 ### Detach
 
 `mo session detach <child-session-id>` 要求 child 当前 attached。它在 child Session 中把
-link 原子改为 `detached`，更新 tree index，并返回被移除的 parent 和 edge identity。
-它不 cancel child、不会移动 workDir、不会修改 child Source，也不会把 child 转换成新
-Agent 资源。已 detached child 是新的 tree root；它的 attached descendants 保持原来的结构。
+link 作为一个 fence mutation 改为 `detached`：fence 先持久化 command/revision，child 再以
+幂等 transition 写入 detach revision/index acknowledgement，最后由 fence 发布该 revision。
+它返回被移除的 parent 和 edge identity，不 cancel child、不会移动 workDir、不会修改 child
+Source，也不会把 child 转换成新 Agent 资源。已 detached child 是新的 tree root；它的
+attached descendants 保持原来的结构。
 
 detach 是幂等的目标状态：重试已经 detached 的同一 child 返回该 historic link。它不能
 reparent 到另一个 Session。终态 report 与 detach 的竞争规则以本篇“持久且幂等的投递”为
@@ -339,14 +451,15 @@ reparent 到另一个 Session。终态 report 与 detach 的竞争规则以本�
 
 | Increment | 独立用户价值 | 依赖与范围 |
 |---|---|---|
-| 1. Spawn and inspect | 已授权 parent 能 spawn 一个已声明的 child，并从 `mo session tree` 看见 child、Job 与 Session。 | capability stable IDs and launch snapshot、explicit caller/key、parent workDir plus pinned Runner binding、existing launch coordinator extension、link/index/paged tree query。没有 terminal callback、cascade 或 detach。 |
+| 1. Spawn and inspect | 具备 authoritative workDir 与当前 Runner binding 的已授权 Mohist Agent parent 能 spawn 一个已声明的 child，并从 `mo session tree` 看见 child、Job 与 Session。当前 Agent Connection parent 因缺少这些事实被拒绝。 | capability stable IDs and launch snapshot、explicit caller/key、parent workDir plus pinned Runner binding、existing launch coordinator extension、reservation/finalization/abort gate、link/index/revision-pinned paged tree query。没有 terminal callback、cascade 或 detach。 |
 | 2. Terminal callback | parent 会收到 child launch job 的一次终态 Input，并可按引用检查结果。 | 依赖 1 的 edge 与 Job identity；实现 pending/delivered/suppressed report recovery。 |
 | 3. Cascade and detach | parent 能停止当前 attached subtree 的工作；需要留下 child 时可 detach。 | 依赖 1 的 link index；实现 `SessionTreeStopOperation`、fence、partial/unknown/retry 与 detach race rules。 |
 | 4. Managed worktree | child 可以请求由 Project Space 定义且由 Runner 物化的隔离工作空间。 | 依赖 1 的 link/launch model 与 Project Space/Runner materialization contract；不接受任意 Server path。 |
 
 Increment 1 不需要等待后续生命周期能力即可交付。它必须用 coordinator recovery 证明：在
-prepare、initial Session creation、link creation 和 submit 任一步中断后，同一个 idempotency
-key 恢复为同一 child，且 child 永远不会在缺 link 或错误 Runner 上 dispatch。
+reserve、prepare、initial Session creation、final link check、abort 和 submit 任一步中断后，
+同一个 idempotency key 恢复同一 accepted child 或同一 durable rejection；child 永远不会在
+缺 link、rejected reservation、已被 snapshot 取消或错误 Runner 上 dispatch。
 
 ## Non-goals
 
@@ -364,18 +477,24 @@ key 恢复为同一 child，且 child 永远不会在缺 link 或错误 Runner �
 Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少以下行为：
 
 - capability snapshot 对 rename、archive、self-spawn、cross-Project 和同 key conflict 的结果；
-- SpawnOrigin 的 parent identity、缺失/unknown/stale binding 拒绝、workDir inheritance 与
-  exact Runner pin，且 Job admission 不会改选其它 eligible Runner；
+- SpawnOrigin 的 parent identity、缺失/unknown/stale binding 或 authoritative workDir 拒绝、
+  workDir inheritance 与 exact Runner pin，且 Job admission 不会改选其它 eligible Runner；
+- pre-plan validation rejection 只持久化 request fence、同 key stable replay、mismatched payload
+  conflict 和新 key retry，不留任何 child artifact；post-plan reservation/final-check rejection 的
+  Job cancelled、initial Turn cancelled、Session idle、无 visible link/input/callback 和 replay
+  must-not-submit；
 - coordinator 每个 durable fence 的 activation loss/retry，确保一个 Job、Session、Input、
-  Turn、edge 和 dispatch；
-- 单 parent、无 reparent/cycle、detach 后 subtree query 的 `O(n)` indexed read cost、batch 和
-  page/continuation；
-- Agent Connection parent 可 spawn、Workflow inline parent 被拒绝，target Agent
+  Turn、edge 和 dispatch，或同一 durable rejection；
+- 单 parent、无 reparent/cycle、detach 后 subtree query 的 indexed read cost、batch、revision-
+  pinned stable BFS page/continuation 及 concurrent attach/detach 只由新 query 可见；
+- 当前 Agent Connection parent 与 Workflow inline parent 因各自缺失 required facts 被拒绝；具备
+  authoritative workDir 与当前 Runner binding 的 Mohist Agent parent 可 spawn，target Agent
   `MaxConcurrentRuns` 满时 child 以普通 Job 语义排队而非拒绝；
 - AgentJob terminal 而非 Session/Turn terminal 触发一次 parent SessionInput，含 handler
   replay、parent busy/capacity、unknown 与 detach race；
-- cascade snapshot、queued/executing/idle/unknown targets、partial outcome、同 operation retry
-  及 later Turn 不被旧 operation 停止；
+- cascade snapshot 与 reservation/final attachment/detach 的两两顺序、queued/executing/idle/
+  unknown targets、pre-submit child cancellation、partial outcome、同 operation retry 及 later
+  Turn 不被旧 operation 停止；
 - startup context 在第一轮前包含 own Session ID、parent ID（若有）、snapshot 和规范 CLI
   command，且 dispatch 不依赖 per-session environment variable。
 
