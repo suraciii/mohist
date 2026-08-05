@@ -6,6 +6,7 @@ class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
   started = false
   disconnected = false
+  acknowledged = false
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -16,9 +17,9 @@ class FakeSocket implements SocketClient {
   }
 
   async emit(body: unknown) {
-    let acknowledged = false
-    await this.handler?.({ body, ack: () => { acknowledged = true } })
-    return acknowledged
+    this.acknowledged = false
+    await this.handler?.({ body, ack: () => { this.acknowledged = true } })
+    return this.acknowledged
   }
 
   async disconnect() {
@@ -35,7 +36,9 @@ class FakeTransport implements AdapterTransport {
   readonly uncertainDeliveries: Delivery[] = []
   connections: SlackAdapterTarget[] = []
   nextIngressResults: IngressResult[] = []
+  ingressError?: Error
   interactionError?: Error
+  interactionGate?: Promise<void>
   private readonly sessionByConnection = new Map<string, AdapterSession>()
 
   async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
@@ -53,12 +56,14 @@ class FakeTransport implements AdapterTransport {
 
   async ingress(_ref: SlackAdapterTarget, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
+    if (this.ingressError) throw this.ingressError
     const queued = this.nextIngressResults.shift()
     return queued ?? { kind: "accepted" }
   }
 
   async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
     this.interactions.push(envelope)
+    await this.interactionGate
     if (this.interactionError) throw this.interactionError
     return { state: "stop_requested" }
   }
@@ -122,7 +127,40 @@ describe("mohist-slack adapter", () => {
     expect(JSON.stringify(interaction)).not.toContain("xoxb-secret")
   })
 
-  it("leaves a failed interaction unacknowledged without crashing the socket callback", async () => {
+  it("acknowledges an interaction before waiting for Server processing", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    let releaseInteraction!: () => void
+    transport.interactionGate = new Promise<void>((resolve) => { releaseInteraction = resolve })
+    const socket = new FakeSocket()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const pending = socket.emit({
+      type: "block_actions",
+      trigger_id: "trigger-1",
+      team: { id: "T1" },
+      user: { id: "U1" },
+      container: { channel_id: "C1", message_ts: "123.456" },
+      actions: [{ action_id: "mohist_stop_turn", action_ts: "123.500", value: "signed-value" }],
+    })
+
+    await vi.waitFor(() => expect(transport.interactions).toHaveLength(1))
+    expect(socket.acknowledged).toBe(true)
+    releaseInteraction()
+    await expect(pending).resolves.toBe(true)
+    controller.abort()
+  })
+
+  it("contains a failed acknowledged interaction without crashing the socket callback", async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
@@ -148,14 +186,43 @@ describe("mohist-slack adapter", () => {
       actions: [{ action_id: "mohist_stop_turn", action_ts: "123.500", value: "signed-value" }],
     }
 
-    await expect(socket.emit(body)).resolves.toBe(false)
+    await expect(socket.emit(body)).resolves.toBe(true)
     expect(error).toHaveBeenCalledWith(
-      "Slack event handling failed; the event remains unacknowledged for retry.",
+      "Slack interaction processing failed after acknowledgement.",
       "Server returned 500 with <redacted>",
     )
 
     transport.interactionError = undefined
     await expect(socket.emit(body)).resolves.toBe(true)
+    controller.abort()
+  })
+
+  it("leaves a failed message event unacknowledged for Slack retry", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.ingressError = new Error("Server returned 500")
+    const socket = new FakeSocket()
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await expect(socket.emit({
+      team_id: "T1",
+      event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", user: "U1", text: "do work" },
+    })).resolves.toBe(false)
+    expect(error).toHaveBeenCalledWith(
+      "Slack event handling failed; the event remains unacknowledged for retry.",
+      "Server returned 500",
+    )
     controller.abort()
   })
 
