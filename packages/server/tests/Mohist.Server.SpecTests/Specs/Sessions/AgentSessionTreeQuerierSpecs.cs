@@ -247,6 +247,96 @@ public sealed class AgentSessionTreeQuerierSpecs
             page!.Nodes.Select(node => node.SessionId).ToArray());
     }
 
+    [Fact]
+    public async Task ReachableDetachedBeforeAttachedCandidateFailsClosed()
+    {
+        var projectId = $"tree-detach-order-{Guid.NewGuid():N}";
+        var rootId = $"session-root-{Guid.NewGuid():N}";
+        var childId = $"session-child-{Guid.NewGuid():N}";
+        await AttachChildAsync(projectId, rootId, childId, "edge-bad", "command-bad", "job-bad");
+
+        await CorruptRowColumnAsync(childId, row => row.ParentLinkDetachedRevision = row.ParentLinkAttachedRevision);
+
+        await Assert.ThrowsAsync<SessionTreeProjectionInconsistentException>(() =>
+            CreateQuerier().GetAsync(projectId, rootId, 10, null));
+    }
+
+    [Fact]
+    public async Task FutureAttachedChildIsSkippedAtOldCursorRevisionAndAppearsAtItsOwn()
+    {
+        var projectId = $"tree-future-attach-{Guid.NewGuid():N}";
+        var rootId = $"session-root-{Guid.NewGuid():N}";
+        var childId = $"session-child-{Guid.NewGuid():N}";
+        var futureChildId = $"session-future-child-{Guid.NewGuid():N}";
+        await AttachChildAsync(projectId, rootId, childId, "edge-a", "command-a", "job-a");
+
+        var querier = CreateQuerier();
+        var snapshot = await querier.GetAsync(projectId, rootId, 1, null);
+        Assert.NotNull(snapshot);
+        Assert.Equal(1, snapshot!.Revision);
+        Assert.NotNull(snapshot.Continuation);
+
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(futureChildId).OpenAsync(new OpenAgentSessionCommand(
+            string.Empty,
+            "pi",
+            "/workspace",
+            Metadata: Metadata(projectId, "agent-future", "agent-launch"),
+            LaunchVisibility: AgentLaunchVisibility.Provisional));
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        await fence.ReserveAsync(LinkCommand(projectId, "edge-b", "command-b", rootId, futureChildId));
+        var assigned = await fence.BeginFinalizeAsync("command-b", "edge-b");
+        await _fixture.Grains.GetGrain<IAgentSessionGrain>(futureChildId).EnsureParentLinkAsync(new EnsureParentLinkCommand(
+            new SessionParentLink(
+                "edge-b",
+                rootId,
+                "agent-root",
+                "job-b",
+                _fixture.TimeProvider.GetUtcNow(),
+                assigned.Revision,
+                SessionParentLinkState.Attached),
+            "/workspace",
+            "runner-tree",
+            "opencode",
+            null));
+
+        var pinned = await querier.GetAsync(projectId, rootId, 10, snapshot.Continuation);
+        Assert.NotNull(pinned);
+        Assert.Equal(1, pinned!.Revision);
+        Assert.Equal(childId, Assert.Single(pinned.Nodes).SessionId);
+
+        await fence.CommitFinalizeAsync("command-b", "edge-b");
+
+        var current = await querier.GetAsync(projectId, rootId, 10, null);
+        Assert.NotNull(current);
+        Assert.Equal(2, current!.Revision);
+        Assert.Equal(
+            new[] { rootId, childId, futureChildId },
+            current.Nodes.Select(node => node.SessionId).ToArray());
+    }
+
+    [Fact]
+    public async Task LegallyDetachedChildIsSkippedInCurrentTree()
+    {
+        var projectId = $"tree-detach-skip-{Guid.NewGuid():N}";
+        var rootId = $"session-root-{Guid.NewGuid():N}";
+        var childId = $"session-child-{Guid.NewGuid():N}";
+        await AttachChildAsync(projectId, rootId, childId, "edge-d", "command-d", "job-d");
+
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        await fence.ReserveAsync(LinkCommand(projectId, "edge-x", "command-x", rootId, $"unused-{Guid.NewGuid():N}"));
+        await fence.BeginFinalizeAsync("command-x", "edge-x");
+        await fence.CommitFinalizeAsync("command-x", "edge-x");
+        Assert.Equal(2, await SessionTreeGraphRevisionWatermark.ReadPublishedRevisionAsync(DbFactory(), projectId));
+
+        await MarkDetachedAsync(childId, 2);
+
+        var page = await CreateQuerier().GetAsync(projectId, rootId, 10, null);
+        Assert.NotNull(page);
+        Assert.Equal(2, page!.Revision);
+        Assert.Equal(rootId, Assert.Single(page.Nodes).SessionId);
+        Assert.Empty(page.Edges);
+    }
+
     private AgentSessionTreeQuerier CreateQuerier()
     {
         var services = _fixture.Cluster.GetSiloServiceProvider(null);

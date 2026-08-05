@@ -88,9 +88,7 @@ public sealed class AgentSessionTreeQuerier(
             var candidates = await db.AgentSessions.AsNoTracking()
                 .Where(row => row.LabelProjectId == projectId
                     && row.ParentSessionId != null
-                    && parentIds.Contains(row.ParentSessionId)
-                    && row.ParentLinkAttachedRevision <= revision
-                    && (row.ParentLinkDetachedRevision == null || row.ParentLinkDetachedRevision > revision))
+                    && parentIds.Contains(row.ParentSessionId))
                 .OrderBy(row => row.ParentSessionId)
                 .ThenBy(row => row.ParentLinkAttachedRevision)
                 .ThenBy(row => row.ParentLinkEdgeId)
@@ -106,13 +104,13 @@ public sealed class AgentSessionTreeQuerier(
                     continue;
                 foreach (var candidate in siblings)
                 {
-                    ValidateCandidate(candidate, projectId, revision, seenEdges, visited);
+                    if (!IsVisibleCandidate(candidate, projectId, revision, seenEdges, visited))
+                        continue;
                     var record = ToRecord(candidate);
                     if (record is null)
                         throw new SessionTreeProjectionInconsistentException();
                     result.Add((record, depth));
                     next.Add(candidate.Id);
-                    visited.Add(candidate.Id);
                 }
             }
             frontier = next;
@@ -121,7 +119,7 @@ public sealed class AgentSessionTreeQuerier(
         return result;
     }
 
-    private static void ValidateCandidate(
+    private static bool IsVisibleCandidate(
         AgentSessionRow candidate,
         string projectId,
         long revision,
@@ -135,17 +133,25 @@ public sealed class AgentSessionTreeQuerier(
             throw new SessionTreeProjectionInconsistentException();
 
         var attached = candidate.ParentLinkAttachedRevision;
-        if (!attached.HasValue || attached.Value <= 0 || attached.Value > revision)
+        if (!attached.HasValue || attached.Value <= 0)
             throw new SessionTreeProjectionInconsistentException();
 
         var detached = candidate.ParentLinkDetachedRevision;
-        if (detached.HasValue && (detached.Value <= revision || detached.Value <= attached.Value))
+        if (detached.HasValue && detached.Value <= attached.Value)
             throw new SessionTreeProjectionInconsistentException();
+
+        if (attached.Value > revision)
+            return false;
+
+        if (detached.HasValue && detached.Value <= revision)
+            return false;
 
         if (string.Equals(candidate.ParentSessionId, candidate.Id, StringComparison.Ordinal)
             || !seenEdges.Add(candidate.ParentLinkEdgeId!)
             || !visited.Add(candidate.Id))
             throw new SessionTreeProjectionInconsistentException();
+
+        return true;
     }
 
     private static AgentSessionTreeNode ToNode(AgentSessionRecord record, int depth) => new(
