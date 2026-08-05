@@ -15,6 +15,35 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
         migrationBuilder.RenameTable(
             name: "ManagedSlackChildApps",
             newName: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "UX_ManagedSlackChildApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "UX_ManagedSlackChildApps_WorkspaceTeamId_AppId",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.CreateIndex(
+            name: "IX_ManagedSlackAgentApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps",
+            column: "AgentConnectionId");
+        migrationBuilder.CreateIndex(
+            name: "UX_ManagedSlackAgentApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps",
+            column: "AgentConnectionId",
+            unique: true,
+            filter: "\"DeletedAt\" IS NULL");
+        migrationBuilder.CreateIndex(
+            name: "UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId",
+            table: "ManagedSlackAgentApps",
+            columns: new[] { "WorkspaceTeamId", "AppId" },
+            unique: true,
+            filter: "\"DeletedAt\" IS NULL AND \"AppId\" <> ''");
+        migrationBuilder.CreateIndex(
+            name: "IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt",
+            table: "ManagedSlackAgentApps",
+            columns: new[] { "EnrollmentId", "UpdatedAt" });
 
         migrationBuilder.CreateTable(
             name: "StoredSecrets",
@@ -35,7 +64,13 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
                     "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')");
                 table.CheckConstraint(
                     "CK_StoredSecrets_Kind",
-                    "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret')");
+                    "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken')");
+                table.CheckConstraint(
+                    "CK_StoredSecrets_OwnerKindKind",
+                    "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR " +
+                    "(\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR " +
+                    "(\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret')) OR " +
+                    "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret'))");
             });
 
         migrationBuilder.Sql(
@@ -60,6 +95,27 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql(
+            """
+            CREATE TABLE "__StoredSecretsDownCompatibilityGuard" (
+                "Value" INTEGER NOT NULL CONSTRAINT "CK_StoredSecrets_DownCompatible" CHECK ("Value" = 0)
+            );
+            """);
+        migrationBuilder.Sql(
+            """
+            INSERT INTO "__StoredSecretsDownCompatibilityGuard" ("Value")
+            SELECT 1
+            WHERE EXISTS (
+                SELECT 1
+                FROM "StoredSecrets"
+                WHERE NOT (
+                    ("OwnerKind" = 'agent_connection' AND "Kind" IN ('appToken', 'botToken'))
+                    OR ("OwnerKind" = 'webhook_subscription' AND "Kind" = 'webhookSecret')
+                )
+            );
+            """);
+        migrationBuilder.Sql("DROP TABLE \"__StoredSecretsDownCompatibilityGuard\";");
+
         migrationBuilder.CreateTable(
             name: "ConnectionSecrets",
             columns: table => new
@@ -83,7 +139,8 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
             INSERT INTO "ConnectionSecrets" ("ProjectId", "ConnectionId", "Kind", "Blob", "UpdatedAt")
             SELECT "OwnerScope", "OwnerId", "Kind", "Blob", "UpdatedAt"
             FROM "StoredSecrets"
-            WHERE "OwnerKind" IN ('agent_connection', 'webhook_subscription');
+            WHERE ("OwnerKind" = 'agent_connection' AND "Kind" IN ('appToken', 'botToken'))
+               OR ("OwnerKind" = 'webhook_subscription' AND "Kind" = 'webhookSecret');
             """);
 
         migrationBuilder.CreateIndex(
@@ -92,6 +149,35 @@ public partial class RenameManagedSlackAgentAppAndGeneralizeSecrets : Migration
             columns: new[] { "ProjectId", "ConnectionId" });
 
         migrationBuilder.DropTable(name: "StoredSecrets");
+
+        migrationBuilder.DropIndex(
+            name: "IX_ManagedSlackAgentApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "UX_ManagedSlackAgentApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.DropIndex(
+            name: "IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt",
+            table: "ManagedSlackAgentApps");
+        migrationBuilder.CreateIndex(
+            name: "UX_ManagedSlackChildApps_AgentConnectionId",
+            table: "ManagedSlackAgentApps",
+            column: "AgentConnectionId",
+            unique: true,
+            filter: "\"DeletedAt\" IS NULL");
+        migrationBuilder.CreateIndex(
+            name: "UX_ManagedSlackChildApps_WorkspaceTeamId_AppId",
+            table: "ManagedSlackAgentApps",
+            columns: new[] { "WorkspaceTeamId", "AppId" },
+            unique: true,
+            filter: "\"DeletedAt\" IS NULL AND \"AppId\" <> ''");
+        migrationBuilder.CreateIndex(
+            name: "IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt",
+            table: "ManagedSlackAgentApps",
+            columns: new[] { "EnrollmentId", "UpdatedAt" });
 
         migrationBuilder.RenameTable(
             name: "ManagedSlackAgentApps",

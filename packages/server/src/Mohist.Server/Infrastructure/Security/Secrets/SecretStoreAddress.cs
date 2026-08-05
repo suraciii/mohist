@@ -92,7 +92,12 @@ public readonly record struct SecretStoreAddress
         {
             SecretOwnerAddress.AgentConnection => kind is SecretKind.AppToken or SecretKind.BotToken,
             SecretOwnerAddress.WebhookSubscription => kind is SecretKind.WebhookSecret,
-            SecretOwnerAddress.SlackWorkspaceEnrollment => kind is SecretKind.AppToken or SecretKind.BotToken,
+            SecretOwnerAddress.SlackWorkspaceEnrollment => kind is SecretKind.ConfigurationAccessToken
+                or SecretKind.ConfigurationRefreshToken
+                or SecretKind.AppToken
+                or SecretKind.BotToken
+                or SecretKind.ClientSecret
+                or SecretKind.SigningSecret,
             SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken,
             _ => false,
         };

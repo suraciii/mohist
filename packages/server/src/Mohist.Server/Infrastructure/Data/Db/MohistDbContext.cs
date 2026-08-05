@@ -1502,7 +1502,13 @@ public class MohistDbContext : DbContext
                 "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')"));
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_StoredSecrets_Kind",
-                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret')"));
+                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken')"));
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_StoredSecrets_OwnerKindKind",
+                "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR " +
+                "(\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR " +
+                "(\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret')) OR " +
+                "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret'))"));
             entity.HasIndex(e => new { e.OwnerKind, e.OwnerScope, e.OwnerId })
                 .HasDatabaseName("IX_StoredSecrets_Owner");
         });

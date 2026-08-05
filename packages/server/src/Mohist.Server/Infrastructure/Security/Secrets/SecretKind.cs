@@ -7,6 +7,8 @@ public enum SecretKind
     WebhookSecret = 2,
     ClientSecret = 3,
     SigningSecret = 4,
+    ConfigurationAccessToken = 5,
+    ConfigurationRefreshToken = 6,
 }
 
 public static class SecretKinds
@@ -16,6 +18,8 @@ public static class SecretKinds
     public const string WebhookSecret = "webhookSecret";
     public const string ClientSecret = "clientSecret";
     public const string SigningSecret = "signingSecret";
+    public const string ConfigurationAccessToken = "configurationAccessToken";
+    public const string ConfigurationRefreshToken = "configurationRefreshToken";
 
     public static string ToWire(SecretKind kind) => kind switch
     {
@@ -24,6 +28,8 @@ public static class SecretKinds
         SecretKind.WebhookSecret => WebhookSecret,
         SecretKind.ClientSecret => ClientSecret,
         SecretKind.SigningSecret => SigningSecret,
+        SecretKind.ConfigurationAccessToken => ConfigurationAccessToken,
+        SecretKind.ConfigurationRefreshToken => ConfigurationRefreshToken,
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
     };
 
@@ -45,6 +51,12 @@ public static class SecretKinds
                 return true;
             case SigningSecret:
                 kind = SecretKind.SigningSecret;
+                return true;
+            case ConfigurationAccessToken:
+                kind = SecretKind.ConfigurationAccessToken;
+                return true;
+            case ConfigurationRefreshToken:
+                kind = SecretKind.ConfigurationRefreshToken;
                 return true;
             default:
                 kind = default;

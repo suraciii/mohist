@@ -12,6 +12,21 @@ namespace Mohist.Server.SpecTests.Specs.Security;
 
 public class ConnectionSecretsMigrationSpecs
 {
+    private static readonly string[] ManagedSlackAgentAppIndexes =
+    [
+        "IX_ManagedSlackAgentApps_AgentConnectionId",
+        "UX_ManagedSlackAgentApps_AgentConnectionId",
+        "UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId",
+        "IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt",
+    ];
+
+    private static readonly string[] ManagedSlackChildAppIndexes =
+    [
+        "UX_ManagedSlackChildApps_AgentConnectionId",
+        "UX_ManagedSlackChildApps_WorkspaceTeamId_AppId",
+        "IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt",
+    ];
+
     [Fact]
     public async Task Up_CreatesConnectionSecretsTableWithExpectedColumns()
     {
@@ -113,6 +128,39 @@ public class ConnectionSecretsMigrationSpecs
     }
 
     [Fact]
+    public async Task StoredSecrets_RestrictsKindsToTheirTypedOwners()
+    {
+        await using var database = CreateDatabase();
+        await using var context = database.CreateDbContext();
+        await context.Database.MigrateAsync();
+
+        await context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "StoredSecrets" (
+                "OwnerKind", "OwnerScope", "OwnerId", "Kind", "Blob", "UpdatedAt")
+            VALUES (
+                'slack_workspace_enrollment', '', 'enrollment_1', 'configurationAccessToken', X'01',
+                '2026-08-05T00:00:00.0000000+00:00');
+            """);
+
+        await Assert.ThrowsAsync<SqliteException>(() => context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "StoredSecrets" (
+                "OwnerKind", "OwnerScope", "OwnerId", "Kind", "Blob", "UpdatedAt")
+            VALUES (
+                'slack_workspace_enrollment', '', 'enrollment_1', 'webhookSecret', X'01',
+                '2026-08-05T00:00:00.0000000+00:00');
+            """));
+        await Assert.ThrowsAsync<SqliteException>(() => context.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "StoredSecrets" (
+                "OwnerKind", "OwnerScope", "OwnerId", "Kind", "Blob", "UpdatedAt")
+            VALUES (
+                'managed_slack_agent_app', '', 'agent_app_1', 'configurationRefreshToken', X'01',
+                '2026-08-05T00:00:00.0000000+00:00');
+            """));
+
+        Assert.Equal(1, await CountRowsAsync(context, "StoredSecrets"));
+    }
+
+    [Fact]
     public async Task Upgrade_CopiesLegacySecretsToTypedOwnersAndRenamesAgentAppTable()
     {
         await using var database = CreateDatabase("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
@@ -135,6 +183,9 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ManagedSlackAgentApps"));
         Assert.False(await TableExistsAsync(after, "ManagedSlackChildApps"));
         Assert.False(await TableExistsAsync(after, "ConnectionSecrets"));
+        AssertIndexNames(
+            ManagedSlackAgentAppIndexes,
+            await ReadIndexesAsync(after, "ManagedSlackAgentApps"));
     }
 
     [Fact]
@@ -156,7 +207,46 @@ public class ConnectionSecretsMigrationSpecs
         Assert.True(await TableExistsAsync(after, "ConnectionSecrets"));
         Assert.False(await TableExistsAsync(after, "StoredSecrets"));
         Assert.Equal(1, await CountRowsAsync(after, "ConnectionSecrets"));
+        AssertIndexNames(
+            ManagedSlackChildAppIndexes,
+            await ReadIndexesAsync(after, "ManagedSlackChildApps"));
     }
+
+    [Fact]
+    public async Task Down_RejectsNonrepresentableEnrollmentAndAgentAppSecrets()
+    {
+        await using var database = CreateDatabase("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
+        await using (var apply = database.CreateDbContext())
+        {
+            var migrator = apply.GetService<IMigrator>();
+            await migrator.MigrateAsync();
+            await apply.Database.ExecuteSqlRawAsync("""
+                INSERT INTO "StoredSecrets" (
+                    "OwnerKind", "OwnerScope", "OwnerId", "Kind", "Blob", "UpdatedAt")
+                VALUES
+                    ('slack_workspace_enrollment', '', 'enrollment_down', 'configurationAccessToken', X'01', '2026-08-05T00:00:00.0000000+00:00'),
+                    ('managed_slack_agent_app', '', 'agent_app_down', 'clientSecret', X'02', '2026-08-05T00:00:00.0000000+00:00');
+                """);
+
+            await Assert.ThrowsAsync<SqliteException>(
+                () => migrator.MigrateAsync("20260804100000_AddSlackManagerIdentityAndOutboxOwner"));
+        }
+
+        await using var after = database.CreateDbContext();
+        Assert.True(await TableExistsAsync(after, "StoredSecrets"));
+        Assert.False(await TableExistsAsync(after, "ConnectionSecrets"));
+        Assert.Equal(2, await CountRowsAsync(after, "StoredSecrets"));
+        Assert.Contains(
+            "20260805120000_RenameManagedSlackAgentAppAndGeneralizeSecrets",
+            await after.Database.GetAppliedMigrationsAsync());
+    }
+
+    private static void AssertIndexNames(
+        string[] expected,
+        IDictionary<string, string[]> actual) =>
+        Assert.Equal(
+            expected.OrderBy(name => name, StringComparer.Ordinal),
+            actual.Keys.OrderBy(name => name, StringComparer.Ordinal));
 
     private static async Task<IDictionary<string, string>> ReadColumnTypesAsync(
         MohistDbContext context,
