@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
@@ -20,8 +21,11 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
     {
     }
 
-    [Fact]
-    public async Task SpawnRecoveryKeepsProvisionalArtifactsHidden_ThenCommitsAndReplaysStablePlan()
+    [Theory]
+    [InlineData(LaunchParticipantGate.EnsureInitialLaunch)]
+    [InlineData(LaunchParticipantGate.ParentLinkCommitted)]
+    public async Task SpawnRecoveryKeepsProvisionalArtifactsHidden_ThenCommitsAndReplaysStablePlan(
+        LaunchParticipantGate failureGate)
     {
         var runnerId = $"spawn-runner-{Guid.NewGuid():N}";
         var projectId = $"spawn-project-{Guid.NewGuid():N}";
@@ -118,7 +122,8 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
 
         try
         {
-            _fixture.LaunchFaults.FailNext(LaunchParticipantGate.EnsureInitialLaunch);
+            _fixture.LaunchFaults.ClearObservations();
+            _fixture.LaunchFaults.FailNext(failureGate);
             await Assert.ThrowsAsync<LaunchSetupPendingException>(() => coordinator.LaunchAsync(command));
 
             var jobKey = Assert.Single(_fixture.LaunchFaults.ParticipantIds(LaunchParticipantGate.PrepareJob));
@@ -136,10 +141,32 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
             var beforeCommit = await Grains
                 .GetGrain<ISessionTreeMutationFenceGrain>(projectId)
                 .GetAsync();
-            Assert.Equal(0, beforeCommit.GraphRevision);
-            Assert.Equal(LinkReservationState.Reserved, Assert.Single(beforeCommit.Reservations!).State);
+            if (failureGate == LaunchParticipantGate.ParentLinkCommitted)
+            {
+                Assert.Equal(1, beforeCommit.GraphRevision);
+                var attached = Assert.Single(beforeCommit.Reservations!);
+                Assert.Equal(LinkReservationState.Attached, attached.State);
+                Assert.Equal(1, attached.AttachedRevision);
 
-            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
+                var services = _fixture.Cluster.GetSiloServiceProvider(null);
+                var tree = new AgentSessionTreeQuerier(
+                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
+                    Grains);
+                var published = await tree.GetAsync(projectId, parentSessionId, 10, null);
+                Assert.NotNull(published);
+                Assert.Equal(1, published!.Revision);
+                Assert.Equal(
+                    new[] { parentSessionId, childSessionId },
+                    published.Nodes.Select(node => node.SessionId).ToArray());
+                Assert.Equal(edgeId, Assert.Single(published.Edges).EdgeId);
+            }
+            else
+            {
+                Assert.Equal(0, beforeCommit.GraphRevision);
+                Assert.Equal(LinkReservationState.Reserved, Assert.Single(beforeCommit.Reservations!).State);
+            }
+
+            _fixture.LaunchFaults.StopFailing(failureGate);
             var recovered = await coordinator.LaunchAsync(command);
             Assert.Equal(childSessionId, recovered.SessionId);
             Assert.Equal(inputId, recovered.InputId);
@@ -151,7 +178,9 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
                 .GetGrain<ISessionTreeMutationFenceGrain>(projectId)
                 .GetAsync();
             Assert.Equal(1, afterCommit.GraphRevision);
-            Assert.Equal(LinkReservationState.Attached, Assert.Single(afterCommit.Reservations!).State);
+            var afterAttached = Assert.Single(afterCommit.Reservations!);
+            Assert.Equal(LinkReservationState.Attached, afterAttached.State);
+            Assert.Equal(1, afterAttached.AttachedRevision);
 
             await using (var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope())
             {
@@ -159,6 +188,21 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
                 var jobs = scope.ServiceProvider.GetRequiredService<AgentJobQuerier>();
                 Assert.Single(await sessions.ListByIdsAsync([childSessionId]));
                 Assert.NotNull(await jobs.GetByKeyAsync(jobKey));
+            }
+
+            if (failureGate == LaunchParticipantGate.ParentLinkCommitted)
+            {
+                var services = _fixture.Cluster.GetSiloServiceProvider(null);
+                var tree = new AgentSessionTreeQuerier(
+                    services.GetRequiredService<IDbContextFactory<MohistDbContext>>(),
+                    Grains);
+                var recoveredTree = await tree.GetAsync(projectId, parentSessionId, 10, null);
+                Assert.NotNull(recoveredTree);
+                Assert.Equal(1, recoveredTree!.Revision);
+                Assert.Equal(
+                    new[] { parentSessionId, childSessionId },
+                    recoveredTree.Nodes.Select(node => node.SessionId).ToArray());
+                Assert.Equal(edgeId, Assert.Single(recoveredTree.Edges).EdgeId);
             }
 
             var status = await Grains.GetGrain<IAgentJobGrain>(jobKey).GetStatusAsync();
@@ -174,7 +218,7 @@ public sealed class AgentSpawnCoordinatorSpecs : AgentJobGrainTestSupport
         }
         finally
         {
-            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.EnsureInitialLaunch);
+            _fixture.LaunchFaults.StopFailing(failureGate);
         }
     }
 

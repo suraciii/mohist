@@ -12,6 +12,7 @@ public enum LaunchParticipantGate
 {
     PrepareJob,
     EnsureInitialLaunch,
+    ParentLinkCommitted,
     SubmitJob,
 }
 
@@ -48,6 +49,12 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public void StopFailing(LaunchParticipantGate gate) =>
         _remaining.TryRemove(gate, out _);
 
+    public void ClearObservations()
+    {
+        _commandIds.Clear();
+        _participantIds.Clear();
+    }
+
     public IReadOnlyList<string> CommandIds(LaunchParticipantGate gate) =>
         _commandIds.TryGetValue(gate, out var commandIds) ? commandIds.ToArray() : [];
 
@@ -59,6 +66,9 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
 
     public Task OnEnsureInitialLaunchAsync(string sessionId, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.EnsureInitialLaunch, sessionId, commandId);
+
+    public Task OnParentLinkCommittedAsync(string edgeId, string commandId) =>
+        RecordAndMaybeThrow(LaunchParticipantGate.ParentLinkCommitted, edgeId, commandId);
 
     public Task OnSubmitJobAsync(string jobKey, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.SubmitJob, jobKey, commandId);
