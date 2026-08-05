@@ -559,7 +559,18 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             .BeginFinalizeAsync(commandId, edgeId);
         if (begun.RejectionReason == "finalize_busy")
             throw new AgentSpawnValidationPendingException("finalize_busy");
-        if (begun.State != LinkReservationState.Reserved || begun.Revision <= plan.ParentLinkRevision)
+        if (begun.State == LinkReservationState.Rejected)
+            throw new AgentSpawnPreplanRejectedException(
+                begun.RejectionReason ?? "parent_tree_link_rejected");
+        if (begun.State == LinkReservationState.Attached)
+        {
+            if (begun.Revision <= (plan.ParentLinkRevision ?? -1))
+                throw new AgentSpawnPreplanRejectedException("parent_tree_link_revision_mismatch");
+            await PromoteAndQueueSubmitAsync(plan);
+            return;
+        }
+        if (begun.State != LinkReservationState.Reserved
+            || begun.Revision <= (plan.ParentLinkRevision ?? -1))
             throw new AgentSpawnValidationPendingException("parent_tree_link_not_ready_to_finalize");
 
         await _grains.GetGrain<IAgentSessionGrain>(plan.SessionId).EnsureParentLinkAsync(
@@ -581,6 +592,13 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             .CommitFinalizeAsync(commandId, edgeId);
         if (finalized.State != LinkReservationState.Attached)
             throw new AgentSpawnValidationPendingException("parent_tree_link_not_attached");
+
+        await _participantProbe.OnParentLinkCommittedAsync(edgeId, commandId);
+        await PromoteAndQueueSubmitAsync(plan);
+    }
+
+    private async Task PromoteAndQueueSubmitAsync(AgentLaunchCoordinatorPlan plan)
+    {
         await _grains.GetGrain<IAgentSessionGrain>(plan.SessionId).PromoteProvisionalLaunchAsync();
         await _grains.GetGrain<IAgentJobGrain>(plan.JobKey).PromotePreparedLaunchAsync();
 

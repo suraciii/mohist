@@ -77,6 +77,35 @@ public sealed class SessionTreeMutationFenceSpecs
         Assert.Equal(1, afterQuery.Reservations!.Single().AttachedRevision);
     }
 
+    [Fact]
+    public async Task FinalizeRecoveryRequiresTheReservedCommandAndRejectsAbortedOrUnknownEdges()
+    {
+        var projectId = $"tree-fence-validation-{Guid.NewGuid():N}";
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+
+        await fence.ReserveAsync(Command(projectId, "edge-attached", "command-attached"));
+        var assigned = await fence.BeginFinalizeAsync("command-attached", "edge-attached");
+        await fence.CommitFinalizeAsync("command-attached", "edge-attached");
+
+        var mismatchedBegin = await fence.BeginFinalizeAsync("command-other", "edge-attached");
+        Assert.Equal(LinkReservationState.Rejected, mismatchedBegin.State);
+        Assert.Equal("parent_tree_link_command_mismatch", mismatchedBegin.RejectionReason);
+        var mismatchedCommit = await fence.CommitFinalizeAsync("command-other", "edge-attached");
+        Assert.Equal(LinkReservationState.Rejected, mismatchedCommit.State);
+        Assert.Equal("parent_tree_link_command_mismatch", mismatchedCommit.RejectionReason);
+
+        await fence.ReserveAsync(Command(projectId, "edge-aborted", "command-aborted"));
+        await fence.RejectAsync("command-aborted", "edge-aborted", "parent_binding_changed");
+        var aborted = await fence.BeginFinalizeAsync("command-aborted", "edge-aborted");
+        Assert.Equal(LinkReservationState.Rejected, aborted.State);
+        Assert.Equal("parent_binding_changed", aborted.RejectionReason);
+
+        var unknown = await fence.BeginFinalizeAsync("command-unknown", "edge-unknown");
+        Assert.Equal(LinkReservationState.Rejected, unknown.State);
+        Assert.Equal("parent_tree_link_not_reserved", unknown.RejectionReason);
+        Assert.Equal(assigned.Revision, (await fence.GetAsync()).Reservations!.Single(item => item.EdgeId == "edge-attached").AttachedRevision);
+    }
+
     private static ReserveSessionTreeLinkCommand Command(string projectId, string edgeId, string commandId) =>
         new(
             ProjectId: projectId,

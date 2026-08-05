@@ -52,7 +52,8 @@ public sealed class SessionTreeMutationFenceGrain(
                 command.EdgeId,
                 command.ParentSessionId,
                 command.ChildSessionId,
-                LinkReservationState.Reserved))
+                LinkReservationState.Reserved,
+                CommandId: command.CommandId))
             .ToArray();
         var nextPending = pending
             .Append(new PendingSessionTreeMutation(
@@ -86,7 +87,17 @@ public sealed class SessionTreeMutationFenceGrain(
         var pending = PendingOf(current);
         var reservation = reservations.FirstOrDefault(item => item.EdgeId == edgeId);
         if (reservation is null)
-            throw new InvalidOperationException("The requested session tree mutation is not pending.");
+            return new SessionTreeMutationResult(
+                edgeId,
+                current.GraphRevision,
+                LinkReservationState.Rejected,
+                "parent_tree_link_not_reserved");
+        if (!string.Equals(reservation.CommandId, commandId, StringComparison.Ordinal))
+            return new SessionTreeMutationResult(
+                edgeId,
+                current.GraphRevision,
+                LinkReservationState.Rejected,
+                "parent_tree_link_command_mismatch");
         if (reservation.State == LinkReservationState.Attached)
             return new SessionTreeMutationResult(edgeId, reservation.AttachedRevision ?? current.GraphRevision, reservation.State);
         if (reservation.State == LinkReservationState.Rejected)
@@ -122,7 +133,17 @@ public sealed class SessionTreeMutationFenceGrain(
         var pending = PendingOf(current);
         var reservation = reservations.FirstOrDefault(item => item.EdgeId == edgeId);
         if (reservation is null)
-            throw new InvalidOperationException("The requested session tree mutation is not pending.");
+            return new SessionTreeMutationResult(
+                edgeId,
+                current.GraphRevision,
+                LinkReservationState.Rejected,
+                "parent_tree_link_not_reserved");
+        if (!string.Equals(reservation.CommandId, commandId, StringComparison.Ordinal))
+            return new SessionTreeMutationResult(
+                edgeId,
+                current.GraphRevision,
+                LinkReservationState.Rejected,
+                "parent_tree_link_command_mismatch");
         if (reservation.State == LinkReservationState.Attached)
             return new SessionTreeMutationResult(edgeId, reservation.AttachedRevision ?? current.GraphRevision, reservation.State);
         if (reservation.State == LinkReservationState.Rejected)

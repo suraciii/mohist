@@ -63,7 +63,8 @@ public sealed record LinkReservation(
     [property: Id(2)] string ChildSessionId,
     [property: Id(3)] LinkReservationState State,
     [property: Id(4)] string? RejectionReason = null,
-    [property: Id(5)] long? AttachedRevision = null);
+    [property: Id(5)] long? AttachedRevision = null,
+    [property: Id(6)] string? CommandId = null);
 
 [GenerateSerializer]
 public sealed record PendingSessionTreeMutation(
