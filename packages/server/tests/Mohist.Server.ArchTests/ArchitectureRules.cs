@@ -1,6 +1,5 @@
 using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
-using ArchUnitNET.Loader;
 using ArchUnitNET.xUnitV3;
 using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
@@ -11,11 +10,7 @@ namespace Mohist.Server.ArchTests;
 
 public class ArchitectureRules
 {
-    private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()
-        .LoadAssemblies(
-            System.Reflection.Assembly.Load("Mohist.Server"),
-            System.Reflection.Assembly.Load("Mohist.Cli"))
-        .Build();
+    private static readonly ArchUnitNET.Domain.Architecture _architecture = ArchitectureRulesSupport.Architecture;
 
     private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
         .That().ResideInNamespaceMatching("OrleansCodeGen")
