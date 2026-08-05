@@ -81,7 +81,7 @@ public sealed class DispatchSnapshotStore : IDispatchSnapshotStore
             // or a retry after grain reactivation). Honor first-write-wins by
             // reloading the existing row.
             _log.LogDebug(ex,
-                "DispatchSnapshotStore concurrent insert for workflow {WorkflowRunId} work {WorkId}; reloading winner",
+                "dispatch snapshot concurrent insert for run {run} work {work}; reloading winner",
                 workflowRunId, workId);
             await db.Entry(newRow).ReloadAsync(ct);
             var winner = await db.WorkflowDispatchSnapshots.AsNoTracking()
