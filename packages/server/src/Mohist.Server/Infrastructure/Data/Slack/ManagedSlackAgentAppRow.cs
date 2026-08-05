@@ -1,6 +1,6 @@
 namespace Mohist.Server.Infrastructure.Data.Slack;
 
-public sealed class ManagedSlackChildAppRow
+public sealed class ManagedSlackAgentAppRow
 {
     public string Id { get; set; } = string.Empty;
     public string EnrollmentId { get; set; } = string.Empty;

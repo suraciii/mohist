@@ -1,6 +1,6 @@
 namespace Mohist.Server.Slack.Domain;
 
-public sealed class ManagedSlackChildApp
+public sealed class ManagedSlackAgentApp
 {
     public string Id { get; set; } = string.Empty;
     public string EnrollmentId { get; set; } = string.Empty;
@@ -12,13 +12,13 @@ public sealed class ManagedSlackChildApp
 
     public string AppLifecycle { get; set; } = SlackAppLifecycle.NotCreated;
     public string Authorization { get; set; } = SlackAuthorizationState.NotStarted;
-    public string ManifestState => ManagedSlackChildAppStatusDeriver.DeriveManifestState(this);
+    public string ManifestState => ManagedSlackAgentAppStatusDeriver.DeriveManifestState(this);
     public string TransportKind { get; set; } = SlackTransportKind.Socket;
-    public string TransportReadiness => ManagedSlackChildAppStatusDeriver.DeriveTransportReadiness(this);
-    public string NextAction => ManagedSlackChildAppStatusDeriver.DeriveNextAction(
+    public string TransportReadiness => ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(this);
+    public string NextAction => ManagedSlackAgentAppStatusDeriver.DeriveNextAction(
         this,
-        ManagedSlackChildAppStatusDeriver.DeriveManifestState(this),
-        ManagedSlackChildAppStatusDeriver.DeriveTransportReadiness(this));
+        ManagedSlackAgentAppStatusDeriver.DeriveManifestState(this),
+        ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(this));
 
     public int DesiredManifestVersion { get; set; }
     public string DesiredManifestHash { get; set; } = string.Empty;

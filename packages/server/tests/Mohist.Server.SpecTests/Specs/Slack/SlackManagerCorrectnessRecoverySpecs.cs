@@ -175,7 +175,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         Array.Empty<IAgentConnectionProviderCleanup>(),
         _time);
 
-    private async Task AssertBindingConvergedAsync(ManagedSlackChildAppRow child, string state)
+    private async Task AssertBindingConvergedAsync(ManagedSlackAgentAppRow child, string state)
     {
         Assert.Equal(state, await BindingStateAsync(child.Id));
         await using var db = _factory.CreateDbContext();
@@ -245,12 +245,12 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             var attempt = await failed.SlackOAuthAttempts.SingleAsync();
             Assert.Equal(SlackOAuthAttemptStatus.SecretStored, attempt.Status);
             Assert.StartsWith("slack-oauth-attempt:", attempt.BotTokenRef, StringComparison.Ordinal);
-            Assert.Equal("A_CHANGED", await failed.ManagedSlackChildApps.Where(item => item.Id == child.Id).Select(item => item.AppId).SingleAsync());
+            Assert.Equal("A_CHANGED", await failed.ManagedSlackAgentApps.Where(item => item.Id == child.Id).Select(item => item.AppId).SingleAsync());
         }
 
         await using (var restore = _factory.CreateDbContext())
         {
-            var row = await restore.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
+            var row = await restore.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
             row.AppId = "A_APPLY_RETRY";
             await restore.SaveChangesAsync();
         }
@@ -261,13 +261,13 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         Assert.Equal(1, sink.StoreCalls);
         await using var recovered = _factory.CreateDbContext();
         Assert.Equal(SlackOAuthAttemptStatus.Applied, await recovered.SlackOAuthAttempts.Select(item => item.Status).SingleAsync());
-        Assert.Equal(SlackAuthorizationState.Authorized, await recovered.ManagedSlackChildApps.Select(item => item.Authorization).SingleAsync());
+        Assert.Equal(SlackAuthorizationState.Authorized, await recovered.ManagedSlackAgentApps.Select(item => item.Authorization).SingleAsync());
     }
 
     [Fact]
     public void Domain_transitions_and_derivation_reject_unknown_or_illegal_states()
     {
-        var child = new ManagedSlackChildApp
+        var child = new ManagedSlackAgentApp
         {
             AppLifecycle = SlackAppLifecycle.Created,
             Authorization = SlackAuthorizationState.Authorized,
@@ -277,7 +277,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
         Assert.Throws<InvalidOperationException>(() => child.TransitionAppLifecycle(SlackAppLifecycle.NotCreated));
         Assert.Throws<ArgumentException>(() => child.SetTransportKind("invalid"));
         child.AppLifecycle = "invalid";
-        Assert.Throws<ArgumentException>(() => ManagedSlackChildAppStatusDeriver.Derive(child));
+        Assert.Throws<ArgumentException>(() => ManagedSlackAgentAppStatusDeriver.Derive(child));
 
         var enrollment = new SlackWorkspaceEnrollment { Lifecycle = SlackEnrollmentLifecycle.Active };
         Assert.Throws<ArgumentOutOfRangeException>(() => enrollment.UpdatePlan("pro", -1));
@@ -288,12 +288,12 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
     {
         var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_CHECKS", botUserId: "U_CHECKS");
         await using var invalidLifecycle = _factory.CreateDbContext();
-        var row = await invalidLifecycle.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
+        var row = await invalidLifecycle.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
         row.AppLifecycle = "invalid";
         await Assert.ThrowsAsync<DbUpdateException>(() => invalidLifecycle.SaveChangesAsync());
 
         await using var invalidManifest = _factory.CreateDbContext();
-        var manifestRow = await invalidManifest.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
+        var manifestRow = await invalidManifest.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
         manifestRow.AppLifecycle = SlackAppLifecycle.Created;
         manifestRow.DesiredManifestVersion = 0;
         await Assert.ThrowsAsync<DbUpdateException>(() => invalidManifest.SaveChangesAsync());
@@ -399,7 +399,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs
             if (MutateChildAppIdBeforeReturn is not null)
             {
                 await using var db = _factory.CreateDbContext();
-                var child = await db.ManagedSlackChildApps.SingleAsync(item => item.Id == _childAppId, ct);
+                var child = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == _childAppId, ct);
                 child.AppId = MutateChildAppIdBeforeReturn;
                 await db.SaveChangesAsync(ct);
             }

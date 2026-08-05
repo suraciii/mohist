@@ -64,22 +64,24 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         var blob = Encrypt(address, plaintext, nonce);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var existing = await db.ConnectionSecrets
+        var existing = await db.StoredSecrets
             .FirstOrDefaultAsync(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind),
+                r => r.OwnerKind == address.OwnerKind
+                    && r.OwnerScope == address.OwnerScope
+                    && r.OwnerId == address.OwnerId
+                    && r.Kind == StoredSecretRow.WireKind(address.Kind),
                 ct)
             .ConfigureAwait(false);
 
         var now = _timeProvider.GetUtcNow();
         if (existing is null)
         {
-            db.ConnectionSecrets.Add(new ConnectionSecretRow
+            db.StoredSecrets.Add(new StoredSecretRow
             {
-                ProjectId = address.ProjectId,
-                ConnectionId = address.ConnectionId,
-                Kind = ConnectionSecretRow.WireKind(address.Kind),
+                OwnerKind = address.OwnerKind,
+                OwnerScope = address.OwnerScope,
+                OwnerId = address.OwnerId,
+                Kind = StoredSecretRow.WireKind(address.Kind),
                 Blob = blob,
                 UpdatedAt = now,
             });
@@ -98,12 +100,13 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         ValidateAddress(address);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var row = await db.ConnectionSecrets
+        var row = await db.StoredSecrets
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind),
+                r => r.OwnerKind == address.OwnerKind
+                    && r.OwnerScope == address.OwnerScope
+                    && r.OwnerId == address.OwnerId
+                    && r.Kind == StoredSecretRow.WireKind(address.Kind),
                 ct)
             .ConfigureAwait(false);
         if (row is null)
@@ -127,17 +130,18 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         ValidateAddress(address);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var rows = await db.ConnectionSecrets
+        var rows = await db.StoredSecrets
             .Where(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind))
+                r => r.OwnerKind == address.OwnerKind
+                    && r.OwnerScope == address.OwnerScope
+                    && r.OwnerId == address.OwnerId
+                    && r.Kind == StoredSecretRow.WireKind(address.Kind))
             .ToListAsync(ct)
             .ConfigureAwait(false);
         if (rows.Count == 0)
             return false;
 
-        db.ConnectionSecrets.RemoveRange(rows);
+        db.StoredSecrets.RemoveRange(rows);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
     }
@@ -237,9 +241,8 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
 
     private static void ValidateAddress(SecretStoreAddress address)
     {
-        if (string.IsNullOrWhiteSpace(address.ProjectId))
-            throw new ArgumentException("ProjectId is required.", nameof(address));
-        if (string.IsNullOrWhiteSpace(address.ConnectionId))
-            throw new ArgumentException("ConnectionId is required.", nameof(address));
+        if (address.Owner is null)
+            throw new ArgumentException("Secret owner is required.", nameof(address));
+        _ = new SecretStoreAddress(address.Owner, address.Kind);
     }
 }

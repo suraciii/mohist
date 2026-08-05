@@ -51,7 +51,7 @@ public sealed class SlackChildAppBindingService : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(childAppId);
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var child = await db.ManagedSlackChildApps.AsNoTracking()
+        var child = await db.ManagedSlackAgentApps.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == childAppId, ct);
         if (child is null) return SlackChildAppBindingResult.NotFound;
         if (child.AppLifecycle != SlackAppLifecycle.Created
@@ -116,7 +116,7 @@ public sealed class SlackChildAppBindingService : IScopedService
         }
 
         SlackStateTransitions.RequireBindingTransition(child.BindingState, SlackChildAppBindingState.InProgress);
-        var childClaim = await db.ManagedSlackChildApps
+        var childClaim = await db.ManagedSlackAgentApps
             .Where(item => item.Id == childAppId && item.BindingState == child.BindingState)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.BindingState, SlackChildAppBindingState.InProgress)
@@ -184,7 +184,7 @@ public sealed class SlackChildAppBindingService : IScopedService
             return await ReadCurrentResultAsync(db, childAppId, ct);
         }
 
-        var childChanged = await db.ManagedSlackChildApps
+        var childChanged = await db.ManagedSlackAgentApps
             .Where(item => item.Id == childAppId && item.BindingState == SlackChildAppBindingState.InProgress)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.BindingState, SlackChildAppBindingState.Bound)
@@ -225,7 +225,7 @@ public sealed class SlackChildAppBindingService : IScopedService
             return await ReadCurrentResultAsync(db, childAppId, ct);
         }
 
-        var childChanged = await db.ManagedSlackChildApps
+        var childChanged = await db.ManagedSlackAgentApps
             .Where(item => item.Id == childAppId && item.BindingState == SlackChildAppBindingState.InProgress)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.BindingState, state)
@@ -263,7 +263,7 @@ public sealed class SlackChildAppBindingService : IScopedService
             return await ReadCurrentResultAsync(db, childAppId, ct);
         }
 
-        var childChanged = await db.ManagedSlackChildApps
+        var childChanged = await db.ManagedSlackAgentApps
             .Where(item => item.Id == childAppId && item.BindingState == SlackChildAppBindingState.Bound)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.BindingState, SlackChildAppBindingState.ConnectionDeleted)
@@ -284,7 +284,7 @@ public sealed class SlackChildAppBindingService : IScopedService
         string childAppId,
         CancellationToken ct)
     {
-        var current = await db.ManagedSlackChildApps.AsNoTracking()
+        var current = await db.ManagedSlackAgentApps.AsNoTracking()
             .Where(item => item.Id == childAppId)
             .Select(item => new { item.BindingState, item.BindingErrorClass })
             .SingleOrDefaultAsync(ct);

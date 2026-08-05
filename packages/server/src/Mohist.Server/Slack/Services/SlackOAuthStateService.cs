@@ -36,7 +36,7 @@ public sealed class SlackOAuthStateService : IScopedService
         var now = _timeProvider.GetUtcNow();
         var expiresAt = now.Add(lifetime ?? DefaultLifetime);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var childExists = await db.ManagedSlackChildApps.AnyAsync(child =>
+        var childExists = await db.ManagedSlackAgentApps.AnyAsync(child =>
             child.Id == childAppId
             && child.WorkspaceTeamId == workspaceTeamId
             && child.AppId == appId
@@ -229,12 +229,12 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
             throw new ArgumentException("Unsupported OAuth authorization progress.", nameof(authorization));
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var current = await db.ManagedSlackChildApps.AsNoTracking()
+        var current = await db.ManagedSlackAgentApps.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == childAppId && item.DeletedAt == null, ct);
         if (current is null)
             return SlackOAuthAuthorizationResult.RecoveryRequired;
         SlackStateTransitions.RequireAuthorizationTransition(current.Authorization, authorization);
-        var changed = await db.ManagedSlackChildApps
+        var changed = await db.ManagedSlackAgentApps
             .Where(item => item.Id == childAppId
                 && item.DeletedAt == null
                 && item.Authorization == current.Authorization)
@@ -367,7 +367,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
         var now = _timeProvider.GetUtcNow();
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
-        var child = await db.ManagedSlackChildApps.SingleOrDefaultAsync(item => item.Id == childAppId, ct);
+        var child = await db.ManagedSlackAgentApps.SingleOrDefaultAsync(item => item.Id == childAppId, ct);
         var attempt = await db.SlackOAuthAttempts.SingleOrDefaultAsync(item => item.Id == attemptId, ct);
         if (child is null || attempt is null
             || child.WorkspaceTeamId != workspaceTeamId
@@ -412,7 +412,7 @@ public sealed class SlackOAuthAuthorizationService : IScopedService
 
     private static async Task EnsureBindingObligationAsync(
         MohistDbContext db,
-        ManagedSlackChildAppRow child,
+        ManagedSlackAgentAppRow child,
         DateTimeOffset now,
         CancellationToken ct)
     {

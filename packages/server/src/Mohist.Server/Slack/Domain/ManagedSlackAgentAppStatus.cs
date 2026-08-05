@@ -1,15 +1,15 @@
 namespace Mohist.Server.Slack.Domain;
 
-public sealed record ManagedSlackChildAppStatus(
+public sealed record ManagedSlackAgentAppStatus(
     string AppLifecycle,
     string Authorization,
     string ManifestState,
     string TransportReadiness,
     string NextAction);
 
-public static class ManagedSlackChildAppStatusDeriver
+public static class ManagedSlackAgentAppStatusDeriver
 {
-    public static ManagedSlackChildAppStatus Derive(ManagedSlackChildApp child)
+    public static ManagedSlackAgentAppStatus Derive(ManagedSlackAgentApp child)
     {
         ArgumentNullException.ThrowIfNull(child);
         ValidateKnownState(child);
@@ -19,7 +19,7 @@ public static class ManagedSlackChildAppStatusDeriver
         return new(child.AppLifecycle, child.Authorization, manifestState, transportReadiness, nextAction);
     }
 
-    private static void ValidateKnownState(ManagedSlackChildApp child)
+    private static void ValidateKnownState(ManagedSlackAgentApp child)
     {
         SlackStateTransitions.RequireChildAppLifecycleTransition(child.AppLifecycle, child.AppLifecycle);
         SlackStateTransitions.RequireAuthorizationTransition(child.Authorization, child.Authorization);
@@ -27,7 +27,7 @@ public static class ManagedSlackChildAppStatusDeriver
         SlackStateTransitions.RequireBindingTransition(child.BindingState, child.BindingState);
     }
 
-    public static string DeriveManifestState(ManagedSlackChildApp child) => DeriveManifestState(
+    public static string DeriveManifestState(ManagedSlackAgentApp child) => DeriveManifestState(
         child.DesiredManifestVersion,
         child.DesiredManifestHash,
         child.AppliedManifestVersion,
@@ -47,7 +47,7 @@ public static class ManagedSlackChildAppStatusDeriver
                 ? SlackManifestState.Desired
                 : SlackManifestState.DriftKnown;
 
-    public static string DeriveTransportReadiness(ManagedSlackChildApp child) => DeriveTransportReadiness(
+    public static string DeriveTransportReadiness(ManagedSlackAgentApp child) => DeriveTransportReadiness(
         child.TransportKind,
         child.PublicIngressBaseUrl,
         child.SigningSecretRef,
@@ -81,7 +81,7 @@ public static class ManagedSlackChildAppStatusDeriver
     }
 
     public static string DeriveNextAction(
-        ManagedSlackChildApp child,
+        ManagedSlackAgentApp child,
         string manifestState,
         string transportReadiness) => DeriveNextAction(
             child.AppLifecycle,

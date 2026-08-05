@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Secrets;
+using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -67,8 +68,7 @@ public class ConnectionSecretsMigrationSpecs
             VALUES ('proj_a', 'conn_1', 'botToken', X'00', '2026-07-29T00:00:00.0000000+00:00');
             """);
 
-        var rows = await context.ConnectionSecrets.AsNoTracking().ToListAsync();
-        Assert.Equal(2, rows.Count);
+        Assert.Equal(2, await CountRowsAsync(context, "ConnectionSecrets"));
     }
 
     [Fact]
@@ -79,9 +79,11 @@ public class ConnectionSecretsMigrationSpecs
 
         await context.Database.MigrateAsync();
 
-        Assert.True(await TableExistsAsync(context, "ConnectionSecrets"));
+        Assert.True(await TableExistsAsync(context, "StoredSecrets"));
+        Assert.False(await TableExistsAsync(context, "ConnectionSecrets"));
         var applied = await context.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == "20260729000000_AddConnectionSecrets");
+        Assert.Contains(applied, m => m == "20260805120000_RenameManagedSlackAgentAppAndGeneralizeSecrets");
     }
 
     [Fact]
@@ -99,15 +101,61 @@ public class ConnectionSecretsMigrationSpecs
     }
 
     [Fact]
-    public async Task DbContext_ExposesConnectionSecretsDbSet()
+    public async Task DbContext_ExposesTypedStoredSecretsDbSet()
     {
         await using var database = CreateDatabase();
         await using var context = database.CreateDbContext();
 
-        Assert.NotNull(context.ConnectionSecrets);
-        var entityType = context.Model.FindEntityType(typeof(ConnectionSecretRow));
+        Assert.NotNull(context.StoredSecrets);
+        var entityType = context.Model.FindEntityType(typeof(StoredSecretRow));
         Assert.NotNull(entityType);
-        Assert.Equal("ConnectionSecrets", entityType.GetTableName());
+        Assert.Equal("StoredSecrets", entityType.GetTableName());
+    }
+
+    [Fact]
+    public async Task Upgrade_CopiesLegacySecretsToTypedOwnersAndRenamesAgentAppTable()
+    {
+        await using var database = CreateDatabase("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
+        await using (var before = database.CreateDbContext())
+        {
+            await before.Database.ExecuteSqlRawAsync("""
+                INSERT INTO "ConnectionSecrets" ("ProjectId", "ConnectionId", "Kind", "Blob", "UpdatedAt")
+                VALUES ('proj_a', 'conn_a', 'appToken', X'01', '2026-08-05T00:00:00.0000000+00:00');
+                """);
+            var migrator = before.GetService<IMigrator>();
+            await migrator.MigrateAsync();
+        }
+
+        await using var after = database.CreateDbContext();
+        var secret = Assert.Single(await after.StoredSecrets.AsNoTracking().ToListAsync());
+        Assert.Equal(SecretOwnerKinds.AgentConnection, secret.OwnerKind);
+        Assert.Equal("proj_a", secret.OwnerScope);
+        Assert.Equal("conn_a", secret.OwnerId);
+        Assert.Equal("appToken", secret.Kind);
+        Assert.True(await TableExistsAsync(after, "ManagedSlackAgentApps"));
+        Assert.False(await TableExistsAsync(after, "ManagedSlackChildApps"));
+        Assert.False(await TableExistsAsync(after, "ConnectionSecrets"));
+    }
+
+    [Fact]
+    public async Task Down_RestoresLegacySecretRows()
+    {
+        await using var database = CreateDatabase("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
+        await using (var before = database.CreateDbContext())
+        {
+            await before.Database.ExecuteSqlRawAsync("""
+                INSERT INTO "ConnectionSecrets" ("ProjectId", "ConnectionId", "Kind", "Blob", "UpdatedAt")
+                VALUES ('proj_down', 'conn_down', 'botToken', X'02', '2026-08-05T00:00:00.0000000+00:00');
+                """);
+            var migrator = before.GetService<IMigrator>();
+            await migrator.MigrateAsync();
+            await migrator.MigrateAsync("20260804100000_AddSlackManagerIdentityAndOutboxOwner");
+        }
+
+        await using var after = database.CreateDbContext();
+        Assert.True(await TableExistsAsync(after, "ConnectionSecrets"));
+        Assert.False(await TableExistsAsync(after, "StoredSecrets"));
+        Assert.Equal(1, await CountRowsAsync(after, "ConnectionSecrets"));
     }
 
     private static async Task<IDictionary<string, string>> ReadColumnTypesAsync(
@@ -125,6 +173,14 @@ public class ConnectionSecretsMigrationSpecs
             result[reader.GetString(0)] = reader.GetString(1);
         }
         return result;
+    }
+
+    private static async Task<int> CountRowsAsync(MohistDbContext context, string tableName)
+    {
+        var connection = context.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM \"{tableName}\"";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task<IDictionary<string, string[]>> ReadIndexesAsync(

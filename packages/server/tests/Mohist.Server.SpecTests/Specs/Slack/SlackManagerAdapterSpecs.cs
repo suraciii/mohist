@@ -48,7 +48,7 @@ public sealed class SlackManagerAdapterSpecs
             });
             await db.SaveChangesAsync();
             await scope.ServiceProvider.GetRequiredService<ISecretStore>().StoreAsync(
-                new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, credentialRef, SecretKind.BotToken),
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken),
                 Encoding.UTF8.GetBytes(managerCredential));
         }
 

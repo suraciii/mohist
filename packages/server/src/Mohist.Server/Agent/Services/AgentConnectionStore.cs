@@ -190,7 +190,7 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
             ct);
         if (!existing && requireWorkspaceReservation)
         {
-            existing = await db.ManagedSlackChildApps.AnyAsync(child =>
+            existing = await db.ManagedSlackAgentApps.AnyAsync(child =>
                 child.DeletedAt == null
                 && child.WorkspaceTeamId == connection.WorkspaceTeamId
                 && db.AgentConnections.Any(candidate =>
@@ -412,11 +412,11 @@ public sealed class AgentConnectionStore : IScopedService, ISlackChildAppBinding
 
     public static bool HasBoundIdentity(AgentConnection connection) =>
         !string.IsNullOrWhiteSpace(connection.AppId)
-        || !string.IsNullOrWhiteSpace(connection.BotUserId);
+        && !string.IsNullOrWhiteSpace(connection.BotUserId);
 
     public static bool HasBoundIdentity(AgentConnectionRow row) =>
         !string.IsNullOrWhiteSpace(row.AppId)
-        || !string.IsNullOrWhiteSpace(row.BotUserId);
+        && !string.IsNullOrWhiteSpace(row.BotUserId);
 
     private static AgentConnection ToDomain(AgentConnectionRow row, string? derivedReadiness = null) => new()
     {

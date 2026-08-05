@@ -68,7 +68,7 @@ public sealed class SlackManagerApplicationSpecs
         var connection = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
         Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
         Assert.Equal("T_MANAGER_CREATE", connection.WorkspaceTeamId);
-        var child = await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId);
+        var child = await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId);
         Assert.Equal(connectionId, child.AgentConnectionId);
         Assert.NotEmpty(child.DesiredManifestHash);
         Assert.Equal(seeded.Agent.Id, (await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id)).Id);
@@ -192,7 +192,7 @@ public sealed class SlackManagerApplicationSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.NotNull(await db.AgentConnections.SingleAsync(row => row.Id == connectionId && row.DeletedAt != null));
-        Assert.NotNull(await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
+        Assert.NotNull(await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
         Assert.NotNull(await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id));
     }
 

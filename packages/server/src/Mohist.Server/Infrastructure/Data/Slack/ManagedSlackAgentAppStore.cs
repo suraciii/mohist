@@ -5,41 +5,41 @@ using Mohist.Server.Slack.Domain;
 
 namespace Mohist.Server.Infrastructure.Data.Slack;
 
-public sealed class ManagedSlackChildAppStore : IScopedService
+public sealed class ManagedSlackAgentAppStore : IScopedService
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;
 
-    public ManagedSlackChildAppStore(IDbContextFactory<MohistDbContext> dbFactory, TimeProvider timeProvider)
+    public ManagedSlackAgentAppStore(IDbContextFactory<MohistDbContext> dbFactory, TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
         _timeProvider = timeProvider;
     }
 
-    public async Task<ManagedSlackChildApp?> GetAsync(string id, CancellationToken ct = default)
+    public async Task<ManagedSlackAgentApp?> GetAsync(string id, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.ManagedSlackChildApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, ct);
+        var row = await db.ManagedSlackAgentApps.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, ct);
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task<IReadOnlyList<ManagedSlackChildApp>> ListByEnrollmentAsync(string enrollmentId, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ManagedSlackAgentApp>> ListByEnrollmentAsync(string enrollmentId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(enrollmentId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var rows = await db.ManagedSlackChildApps.AsNoTracking()
+        var rows = await db.ManagedSlackAgentApps.AsNoTracking()
             .Where(item => item.EnrollmentId == enrollmentId)
             .OrderBy(item => item.Id)
             .ToListAsync(ct);
         return rows.Select(ToDomain).ToList();
     }
 
-    public async Task<ManagedSlackChildApp?> GetByConnectionAsync(string connectionId, CancellationToken ct = default)
+    public async Task<ManagedSlackAgentApp?> GetByConnectionAsync(string connectionId, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.ManagedSlackChildApps.AsNoTracking()
+        var row = await db.ManagedSlackAgentApps.AsNoTracking()
             .SingleOrDefaultAsync(item => item.AgentConnectionId == connectionId && item.DeletedAt == null, ct);
         return row is null ? null : ToDomain(row);
     }
@@ -54,7 +54,7 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(agentId);
         ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        return await db.ManagedSlackChildApps.AnyAsync(child =>
+        return await db.ManagedSlackAgentApps.AnyAsync(child =>
             child.DeletedAt == null
             && child.WorkspaceTeamId == workspaceTeamId
             && db.AgentConnections.Any(connection =>
@@ -63,7 +63,7 @@ public sealed class ManagedSlackChildAppStore : IScopedService
                 && connection.AgentId == agentId), ct);
     }
 
-    public async Task<ManagedSlackChildApp> CreateAsync(ManagedSlackChildApp childApp, CancellationToken ct = default)
+    public async Task<ManagedSlackAgentApp> CreateAsync(ManagedSlackAgentApp childApp, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(childApp);
         if (string.IsNullOrWhiteSpace(childApp.Id)) throw new ArgumentException("Child App id is required.", nameof(childApp));
@@ -97,44 +97,44 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         var now = _timeProvider.GetUtcNow();
         childApp.CreatedAt = now;
         childApp.UpdatedAt = now;
-        db.ManagedSlackChildApps.Add(ToRow(childApp));
+        db.ManagedSlackAgentApps.Add(ToRow(childApp));
         await db.SaveChangesAsync(ct);
         return childApp;
     }
 
-    public Task<ManagedSlackChildApp?> TransitionAppLifecycleAsync(
+    public Task<ManagedSlackAgentApp?> TransitionAppLifecycleAsync(
         string id,
         string nextLifecycle,
         CancellationToken ct = default) =>
         UpdateAsync(id, childApp => childApp.TransitionAppLifecycle(nextLifecycle), ct);
 
-    public Task<ManagedSlackChildApp?> TransitionAuthorizationAsync(
+    public Task<ManagedSlackAgentApp?> TransitionAuthorizationAsync(
         string id,
         string nextAuthorization,
         CancellationToken ct = default) =>
         UpdateAsync(id, childApp => childApp.TransitionAuthorization(nextAuthorization), ct);
 
-    public Task<ManagedSlackChildApp?> SetTransportKindAsync(
+    public Task<ManagedSlackAgentApp?> SetTransportKindAsync(
         string id,
         string transportKind,
         CancellationToken ct = default) =>
         UpdateAsync(id, childApp => childApp.SetTransportKind(transportKind), ct);
 
-    public Task<ManagedSlackChildApp?> TransitionBindingStateAsync(
+    public Task<ManagedSlackAgentApp?> TransitionBindingStateAsync(
         string id,
         string nextBindingState,
         CancellationToken ct = default) =>
         UpdateAsync(id, childApp => childApp.TransitionBindingState(nextBindingState), ct);
 
-    private async Task<ManagedSlackChildApp?> UpdateAsync(
+    private async Task<ManagedSlackAgentApp?> UpdateAsync(
         string id,
-        Action<ManagedSlackChildApp> transition,
+        Action<ManagedSlackAgentApp> transition,
         CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         ArgumentNullException.ThrowIfNull(transition);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var row = await db.ManagedSlackChildApps.SingleOrDefaultAsync(item => item.Id == id, ct);
+        var row = await db.ManagedSlackAgentApps.SingleOrDefaultAsync(item => item.Id == id, ct);
         if (row is null) return null;
         var childApp = ToDomain(row);
         transition(childApp);
@@ -144,7 +144,7 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         return childApp;
     }
 
-    private static ManagedSlackChildApp ToDomain(ManagedSlackChildAppRow row) => new()
+    private static ManagedSlackAgentApp ToDomain(ManagedSlackAgentAppRow row) => new()
     {
         Id = row.Id,
         EnrollmentId = row.EnrollmentId,
@@ -182,7 +182,7 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         DeletedAt = row.DeletedAt,
     };
 
-    private static ManagedSlackChildAppRow ToRow(ManagedSlackChildApp childApp) => new()
+    private static ManagedSlackAgentAppRow ToRow(ManagedSlackAgentApp childApp) => new()
     {
         Id = childApp.Id,
         EnrollmentId = childApp.EnrollmentId,
@@ -219,7 +219,7 @@ public sealed class ManagedSlackChildAppStore : IScopedService
         UpdatedAt = childApp.UpdatedAt,
         DeletedAt = childApp.DeletedAt,
     };
-    private static void Apply(ManagedSlackChildApp childApp, ManagedSlackChildAppRow row)
+    private static void Apply(ManagedSlackAgentApp childApp, ManagedSlackAgentAppRow row)
     {
         row.AppLifecycle = childApp.AppLifecycle;
         row.Authorization = childApp.Authorization;

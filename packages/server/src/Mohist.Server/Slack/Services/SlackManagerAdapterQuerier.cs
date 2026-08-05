@@ -49,7 +49,7 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
         var targets = new List<SlackManagerAdapterTarget>(candidates.Count);
         foreach (var candidate in candidates)
         {
-            var credential = await LoadManagerCredentialAsync(candidate.ManagerCredentialRef, ct);
+            var credential = await LoadManagerCredentialAsync(candidate.Id, ct);
             if (credential is not null)
                 targets.Add(new SlackManagerAdapterTarget(candidate.Id, candidate.WorkspaceTeamId));
         }
@@ -70,7 +70,7 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
             || string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef))
             return SlackManagerAdapterSessionResult.NotReady;
 
-        var botToken = await LoadManagerCredentialAsync(enrollment.ManagerCredentialRef, ct);
+        var botToken = await LoadManagerCredentialAsync(enrollment.Id, ct);
         if (botToken is null)
             return SlackManagerAdapterSessionResult.NotReady;
 
@@ -81,14 +81,11 @@ public sealed class SlackManagerAdapterQuerier : IScopedService
     }
 
     private async Task<byte[]?> LoadManagerCredentialAsync(
-        string credentialRef,
+        string enrollmentId,
         CancellationToken ct)
     {
         var secret = await _secrets.LoadAsync(
-            new SecretStoreAddress(
-                SlackDeliveryOwnerIds.ManagerProjectId,
-                credentialRef,
-                SecretKind.BotToken),
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken),
             ct);
         return secret is { Length: > 0 } ? secret : null;
     }

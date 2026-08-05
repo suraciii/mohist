@@ -50,7 +50,7 @@ public sealed class SlackOAuthConcurrencySpecs : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now,
         });
-        db.ManagedSlackChildApps.Add(new ManagedSlackChildAppRow
+        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
         {
             Id = "child-oauth-concurrency",
             EnrollmentId = "enrollment-oauth-concurrency",

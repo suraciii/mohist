@@ -185,8 +185,8 @@ public static class SlackManagerRoutes
                 context.GetResolvedProject().Id, connectionId, body.Confirmation, ct);
             return result.Status switch
             {
-                ManagedSlackChildAppOperationStatus.NotFound => ApiResults.NotFound("The managed Child App was not found."),
-                ManagedSlackChildAppOperationStatus.NotAllowed => ApiResults.Conflict(
+                ManagedSlackAgentAppOperationStatus.NotFound => ApiResults.NotFound("The managed Child App was not found."),
+                ManagedSlackAgentAppOperationStatus.NotAllowed => ApiResults.Conflict(
                     result.ErrorClass ?? "Permanent delete is not currently allowed.", "permanent_delete_not_allowed"),
                 _ => ApiResults.Ok(result),
             };
@@ -223,8 +223,8 @@ public static class SlackManagerRoutes
         return updated is null ? ApiResults.NotFound("Slack Connection was not found.") : ApiResults.Ok(updated);
     }
 
-    private static IResult OperationResult(ManagedSlackChildAppOperationResult result) =>
-        result.Status == ManagedSlackChildAppOperationStatus.NotFound
+    private static IResult OperationResult(ManagedSlackAgentAppOperationResult result) =>
+        result.Status == ManagedSlackAgentAppOperationStatus.NotFound
             ? ApiResults.NotFound("The managed Child App was not found.")
             : ApiResults.Ok(result);
 

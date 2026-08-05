@@ -35,6 +35,8 @@ public sealed class SlackManagerCredentialProvisioningSpecs
         });
         setup.EnsureSuccessStatusCode();
         var setupData = await ReadDataAsync(setup);
+        var enrollmentId = setupData.GetProperty("enrollment").GetProperty("id").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(enrollmentId));
         Assert.True(setupData.GetProperty("enrollment").GetProperty("managerCredentialConfigured").GetBoolean());
         Assert.False(setupData.GetProperty("enrollment").GetProperty("managerCredentialProvisioned").GetBoolean());
 
@@ -86,15 +88,13 @@ public sealed class SlackManagerCredentialProvisioningSpecs
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-            var stored = await secrets.LoadAsync(new SecretStoreAddress(
-                SlackDeliveryOwnerIds.ManagerProjectId,
-                credentialRef,
-                SecretKind.BotToken));
+            var stored = await secrets.LoadAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId!, SecretKind.BotToken));
             Assert.Equal(firstCredential, Encoding.UTF8.GetString(stored!));
-            Assert.Null(await secrets.LoadAsync(new SecretStoreAddress(
-                SlackDeliveryOwnerIds.ManagerProjectId,
-                "caller-supplied-reference-must-not-be-used",
-                SecretKind.BotToken)));
+            Assert.Null(await secrets.LoadAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(
+                    "caller-supplied-reference-must-not-be-used",
+                    SecretKind.BotToken)));
         }
 
         using var status = await _fixture.Client.GetAsync($"/api/slack-manager/status?workspaceTeamId={team}");
@@ -115,10 +115,7 @@ public sealed class SlackManagerCredentialProvisioningSpecs
 
         await using var verify = _fixture.Services.CreateAsyncScope();
         var rotatedSecret = await verify.ServiceProvider.GetRequiredService<ISecretStore>().LoadAsync(
-            new SecretStoreAddress(
-                SlackDeliveryOwnerIds.ManagerProjectId,
-                credentialRef,
-                SecretKind.BotToken));
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId!, SecretKind.BotToken));
         Assert.Equal(rotatedCredential, Encoding.UTF8.GetString(rotatedSecret!));
     }
 
