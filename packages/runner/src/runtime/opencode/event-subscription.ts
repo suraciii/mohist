@@ -8,6 +8,9 @@
  */
 
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
+import { runnerLogger } from "../../system/logger.js"
+
+const log = runnerLogger.child("session")
 
 export interface RuntimeGlobalEvent {
   readonly type: string
@@ -73,13 +76,13 @@ export function createEventSubscription(
             try {
               listener(event)
             } catch (error) {
-              console.error("runtime event listener failed", error)
+              log.error("runtime event listener failed", { exception: error, session: sessionID })
             }
           }
         }
       } catch (error) {
         if (!closed) {
-          console.error("runtime event subscription terminated", error)
+          log.error("runtime event subscription terminated", { exception: error })
         }
       } finally {
         pump = null

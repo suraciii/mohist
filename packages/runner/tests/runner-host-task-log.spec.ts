@@ -3,6 +3,7 @@ import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
+import { capturedLogs } from "./support/logger-test.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
@@ -360,7 +361,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-fail", workId: "work-fail", agentJobId: "aj-fail" })]).mockImplementation(async () => [])
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     const controller = new AbortController()
     const host = new RunnerHost({
@@ -378,11 +378,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
-    // At least one upload error must have been logged. The label is
-    // "incremental" or "terminal" — both contain "upload failed for work".
-    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("upload failed for work")))).toBe(true)
-
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "task-log upload failed" }),
+    ]))
   })
 
   it("PendingUploadIsTimedOut_ReportStillSucceeds", async () => {
@@ -407,7 +405,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
     poll.mockResolvedValueOnce([workWith({ workflowRunId: "wf-pending", workId: "work-pending", agentJobId: "aj-pending" })]).mockImplementation(async () => [])
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     const controller = new AbortController()
     const host = buildHost()
@@ -420,9 +417,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     expect(uploadTaskLog).toHaveBeenCalled()
     expect(report).toHaveBeenCalledTimes(1)
-    expect(errorSpy.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && arg.includes("upload failed for work")))).toBe(true)
-
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "task-log upload failed" }),
+    ]))
   })
 
   it("ReportCarriesTheVerdict_WhenLogUploadSucceeds", async () => {

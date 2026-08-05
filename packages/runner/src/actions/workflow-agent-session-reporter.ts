@@ -1,6 +1,8 @@
-import { errorMessage } from "../core/errors.js"
 import type { RuntimeTurnEvent } from "../runtime/opencode/index.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../server/runtime-event-outbox.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("session")
 
 export interface WorkflowAgentSessionWorkMetadata {
   readonly workId: string
@@ -77,9 +79,12 @@ export class WorkflowAgentSessionReporter {
       .catch((error) => {
         if (this.inputRejected) return
         this.inputRejected = true
-        console.error(
-          `workflow agent-session input enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName}: ${errorMessage(error)}`,
-        )
+        log.error("workflow agent-session input enqueue failed", {
+          run: this.workflowRunId,
+          work: this.workMetadata.workId,
+          session: this.sessionName,
+          exception: error,
+        })
         throw error
       })
     this.pendingPromises.add(promise)
@@ -105,9 +110,13 @@ export class WorkflowAgentSessionReporter {
     })
     const promise = this.outbox.enqueueProducedFact(record)
       .catch((error) => {
-        console.error(
-          `workflow agent-session event enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName} type=${event.type}: ${errorMessage(error)}`,
-        )
+        log.error("workflow agent-session event enqueue failed", {
+          run: this.workflowRunId,
+          work: this.workMetadata.workId,
+          session: this.sessionName,
+          reason: event.type,
+          exception: error,
+        })
         // Surface as a settled rejection so `settle()` can observe it; do not
         // rethrow synchronously (would crash the synchronous observer).
         throw error
@@ -125,9 +134,13 @@ export class WorkflowAgentSessionReporter {
     }))
     const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {
-        console.error(
-          `workflow agent-session delta batch enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName} count=${records.length}: ${errorMessage(error)}`,
-        )
+        log.error("workflow agent-session delta batch enqueue failed", {
+          run: this.workflowRunId,
+          work: this.workMetadata.workId,
+          session: this.sessionName,
+          reason: `count=${records.length}`,
+          exception: error,
+        })
         throw error
       })
     this.pendingPromises.add(promise)
@@ -155,9 +168,12 @@ export class WorkflowAgentSessionReporter {
     }))
     const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {
-        console.error(
-          `workflow agent-session close enqueue failed for workflow=${this.workflowRunId} work=${this.workMetadata.workId} session=${this.sessionName}: ${errorMessage(error)}`,
-        )
+        log.error("workflow agent-session close enqueue failed", {
+          run: this.workflowRunId,
+          work: this.workMetadata.workId,
+          session: this.sessionName,
+          exception: error,
+        })
         throw error
       })
     this.pendingPromises.add(promise)

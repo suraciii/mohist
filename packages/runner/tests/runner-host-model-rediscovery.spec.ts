@@ -11,6 +11,7 @@ import {
   installFakeOpenCodeRuntimeFactory,
   type FakeRuntimeHandles,
 } from "./support/opencode-runtime-factory.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 const REDISCOVERY_INTERVAL_MS = 60_000
 const DEFAULT_REDISCOVERY_INTERVAL_MS = 30 * 60_000
@@ -159,9 +160,10 @@ describe("RunnerHost model discovery", () => {
   it("registers empty fields and keeps polling to claim work when initial discovery throws", async () => {
     const failure = new Error("models command unavailable")
     discovery.mockRejectedValueOnce(failure)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const { controller, run } = await startHost({ modelRediscoveryIntervalMs: REDISCOVERY_INTERVAL_MS })
-    expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", failure)
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: { exception: failure } }),
+    ]))
     expect(mocks.connect.mock.calls[0]?.[0]).toMatchObject({ coderModels: [], coderModelVariants: {} })
     expect(mocks.poll).toHaveBeenCalled()
     await stopHost(controller, run)
@@ -250,7 +252,6 @@ describe("RunnerHost model discovery", () => {
         variants: { "openai/gpt-5.5": ["low", "high"], "openai/gpt-6": ["medium", "max"] },
         complete: true,
       })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const { controller, run } = await startHost({ modelRediscoveryIntervalMs: REDISCOVERY_INTERVAL_MS })
 
     await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
@@ -266,7 +267,9 @@ describe("RunnerHost model discovery", () => {
     mocks.heartbeat.mockClear()
 
     await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
-    expect(errorSpy).toHaveBeenCalledWith("failed to discover opencode models", failure)
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: { exception: failure } }),
+    ]))
     expect(mocks.heartbeat).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
     expect(mocks.heartbeat).toHaveBeenCalledTimes(1)
@@ -317,11 +320,12 @@ describe("RunnerHost model discovery", () => {
       .mockResolvedValueOnce({ models: ["openai/gpt-7"], variants: { "openai/gpt-7": ["max"] }, complete: true })
     const heartbeatFailure = new Error("heartbeat unavailable")
     mocks.heartbeat.mockRejectedValueOnce(heartbeatFailure).mockResolvedValue(undefined)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
     const { controller, run } = await startHost({ modelRediscoveryIntervalMs: REDISCOVERY_INTERVAL_MS })
 
     await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
-    expect(errorSpy).toHaveBeenCalledWith("immediate runner heartbeat failed:", heartbeatFailure)
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "immediate runner heartbeat failed", fields: { exception: heartbeatFailure } }),
+    ]))
     await vi.advanceTimersByTimeAsync(REDISCOVERY_INTERVAL_MS)
     expect(discovery).toHaveBeenCalledTimes(3)
     expect(mocks.heartbeat).toHaveBeenCalledTimes(2)
