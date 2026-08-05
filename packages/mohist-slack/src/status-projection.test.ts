@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { SlackAdapter } from "./adapter.js"
-import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, LeaseRenewal, SlackConnectionRef, SlackEnvelope, SlackHelloOutcome, SlackInteractionEnvelope, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class Socket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
@@ -15,14 +15,14 @@ class Transport implements AdapterTransport {
   readonly uncertain: Delivery[] = []
   readonly acks: DeliveryAck[] = []
   async discover() { return [this.ref] }
-  async acquireLease(): Promise<AdapterLease | null> { return { kind: "runtime", leaseId: "lease", appToken: "app", botToken: "bot" } }
-  async renewLease(): Promise<AdapterLease | null> { return { kind: "runtime", leaseId: "lease", appToken: "app", botToken: "bot" } }
-  async reportHello() {}
-  async ingress(_ref: SlackConnectionRef, _leaseId: string, _envelope: SlackEnvelope) { return { kind: "accepted" as const } }
-  async interaction(_ref: SlackConnectionRef, _leaseId: string, _envelope: SlackInteractionEnvelope) { return { state: "stop_requested" } }
+  async acquireLease(): Promise<AdapterLease | null> { return { kind: "runtime", leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "app", botToken: "bot" } }
+  async renewLease(): Promise<LeaseRenewal | null> { return { leaseId: "lease", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" } }
+  async reportHello(): Promise<SlackHelloOutcome> { return "verified" }
+  async ingress(_ref: SlackConnectionRef, _envelope: SlackEnvelope) { return { kind: "accepted" as const } }
+  async interaction(_ref: SlackConnectionRef, _envelope: SlackInteractionEnvelope) { return { state: "stop_requested" } }
   async claimDelivery() { return this.deliveries.shift() ?? null }
   async claimUncertainDelivery() { return this.uncertain.shift() ?? null }
-  async ackDelivery(_ref: SlackConnectionRef, _leaseId: string, ack: DeliveryAck) { this.acks.push(ack) }
+  async ackDelivery(_ref: SlackConnectionRef, ack: DeliveryAck) { this.acks.push(ack) }
 }
 
 class Web implements SlackWebClient {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
 import { setSlackLoggerForTest, type SlackLogFields, type SlackLogger } from "./logger.js"
-import type { AdapterLease, AdapterTransport, Delivery, IngressResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, IngressResult, LeaseRenewal, RuntimeLease, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackHelloOutcome, SlackInteractionEnvelope, SlackLeaseKind, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
@@ -69,7 +69,7 @@ class FakeTransport implements AdapterTransport {
   readonly uncertainDeliveries: Delivery[] = []
   connections: SlackAdapterTarget[] = []
   nextLeases: Array<AdapterLease | null> = []
-  nextRenewals: Array<AdapterLease | null> = []
+  nextRenewals: Array<LeaseRenewal | null> = []
   nextIngressResults: IngressResult[] = []
   ingressError?: Error
   ingressGate?: Promise<void>
@@ -86,22 +86,28 @@ class FakeTransport implements AdapterTransport {
     return this.connections
   }
 
-  async acquireLease(ref: SlackAdapterTarget): Promise<AdapterLease | null> {
-    this.leases.push(ref)
+  async acquireLease(ref: SlackAdapterTarget, kind: SlackLeaseKind): Promise<AdapterLease | null> {
     if (this.leaseError) throw this.leaseError
-    return this.nextLeases.length > 0 ? this.nextLeases.shift()! : runtimeLease(ref)
+    const lease = this.nextLeases.length > 0
+      ? this.nextLeases.shift()!
+      : kind === "validation" ? null : runtimeLease(ref)
+    if (lease) this.leases.push(ref)
+    return lease
   }
 
-  async renewLease(ref: SlackAdapterTarget): Promise<AdapterLease | null> {
+  async renewLease(ref: SlackAdapterTarget, leaseId: string): Promise<LeaseRenewal | null> {
     if (this.leaseError) throw this.leaseError
-    return this.nextRenewals.length > 0 ? this.nextRenewals.shift()! : runtimeLease(ref)
+    return this.nextRenewals.length > 0
+      ? this.nextRenewals.shift()!
+      : { leaseId, kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }
   }
 
-  async reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string) {
+  async reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string): Promise<SlackHelloOutcome> {
     this.hellos.push({ ref, leaseId, appId })
+    return "verified"
   }
 
-  async ingress(_ref: SlackAdapterTarget, _leaseId: string, envelope: SlackEnvelope): Promise<IngressResult> {
+  async ingress(_ref: SlackAdapterTarget, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
     this.ingressStarted?.()
     await this.ingressGate
@@ -110,7 +116,7 @@ class FakeTransport implements AdapterTransport {
     return queued ?? { kind: "accepted" }
   }
 
-  async interaction(_ref: SlackAdapterTarget, _leaseId: string, envelope: SlackInteractionEnvelope) {
+  async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
     this.interactions.push(envelope)
     this.interactionStarted?.()
     await this.interactionGate
@@ -129,17 +135,19 @@ class FakeTransport implements AdapterTransport {
     return this.uncertainDeliveries.shift() ?? null
   }
 
-  async ackDelivery(ref: SlackAdapterTarget, _leaseId: string, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
+  async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck) {
     this.acks.push({ ref, id: ack.id, outcome: ack.outcome })
   }
 }
 
-function runtimeLease(ref: SlackAdapterTarget): AdapterLease {
+function runtimeLease(ref: SlackAdapterTarget): RuntimeLease {
   return {
     kind: "runtime",
-    leaseId: `lease-${ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId}`,
-    appToken: `xapp-${ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId}`,
-    botToken: `xoxb-${ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId}`,
+    leaseId: `lease-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
+    generation: 1,
+    expiresAt: "2026-01-01T00:05:00Z",
+    appToken: `xapp-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
+    botToken: `xoxb-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
   }
 }
 
@@ -273,7 +281,7 @@ describe("mohist-slack adapter", () => {
     const transport = new FakeTransport()
     const ref = { projectId: "p", connectionId: "c" }
     transport.connections = [ref]
-    transport.nextLeases = [{ kind: "validation", leaseId: "validation-lease", appToken: "xapp-candidate-secret" }]
+    transport.nextLeases = [{ kind: "validation", leaseId: "validation-lease", generation: 1, expiresAt: "2026-01-01T00:02:00Z", expectedAppId: "A1", appToken: "xapp-candidate-secret" }, null]
     const socket = new FakeSocket()
     let webFactoryCalls = 0
     const adapter = new SlackAdapter({
@@ -303,7 +311,7 @@ describe("mohist-slack adapter", () => {
   it("does not start a Socket or delivery worker when discovery has no lease", async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
-    transport.nextLeases = [null]
+    transport.nextLeases = [null, null]
     let socketFactoryCalls = 0
     let webFactoryCalls = 0
     const adapter = new SlackAdapter({
@@ -354,15 +362,16 @@ describe("mohist-slack adapter", () => {
     await adapter.stop()
   })
 
-  it("reopens a runtime Socket only when a renewed lease rotates its credentials", async () => {
+  it("keeps the runtime Socket when a renewal extends the lease", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
-    transport.nextRenewals = [{ kind: "runtime", leaseId: "lease-rotated", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    transport.nextRenewals = [{ leaseId: "lease-c", kind: "runtime", generation: 2, expiresAt: "2026-01-01T00:10:00Z" }]
     const sockets: FakeSocket[] = []
     const socketTokens: string[] = []
     const webTokens: string[] = []
+    const webs: FakeWeb[] = []
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
@@ -374,7 +383,9 @@ describe("mohist-slack adapter", () => {
       },
       webFactory: (token) => {
         webTokens.push(token)
-        return new FakeWeb()
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
       },
       heartbeatIntervalMs: 1_000,
       deliveryPollIntervalMs: 60_000,
@@ -382,24 +393,28 @@ describe("mohist-slack adapter", () => {
     const controller = new AbortController()
     await adapter.start(controller.signal)
 
+    transport.deliveries.push({ id: "extended-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "extended" }) })
     await vi.advanceTimersByTimeAsync(1_000)
 
-    expect(socketTokens).toEqual(["xapp-c", "xapp-rotated"])
-    expect(webTokens).toEqual(["xoxb-c", "xoxb-rotated"])
-    expect(sockets[0]?.disconnected).toBe(true)
-    expect(sockets[1]?.starts).toBe(1)
-    expect(JSON.stringify(logger.entries)).not.toContain("xapp-rotated")
-    expect(JSON.stringify(logger.entries)).not.toContain("xoxb-rotated")
+    expect(socketTokens).toEqual(["xapp-c"])
+    expect(webTokens).toEqual(["xoxb-c"])
+    expect(sockets).toHaveLength(1)
+    expect(sockets[0]?.disconnected).toBe(false)
+    expect(webs[0]?.posted).toEqual([{ channel: "D", text: "extended" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "extended-delivery", outcome: "delivered" }])
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-")
+    expect(JSON.stringify(logger.entries)).not.toContain("xoxb-")
     controller.abort()
     await adapter.stop()
   })
 
-  it("fences the old Web client while credential rotation waits for its Socket to disconnect", async () => {
+  it("fences the old runtime while a foreign renewal waits for its Socket to disconnect", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
-    transport.nextRenewals = [{ kind: "runtime", leaseId: "lease-rotated", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
     const sockets: FakeSocket[] = []
     const webs: FakeWeb[] = []
     const adapter = new SlackAdapter({
@@ -430,7 +445,7 @@ describe("mohist-slack adapter", () => {
     await vi.advanceTimersByTimeAsync(1_000)
     await disconnectStarted
     const claimsWhileDisconnected = transport.claimDeliveryCalls
-    transport.deliveries.push({ id: "rotation-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
+    transport.deliveries.push({ id: "foreign-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
     await vi.advanceTimersByTimeAsync(100)
 
     expect(transport.claimDeliveryCalls).toBe(claimsWhileDisconnected)
@@ -440,19 +455,19 @@ describe("mohist-slack adapter", () => {
     transport.deliveries.length = 0
     releaseDisconnect()
     await vi.advanceTimersByTimeAsync(0)
+    expect(sockets[0]?.disconnected).toBe(true)
+    expect(await sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "late" } })).toBe(false)
+    expect(transport.envelopes).toEqual([])
     controller.abort()
     await adapter.stop()
   })
 
-  it("keeps the current runtime when a stale Socket disconnect fails", async () => {
+  it("re-acquires a rotated runtime even when the old Socket disconnect fails", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
-    transport.nextRenewals = [
-      { kind: "runtime", leaseId: "lease-first", appToken: "xapp-first", botToken: "xoxb-first" },
-      { kind: "runtime", leaseId: "lease-second", appToken: "xapp-second", botToken: "xoxb-second" },
-    ]
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
     const sockets: FakeSocket[] = []
     const webs: FakeWeb[] = []
     const adapter = new SlackAdapter({
@@ -485,10 +500,14 @@ describe("mohist-slack adapter", () => {
     await disconnectStarted
     await vi.advanceTimersByTimeAsync(1_000)
 
-    expect(sockets).toHaveLength(2)
-    expect(sockets[1]?.starts).toBe(1)
+    expect(sockets).toHaveLength(1)
     releaseDisconnect()
     await vi.advanceTimersByTimeAsync(0)
+
+    transport.nextLeases = [null, { kind: "runtime", leaseId: "lease-rotated", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[1]?.starts).toBe(1)
 
     transport.deliveries.push({ id: "current-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "current" }) })
     await vi.advanceTimersByTimeAsync(100)
@@ -507,105 +526,102 @@ describe("mohist-slack adapter", () => {
     await adapter.stop()
   })
 
-  it("fences a stale concurrent renewal through its Socket startup", async () => {
+  it("reopens a runtime Socket with rotated credentials after a superseded lease is re-acquired", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
-    transport.nextRenewals = [
-      { kind: "runtime", leaseId: "lease-first", appToken: "xapp-first", botToken: "xoxb-first" },
-      { kind: "runtime", leaseId: "lease-second", appToken: "xapp-second", botToken: "xoxb-second" },
-    ]
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
     const sockets: FakeSocket[] = []
     const socketTokens: string[] = []
     const webTokens: string[] = []
-    const webs: FakeWeb[] = []
-    let releaseFirstStart!: () => void
-    let markFirstStart!: () => void
-    let releaseSecondStart!: () => void
-    let markSecondStart!: () => void
-    const firstStartGate = new Promise<void>((resolve) => { releaseFirstStart = resolve })
-    const firstStartStarted = new Promise<void>((resolve) => { markFirstStart = resolve })
-    const secondStartGate = new Promise<void>((resolve) => { releaseSecondStart = resolve })
-    const secondStartStarted = new Promise<void>((resolve) => { markSecondStart = resolve })
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
       socketFactory: (token) => {
         socketTokens.push(token)
         const socket = new FakeSocket()
-        if (token === "xapp-first") {
-          socket.startGate = firstStartGate
-          socket.startStarted = markFirstStart
-        }
-        if (token === "xapp-second") {
-          socket.startGate = secondStartGate
-          socket.startStarted = markSecondStart
-        }
         sockets.push(socket)
         return socket
       },
       webFactory: (token) => {
         webTokens.push(token)
-        const web = new FakeWeb()
-        webs.push(web)
-        return web
+        return new FakeWeb()
       },
       heartbeatIntervalMs: 1_000,
-      deliveryPollIntervalMs: 100,
+      deliveryPollIntervalMs: 60_000,
     })
     const controller = new AbortController()
     await adapter.start(controller.signal)
 
     await vi.advanceTimersByTimeAsync(1_000)
-    await firstStartStarted
-    const claimsWhileSocketsStart = transport.claimDeliveryCalls
-    transport.deliveries.push({ id: "concurrent-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
-    await vi.advanceTimersByTimeAsync(100)
+    expect(sockets[0]?.disconnected).toBe(true)
 
-    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
-    expect(webs.map((web) => web.posted)).toEqual([[], []])
-    expect(webs.map((web) => web.updated)).toEqual([[], []])
-    expect(transport.acks).toEqual([])
+    transport.nextLeases = [null, { kind: "runtime", leaseId: "lease-rotated", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    await adapter.refreshConnections(controller.signal)
 
-    await vi.advanceTimersByTimeAsync(1_000)
-    await secondStartStarted
-    await vi.advanceTimersByTimeAsync(100)
-
-    expect(socketTokens).toEqual(["xapp-c", "xapp-first", "xapp-second"])
-    expect(webTokens).toEqual(["xoxb-c", "xoxb-first", "xoxb-second"])
-    expect(sockets).toHaveLength(3)
-    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
-    expect(webs.map((web) => web.posted)).toEqual([[], [], []])
-    expect(webs.map((web) => web.updated)).toEqual([[], [], []])
-    expect(transport.acks).toEqual([])
-
-    releaseFirstStart()
-    await vi.advanceTimersByTimeAsync(0)
-
-    expect(sockets[1]?.disconnected).toBe(true)
-    expect(sockets[2]?.disconnected).toBe(false)
-    expect(transport.claimDeliveryCalls).toBe(claimsWhileSocketsStart)
-    expect(webs.map((web) => web.posted)).toEqual([[], [], []])
-    expect(webs.map((web) => web.updated)).toEqual([[], [], []])
-    expect(transport.acks).toEqual([])
-
-    releaseSecondStart()
-    await vi.advanceTimersByTimeAsync(0)
-
-    expect(sockets[2]?.starts).toBe(1)
-    expect(webs[2]?.posted).toEqual([{ channel: "D", text: "pending" }])
-    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "concurrent-delivery", outcome: "delivered" }])
+    expect(socketTokens).toEqual(["xapp-c", "xapp-rotated"])
+    expect(webTokens).toEqual(["xoxb-c", "xoxb-rotated"])
+    expect(sockets[0]?.disconnected).toBe(true)
+    expect(sockets[1]?.starts).toBe(1)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-rotated")
+    expect(JSON.stringify(logger.entries)).not.toContain("xoxb-rotated")
     controller.abort()
     await adapter.stop()
   })
 
-  it("does not forward an old Socket event that was waiting when credentials rotate", async () => {
+  it("fences a stale renewal that resolves after the runtime was removed", async () => {
     vi.useFakeTimers()
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
-    transport.nextRenewals = [{ kind: "runtime", leaseId: "lease-rotated", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    const sockets: FakeSocket[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const claimsBefore = transport.claimDeliveryCalls
+    let releaseRenew!: () => void
+    let markRenewStarted!: () => void
+    const renewGate = new Promise<void>((resolve) => { releaseRenew = resolve })
+    const renewStarted = new Promise<void>((resolve) => { markRenewStarted = resolve })
+    vi.spyOn(transport, "renewLease").mockImplementation(async (ref, leaseId) => {
+      markRenewStarted()
+      await renewGate
+      return { leaseId, kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await renewStarted
+    transport.connections = []
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets[0]?.disconnected).toBe(true)
+
+    releaseRenew()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets).toHaveLength(1)
+    expect(transport.claimDeliveryCalls).toBe(claimsBefore)
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("does not forward a Socket event that was waiting when a foreign renewal removes the runtime", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
     let releaseIngress!: () => void
     let markIngressStarted!: () => void
     transport.ingressGate = new Promise<void>((resolve) => { releaseIngress = resolve })
@@ -638,7 +654,7 @@ describe("mohist-slack adapter", () => {
     await old
 
     expect(transport.envelopes.map((envelope) => envelope.messageTs)).toEqual(["1"])
-    expect(sockets).toHaveLength(2)
+    expect(sockets).toHaveLength(1)
     controller.abort()
     await adapter.stop()
   })
@@ -1007,7 +1023,7 @@ describe("mohist-slack adapter", () => {
 
   it("runs an explicit Manager target through its Socket Mode runtime lease", async () => {
     const manager: SlackManagerRef = {
-      ownerKind: "manager",
+      kind: "manager",
       enrollmentId: "enrollment-manager",
       workspaceTeamId: "T_MANAGER",
     }
@@ -1392,9 +1408,11 @@ describe("mohist-slack adapter", () => {
     const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve })
     const transport: AdapterTransport = {
       discover: async () => [{ projectId: "p", connectionId: "c" }],
-      acquireLease: async () => ({ kind: "runtime", leaseId: "lease", appToken: "app", botToken: "bot" }),
-      renewLease: async () => ({ kind: "runtime", leaseId: "lease", appToken: "app", botToken: "bot" }),
-      reportHello: async () => undefined,
+      acquireLease: async (_ref, kind) => kind === "validation"
+        ? null
+        : { kind: "runtime", leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "app", botToken: "bot" },
+      renewLease: async () => ({ leaseId: "lease", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }),
+      reportHello: async () => "verified",
       ingress: async () => {
         active += 1
         maximum = Math.max(maximum, active)

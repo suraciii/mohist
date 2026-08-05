@@ -118,17 +118,23 @@ afterEach(() => vi.useRealTimers())
 
 function compositionServerFetch(withManagerDelivery = true): typeof fetch {
   let managerDeliveryClaimed = false
-  return async (input, _init) => {
+  return async (input, init) => {
     const url = String(input)
+    const requestBody = JSON.parse(String(init?.body ?? "{}")) as { kind?: string; target?: { kind?: string } }
     let data: unknown
-    if (url.endsWith("/api/slack-connections/adapter")) {
-      data = [{ projectId: "p", connectionId: "c" }]
-    } else if (url.endsWith("/api/slack-manager/adapter")) {
-      data = [{ ownerKind: "manager", enrollmentId: "m", workspaceTeamId: "T" }]
-    } else if (url.endsWith("/api/projects/p/slack-connections/c/adapter/leases/acquire")) {
-      data = { kind: "runtime", leaseId: "lease-c", appToken: "xapp-c", botToken: "xoxb-c" }
-    } else if (url.endsWith("/api/slack-manager/adapter/m/leases/acquire")) {
-      data = { kind: "runtime", leaseId: "lease-m", appToken: "xapp-m", botToken: "xoxb-manager" }
+    if (url.endsWith("/api/slack-adapter/leases/targets")) {
+      data = [
+        { kind: "connection", projectId: "p", connectionId: "c", expectedAppId: "A1" },
+        { kind: "manager", enrollmentId: "m", workspaceTeamId: "T", expectedAppId: "A2" },
+      ]
+    } else if (url.endsWith("/api/slack-adapter/leases/acquire")) {
+      if (requestBody.kind === "validation") {
+        data = null
+      } else if (requestBody.target?.kind === "manager") {
+        data = { leaseId: "lease-m", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-m", botToken: "xoxb-manager" }
+      } else {
+        data = { leaseId: "lease-c", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-c", botToken: "xoxb-c" }
+      }
     } else if (url.endsWith("/deliveries/claim-uncertain")) {
       data = null
     } else if (url.endsWith("/deliveries/claim")) {
@@ -213,7 +219,7 @@ describe("mohist-slack CLI composition", () => {
 
   it("delivers a Manager message through the production WebClient and acknowledges it on the Manager route", async () => {
     const managerCredential = "test-manager-credential"
-    const manager = { ownerKind: "manager" as const, enrollmentId: "manager-enrollment", workspaceTeamId: "T_MANAGER" }
+    const manager = { kind: "manager" as const, enrollmentId: "manager-enrollment", workspaceTeamId: "T_MANAGER" }
     const delivery = {
       id: "manager-delivery",
       ownerKind: "manager" as const,
@@ -233,12 +239,12 @@ describe("mohist-slack CLI composition", () => {
         operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
       })
       let data: unknown
-      if (url.endsWith("/api/slack-connections/adapter")) {
-        data = []
-      } else if (url.endsWith("/api/slack-manager/adapter")) {
+      if (url.endsWith("/api/slack-adapter/leases/targets")) {
         data = [manager]
-      } else if (url.endsWith("/leases/acquire")) {
-        data = { kind: "runtime", leaseId: "lease-manager", appToken: "xapp-manager", botToken: managerCredential }
+      } else if (url.endsWith("/api/slack-adapter/leases/acquire")) {
+        data = JSON.parse(body ?? "{}").kind === "validation"
+          ? null
+          : { leaseId: "lease-manager", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-manager", botToken: managerCredential }
       } else if (url.endsWith("/deliveries/claim-uncertain")) {
         data = null
       } else if (url.endsWith("/deliveries/claim")) {
@@ -291,7 +297,7 @@ describe("mohist-slack CLI composition", () => {
       adapterId: "adapter-manager",
       providerMessageIdentity: { conversationId: "D_MANAGER", messageTs: "1700000000.001" },
     }])
-    expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/leases/lease-manager/deliveries/ack"))).toBe(true)
+    expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)
     controller.abort()
     await adapter.stop()
     expect(slackSdkMocks.proxyCloseCalls).toBe(0)

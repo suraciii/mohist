@@ -1,13 +1,15 @@
 export type SlackDeliveryOwnerKind = "connection" | "manager"
 
+export type SlackLeaseKind = "validation" | "runtime"
+
 export interface SlackConnectionRef {
-  readonly ownerKind?: "connection"
+  readonly kind?: "connection"
   readonly projectId: string
   readonly connectionId: string
 }
 
 export interface SlackManagerRef {
-  readonly ownerKind: "manager"
+  readonly kind: "manager"
   readonly enrollmentId: string
   readonly workspaceTeamId: string
 }
@@ -19,15 +21,29 @@ export type AdapterLease = ValidationLease | RuntimeLease
 export interface ValidationLease {
   readonly kind: "validation"
   readonly leaseId: string
+  readonly generation: number
+  readonly expiresAt: string
+  readonly expectedAppId: string
   readonly appToken: string
 }
 
 export interface RuntimeLease {
   readonly kind: "runtime"
   readonly leaseId: string
+  readonly generation: number
+  readonly expiresAt: string
   readonly appToken: string
   readonly botToken: string
 }
+
+export interface LeaseRenewal {
+  readonly leaseId: string
+  readonly kind: SlackLeaseKind
+  readonly generation: number
+  readonly expiresAt: string
+}
+
+export type SlackHelloOutcome = "verified" | "app_id_mismatch" | "lease_stale_or_expired"
 
 export interface SlackFileRef {
   readonly id: string
@@ -102,14 +118,14 @@ export interface DeliveryAck {
 
 export interface AdapterTransport {
   discover(signal: AbortSignal): Promise<readonly SlackAdapterTarget[]>
-  acquireLease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<AdapterLease | null>
-  renewLease(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<AdapterLease | null>
-  reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string, signal: AbortSignal): Promise<void>
-  ingress(ref: SlackAdapterTarget, leaseId: string, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
-  interaction(ref: SlackAdapterTarget, leaseId: string, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
-  claimDelivery(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  claimUncertainDelivery?(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
-  ackDelivery(ref: SlackAdapterTarget, leaseId: string, ack: DeliveryAck, signal: AbortSignal): Promise<void>
+  acquireLease(ref: SlackAdapterTarget, kind: SlackLeaseKind, adapterId: string, signal: AbortSignal): Promise<AdapterLease | null>
+  renewLease(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<LeaseRenewal | null>
+  reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string, signal: AbortSignal): Promise<SlackHelloOutcome>
+  ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
+  interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
+  claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  claimUncertainDelivery?(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
+  ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, signal: AbortSignal): Promise<void>
 }
 
 export interface SocketEvent {

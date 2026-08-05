@@ -83,12 +83,10 @@ export class SlackAdapter {
       const key = connectionKey(ref)
       if (this.runtimes.has(key)) return
       try {
-        const lease = await this.options.transport.acquireLease(ref, this.options.adapterId, signal)
-        if (!lease) return
-        if (lease.kind === "validation") {
-          await this.validate(ref, lease, signal)
-          return
-        }
+        const validationLease = await this.options.transport.acquireLease(ref, "validation", this.options.adapterId, signal)
+        if (validationLease && validationLease.kind === "validation") await this.validate(ref, validationLease, signal)
+        const lease = await this.options.transport.acquireLease(ref, "runtime", this.options.adapterId, signal)
+        if (!lease || lease.kind !== "runtime") return
         const runtime: ConnectionRuntime = { target: ref, generation: 0, lease, draining: false, drainRequested: false }
         this.runtimes.set(key, runtime)
         try {
@@ -187,26 +185,13 @@ export class SlackAdapter {
     const generation = runtime.generation
     const currentLease = runtime.lease
     try {
-      const lease = await this.options.transport.renewLease(runtime.target, currentLease.leaseId, this.options.adapterId, signal)
+      const renewal = await this.options.transport.renewLease(runtime.target, currentLease.leaseId, this.options.adapterId, signal)
       if (!this.isActive(runtime, signal) || runtime.generation !== generation) return
-      if (!lease || lease.kind !== "runtime") {
+      if (!renewal || renewal.kind !== "runtime" || renewal.leaseId !== currentLease.leaseId) {
         await this.removeRuntime(runtime)
         return
       }
-      const credentialsChanged = currentLease.appToken !== lease.appToken || currentLease.botToken !== lease.botToken
-      const leaseChanged = currentLease.leaseId !== lease.leaseId || credentialsChanged
-      if (leaseChanged) runtime.generation += 1
-      runtime.lease = lease
-      if (credentialsChanged) {
-        const refreshGeneration = runtime.generation
-        const socket = runtime.socket
-        runtime.socket = undefined
-        runtime.web = undefined
-        await this.disconnectSocket(socket, runtime.target)
-        if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return
-        if (!await this.openRuntimeSocket(runtime, signal, refreshGeneration)) return
-        if (!this.isGenerationCurrent(runtime, refreshGeneration, signal)) return
-      }
+      runtime.lease = { ...currentLease, generation: renewal.generation, expiresAt: renewal.expiresAt }
       await this.drain(runtime, signal)
     } catch (error) {
       if (this.stopped || signal.aborted) return
@@ -280,7 +265,7 @@ export class SlackAdapter {
       this.log.info("envelope forwarding", { target, event: eventType })
       if (interaction) {
         this.assertCurrent(runtime, snapshot, signal)
-        await this.options.transport.interaction(runtime.target, snapshot.lease.leaseId, normalizeSlackInteraction(body), signal)
+        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
         this.assertCurrent(runtime, snapshot, signal)
         this.log.info("interaction forwarded", { target, event: eventType })
         await this.drain(runtime, signal)
@@ -288,7 +273,7 @@ export class SlackAdapter {
       }
       const envelope = normalizeSocketEvent(body)
       this.assertCurrent(runtime, snapshot, signal)
-      const result = await this.options.transport.ingress(runtime.target, snapshot.lease.leaseId, envelope, signal)
+      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
       this.assertCurrent(runtime, snapshot, signal)
       this.log.info("ingress accepted", { target, event: eventType, kind: result.kind })
       if (!await this.renderUserFacingRejection(runtime, snapshot, envelope, result, signal)) return
@@ -338,19 +323,19 @@ export class SlackAdapter {
       this.assertCurrent(runtime, snapshot, signal)
       while (!signal.aborted) {
         this.assertCurrent(runtime, snapshot, signal)
-        const delivery = await this.options.transport.claimDelivery(runtime.target, snapshot.lease.leaseId, this.options.adapterId, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
         this.assertCurrent(runtime, snapshot, signal)
         if (!delivery) break
         try {
           this.assertCurrent(runtime, snapshot, signal)
           const ack = await this.mutateDelivery(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
           this.assertCurrent(runtime, snapshot, signal)
-          await this.options.transport.ackDelivery(runtime.target, snapshot.lease.leaseId, withAdapterId(ack, this.options.adapterId), signal)
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
           this.assertCurrent(runtime, snapshot, signal)
         } catch (error) {
           if (error instanceof StaleRuntimeError) return
           this.assertCurrent(runtime, snapshot, signal)
-          await this.options.transport.ackDelivery(runtime.target, snapshot.lease.leaseId, withAdapterId({
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId({
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
@@ -558,20 +543,20 @@ export class SlackAdapter {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
       this.assertCurrent(runtime, snapshot, signal)
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, snapshot.lease.leaseId, this.options.adapterId, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
       this.assertCurrent(runtime, snapshot, signal)
       if (!delivery) return
       try {
         this.assertCurrent(runtime, snapshot, signal)
         const ack = await this.reconcile(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
         this.assertCurrent(runtime, snapshot, signal)
-        await this.options.transport.ackDelivery(runtime.target, snapshot.lease.leaseId, withAdapterId(ack, this.options.adapterId), signal)
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
         this.assertCurrent(runtime, snapshot, signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
         if (error instanceof StaleRuntimeError) throw error
         this.assertCurrent(runtime, snapshot, signal)
-        await this.options.transport.ackDelivery(runtime.target, snapshot.lease.leaseId, withAdapterId({
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
@@ -603,7 +588,7 @@ function safeErrorMessage(error: unknown) {
 }
 
 function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
-  return value.ownerKind === "manager"
+  return value.kind === "manager"
 }
 
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {
