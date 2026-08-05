@@ -33,10 +33,11 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         const string queuedTurn = "adapter-queued-turn";
         await queued.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
             "adapter-queued-input", queuedTurn, "queued", "test"));
+        var queuedInvocationCount = hub.Invocations.Count;
         var queuedResult = await adapter.StopAsync(projectId, Target(
             "adapter-queued", queuedTurn, AgentTurnStatus.Queued, "adapter-queued-op"));
         Assert.Equal(SessionTreeStopTargetOutcome.Cancelled, queuedResult.Outcome);
-        Assert.Empty(hub.Invocations);
+        Assert.Equal(queuedInvocationCount, hub.Invocations.Count);
 
         var executing = await OpenSessionAsync(projectId, "adapter-executing");
         const string executingTurn = "adapter-executing-turn";
@@ -46,10 +47,11 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         var runnerId = "adapter-runner";
         _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(runnerId, "adapter-executing-connection");
         hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("stopped"));
+        var executingInvocationCount = hub.Invocations.Count;
         var executingResult = await adapter.StopAsync(projectId, Target(
             "adapter-executing", executingTurn, AgentTurnStatus.Executing, "adapter-executing-op", runnerId));
         Assert.Equal(SessionTreeStopTargetOutcome.Cancelled, executingResult.Outcome);
-        Assert.Contains(hub.Invocations, item => item.Method == "CancelAgentSession");
+        Assert.Contains(hub.Invocations.Skip(executingInvocationCount), item => item.Method == "CancelAgentSession");
 
         var idleResult = await adapter.StopAsync(projectId, Target(
             "adapter-idle", null, null, "adapter-idle-op"));
