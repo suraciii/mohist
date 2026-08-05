@@ -285,6 +285,36 @@ public sealed class SlackAdapterLeaseRoutesSpecs
         Assert.Equal(HttpStatusCode.BadRequest, noApp.StatusCode);
     }
 
+    [Theory]
+    [InlineData(AcquirePath)]
+    [InlineData(HelloPath)]
+    [InlineData(RenewPath)]
+    public async Task Post_routes_reject_a_missing_or_null_target_without_server_error(string path)
+    {
+        using var client = _fixture.CreateOperatorClient(OperatorId);
+
+        using var missing = await client.PostAsJsonAsync(path, new
+        {
+            kind = SlackLeaseKind.Validation,
+            adapterId = "adapter-A",
+            leaseId = "lease_x",
+            appId = "A_X",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+        Assert.Equal("invalid_target", await CodeAsync(missing));
+
+        using var nullTarget = await client.PostAsJsonAsync(path, new
+        {
+            target = (object?)null,
+            kind = SlackLeaseKind.Validation,
+            adapterId = "adapter-A",
+            leaseId = "lease_x",
+            appId = "A_X",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, nullTarget.StatusCode);
+        Assert.Equal("invalid_target", await CodeAsync(nullTarget));
+    }
+
     private static object AcquireBody(SlackLeaseTargetRef target, string adapterId) => new
     {
         kind = SlackLeaseKind.Validation,

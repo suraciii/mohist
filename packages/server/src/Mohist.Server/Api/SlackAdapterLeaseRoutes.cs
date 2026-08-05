@@ -43,7 +43,7 @@ public static class SlackAdapterLeaseRoutes
                 return invalid;
             if (body!.Kind != SlackLeaseKind.Validation && body.Kind != SlackLeaseKind.Runtime)
                 return ApiResults.BadRequest("kind must be 'validation' or 'runtime'.", "invalid_lease_kind");
-            var target = body.Target!.ToTargetRef();
+            var target = body.Target?.ToTargetRef();
             if (target is null)
                 return ApiResults.BadRequest(
                     "target must identify a manager enrollment or a connection.", "invalid_target");
@@ -72,7 +72,7 @@ public static class SlackAdapterLeaseRoutes
             var invalid = InvalidBody(body);
             if (invalid is not null)
                 return invalid;
-            var target = body!.Target!.ToTargetRef();
+            var target = body.Target?.ToTargetRef();
             if (target is null)
                 return ApiResults.BadRequest(
                     "target must identify a manager enrollment or a connection.", "invalid_target");
@@ -104,7 +104,7 @@ public static class SlackAdapterLeaseRoutes
             var invalid = InvalidBody(body);
             if (invalid is not null)
                 return invalid;
-            var target = body!.Target!.ToTargetRef();
+            var target = body.Target?.ToTargetRef();
             if (target is null)
                 return ApiResults.BadRequest(
                     "target must identify a manager enrollment or a connection.", "invalid_target");
