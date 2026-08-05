@@ -53,6 +53,70 @@ public sealed class SlackManifestGeneratorTests
         Assert.True(SlackManifestDrift.HasDrift(expected, "not-json"));
     }
 
+    [Fact]
+    public void HasDrift_ArrayElementOrderDoesNotMatter()
+    {
+        var expected = new SlackManifest(2, """{"oauth_config":{"scopes":{"bot":["chat:write","im:history","users:read"]}},"settings":{"event_subscriptions":{"bot_events":["app_mention","message.im"]}}}""", "hash");
+
+        Assert.False(SlackManifestDrift.HasDrift(expected, """{"settings":{"event_subscriptions":{"bot_events":["message.im","app_mention"]}},"oauth_config":{"scopes":{"bot":["users:read","chat:write","im:history"]}}}"""));
+        Assert.False(SlackManifestDrift.HasDrift(expected, """{"oauth_config":{"scopes":{"bot":["chat:write","im:history","users:read"]}},"settings":{"event_subscriptions":{"bot_events":["app_mention","message.im"]}}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"oauth_config":{"scopes":{"bot":["chat:write","im:history","users:read","files:read"]}},"settings":{"event_subscriptions":{"bot_events":["app_mention","message.im"]}}}"""));
+    }
+
+    [Fact]
+    public void HasDrift_ArrayComparisonKeepsDuplicateSensitivity()
+    {
+        var expected = new SlackManifest(2, """{"settings":{"event_subscriptions":{"bot_events":["message.im"]}}}""", "hash");
+
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"settings":{"event_subscriptions":{"bot_events":["message.im","message.im"]}}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"settings":{"event_subscriptions":{"bot_events":[]}}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"settings":{"event_subscriptions":{"bot_events":["app_mention"]}}}"""));
+    }
+
+    [Fact]
+    public void HasDrift_TrueOrOmittedToleranceAppliesOnlyToBooleans()
+    {
+        var expected = new SlackManifest(2, """{"display_information":{"name":"Agent"},"settings":{"socket_mode_enabled":true}}""", "hash");
+
+        Assert.False(SlackManifestDrift.HasDrift(expected, """{"display_information":{"name":"Agent"},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"display_information":{"name":"Agent","background_color":"#4A154B"},"settings":{"socket_mode_enabled":true}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"display_information":{"name":"Agent"},"oauth_config":{"redirect_urls":[]},"settings":{"socket_mode_enabled":true}}"""));
+        Assert.True(SlackManifestDrift.HasDrift(expected, """{"display_information":{"name":"Agent"},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":false}}"""));
+    }
+
+    [Fact]
+    public void HasDrift_ObjectFieldOrderDoesNotMatter()
+    {
+        var expected = new SlackManifest(2, """{"features":{"bot_user":{"display_name":"Agent","always_online":false}},"settings":{"socket_mode_enabled":true}}""", "hash");
+
+        Assert.False(SlackManifestDrift.HasDrift(expected, """{"settings":{"socket_mode_enabled":true},"features":{"bot_user":{"always_online":false,"display_name":"Agent"}}}"""));
+    }
+
+    [Fact]
+    public void HasDrift_PlatformRoundTripWithReorderedSetsAndOmittedTrueIsNotDrift()
+    {
+        var generator = new SlackManifestGenerator();
+        var manifest = generator.Generate(new("Agent", "Handles work", "capability-1", Identity, SlackManifestKind.AgentApp));
+
+        var export = """
+            {
+              "display_information": { "description": "Handles work", "name": "Agent" },
+              "features": {
+                "app_home": { "messages_tab_enabled": true, "home_tab_enabled": false, "messages_tab_read_only_enabled": false },
+                "bot_user": { "always_online": false, "display_name": "Agent" }
+              },
+              "oauth_config": { "scopes": { "bot": ["users:read", "reactions:write", "reactions:read", "im:history", "groups:history", "chat:write", "channels:history", "app_mentions:read"] } },
+              "settings": {
+                "socket_mode_enabled": true,
+                "token_rotation_enabled": false,
+                "interactivity": { "is_enabled": true },
+                "event_subscriptions": { "bot_events": ["message.im", "app_mention"] }
+              }
+            }
+            """;
+        Assert.False(SlackManifestDrift.HasDrift(manifest, export));
+    }
+
     private static string[] Scopes(JsonDocument manifest) => manifest.RootElement
         .GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot")
         .EnumerateArray().Select(scope => scope.GetString()!).ToArray();

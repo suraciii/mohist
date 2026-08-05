@@ -182,9 +182,14 @@ public static class SlackManifestDrift
 
     private static bool EquivalentArray(JsonElement expected, JsonElement actual)
     {
-        var expectedItems = expected.EnumerateArray().ToArray();
-        var actualItems = actual.EnumerateArray().ToArray();
-        return expectedItems.Length == actualItems.Length
-            && expectedItems.Zip(actualItems).All(pair => Equivalent(pair.First, pair.Second));
+        var remaining = actual.EnumerateArray().ToList();
+        foreach (var expectedItem in expected.EnumerateArray())
+        {
+            var matchIndex = remaining.FindIndex(candidate => Equivalent(expectedItem, candidate));
+            if (matchIndex < 0)
+                return false;
+            remaining.RemoveAt(matchIndex);
+        }
+        return remaining.Count == 0;
     }
 }
