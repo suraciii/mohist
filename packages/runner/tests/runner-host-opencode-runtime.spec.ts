@@ -4,6 +4,7 @@ import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models
 import { setPiRuntimeFactoryForTest, type PiRuntime } from "../src/runtime/pi/index.js"
 import type { ActionDefinition } from "../src/actions/manifest.js"
 import { deferred } from "./support/deferred.js"
+import { capturedLogs } from "./support/logger-test.js"
 import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
 import {
@@ -324,11 +325,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     // Capture the readiness-diagnostic warn so it doesn't trip the
     // unexpected-console recorder — the diagnostic IS the expected
     // signal the test verifies.
-    const warnCalls: string[] = []
-    const previousWarn = console.warn
-    console.warn = (...args: unknown[]) => {
-      warnCalls.push(args.map((value) => typeof value === "string" ? value : String(value)).join(" "))
-    }
     const run = host.run(controller.signal)
     try {
       await reportStarted.promise
@@ -342,7 +338,9 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       expect(poll.mock.calls.length).toBe(callsBefore)
       // The actionable readiness diagnostic is emitted while the gate
       // is closed.
-      expect(warnCalls.some((message) => /opencode runtime not ready \(server-exit\)/.test(message))).toBe(true)
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "runner not ready; skipping poll", fields: expect.objectContaining({ reason: expect.stringContaining("opencode runtime not ready (server-exit)") }) }),
+      ]))
       // awaitingAck drains while not-ready: the in-flight report
       // resolves and the entry leaves awaitingAck on the next loop
       // tick. The run continues without a fresh poll.
@@ -356,7 +354,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     } finally {
       controller.abort()
       reportRelease.resolve()
-      console.warn = previousWarn
       await run.catch(() => undefined)
     }
   })
@@ -389,8 +386,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     })
     const controller = new AbortController()
     const host = new RunnerHost(hostOptions())
-    const previousWarn = console.warn
-    console.warn = () => undefined
     const run = host.run(controller.signal)
     try {
       await firstPollDone.promise
@@ -417,7 +412,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     } finally {
       controller.abort()
       actionRelease.resolve()
-      console.warn = previousWarn
       await run.catch(() => undefined)
     }
   })
@@ -550,8 +544,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
     blockingAction.mockReset().mockResolvedValue({ output: { message: "ok" } })
     const controller = new AbortController()
     const host = new RunnerHost(hostOptions())
-    const previousWarn = console.warn
-    console.warn = () => undefined
     const run = host.run(controller.signal)
     try {
       const runtime = await installedHandles.runtimeCreated
@@ -577,7 +569,6 @@ describe("RunnerHost wires the OpenCodeRuntime lifecycle", () => {
       expect(poll.mock.calls.length).toBe(callsBeforeFlip)
     } finally {
       controller.abort()
-      console.warn = previousWarn
       await run.catch(() => undefined)
     }
   })

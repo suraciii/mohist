@@ -11,6 +11,7 @@ import type {
   RuntimeResult,
 } from "../src/runtime/opencode/index.js"
 import { makeFakePiRuntime, type FakePiRuntimeHandles } from "./support/pi-runtime-fixture.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 
 interface CapturedBuilder {
@@ -278,7 +279,6 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       turnId: "turn-1",
       operationId: "stop-1",
     }
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     buildClient({ resolver, outbox: readyOutbox(), openCodeRuntime: runtime.runtime, cancelOperationJournal: journal })
     await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stop-requested" })
@@ -295,7 +295,6 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
     await expect(emitCancel(lastBuilder(), payload)).resolves.toEqual({ state: "stopped" })
 
     expect(runtime.cancelCalls).toHaveLength(2)
-    errorSpy.mockRestore()
   })
 
   it("UnknownSession_ResolverReturnsNull_RepliesNotCancellableAndDoesNotCallCancel", async () => {
@@ -384,7 +383,6 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
       diagnostics: [{ severity: "error", code: "turn-failed", message: "transport dropped" }],
     })
     const resolver = vi.fn(() => ({ runtimeSessionId: "runtime-1", workDir: "/work/project", projectId: "proj-1" }))
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -393,8 +391,9 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     expect(reply).toEqual({ state: "stop-requested" })
     expect(runtime.cancelCalls).toHaveLength(1)
-    expect(errorSpy).toHaveBeenCalledWith("cancel runtime.cancel rejected:", expect.stringContaining("transport dropped"))
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "cancel runtime.cancel rejected", fields: expect.objectContaining({ reason: expect.stringContaining("transport dropped"), session: "runtime-1" }) }),
+    ]))
   })
 
   it("RuntimeMissingSession_RepliesNotCancellable", async () => {
@@ -442,7 +441,6 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
   it("ResolverThrows_RepliesNotCancellableAndLogs", async () => {
     const runtime = makeFakeRuntime()
     const resolver = vi.fn(() => { throw new Error("resolver boom") })
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
 
     buildClient({ resolver, openCodeRuntime: runtime.runtime })
     const builder = lastBuilder()
@@ -451,8 +449,9 @@ describe("RunnerSignalRClient CancelAgentSession handler", () => {
 
     expect(reply).toEqual({ state: "not-cancellable" })
     expect(runtime.cancelCalls).toHaveLength(0)
-    expect(errorSpy).toHaveBeenCalledWith("cancel target resolver threw:", expect.any(Error))
-    errorSpy.mockRestore()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "cancel target resolver threw", fields: expect.objectContaining({ exception: expect.objectContaining({ message: "resolver boom" }) }) }),
+    ]))
   })
 
   it("NullOrMissingPayload_RepliesNotCancellable", async () => {

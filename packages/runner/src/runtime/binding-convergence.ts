@@ -3,6 +3,9 @@ import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../serv
 import { BindingRecoveryCoordinator, resolveOrRecoverBinding, type BindingProbeResult, type RecoverableRuntime, type RuntimeBinding } from "./binding-recovery.js"
 import type { OpenCodeRuntime } from "./opencode/index.js"
 import type { PiRuntime } from "./pi/index.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("session")
 
 export interface BindingConvergenceConnection {
   listAgentSessionsForReconcile(signal: AbortSignal): Promise<AgentSessionReconcileBinding[]>
@@ -47,7 +50,7 @@ export class BindingConvergence {
       try {
         await this.reconcileBinding(binding, signal)
       } catch (error) {
-        console.error(`agent-session binding reconciliation failed for ${binding.sessionId}:`, error)
+        log.error("agent-session binding reconciliation failed", { session: binding.sessionId, exception: error })
       }
     }
   }

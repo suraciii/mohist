@@ -4,6 +4,7 @@ import { join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConvergenceBackstop, type ConvergenceRunner } from "../src/runtime/cleanup-convergence.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
+import { capturedLogs } from "./support/logger-test.js"
 
 // Unit coverage for the convergence backstop. The backstop
 // enumerates only registry entries still in phase `active`, asks the
@@ -298,17 +299,15 @@ describe("ConvergenceBackstop", () => {
     const failure = new Error("network blip")
     const stub = new StubRunner([failure])
     const backstop = new ConvergenceBackstop(registry, stub)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-
     try {
       const result = await backstop.runOnce(new AbortController().signal)
 
       expect(result).toEqual({ queried: 1, transitioned: 0, dropped: 0 })
       expect(registry.get("wr-1")?.phase).toBe("active")
-      expect(errorSpy).toHaveBeenCalledOnce()
-      expect(errorSpy).toHaveBeenCalledWith("workspace cleanup convergence query failed:", failure)
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "workspace cleanup convergence query failed", fields: { exception: failure } }),
+      ]))
     } finally {
-      errorSpy.mockRestore()
     }
   })
 

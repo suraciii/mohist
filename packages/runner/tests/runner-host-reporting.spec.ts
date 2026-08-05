@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
+import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
@@ -293,9 +294,9 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
     blockingAction.mockResolvedValue({ output: { message: "ok" } })
-    const warningSpy = vi.spyOn(console, "warn").mockClear().mockImplementation((message: unknown) => {
-      if (message === "first report for work work-retry failed; will retry") firstFailureLogged.resolve()
-      if (message === "retry report for work work-retry failed (attempt 2)") secondFailureLogged.resolve()
+    const stopLog = onCapturedLog((record) => {
+      if (record.message === "first work report failed; will retry") firstFailureLogged.resolve()
+      if (record.message === "work report retry failed") secondFailureLogged.resolve()
     })
     const run = host.run(controller.signal)
     try {
@@ -311,21 +312,14 @@ describe("RunnerHost", () => {
       await expect(run).resolves.toBeUndefined()
 
       expect(uploadTaskLog).toHaveBeenCalledTimes(1)
-      expect(warningSpy).toHaveBeenCalledTimes(2)
-      expect(warningSpy).toHaveBeenNthCalledWith(
-        1,
-        "first report for work work-retry failed; will retry",
-        firstFailure,
-      )
-      expect(warningSpy).toHaveBeenNthCalledWith(
-        2,
-        "retry report for work work-retry failed (attempt 2)",
-        secondFailure,
-      )
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "first work report failed; will retry", fields: expect.objectContaining({ work: "work-retry", exception: firstFailure }) }),
+        expect.objectContaining({ level: "WARN", message: "work report retry failed", fields: expect.objectContaining({ work: "work-retry", attempt: 2, exception: secondFailure }) }),
+      ]))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-      warningSpy.mockRestore()
+      stopLog()
     }
   })
 })
