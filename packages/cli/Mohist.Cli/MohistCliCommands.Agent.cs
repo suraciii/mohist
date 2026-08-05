@@ -772,7 +772,7 @@ internal static class AgentCommands
         var parentSessionOpt = new Option<string?>("--parent-session") { Description = "Parent AgentSession id" };
         var promptOpt = new Option<string?>("--prompt") { Description = "Child session prompt" };
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Required stable retry key" };
-        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionSpawn)));
 
         cmd.Arguments.Add(agentRefArg);
         cmd.Options.Add(projectOpt);
@@ -808,7 +808,7 @@ internal static class AgentCommands
                 $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(parentSessionId)}/spawns",
                 new { targetAgentRef = agentRef, prompt },
                 mode,
-                nameof(MohistCliApi.TableShape.AgentSessionLaunch),
+                nameof(MohistCliApi.TableShape.AgentSessionSpawn),
                 rawJson: true,
                 headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey },
                 retries: 1);

@@ -235,8 +235,6 @@ internal sealed partial class TableRenderer
 
         _out.WriteLine($"job id:     {StringOf(data, "jobId")}");
         _out.WriteLine($"session id: {StringOf(data, "sessionId")}");
-        _out.WriteLine($"parent session: {StringOf(data, "parentSessionId")}");
-        _out.WriteLine($"edge id:    {StringOf(data, "edgeId")}");
         _out.WriteLine($"input id:   {StringOf(data, "inputId")}");
         _out.WriteLine($"turn id:    {StringOf(data, "turnId")}");
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
@@ -246,6 +244,21 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
         _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
         _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");
+    }
+
+    private void RenderAgentSessionSpawn(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"job id:         {StringOf(data, "jobId")}");
+        _out.WriteLine($"session id:     {StringOf(data, "sessionId")}");
+        _out.WriteLine($"turn id:        {StringOf(data, "turnId")}");
+        _out.WriteLine($"parent session: {StringOf(data, "parentSessionId")}");
+        _out.WriteLine($"edge id:        {StringOf(data, "edgeId")}");
     }
 
     private void RenderSessionTree(JsonNode? data)
