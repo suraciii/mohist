@@ -147,6 +147,10 @@ RuntimeBinding
 以下是不变量：
 
 - `Id`、`Source` 与 `WorkDir` 在 AgentSession 生命周期内不变。
+- Session parentage is an optional `SessionParentLink` owned separately from immutable `Source`.
+  It can only be established for a newly launched child Session and later detached; it never turns
+  an Agent launch Source into another Source. The complete tree contract is
+  [`subagents.md`](subagents.md).
 - `CurrentBinding` 是当前路由事实，可以整体替换；AgentSession 不保存物理 Session 历史。
 - `Transcript` 是一个按 AgentSession 顺序追加的会话记录，不按物理 Session 或其它
   子实体拆分。
