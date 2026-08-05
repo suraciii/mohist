@@ -45,9 +45,41 @@ describe("OpenCode global event subscription", () => {
       { generation: 2, directory: "/tmp/project-a" },
     ])
     expect(event).toHaveBeenCalledTimes(2)
-    expect(event).toHaveBeenNthCalledWith(1, { throwOnError: true })
-    expect(event).toHaveBeenNthCalledWith(2, { throwOnError: true })
+    expect(event).toHaveBeenNthCalledWith(1, expect.objectContaining({ throwOnError: true, signal: expect.any(AbortSignal) }))
+    expect(event).toHaveBeenNthCalledWith(2, expect.objectContaining({ throwOnError: true, signal: expect.any(AbortSignal) }))
 
     await subscription.close()
+  })
+
+  it("aborts the active event stream when closed", async () => {
+    let requestSignal: AbortSignal | undefined
+    let markStarted: () => void = () => {}
+    let releaseStream: () => void = () => {}
+    const started = new Promise<void>((resolve) => { markStarted = resolve })
+    const release = new Promise<void>((resolve) => { releaseStream = resolve })
+    const event = vi.fn(async (options: { signal: AbortSignal }) => {
+      requestSignal = options.signal
+      return {
+        stream: (async function* () {
+          markStarted()
+          await Promise.race([
+            release,
+            new Promise<void>((resolve) => options.signal.addEventListener("abort", () => resolve(), { once: true })),
+          ])
+        })(),
+      }
+    })
+    const client = { global: { event } } as unknown as OpencodeClient
+    const subscription = createEventSubscription(client)
+    subscription.subscribe(() => {})
+    await started
+
+    const closing = subscription.close()
+    try {
+      expect(requestSignal?.aborted).toBe(true)
+    } finally {
+      releaseStream()
+      await closing
+    }
   })
 })
