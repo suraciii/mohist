@@ -244,34 +244,29 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
             return;
 
         var state = agentApp.RuntimeCredentialValidationState;
+        if (state == SlackRuntimeCredentialValidationState.NotProvided
+            || state == SlackRuntimeCredentialValidationState.Failed)
+            return;
+
+        // Promote the candidate pair to the runtime addresses, drop the
+        // candidate slot and the previous pair parked by a rotation, and only
+        // then mark Verified. Verified must imply the runtime addresses hold
+        // the verified pair: a crash here leaves the Agent App AwaitingSocket,
+        // so a runtime lease can never serve an un-promoted candidate.
         if (state == SlackRuntimeCredentialValidationState.Candidate)
-        {
             await agentApps.ApplyCredentialValidationAsync(
                 agentApp.Id, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
-            await agentApps.ApplyCredentialValidationAsync(
-                agentApp.Id, SlackRuntimeCredentialValidationState.Verified, ct);
-        }
-        else if (state == SlackRuntimeCredentialValidationState.AwaitingSocket)
-        {
-            await agentApps.ApplyCredentialValidationAsync(
-                agentApp.Id, SlackRuntimeCredentialValidationState.Verified, ct);
-        }
-        else if (state != SlackRuntimeCredentialValidationState.Verified)
-        {
-            return;
-        }
 
-        // The confirmed hello promotes the candidate pair to the runtime
-        // addresses; the candidate slot and the previous pair parked by a
-        // rotation are no longer needed. Promote before the state leaves
-        // AwaitingSocket so a crash between the two can never serve a stale
-        // pair from a Verified state.
         await PromoteAgentAppCandidateAsync(agentApp.Id, ct);
         await DeleteAgentAppCandidateSecretsAsync(agentApp.Id, ct);
         await secrets.DeleteAsync(
             SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousBotToken), ct);
         await secrets.DeleteAsync(
             SecretStoreAddress.ForManagedSlackAgentApp(agentApp.Id, SecretKind.PreviousAppToken), ct);
+
+        if (state != SlackRuntimeCredentialValidationState.Verified)
+            await agentApps.ApplyCredentialValidationAsync(
+                agentApp.Id, SlackRuntimeCredentialValidationState.Verified, ct);
         await binding.ReconcileAsync(agentApp.Id, ct);
     }
 

@@ -30,7 +30,7 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
     private readonly FakeTimeProvider _time = new(Now);
     private TestSqliteDatabase _database = null!;
     private TestDbContextFactory _factory = null!;
-    private InMemorySecretStore _secrets = null!;
+    private FaultingSecretStore _secrets = null!;
     private ManagedSlackAgentAppStore _agentApps = null!;
     private AgentConnectionStore _connections = null!;
     private SlackAgentAppBindingService _binding = null!;
@@ -41,7 +41,7 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
     {
         _database = TestSqliteDatabase.CreateMigrated();
         _factory = new TestDbContextFactory(_database.Options);
-        _secrets = new InMemorySecretStore();
+        _secrets = new FaultingSecretStore();
         _connections = new AgentConnectionStore(_factory, new AgentQuerier(_factory), _secrets, [], _time);
         _agentApps = new ManagedSlackAgentAppStore(_factory, _time);
         _binding = new SlackAgentAppBindingService(_factory, _connections, _time);
@@ -262,6 +262,44 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
         Assert.Null(await _leases.RenewLeaseAsync("operator-1", targetRef, validation.LeaseId, "adapter-A"));
     }
 
+    [Fact]
+    public async Task Hello_that_crashes_during_promote_stays_awaiting_socket_and_is_retriable()
+    {
+        var seeded = await SeedAsync(SlackRuntimeCredentialValidationState.Candidate, bound: false);
+        var targetRef = seeded.TargetRef;
+        var validation = await _leases.AcquireValidationLeaseAsync("operator-1", targetRef, "adapter-A");
+
+        // Crash exactly where the fixed order promotes the candidate to the
+        // runtime pair: the first runtime StoreAsync inside promotion. Verified
+        // is set only after promotion, so the crash lands before the state
+        // leaves AwaitingSocket.
+        _secrets.FaultStore(address =>
+            address == SecretStoreAddress.ForManagedSlackAgentApp(seeded.AgentAppId, SecretKind.BotToken));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _leases.ReportHelloAsync("operator-1", targetRef, validation!.LeaseId, seeded.AppId));
+
+        // The crash happened before Verified: the Agent App is still
+        // AwaitingSocket, so a runtime lease can never serve the un-promoted
+        // candidate.
+        await AssertAgentAppStateAsync(seeded.AgentAppId,
+            SlackRuntimeCredentialValidationState.AwaitingSocket, SlackAgentAppBindingState.Pending);
+        Assert.Null(await _leases.AcquireRuntimeLeaseAsync("operator-1", targetRef, "adapter-A"));
+
+        // Recovery: clear the fault, re-acquire the validation lease (still an
+        // unverified candidate) and replay the hello; promotion completes, the
+        // state advances to Verified and the binding reconciles.
+        _secrets.ClearFault();
+        var retryLease = await _leases.AcquireValidationLeaseAsync("operator-1", targetRef, "adapter-A");
+        Assert.NotNull(retryLease);
+
+        var outcome = await _leases.ReportHelloAsync("operator-1", targetRef, retryLease!.LeaseId, seeded.AppId);
+        Assert.Equal(SlackHelloOutcome.Verified, outcome);
+        await AssertAgentAppStateAsync(seeded.AgentAppId,
+            SlackRuntimeCredentialValidationState.Verified, SlackAgentAppBindingState.Bound);
+        await AssertConnectionIdentityAsync(seeded.ConnectionId, seeded.AppId);
+    }
+
     private async Task<SeededTarget> SeedAsync(string credentialState, bool bound)
     {
         var suffix = Guid.NewGuid().ToString("N");
@@ -395,5 +433,28 @@ public sealed class SlackConnectionLeaseTargetSpecs : IAsyncLifetime
             Task.FromResult(_values.Remove(address));
 
         public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
+    }
+
+    private sealed class FaultingSecretStore : ISecretStore
+    {
+        private readonly InMemorySecretStore _inner = new();
+        private Func<SecretStoreAddress, bool>? _storeFault;
+
+        public void FaultStore(Func<SecretStoreAddress, bool> predicate) => _storeFault = predicate;
+        public void ClearFault() => _storeFault = null;
+
+        public async Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
+        {
+            if (_storeFault is { } fault && fault(address))
+                throw new InvalidOperationException("Injected promote fault.");
+            await _inner.StoreAsync(address, plaintext, ct);
+        }
+
+        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.LoadAsync(address, ct);
+        public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            _inner.DeleteAsync(address, ct);
+        public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) =>
+            _inner.Redact(values);
     }
 }
