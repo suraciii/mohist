@@ -20,7 +20,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue")]
+[Collection("IssueLifecycle")]
 public class IssueFeedbackApiSpecs
 {
     private static readonly JsonSerializerOptions ReadJsonOptions = new()

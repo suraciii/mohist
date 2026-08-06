@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
-[Collection("IntegrationIssue")]
+[Collection("IssueLifecycle")]
 public class IssueApiSpecs
 {
     private readonly HttpClient _client;

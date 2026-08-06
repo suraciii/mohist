@@ -36,7 +36,7 @@ namespace Mohist.Server.SpecTests.Specs.Project.Grain;
 /// </list>
 /// </para>
 /// </summary>
-[Collection("IntegrationIssue")]
+[Collection("IssueLifecycle")]
 public class RepositoryDeletionProtectionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
