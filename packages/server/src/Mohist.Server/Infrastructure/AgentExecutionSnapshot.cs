@@ -38,8 +38,7 @@ public sealed record AllowedSubagentSnapshot(
 /// and carries in <see cref="AgentSessionStartup"/> to the Runner for
 /// first-execution source confirmation. The Server never constructs or
 /// reads the workDir path; it only hands the snapshot and the workDir
-/// string to the Runner. See design/agent-workspace.md
-/// "WorkspaceRepository".
+/// string to the Runner.
 /// </summary>
 [GenerateSerializer]
 public sealed record WorkspaceRepositorySnapshot(

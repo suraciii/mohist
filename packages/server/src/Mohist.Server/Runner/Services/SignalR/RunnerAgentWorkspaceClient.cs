@@ -9,7 +9,6 @@ namespace Mohist.Server.Runner.Services.SignalR;
 /// materialize a managed worktree for a child AgentSession. The Runner
 /// is the sole materialization authority; the Server only persists the
 /// returned path/identity and never constructs or reads the directory.
-/// See design/agent-workspace.md "物化契约".
 /// </summary>
 public sealed record MaterializeAgentWorkspaceRequest(
     string ProjectId,

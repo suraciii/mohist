@@ -21,7 +21,7 @@ public sealed class AgentSession
     /// to <c>unconfirmed</c> at explicit Project-backed launch and
     /// advanced by the Runner's first-execution
     /// <c>workspace_source_confirmed</c>/<c>workspace_source_rejected</c>
-    /// report. See design/agent-workspace.md "WorkspaceRepository".
+    /// report.
     /// </summary>
     public WorkspaceRepository? WorkspaceRepository { get; set; }
     [JsonInclude]

@@ -6,8 +6,7 @@ namespace Mohist.Server.Sessions.Domain;
 /// Workspace source confirmation state for a Project-backed
 /// AgentSession. The parent workDir is recorded at launch; the Runner
 /// verifies ownership + origin on first execution and reports back, and
-/// the Server advances the state. See design/agent-workspace.md
-/// "WorkspaceRepository".
+/// the Server advances the state.
 /// </summary>
 public enum WorkspaceRepositoryState
 {
@@ -54,8 +53,7 @@ public sealed record WorkspaceRepository(
 }
 
 /// <summary>
-/// Constrained spawn workspace intent (design/agent-workspace.md
-/// "Workspace mode"). <see cref="Inherit"/> is increment-1 behaviour
+/// Constrained spawn workspace intent. <see cref="Inherit"/> is increment-1 behaviour
 /// (child reuses the parent authoritative workDir, no materialization);
 /// <see cref="Worktree"/> triggers the managed-worktree contract.
 /// </summary>
@@ -66,9 +64,8 @@ public enum WorkspaceMode
 }
 
 /// <summary>
-/// Durable materialization progress persisted on the spawn launch plan
-/// (design/agent-workspace.md "物化状态机与恢复"). Recovery/abort read
-/// it before the child Session exists.
+/// Durable materialization progress persisted on the spawn launch plan.
+/// Recovery/abort read it before the child Session exists.
 /// </summary>
 public enum MaterializeState
 {
