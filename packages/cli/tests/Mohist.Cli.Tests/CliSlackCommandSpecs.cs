@@ -1097,7 +1097,22 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task ClaimOwner_PrintsServerCodeOnce()
+    public async Task ClaimOwner_PrintsServerCodeOnce_WithAgentBotDmHint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { code = "claim_once", expiresAt = "2026-07-29T10:00:00Z", botName = "Mohist Agent" } })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "claim-owner", "connection_1"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, Count(output.ToString(), "claim_once"));
+        Assert.Contains("Send the code to the Agent bot DM (Mohist Agent)", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/claim-owner", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ClaimOwner_WithoutBotName_FallsBackToGenericHint()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { code = "claim_once", expiresAt = "2026-07-29T10:00:00Z" } })));
@@ -1106,8 +1121,7 @@ public sealed class CliSlackCommandSpecs
             ["slack", "claim-owner", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
-        Assert.Equal(1, Count(output.ToString(), "claim_once"));
-        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/claim-owner", handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("Send the code to the Agent bot DM to claim ownership.", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

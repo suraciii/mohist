@@ -721,9 +721,20 @@ internal static class SlackCommands
             var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
             if (exit != 0 || projectId is null) return exit;
             var result = await api.PostAndReadAsync(Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/claim-owner"), new { });
+            if (result.ExitCode == 0)
+                await PrintClaimCodeHintAsync(api, result);
             return result.ExitCode;
         });
         return command;
+    }
+
+    private static async Task PrintClaimCodeHintAsync(MohistCliApi api, MohistCliApi.PostResult result)
+    {
+        var botName = result.Data?["botName"]?.GetValue<string>();
+        var hint = string.IsNullOrWhiteSpace(botName)
+            ? "Send the code to the Agent bot DM to claim ownership."
+            : $"Send the code to the Agent bot DM ({botName}) to claim ownership.";
+        await api.Error.WriteLineAsync(hint).ConfigureAwait(false);
     }
 
     private static Command BuildTransferOwner(MohistCliApi api)
@@ -740,6 +751,8 @@ internal static class SlackCommands
             var result = await api.PostAndReadAsync(
                 Path(projectId, $"/{Uri.EscapeDataString(ctx.GetValue(id)!)}/transfer-owner"),
                 new { });
+            if (result.ExitCode == 0)
+                await PrintClaimCodeHintAsync(api, result);
             return result.ExitCode;
         });
         return command;
