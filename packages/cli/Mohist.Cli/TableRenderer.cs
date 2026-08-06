@@ -162,6 +162,13 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.SessionDetach:
                 RenderSessionDetach(data);
                 break;
+            case MohistCliApi.TableShape.SessionScheduleCreate:
+            case MohistCliApi.TableShape.SessionScheduleCancel:
+                RenderSessionSchedule(data);
+                break;
+            case MohistCliApi.TableShape.SessionScheduleList:
+                RenderSessionScheduleList(data);
+                break;
             case MohistCliApi.TableShape.RoutingRuleList:
                 RenderRoutingRuleList(data);
                 break;

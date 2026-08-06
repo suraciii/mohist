@@ -702,6 +702,55 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"historic:  {StringOf(data, "historic")}");
     }
 
+    private void RenderSessionSchedule(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"schedule id: {StringOf(data, "scheduleId")}");
+        _out.WriteLine($"status:      {StringOf(data, "status")}");
+        _out.WriteLine($"due at:      {StringOf(data, "dueAt")}");
+        _out.WriteLine($"text:        {StringOf(data, "text")}");
+        var inputId = StringOf(data, "inputId");
+        if (!string.IsNullOrEmpty(inputId))
+            _out.WriteLine($"input id:    {inputId}");
+        var cancelledAt = StringOf(data, "cancelledAt");
+        if (!string.IsNullOrEmpty(cancelledAt))
+            _out.WriteLine($"cancelled:   {cancelledAt}");
+    }
+
+    private void RenderSessionScheduleList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No schedules");
+            return;
+        }
+
+        var headers = new[] { "schedule id", "status", "due at", "input id", "text" };
+        var widths = new[] { IdSoftCap, 18, 25, IdSoftCap, BodySoftCap };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            cells.Add(new[]
+            {
+                Truncate(StringOf(obj, "scheduleId"), IdSoftCap),
+                Truncate(StringOf(obj, "status"), 18),
+                Truncate(StringOf(obj, "dueAt"), 25),
+                Truncate(StringOf(obj, "inputId"), IdSoftCap),
+                Truncate(StringOf(obj, "text"), BodySoftCap),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
+    }
+
     private static string FormatSessionOwner(JsonObject obj)
     {
         var source = StringOf(obj, "source");

@@ -48,6 +48,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
             MohistCliApi.TableShape.SessionList or
+            MohistCliApi.TableShape.SessionScheduleList or
             MohistCliApi.TableShape.OtelTracesList or
             MohistCliApi.TableShape.WebhookSubscriptionList or
             MohistCliApi.TableShape.WebhookDeliveryFailureList => ResourceCardinality.Collection,
@@ -94,6 +95,10 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionCancel => ["state", "interruptUnconfirmed"],
             MohistCliApi.TableShape.SessionStop => ["operationId", "rootSessionId", "status", "admissionFenceActive", "graphRevision", "membership", "targets"],
             MohistCliApi.TableShape.SessionDetach => ["state", "childSessionId", "parentSessionId", "edgeId", "childLaunchJobId", "attachedRevision", "detachedRevision", "historic", "reason"],
+            MohistCliApi.TableShape.SessionScheduleCreate or
+            MohistCliApi.TableShape.SessionScheduleList or
+            MohistCliApi.TableShape.SessionScheduleCancel =>
+                ["scheduleId", "status", "dueAt", "text", "inputId", "createdAt", "idempotencyKey", "cancelledAt"],
             MohistCliApi.TableShape.SessionRecovery =>
                 ["id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"],
             MohistCliApi.TableShape.IssueTemplateList => ["id", "name", "description", "source"],
