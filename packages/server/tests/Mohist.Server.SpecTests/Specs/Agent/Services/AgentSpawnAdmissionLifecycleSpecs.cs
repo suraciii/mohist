@@ -319,7 +319,10 @@ public sealed class AgentSpawnAdmissionLifecycleSpecs
                     rejected = await Assert.ThrowsAsync<AgentSpawnPostPlanRejectedException>(() =>
                         launcher.LaunchSubagentAsync(projectId, parentId, target.Id, prompt, idempotencyKey));
                 }
-                Assert.Equal("parent_link_rejected", rejected.Reason);
+                // Reservation is rejected by the published non-terminal stop membership, so the
+                // coordinator surfaces that durable fence reason rather than the generic abort label
+                // (the child Job/Turn cancel reason remains "parent_link_rejected").
+                Assert.Equal("parent_tree_stop_in_progress", rejected.Reason);
             }
 
             var state = await fence.GetAsync();
