@@ -542,25 +542,21 @@ Server spec 必须以 fake Runner、fake clock 与 in-memory stores 覆盖至少
 
 ## Status
 
-交付增量 4（Managed worktree）**尚未实装**。当前全部代码事实：
+交付增量 4 的范围 A、B 已落地；范围 C 尚未实现。
 
-- 子会话只继承 parent 的 authoritative workDir（增量 1）。`AgentSpawnAdmission.WorkDir` 取自
-  `parent.Session.Runtime.WorkDir`；spawn body 只接受 `targetAgentRef` 与 `prompt`，无 workspace
-  mode。
-- AgentSession 领域无 `WorkspaceRepository` 字段。direct launch（HTTP/CLI）可经 `context.repository`
-  + `context.workspacePath` 提供来源与工作目录（`workspacePath` → workDir，既有行为；`repository`
-  当前只作为 context 引用携带，**未**解析为 Project.Repository 快照或经 Runner 校验）；Agent
-  Connection / mention / routed launch 的 `Repository` 与 `WorkspacePath` 均为 null，无来源。因此
-  当前没有 confirmed `WorkspaceRepository` 的 Session，worktree mode 真实不可达。
-- Runner 只物化 Issue-backed 的 WorkflowRun workspace（`WorkspaceManager.prepare`，键为
-  `workflowRunId`，路径 `<runnerRoot>/workspaces/<workflowRunId>`，marker `{workflowRunId,
-  runBranch}`，ID 校验 `/^wr[-_A-Za-z0-9]+$/`）。不存在 `git worktree add` 形式的 child 工作空间
-  物化、`workspace_source_confirmed` 回报、agent worktree 注册表或 storage budget 共享逻辑。
-- Server→Runner 既有命令通道（`SessionCommand`、workspace 查询、follow-up 投递）可承载新的
-  物化/释放/确认原语，但当前不存在该原语。
-- AgentSession activity 只有 `idle`/`active`/`unknown`，无 durable `IdleSince`。
+- **范围 A：Runner 原语与 `WorkspaceRepository` source confirmation（已落地）**。Runner
+  提供 managed-worktree 的物化与释放原语，并在 parent 首轮执行时确认工作空间来源，回报
+  `workspace_source_confirmed` 或 `workspace_source_rejected`。
+- **范围 B：Server producer、spawn durable materialization、CLI/API（已落地）**。explicit
+  Project-backed launch 生产 `WorkspaceRepository(unconfirmed)`，Runner 确认后变为
+  `confirmed`；nested managed child 继承确认。`--workspace` 与 API 的 `workspace` mode 已
+  接入请求指纹和 canonical launch pipeline，`MaterializeState`/`ReleaseState` 及物化后的
+  child `WorkspaceRepository` 持久化在 durable launch/session facts 中，物化绑定继续 pin
+  parent 的 Runner。
+- **范围 C：生命周期回收（当前 gap）**。Server 尚无 durable `IdleSince`，也尚无按
+  `(ProjectId, ChildSessionId)` 提供给 Runner 的 activity query；Runner 的 idle/orphan cleanup、
+  grace recheck 和 removal fence 尚未实现。因此物化后的 worktree 仍缺少完整的 idle/孤儿安全
+  回收路径。
 
-本篇为 spec（目标设计）；`WorkspaceRepository`（含确认状态机）、`IdleSince`、launch plan 物化状态
-字段、Runner agent-worktree 注册表与物化/释放/确认原语均为新增。以上差距由上述交付拆分的 issue
-推进落地，落地后无需改本文。增量 1–3、5 的契约不受本篇影响，仍以 [`subagents.md`](subagents.md)
-为权威。
+本篇仍是目标 spec；范围 C 的未实现状态不改变上文的物化、释放、生命周期和验证契约。增量 1–3、5
+的契约不受影响，仍以 [`subagents.md`](subagents.md) 为权威。

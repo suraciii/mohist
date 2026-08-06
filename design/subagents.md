@@ -831,9 +831,12 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 交付增量 1–3 与 5 已实装：capability declaration 与 launch snapshot、`mo agent spawn`、
 startup-known context、`mo session tree`、terminal callback、cascade stop、detach 与
 定时输入（SessionSchedule 子记录、API/CLI 命令面、一次性与 recovery reminder 投递）
-均已落地。交付增量 4（Managed worktree）的执行契约已在 [`agent-workspace.md`](agent-workspace.md)
-定稿（spawn 携带受约束的 `workspace` mode、Server→被 pin Runner 的物化/释放/回收契约、
-fail-closed 语义与生命周期），但**尚未实装**：child 仍只继承 parent 的 workDir，
-spawn 不接受 `workspace` mode，Runner 也不物化 child worktree；不接受 `--work-dir`、
-`workspacePath` 或任意路径输入。由 [`agent-workspace.md`](agent-workspace.md) 的交付拆分 issue
-推进。
+均已落地。交付增量 4 的范围 A（Runner 原语与 `WorkspaceRepository` source confirmation）
+和范围 B（Server producer、spawn durable materialization state machine、CLI/API workspace
+mode）已落地：`inherit` 仍复用 parent workDir，`worktree`
+则使用已确认的来源、调用被 pin 的 Runner 物化并把返回的 workspace identity/path 写入 child。
+
+范围 C（Server `IdleSince`、runner-owned activity query、idle/orphan cleanup 与 grace
+recheck）尚未实现。因而增量 4 的创建、来源确认和 spawn 物化路径已具备，但生命周期回收
+契约仍是当前 gap；目标设计与验证清单保持不变，后续实现继续按
+[`agent-workspace.md`](agent-workspace.md) 的范围 C 推进。
