@@ -94,7 +94,13 @@ mo github connect owner/repo
 
 ## 实装差距
 
-本篇描述的能力全部未实装。当前 GitHub 仅是交付目标（`mohist/github-pr` profile），本篇各能力由后续 issue 推进落地。
+> **当前实装差距：** 连接仓库与事件入站已实装：`mo github connect` 建立连接并打印
+> GitHub 侧配置清单，打标签、关闭 issue、PR review、check suite 完成等事件验签后实时
+> 进入事件路由，可被订阅。供料翻译器、进度回写器与 PR review 审批仍未实装；GitHub
+> 身份（App / PAT）的配置与使用也未交付。
+
+当前 GitHub 仅是交付目标（`mohist/github-pr` profile），供料 / 回写 / 审批各能力由
+后续 issue 推进落地。
 
 ---
 

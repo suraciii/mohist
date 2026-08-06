@@ -93,6 +93,25 @@ public class EventStore : IEventStore
             return;
         }
 
+        if (IngressEventPersistence.IsIngressSource(source))
+        {
+            var nextId = await NextIngressIdAsync(db, source, ct);
+            db.IngressEvents.Add(new IngressEventRow
+            {
+                Id = nextId,
+                Source = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            return;
+        }
+
         if (IssueEventPersistence.IsIssueSource(source))
         {
             var nextSequence = await NextIssueSequenceAsync(db, source, ct);
@@ -267,6 +286,14 @@ public class EventStore : IEventStore
                 row.DispatchedAt = dispatchedAt;
                 break;
             }
+            case EventOrigin.Ingress:
+            {
+                var row = await db.IngressEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Ingress event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
             case EventOrigin.Issue:
             {
                 var row = await db.IssueEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
@@ -320,6 +347,10 @@ public class EventStore : IEventStore
             SELECT 'AgentJob' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
                    "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
             FROM "AgentJobEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'Ingress' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "IngressEvents" WHERE "DispatchedAt" IS NULL
             ORDER BY "Source", "Id"
             LIMIT @limit
             """;
@@ -413,6 +444,9 @@ public class EventStore : IEventStore
     private static Task<long> NextAgentJobIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.AgentJobEvents, source, ct);
 
+    private static Task<long> NextIngressIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.IngressEvents, source, ct);
+
     private static async Task<long> NextIdAsync<T>(DbSet<T> set, string source, CancellationToken ct)
         where T : class, IEventRow
     {
@@ -463,6 +497,7 @@ private sealed class UndeliveredSqlRow
         "Epic" => EventOrigin.Epic,
         "AgentSession" => EventOrigin.AgentSession,
         "AgentJob" => EventOrigin.AgentJob,
+        "Ingress" => EventOrigin.Ingress,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 

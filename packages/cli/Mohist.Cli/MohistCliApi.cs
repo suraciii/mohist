@@ -967,6 +967,49 @@ internal sealed class MohistCliApi
             mode,
             tableShape: null);
 
+    public async Task<(JsonNode? Data, int Exit)> ConnectGitHubRepositoryAsync(
+        string projectId,
+        string owner,
+        string repo,
+        string? feedMode,
+        IReadOnlyList<string>? approvers)
+    {
+        try
+        {
+            var data = await PostDataAsync(
+                $"/api/projects/{Uri.EscapeDataString(projectId)}/github-connections",
+                new
+                {
+                    owner,
+                    repo,
+                    feedMode,
+                    approvers = approvers is { Count: > 0 } ? approvers : null,
+                }).ConfigureAwait(false);
+            if (data is JsonObject obj)
+            {
+                var id = obj["id"]?.GetValue<string>() ?? string.Empty;
+                obj["ingressUrl"] = GitHubIngressUrl(id);
+            }
+            return (data, 0);
+        }
+        catch (ApiResponseException ex)
+        {
+            WriteApiFailure(ex);
+            return (null, FailureExitCode(ex.StatusCode));
+        }
+        catch (HttpRequestException)
+        {
+            _err.WriteLine(ServerUnavailableMessage);
+            return (null, 1);
+        }
+    }
+
+    private string GitHubIngressUrl(string connectionId)
+    {
+        var relative = $"/api/github-connections/{Uri.EscapeDataString(connectionId)}/ingress";
+        return _http.BaseAddress is null ? relative : new Uri(_http.BaseAddress, relative).ToString();
+    }
+
     public Task<int> ListWebhookSubscriptionsAsync(string projectId, string mode, bool includeArchived = false) =>
         PrintWithOutputAsync(
             WebhookSubscriptionsPath(projectId, includeArchived),

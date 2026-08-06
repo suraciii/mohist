@@ -280,6 +280,16 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
 主路径是在 Slack 中与 Mohist App 对话；CLI 与 Web 操作同一条接入记录。完整产品语义见
 [Slack](slack.md)。
 
+## GitHub
+
+`mo github connect owner/repo [--feed-mode start|backlog] [--approver <login> ...]`
+把 GitHub 仓库接入当前 Project：按仓库地址匹配已注册仓库，建立连接并生成入站验签
+secret，然后打印 GitHub 侧配置清单（webhook 地址、内容类型、secret 与事件订阅）。
+配置完成后，GitHub 上的打标签、关闭 issue、PR review、check suite 完成等动作会实时
+进入 Mohist 事件路由。GitHub 身份（App / PAT）的配置步骤会在输出中提示，本版本不要求。
+
+完整产品语义见 [GitHub](github.md)。
+
 ## Activity、Event 与本机 Service
 
 `activity` 是 Project 范围的只读活动记录，用于回答 Issue、WorkflowRun 和 AgentSession 最近

@@ -57,6 +57,7 @@ public enum EventOrigin
     Epic,
     AgentSession,
     AgentJob,
+    Ingress,
 }
 
 public sealed record UndeliveredEvent(
