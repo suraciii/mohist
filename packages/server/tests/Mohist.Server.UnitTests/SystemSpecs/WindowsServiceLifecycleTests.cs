@@ -5,9 +5,9 @@ using Mohist.Server.TestSupport.SystemSpecs;
 using Xunit;
 using static Mohist.Server.TestSupport.SystemSpecs.WindowsInstallTestSupport;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class WindowsServiceLifecycleSpecs
+public class WindowsServiceLifecycleTests
 {
     [Theory]
     [InlineData(WindowsServiceTarget.Server)]
