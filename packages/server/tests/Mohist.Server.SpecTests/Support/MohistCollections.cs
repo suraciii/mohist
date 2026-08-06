@@ -41,9 +41,6 @@ public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFi
 [CollectionDefinition("IssueLifecycle")]
 public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IssueProfile")]
-public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
 
