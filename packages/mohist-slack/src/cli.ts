@@ -7,12 +7,13 @@ import { pathToFileURL } from "node:url"
 import { SlackAdapter } from "./adapter.js"
 import { HttpAdapterTransport } from "./transport.js"
 import { configureSlackLogger } from "./logger.js"
-import type { SocketClient, SocketEvent } from "./types.js"
+import type { SocketClient, SocketEvent, SocketHello } from "./types.js"
 
 export interface SlackCliOptions {
   readonly adapterId: string
   readonly serverUrl: string
   readonly operatorToken: string
+  readonly operatorId: string
   readonly serverFetch?: typeof fetch
   readonly slackFetch?: FetchFunction
   readonly slackProxyUrl?: string
@@ -23,6 +24,8 @@ export interface SlackCliOptions {
 }
 
 export type OperatorCredentialFileReader = (path: string) => Promise<string>
+
+export const DEFAULT_OPERATOR_ID = "mohist-slack"
 
 const PROXIED_CLIENT_PING_TIMEOUT_MS = 24 * 60 * 60 * 1_000
 const SOCKET_RECONNECT_MAX_DELAY_MS = 30_000
@@ -39,6 +42,7 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
     transport: new HttpAdapterTransport({
       serverUrl: options.serverUrl,
       operatorToken: options.operatorToken,
+      operatorId: options.operatorId,
       fetch: options.serverFetch,
     }),
     socketFactory: (appToken) => socketClient(appToken, dispatcher),
@@ -52,36 +56,32 @@ export function createSlackAdapter(options: SlackCliOptions): SlackAdapter {
 }
 
 function socketClient(appToken: string, dispatcher?: ProxyAgent): SocketClient {
-  if (dispatcher) return new ProxiedSocketClient(appToken, dispatcher)
-  const client = new SocketModeClient({
-    appToken,
-  })
-  return {
-    on: (event, handler) => client.on(event, handler),
-    onState: (event, handler) => client.on(event, handler),
-    start: async () => { await client.start() },
-    disconnect: async () => { await client.disconnect() },
-  }
+  return new AdapterSocketClient(appToken, dispatcher)
 }
 
-class ProxiedSocketClient implements SocketClient {
+class AdapterSocketClient implements SocketClient {
   private readonly client: SocketModeClient
   private reconnectTimer?: ReturnType<typeof setTimeout>
   private reconnectAttempts = 0
-  private startPromise?: Promise<void>
+  private startPromise?: Promise<SocketHello>
+  private hello?: { resolve: (appId: string) => void; reject: (error: Error) => void }
   private stopped = true
 
-  constructor(appToken: string, dispatcher: ProxyAgent) {
+  constructor(appToken: string, dispatcher?: ProxyAgent) {
     this.client = new SocketModeClient({
       appToken,
       dispatcher,
       autoReconnectEnabled: false,
-      // CONNECT proxies can relay Slack traffic while hiding client pong diagnostics.
-      // Slack's independent server-ping watchdog remains the liveness authority.
-      clientPingTimeout: PROXIED_CLIENT_PING_TIMEOUT_MS,
+      ...(dispatcher ? { clientPingTimeout: PROXIED_CLIENT_PING_TIMEOUT_MS } : {}),
     })
     this.client.on("connected", () => { this.reconnectAttempts = 0 })
     this.client.on("disconnected", () => this.scheduleReconnect())
+    this.client.on("ws_message", (message: string | ArrayBuffer, isBinary: boolean) => {
+      if (isBinary || !this.hello) return
+      const appId = helloAppId(message)
+      if (appId) this.hello.resolve(appId)
+      else this.hello.reject(new Error("Slack Socket hello did not contain app_id"))
+    })
   }
 
   on(event: "slack_event", handler: (event: SocketEvent) => Promise<void>): void {
@@ -95,9 +95,9 @@ class ProxiedSocketClient implements SocketClient {
     this.client.on(event, handler)
   }
 
-  async start(): Promise<void> {
+  async start(): Promise<SocketHello> {
     this.stopped = false
-    await this.startNow()
+    return await this.startNow()
   }
 
   async disconnect(): Promise<void> {
@@ -107,14 +107,18 @@ class ProxiedSocketClient implements SocketClient {
     await this.client.disconnect()
   }
 
-  private async startNow(): Promise<void> {
+  private async startNow(): Promise<SocketHello> {
     if (this.startPromise) return await this.startPromise
-    const pending = this.client.start().then(() => undefined)
+    const hello = new Promise<string>((resolve, reject) => {
+      this.hello = { resolve, reject }
+    })
+    const pending = this.client.start().then(async () => ({ appId: await hello }))
     this.startPromise = pending
     try {
-      await pending
+      return await pending
     } finally {
       if (this.startPromise === pending) this.startPromise = undefined
+      this.hello = undefined
     }
   }
 
@@ -124,9 +128,30 @@ class ProxiedSocketClient implements SocketClient {
     this.reconnectAttempts += 1
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined
+      if (this.stopped) return
       void this.startNow().catch(() => this.scheduleReconnect())
     }, delay)
   }
+}
+
+function helloAppId(value: string | ArrayBuffer): string | undefined {
+  try {
+    const payload: unknown = JSON.parse(typeof value === "string" ? value : new TextDecoder().decode(value))
+    return isRecord(payload) && payload.type === "hello" && typeof payload.app_id === "string"
+      ? payload.app_id
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+export function resolveOperatorId(environment: NodeJS.ProcessEnv = process.env): string {
+  const configured = environment.MOHIST_OPERATOR_ID?.trim()
+  return configured ? configured : DEFAULT_OPERATOR_ID
 }
 
 export async function resolveOperatorToken(
@@ -162,6 +187,7 @@ export async function runCli() {
       adapterId: env("ADAPTER_ID") ?? `mohist-slack-${process.pid}`,
       serverUrl: env("SERVER_URL") ?? "http://localhost:3456",
       operatorToken: await resolveOperatorToken(),
+      operatorId: resolveOperatorId(),
       slackProxyUrl: env("SLACK_PROXY_URL"),
       heartbeatIntervalMs: positiveNumberEnv("HEARTBEAT_INTERVAL_MS"),
       deliveryPollIntervalMs: positiveNumberEnv("DELIVERY_POLL_INTERVAL_MS"),

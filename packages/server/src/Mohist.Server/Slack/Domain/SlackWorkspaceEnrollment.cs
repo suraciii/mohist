@@ -10,11 +10,21 @@ public sealed class SlackWorkspaceEnrollment
     public DateTimeOffset? LastVerifiedAt { get; set; }
     public string PlanCode { get; set; } = string.Empty;
     public int ManagedAppLimit { get; set; }
+    public string ConfigurationCredentialRef { get; set; } = string.Empty;
+    public int ConfigurationCredentialGeneration { get; set; }
+    public DateTimeOffset? ConfigurationCredentialExpiresAt { get; set; }
     public string ManagerCredentialRef { get; set; } = string.Empty;
     public string ManagerAppId { get; set; } = string.Empty;
     public string ManagerBotUserId { get; set; } = string.Empty;
     public string ManagerTransportKind { get; set; } = SlackManagerTransportKind.Socket;
     public string ManagerReadiness { get; set; } = SlackManagerReadiness.Unknown;
+    public string ManagerAppLifecycle { get; set; } = SlackManagerAppLifecycle.NotCreated;
+    public int ManagerAppOperationFence { get; set; }
+    public string? ManagerAppOperationId { get; set; }
+    public string? ManagerAppOperationOutcome { get; set; }
+    public string ManagerAppManifestHash { get; set; } = string.Empty;
+    public string ManagerAppInstallUrl { get; set; } = string.Empty;
+    public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }
     public string? ManagerClaimHash { get; set; }
@@ -51,6 +61,23 @@ public sealed class SlackWorkspaceEnrollment
         ManagedAppLimit = managedAppLimit;
     }
 
+    public void RecordConfigurationCredentialRotation(
+        string workspaceTeamId,
+        DateTimeOffset expiresAt,
+        DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        if (!string.Equals(WorkspaceTeamId, workspaceTeamId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Configuration credential workspace does not match the enrollment.");
+        if (expiresAt <= now)
+            throw new ArgumentOutOfRangeException(nameof(expiresAt));
+
+        ConfigurationCredentialRef = Id;
+        ConfigurationCredentialGeneration++;
+        ConfigurationCredentialExpiresAt = expiresAt;
+        UpdatedAt = now;
+    }
+
     public void ConfigureManagerApp(
         string appId,
         string botUserId,
@@ -84,6 +111,122 @@ public sealed class SlackWorkspaceEnrollment
         ManagerCredentialRef = credentialRef.Trim();
         ManagerTransportKind = transportKind;
         ManagerReadiness = readiness;
+        UpdatedAt = now;
+    }
+
+    public void BeginManagerAppCreate(string operationId, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, SlackManagerAppLifecycle.Creating);
+        ManagerAppLifecycle = SlackManagerAppLifecycle.Creating;
+        ManagerAppOperationFence = expectedFence + 1;
+        ManagerAppOperationId = operationId.Trim();
+        ManagerAppOperationOutcome = null;
+        UpdatedAt = now;
+    }
+
+    public void ApplyManagerAppCreateResult(string lifecycle, string redactedOutcome, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+        if (lifecycle is not (SlackManagerAppLifecycle.Created
+            or SlackManagerAppLifecycle.CreateUnknown
+            or SlackManagerAppLifecycle.NotCreated))
+            throw new ArgumentException("A Manager App create result must be 'created', 'create_unknown' or 'not_created'.", nameof(lifecycle));
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, lifecycle);
+        ManagerAppLifecycle = lifecycle;
+        ManagerAppOperationOutcome = redactedOutcome.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecordManagerAppCreated(string appId, string manifestHash, string installUrl, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestHash);
+        ArgumentException.ThrowIfNullOrWhiteSpace(installUrl);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created)
+            throw new InvalidOperationException("The Manager App must be created before recording its identity.");
+        if (!string.IsNullOrWhiteSpace(ManagerAppId)
+            && !string.Equals(ManagerAppId, appId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager App identity cannot be changed after setup.");
+        ManagerAppId = appId.Trim();
+        ManagerAppManifestHash = manifestHash.Trim();
+        ManagerAppInstallUrl = installUrl.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecordManagerAppIdentity(string appId, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(appId);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.CreateUnknown)
+            throw new InvalidOperationException("The Manager App identity can only be recorded while the create outcome is unknown.");
+        if (!string.IsNullOrWhiteSpace(ManagerAppId)
+            && !string.Equals(ManagerAppId, appId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager App identity cannot be changed after setup.");
+        ManagerAppId = appId.Trim();
+        UpdatedAt = now;
+    }
+
+    public void RecoverManagerAppCreate(string redactedOutcome, int expectedFence, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(redactedOutcome);
+        if (ManagerAppOperationFence != expectedFence)
+            throw new InvalidOperationException("The Manager App create operation fence does not match the enrollment.");
+        if (ManagerAppLifecycle == SlackManagerAppLifecycle.Created
+            && !string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App is created and recorded; it needs no recovery.");
+        if (ManagerAppLifecycle is not (SlackManagerAppLifecycle.Creating or SlackManagerAppLifecycle.Created))
+            throw new InvalidOperationException("The Manager App create cannot be recovered from its current lifecycle.");
+        SlackStateTransitions.RequireManagerAppLifecycleTransition(ManagerAppLifecycle, SlackManagerAppLifecycle.CreateUnknown);
+        ManagerAppLifecycle = SlackManagerAppLifecycle.CreateUnknown;
+        ManagerAppOperationOutcome = redactedOutcome.Trim();
+        UpdatedAt = now;
+    }
+
+    public void StageManagerRuntimeCredentials(string botUserId, DateTimeOffset now)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(botUserId);
+        if (ManagerAppLifecycle != SlackManagerAppLifecycle.Created || string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App must be created before staging runtime credentials.");
+        if (!string.IsNullOrWhiteSpace(ManagerBotUserId)
+            && !string.Equals(ManagerBotUserId, botUserId, StringComparison.Ordinal))
+            throw new InvalidOperationException("The Manager Bot identity cannot be changed after setup.");
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState, SlackRuntimeCredentialValidationState.Candidate);
+        ManagerBotUserId = botUserId.Trim();
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Candidate;
+        UpdatedAt = now;
+    }
+
+    public void CompleteSocketVerification(DateTimeOffset now)
+    {
+        if (Lifecycle != SlackEnrollmentLifecycle.Active)
+            throw new InvalidOperationException("The Manager App can only be verified while the enrollment is active.");
+        if (string.IsNullOrWhiteSpace(ManagerAppId))
+            throw new InvalidOperationException("The Manager App must be created before Socket verification.");
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState, SlackRuntimeCredentialValidationState.Verified);
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified;
+        ManagerReadiness = SlackManagerReadiness.Ready;
+        UpdatedAt = now;
+    }
+
+    public void StageRuntimeCredentials(DateTimeOffset now)
+    {
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(
+            RuntimeCredentialValidationState,
+            SlackRuntimeCredentialValidationState.Candidate);
+        RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Candidate;
+        UpdatedAt = now;
+    }
+
+    public void ApplySocketValidation(string validationState, DateTimeOffset now)
+    {
+        SlackStateTransitions.RequireRuntimeCredentialValidationTransition(RuntimeCredentialValidationState, validationState);
+        RuntimeCredentialValidationState = validationState;
         UpdatedAt = now;
     }
 
@@ -136,7 +279,6 @@ public static class SlackManagerCapability
 public static class SlackManagerTransportKind
 {
     public const string Socket = "socket";
-    public const string Https = "https";
 }
 
 public static class SlackManagerReadiness
@@ -145,6 +287,23 @@ public static class SlackManagerReadiness
     public const string Ready = "ready";
     public const string NotReady = "not_ready";
     public const string Degraded = "degraded";
+}
+
+public static class SlackManagerAppLifecycle
+{
+    public const string NotCreated = "not_created";
+    public const string Creating = "creating";
+    public const string Created = "created";
+    public const string CreateUnknown = "create_unknown";
+}
+
+public static class SlackRuntimeCredentialValidationState
+{
+    public const string NotProvided = "not_provided";
+    public const string Candidate = "candidate";
+    public const string AwaitingSocket = "awaiting_socket";
+    public const string Verified = "verified";
+    public const string Failed = "failed";
 }
 
 public static class SlackManagerClaimOutcome

@@ -145,8 +145,6 @@ public static class SlackConnectionRoutes
             string connectionId,
             AgentConnectionStore connections,
             AgentQuerier agents,
-            ISecretStore secrets,
-            ISlackApiClient slack,
             SlackSetupVerifier verifier,
             CancellationToken ct) =>
         {
@@ -155,7 +153,7 @@ public static class SlackConnectionRoutes
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
 
-            var ownerAvailability = await ProbeOwnerAvailabilityAsync(connection, secrets, slack, ct);
+            var ownerAvailability = ProbeOwnerAvailability(connection);
             var agent = await agents.GetByIdAsync(projectId, connection.AgentId);
             var agentReadiness = agent is null
                 ? connection.AgentReadiness
@@ -229,61 +227,14 @@ public static class SlackConnectionRoutes
             if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
             if (AgentConnectionStore.HasBoundIdentity(connection))
                 return ApiResults.Conflict(
-                    "Connection identity is already bound. Use rotate-credentials to update credentials.",
-                    "use_rotate_credentials");
+                    "Connection identity is already bound. Re-run `mo slack install-agent` and re-supply credentials to rotate them.",
+                    "identity_already_bound");
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
             var updated = await connections.UpdateAsync(projectId, connectionId,
                 new HashSet<string>(StringComparer.Ordinal) { "setupProgress" },
                 setupProgress: SetupProgressKind.WaitingForSlackService, ct: ct);
             return ApiResults.Ok(updated);
-        });
-
-        management.MapPost("/{connectionId}/rotate-credentials", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, SlackSetupVerifier verifier, CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.AppToken) || string.IsNullOrWhiteSpace(body.BotToken))
-                return ApiResults.BadRequest("appToken and botToken are required.");
-            var projectId = context.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
-            if (!AgentConnectionStore.HasBoundIdentity(connection))
-                return ApiResults.BadRequest(
-                    "Connection identity is not bound yet. Use configure to set up credentials.",
-                    "identity_not_bound");
-
-            var check = await verifier.VerifyRotationAsync(projectId, connectionId, body.AppToken, body.BotToken, ct);
-            if (!check.Verified)
-                return ApiResults.BadRequest(check.Reason ?? "Slack rejected the credentials.", "credential_verification_failed");
-
-            if (!string.Equals(check.ResolvedTeamId, connection.WorkspaceTeamId, StringComparison.Ordinal)
-                || !string.Equals(check.ResolvedAppId, connection.AppId, StringComparison.Ordinal)
-                || !string.Equals(check.ResolvedBotUserId, connection.BotUserId, StringComparison.Ordinal))
-                return ApiResults.BadRequest(
-                    $"New tokens resolve to workspace/App/Bot '{check.ResolvedTeamId}/{check.ResolvedAppId}/{check.ResolvedBotUserId}', which does not match the bound identity. Rotation cannot rebind; create a new Connection instead.",
-                    "credential_binding_mismatch");
-
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
-
-            string? newHealth = null;
-            var fields = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "healthReason", "verifiedBotName", "verifiedBotIconUrl",
-            };
-            if (connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
-                && IsCredentialRelatedHealthReason(connection.HealthReason))
-            {
-                fields.Add("connectionHealth");
-                newHealth = ConnectionHealthKind.Healthy;
-            }
-            await connections.UpdateAsync(projectId, connectionId, fields,
-                healthReason: null,
-                connectionHealth: newHealth,
-                verifiedBotName: check.VerifiedBotName,
-                verifiedBotIconUrl: check.VerifiedBotIconUrl,
-                ct: ct);
-
-            return ApiResults.Ok(await connections.GetAsync(projectId, connectionId, ct));
         });
 
         management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
@@ -521,39 +472,6 @@ public static class SlackConnectionRoutes
                 ct);
         });
 
-        group.MapPost("/adapter-session", async (
-            HttpContext http,
-            string connectionId,
-            AdapterSessionBody body,
-            AgentConnectionStore connections,
-            ISecretStore secrets,
-            SlackSetupVerifier verifier,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            var projectId = http.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null)
-                return ApiResults.NotFound("Slack Connection was not found.");
-            if (connection.DesiredState == DesiredStateKind.Disabled)
-                return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
-            if (string.IsNullOrWhiteSpace(body?.AdapterId))
-                return ApiResults.BadRequest("adapterId is required.");
-            var appToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), ct);
-            var botToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), ct);
-            if (appToken is null || botToken is null)
-                return ApiResults.Conflict("Configure both Slack credentials before starting the adapter.", "credentials_required");
-            await verifier.RecordAdapterHeartbeatAsync(projectId, connectionId, ct);
-            return ApiResults.Ok(new
-            {
-                adapterId = body.AdapterId,
-                appToken = Encoding.UTF8.GetString(appToken),
-                botToken = Encoding.UTF8.GetString(botToken),
-            });
-        });
-
         group.MapPost("/deliveries/claim", async (
             HttpContext http,
             string connectionId,
@@ -628,36 +546,6 @@ public static class SlackConnectionRoutes
                 enrollmentId = target.EnrollmentId,
                 workspaceTeamId = target.WorkspaceTeamId,
             }).ToArray());
-        });
-
-        app.MapPost("/api/slack-manager/adapter/{enrollmentId}/session", async (
-            HttpContext http,
-            string enrollmentId,
-            AdapterSessionBody body,
-            SlackManagerAdapterQuerier adapters,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            if (string.IsNullOrWhiteSpace(body?.AdapterId))
-                return ApiResults.BadRequest("adapterId is required.");
-
-            var session = await adapters.GetSessionAsync(enrollmentId, ct);
-            if (session.State == SlackManagerAdapterSessionStates.NotFound)
-                return ApiResults.NotFound("Slack Manager enrollment was not found.");
-            if (session.State == SlackManagerAdapterSessionStates.Inactive)
-                return ApiResults.Conflict("The Slack Manager enrollment is not active.", "manager_enrollment_inactive");
-            if (session.State == SlackManagerAdapterSessionStates.NotReady)
-                return ApiResults.Conflict("The Slack Manager adapter is not ready.", "manager_adapter_not_ready");
-
-            return ApiResults.Ok(new
-            {
-                adapterId = body.AdapterId,
-                ownerKind = SlackDeliveryOwnerKinds.Manager,
-                workspaceTeamId = session.WorkspaceTeamId,
-                botToken = session.BotToken,
-            });
         });
 
         app.MapPost("/api/slack-manager/adapter/{enrollmentId}/deliveries/claim", async (
@@ -1156,47 +1044,11 @@ public static class SlackConnectionRoutes
             : new(SlackProviderInboxRouteKinds.Followup, sessionId);
     }
 
-    internal static async Task<string> ProbeOwnerAvailabilityAsync(
-        AgentConnection connection,
-        ISecretStore secrets,
-        ISlackApiClient slack,
-        CancellationToken ct)
+    internal static string ProbeOwnerAvailability(AgentConnection connection)
     {
         if (connection.OwnerSlackUserId is null)
             return OwnerAvailabilityKind.NotConfigured;
-
-        var token = await secrets.LoadAsync(
-            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-        if (token is null || token.Length == 0)
-            return OwnerAvailabilityKind.Unknown;
-
-        try
-        {
-            var response = await slack.UsersInfoAsync(
-                connection.OwnerSlackUserId,
-                Encoding.UTF8.GetString(token),
-                ct);
-            return SlackOwnerClaimService.IsEligibleMember(
-                response,
-                connection.WorkspaceTeamId,
-                connection.OwnerSlackUserId)
-                ? OwnerAvailabilityKind.Available
-                : OwnerAvailabilityKind.Unavailable;
-        }
-        catch (HttpRequestException)
-        {
-            return OwnerAvailabilityKind.Unknown;
-        }
-    }
-
-    private static bool IsCredentialRelatedHealthReason(string? reason)
-    {
-        if (string.IsNullOrWhiteSpace(reason)) return false;
-        if (reason.Contains("token", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("scope", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("credential", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("App and Bot", StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
+        return OwnerAvailabilityKind.Unknown;
     }
 
     /// <summary>
@@ -2327,11 +2179,6 @@ public sealed class SlackIngressBody
     public IReadOnlyList<SlackIngressFile> Files { get; init; } = Array.Empty<SlackIngressFile>();
 }
 
-
-public sealed class AdapterSessionBody
-{
-    public string AdapterId { get; init; } = string.Empty;
-}
 
 public sealed class DeliveryClaimBody
 {

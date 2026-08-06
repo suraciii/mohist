@@ -72,9 +72,11 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   `project repo set-default` 修改。
 - `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
-- `slack create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete`
-  管理一个 Agent 的 Slack 接入关系；它不修改 Agent 定义。接入动作直接挂在根级 `slack`，
-  不设泛化的 connection 子组。
+- `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
+  管理一个 Agent 的 Slack 接入关系，`permanent-delete` 在无 active binding 时永久删除对应
+  Agent App；这些动作不修改 Agent 定义。`install-agent` 是把已有 Agent 安装到
+  Slack workspace 的领域动作，创建或恢复 Connection 与 Agent App；接入动作直接挂在根级
+  `slack`，不设泛化的 connection 子组。
 - `session transcript/followup/compact/reset/cancel/stop` 改变或读取 AgentSession；`cancel` 确定性取消指定的排队 Turn，`stop` 请求 Runtime 停止指定的执行中 Turn；不按 Issue 来源和 Agent 来源复制两套路径。
 - `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
   写入权威，CLI 不暴露跨 aggregate 协调过程。
@@ -113,6 +115,8 @@ scope 下的关系（`project workflow`、`project repo`）。AgentSession 有�
 | 为执行后端建立 `runtime list/view/model list` | 看似对称，但把 Runner 内部 adapter 与配置目录提升成不存在的产品资源 | 不采用；Runtime 只作为配置维度，模型目录放在 `agent model list --runtime` |
 | 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
 | Slack 接入的命令面放在哪 | 曾按「未来多 provider」预演为泛化 provider 子组；但 provider 只有 Slack 一个，预置抽象让绑定、权限与生命周期躲进泛化名词后面 | 采用根级 `slack`：`setup`/`status` 编排 workspace 安装，其余动作管理 Slack 接入资源；不留兼容命令。第二个 provider 出现时按当时形态再评估 |
+| 把已有 Agent 加到 Slack 的动作叫什么 | `setup-agent` 会与 Agent Readiness 的 setup 混淆，也和 workspace 级 `slack setup` 形成两个不同对象的 setup；`create` 错称在创建 Agent 或 Connection | 采用 `slack install-agent <agent>`：主语是已有 Agent，结果是一个可恢复的 Slack 安装；App 创建、授权、凭据与绑定都是该动作内部步骤 |
+| 凭据轮换是否保留 `rotate-credentials` | 与 `install-agent` 续跑的凭据步骤职责重叠；Connection 不再拥有凭据后，命令的操作对象落空 | 不采用；重跑 `setup` / `install-agent` 并显式重供凭据即轮换，同一安装记录只有一条路径 |
 | 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
 | 增加存储 / DB 审计命令（表体积、freelist、行数统计） | 能覆盖 server 内部审计场景，但那是开发行为不是产品操作；架构禁令约束的是领域操作，不为一次性审计扩大命令面 | 不采用；`otel` 是遥测入口，server 内部审计直接读库是开发者的合理路径 |
 | `mo otel query` 直读本机追踪存储 | Server 不可用时仍可查询，但绕过 API 与查询安全网、耦合存储 schema、没有查询预算与大小上限，且 CLI 指向远程 Server 时静默读到本机数据 | 不采用；`query` 经 Server 查询能力执行，Server 故障时直接读库是开发者路径 |
@@ -292,9 +296,11 @@ CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、
   与已知时的 Turn ID。
 - Agent create/edit 的 profile、Runtime、Model、Variant、Skills 与并发限制使用类型化
   flags；命令不暴露任意 Agent config JSON，并显示 Server 提供的 Readiness 缺口。
-- `slack` 的 create/list/view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete
-  只有一组规范路径；create 建立可恢复接入，configure 安全提交凭据，view 始终显示
-  当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，也不暴露 token。
+- `slack setup` 与 `slack install-agent` 只有一组规范路径；两者都从持久进度幂等续跑，自动完成
+  App 创建与配置，只在 Slack 安装确认和本机凭据输入时停下。重跑会重新校验已保存凭据，
+  失效即回到凭据步骤；对就绪记录显式重供凭据即轮换，不设独立的 rotate 命令。`view` 始终
+  显示当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，不暴露 token，
+  也不把底层 create/configure 拆给用户编排。
 - `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
   把本机进程状态表示成 Runner resource 状态。
 - `otel` 查询动作经 Server 查询能力执行；CLI 不直接打开追踪存储文件，不解析本地存储路径。

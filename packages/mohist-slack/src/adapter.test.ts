@@ -1,14 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
 import { setSlackLoggerForTest, type SlackLogFields, type SlackLogger } from "./logger.js"
-import type { AdapterSession, AdapterTransport, Delivery, IngressResult, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackInteractionEnvelope, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, IngressResult, LeaseRenewal, RuntimeLease, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackHelloOutcome, SlackInteractionEnvelope, SlackLeaseKind, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
 class FakeSocket implements SocketClient {
   private handler?: (event: SocketEvent) => Promise<void>
   started = false
+  starts = 0
   disconnected = false
   acknowledged = false
   disconnectError?: Error
+  disconnectGate?: Promise<void>
+  disconnectStarted?: () => void
+  startGate?: Promise<void>
+  startStarted?: () => void
 
   on(_event: "slack_event", handler: (event: SocketEvent) => Promise<void>) {
     this.handler = handler
@@ -16,6 +21,10 @@ class FakeSocket implements SocketClient {
 
   async start() {
     this.started = true
+    this.starts += 1
+    this.startStarted?.()
+    await this.startGate
+    return { appId: "A1" }
   }
 
   async emit(body: unknown) {
@@ -26,6 +35,8 @@ class FakeSocket implements SocketClient {
 
   async disconnect() {
     this.disconnected = true
+    this.disconnectStarted?.()
+    await this.disconnectGate
     if (this.disconnectError) throw this.disconnectError
   }
 }
@@ -53,32 +64,53 @@ class FakeTransport implements AdapterTransport {
   readonly envelopes: SlackEnvelope[] = []
   readonly interactions: SlackInteractionEnvelope[] = []
   readonly acks: Array<{ ref: SlackAdapterTarget; id: string; outcome: string }> = []
+  readonly hellos: Array<{ ref: SlackAdapterTarget; leaseId: string; appId: string }> = []
   readonly deliveries: Delivery[] = [{ id: "delivery-1", conversationId: "D1", threadTs: null, payloadJson: JSON.stringify({ text: "accepted" }) }]
   readonly uncertainDeliveries: Delivery[] = []
   connections: SlackAdapterTarget[] = []
+  nextLeases: Array<AdapterLease | null> = []
+  nextRenewals: Array<LeaseRenewal | null> = []
   nextIngressResults: IngressResult[] = []
   ingressError?: Error
+  ingressGate?: Promise<void>
+  ingressStarted?: () => void
   interactionError?: Error
   interactionGate?: Promise<void>
+  interactionStarted?: () => void
+  uncertainGate?: Promise<void>
+  uncertainStarted?: () => void
+  claimDeliveryCalls = 0
   leaseError?: Error
-  private readonly sessionByConnection = new Map<string, AdapterSession>()
 
-  async discoverConnections(): Promise<readonly SlackAdapterTarget[]> {
+  async discover(): Promise<readonly SlackAdapterTarget[]> {
     return this.connections
   }
 
-  async lease(ref: SlackAdapterTarget): Promise<AdapterSession> {
-    this.leases.push(ref)
+  async acquireLease(ref: SlackAdapterTarget, kind: SlackLeaseKind): Promise<AdapterLease | null> {
     if (this.leaseError) throw this.leaseError
-    const session = ref.ownerKind === "manager"
-      ? { adapterId: "adapter-1", ownerKind: "manager" as const, botToken: "manager credential" }
-      : { adapterId: "adapter-1", appToken: `xapp-${ref.connectionId}`, botToken: `xoxb-${ref.connectionId}` }
-    this.sessionByConnection.set(ref.ownerKind === "manager" ? ref.enrollmentId : ref.connectionId, session)
-    return session
+    const lease = this.nextLeases.length > 0
+      ? this.nextLeases.shift()!
+      : kind === "validation" ? null : runtimeLease(ref)
+    if (lease) this.leases.push(ref)
+    return lease
+  }
+
+  async renewLease(ref: SlackAdapterTarget, leaseId: string): Promise<LeaseRenewal | null> {
+    if (this.leaseError) throw this.leaseError
+    return this.nextRenewals.length > 0
+      ? this.nextRenewals.shift()!
+      : { leaseId, kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }
+  }
+
+  async reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string): Promise<SlackHelloOutcome> {
+    this.hellos.push({ ref, leaseId, appId })
+    return "verified"
   }
 
   async ingress(_ref: SlackAdapterTarget, envelope: SlackEnvelope): Promise<IngressResult> {
     this.envelopes.push(envelope)
+    this.ingressStarted?.()
+    await this.ingressGate
     if (this.ingressError) throw this.ingressError
     const queued = this.nextIngressResults.shift()
     return queued ?? { kind: "accepted" }
@@ -86,21 +118,36 @@ class FakeTransport implements AdapterTransport {
 
   async interaction(_ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope) {
     this.interactions.push(envelope)
+    this.interactionStarted?.()
     await this.interactionGate
     if (this.interactionError) throw this.interactionError
     return { state: "stop_requested" }
   }
 
   async claimDelivery(): Promise<Delivery | null> {
+    this.claimDeliveryCalls += 1
     return this.deliveries.shift() ?? null
   }
 
   async claimUncertainDelivery(): Promise<Delivery | null> {
+    this.uncertainStarted?.()
+    await this.uncertainGate
     return this.uncertainDeliveries.shift() ?? null
   }
 
-  async ackDelivery(ref: SlackAdapterTarget, ack: { id: string; outcome: "delivered" | "uncertain" | "retry" }) {
+  async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck) {
     this.acks.push({ ref, id: ack.id, outcome: ack.outcome })
+  }
+}
+
+function runtimeLease(ref: SlackAdapterTarget): RuntimeLease {
+  return {
+    kind: "runtime",
+    leaseId: `lease-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
+    generation: 1,
+    expiresAt: "2026-01-01T00:05:00Z",
+    appToken: `xapp-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
+    botToken: `xoxb-${ref.kind === "manager" ? ref.enrollmentId : ref.connectionId}`,
   }
 }
 
@@ -204,7 +251,7 @@ describe("mohist-slack adapter", () => {
     let markLeaseSettled!: () => void
     const leaseStarted = new Promise<void>((resolve) => { markLeaseStarted = resolve })
     const leaseSettled = new Promise<void>((resolve) => { markLeaseSettled = resolve })
-    vi.spyOn(transport, "lease").mockImplementation(async (_ref, _adapterId, signal) => {
+    vi.spyOn(transport, "renewLease").mockImplementation(async (_ref, _leaseId, _adapterId, signal) => {
       markLeaseStarted()
       try {
         await new Promise<void>((_resolve, reject) => signal.addEventListener(
@@ -230,11 +277,432 @@ describe("mohist-slack adapter", () => {
     }))
   })
 
+  it("uses a validation lease for exactly one hello without creating a runtime", async () => {
+    const transport = new FakeTransport()
+    const ref = { projectId: "p", connectionId: "c" }
+    transport.connections = [ref]
+    transport.nextLeases = [{ kind: "validation", leaseId: "validation-lease", generation: 1, expiresAt: "2026-01-01T00:02:00Z", expectedAppId: "A1", appToken: "xapp-candidate-secret" }, null]
+    const socket = new FakeSocket()
+    let webFactoryCalls = 0
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => {
+        webFactoryCalls += 1
+        return new FakeWeb()
+      },
+      discoveryIntervalMs: 60_000,
+    })
+
+    await adapter.start(new AbortController().signal)
+
+    expect(socket.starts).toBe(1)
+    expect(socket.disconnected).toBe(true)
+    expect(transport.hellos).toEqual([{ ref, leaseId: "validation-lease", appId: "A1" }])
+    expect(await socket.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "ignored" } })).toBe(false)
+    expect(transport.envelopes).toEqual([])
+    expect(transport.acks).toEqual([])
+    expect(webFactoryCalls).toBe(0)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-candidate-secret")
+    await adapter.stop()
+  })
+
+  it("does not start a Socket or delivery worker when discovery has no lease", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.nextLeases = [null, null]
+    let socketFactoryCalls = 0
+    let webFactoryCalls = 0
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        socketFactoryCalls += 1
+        return new FakeSocket()
+      },
+      webFactory: () => {
+        webFactoryCalls += 1
+        return new FakeWeb()
+      },
+      discoveryIntervalMs: 60_000,
+    })
+
+    await adapter.start(new AbortController().signal)
+
+    expect(socketFactoryCalls).toBe(0)
+    expect(webFactoryCalls).toBe(0)
+    expect(transport.deliveries).toHaveLength(1)
+    await adapter.stop()
+  })
+
+  it("disconnects an expired runtime lease before any late Socket event reaches Server", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    const socket = new FakeSocket()
+    vi.spyOn(transport, "renewLease").mockResolvedValue(null)
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => socket,
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(socket.disconnected).toBe(true)
+    expect(await socket.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "late" } })).toBe(false)
+    expect(transport.envelopes).toEqual([])
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("keeps the runtime Socket when a renewal extends the lease", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-c", kind: "runtime", generation: 2, expiresAt: "2026-01-01T00:10:00Z" }]
+    const sockets: FakeSocket[] = []
+    const socketTokens: string[] = []
+    const webTokens: string[] = []
+    const webs: FakeWeb[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: (token) => {
+        socketTokens.push(token)
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: (token) => {
+        webTokens.push(token)
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    transport.deliveries.push({ id: "extended-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "extended" }) })
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(socketTokens).toEqual(["xapp-c"])
+    expect(webTokens).toEqual(["xoxb-c"])
+    expect(sockets).toHaveLength(1)
+    expect(sockets[0]?.disconnected).toBe(false)
+    expect(webs[0]?.posted).toEqual([{ channel: "D", text: "extended" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "extended-delivery", outcome: "delivered" }])
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-")
+    expect(JSON.stringify(logger.entries)).not.toContain("xoxb-")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("fences the old runtime while a foreign renewal waits for its Socket to disconnect", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
+    const sockets: FakeSocket[] = []
+    const webs: FakeWeb[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => {
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let releaseDisconnect!: () => void
+    let markDisconnectStarted!: () => void
+    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
+    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
+    sockets[0]!.disconnectGate = disconnectGate
+    sockets[0]!.disconnectStarted = markDisconnectStarted
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await disconnectStarted
+    const claimsWhileDisconnected = transport.claimDeliveryCalls
+    transport.deliveries.push({ id: "foreign-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "pending" }) })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(transport.claimDeliveryCalls).toBe(claimsWhileDisconnected)
+    expect(webs[0]?.posted).toEqual([])
+    expect(transport.acks).toEqual([])
+
+    transport.deliveries.length = 0
+    releaseDisconnect()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets[0]?.disconnected).toBe(true)
+    expect(await sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "late" } })).toBe(false)
+    expect(transport.envelopes).toEqual([])
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("re-acquires a rotated runtime even when the old Socket disconnect fails", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
+    const sockets: FakeSocket[] = []
+    const webs: FakeWeb[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => {
+        const web = new FakeWeb()
+        webs.push(web)
+        return web
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    let releaseDisconnect!: () => void
+    let markDisconnectStarted!: () => void
+    const disconnectGate = new Promise<void>((resolve) => { releaseDisconnect = resolve })
+    const disconnectStarted = new Promise<void>((resolve) => { markDisconnectStarted = resolve })
+    sockets[0]!.disconnectGate = disconnectGate
+    sockets[0]!.disconnectStarted = markDisconnectStarted
+    sockets[0]!.disconnectError = new Error("disconnect rejected xapp-secret-value")
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await disconnectStarted
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(sockets).toHaveLength(1)
+    releaseDisconnect()
+    await vi.advanceTimersByTimeAsync(0)
+
+    transport.nextLeases = [null, { kind: "runtime", leaseId: "lease-rotated", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[1]?.starts).toBe(1)
+
+    transport.deliveries.push({ id: "current-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "current" }) })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(sockets[1]?.disconnected).toBe(false)
+    expect(webs[1]?.posted).toEqual([{ channel: "D", text: "current" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p", connectionId: "c" }, id: "current-delivery", outcome: "delivered" }])
+    expect(logger.entries).toContainEqual({
+      level: "error",
+      message: "socket disconnect failed",
+      fields: { target: "connection:p:c", reason: "disconnect rejected <redacted>" },
+    })
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-secret-value")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("reopens a runtime Socket with rotated credentials after a superseded lease is re-acquired", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
+    const sockets: FakeSocket[] = []
+    const socketTokens: string[] = []
+    const webTokens: string[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: (token) => {
+        socketTokens.push(token)
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: (token) => {
+        webTokens.push(token)
+        return new FakeWeb()
+      },
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(sockets[0]?.disconnected).toBe(true)
+
+    transport.nextLeases = [null, { kind: "runtime", leaseId: "lease-rotated", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "xapp-rotated", botToken: "xoxb-rotated" }]
+    await adapter.refreshConnections(controller.signal)
+
+    expect(socketTokens).toEqual(["xapp-c", "xapp-rotated"])
+    expect(webTokens).toEqual(["xoxb-c", "xoxb-rotated"])
+    expect(sockets[0]?.disconnected).toBe(true)
+    expect(sockets[1]?.starts).toBe(1)
+    expect(JSON.stringify(logger.entries)).not.toContain("xapp-rotated")
+    expect(JSON.stringify(logger.entries)).not.toContain("xoxb-rotated")
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("fences a stale renewal that resolves after the runtime was removed", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    const sockets: FakeSocket[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const claimsBefore = transport.claimDeliveryCalls
+    let releaseRenew!: () => void
+    let markRenewStarted!: () => void
+    const renewGate = new Promise<void>((resolve) => { releaseRenew = resolve })
+    const renewStarted = new Promise<void>((resolve) => { markRenewStarted = resolve })
+    vi.spyOn(transport, "renewLease").mockImplementation(async (ref, leaseId) => {
+      markRenewStarted()
+      await renewGate
+      return { leaseId, kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await renewStarted
+    transport.connections = []
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets[0]?.disconnected).toBe(true)
+
+    releaseRenew()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sockets).toHaveLength(1)
+    expect(transport.claimDeliveryCalls).toBe(claimsBefore)
+    expect(logger.entries.some((entry) => entry.message === "target lease refresh failed")).toBe(false)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("does not forward a Socket event that was waiting when a foreign renewal removes the runtime", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    transport.nextRenewals = [{ leaseId: "lease-foreign", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }]
+    let releaseIngress!: () => void
+    let markIngressStarted!: () => void
+    transport.ingressGate = new Promise<void>((resolve) => { releaseIngress = resolve })
+    const ingressStarted = new Promise<void>((resolve) => { markIngressStarted = resolve })
+    transport.ingressStarted = markIngressStarted
+    const sockets: FakeSocket[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 60_000,
+      maxInFlight: 1,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+
+    const first = sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "first" } })
+    await ingressStarted
+    const old = sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "2", user: "U", text: "old" } })
+    await vi.advanceTimersByTimeAsync(1_000)
+    releaseIngress()
+    await first
+    await vi.advanceTimersByTimeAsync(5)
+    await old
+
+    expect(transport.envelopes.map((envelope) => envelope.messageTs)).toEqual(["1"])
+    expect(sockets).toHaveLength(1)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("stops an old drain before claim, mutation, or acknowledgement when renewal expires", async () => {
+    vi.useFakeTimers()
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 1_000,
+      deliveryPollIntervalMs: 100,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    const claimsBefore = transport.claimDeliveryCalls
+    transport.deliveries.push({ id: "old-delivery", conversationId: "D", threadTs: null, payloadJson: JSON.stringify({ text: "old" }) })
+    let releaseUncertain!: () => void
+    let markUncertainStarted!: () => void
+    transport.uncertainGate = new Promise<void>((resolve) => { releaseUncertain = resolve })
+    const uncertainStarted = new Promise<void>((resolve) => { markUncertainStarted = resolve })
+    transport.uncertainStarted = markUncertainStarted
+
+    vi.advanceTimersByTime(100)
+    await uncertainStarted
+    transport.nextRenewals = [null]
+    await vi.advanceTimersByTimeAsync(900)
+    releaseUncertain()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(transport.claimDeliveryCalls).toBe(claimsBefore)
+    expect(web.posted).toEqual([])
+    expect(transport.acks).toEqual([])
+    controller.abort()
+    await adapter.stop()
+  })
+
   it("normalizes the Socket Mode interactive payload without copying its raw body", () => {
     const interaction = normalizeSlackInteraction({
       type: "interactive",
       payload: JSON.stringify({
         type: "block_actions",
+        api_app_id: "A1",
         trigger_id: "trigger-1",
         team: { id: "T1" },
         user: { id: "U1" },
@@ -246,6 +714,7 @@ describe("mohist-slack adapter", () => {
 
     expect(interaction).toEqual({
       eventType: "block_actions",
+      apiAppId: "A1",
       interactionId: "trigger-1",
       teamId: "T1",
       conversationId: "C1",
@@ -263,7 +732,10 @@ describe("mohist-slack adapter", () => {
     transport.connections = [{ projectId: "p", connectionId: "c" }]
     transport.deliveries.length = 0
     let releaseInteraction!: () => void
+    let markInteractionStarted!: () => void
     transport.interactionGate = new Promise<void>((resolve) => { releaseInteraction = resolve })
+    const interactionStarted = new Promise<void>((resolve) => { markInteractionStarted = resolve })
+    transport.interactionStarted = markInteractionStarted
     const socket = new FakeSocket()
     const adapter = new SlackAdapter({
       adapterId: "a",
@@ -277,6 +749,7 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
     const pending = socket.emit({
       type: "block_actions",
+        api_app_id: "A1",
       trigger_id: "trigger-1",
       team: { id: "T1" },
       user: { id: "U1" },
@@ -284,7 +757,8 @@ describe("mohist-slack adapter", () => {
       actions: [{ action_id: "mohist_stop_turn", action_ts: "123.500", value: "signed-value" }],
     })
 
-    await vi.waitFor(() => expect(transport.interactions).toHaveLength(1))
+    await interactionStarted
+    expect(transport.interactions).toHaveLength(1)
     expect(socket.acknowledged).toBe(true)
     releaseInteraction()
     await expect(pending).resolves.toBe(true)
@@ -309,6 +783,7 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
     const body = {
       type: "block_actions",
+        api_app_id: "A1",
       trigger_id: "trigger-1",
       team: { id: "T1" },
       user: { id: "U1" },
@@ -350,7 +825,7 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
 
     await expect(socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", user: "U1", text: "do work" },
     })).resolves.toBe(false)
     expect(logger.entries).toContainEqual({
@@ -367,10 +842,11 @@ describe("mohist-slack adapter", () => {
 
   it("normalizes a Socket Mode event with stable identity", () => {
     expect(normalizeSocketEvent({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", user: "U1", text: "do work" },
     })).toEqual({
       eventType: "message",
+      apiAppId: "A1",
       isDirectMessage: true,
       teamId: "T1",
       conversationId: "D1",
@@ -386,7 +862,7 @@ describe("mohist-slack adapter", () => {
 
   it("forwards file metadata without Slack secrets or raw payload", () => {
     const envelope = normalizeSocketEvent({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       bot_token: "xoxb-secret",
       event: {
         type: "message",
@@ -426,7 +902,7 @@ describe("mohist-slack adapter", () => {
 
   it("normalizes channel threads, all mentions, bot senders, and unknown senders", () => {
     expect(normalizeSocketEvent({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: {
         type: "message",
         channel: "C1",
@@ -443,7 +919,7 @@ describe("mohist-slack adapter", () => {
     })
 
     expect(normalizeSocketEvent({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { channel: "C1", ts: "123.457", subtype: "bot_message", bot_id: "B1", text: "reply" },
     })).toMatchObject({
       teamId: "T1",
@@ -454,7 +930,7 @@ describe("mohist-slack adapter", () => {
     })
 
     expect(normalizeSocketEvent({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { channel: "C1", ts: "123.458", text: "system event" },
     })).toMatchObject({
       teamId: "T1",
@@ -482,11 +958,11 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
 
     await expect(socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { channel: "C1", ts: "123.457", subtype: "bot_message", bot_id: "B1", text: "reply" },
     })).resolves.toBe(true)
     await expect(socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { channel: "C1", ts: "123.458", text: "system event" },
     })).resolves.toBe(true)
     expect(transport.envelopes.map((envelope) => [envelope.messageTs, envelope.senderKind])).toEqual([
@@ -522,7 +998,7 @@ describe("mohist-slack adapter", () => {
     await adapter.start(controller.signal)
     expect(transport.leases.map((ref) => ref.connectionId)).toEqual(["c1", "c2"])
     expect(sockets.get("c1")?.started).toBe(true)
-    expect(await sockets.get("c1")?.emit({ team_id: "T1", event: { type: "message", channel: "D1", channel_type: "im", ts: "1.2", user: "U1", text: "task" } })).toBe(true)
+    expect(await sockets.get("c1")?.emit({ team_id: "T1", api_app_id: "A1", event: { type: "message", channel: "D1", channel_type: "im", ts: "1.2", user: "U1", text: "task" } })).toBe(true)
     expect(transport.envelopes).toHaveLength(1)
     expect(transport.envelopes[0]?.text).toBe("task")
     expect(logger.entries).toContainEqual({
@@ -545,9 +1021,9 @@ describe("mohist-slack adapter", () => {
     controller.abort()
   })
 
-  it("runs an explicit Manager target through web delivery without starting Socket Mode", async () => {
+  it("runs an explicit Manager target through its Socket Mode runtime lease", async () => {
     const manager: SlackManagerRef = {
-      ownerKind: "manager",
+      kind: "manager",
       enrollmentId: "enrollment-manager",
       workspaceTeamId: "T_MANAGER",
     }
@@ -588,8 +1064,8 @@ describe("mohist-slack adapter", () => {
 
     await adapter.start(controller.signal)
 
-    expect(socketFactoryCalls).toBe(0)
-    expect(webFactoryToken).toBe("manager credential")
+    expect(socketFactoryCalls).toBe(1)
+    expect(webFactoryToken).toBe("xoxb-enrollment-manager")
     expect(transport.leases).toEqual([manager])
     expect(web.posted).toEqual([{ channel: "D_MANAGER", text: "manager reply" }])
     expect(transport.acks).toEqual([
@@ -672,6 +1148,7 @@ describe("mohist-slack adapter", () => {
       type: "interactive",
       payload: JSON.stringify({
         type: "block_actions",
+        api_app_id: "A1",
         trigger_id: "trigger-1",
         team: { id: "T1" },
         user: { id: "U1" },
@@ -683,6 +1160,7 @@ describe("mohist-slack adapter", () => {
     expect(acknowledged).toBe(true)
     expect(transport.interactions).toEqual([{
       eventType: "block_actions",
+      apiAppId: "A1",
       interactionId: "trigger-1",
       teamId: "T1",
       conversationId: "C1",
@@ -777,7 +1255,7 @@ describe("mohist-slack adapter", () => {
 
     await adapter.start(controller.signal)
     const acknowledged = await socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", thread_ts: "123.000", user: "U1", text: "do work" },
     })
 
@@ -810,7 +1288,7 @@ describe("mohist-slack adapter", () => {
 
     await adapter.start(controller.signal)
     const acknowledged = await socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "123.456", user: "U1", text: "" },
     })
 
@@ -841,11 +1319,11 @@ describe("mohist-slack adapter", () => {
 
     await adapter.start(controller.signal)
     const firstAck = await socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "1710000000.000001", user: "U1", text: "first" },
     })
     const secondAck = await socket.emit({
-      team_id: "T1",
+      team_id: "T1", api_app_id: "A1",
       event: { type: "message", channel: "D1", channel_type: "im", ts: "1710000000.000002", user: "U1", text: "second" },
     })
 
@@ -879,7 +1357,7 @@ describe("mohist-slack adapter", () => {
     const controller = new AbortController()
     await adapter.start(controller.signal)
 
-    await vi.waitFor(() => expect(web.posted.length).toBe(2))
+    expect(web.posted).toHaveLength(2)
     expect(transport.acks).toEqual([
       { ref: { projectId: "p", connectionId: "c" }, id: "delivery-rejected", outcome: "retry" },
       { ref: { projectId: "p", connectionId: "c" }, id: "delivery-accepted", outcome: "delivered" },
@@ -911,7 +1389,7 @@ describe("mohist-slack adapter", () => {
     const controller = new AbortController()
     await adapter.start(controller.signal)
 
-    await vi.waitFor(() => expect(transport.acks.length).toBe(2))
+    expect(transport.acks).toHaveLength(2)
     expect(transport.acks).toEqual([
       { ref: { projectId: "p", connectionId: "c" }, id: "delivery-bad-json", outcome: "uncertain" },
       { ref: { projectId: "p", connectionId: "c" }, id: "delivery-no-text", outcome: "uncertain" },
@@ -925,14 +1403,23 @@ describe("mohist-slack adapter", () => {
     let active = 0
     let maximum = 0
     let releaseFirst!: () => void
+    let markFirstStarted!: () => void
     const first = new Promise<void>((resolve) => { releaseFirst = resolve })
+    const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve })
     const transport: AdapterTransport = {
-      discoverConnections: async () => [{ projectId: "p", connectionId: "c" }],
-      lease: async () => ({ adapterId: "a", appToken: "app", botToken: "bot" }),
+      discover: async () => [{ projectId: "p", connectionId: "c" }],
+      acquireLease: async (_ref, kind) => kind === "validation"
+        ? null
+        : { kind: "runtime", leaseId: "lease", generation: 1, expiresAt: "2026-01-01T00:05:00Z", appToken: "app", botToken: "bot" },
+      renewLease: async () => ({ leaseId: "lease", kind: "runtime", generation: 1, expiresAt: "2026-01-01T00:05:00Z" }),
+      reportHello: async () => "verified",
       ingress: async () => {
         active += 1
         maximum = Math.max(maximum, active)
-        if (active === 1) await first
+        if (active === 1) {
+          markFirstStarted()
+          await first
+        }
         active -= 1
         return { kind: "accepted" }
       },
@@ -940,6 +1427,7 @@ describe("mohist-slack adapter", () => {
       claimDelivery: async () => null,
       ackDelivery: async () => undefined,
     }
+    vi.useFakeTimers()
     const adapter = new SlackAdapter({
       adapterId: "a",
       transport,
@@ -951,13 +1439,14 @@ describe("mohist-slack adapter", () => {
     })
     const controller = new AbortController()
     await adapter.start(controller.signal)
-    const event = { team_id: "T", event: { channel: "D", ts: "1", user: "U", text: "x" } }
+    const event = { team_id: "T", api_app_id: "A1", event: { channel: "D", ts: "1", user: "U", text: "x" } }
     const firstEvent = socket.emit(event)
-    await vi.waitFor(() => expect(active).toBe(1))
+    await firstStarted
     const secondEvent = socket.emit({ ...event, event: { ...event.event, ts: "2" } })
-    await new Promise((resolve) => setTimeout(resolve, 10))
+    await vi.advanceTimersByTimeAsync(10)
     expect(maximum).toBe(1)
     releaseFirst()
+    await vi.advanceTimersByTimeAsync(5)
     await Promise.all([firstEvent, secondEvent])
     controller.abort()
   })

@@ -264,9 +264,8 @@ internal static class MohistCliCommands
     {
         var credentialCommand = args.Length >= 2
             && string.Equals(args[0], "slack", StringComparison.Ordinal)
-            && (string.Equals(args[1], "configure", StringComparison.Ordinal)
-                || string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal)
-                || string.Equals(args[1], "configure-manager", StringComparison.Ordinal));
+            && (string.Equals(args[1], "setup", StringComparison.Ordinal)
+                || string.Equals(args[1], "install-agent", StringComparison.Ordinal));
         if (!credentialCommand)
             return false;
 
@@ -275,27 +274,46 @@ internal static class MohistCliCommands
             || string.Equals(arg, "--manager-bot-token", StringComparison.Ordinal)))
             return true;
 
-        if (!string.Equals(args[1], "rotate-credentials", StringComparison.Ordinal))
-            return false;
-
-        for (var index = 3; index < args.Length; index++)
+        // install-agent takes exactly one positional agent reference (index 2);
+        // setup takes none. Any other positional value is a refused token literal.
+        var positionalStart = string.Equals(args[1], "install-agent", StringComparison.Ordinal) ? 3 : 2;
+        for (var index = positionalStart; index < args.Length; index++)
         {
             var argument = args[index];
-            if (argument is "--credentials-file" or "--project")
+            if (argument is "--workspace-team" or "--credentials-file" or "--configuration-token-file"
+                or "--manager-app-id" or "--manager-bot-user-id" or "--manager-credential-ref" or "--project")
             {
                 index++;
                 continue;
             }
-            if (argument.StartsWith("--credentials-file=", StringComparison.Ordinal)
+            if (argument.StartsWith("--workspace-team=", StringComparison.Ordinal)
+                || argument.StartsWith("--credentials-file=", StringComparison.Ordinal)
+                || argument.StartsWith("--configuration-token-file=", StringComparison.Ordinal)
+                || argument.StartsWith("--manager-app-id=", StringComparison.Ordinal)
+                || argument.StartsWith("--manager-bot-user-id=", StringComparison.Ordinal)
+                || argument.StartsWith("--manager-credential-ref=", StringComparison.Ordinal)
                 || argument.StartsWith("--project=", StringComparison.Ordinal)
                 || IsHelpToken(argument))
                 continue;
+            if (string.Equals(argument, "--json", StringComparison.Ordinal))
+            {
+                if (index + 1 < args.Length
+                    && !args[index + 1].StartsWith("-", StringComparison.Ordinal)
+                    && !IsJsonFieldList(args[index + 1]))
+                    return true;
+                index++;
+                continue;
+            }
             if (!argument.StartsWith("-", StringComparison.Ordinal))
                 return true;
         }
 
         return false;
     }
+
+    private static bool IsJsonFieldList(string value) =>
+        value.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .All(part => part.Length > 0 && part.All(char.IsAsciiLetterOrDigit));
 
     private sealed class EnvironmentVariableAdapter : ICliEnvironment
     {

@@ -45,7 +45,7 @@ public sealed class SlackManagerApplicationSpecs
         var childId = first.GetProperty("managedApp").GetProperty("id").GetString()!;
         Assert.Equal("release_helper", first.GetProperty("preview").GetProperty("botName").GetString());
         Assert.Equal("not_created", first.GetProperty("managedApp").GetProperty("appLifecycle").GetString());
-        Assert.Equal("create_child_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
+        Assert.Equal("create_agent_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
 
         using var secondResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), request);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
@@ -68,7 +68,7 @@ public sealed class SlackManagerApplicationSpecs
         var connection = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
         Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
         Assert.Equal("T_MANAGER_CREATE", connection.WorkspaceTeamId);
-        var child = await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId);
+        var child = await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId);
         Assert.Equal(connectionId, child.AgentConnectionId);
         Assert.NotEmpty(child.DesiredManifestHash);
         Assert.Equal(seeded.Agent.Id, (await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id)).Id);
@@ -115,7 +115,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = "U_MANAGER_BOT_DEFAULT_AGENT",
-            managerCredentialRef = "manager-credential-default-agent",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
@@ -192,7 +191,7 @@ public sealed class SlackManagerApplicationSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.NotNull(await db.AgentConnections.SingleAsync(row => row.Id == connectionId && row.DeletedAt != null));
-        Assert.NotNull(await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
+        Assert.NotNull(await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
         Assert.NotNull(await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id));
     }
 
@@ -239,7 +238,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         setupResponse.EnsureSuccessStatusCode();
         var setupJson = await setupResponse.Content.ReadAsStringAsync();
@@ -354,7 +352,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         repeatedSetup.EnsureSuccessStatusCode();
         var repeated = await ReadDataAsync(repeatedSetup);
@@ -405,7 +402,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId,
             managerAppId = $"A_MANAGER_{workspaceTeamId}",
             managerBotUserId = $"U_MANAGER_{workspaceTeamId}",
-            managerCredentialRef = $"manager-credential-{workspaceTeamId}",
             transportKind = SlackManagerTransportKind.Socket,
             readiness = SlackManagerReadiness.Ready,
         });

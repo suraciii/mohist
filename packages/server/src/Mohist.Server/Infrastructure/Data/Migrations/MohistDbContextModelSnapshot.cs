@@ -1412,13 +1412,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("TaskLogEntries", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Secrets.ConnectionSecretRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Secrets.StoredSecretRow", b =>
                 {
-                    b.Property<string>("ProjectId")
+                    b.Property<string>("OwnerKind")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerScope")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ConnectionId")
+                    b.Property<string>("OwnerId")
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
@@ -1433,14 +1437,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
-                    b.HasKey("ProjectId", "ConnectionId", "Kind");
+                    b.HasKey("OwnerKind", "OwnerScope", "OwnerId", "Kind");
 
-                    b.HasIndex("ProjectId", "ConnectionId")
-                        .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
+                    b.HasIndex("OwnerKind", "OwnerScope", "OwnerId")
+                        .HasDatabaseName("IX_StoredSecrets_Owner");
 
-                    b.ToTable("ConnectionSecrets", null, t =>
+                    b.ToTable("StoredSecrets", null, t =>
                         {
-                            t.HasCheckConstraint("CK_ConnectionSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret')");
+                            t.HasCheckConstraint("CK_StoredSecrets_Kind", "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKindKind", "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR (\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR (\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR (\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken'))");
+                            t.HasCheckConstraint("CK_StoredSecrets_OwnerKind", "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')");
                         });
                 });
 
@@ -1738,7 +1744,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("AgentSessionTranscriptTurns", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackChildAppRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(256)
@@ -1852,18 +1858,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("OperationStartedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("PublicIngressBaseUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("SigningSecretRef")
                         .IsRequired()
                         .HasMaxLength(512)
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("TransportKind")
-                        .IsRequired()
-                        .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("UnknownOutcome")
@@ -1877,6 +1874,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("JSON");
 
+                    b.Property<string>("InstallUrl")
+                        .IsRequired()
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RuntimeCredentialValidationState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("WorkspaceTeamId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -1886,32 +1893,31 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("AgentConnectionId")
                         .IsUnique()
-                        .HasDatabaseName("UX_ManagedSlackChildApps_AgentConnectionId")
+                        .HasDatabaseName("UX_ManagedSlackAgentApps_AgentConnectionId")
                         .HasFilter("\"DeletedAt\" IS NULL");
 
                     b.HasIndex("EnrollmentId", "UpdatedAt")
-                        .HasDatabaseName("IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt");
+                        .HasDatabaseName("IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt");
 
                     b.HasIndex("WorkspaceTeamId", "AppId")
                         .IsUnique()
-                        .HasDatabaseName("UX_ManagedSlackChildApps_WorkspaceTeamId_AppId")
+                        .HasDatabaseName("UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId")
                         .HasFilter("\"DeletedAt\" IS NULL AND \"AppId\" <> ''");
 
-                    b.ToTable("ManagedSlackChildApps", null, t =>
+                    b.ToTable("ManagedSlackAgentApps", null, t =>
                         {
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_AppLifecycle", "\"AppLifecycle\" IN ('not_created', 'creating', 'create_unknown', 'created', 'deleting', 'delete_unknown', 'deleted')");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_AppLifecycle", "\"AppLifecycle\" IN ('not_created', 'creating', 'create_unknown', 'created', 'deleting', 'delete_unknown', 'deleted')");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_AppliedManifestPair", "(\"AppliedManifestVersion\" IS NULL AND \"AppliedManifestHash\" IS NULL) OR (\"AppliedManifestVersion\" IS NOT NULL AND \"AppliedManifestHash\" IS NOT NULL AND \"AppliedManifestVersion\" > 0 AND \"AppliedManifestHash\" <> '')");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_AppliedManifestPair", "(\"AppliedManifestVersion\" IS NULL AND \"AppliedManifestHash\" IS NULL) OR (\"AppliedManifestVersion\" IS NOT NULL AND \"AppliedManifestHash\" IS NOT NULL AND \"AppliedManifestVersion\" > 0 AND \"AppliedManifestHash\" <> '')");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_Authorization", "\"Authorization\" IN ('not_started', 'awaiting_user', 'pending_admin', 'authorized', 'expired_or_cancelled', 'revoked')");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_Authorization", "\"Authorization\" IN ('not_started', 'awaiting_user', 'pending_admin', 'authorized', 'expired_or_cancelled', 'revoked')");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_BindingState", "\"BindingState\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_BindingState", "\"BindingState\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_DesiredManifest", "\"DesiredManifestVersion\" > 0 AND \"DesiredManifestHash\" <> ''");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_DesiredManifest", "\"DesiredManifestVersion\" > 0 AND \"DesiredManifestHash\" <> ''");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_IdentityPair", "\"BotUserId\" = '' OR \"AppId\" <> ''");
+                            t.HasCheckConstraint("CK_ManagedSlackAgentApps_IdentityPair", "\"BotUserId\" = '' OR \"AppId\" <> ''");
 
-                            t.HasCheckConstraint("CK_ManagedSlackChildApps_TransportKind", "\"TransportKind\" IN ('socket', 'https')");
                         });
                 });
 
@@ -1975,7 +1981,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("SlackAmbiguousPrompts", (string)null);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackChildAppBindingObligationRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAgentAppBindingObligationRow", b =>
                 {
                     b.Property<string>("Id")
                         .HasMaxLength(256)
@@ -1989,7 +1995,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<int>("AttemptCount")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2019,18 +2025,19 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AgentConnectionId");
+                    b.HasIndex("AgentConnectionId")
+                        .HasDatabaseName("IX_SlackAgentAppBindingObligations_AgentConnectionId");
 
-                    b.HasIndex("ChildAppId")
+                    b.HasIndex("AgentAppId")
                         .IsUnique()
-                        .HasDatabaseName("UX_SlackChildAppBindingObligations_ChildAppId");
+                        .HasDatabaseName("UX_SlackAgentAppBindingObligations_AgentAppId");
 
                     b.HasIndex("Status", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackChildAppBindingObligations_Status_UpdatedAt");
+                        .HasDatabaseName("IX_SlackAgentAppBindingObligations_Status_UpdatedAt");
 
-                    b.ToTable("SlackChildAppBindingObligations", null, t =>
+                    b.ToTable("SlackAgentAppBindingObligations", null, t =>
                         {
-                            t.HasCheckConstraint("CK_SlackChildAppBindingObligations_Status", "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
+                            t.HasCheckConstraint("CK_SlackAgentAppBindingObligations_Status", "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
                         });
                 });
 
@@ -2153,7 +2160,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2195,8 +2202,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_SlackOAuthAttempts_StateHash");
 
-                    b.HasIndex("ChildAppId", "Status", "UpdatedAt")
-                        .HasDatabaseName("IX_SlackOAuthAttempts_ChildAppId_Status_UpdatedAt");
+                    b.HasIndex("AgentAppId", "Status", "UpdatedAt")
+                        .HasDatabaseName("IX_SlackOAuthAttempts_AgentAppId_Status_UpdatedAt");
 
                     b.ToTable("SlackOAuthAttempts", null, t =>
                         {
@@ -2219,7 +2226,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ChildAppId")
+                    b.Property<string>("AgentAppId")
                         .IsRequired()
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
@@ -2249,14 +2256,15 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AuthorizationAttemptId");
+                    b.HasIndex("AuthorizationAttemptId")
+                        .HasDatabaseName("IX_SlackOAuthStates_AuthorizationAttemptId");
 
                     b.HasIndex("StateHash")
                         .IsUnique()
                         .HasDatabaseName("UX_SlackOAuthStates_StateHash");
 
-                    b.HasIndex("ChildAppId", "ConsumedAt", "ExpiresAt")
-                        .HasDatabaseName("IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt");
+                    b.HasIndex("AgentAppId", "ConsumedAt", "ExpiresAt")
+                        .HasDatabaseName("IX_SlackOAuthStates_AgentAppId_ConsumedAt_ExpiresAt");
 
                     b.ToTable("SlackOAuthStates", null, t =>
                         {
@@ -2410,6 +2418,49 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("SlackManagerToolExecutionFences", null, t =>
                         {
                             t.HasCheckConstraint("CK_SlackManagerToolExecutionFences_State", "\"State\" IN ('started', 'completed')");
+                        });
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAdapterLeaseRow", b =>
+                {
+                    b.Property<string>("TargetKey")
+                        .HasMaxLength(320)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Generation")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("LeaseId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LeaseKind")
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdapterId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CredentialFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("IssuedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("TargetKey");
+
+                    b.ToTable("SlackAdapterLeases", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SlackAdapterLeases_LeaseKind", "\"LeaseKind\" IS NULL OR \"LeaseKind\" IN ('validation', 'runtime')");
+                            t.HasCheckConstraint("CK_SlackAdapterLeases_ActiveLeaseCoherent", "(\"LeaseId\" IS NULL) = (\"LeaseKind\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"AdapterId\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"IssuedAt\" IS NULL) AND (\"LeaseId\" IS NULL) = (\"ExpiresAt\" IS NULL)");
                         });
                 });
 
@@ -2685,6 +2736,17 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(1024)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ConfigurationCredentialRef")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ConfigurationCredentialExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ConfigurationCredentialGeneration")
+                        .HasColumnType("INTEGER");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("TEXT");
 
@@ -2715,6 +2777,32 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<string>("ManagerAppId")
                         .IsRequired()
                         .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppLifecycle")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ManagerAppOperationFence")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ManagerAppOperationId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppOperationOutcome")
+                        .HasMaxLength(1024)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppManifestHash")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ManagerAppInstallUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("ManagerBotUserId")
@@ -2759,6 +2847,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("RuntimeCredentialValidationState")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("TEXT");
 
@@ -2783,9 +2876,13 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerCapability", "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
 
-                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" IN ('socket', 'https')");
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerTransportKind", "\"ManagerTransportKind\" = 'socket'");
 
                             t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerReadiness", "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_ManagerAppLifecycle", "\"ManagerAppLifecycle\" IN ('not_created', 'creating', 'created', 'create_unknown')");
+
+                            t.HasCheckConstraint("CK_SlackWorkspaceEnrollments_RuntimeCredentialValidationState", "\"RuntimeCredentialValidationState\" IN ('not_provided', 'candidate', 'awaiting_socket', 'verified', 'failed')");
                         });
                 });
 
@@ -3441,7 +3538,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackChildAppRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", b =>
                 {
                     b.HasOne("Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow", null)
                         .WithMany()
@@ -3456,7 +3553,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackChildAppBindingObligationRow", b =>
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackAgentAppBindingObligationRow", b =>
                 {
                     b.HasOne("Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow", null)
                         .WithMany()
@@ -3464,18 +3561,18 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackChildAppRow", null)
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Slack.SlackOAuthAttemptRow", b =>
                 {
-                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackChildAppRow", null)
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -3487,9 +3584,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasForeignKey("AuthorizationAttemptId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackChildAppRow", null)
+                    b.HasOne("Mohist.Server.Infrastructure.Data.Slack.ManagedSlackAgentAppRow", null)
                         .WithMany()
-                        .HasForeignKey("ChildAppId")
+                        .HasForeignKey("AgentAppId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
