@@ -1,10 +1,12 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Mohist.Server.GitHub.Domain;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.GitHub.Ports;
 using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Issue.Domain.Events;
 
 namespace Mohist.Server.GitHub.Subscriptions;
 
@@ -91,16 +93,41 @@ public sealed class GitHubWriteBackHandler : ICloudEventHandler
                 await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.Blocked, evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.IssueCompleted:
+                var prUrl = await FindDeliveryPullRequestUrlAsync(sp, connection, link, evt.Type, ct);
                 await PostCommentAsync(sp, connection, link, GitHubCommentKinds.Completed,
-                    GitHubWriteBackComments.Completed(link.IssueNumber), evt.Type, ct);
+                    GitHubWriteBackComments.Completed(link.IssueNumber, prUrl), evt.Type, ct);
                 await SetStateLabelAsync(sp, connection, link, GitHubStateLabels.Done, evt.Type, ct);
                 await CloseAsync(sp, connection, link, "completed", GitHubCommentKinds.ClosedCompleted, evt.Type, ct);
                 break;
             case EventCatalog.ReverseDns.IssueCancelled:
                 await PostCommentAsync(sp, connection, link, GitHubCommentKinds.Cancelled,
-                    GitHubWriteBackComments.Cancelled(link.IssueNumber), evt.Type, ct);
+                    GitHubWriteBackComments.Cancelled(link.IssueNumber, ReadCancelledReason(evt)), evt.Type, ct);
                 await CloseAsync(sp, connection, link, "not_planned", GitHubCommentKinds.ClosedNotPlanned, evt.Type, ct);
                 break;
+        }
+    }
+
+    private static string? ReadCancelledReason(CloudEvent evt) =>
+        evt.Data is { } data
+            ? data.Deserialize<IssueCancelled>(CloudEvent.JsonOptions)?.Reason
+            : null;
+
+    private async Task<string?> FindDeliveryPullRequestUrlAsync(
+        IServiceProvider sp,
+        GitHubConnection connection,
+        GitHubIssueLink link,
+        string eventType,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await sp.GetRequiredService<IGitHubCommentPort>()
+                .FindDeliveryPullRequestUrlAsync(connection, link.IssueNumber, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            await RecordFailureAsync(sp, connection, link, eventType, GitHubWriteBackOperation.DeliveryPullRequest, ex, ct);
+            return null;
         }
     }
 

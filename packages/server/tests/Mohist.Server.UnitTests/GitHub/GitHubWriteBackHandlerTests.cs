@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.Issue.Domain.Events;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.GitHub;
@@ -43,6 +45,8 @@ public sealed class GitHubWriteBackHandlerTests
         public Exception? CommentFailure { get; set; }
         public Exception? LabelFailure { get; set; }
         public Exception? CloseFailure { get; set; }
+        public Exception? DeliveryLookupFailure { get; set; }
+        public string? DeliveryPrUrl { get; set; }
 
         public Task PostCommentAsync(
             GitHubConnection connection,
@@ -75,6 +79,15 @@ public sealed class GitHubWriteBackHandlerTests
             if (CloseFailure is not null) throw CloseFailure;
             Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
             return Task.CompletedTask;
+        }
+
+        public Task<string?> FindDeliveryPullRequestUrlAsync(
+            GitHubConnection connection,
+            int issueNumber,
+            CancellationToken ct = default)
+        {
+            if (DeliveryLookupFailure is not null) throw DeliveryLookupFailure;
+            return Task.FromResult(DeliveryPrUrl);
         }
     }
 
@@ -215,12 +228,12 @@ public sealed class GitHubWriteBackHandlerTests
         }
     }
 
-    private static CloudEvent Event(string type) => new(
+    private static CloudEvent Event(string type, JsonElement? data = null) => new(
         id: $"evt-{Guid.NewGuid():N}",
         source: new Uri("mohist://test"),
         type: type,
         time: Now,
-        data: null,
+        data: data,
         extensions: new Dictionary<string, string>
         {
             [EventCatalog.Lineage.ProjectId] = "project-1",
@@ -299,6 +312,85 @@ public sealed class GitHubWriteBackHandlerTests
         var link = await harness.LinkAsync();
         Assert.Contains(GitHubCommentKinds.Completed, link.PostedComments);
         Assert.Contains(GitHubCommentKinds.ClosedCompleted, link.PostedComments);
+    }
+
+    [Fact]
+    public async Task Completed_WithDeliveryPullRequest_IncludesPrUrlInCommentAndIsIdempotent()
+    {
+        var harness = new Harness();
+        harness.Port.DeliveryPrUrl = "https://github.com/octo/hello/pull/123";
+        var handler = await harness.NewHandlerAsync();
+        var evt = Event(EventCatalog.ReverseDns.IssueCompleted);
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var comment = Assert.Single(harness.Port.Comments);
+        Assert.Equal(GitHubWriteBackComments.Completed(7, "https://github.com/octo/hello/pull/123"), comment.Body);
+        Assert.Contains("https://github.com/octo/hello/pull/123", comment.Body);
+        var link = await harness.LinkAsync();
+        Assert.Contains(GitHubCommentKinds.Completed, link.PostedComments);
+    }
+
+    [Fact]
+    public async Task Completed_WithoutDeliveryPullRequest_PostsLegalCommentWithoutPrUrl()
+    {
+        var harness = new Harness();
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
+
+        var comment = Assert.Single(harness.Port.Comments);
+        Assert.Equal(GitHubWriteBackComments.Completed(7), comment.Body);
+        Assert.DoesNotContain("交付 PR", comment.Body);
+        Assert.Single(harness.Port.Closes);
+    }
+
+    [Fact]
+    public async Task Completed_DeliveryLookupFails_RecordsFailureAndStillPostsComment()
+    {
+        var harness = new Harness();
+        harness.Port.DeliveryLookupFailure = new InvalidOperationException("lookup boom");
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCompleted), CancellationToken.None);
+
+        var comment = Assert.Single(harness.Port.Comments);
+        Assert.Equal(GitHubWriteBackComments.Completed(7), comment.Body);
+        Assert.Single(harness.Port.Closes);
+        var failure = Assert.Single(await harness.FailuresAsync());
+        Assert.Equal(GitHubWriteBackOperation.DeliveryPullRequest, failure.Operation);
+        Assert.Equal(nameof(InvalidOperationException), failure.ErrorCode);
+    }
+
+    [Fact]
+    public async Task Cancelled_WithReason_IncludesReasonInCommentAndIsIdempotent()
+    {
+        var harness = new Harness();
+        var handler = await harness.NewHandlerAsync();
+        var evt = Event(EventCatalog.ReverseDns.IssueCancelled,
+            JsonSerializer.SerializeToElement(new IssueCancelled("需求方撤回"), CloudEvent.JsonOptions));
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        var comment = Assert.Single(harness.Port.Comments);
+        Assert.Equal(GitHubWriteBackComments.Cancelled(7, "需求方撤回"), comment.Body);
+        Assert.Contains("需求方撤回", comment.Body);
+        Assert.Single(harness.Port.Closes);
+    }
+
+    [Fact]
+    public async Task Cancelled_WithoutReason_PostsGenericComment()
+    {
+        var harness = new Harness();
+        var handler = await harness.NewHandlerAsync();
+
+        await handler.HandleAsync(Event(EventCatalog.ReverseDns.IssueCancelled), CancellationToken.None);
+
+        var comment = Assert.Single(harness.Port.Comments);
+        Assert.Equal(GitHubWriteBackComments.Cancelled(7), comment.Body);
+        Assert.DoesNotContain("原因", comment.Body);
     }
 
     [Fact]

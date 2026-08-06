@@ -26,6 +26,7 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
     public List<PostedComment> Comments { get; } = [];
     public List<StateLabelChange> StateLabels { get; } = [];
     public List<IssueClose> Closes { get; } = [];
+    public string? DeliveryPrUrl { get; set; }
 
     public Task PostCommentAsync(
         GitHubConnection connection,
@@ -56,6 +57,12 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
         Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
         return Task.CompletedTask;
     }
+
+    public Task<string?> FindDeliveryPullRequestUrlAsync(
+        GitHubConnection connection,
+        int issueNumber,
+        CancellationToken ct = default) =>
+        Task.FromResult(DeliveryPrUrl);
 }
 
 /// <summary>

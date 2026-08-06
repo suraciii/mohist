@@ -101,6 +101,26 @@ public sealed class GitHubCommentPort : IGitHubCommentPort
         return SendAsync(connection, url, HttpMethod.Patch, JsonContent.Create(body), ct);
     }
 
+    public async Task<string?> FindDeliveryPullRequestUrlAsync(
+        GitHubConnection connection,
+        int issueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        var url = $"/repos/{connection.Owner}/{connection.Repo}/pulls?head={connection.Owner}:mo/issue-{issueNumber}&state=all";
+        var pat = await LoadPatAsync(connection, ct);
+        using var request = BuildRequest(url, HttpMethod.Get, content: null, pat);
+        using var response = await _http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            await LogFailureAsync(response, url, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        var array = JsonNode.Parse(await response.Content.ReadAsStringAsync(ct)) as JsonArray;
+        var urlNode = array?.FirstOrDefault()?["html_url"];
+        return urlNode?.GetValue<string>();
+    }
+
     private async Task SendAsync(
         GitHubConnection connection,
         string url,
