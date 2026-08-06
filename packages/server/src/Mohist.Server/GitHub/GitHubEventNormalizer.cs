@@ -70,11 +70,19 @@ public static class GitHubEventNormalizer
             || !body.TryGetProperty("repository", out var repository)
             || repository.ValueKind != JsonValueKind.Object)
             return false;
-        var login = repository.TryGetProperty("login", out var loginValue) ? loginValue.GetString() : null;
         var name = repository.TryGetProperty("name", out var nameValue) ? nameValue.GetString() : null;
-        if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(name))
+        var ownerValue = repository.TryGetProperty("owner", out var ownerElement) && ownerElement.ValueKind == JsonValueKind.Object
+            ? ownerElement.TryGetProperty("login", out var loginValue) ? loginValue.GetString() : null
+            : null;
+        if (string.IsNullOrWhiteSpace(ownerValue) && repository.TryGetProperty("full_name", out var fullName))
+        {
+            var parts = fullName.GetString()?.Split('/', 2);
+            if (parts is { Length: 2 })
+                ownerValue = parts[0];
+        }
+        if (string.IsNullOrWhiteSpace(ownerValue) || string.IsNullOrWhiteSpace(name))
             return false;
-        owner = login;
+        owner = ownerValue;
         repo = name;
         return true;
     }

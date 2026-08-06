@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -62,8 +63,8 @@ public sealed class GitHubConnectionStore : IScopedService
     public async Task<string> CreateAsync(GitHubConnection connection, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        connection.Owner = connection.Owner.Trim();
-        connection.Repo = connection.Repo.Trim();
+        connection.Owner = connection.Owner.Trim().ToLowerInvariant();
+        connection.Repo = connection.Repo.Trim().ToLowerInvariant();
         connection.Validate(requireInstallationId: false);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -92,9 +93,9 @@ public sealed class GitHubConnectionStore : IScopedService
                 $"GitHub repository '{connection.Owner}/{connection.Repo}' is already connected to a project", "github_repository_already_connected");
         }
 
-        var secret = GenerateWebhookSecret();
-        await _secretStore.StoreAsync(WebhookSecretAddress(connection.ProjectId, connection.Id), secret, ct);
-        return Convert.ToHexString(secret).ToLowerInvariant();
+        var secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        await _secretStore.StoreAsync(WebhookSecretAddress(connection.ProjectId, connection.Id), Encoding.UTF8.GetBytes(secret), ct);
+        return secret;
     }
 
     public async Task<GitHubConnection?> SetStatusAsync(string projectId, string id, string status, CancellationToken ct = default)
@@ -120,23 +121,18 @@ public sealed class GitHubConnectionStore : IScopedService
     private static string ResolveRepository(string repositoriesJson, string owner, string repo)
     {
         var repositories = JSON.Deserialize<List<RepositoryInfo>>(repositoriesJson) ?? [];
-        var candidates = new[]
-        {
-            $"https://github.com/{owner}/{repo}",
-            $"https://github.com/{owner.ToLowerInvariant()}/{repo.ToLowerInvariant()}",
-        };
-        var fingerprints = repositories
+        var target = GitRemoteUrlNormalizer.Fingerprint($"https://github.com/{owner}/{repo}");
+        if (target is null)
+            throw new GitHubConnectionValidationException(
+                $"Could not normalize 'https://github.com/{owner}/{repo}'", "repository_not_registered");
+        var match = repositories
             .Select(r => (Repository: r, Fingerprint: GitRemoteUrlNormalizer.Fingerprint(r.GitUrl)))
             .Where(pair => pair.Fingerprint is not null)
-            .ToArray();
-        foreach (var candidate in candidates)
-        {
-            var fingerprint = GitRemoteUrlNormalizer.Fingerprint(candidate);
-            if (fingerprint is null) continue;
-            var match = fingerprints.FirstOrDefault(pair => pair.Fingerprint!.Fingerprint == fingerprint.Fingerprint);
-            if (match.Repository is not null)
-                return match.Repository.Name;
-        }
+            .FirstOrDefault(pair =>
+                pair.Fingerprint!.Fingerprint == target.Fingerprint
+                || string.Equals(pair.Fingerprint.Canonical, target.Canonical, StringComparison.OrdinalIgnoreCase));
+        if (match.Repository is not null)
+            return match.Repository.Name;
         throw new GitHubConnectionValidationException(
             $"No repository registered in this project matches 'https://github.com/{owner}/{repo}'; register the repository first", "repository_not_registered");
     }
@@ -145,8 +141,6 @@ public sealed class GitHubConnectionStore : IScopedService
         ex.InnerException is SqliteException sqlite
         && sqlite.SqliteErrorCode == 19
         && sqlite.Message.Contains("GitHubConnections", StringComparison.OrdinalIgnoreCase);
-
-    private static byte[] GenerateWebhookSecret() => RandomNumberGenerator.GetBytes(32);
 
     private static GitHubConnection ToDomain(GitHubConnectionRow row) => new()
     {
