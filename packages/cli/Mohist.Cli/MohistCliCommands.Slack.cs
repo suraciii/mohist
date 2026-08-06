@@ -42,6 +42,7 @@ internal static class SlackCommands
         group.Subcommands.Add(BuildClearGap(api));
         group.Subcommands.Add(BuildReconcileCreate(api));
         group.Subcommands.Add(BuildReconcileDelete(api));
+        group.Subcommands.Add(BuildMessage(api));
         return group;
     }
 
@@ -1020,6 +1021,67 @@ internal static class SlackCommands
                 return candidate;
         }
         return null;
+    }
+
+    private static Command BuildMessage(MohistCliApi api)
+    {
+        var message = new Command("message", "Send or read Slack messages on behalf of an Agent");
+        message.Subcommands.Add(BuildMessageSend(api));
+        return message;
+    }
+
+    private static Command BuildMessageSend(MohistCliApi api)
+    {
+        var command = new Command("send", "Send a plain-text reply to a Slack conversation (the Agent-authored reply body); --text - reads the body from stdin");
+        var conversation = new Option<string>("--conversation")
+        {
+            Description = "Slack conversation id (channel or DM), read from the injected Slack reply anchor.",
+            Required = true,
+        };
+        var replyTo = new Option<string?>("--reply-to")
+        {
+            Description = "Thread root message timestamp to reply in a thread (the reply anchor threadRootMessageId). Omit for a DM.",
+        };
+        var text = new Option<string>("--text")
+        {
+            Description = "Reply body. Pass '-' to read it from standard input (preserves newlines).",
+            Required = true,
+        };
+        var project = MohistCliCommands.ProjectRefOption();
+        command.Options.Add(conversation);
+        command.Options.Add(replyTo);
+        command.Options.Add(text);
+        command.Options.Add(project);
+        command.SetAction(async ctx =>
+        {
+            var (projectId, exit) = await ProjectAsync(api, ctx.GetValue(project));
+            if (exit != 0 || projectId is null) return exit;
+
+            var body = ctx.GetValue(text);
+            if (string.Equals(body, "-", StringComparison.Ordinal))
+            {
+                body = await api.StandardInput
+                    .ReadToEndAsync(api.Invocation.CancellationToken)
+                    .ConfigureAwait(false);
+            }
+            if (string.IsNullOrWhiteSpace(body))
+            {
+                api.Error.WriteLine("--text is empty; nothing to send (silence is achieved by not running this command).");
+                return CliExitCode.For(CliExitOutcome.OperationFailure);
+            }
+
+            return await api.PrintPostWithOutputAsync(
+                Path(projectId, "/reply"),
+                new
+                {
+                    conversationId = ctx.GetValue(conversation),
+                    threadTs = ctx.GetValue(replyTo),
+                    text = body,
+                },
+                "json",
+                tableShape: null);
+        });
+        return command;
     }
 
     private static Command BuildClearGap(MohistCliApi api)

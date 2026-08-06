@@ -184,6 +184,63 @@ public sealed class SlackDeliveryOutcomesSpecs
         Assert.Equal(HttpStatusCode.Conflict, resend.StatusCode);
     }
 
+    [Fact]
+    public async Task Agent_reply_promotes_the_liveness_progress_message_in_place()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-inplace", "1710000000.000010");
+        var working = await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "C-reply-inplace", null, "All green — the task is complete.");
+
+        Assert.True(reply.Accepted);
+        Assert.Equal(connection.Id, reply.ConnectionId);
+        Assert.Equal(working.Id, reply.DeliveryId);
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
+        Assert.Equal(working.Id, terminal.Id);
+        var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Contains("the task is complete", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Agent_reply_merges_repeated_sends_into_one_terminal_answer()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-merge", "1710000000.000020");
+        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+
+        var first = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part one");
+        var second = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part two");
+
+        Assert.True(first.Accepted);
+        Assert.Equal(first.DeliveryId, second.DeliveryId);
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
+        var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Contains("part one", payload.Text, StringComparison.Ordinal);
+        Assert.Contains("part two", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Agent_reply_without_an_active_conversation_is_not_accepted()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-unknown", null, "hello");
+
+        Assert.False(reply.Accepted);
+    }
+
     private async Task<AgentConnection> CreateConnectionAsync()
     {
         var id = $"connection_{Guid.NewGuid():N}";

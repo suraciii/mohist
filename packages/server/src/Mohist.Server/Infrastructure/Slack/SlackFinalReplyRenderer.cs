@@ -89,6 +89,23 @@ public static class SlackFinalReplyRenderer
         return new SlackFinalReplyProjection(Segment(safeLines, maximumSegmentLength));
     }
 
+    /// <summary>
+    /// Redacts an Agent-authored reply body for Slack delivery: strips
+    /// secret-looking values and Slack control syntax so the Agent's text
+    /// cannot leak credentials or trigger mentions/controls. Markdown is
+    /// left intact (mrkdwn conversion is a separate concern).
+    /// </summary>
+    public static string RedactReplyText(string? text)
+    {
+        var clean = NormalizeText(text);
+        if (clean is null)
+            return string.Empty;
+
+        clean = SecretAssignment.Replace(clean, "[REDACTED]");
+        clean = SlackToken.Replace(clean, "[REDACTED]");
+        return NeutralizeSlackControlSyntax(clean);
+    }
+
     public static string AppendStableReference(string text, string jobKey, string? sessionId)
     {
         if (string.IsNullOrWhiteSpace(text))

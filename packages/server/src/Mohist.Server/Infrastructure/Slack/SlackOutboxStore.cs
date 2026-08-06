@@ -278,6 +278,267 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         return await EnqueueAsync(draft, ct);
     }
 
+    /// <summary>
+    /// Enqueues an Agent-authored reply (<c>mo slack message send</c>) into
+    /// the same outbox as liveness projections. The reply is the Agent's
+    /// voice — the caller passes already-redacted text. Landing prefers an
+    /// in-place update of the replaceable progress message for this input
+    /// (one input = one final answer); a repeated send for the same input
+    /// merges its text into the existing terminal row, and the stable
+    /// dispatch reference guards against duplication. When no progress row
+    /// exists the reply resolves the owning Connection from the
+    /// conversation mapping and posts a fresh terminal answer.
+    /// </summary>
+    public async Task<SlackAgentReplyResult> EnqueueAgentReplyAsync(
+        string projectId,
+        string conversationId,
+        string? threadTs,
+        string redactedText,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(conversationId);
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+        var progress = await FindReplyProgressRowAsync(db, projectId, conversationId, threadTs, ct);
+        if (progress is not null)
+        {
+            var promoted = await PromoteReplyProgressAsync(db, progress, redactedText, threadTs, ct);
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(
+                Accepted: true,
+                progress.ConnectionId,
+                promoted.Id,
+                progress.DispatchRef ?? promoted.Id,
+                MergedIntoExisting: true);
+        }
+
+        var terminal = await FindReplyTerminalRowAsync(db, projectId, conversationId, threadTs, ct);
+        if (terminal is not null && await IsLiveOwnerRowAsync(db, terminal, ct))
+        {
+            var merged = await MergeReplyTerminalAsync(db, terminal, redactedText, ct);
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(
+                Accepted: true,
+                terminal.ConnectionId,
+                terminal.Id,
+                terminal.DispatchRef,
+                MergedIntoExisting: true);
+        }
+
+        var connection = await ResolveReplyConnectionAsync(db, projectId, conversationId, threadTs, ct);
+        if (connection is null)
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(Accepted: false);
+        }
+
+        var connectionId = connection.Value.ConnectionId;
+        var dispatchRef = ReplyDispatchRef(connectionId, conversationId, threadTs);
+        var live = await db.AgentConnections.AnyAsync(c =>
+            c.ProjectId == projectId && c.Id == connectionId && c.DeletedAt == null, ct);
+        if (!live)
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(Accepted: false);
+        }
+
+        var duplicate = await db.SlackOutboxRows.AsNoTracking()
+            .Where(row => row.OwnerKind == SlackDeliveryOwnerKinds.Connection
+                && row.ConnectionId == connectionId
+                && row.Kind == SlackOutboxKinds.TerminalResult
+                && row.DispatchRef == dispatchRef)
+            .Select(row => new { row.Id })
+            .FirstOrDefaultAsync(ct);
+        if (duplicate is not null)
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(true, connectionId, duplicate.Id, dispatchRef, MergedIntoExisting: true);
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var row = new SlackOutboxRow
+        {
+            Id = $"slkout_{Guid.NewGuid():N}",
+            ProjectId = projectId,
+            ConnectionId = connectionId,
+            OwnerKind = SlackDeliveryOwnerKinds.Connection,
+            WorkspaceTeamId = connection.Value.WorkspaceTeamId,
+            ConversationId = conversationId,
+            ThreadTs = threadTs,
+            Kind = SlackOutboxKinds.TerminalResult,
+            State = SlackOutboxStates.Pending,
+            DispatchRef = dispatchRef,
+            PayloadJson = JsonSerializer.Serialize(BuildReplyPayload(redactedText, dispatchRef, null)),
+            AttemptCount = 0,
+            NextAttemptAt = now,
+            CreatedAt = now,
+            UpdatedAt = now,
+        };
+        db.SlackOutboxRows.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch (DbUpdateException ex) when (IsDispatchRefConflict(ex))
+        {
+            await transaction.CommitAsync(ct);
+            return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: true);
+        }
+        return new SlackAgentReplyResult(true, connectionId, row.Id, dispatchRef, MergedIntoExisting: false);
+    }
+
+    private static async Task<SlackOutboxRow?> FindReplyProgressRowAsync(
+        MohistDbContext db,
+        string projectId,
+        string conversationId,
+        string? threadTs,
+        CancellationToken ct)
+    {
+        var query = db.SlackOutboxRows.Where(row =>
+            row.ProjectId == projectId
+            && row.ConversationId == conversationId
+            && row.Kind == SlackOutboxKinds.ReplaceableProgress
+            && row.State == SlackOutboxStates.Pending);
+        if (!string.IsNullOrWhiteSpace(threadTs))
+            query = query.Where(row => row.ThreadTs == threadTs);
+        return await query.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
+    }
+
+    private static async Task<SlackOutboxRow?> FindReplyTerminalRowAsync(
+        MohistDbContext db,
+        string projectId,
+        string conversationId,
+        string? threadTs,
+        CancellationToken ct)
+    {
+        var query = db.SlackOutboxRows.Where(row =>
+            row.ProjectId == projectId
+            && row.ConversationId == conversationId
+            && row.Kind == SlackOutboxKinds.TerminalResult
+            && row.State == SlackOutboxStates.Pending);
+        if (!string.IsNullOrWhiteSpace(threadTs))
+            query = query.Where(row => row.ThreadTs == threadTs);
+        return await query.OrderBy(row => row.Id).FirstOrDefaultAsync(ct);
+    }
+
+    private async Task<SlackOutboxRow> PromoteReplyProgressAsync(
+        MohistDbContext db,
+        SlackOutboxRow progress,
+        string redactedText,
+        string? threadTs,
+        CancellationToken ct)
+    {
+        var previous = SlackDeliveryPayload.Parse(progress.PayloadJson);
+        var dispatchRef = progress.DispatchRef ?? progress.Id;
+        var payload = BuildReplyPayload(redactedText, dispatchRef, previous.ProviderMessageIdentity);
+        progress.Kind = SlackOutboxKinds.TerminalResult;
+        progress.PayloadJson = JsonSerializer.Serialize(payload);
+        if (!string.IsNullOrWhiteSpace(threadTs))
+            progress.ThreadTs = threadTs;
+        progress.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return progress;
+    }
+
+    private async Task<SlackOutboxRow> MergeReplyTerminalAsync(
+        MohistDbContext db,
+        SlackOutboxRow terminal,
+        string redactedText,
+        CancellationToken ct)
+    {
+        var previous = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        var combined = string.IsNullOrWhiteSpace(previous.Text)
+            ? redactedText
+            : previous.Text + "\n\n" + redactedText;
+        terminal.PayloadJson = JsonSerializer.Serialize(previous with { Text = combined });
+        terminal.State = SlackOutboxStates.Pending;
+        terminal.NextAttemptAt = _timeProvider.GetUtcNow();
+        terminal.ClaimedAt = null;
+        terminal.ClaimedByAdapterId = null;
+        terminal.DeliveryUncertainAt = null;
+        terminal.LastError = null;
+        terminal.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return terminal;
+    }
+
+    private static SlackDeliveryPayload BuildReplyPayload(
+        string text,
+        string dispatchRef,
+        SlackProviderMessageIdentity? providerIdentity)
+    {
+        var operation = providerIdentity is null
+            ? SlackDeliveryOperations.PostMessage
+            : SlackDeliveryOperations.ChatUpdate;
+        return new SlackDeliveryPayload(
+            operation,
+            text,
+            ClientMessageId: dispatchRef,
+            ProviderMessageIdentity: providerIdentity,
+            FallbackText: text,
+            FallbackDispatchRef: $"{dispatchRef}:fallback");
+    }
+
+    private static async Task<bool> IsLiveOwnerRowAsync(
+        MohistDbContext db,
+        SlackOutboxRow row,
+        CancellationToken ct) =>
+        row.OwnerKind == SlackDeliveryOwnerKinds.Manager
+            ? await db.SlackWorkspaceEnrollments.AnyAsync(enrollment =>
+                enrollment.Id == row.ConnectionId
+                && enrollment.Lifecycle == SlackEnrollmentLifecycle.Active
+                && enrollment.DeletedAt == null, ct)
+            : await db.AgentConnections.AnyAsync(connection =>
+                connection.ProjectId == row.ProjectId
+                && connection.Id == row.ConnectionId
+                && connection.DeletedAt == null, ct);
+
+    private static async Task<(string ConnectionId, string WorkspaceTeamId)?> ResolveReplyConnectionAsync(
+        MohistDbContext db,
+        string projectId,
+        string conversationId,
+        string? threadTs,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(threadTs))
+        {
+            var thread = await db.SlackThreadSessionMappings
+                .Where(row => row.ProjectId == projectId
+                    && row.ConversationId == conversationId
+                    && row.ThreadTs == threadTs)
+                .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
+                .FirstOrDefaultAsync(ct);
+            if (thread is not null)
+                return (thread.ConnectionId, thread.WorkspaceTeamId);
+        }
+
+        var dm = await db.SlackDmSessionMappings
+            .Where(row => row.ProjectId == projectId && row.DmConversationId == conversationId)
+            .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
+            .FirstOrDefaultAsync(ct);
+        if (dm is not null)
+            return (dm.ConnectionId, dm.WorkspaceTeamId);
+
+        if (string.IsNullOrWhiteSpace(threadTs))
+        {
+            var anyThread = await db.SlackThreadSessionMappings
+                .Where(row => row.ProjectId == projectId && row.ConversationId == conversationId)
+                .Select(row => new { row.ConnectionId, row.WorkspaceTeamId })
+                .FirstOrDefaultAsync(ct);
+            if (anyThread is not null)
+                return (anyThread.ConnectionId, anyThread.WorkspaceTeamId);
+        }
+
+        return null;
+    }
+
+    private static string ReplyDispatchRef(string connectionId, string conversationId, string? threadTs) =>
+        $"slack-reply:{connectionId}:{conversationId}:{threadTs ?? "dm"}:terminal";
+
     private static bool IsDispatchRefConflict(DbUpdateException ex)
     {
         for (var inner = (Exception?)ex; inner is not null; inner = inner.InnerException)

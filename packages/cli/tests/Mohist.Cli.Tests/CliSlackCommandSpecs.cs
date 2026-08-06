@@ -16,7 +16,7 @@ public sealed class CliSlackCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "setup", "status", "install-agent", "list", "view", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete" })
+        foreach (var command in new[] { "setup", "status", "install-agent", "list", "view", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.DoesNotContain("agent connection", text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
@@ -1094,6 +1094,65 @@ public sealed class CliSlackCommandSpecs
             ["clear-gap", "connection_1"],
             "/api/projects/proj_abc/slack-connections/connection_1/clear-gap",
             HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task MessageSend_PostsAgentReplyToTheReplyEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_1", dispatchRef = "slack-reply:connection_1:C1:1710000000.000100:terminal", merged = false },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--reply-to", "1710000000.000100", "--text", "All green. token=xoxb-leak"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/reply", request.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(request.Body!)!;
+        Assert.Equal("C1", body["conversationId"]!.GetValue<string>());
+        Assert.Equal("1710000000.000100", body["threadTs"]!.GetValue<string>());
+        // The CLI forwards the Agent-authored body verbatim; the Server redacts.
+        Assert.Equal("All green. token=xoxb-leak", body["text"]!.GetValue<string>());
+        Assert.Contains("accepted", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MessageSend_ReadsBodyFromStdinWhenTextIsDash()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_2", dispatchRef = "d", merged = false } })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "D1", "--text", "-"],
+            output, error, fs, executor,
+            standardInput: new StringReader("line one\nline two\n"));
+
+        Assert.Equal(0, exit);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("line one\nline two\n", body["text"]!.GetValue<string>());
+        Assert.Equal("D1", body["conversationId"]!.GetValue<string>());
+        // --reply-to is optional (omitted for a DM).
+        Assert.Null(body["threadTs"]?.GetValue<string?>());
+    }
+
+    [Fact]
+    public async Task MessageSend_EmptyTextFailsBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--text", "   "],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--text is empty", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
