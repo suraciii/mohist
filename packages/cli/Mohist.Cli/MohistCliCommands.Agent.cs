@@ -766,12 +766,16 @@ internal static class AgentCommands
     {
         var cmd = new Command(
             "spawn",
-            "Spawn an allowed child AgentSession from a parent session. Sends only targetAgentRef and prompt to the Server spawn endpoint.");
+            "Spawn an allowed child AgentSession from a parent session. Sends targetAgentRef, prompt and the optional workspace mode to the Server spawn endpoint.");
         var agentRefArg = new Argument<string>("agent-ref") { Description = "Stable target Agent ref" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var parentSessionOpt = new Option<string?>("--parent-session") { Description = "Parent AgentSession id" };
         var promptOpt = new Option<string?>("--prompt") { Description = "Child session prompt" };
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Required stable retry key" };
+        var workspaceOpt = new Option<string?>("--workspace")
+        {
+            Description = "Workspace mode: inherit (share the parent workdir; default) or worktree (isolated workspace created by the system)",
+        };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionSpawn)));
 
         cmd.Arguments.Add(agentRefArg);
@@ -779,6 +783,7 @@ internal static class AgentCommands
         cmd.Options.Add(parentSessionOpt);
         cmd.Options.Add(promptOpt);
         cmd.Options.Add(idempotencyKeyOpt);
+        cmd.Options.Add(workspaceOpt);
         cmd.Options.Add(outputOpt);
         cmd.SetAction(ctx => SpawnAsync(ctx));
 
@@ -789,6 +794,7 @@ internal static class AgentCommands
             var prompt = ctx.GetValue(promptOpt);
             var idempotencyKey = ctx.GetValue(idempotencyKeyOpt);
             var agentRef = ctx.GetValue(agentRefArg);
+            var workspace = ctx.GetValue(workspaceOpt);
             var output = ctx.GetValue(outputOpt);
 
             if (string.IsNullOrWhiteSpace(project))
@@ -799,14 +805,19 @@ internal static class AgentCommands
                 return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--prompt is required");
             if (string.IsNullOrWhiteSpace(idempotencyKey))
                 return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--idempotency-key is required");
+            if (workspace is not null && workspace is not ("inherit" or "worktree"))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--workspace must be one of: inherit, worktree");
 
             var (mode, exit) = api.ResolveOutputMode(output);
             if (exit != 0)
                 return exit;
 
+            object body = workspace is null
+                ? new { targetAgentRef = agentRef, prompt }
+                : new { targetAgentRef = agentRef, prompt, workspace };
             return await api.PrintPostWithOutputAsync(
                 $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(parentSessionId)}/spawns",
-                new { targetAgentRef = agentRef, prompt },
+                body,
                 mode,
                 nameof(MohistCliApi.TableShape.AgentSessionSpawn),
                 rawJson: true,
