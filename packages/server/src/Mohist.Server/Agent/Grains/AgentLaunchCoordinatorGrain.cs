@@ -422,7 +422,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 plan.ParentExpectedBindingEpoch,
                 SessionTreeExpectedLinkState.Absent));
         if (result.State == LinkReservationState.Rejected)
-            throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
+            throw new AgentSpawnPostPlanRejectedException(
+                result.RejectionReason ?? "parent_link_rejected");
 
         await _grains.GetGrain<ISpawnRequestFenceGrain>(
             AgentLaunchCoordinatorCodec.KeyFor(
@@ -630,7 +631,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             throw new AgentSpawnPostPlanRejectedException(
                 begun.RejectionReason ?? "parent_binding_changed");
         if (begun.State == LinkReservationState.Rejected)
-            throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
+            throw new AgentSpawnPostPlanRejectedException(
+                begun.RejectionReason ?? "parent_link_rejected");
         if (begun.State == LinkReservationState.Attached)
         {
             if (begun.Revision <= (plan.ParentLinkRevision ?? -1))
@@ -690,7 +692,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             ?? (fence.Reservation is { } legacy ? [legacy] : []))
             .FirstOrDefault(item => item.EdgeId == plan.ParentLinkEdgeId);
         if (reservation?.State == LinkReservationState.Rejected)
-            throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
+            throw new AgentSpawnPostPlanRejectedException(
+                reservation?.RejectionReason ?? "parent_link_rejected");
         if (reservation is null)
             throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
     }
@@ -729,7 +732,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             ?? (fence.Reservation is { } legacy ? [legacy] : []))
             .FirstOrDefault(item => item.EdgeId == plan.ParentLinkEdgeId);
         if (reservation?.State == LinkReservationState.Rejected)
-            throw new AgentSpawnPostPlanRejectedException("parent_link_rejected");
+            throw new AgentSpawnPostPlanRejectedException(
+                reservation?.RejectionReason ?? "parent_link_rejected");
         if (reservation?.State != LinkReservationState.Attached)
             throw new AgentSpawnValidationPendingException("parent_tree_link_not_attached");
     }
@@ -737,7 +741,10 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
     private async Task BeginAbortLaunchAsync(AgentLaunchCoordinatorPlan plan)
     {
         var current = plan;
-        var reason = plan.RejectionReason ?? "spawn_rejected";
+        var fenceReason = plan.RejectionReason ?? "spawn_rejected";
+        var childAbortReason = plan.PostPlanRejected
+            ? "parent_link_rejected"
+            : fenceReason;
         var fence = _grains.GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId);
 
         if (!current.AbortFenceAcknowledged)
@@ -754,7 +761,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 var rejected = await fence.RejectAsync(
                     pending?.CommandId ?? reservation.CommandId ?? string.Empty,
                     plan.ParentLinkEdgeId!,
-                    reason);
+                    fenceReason);
                 if (rejected.ReconciliationRequired)
                     return;
             }
@@ -782,7 +789,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         if (!current.AbortJobAcknowledged)
         {
-            await _grains.GetGrain<IAgentJobGrain>(plan.JobKey).AbortPreparedLaunchAsync(reason);
+            await _grains.GetGrain<IAgentJobGrain>(plan.JobKey).AbortPreparedLaunchAsync(childAbortReason);
             current = current with { AbortJobAcknowledged = true };
             _state.State.Plan = current;
             await SaveStateAsync();
@@ -792,7 +799,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         {
             var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(plan.SessionId);
             if (await sessionGrain.GetAsync() is not null)
-                await sessionGrain.AbortProvisionalLaunchAsync(plan.JobKey, plan.TurnId, reason);
+                await sessionGrain.AbortProvisionalLaunchAsync(plan.JobKey, plan.TurnId, childAbortReason);
             current = current with { AbortSessionAcknowledged = true };
             _state.State.Plan = current;
             await SaveStateAsync();
