@@ -43,6 +43,30 @@ public sealed class SlackFinalReplyRendererTests
     }
 
     [Fact]
+    public void RedactReplyText_StripsSecretsAndNeutralizesSlackControlSyntax()
+    {
+        var redacted = SlackFinalReplyRenderer.RedactReplyText(
+            "Result ready. token=xoxb-secret and api_key=abc123. Ping <!channel> and <@U123>.");
+
+        Assert.Contains("Result ready.", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-secret", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc123", redacted, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", redacted, StringComparison.Ordinal);
+        // Slack control syntax is neutralized so the Agent body cannot trigger
+        // mentions/broadcasts or forge controls.
+        Assert.DoesNotContain("<!channel>", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("<@U123>", redacted, StringComparison.Ordinal);
+        Assert.Contains("&lt;!channel&gt;", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedactReplyText_ReturnsEmptyForBlankInput()
+    {
+        Assert.Equal(string.Empty, SlackFinalReplyRenderer.RedactReplyText("   "));
+        Assert.Equal(string.Empty, SlackFinalReplyRenderer.RedactReplyText(null));
+    }
+
+    [Fact]
     public void Project_RendersBlockingFailureActionsAndExplicitNextStep()
     {
         var blocked = SlackFinalReplyRenderer.Project(new SlackConfirmedAgentResult(

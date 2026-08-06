@@ -184,6 +184,100 @@ public sealed class SlackDeliveryOutcomesSpecs
         Assert.Equal(HttpStatusCode.Conflict, resend.StatusCode);
     }
 
+    [Fact]
+    public async Task Agent_reply_promotes_the_liveness_progress_message_in_place()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-inplace", "1710000000.000010");
+        var working = await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+
+        var reply = await outbox.EnqueueAgentReplyAsync(
+            connection.ProjectId, "C-reply-inplace", null, "All green — the task is complete.");
+
+        Assert.True(reply.Accepted);
+        Assert.Equal(connection.Id, reply.ConnectionId);
+        Assert.Equal(working.Id, reply.DeliveryId);
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
+        Assert.Equal(working.Id, terminal.Id);
+        var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Contains("the task is complete", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Agent_reply_merges_repeated_sends_into_one_terminal_answer()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-merge", "1710000000.000020");
+        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null);
+
+        var first = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part one");
+        var second = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-merge", null, "part two");
+
+        Assert.True(first.Accepted);
+        Assert.Equal(first.DeliveryId, second.DeliveryId);
+        var rows = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        var terminal = Assert.Single(rows, r => r.Kind == SlackOutboxKinds.TerminalResult);
+        var payload = SlackDeliveryPayload.Parse(terminal.PayloadJson);
+        Assert.Contains("part one", payload.Text, StringComparison.Ordinal);
+        Assert.Contains("part two", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Agent_reply_promotion_carries_liveness_status_ref_so_finalization_locates_the_reaction_target()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-statusref", "1710000000.000030");
+        var progressDispatchRef = "agent-session-followup:session-statusref:turn-1:progress";
+        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null, progressDispatchRef);
+
+        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-statusref", null, "the answer");
+
+        Assert.True(reply.Accepted);
+        var promoted = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+            .Single(row => row.Kind == SlackOutboxKinds.TerminalResult);
+        // The in-place promotion must carry the liveness StatusDispatchRef so the
+        // post-reply liveness finalization can derive the reaction target from the
+        // authoritative progress-row metadata, not from a potentially-wrong delivery source.
+        Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"),
+            SlackDeliveryPayload.Parse(promoted.PayloadJson).StatusDispatchRef);
+
+        // Simulate the terminal handler's source differing from the ingress source
+        // (e.g. delivery.MessageTs null -> synthetic ts). FinalizeLivenessAsync must
+        // target the ORIGINAL message (from StatusDispatchRef), not the synthetic one —
+        // otherwise the reaction mutation targets a non-existent message and stalls.
+        var deliverySource = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-statusref", "terminal:synthetic");
+        await projection.FinalizeLivenessAsync(
+            connection.ProjectId, connection.Id, deliverySource, threadTs: null, "completed", progressDispatchRef);
+
+        var finalized = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        Assert.Contains(finalized, row => row.Kind == SlackOutboxKinds.ReactionMutation
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-add"));
+        Assert.DoesNotContain(finalized, row => row.Kind == SlackOutboxKinds.ReactionMutation
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(deliverySource, "terminal-add"));
+    }
+
+    [Fact]
+    public async Task Agent_reply_without_an_active_conversation_is_not_accepted()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+
+        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-unknown", null, "hello");
+
+        Assert.False(reply.Accepted);
+    }
+
     private async Task<AgentConnection> CreateConnectionAsync()
     {
         var id = $"connection_{Guid.NewGuid():N}";

@@ -23,15 +23,12 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackTerminalDeliveryHandlerSpecs
 {
     [Theory]
-    [InlineData("completed", SlackOutboxKinds.TerminalResult, "The task completed.", "Review the evidence")]
-    [InlineData("failed", SlackOutboxKinds.ExplicitFailure, "The task failed.", "Reply with corrected instructions")]
-    [InlineData("cancelled", SlackOutboxKinds.ExplicitFailure, "The task was cancelled.", "Send a new request")]
-    [InlineData("unknown", SlackOutboxKinds.ExplicitFailure, "The task outcome is unknown.", "Wait for reconciliation")]
-    public async Task HandleAsync_RendersTerminalOutcomeAndEnqueuesIdempotently(
-        string status,
-        string expectedKind,
-        string expectedConclusion,
-        string expectedNextStep)
+    [InlineData("completed")]
+    [InlineData("failed")]
+    [InlineData("cancelled")]
+    [InlineData("unknown")]
+    public async Task HandleAsync_FinalizesLivenessWithoutAuthoringAReply_TheAgentOwnsTheReply(
+        string status)
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
@@ -115,26 +112,19 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
 
         await using var scope = provider.CreateAsyncScope();
         var rows = (await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>().ListAsync("proj-1", "conn-1")).Entries;
-        var row = Assert.Single(rows);
-        Assert.Equal(expectedKind, row.Kind);
-        Assert.Equal("D1", row.ConversationId);
-        Assert.Equal("1710000000.000001", row.ThreadTs);
-        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
-        var text = payload.Text!;
-        Assert.StartsWith("Task: ship the release\n", text, StringComparison.Ordinal);
-        Assert.Contains($"Conclusion: {expectedConclusion}", text);
-        Assert.Contains("Evidence: ", text);
-        Assert.True(text.Contains($"Next step: {expectedNextStep}", StringComparison.Ordinal), text);
-        Assert.DoesNotContain("xoxb-secret", text);
-        Assert.DoesNotContain("raw tool output", text);
-        Assert.Contains("Session: session-1", text);
-        Assert.True(payload.Blocks.HasValue);
-        var button = payload.Blocks.Value[0].GetProperty("elements")[0];
-        Assert.Equal("https://mohist.example/demo/sessions/session-1", button.GetProperty("url").GetString());
+        // The reply body is the Agent's responsibility: it is sent via
+        // `mo slack message send` (the reply action), not extracted from the
+        // turn output. The terminal handler finalizes liveness only and must
+        // never author a Server-rendered reply, status template, or leak the
+        // raw turn output — silence is a legitimate outcome.
+        Assert.DoesNotContain(rows, row => row.Kind is SlackOutboxKinds.TerminalResult or SlackOutboxKinds.ExplicitFailure);
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("ship the release", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("raw tool output", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("xoxb-secret", StringComparison.Ordinal));
     }
 
     [Fact]
-    public async Task HandleAsync_UsesTheAssistantReportAsTheTerminalReply_WhenTheAgentHasOne()
+    public async Task HandleAsync_DoesNotExtractAssistantTextAsTheReply_SilenceIsOwnedByTheAgent()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
@@ -208,14 +198,12 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
 
         await using var scope = provider.CreateAsyncScope();
         var rows = (await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>().ListAsync("proj-1", "conn-1")).Entries;
-        var row = Assert.Single(rows);
-        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
-        Assert.Equal(
-            "磁盘占用 62%，CPU 平均 18%，内存剩余 3.2G。无需处理。\nSession: session-1",
-            payload.Text);
-        Assert.DoesNotContain("Task: ship the release", payload.Text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Conclusion:", payload.Text, StringComparison.Ordinal);
-        Assert.DoesNotContain("Next step:", payload.Text, StringComparison.Ordinal);
+        // The Agent is the speaker: the turn output's assistantText is a
+        // Runner fact for state adjudication, never the Slack reply source.
+        // If the Agent did not send a reply action, the turn ends in silence.
+        Assert.DoesNotContain(rows, row => row.Kind is SlackOutboxKinds.TerminalResult or SlackOutboxKinds.ExplicitFailure);
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("磁盘占用", StringComparison.Ordinal));
+        Assert.DoesNotContain(rows, row => row.PayloadJson.Contains("Task: ship the release", StringComparison.Ordinal));
     }
 
     [Fact]

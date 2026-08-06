@@ -387,6 +387,43 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(new { cleared = cleared > 0 });
         });
 
+        management.MapPost("/reply", async (
+            HttpContext context,
+            SlackReplyBody body,
+            SlackOutboxStore outbox,
+            CancellationToken ct) =>
+        {
+            if (body is null
+                || string.IsNullOrWhiteSpace(body.ConversationId)
+                || string.IsNullOrWhiteSpace(body.Text))
+                return ApiResults.BadRequest("conversationId and text are required.");
+
+            var projectId = context.GetResolvedProject().Id;
+            var text = SlackFinalReplyRenderer.RedactReplyText(body.Text);
+            if (string.IsNullOrWhiteSpace(text))
+                return ApiResults.BadRequest("text must not be empty.");
+
+            var result = await outbox.EnqueueAgentReplyAsync(
+                projectId,
+                body.ConversationId.Trim(),
+                string.IsNullOrWhiteSpace(body.ThreadTs) ? null : body.ThreadTs.Trim(),
+                text,
+                ct);
+            if (!result.Accepted)
+                return ApiResults.Fail(
+                    "No active Slack conversation matches this conversation and reply target.",
+                    404,
+                    "slack_reply_no_conversation");
+            return ApiResults.Ok(new
+            {
+                accepted = true,
+                connectionId = result.ConnectionId,
+                deliveryId = result.DeliveryId,
+                dispatchRef = result.DispatchRef,
+                merged = result.MergedIntoExisting,
+            });
+        });
+
         var group = app.MapGroup("/api/projects/{projectRef}/slack-connections/{connectionId}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
@@ -2240,6 +2277,13 @@ public sealed class SlackCredentialsBody
 {
     public string AppToken { get; init; } = string.Empty;
     public string BotToken { get; init; } = string.Empty;
+}
+
+public sealed class SlackReplyBody
+{
+    public string ConversationId { get; init; } = string.Empty;
+    public string? ThreadTs { get; init; }
+    public string Text { get; init; } = string.Empty;
 }
 
 public sealed class SlackIngressBody

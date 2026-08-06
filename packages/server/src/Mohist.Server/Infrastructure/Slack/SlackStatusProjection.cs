@@ -163,6 +163,66 @@ public sealed class SlackStatusProjection : IScopedService
         return result;
     }
 
+    /// <summary>
+    /// Finalizes liveness for a completed turn WITHOUT authoring a reply:
+    /// transitions the Working reaction to the terminal reaction
+    /// (Completed/Failed). The reply body itself comes from the Agent's
+    /// reply action (<c>mo slack message send</c>); silence is a
+    /// legitimate outcome, so this never injects text. Safe to call
+    /// after a reply action already promoted the progress message in
+    /// place — it looks for either a replaceable progress row or the
+    /// promoted terminal row for the same dispatch reference.
+    /// </summary>
+    public async Task FinalizeLivenessAsync(
+        string projectId,
+        string connectionId,
+        SlackMessageIdentity source,
+        string? threadTs,
+        string status,
+        string? progressDispatchRef = null,
+        CancellationToken ct = default)
+    {
+        var dispatchRef = progressDispatchRef ?? DispatchRef(source, "progress");
+        var entries = await _outbox.ListAsync(projectId, connectionId, ct);
+        var projectionSource = source;
+        var hadWorking = false;
+        foreach (var entry in entries.Entries)
+        {
+            if (entry.DispatchRef != dispatchRef)
+                continue;
+            if (entry.Kind == SlackOutboxKinds.ReplaceableProgress
+                || entry.Kind == SlackOutboxKinds.TerminalResult
+                || entry.Kind == SlackOutboxKinds.ExplicitFailure)
+            {
+                hadWorking = true;
+                var payload = TryReadPayload(entry.PayloadJson);
+                if (payload?.StatusDispatchRef is { } statusDispatchRef
+                    && TryReadSource(statusDispatchRef, out var parsedSource))
+                {
+                    projectionSource = parsedSource;
+                }
+                break;
+            }
+        }
+        if (!hadWorking)
+            return;
+
+        await EnqueueReactionAsync(
+            projectId, connectionId, projectionSource, threadTs,
+            "terminal-remove-working",
+            SlackDeliveryOperations.ReactionRemove,
+            WorkingReaction,
+            null,
+            ct);
+        await EnqueueReactionAsync(
+            projectId, connectionId, projectionSource, threadTs,
+            "terminal-add",
+            SlackDeliveryOperations.ReactionAdd,
+            ReactionFor(status),
+            null,
+            ct);
+    }
+
     public static string DispatchRef(SlackMessageIdentity source, string phase) =>
         $"slack-status:{source.AsKey()}:{phase}";
 

@@ -17,10 +17,12 @@ public sealed class SlackExecutionContextContractTests
         Assert.Equal(
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(skill.Instructions))).ToLowerInvariant(),
             skill.ContentHash);
-        Assert.Contains("Reply to the Server-provided SlackReplyAnchor", skill.Instructions, StringComparison.Ordinal);
-        Assert.Contains("Avoid empty acknowledgements", skill.Instructions, StringComparison.Ordinal);
-        Assert.Contains("delegated result is complete", skill.Instructions, StringComparison.Ordinal);
-        Assert.Contains("conclusions, evidence, and next actions self-contained", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("You are the speaker", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("mo slack message send", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("silence is a legitimate", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Do not post empty acknowledgements", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("@mention the delegator", skill.Instructions, StringComparison.Ordinal);
+        Assert.Contains("Never guess a reply destination", skill.Instructions, StringComparison.Ordinal);
     }
 
     [Fact]

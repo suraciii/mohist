@@ -353,7 +353,7 @@ public sealed partial class SlackChannelThreadIngressSpecs
     }
 
     [Fact]
-    public async Task Followup_turn_terminal_delivers_result_to_slack_thread()
+    public async Task Followup_turn_reply_is_delivered_by_the_agent_reply_action_not_the_terminal_handler()
     {
         var connection = await CreateConnectionAsync();
         const string conversationId = "C-channel-followup-delivery";
@@ -390,33 +390,42 @@ public sealed partial class SlackChannelThreadIngressSpecs
 
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var dispatchRefPrefix = $"agent-job:agent-session-followup:{sessionId}:";
 
-        var deliveryDispatchRef = await TestWait.ForAsync(
+        // The Agent sends its reply via the reply action API (mo slack message send).
+        // The reply lands in the outbox — preferring an in-place update of the
+        // liveness progress message — and is the only reply body Slack sees.
+        const string agentReply = "Done — the follow-up is resolved. token=xoxb-leak-attempt";
+        using var reply = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{connection.ProjectId}/slack-connections/reply",
+            new { conversationId, threadTs = rootTs, text = agentReply });
+        if (!reply.IsSuccessStatusCode)
+        {
+            var body = await reply.Content.ReadAsStringAsync();
+            Assert.Fail($"reply action failed {(int)reply.StatusCode}: {body}");
+        }
+
+        var delivered = await TestWait.ForAsync(
             async () =>
             {
-                var rows = await db.SlackOutboxRows.AsNoTracking()
+                var json = await db.SlackOutboxRows.AsNoTracking()
                     .Where(row => row.ConnectionId == connection.Id
                         && row.ConversationId == conversationId
-                        && row.Kind == SlackOutboxKinds.TerminalResult
-                        && row.ThreadTs == rootTs)
-                    .Select(row => row.DispatchRef)
-                    .ToListAsync();
-                return rows.FirstOrDefault(r => r is not null && r.StartsWith(dispatchRefPrefix, StringComparison.Ordinal));
+                        && row.Kind == SlackOutboxKinds.TerminalResult)
+                    .Select(row => row.PayloadJson)
+                    .FirstOrDefaultAsync();
+                return json is null ? null : SlackDeliveryPayload.Parse(json);
             },
-            value => value is not null,
+            payload => payload?.Text is { } text
+                && text.Contains("the follow-up is resolved", StringComparison.Ordinal),
             TimeSpan.FromSeconds(30),
             TimeSpan.FromMilliseconds(50),
-            $"follow-up terminal delivery outbox row for session {sessionId}",
-            advance: async () =>
-            {
-                await _fixture.Grains.GetGrain<Mohist.Server.Events.Grains.IEventDispatcherGrain>(
-                    Mohist.Server.Events.Grains.EventDispatcherGrain.Global)
-                    .DispatchNowAsync();
-            });
+            "agent reply action terminal row");
 
-        Assert.NotNull(deliveryDispatchRef);
-        Assert.StartsWith(dispatchRefPrefix, deliveryDispatchRef);
+        Assert.Contains("the follow-up is resolved", delivered!.Text, StringComparison.Ordinal);
+        // Sensitive values carried by the reply action must be redacted out of
+        // the Slack body — the reply anchor / secrets never reach the channel.
+        Assert.DoesNotContain("xoxb-leak-attempt", delivered.Text, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", delivered.Text, StringComparison.Ordinal);
     }
 
     [Fact]
