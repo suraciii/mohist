@@ -63,6 +63,7 @@ public class MohistDbContext : DbContext
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
     public DbSet<AgentJobEventRow> AgentJobEvents { get; set; } = null!;
+    public DbSet<IngressEventRow> IngressEvents { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -1060,6 +1061,47 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentJobEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<IngressEventRow>(entity =>
+        {
+            entity.ToTable("IngressEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.Property(e => e.DispatchedAt);
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_IngressEvents_Undelivered");
         });
 
         modelBuilder.Entity<DeadLetterRow>(entity =>

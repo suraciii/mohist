@@ -765,6 +765,62 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("EpicEvents", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.IngressEventRow", b =>
+                {
+                    b.Property<string>("Source")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("Id")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Data")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("DataContentType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ExtensionsJson")
+                        .IsRequired()
+                        .HasColumnType("JSON");
+
+                    b.Property<string>("SpecVersion")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Subject")
+                        .HasColumnType("TEXT")
+                        .HasMaxLength(256);
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("Time")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Source", "Id");
+
+                    b.HasIndex("Source", "Id")
+                        .HasDatabaseName("IX_IngressEvents_Undelivered")
+                        .HasFilter("\"DispatchedAt\" IS NULL");
+
+                    b.ToTable("IngressEvents", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.IssueEventRow", b =>
                 {
                     b.Property<string>("Source")
