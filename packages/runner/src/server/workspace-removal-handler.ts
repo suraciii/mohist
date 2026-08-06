@@ -28,6 +28,9 @@ import { hasCompleteWorkspaceIdentity, isUnderRunnerRoot, type WorkspaceQuery } 
 import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import { issueWorkspacePath, validateWorkspaceIdentity, type IssueWorkspaceMarker } from "../runtime/workspace.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("cleanup")
 
 export interface WorkspaceRemovalHandlerDeps {
   runnerRoot: string
@@ -110,7 +113,7 @@ async function dropRegistryEntryForPath(
   try {
     await registry.remove(entry.workflowRunId)
   } catch (error) {
-    console.error("workspace registry remove failed:", error)
+    log.error("workspace registry remove failed", { path: workspacePath, run: entry.workflowRunId, exception: error })
   }
 }
 

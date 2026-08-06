@@ -14,6 +14,13 @@
 持久关系。它保存该场所中的 Agent 身份、调用范围和可用状态，但不复制 Mohist Agent
 的 Instructions、执行配置或 Skills，也不拥有 AgentSession。
 
+**Mohist App**：一个 Slack 工作区中只安装一次的 Mohist 管理入口。它负责建立工作区
+连接、安装和管理 Agent 接入，但不代表任何一个业务 Agent，也不代替 Agent App 执行工作。
+
+**Agent App**：一个 Agent 接入在 Slack 平台上的专属 App 与 Bot。它让一个 Mohist Agent
+以独立身份出现在一个 Slack 工作区中，但不复制 Agent 定义；同一个 Mohist Agent 在不同
+工作区中的 Agent App 是彼此独立的外部身份。
+
 **Slack Bot**：Agent 接入在 Slack 中代表 Mohist Agent 的交互身份。Slack Bot 是客户端，
 不是另一个 Mohist Agent，也不是外部 Agent。
 

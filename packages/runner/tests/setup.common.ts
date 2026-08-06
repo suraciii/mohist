@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, vi } from "vitest"
 import { UnexpectedConsoleRecorder } from "./support/unexpected-console.js"
 import { cleanupRegisteredTempDirs } from "./support/temp-dir.js"
+import { installLoggerCapture } from "./support/logger-test.js"
 
 const unexpectedConsole = new UnexpectedConsoleRecorder()
+let restoreLogger: (() => void) | null = null
 
 beforeEach(() => {
+  restoreLogger = installLoggerCapture()
   unexpectedConsole.clear()
   vi.spyOn(console, "error").mockImplementation((...values) => {
     unexpectedConsole.record("error", values)
@@ -15,6 +18,8 @@ beforeEach(() => {
 })
 
 afterEach(async () => {
+  restoreLogger?.()
+  restoreLogger = null
   vi.useRealTimers()
   vi.unstubAllEnvs()
 

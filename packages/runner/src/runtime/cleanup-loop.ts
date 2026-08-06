@@ -2,9 +2,12 @@ import { existsSync } from "node:fs"
 import { isUnderRunnerRoot } from "./workspace-query.js"
 import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath, type IssueWorkspaceMarker } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
+import { runnerLogger } from "../system/logger.js"
 import type { CleanupPolicy } from "../core/types.js"
 import type { WorkspaceRegistry, WorkspaceRegistryEntry } from "./workspace-registry.js"
 import type { WorkspaceRemovalFence } from "./workspace-removal-fence.js"
+
+const log = runnerLogger.child("cleanup")
 
 export interface CleanupRunner {
   isUnderRunnerRoot(root: string, candidate: string): boolean
@@ -72,7 +75,7 @@ export class CleanupLoop {
       if (blockedPaths.has(entry.workspacePath)) continue
       const verdict = await this.evaluateGuards(entry)
       if (verdict.ok) continue
-      console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
+      log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: verdict.message })
       await this.registry.markStuck(entry.workflowRunId)
       result.stuckResolved++
     }
@@ -180,7 +183,7 @@ export class CleanupLoop {
     const remove = async (): Promise<boolean> => {
       const verdict = await this.evaluateGuards(entry)
       if (!verdict.ok) {
-        console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} — ${verdict.message}`)
+        log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: verdict.message })
         return false
       }
 
@@ -191,7 +194,7 @@ export class CleanupLoop {
 
       if (this.runner.validateAndDeleteWorkspace) {
         if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
-          console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
+          log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: "workspace identity is invalid" })
           return false
         }
         await this.registry.remove(entry.workflowRunId)
@@ -199,7 +202,7 @@ export class CleanupLoop {
       }
 
       if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
-        console.warn(`workspace cleanup: refused to remove ${entry.workspacePath} - workspace identity is invalid`)
+        log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: "workspace identity is invalid" })
         return false
       }
 
@@ -212,7 +215,7 @@ export class CleanupLoop {
       try {
         return await remove()
       } catch (error) {
-        console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
+        log.error("workspace cleanup failed to remove path", { run: entry.workflowRunId, path: entry.workspacePath, exception: error })
         return false
       }
     }
@@ -221,7 +224,7 @@ export class CleanupLoop {
       try {
         return await remove()
       } catch (error) {
-        console.error(`workspace cleanup: failed to remove ${entry.workspacePath}:`, error)
+        log.error("workspace cleanup failed to remove path", { run: entry.workflowRunId, path: entry.workspacePath, exception: error })
         return false
       }
     })

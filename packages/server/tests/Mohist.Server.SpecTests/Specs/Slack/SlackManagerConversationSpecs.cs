@@ -40,7 +40,6 @@ public sealed class SlackManagerConversationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = "U_MANAGER_BOT_CONVERSATION",
-            managerCredentialRef = "manager-credential-conversation",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
@@ -215,6 +214,65 @@ public sealed class SlackManagerConversationSpecs
             .ToListAsync();
         Assert.DoesNotContain(messages, payload => payload.Contains("Agent created and mounted.", StringComparison.Ordinal));
         Assert.DoesNotContain(messages, payload => payload.Contains("manager_tool_not_available", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Manager_conversation_replaces_an_unbound_session_before_accepting_the_next_message()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var team = $"T_MANAGER_RECOVERY_{suffix}";
+        var appId = $"A_MANAGER_RECOVERY_{suffix}";
+        var owner = $"U_MANAGER_RECOVERY_{suffix}";
+        using var setupResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/setup", new
+        {
+            workspaceTeamId = team,
+            managerAppId = appId,
+            managerBotUserId = $"U_MANAGER_BOT_RECOVERY_{suffix}",
+        });
+        setupResponse.EnsureSuccessStatusCode();
+        var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+        var claimed = await SendManagerMessageAsync(
+            appId, team, owner, "1710000001.000001", $"claim {claimCode}");
+        Assert.Equal("accepted", claimed.GetProperty("decision").GetString());
+
+        var initial = await SendManagerMessageAsync(
+            appId, team, owner, "1710000001.000002", "Start a Manager conversation.");
+        Assert.Equal("accepted", initial.GetProperty("decision").GetString());
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var enrollment = await scope.ServiceProvider.GetRequiredService<SlackWorkspaceEnrollmentStore>()
+            .GetActiveByTeamAsync(team);
+        Assert.NotNull(enrollment);
+        var originalSessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollment!.Id,
+            team,
+            "D_MANAGER_CONVERSATION"))}";
+        var replacementMessageTs = "1710000001.000003";
+        var replacement = await SendManagerMessageAsync(
+            appId, team, owner, replacementMessageTs, "Continue after the unbound launch.");
+        Assert.Equal("accepted", replacement.GetProperty("decision").GetString());
+
+        var replacementSessionId = $"manager-session-{AgentLaunchCoordinatorCodec.StableToken(string.Join('\n',
+            enrollment.Id,
+            team,
+            "D_MANAGER_CONVERSATION",
+            replacementMessageTs))}";
+        Assert.NotEqual(originalSessionId, replacementSessionId);
+        var mapping = await scope.ServiceProvider.GetRequiredService<SlackDmSessionMappingStore>()
+            .GetCurrentSessionIdAsync(
+                BuiltInAgentCatalog.MohistSlackProjectId,
+                enrollment.Id,
+                "D_MANAGER_CONVERSATION");
+        Assert.Equal(replacementSessionId, mapping);
+
+        var database = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+        var replacementJob = await database.AgentJobs.SingleAsync(row =>
+            row.AgentSessionId == replacementSessionId);
+        Assert.Equal(BuiltInAgentCatalog.MohistSlackProjectId, replacementJob.ProjectId);
+        var replacementInbox = await database.SlackProviderInboxRows.SingleAsync(row =>
+            row.ConnectionId == enrollment.Id
+            && row.SlackMessageIdentity == $"{team}/D_MANAGER_CONVERSATION/{replacementMessageTs}");
+        Assert.Equal(replacementSessionId, replacementInbox.RouteSessionId);
     }
 
     private async Task SeedProjectAsync(string projectId)

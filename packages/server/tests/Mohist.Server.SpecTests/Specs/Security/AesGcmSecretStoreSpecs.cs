@@ -44,7 +44,7 @@ public class AesGcmSecretStoreSpecs
         await store.StoreAsync(fixture.BotAddress, "bot"u8.ToArray());
 
         await using var db = database.CreateContext();
-        var rows = db.ConnectionSecrets.AsNoTracking().ToList();
+        var rows = db.StoredSecrets.AsNoTracking().ToList();
         Assert.Equal(2, rows.Count);
         var byKind = rows.ToDictionary(r => r.Kind);
         Assert.True(byKind["appToken"].Blob.Length > 0);
@@ -109,7 +109,7 @@ public class AesGcmSecretStoreSpecs
         Assert.Null(await store.LoadAsync(fixture.AppAddress));
 
         await using var db = database.CreateContext();
-        Assert.Empty(db.ConnectionSecrets);
+        Assert.Empty(db.StoredSecrets);
     }
 
     [Fact]
@@ -136,6 +136,58 @@ public class AesGcmSecretStoreSpecs
         await using var db = database.CreateContext();
         var applied = await db.Database.GetAppliedMigrationsAsync();
         Assert.Contains(applied, m => m == "20260729000000_AddConnectionSecrets");
+    }
+
+    [Fact]
+    public async Task TypedSlackOwnersKeepCredentialSetsIsolated()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var store = NewStore(database);
+        var enrollmentKinds = new[]
+        {
+            SecretKind.ConfigurationAccessToken,
+            SecretKind.ConfigurationRefreshToken,
+            SecretKind.AppToken,
+            SecretKind.BotToken,
+            SecretKind.ClientSecret,
+            SecretKind.SigningSecret,
+        };
+        foreach (var kind in enrollmentKinds)
+        {
+            var address = SecretStoreAddress.ForSlackWorkspaceEnrollment("shared-id", kind);
+            var value = $"enrollment-{SecretKinds.ToWire(kind)}";
+            await store.StoreAsync(address, Encoding.UTF8.GetBytes(value));
+
+            var loaded = await store.LoadAsync(address);
+            Assert.Equal(value, Encoding.UTF8.GetString(loaded!));
+        }
+
+        var agentApp = SecretStoreAddress.ForManagedSlackAgentApp("shared-id", SecretKind.BotToken);
+        var connection = SecretStoreAddress.ForAgentConnection("proj_a", "shared-id", SecretKind.BotToken);
+        await store.StoreAsync(agentApp, "xoxb-agent-app"u8.ToArray());
+        await store.StoreAsync(connection, "xoxb-connection"u8.ToArray());
+
+        Assert.Equal("xoxb-agent-app", Encoding.UTF8.GetString((await store.LoadAsync(agentApp))!));
+        Assert.Equal("xoxb-connection", Encoding.UTF8.GetString((await store.LoadAsync(connection))!));
+
+        await using var db = database.CreateContext();
+        Assert.Equal(
+            [
+                SecretOwnerKinds.AgentConnection,
+                SecretOwnerKinds.ManagedSlackAgentApp,
+                SecretOwnerKinds.SlackWorkspaceEnrollment,
+            ],
+            db.StoredSecrets
+                .Select(row => row.OwnerKind)
+                .Distinct()
+                .OrderBy(ownerKind => ownerKind)
+                .ToArray());
+        Assert.Throws<ArgumentException>(() =>
+            SecretStoreAddress.ForSlackWorkspaceEnrollment("shared-id", SecretKind.WebhookSecret));
+        Assert.Throws<ArgumentException>(() =>
+            SecretStoreAddress.ForManagedSlackAgentApp("shared-id", SecretKind.ConfigurationAccessToken));
+        Assert.Throws<ArgumentException>(() =>
+            SecretStoreAddress.ForAgentConnection("proj_a", "shared-id", SecretKind.ClientSecret));
     }
 
     private static AesGcmSecretStore NewStore(

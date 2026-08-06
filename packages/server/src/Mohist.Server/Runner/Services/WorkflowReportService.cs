@@ -59,7 +59,7 @@ public sealed class WorkflowReportService : IScopedService
                 // terminal state. Validation runs before any task mutation, so fail
                 // the active work durably and ack so the runner retires the work.
                 _log.LogError(
-                    "Workflow {RunId} work {WorkId} rejected recovery follow-up: {Error}",
+                    "run {run} work {work} rejected recovery follow-up: {reason}",
                     workflowRunId, workId, ex.Message);
                 var rejectionAck = await workflow.ReceiveTaskReportAsync(workerId, workId, new TaskReport(
                     workId,

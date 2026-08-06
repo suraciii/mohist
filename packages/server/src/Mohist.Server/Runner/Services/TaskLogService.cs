@@ -118,7 +118,7 @@ public sealed class TaskLogService : IScopedService
             // already been committed; dropping the realtime push
             // is the correct best-effort behaviour.
             _log.LogWarning(ex,
-                "Task-log realtime fan-out failed for {OwnerKind}/{OwnerId}/{WorkId}; persistence unaffected",
+                "Task-log realtime fan-out failed for {OwnerKind}/{OwnerId}/{work}; persistence unaffected",
                 ownerKind, ownerId, workId);
         }
 

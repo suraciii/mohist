@@ -107,9 +107,14 @@ internal sealed class MohistCliApi
         string path,
         ResourceDescriptor descriptor,
         JsonSelection selection,
-        Func<JsonNode?, Task<int>> humanRenderer)
+        Func<JsonNode?, Task<int>> humanRenderer,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
-        var response = await ResponseReader.ReadAsync(HttpMethod.Get, path, cancellationToken: Invocation.CancellationToken)
+        var response = await ResponseReader.ReadAsync(
+                HttpMethod.Get,
+                path,
+                headers: headers,
+                cancellationToken: Invocation.CancellationToken)
             .ConfigureAwait(false);
         if (!response.IsSuccess)
             return await new CliResultWriter(Invocation).WriteFailureAsync(response.Failure!).ConfigureAwait(false);
@@ -188,13 +193,15 @@ internal sealed class MohistCliApi
         JsonSelection selection,
         Func<JsonNode?, Task<int>> humanRenderer,
         JsonNode? successDataFallback = null,
-        Func<JsonNode?, JsonNode?>? normalizeData = null)
+        Func<JsonNode?, JsonNode?>? normalizeData = null,
+        IReadOnlyDictionary<string, string>? headers = null)
     {
         var response = await ResponseReader.ReadAsync(
                 method,
                 path,
                 body,
                 mutating: true,
+                headers: headers,
                 cancellationToken: Invocation.CancellationToken)
             .ConfigureAwait(false);
         if (!response.IsSuccess)
@@ -1118,6 +1125,9 @@ internal sealed class MohistCliApi
                 new CliFailure("invalid-response", ex.Message, null)).ConfigureAwait(false);
         }
     }
+
+    internal Task<int> WriteJsonDataAsync(JsonNode? data) =>
+        new CliResultWriter(Invocation).WriteSuccessAsync(data);
 
     public enum TableShape
     {

@@ -4,6 +4,7 @@ import { setOpencodeModelDiscoveryForTest } from "../src/runtime/opencode-models
 import type { SessionTarget } from "../src/server/session-target.js"
 import type { FollowupTargetResolution } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
+import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
 import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 
 const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
@@ -195,8 +196,6 @@ describe("RunnerHost", () => {
     poll.mockResolvedValue([])
     startSignalR.mockResolvedValue(undefined)
     stopSignalR.mockResolvedValue(undefined)
-    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
-    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const controller = new AbortController()
     const host = new RunnerHost({
       serverUrl: "http://localhost:3456",
@@ -213,13 +212,13 @@ describe("RunnerHost", () => {
       await connected.promise
       await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS * 2)
       expect(poll).not.toHaveBeenCalled()
-      expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("provider error policy invalid"))
-      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining("provider error policy invalid"))
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "provider error policy invalid", component: "host" }),
+        expect.objectContaining({ level: "WARN", message: "runner not ready; skipping poll", fields: expect.objectContaining({ reason: expect.stringContaining("provider error policy invalid") }) }),
+      ]))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-      errorSpy.mockRestore()
-      warningSpy.mockRestore()
     }
   })
 
@@ -315,8 +314,8 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
-    const warningSpy = vi.spyOn(console, "warn").mockImplementation((message: unknown) => {
-      if (typeof message === "string" && message.includes("runner poll failed; retrying")) failureLogged.resolve()
+    const stopLog = onCapturedLog((record) => {
+      if (record.message === "runner poll failed; retrying") failureLogged.resolve()
     })
     const run = host.run(controller.signal)
 
@@ -329,11 +328,13 @@ describe("RunnerHost", () => {
 
       expect(connect).toHaveBeenCalledTimes(1)
       expect(startSignalR).toHaveBeenCalledTimes(1)
-      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining("runner poll failed; retrying"), pollFailure)
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "runner poll failed; retrying", fields: expect.objectContaining({ exception: pollFailure }) }),
+      ]))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-      warningSpy.mockRestore()
+      stopLog()
     }
   })
 
@@ -373,7 +374,6 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
-    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
     const run = host.run(controller.signal)
 
     try {
@@ -383,11 +383,12 @@ describe("RunnerHost", () => {
       await retryPollStarted.promise
       await expect(run).resolves.toBeUndefined()
 
-      expect(warningSpy).toHaveBeenCalledWith(expect.stringContaining("runner poll failed; retrying"), expect.any(Error))
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "WARN", message: "runner poll failed; retrying", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
+      ]))
     } finally {
       controller.abort()
       await run.catch(() => undefined)
-      warningSpy.mockRestore()
     }
   })
 
@@ -469,7 +470,6 @@ describe("RunnerHost", () => {
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
 
-    const errorSpy = vi.spyOn(console, "error").mockClear().mockImplementation(() => undefined)
     const run = host.run(controller.signal)
     try {
       await firstSignalRStarted.promise
@@ -486,17 +486,13 @@ describe("RunnerHost", () => {
       controller.abort()
       await expect(run).resolves.toBeUndefined()
 
-      expect(errorSpy).toHaveBeenCalledTimes(1)
-      expect(errorSpy).toHaveBeenNthCalledWith(
-        1,
-        `runner connection failed; retrying in ${POLL_INTERVAL_MS}ms`,
-        signalRUnavailable,
-      )
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "runner connection failed; retrying", fields: expect.objectContaining({ exception: signalRUnavailable }) }),
+      ]))
     } finally {
       secondSignalRRelease.resolve()
       controller.abort()
       await run.catch(() => undefined)
-      errorSpy.mockRestore()
     }
   })
 

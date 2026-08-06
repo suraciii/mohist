@@ -1,6 +1,9 @@
 import { execFile } from "node:child_process"
 import type { ExecFileException, ExecFileOptionsWithStringEncoding } from "node:child_process"
 import { assertExternalProcessAllowed } from "../system/process-policy.js"
+import { runnerLogger } from "../system/logger.js"
+
+const log = runnerLogger.child("models")
 
 export interface OpencodeModelCatalog {
   models: string[]
@@ -82,11 +85,11 @@ export async function discoverOpencodeModels(
       throw new Error("opencode models --verbose returned no valid model headers")
     }
     if (!output.complete) {
-      console.warn("opencode model discovery timed out; using an incomplete catalog")
+      log.warn("opencode model discovery timed out; using an incomplete catalog", { reason: "timeout" })
     }
     return { ...catalog, complete: output.complete }
   } catch (error) {
-    console.error("failed to discover opencode models", error)
+    log.error("failed to discover opencode models", { exception: error })
     return { models: [], variants: {}, complete: false }
   }
 }

@@ -15,35 +15,14 @@ public sealed class SlackManifestGenerator : IScopedService
         ArgumentNullException.ThrowIfNull(input.Identity);
         if (input.ManifestVersion <= 0)
             throw new ArgumentOutOfRangeException(nameof(input.ManifestVersion));
-        if (input.Transport == SlackManifestTransport.Https && !IsHttps(input.PublicIngressBaseUrl))
-            throw new ArgumentException("HTTPS manifests require an HTTPS public ingress base URL.", nameof(input));
-        if (input.InteractivityRequestUrl is not null && !IsHttps(input.InteractivityRequestUrl))
-            throw new ArgumentException("Interactivity request URLs must use HTTPS.", nameof(input));
-
-        var botScopes = (input.BotScopes ?? Array.Empty<string>())
-            .Concat(SlackManifestScopes.RequiredBotScopes)
-            .Where(scope => !string.IsNullOrWhiteSpace(scope))
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        var userScopes = (input.UserScopes ?? Array.Empty<string>())
-            .Where(scope => !string.IsNullOrWhiteSpace(scope))
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        var botEvents = (input.BotEvents ?? ["app_mention", "message.im"])
-            .Where(eventType => !string.IsNullOrWhiteSpace(eventType))
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-        if (botEvents.Length == 0)
-            throw new ArgumentException("At least one bot event is required.", nameof(input));
+        var definition = SlackManifestDefinition.For(input.Kind);
 
         var payload = new SortedDictionary<string, object?>(StringComparer.Ordinal)
         {
             ["display_information"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["name"] = input.Name,
+                ["description"] = input.Description,
             },
             ["features"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
@@ -61,9 +40,9 @@ public sealed class SlackManifestGenerator : IScopedService
             },
             ["oauth_config"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
-                ["scopes"] = BuildScopes(botScopes, userScopes),
+                ["scopes"] = BuildScopes(definition.BotScopes),
             },
-            ["settings"] = BuildSettings(input, botEvents),
+            ["settings"] = BuildSettings(definition.BotEvents),
         };
         var canonical = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = false });
         var fingerprint = JsonSerializer.Serialize(new SortedDictionary<string, object?>(StringComparer.Ordinal)
@@ -82,80 +61,135 @@ public sealed class SlackManifestGenerator : IScopedService
         return new(input.ManifestVersion, canonical, hash);
     }
 
-    private static SortedDictionary<string, object?> BuildScopes(
-        IReadOnlyCollection<string> botScopes,
-        IReadOnlyCollection<string> userScopes)
+    private static SortedDictionary<string, object?> BuildScopes(IReadOnlyCollection<string> botScopes)
     {
         var scopes = new SortedDictionary<string, object?>(StringComparer.Ordinal)
         {
             ["bot"] = botScopes.ToArray(),
         };
-        if (userScopes.Count > 0)
-            scopes["user"] = userScopes.ToArray();
         return scopes;
     }
 
-    private static SortedDictionary<string, object?> BuildSettings(SlackManifestInput input, IReadOnlyCollection<string> botEvents)
+    private static SortedDictionary<string, object?> BuildSettings(IReadOnlyCollection<string> botEvents)
     {
         var eventSubscriptions = new SortedDictionary<string, object?>(StringComparer.Ordinal)
         {
             ["bot_events"] = botEvents.ToArray(),
         };
-        if (input.Transport == SlackManifestTransport.Https)
-            eventSubscriptions["request_url"] = $"{input.PublicIngressBaseUrl!.TrimEnd('/')}/slack/events";
-
-        var settings = new SortedDictionary<string, object?>(StringComparer.Ordinal)
+        return new SortedDictionary<string, object?>(StringComparer.Ordinal)
         {
             ["event_subscriptions"] = eventSubscriptions,
-            ["socket_mode_enabled"] = input.Transport == SlackManifestTransport.Socket,
-            ["token_rotation_enabled"] = false,
-        };
-        if (input.InteractivityRequestUrl is not null)
-        {
-            settings["interactivity"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
+            ["interactivity"] = new SortedDictionary<string, object?>(StringComparer.Ordinal)
             {
                 ["is_enabled"] = true,
-                ["request_url"] = input.InteractivityRequestUrl,
-            };
-        }
-        return settings;
+            },
+            ["socket_mode_enabled"] = true,
+            ["token_rotation_enabled"] = false,
+        };
     }
-
-    private static bool IsHttps(string? value) =>
-        Uri.TryCreate(value, UriKind.Absolute, out var uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-        && !string.IsNullOrWhiteSpace(uri.Host);
 }
 
-public static class SlackManifestScopes
+public sealed record SlackManifestDefinition(
+    IReadOnlyCollection<string> BotScopes,
+    IReadOnlyCollection<string> BotEvents)
 {
-    public static readonly string[] RequiredBotScopes = [
-        "channels:history", "chat:write", "groups:history", "im:history", "mpim:history", "reactions:read", "reactions:write", "users:read",
-    ];
+    public static SlackManifestDefinition For(SlackManifestKind kind) => kind switch
+    {
+        SlackManifestKind.MohistApp => new(["chat:write", "im:history", "users:read"], ["message.im"]),
+        SlackManifestKind.AgentApp => new(
+            ["app_mentions:read", "channels:history", "chat:write", "groups:history", "im:history", "reactions:read", "reactions:write", "users:read"],
+            ["app_mention", "message.im"]),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind)),
+    };
 }
 
 public sealed record SlackManifestInput(
     string Name,
     string Description,
-    IReadOnlyCollection<string> BotScopes,
-    SlackManifestTransport Transport,
-    string? PublicIngressBaseUrl,
     string ProductCapabilityVersion,
     SlackManifestIdentitySnapshot Identity,
-    int ManifestVersion = 2,
-    IReadOnlyCollection<string>? BotEvents = null,
-    IReadOnlyCollection<string>? UserScopes = null,
-    string? InteractivityRequestUrl = null);
+    SlackManifestKind Kind,
+    int ManifestVersion = 2);
 
 public sealed record SlackManifestIdentitySnapshot(
     string ConnectionId,
     string AgentId,
     string WorkspaceTeamId);
 
-public enum SlackManifestTransport
+public enum SlackManifestKind
 {
-    Socket,
-    Https,
+    MohistApp,
+    AgentApp,
 }
 
 public sealed record SlackManifest(int Version, string CanonicalJson, string Hash);
+
+public static class SlackManifestDrift
+{
+    public static bool HasDrift(SlackManifest desired, string? exportedManifestJson)
+    {
+        ArgumentNullException.ThrowIfNull(desired);
+        if (string.IsNullOrWhiteSpace(exportedManifestJson))
+            return true;
+
+        try
+        {
+            using var expected = JsonDocument.Parse(desired.CanonicalJson);
+            using var actual = JsonDocument.Parse(exportedManifestJson);
+            return !Equivalent(expected.RootElement, actual.RootElement);
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
+    private static bool Equivalent(JsonElement expected, JsonElement actual)
+    {
+        if (expected.ValueKind != actual.ValueKind)
+            return false;
+
+        return expected.ValueKind switch
+        {
+            JsonValueKind.Object => EquivalentObject(expected, actual),
+            JsonValueKind.Array => EquivalentArray(expected, actual),
+            JsonValueKind.String => expected.GetString() == actual.GetString(),
+            JsonValueKind.Number => expected.GetRawText() == actual.GetRawText(),
+            JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null => true,
+            _ => false,
+        };
+    }
+
+    private static bool EquivalentObject(JsonElement expected, JsonElement actual)
+    {
+        var actualProperties = actual.EnumerateObject()
+            .ToDictionary(property => property.Name, property => property.Value, StringComparer.Ordinal);
+        foreach (var property in expected.EnumerateObject())
+        {
+            if (actualProperties.Remove(property.Name, out var actualValue))
+            {
+                if (!Equivalent(property.Value, actualValue))
+                    return false;
+            }
+            else if (property.Value.ValueKind != JsonValueKind.True)
+            {
+                return false;
+            }
+        }
+
+        return actualProperties.Values.All(value => value.ValueKind == JsonValueKind.True);
+    }
+
+    private static bool EquivalentArray(JsonElement expected, JsonElement actual)
+    {
+        var remaining = actual.EnumerateArray().ToList();
+        foreach (var expectedItem in expected.EnumerateArray())
+        {
+            var matchIndex = remaining.FindIndex(candidate => Equivalent(expectedItem, candidate));
+            if (matchIndex < 0)
+                return false;
+            remaining.RemoveAt(matchIndex);
+        }
+        return remaining.Count == 0;
+    }
+}

@@ -13,7 +13,6 @@ public sealed class SlackManagerIngressService : IScopedService
     private readonly SlackOutboxStore _outbox;
     private readonly ManagerClaimService _claims;
     private readonly ManagerActorAccessDecider _access;
-    private readonly SlackDmSessionMappingStore _dmSessions;
     private readonly ISlackManagerConversationProcessor _conversation;
 
     public SlackManagerIngressService(
@@ -22,7 +21,6 @@ public sealed class SlackManagerIngressService : IScopedService
         SlackOutboxStore outbox,
         ManagerClaimService claims,
         ManagerActorAccessDecider access,
-        SlackDmSessionMappingStore dmSessions,
         ISlackManagerConversationProcessor conversation)
     {
         _enrollments = enrollments;
@@ -30,7 +28,6 @@ public sealed class SlackManagerIngressService : IScopedService
         _outbox = outbox;
         _claims = claims;
         _access = access;
-        _dmSessions = dmSessions;
         _conversation = conversation;
     }
 
@@ -51,11 +48,6 @@ public sealed class SlackManagerIngressService : IScopedService
         if (!string.Equals(enrollment.ManagerAppId, message.AppId, StringComparison.Ordinal))
             return SlackManagerIngressResult.Rejected("manager_app_not_authorized");
 
-        var currentSessionId = await _dmSessions.GetCurrentSessionIdAsync(
-            SlackDeliveryOwnerIds.ManagerProjectId,
-            enrollment.Id,
-            message.Identity.ConversationId,
-            ct);
         var accepted = await _inbox.AcceptAsync(
             new SlackProviderInboxDraft(
                 SlackDeliveryOwnerIds.ManagerProjectId,
@@ -63,7 +55,7 @@ public sealed class SlackManagerIngressService : IScopedService
                 message.Identity,
                 message.SenderSlackUserId,
                 message.ThreadTs),
-            new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, currentSessionId),
+            new SlackProviderInboxRouteDraft(SlackProviderInboxRouteKinds.Manager, SessionId: null),
             ct);
         if (accepted.AlreadyExisted)
         {

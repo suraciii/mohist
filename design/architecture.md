@@ -48,8 +48,8 @@ User Project
 | Slack credentials and service authentication | Server infrastructure | Agent / Session domains |
 | Slack protocol: receiving events, sending messages | `mohist-slack` | Server Agent / Session contexts |
 | Slack provider inbox, conversation mapping, and pending outbound delivery | Server infrastructure | `mohist-slack` local storage / Agent or Session aggregates |
-| Slack workspace Manager enrollment and managed child App lifecycle (external App create, OAuth/approval, manifest, transport facts, operation fence, unknown outcome) | Server Slack integration supporting context (SlackWorkspaceEnrollment / ManagedSlackChildApp aggregates) | `mohist-slack` / Agent or Session aggregates / pure integration records |
-| Slack Manager credential and managed child App runtime secrets (client/signing secret, app-level token, bot token) | Server Slack integration supporting context, addressed by owning aggregate (Enrollment or ChildApp) | Agent Connection / `mohist-slack` / plaintext in row, DTO, audit, or log |
+| Slack workspace Mohist App enrollment and managed Agent App lifecycle (external App create/install approval, manifest, Socket facts, operation fence, unknown outcome) | Server Slack integration supporting context (SlackWorkspaceEnrollment / ManagedSlackAgentApp aggregates) | `mohist-slack` / Agent or Session aggregates / pure integration records |
+| Slack Configuration access/refresh pair, Mohist App credentials, and managed Agent App runtime secrets (client/signing secret, app-level token, bot token) | Server Slack integration supporting context, addressed by owning aggregate (Enrollment or AgentApp) | Agent Connection / `mohist-slack` / plaintext in row, DTO, audit, or log |
 | `mohist-slack` process lifecycle | CLI managed service | Agent Connection aggregate / Runner |
 | third-party Agent exploration and delegation | external Agent + Skill | Mohist Runtime / Web UI |
 | Mohist Agent conversation from any client | Agent API + AgentSession | provider adapter local state |
@@ -231,11 +231,11 @@ Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 - Provider credentials, durable ingress, conversation mappings and delivery state live in Server
   infrastructure, outside Agent/Session domains; Agent Connection owns only the external binding, access
   policy and lifecycle.
-- The Slack Manager control plane (workspace enrollment and managed child App lifecycle) is a Server-side
+- The Slack control plane (workspace enrollment and managed Agent App lifecycle) is a Server-side
   Slack integration supporting context of independent aggregates, not the `mohist-slack` adapter and not
-  Agent-domain state. It owns the external App lifecycle facts (create/OAuth/manifest/transport/fence/unknown);
-  Agent Connection remains the authority for binding, access policy and enable/disable. Managed child App
-  runtime secrets and the Manager credential are addressed by their owning aggregate (ChildApp / Enrollment),
+  Agent-domain state. It owns the external App lifecycle facts (create/install/manifest/Socket/fence/unknown);
+  Agent Connection remains the authority for binding, access policy and enable/disable. Managed Agent App
+  runtime secrets and the Mohist App credential are addressed by their owning aggregate (AgentApp / Enrollment),
   not by Agent Connection, so removing a Connection does not delete a separately-retained Slack App's secrets.
   Production code reaches Slack create/delete only through a narrow app-management port.
 - All shell/agent/git/OpenSpec execution goes to Runner.

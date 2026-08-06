@@ -1,25 +1,49 @@
 export type SlackDeliveryOwnerKind = "connection" | "manager"
 
+export type SlackLeaseKind = "validation" | "runtime"
+
 export interface SlackConnectionRef {
-  readonly ownerKind?: "connection"
+  readonly kind?: "connection"
   readonly projectId: string
   readonly connectionId: string
 }
 
 export interface SlackManagerRef {
-  readonly ownerKind: "manager"
+  readonly kind: "manager"
   readonly enrollmentId: string
   readonly workspaceTeamId: string
 }
 
 export type SlackAdapterTarget = SlackConnectionRef | SlackManagerRef
 
-export interface AdapterSession {
-  readonly adapterId: string
-  readonly ownerKind?: SlackDeliveryOwnerKind
-  readonly appToken?: string
-  readonly botToken?: string
+export type AdapterLease = ValidationLease | RuntimeLease
+
+export interface ValidationLease {
+  readonly kind: "validation"
+  readonly leaseId: string
+  readonly generation: number
+  readonly expiresAt: string
+  readonly expectedAppId: string
+  readonly appToken: string
 }
+
+export interface RuntimeLease {
+  readonly kind: "runtime"
+  readonly leaseId: string
+  readonly generation: number
+  readonly expiresAt: string
+  readonly appToken: string
+  readonly botToken: string
+}
+
+export interface LeaseRenewal {
+  readonly leaseId: string
+  readonly kind: SlackLeaseKind
+  readonly generation: number
+  readonly expiresAt: string
+}
+
+export type SlackHelloOutcome = "verified" | "app_id_mismatch" | "lease_stale_or_expired"
 
 export interface SlackFileRef {
   readonly id: string
@@ -30,6 +54,7 @@ export interface SlackFileRef {
 
 export interface SlackEnvelope {
   readonly eventType: string
+  readonly apiAppId: string
   readonly isDirectMessage: boolean
   readonly teamId: string
   readonly conversationId: string
@@ -44,6 +69,7 @@ export interface SlackEnvelope {
 
 export interface SlackInteractionEnvelope {
   readonly eventType: "block_actions"
+  readonly apiAppId: string
   readonly interactionId: string
   readonly teamId: string
   readonly conversationId: string
@@ -91,8 +117,10 @@ export interface DeliveryAck {
 }
 
 export interface AdapterTransport {
-  discoverConnections(signal: AbortSignal): Promise<readonly SlackAdapterTarget[]>
-  lease(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<AdapterSession>
+  discover(signal: AbortSignal): Promise<readonly SlackAdapterTarget[]>
+  acquireLease(ref: SlackAdapterTarget, kind: SlackLeaseKind, adapterId: string, signal: AbortSignal): Promise<AdapterLease | null>
+  renewLease(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<LeaseRenewal | null>
+  reportHello(ref: SlackAdapterTarget, leaseId: string, appId: string, signal: AbortSignal): Promise<SlackHelloOutcome>
   ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult>
   interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult>
   claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null>
@@ -105,9 +133,14 @@ export interface SocketEvent {
   readonly ack: () => Promise<void> | void
 }
 
+export interface SocketHello {
+  readonly appId: string
+}
+
 export interface SocketClient {
   on(event: "slack_event", handler: (event: SocketEvent) => Promise<void>): void
-  start(): Promise<void>
+  onState?(event: "connecting" | "connected" | "reconnecting" | "disconnected" | "error", handler: (error?: unknown) => void): void
+  start(): Promise<SocketHello>
   disconnect?(): Promise<void>
 }
 
@@ -128,5 +161,5 @@ export interface SlackWebClient {
 
 export type SlackBlock = Record<string, unknown>
 
-export type SocketClientFactory = (appToken: string, ref: SlackConnectionRef) => SocketClient
+export type SocketClientFactory = (appToken: string, ref: SlackAdapterTarget) => SocketClient
 export type WebClientFactory = (botToken: string, ref: SlackAdapterTarget) => SlackWebClient

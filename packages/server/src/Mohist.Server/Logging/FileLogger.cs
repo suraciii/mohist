@@ -1,23 +1,11 @@
-using System.Text;
 using Microsoft.Extensions.Logging;
-using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Logging;
 
-/// <summary>
-/// Single-category <see cref="ILogger"/> that buffers one <see cref="LogRecord"/>
-/// at a time and serializes it through the shared <see cref="JSON.Options"/>
-/// so the on-disk format matches the API response format by construction.
-/// </summary>
-/// <remarks>
-/// The owning <see cref="FileLoggerProvider"/> is responsible for the file
-/// handle and serialization cadence; this class formats one record and
-/// hands the resulting bytes to the provider. The formatter does the
-/// category-to-service projection (top segment, e.g. <c>Mohist.Server</c>)
-/// and normalizes the level to upper-case (e.g. <c>INFO</c>, <c>WARN</c>).
-/// </remarks>
 internal sealed class FileLogger : ILogger
 {
+    private const string ServiceName = "server";
+
     private readonly string _categoryName;
     private readonly ILogRecordSink _sink;
 
@@ -48,9 +36,11 @@ internal sealed class FileLogger : ILogger
         var record = new LogRecord(
             Level: NormalizeLevel(logLevel),
             Time: _sink.TimeProvider.GetUtcNow(),
-            Service: ProjectService(_categoryName),
+            Service: ServiceName,
             Message: message,
-            Exception: exception?.ToString());
+            Exception: exception?.ToString(),
+            Fields: ProjectFields(state),
+            Component: ProjectComponent(_categoryName));
 
         _sink.WriteRecord(record);
     }
@@ -63,32 +53,55 @@ internal sealed class FileLogger : ILogger
         LogLevel.Warning => "WARN",
         LogLevel.Error => "ERROR",
         LogLevel.Critical => "FATAL",
-        LogLevel.None => "NONE",
         _ => level.ToString().ToUpperInvariant(),
     };
 
-    private static string ProjectService(string categoryName)
+    private static IReadOnlyList<KeyValuePair<string, object?>>? ProjectFields<TState>(TState state)
     {
-        if (string.IsNullOrEmpty(categoryName))
+        if (state is not IReadOnlyList<KeyValuePair<string, object?>> values)
+            return null;
+
+        var fields = new List<KeyValuePair<string, object?>>(values.Count);
+        foreach (var pair in values)
         {
-            return string.Empty;
+            if (pair.Key is "{OriginalFormat}" or "OriginalFormat")
+                continue;
+
+            var key = LowerFirst(pair.Key);
+            if (key.Length == 0 || IsReservedKey(key))
+                continue;
+
+            fields.Add(new(key, pair.Value));
         }
 
-        // The agreed "service" is the assembly-level identity, not the
-        // root namespace. For Mohist's own categories
-        // (Mohist.Server.<area>.<...>), the first two segments —
-        // "Mohist.Server" — match the OpenTelemetry service name. For
-        // third-party categories (Microsoft.AspNetCore.<...>) we take
-        // everything up to the second dot so the projected service
-        // remains stable regardless of how deep the category goes.
-        var first = categoryName.IndexOf('.');
-        if (first < 0)
+        return fields.Count == 0 ? null : fields;
+    }
+
+    private static bool IsReservedKey(string key) => key is
+        "time" or "level" or "msg" or "service" or "component" or "exception";
+
+    private static string ProjectComponent(string categoryName)
+    {
+        var lastSegment = categoryName[(categoryName.LastIndexOf('.') + 1)..];
+        foreach (var suffix in new[] { "Service", "Grain", "Handler", "Routes", "Provider" })
         {
-            return categoryName;
+            if (lastSegment.Length > suffix.Length
+                && lastSegment.EndsWith(suffix, StringComparison.Ordinal))
+            {
+                lastSegment = lastSegment[..^suffix.Length];
+                break;
+            }
         }
 
-        var second = categoryName.IndexOf('.', first + 1);
-        return second < 0 ? categoryName : categoryName[..second];
+        return LowerFirst(lastSegment);
+    }
+
+    private static string LowerFirst(string value)
+    {
+        if (value.Length == 0)
+            return value;
+
+        return char.ToLowerInvariant(value[0]) + value[1..];
     }
 
     private sealed class NullScope : IDisposable

@@ -4,6 +4,7 @@ import { dirname, join } from "node:path"
 import { expect, vi } from "vitest"
 import { CleanupLoop, type CleanupRunner } from "../../src/runtime/cleanup-loop.js"
 import { WorkspaceRegistry, type WorkspaceRegistryEntry } from "../../src/runtime/workspace-registry.js"
+import { capturedLogs } from "./logger-test.js"
 
 export class StubCleanupRunner implements CleanupRunner {
   public deletedPaths: string[] = []
@@ -137,17 +138,22 @@ export async function createCleanupLoopFixture(): Promise<CleanupLoopFixture> {
     return path
   }
   const expectWarnings = async <T>(messages: readonly string[], operation: () => Promise<T>): Promise<T> => {
-    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined)
-    try {
-      const result = await operation()
-      expect(warningSpy).toHaveBeenCalledTimes(messages.length)
-      for (const [index, message] of messages.entries()) {
-        expect(warningSpy).toHaveBeenNthCalledWith(index + 1, message)
-      }
-      return result
-    } finally {
-      warningSpy.mockRestore()
+    const start = capturedLogs().length
+    const result = await operation()
+    const warnings = capturedLogs().slice(start).filter((record) => record.level === "WARN")
+    expect(warnings).toHaveLength(messages.length)
+    for (const [index, message] of messages.entries()) {
+      const separator = message.includes(" — ") ? " — " : " - "
+      const separatorIndex = message.indexOf(separator)
+      expect(warnings[index]).toEqual(expect.objectContaining({
+        message: "workspace cleanup refused",
+        fields: expect.objectContaining({
+          path: message.slice("workspace cleanup: refused to remove ".length, separatorIndex),
+          reason: message.slice(separatorIndex + separator.length),
+        }),
+      }))
     }
+    return result
   }
 
   return {
