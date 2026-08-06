@@ -56,7 +56,7 @@ public static class GitHubEventNormalizer
                 "reopened" => EventCatalog.ReverseDns.GitHubIssuesReopened,
                 _ => null,
             },
-            "pull_request_review" => EventCatalog.ReverseDns.GitHubPullRequestReviewed,
+            "pull_request_review" when action == "submitted" => EventCatalog.ReverseDns.GitHubPullRequestReviewed,
             "check_suite" when action == "completed" => EventCatalog.ReverseDns.GitHubCheckSuiteCompleted,
             _ => null,
         };

@@ -72,6 +72,15 @@ public sealed class GitHubEventNormalizerTests
         Assert.Equal("7", envelope.Extensions[EventCatalog.Lineage.GitHubIssue]);
     }
 
+    [Theory]
+    [InlineData("edited")]
+    [InlineData("dismissed")]
+    public void PullRequestReviewEvent_EditedOrDismissed_DoesNotMap(string action)
+    {
+        var body = ReviewSubmitted.Replace("\"submitted\"", $"\"{action}\"");
+        Assert.Null(Normalize("pull_request_review", body));
+    }
+
     [Fact]
     public void CheckSuiteCompletedEvent_MapsToCompletedWithoutIssueNumber()
     {
