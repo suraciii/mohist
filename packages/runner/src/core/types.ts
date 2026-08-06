@@ -97,6 +97,18 @@ export interface AgentSessionStartup {
   pinnedRunnerId?: string | null
   agentId?: string | null
   agentName?: string | null
+  /**
+   * Project Repository snapshot for sessions whose authoritative
+   * workDir is Project-backed (`context.repository` at launch). The
+   * runner verifies the workDir's ownership and origin against this
+   * snapshot on first execution and reports
+   * `workspace_source_confirmed` / `workspace_source_rejected`.
+   */
+  workspaceRepository?: {
+    name: string
+    gitUrl: string
+    baseBranch: string
+  } | null
 }
 
 export type WorkDispatchResponse = {

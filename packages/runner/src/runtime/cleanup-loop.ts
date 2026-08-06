@@ -1,22 +1,52 @@
 import { existsSync } from "node:fs"
+import { resolve } from "node:path"
 import { isUnderRunnerRoot } from "./workspace-query.js"
-import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath, type IssueWorkspaceMarker } from "./workspace.js"
+import { defaultRunnerRoot, issueWorkspacePath, readMarkerWorkflowRunId, validateWorkspaceIdentity, withManagedWorkspacePath } from "./workspace.js"
 import { deleteDirectory } from "../system/process.js"
 import { runnerLogger } from "../system/logger.js"
 import type { CleanupPolicy } from "../core/types.js"
-import type { WorkspaceRegistry, WorkspaceRegistryEntry } from "./workspace-registry.js"
+import type { WorkspaceRegistry, WorkspaceRegistryEntry, WorkspaceRegistryPhase } from "./workspace-registry.js"
+import type { AgentWorkspaceRegistry } from "./agent-workspace-registry.js"
 import type { WorkspaceRemovalFence } from "./workspace-removal-fence.js"
 
 const log = runnerLogger.child("cleanup")
 
+// The maintenance loop is shared by workflow workspaces and agent
+// managed worktrees (agent-workspace.md): both reuse the same phase
+// model, tick, single-flight constraint, storage budget and removal
+// fence. `CleanupEntry` is the common shape; the registry supplies its
+// own key and phase transitions.
+
+export interface CleanupEntry {
+  workspacePath: string
+  phase: WorkspaceRegistryPhase
+  terminalAt: string | null
+}
+
+export interface CleanupRegistry<E extends CleanupEntry> {
+  list(): E[]
+  entryKey(entry: E): string
+  markStuck(key: string): Promise<E | null>
+  remove(key: string): Promise<boolean>
+}
+
 export interface CleanupRunner {
   isUnderRunnerRoot(root: string, candidate: string): boolean
   pathExists(path: string): boolean
-  readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined>
+  // Disk identity probe: the stable identity recorded on disk at
+  // `workspacePath` (workflow marker run id, or child session id
+  // derived from the worktree's git backing). `null`/`undefined` means
+  // the path is not a valid workspace of the owning kind.
+  readWorkspaceIdentity(workspacePath: string): Promise<string | null | undefined>
   deleteDirectory(path: string): Promise<void>
   computeDirectorySize(path: string, signal: AbortSignal): Promise<number | null>
-  validateWorkspace?(entry: WorkspaceRegistryEntry): Promise<boolean>
-  validateAndDeleteWorkspace?(entry: WorkspaceRegistryEntry): Promise<boolean>
+  validateWorkspace?(entry: CleanupEntry): Promise<boolean>
+  validateAndDeleteWorkspace?(entry: CleanupEntry): Promise<boolean>
+  // Whether an `active` child workspace depends on this entry's
+  // directory (agent worktrees are git worktrees of their parent's
+  // repository). Such entries are DEFERRED, not stuck: the dependency
+  // can clear once the child becomes eligible or is released.
+  hasActiveDependents?(entry: CleanupEntry): Promise<boolean>
 }
 
 export interface CleanupLoopResult {
@@ -28,15 +58,18 @@ export interface CleanupLoopResult {
   // entry leaves the eligible set, so it is neither re-evaluated nor
   // re-warned on subsequent ticks.
   stuckResolved: number
+  // Eligible entries with `active` dependent workspaces; their removal
+  // is deferred (not stuck) until the dependents clear.
+  deferred: number
   workspaceUsageBytes: number | null
 }
 
-export class CleanupLoop {
+export class CleanupLoop<E extends CleanupEntry = WorkspaceRegistryEntry> {
   private usageCache: { bytes: number; timestamp: number } | null = null
   private readonly usageCacheTtlMs = 5 * 60_000
 
   constructor(
-    private readonly registry: WorkspaceRegistry,
+    private readonly registry: CleanupRegistry<E>,
     private readonly runner: CleanupRunner,
     private readonly runnerRoot: string,
     private readonly removalFence: () => WorkspaceRemovalFence | null = () => null,
@@ -52,13 +85,26 @@ export class CleanupLoop {
       budgetRemoved: 0,
       guardAborted: 0,
       stuckResolved: 0,
+      deferred: 0,
       workspaceUsageBytes: null,
     }
 
     if (signal.aborted) return result
     if (!policy) return result
 
-    const eligible = this.registry.list().filter((e) => e.phase === "eligible")
+    const initialEligible = this.registry.list().filter((e) => e.phase === "eligible")
+    if (initialEligible.length === 0) return result
+
+    const deferredPaths = new Set<string>()
+    if (this.runner.hasActiveDependents) {
+      for (const entry of initialEligible) {
+        if (signal.aborted) break
+        if (await this.runner.hasActiveDependents(entry)) deferredPaths.add(entry.workspacePath)
+      }
+    }
+    const eligible = initialEligible.filter((e) => !deferredPaths.has(e.workspacePath))
+    if (signal.aborted) return result
+    result.deferred = deferredPaths.size
     if (eligible.length === 0) return result
 
     // Resolution pass: give a guard-refused eligible entry a
@@ -75,8 +121,8 @@ export class CleanupLoop {
       if (blockedPaths.has(entry.workspacePath)) continue
       const verdict = await this.evaluateGuards(entry)
       if (verdict.ok) continue
-      log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: verdict.message })
-      await this.registry.markStuck(entry.workflowRunId)
+      log.warn("workspace cleanup refused", { run: this.registry.entryKey(entry), path: entry.workspacePath, reason: verdict.message })
+      await this.registry.markStuck(this.registry.entryKey(entry))
       result.stuckResolved++
     }
     if (signal.aborted) return result
@@ -89,8 +135,11 @@ export class CleanupLoop {
     // Re-list after resolution: entries marked `stuck` above have left
     // the eligible set, so the eviction passes only see entries whose
     // guards passed (plus any that flipped back to eligible in a race).
+    // Deferred entries stay out of both passes.
+    const reList = () => this.registry.list().filter((e) => e.phase === "eligible" && !deferredPaths.has(e.workspacePath))
+
     if (!retentionDisabled) {
-      const removable = this.registry.list().filter((e) => e.phase === "eligible")
+      const removable = reList()
       const cutoff = Date.now() - policy.retentionDays! * 24 * 60 * 60 * 1000
       for (const entry of removable) {
         if (signal.aborted) break
@@ -103,7 +152,7 @@ export class CleanupLoop {
     }
 
     if (!budgetDisabled && !signal.aborted) {
-      const remaining = this.registry.list().filter((e) => e.phase === "eligible")
+      const remaining = reList()
       if (remaining.length === 0) {
         result.workspaceUsageBytes = await this.getWorkspaceUsage(signal)
         return result
@@ -159,55 +208,57 @@ export class CleanupLoop {
   // refusal is already resolved to `stuck` before eviction, so this
   // branch is unreachable outside that rare race.
   private async evaluateGuards(
-    entry: WorkspaceRegistryEntry,
+    entry: E,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     if (!this.runner.isUnderRunnerRoot(this.runnerRoot, entry.workspacePath)) {
       return { ok: false, message: "path is outside runnerRoot" }
     }
-    const markerRunId = await this.runner.readMarkerWorkflowRunId(entry.workspacePath)
-    if (!markerRunId) {
-      return { ok: false, message: "marker is missing or unreadable" }
+    const diskIdentity = await this.runner.readWorkspaceIdentity(entry.workspacePath)
+    if (!diskIdentity) {
+      return { ok: false, message: "workspace identity is missing or unreadable" }
     }
-    if (markerRunId !== entry.workflowRunId) {
+    const expected = this.registry.entryKey(entry)
+    if (diskIdentity !== expected) {
       return {
         ok: false,
-        message: `marker workflowRunId (${markerRunId}) does not match registry (${entry.workflowRunId})`,
+        message: `workspace identity (${diskIdentity}) does not match registry (${expected})`,
       }
     }
     return { ok: true }
   }
 
-  async safeRemove(entry: WorkspaceRegistryEntry, blockedPaths: ReadonlySet<string> = new Set()): Promise<boolean> {
+  async safeRemove(entry: E, blockedPaths: ReadonlySet<string> = new Set()): Promise<boolean> {
     if (blockedPaths.has(entry.workspacePath)) return false
+    if (this.runner.hasActiveDependents && await this.runner.hasActiveDependents(entry)) return false
     const fence = this.removalFence()
     const remove = async (): Promise<boolean> => {
       const verdict = await this.evaluateGuards(entry)
       if (!verdict.ok) {
-        log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: verdict.message })
+        log.warn("workspace cleanup refused", { run: this.registry.entryKey(entry), path: entry.workspacePath, reason: verdict.message })
         return false
       }
 
       if (!this.runner.pathExists(entry.workspacePath)) {
-        await this.registry.remove(entry.workflowRunId)
+        await this.registry.remove(this.registry.entryKey(entry))
         return true
       }
 
       if (this.runner.validateAndDeleteWorkspace) {
         if (!(await this.runner.validateAndDeleteWorkspace(entry))) {
-          log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: "workspace identity is invalid" })
+          log.warn("workspace cleanup refused", { run: this.registry.entryKey(entry), path: entry.workspacePath, reason: "workspace identity is invalid" })
           return false
         }
-        await this.registry.remove(entry.workflowRunId)
+        await this.registry.remove(this.registry.entryKey(entry))
         return true
       }
 
       if (this.runner.validateWorkspace && !(await this.runner.validateWorkspace(entry))) {
-        log.warn("workspace cleanup refused", { run: entry.workflowRunId, path: entry.workspacePath, reason: "workspace identity is invalid" })
+        log.warn("workspace cleanup refused", { run: this.registry.entryKey(entry), path: entry.workspacePath, reason: "workspace identity is invalid" })
         return false
       }
 
       await this.runner.deleteDirectory(entry.workspacePath)
-      await this.registry.remove(entry.workflowRunId)
+      await this.registry.remove(this.registry.entryKey(entry))
       return true
     }
 
@@ -215,7 +266,7 @@ export class CleanupLoop {
       try {
         return await remove()
       } catch (error) {
-        log.error("workspace cleanup failed to remove path", { run: entry.workflowRunId, path: entry.workspacePath, exception: error })
+        log.error("workspace cleanup failed to remove path", { run: this.registry.entryKey(entry), path: entry.workspacePath, exception: error })
         return false
       }
     }
@@ -224,7 +275,7 @@ export class CleanupLoop {
       try {
         return await remove()
       } catch (error) {
-        log.error("workspace cleanup failed to remove path", { run: entry.workflowRunId, path: entry.workspacePath, exception: error })
+        log.error("workspace cleanup failed to remove path", { run: this.registry.entryKey(entry), path: entry.workspacePath, exception: error })
         return false
       }
     })
@@ -233,7 +284,10 @@ export class CleanupLoop {
 }
 
 export class DefaultCleanupRunner implements CleanupRunner {
-  constructor(private readonly runnerRoot = defaultRunnerRoot()) {}
+  constructor(
+    private readonly runnerRoot = defaultRunnerRoot(),
+    private readonly agentRegistry: AgentWorkspaceRegistry | null = null,
+  ) {}
 
   isUnderRunnerRoot(root: string, candidate: string): boolean {
     return isUnderRunnerRoot(root, candidate)
@@ -243,7 +297,7 @@ export class DefaultCleanupRunner implements CleanupRunner {
     return existsSync(path)
   }
 
-  async readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
+  async readWorkspaceIdentity(workspacePath: string): Promise<string | null | undefined> {
     return await readMarkerWorkflowRunId(workspacePath)
   }
 
@@ -262,6 +316,15 @@ export class DefaultCleanupRunner implements CleanupRunner {
     } catch {
       return null
     }
+  }
+
+  // A workflow workspace cannot be removed while an `active` agent
+  // worktree depends on it (the worktree is a git worktree of the
+  // workspace's repository and shares its object store).
+  async hasActiveDependents(entry: CleanupEntry): Promise<boolean> {
+    if (!this.agentRegistry) return false
+    const target = resolve(entry.workspacePath)
+    return this.agentRegistry.list().some((candidate) => candidate.phase === "active" && resolve(candidate.parentWorkDir) === target)
   }
 
   async validateWorkspace(entry: WorkspaceRegistryEntry): Promise<boolean> {

@@ -15,6 +15,7 @@ const entry: WorkspaceRegistryEntry = {
 
 function createFixture(calls: string[] = []) {
   const registry = {
+    entryKey: vi.fn(() => entry.workflowRunId),
     remove: vi.fn(async () => {
       calls.push("registry-remove")
       return true
@@ -29,7 +30,7 @@ function createFixture(calls: string[] = []) {
       calls.push("path-exists")
       return true
     }),
-    readMarkerWorkflowRunId: vi.fn(async () => {
+    readWorkspaceIdentity: vi.fn(async () => {
       calls.push("guard-marker")
       return entry.workflowRunId
     }),

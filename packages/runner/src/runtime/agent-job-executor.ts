@@ -26,6 +26,7 @@ import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime
 import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
+import type { WorkspaceSourceConfirmer } from "./workspace-source.js"
 import { runnerLogger } from "../system/logger.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
@@ -78,6 +79,7 @@ export class AgentJobExecutor {
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
+    private readonly workspaceSourceConfirmer: WorkspaceSourceConfirmer | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -111,6 +113,24 @@ export class AgentJobExecutor {
       return failureResult("invalid-input", "AgentJob requires 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables")
     }
     const workDir = workspacePath.kind === "resolved" ? workspacePath.path : this.defaultWorkDir
+
+    // First-execution source confirmation: when the launch carried a
+    // Project Repository snapshot, verify the authoritative workDir is
+    // runner-owned and its origin equals the snapshot, and report
+    // `workspace_source_confirmed` / `workspace_source_rejected`. The
+    // confirmation never blocks the session's own work (an unconfirmed
+    // session still executes; only worktree-mode children are gated).
+    const startup = work.agentSessionStartup
+    const repository = startup?.workspaceRepository
+    if (startup && repository && this.workspaceSourceConfirmer) {
+      await this.workspaceSourceConfirmer.confirm({
+        sessionId: startup.sessionId,
+        workDir,
+        repository,
+      }, signal).catch((error) => {
+        log.error("workspace source confirmation failed", { session: startup.sessionId, exception: error })
+      })
+    }
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)

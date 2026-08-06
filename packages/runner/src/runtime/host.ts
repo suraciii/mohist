@@ -1,10 +1,14 @@
-import type { RunnerOptions, RunnerRegistration } from "../core/types.js"
+import type { RunnerOptions, RunnerRegistration, CleanupPolicy } from "../core/types.js"
 import { ServerConnection } from "../server/connection.js"
 import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { ActionRegistry, createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
 import { WorkspaceRegistry } from "./workspace-registry.js"
+import { AgentWorkspaceRegistry, type AgentWorkspaceRegistryEntry } from "./agent-workspace-registry.js"
+import { AgentWorkspaceManager } from "./agent-workspace.js"
+import { AgentCleanupRunner } from "./agent-workspace-cleanup.js"
+import { WorkspaceSourceConfirmer } from "./workspace-source.js"
 import {
   createAgentSessionRuntimeEventOutbox,
   RUNTIME_EVENT_OUTBOX_FILE,
@@ -114,14 +118,19 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
+  private readonly agentWorkspaceRegistry: AgentWorkspaceRegistry
+  private readonly agentWorkspaceManager: AgentWorkspaceManager
+  private readonly workspaceSourceConfirmer: WorkspaceSourceConfirmer
   private readonly agentSessionRuntimeEventOutbox: AgentSessionRuntimeEventOutbox
   private readonly bindingConvergence: BindingConvergence
   private readonly bindingRecoveryCoordinator = new BindingRecoveryCoordinator()
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
+  private readonly agentCleanupLoop: CleanupLoop<AgentWorkspaceRegistryEntry>
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
   private cleanupInFlight: Promise<void> | null = null
+  private lastCleanupPolicy: CleanupPolicy | null = null
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
@@ -185,6 +194,13 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.agentWorkspaceRegistry = new AgentWorkspaceRegistry(options.runnerRoot)
+    this.agentWorkspaceManager = new AgentWorkspaceManager(options.runnerRoot, {
+      registry: this.agentWorkspaceRegistry,
+      workflowRegistry: this.workspaceRegistry,
+      getStorageBudgetBytes: () => this.lastCleanupPolicy?.storageBudgetBytes ?? null,
+    })
+    this.workspaceSourceConfirmer = new WorkspaceSourceConfirmer(this.agentWorkspaceManager)
     this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
       filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
       deliver: createServerRuntimeEventDelivery({ connection: this.connection }),
@@ -203,7 +219,13 @@ export class RunnerHost {
     )
     this.cleanupLoop = new CleanupLoop(
       this.workspaceRegistry,
-      new DefaultCleanupRunner(options.runnerRoot),
+      new DefaultCleanupRunner(options.runnerRoot, this.agentWorkspaceRegistry),
+      options.runnerRoot,
+      () => this.openCodeRuntime,
+    )
+    this.agentCleanupLoop = new CleanupLoop(
+      this.agentWorkspaceRegistry,
+      new AgentCleanupRunner(options.runnerRoot, this.agentWorkspaceRegistry),
       options.runnerRoot,
       () => this.openCodeRuntime,
     )
@@ -221,6 +243,7 @@ export class RunnerHost {
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
         registry: this.workspaceRegistry,
+        agentWorkspaceManager: this.agentWorkspaceManager,
         openCodeRuntime: () => this.openCodeRuntime,
         piRuntime: () => this.piRuntime,
         serverConnection: this.connection,
@@ -263,6 +286,19 @@ export class RunnerHost {
         await this.workspaceRegistry.load()
       } catch (error) {
         log.error("failed to load workspace registry; starting empty", { exception: error })
+      }
+      // Agent worktree registry + rescan: the registry is a rebuildable
+      // index; a lost registry is re-derived from safe-ID directories
+      // and git metadata before any dispatch / RPC can fire.
+      try {
+        await this.agentWorkspaceRegistry.load()
+      } catch (error) {
+        log.error("failed to load agent workspace registry; starting empty", { exception: error })
+      }
+      try {
+        await this.agentWorkspaceManager.recover(signal)
+      } catch (error) {
+        log.error("agent workspace recover failed; continuing with loaded registry", { exception: error })
       }
       // Load the AgentSession runtime-event outbox BEFORE accepting
       // SignalR commands or claiming work. An unreadable snapshot is
@@ -385,6 +421,20 @@ export class RunnerHost {
         blockedPaths = new Set(reclaim.blockedDirectories)
       }
       const policy = await this.connection.fetchConfig(signal)
+      this.lastCleanupPolicy = policy
+      // Agent worktrees first: an eligible child worktree must be
+      // removed before its parent can be (the parent's removal is
+      // deferred while an active child depends on it). The agent loop
+      // only runs when it has eligible entries — an empty pass is a
+      // no-op, so the idle tick stays single-loop.
+      if (this.agentWorkspaceRegistry.list().some((entry) => entry.phase === "eligible")) {
+        const agentResult = await this.agentCleanupLoop.runOnce(policy, signal, blockedPaths)
+        if (agentResult.retentionRemoved > 0 || agentResult.budgetRemoved > 0 || agentResult.guardAborted > 0 || agentResult.stuckResolved > 0 || agentResult.deferred > 0) {
+          cleanupLog.info("agent workspace cleanup completed", {
+            reason: `retention=${agentResult.retentionRemoved} budget=${agentResult.budgetRemoved} guardAborted=${agentResult.guardAborted} stuck=${agentResult.stuckResolved} deferred=${agentResult.deferred} usage=${agentResult.workspaceUsageBytes ?? "unknown"}`,
+          })
+        }
+      }
       const result = await this.cleanupLoop.runOnce(policy, signal, blockedPaths)
       if (result.retentionRemoved > 0 || result.budgetRemoved > 0 || result.guardAborted > 0 || result.stuckResolved > 0) {
         cleanupLog.info("workspace cleanup completed", {
@@ -476,7 +526,7 @@ export class RunnerHost {
       new AgentJobExecutor(this.connection, {
         openCode: () => this.openCodeRuntime,
         pi: () => this.piRuntime,
-      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver),
+      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver, this.workspaceSourceConfirmer),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,
