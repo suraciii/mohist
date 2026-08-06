@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
@@ -181,7 +180,6 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             SlackManagerIngressBody body,
             SlackManagerIngressService ingress,
-            SlackWorkspaceEnrollmentStore enrollments,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -202,14 +200,8 @@ public static class SlackManagerIngressRoutes
                     "Client identity fields are not supported by the Manager API.",
                     "client_identity_not_supported");
 
-            var enrollment = await enrollments.GetActiveByTeamAsync(body.WorkspaceTeamId, ct);
-            if (enrollment is null
-                || !await leases.ValidateRuntimeLeaseAsync(
-                    operatorId,
-                    new SlackLeaseTargetRef.Manager(enrollment.Id, body.WorkspaceTeamId),
-                    body.LeaseId,
-                    body.AdapterId,
-                    ct))
+            if (!await leases.ValidateManagerRuntimeLeaseByTeamAsync(
+                    operatorId, body.WorkspaceTeamId, body.LeaseId, body.AdapterId, ct))
             {
                 return ApiResults.Conflict(
                     "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",

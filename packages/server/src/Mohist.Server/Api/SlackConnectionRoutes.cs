@@ -580,26 +580,6 @@ public static class SlackConnectionRoutes
             "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",
             "lease_stale_or_expired");
 
-    private static async Task<bool> AuthorizesManagerRuntimeLeaseAsync(
-        SlackAdapterLeaseService leases,
-        SlackWorkspaceEnrollmentStore enrollments,
-        string operatorId,
-        string enrollmentId,
-        string leaseId,
-        string adapterId,
-        CancellationToken ct)
-    {
-        var enrollment = await enrollments.GetAsync(enrollmentId, ct);
-        if (enrollment is null)
-            return false;
-        return await leases.ValidateRuntimeLeaseAsync(
-            operatorId,
-            new SlackLeaseTargetRef.Manager(enrollmentId, enrollment.WorkspaceTeamId),
-            leaseId,
-            adapterId,
-            ct);
-    }
-
     private static void MapSlackManagerAdapterRoutes(WebApplication app)
     {
         app.MapGet("/api/slack-manager/adapter", async (
@@ -625,7 +605,6 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            SlackWorkspaceEnrollmentStore enrollments,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -633,7 +612,7 @@ public static class SlackConnectionRoutes
             var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            if (!await AuthorizesManagerRuntimeLeaseAsync(leases, enrollments, operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
                 return LeaseStaleOrExpired();
             var entry = await outbox.ClaimAsync(
                 SlackDeliveryOwnerIds.ManagerProjectId,
@@ -649,7 +628,6 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            SlackWorkspaceEnrollmentStore enrollments,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -657,7 +635,7 @@ public static class SlackConnectionRoutes
             var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            if (!await AuthorizesManagerRuntimeLeaseAsync(leases, enrollments, operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
                 return LeaseStaleOrExpired();
             var entry = await outbox.ClaimUncertainAsync(
                 SlackDeliveryOwnerIds.ManagerProjectId,
@@ -673,7 +651,6 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryAckBody body,
             SlackOutboxStore outbox,
-            SlackWorkspaceEnrollmentStore enrollments,
             SlackAdapterLeaseService leases,
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
@@ -681,7 +658,7 @@ public static class SlackConnectionRoutes
             var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            if (!await AuthorizesManagerRuntimeLeaseAsync(leases, enrollments, operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
                 return LeaseStaleOrExpired();
             if (body is null || string.IsNullOrWhiteSpace(body.Id))
                 return ApiResults.BadRequest("id is required.");

@@ -224,6 +224,43 @@ public sealed class SlackAdapterLeaseService(
         return await CredentialGenerationMatchesAsync(target, active, ct);
     }
 
+    /// <summary>
+    /// Route-level gate for a Manager target addressed by enrollment id (the
+    /// manager adapter delivery routes). Resolves the stored workspace team
+    /// inside the target provider so the caller never touches storage, then
+    /// delegates to <see cref="ValidateRuntimeLeaseAsync"/>. Fail-closed
+    /// (false) when the enrollment is gone or the lease is stale / expired /
+    /// mismatched.
+    /// </summary>
+    public async Task<bool> ValidateManagerRuntimeLeaseByEnrollmentAsync(
+        string operatorId, string enrollmentId, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(enrollmentId);
+        var manager = await targetProvider.ResolveManagerByEnrollmentAsync(enrollmentId, ct);
+        return manager is null
+            ? false
+            : await ValidateRuntimeLeaseAsync(operatorId, manager, leaseId, adapterId, ct);
+    }
+
+    /// <summary>
+    /// Route-level gate for a Manager target addressed by workspace team (the
+    /// manager ingress route). Resolves the active enrollment inside the
+    /// target provider so the caller never touches storage, then delegates to
+    /// <see cref="ValidateRuntimeLeaseAsync"/>. Fail-closed (false) when no
+    /// active enrollment exists or the lease is stale / expired / mismatched.
+    /// </summary>
+    public async Task<bool> ValidateManagerRuntimeLeaseByTeamAsync(
+        string operatorId, string workspaceTeamId, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        var manager = await targetProvider.ResolveManagerByTeamAsync(workspaceTeamId, ct);
+        return manager is null
+            ? false
+            : await ValidateRuntimeLeaseAsync(operatorId, manager, leaseId, adapterId, ct);
+    }
+
     public async Task<SlackLeaseRenewalResult?> RenewLeaseAsync(
         string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
     {
