@@ -1,3 +1,6 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -301,6 +304,146 @@ public sealed class SessionTreeMutationFenceSpecs
         var replay = await fence.ReserveAsync(command);
         Assert.True(replay.ReconciliationRequired);
         Assert.Equal(0, (await fence.GetAsync()).GraphRevision);
+    }
+
+    [Fact]
+    public async Task ProjectionInconsistentStopMaterialization_PersistsReconciliationAndFailsClosed()
+    {
+        var projectId = $"tree-fence-inconsistent-{Guid.NewGuid():N}";
+        var rootId = $"tree-fence-inconsistent-root-{Guid.NewGuid():N}";
+        var childId = $"tree-fence-inconsistent-child-{Guid.NewGuid():N}";
+        await OpenParentAsync(projectId, rootId);
+        await OpenParentAsync(projectId, childId);
+        var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+        var child = _fixture.Grains.GetGrain<IAgentSessionGrain>(childId);
+        await AttachChildAsync(fence, child, projectId, rootId, childId, "edge-inconsistent");
+        var reserved = await fence.ReserveAsync(Command(projectId, "edge-reserve", "command-reserve", rootId));
+        Assert.Equal(LinkReservationState.Reserved, reserved.State);
+
+        await CorruptChildLinkAsync(childId);
+
+        var command = new BeginSessionTreeStopSnapshotCommand(
+            projectId,
+            rootId,
+            "operation-inconsistent",
+            "stop-input:inconsistent",
+            "fingerprint:inconsistent");
+        var blocked = await fence.BeginStopSnapshotAsync(command);
+        Assert.Equal(SessionTreeStopSnapshotDisposition.Blocked, blocked.Disposition);
+        Assert.Equal("session_tree_reconciliation_required", blocked.RejectionReason);
+
+        var state = await fence.GetAsync();
+        Assert.True(state.ReconciliationRequired);
+        Assert.Equal("session_tree_reconciliation_required", state.ReconciliationReason);
+        Assert.False(state.ActiveTreeStop);
+        var materializing = Assert.Single(state.StopSnapshots!);
+        Assert.Equal(SessionTreeStopSnapshotPhase.Materializing, materializing.Phase);
+        Assert.Equal(command.OperationId, materializing.OperationId);
+        Assert.Equal(command.RootSessionId, materializing.RootSessionId);
+        Assert.Equal(1, materializing.GraphRevision);
+        Assert.Equal(materializing.GraphRevision, state.GraphRevision);
+        Assert.Empty(materializing.Membership);
+        Assert.Empty(materializing.Targets);
+
+        var replay = await fence.BeginStopSnapshotAsync(command);
+        Assert.Equal(SessionTreeStopSnapshotDisposition.Blocked, replay.Disposition);
+        Assert.Equal("session_tree_reconciliation_required", replay.RejectionReason);
+        var otherStop = await fence.BeginStopSnapshotAsync(new BeginSessionTreeStopSnapshotCommand(
+            projectId,
+            rootId,
+            "operation-inconsistent-other",
+            "stop-input:inconsistent-other",
+            "fingerprint:inconsistent-other"));
+        Assert.Equal(SessionTreeStopSnapshotDisposition.Blocked, otherStop.Disposition);
+        Assert.Equal("session_tree_reconciliation_required", otherStop.RejectionReason);
+
+        var admission = await fence.SetStopAdmissionAsync(
+            command.OperationId,
+            SessionTreeStopAdmissionOutcome.Running);
+        Assert.False(admission.Active);
+        Assert.Equal("session_tree_reconciliation_required", admission.RejectionReason);
+
+        var reserve = await fence.ReserveAsync(Command(projectId, "edge-after", "command-after", "other-parent"));
+        Assert.True(reserve.ReconciliationRequired);
+        Assert.Equal("reconciliation_required", reserve.RejectionReason);
+        var finalize = await fence.BeginFinalizeAsync(
+            "command-reserve",
+            "edge-reserve",
+            new SessionTreeBindingUseReceipt(
+                "receipt-reserve",
+                projectId,
+                "command-reserve",
+                "edge-reserve",
+                rootId,
+                "/workspace",
+                "runner",
+                "opencode",
+                "runtime-session",
+                1,
+                ParentAgentId: "parent-agent"));
+        Assert.True(finalize.ReconciliationRequired);
+        Assert.Equal("reconciliation_required", finalize.RejectionReason);
+        var detach = await fence.BeginDetachAsync(new BeginSessionTreeDetachCommand(
+            projectId,
+            "edge-reserve",
+            rootId,
+            "child-reserve",
+            "command-detach-reserve",
+            "job-detach-reserve",
+            1));
+        Assert.Equal(SessionTreeDetachMutationState.ReconciliationRequired, detach.State);
+        Assert.Equal("reconciliation_required", detach.RejectionReason);
+
+        var final = await fence.GetAsync();
+        Assert.True(final.ReconciliationRequired);
+        Assert.Equal(1, final.GraphRevision);
+        Assert.Equal(
+            SessionTreeStopSnapshotPhase.Materializing,
+            Assert.Single(final.StopSnapshots!).Phase);
+    }
+
+    private async Task AttachChildAsync(
+        ISessionTreeMutationFenceGrain fence,
+        IAgentSessionGrain child,
+        string projectId,
+        string rootId,
+        string childId,
+        string edgeId)
+    {
+        var command = Command(projectId, edgeId, $"command-{edgeId}", rootId) with { ChildSessionId = childId };
+        Assert.Equal(LinkReservationState.Reserved, (await fence.ReserveAsync(command)).State);
+        var binding = await AcquireAsync(rootId, projectId, command);
+        var begun = await fence.BeginFinalizeAsync(command.CommandId, command.EdgeId, binding);
+        var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+            command.CommandId,
+            command.EdgeId,
+            command.ParentSessionId,
+            command.ParentAgentId!,
+            command.ChildLaunchJobId!,
+            begun.Revision,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            projectId,
+            binding.BindingEpoch,
+            binding.ReceiptId,
+            SessionTreeExpectedLinkState.Absent));
+        Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
+        var acknowledged = await fence.AcknowledgeFinalizeAsync(attached.Receipt!);
+        Assert.False(acknowledged.ReconciliationRequired);
+        var committed = await fence.CommitFinalizeAsync(command.CommandId, command.EdgeId, begun.Revision);
+        Assert.Equal(LinkReservationState.Attached, committed.State);
+    }
+
+    private async Task CorruptChildLinkAsync(string childId)
+    {
+        var factory = _fixture.Cluster.GetSiloServiceProvider(null)
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var row = await db.AgentSessions.SingleAsync(item => item.Id == childId);
+        row.ParentLinkDetachedRevision = row.ParentLinkAttachedRevision;
+        await db.SaveChangesAsync();
     }
 
     private async Task AcknowledgeAttachAsync(

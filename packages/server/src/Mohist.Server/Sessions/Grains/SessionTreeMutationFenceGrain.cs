@@ -612,6 +612,8 @@ public sealed class SessionTreeMutationFenceGrain(
         SessionTreeStopAdmissionOutcome outcome)
     {
         var current = await GetAsync();
+        if (current.ReconciliationRequired)
+            return new SessionTreeStopAdmissionResult(false, operationId, "session_tree_reconciliation_required");
         var snapshots = StopSnapshotsOf(current);
         var index = snapshots.FindIndex(item => item.OperationId == operationId);
         if (index < 0)
@@ -644,10 +646,26 @@ public sealed class SessionTreeMutationFenceGrain(
         SessionTreeStopSnapshot materializing,
         BeginSessionTreeStopSnapshotCommand command)
     {
-        var facts = await snapshotReader.ReadAtAsync(
-            command.ProjectId,
-            command.RootSessionId,
-            materializing.GraphRevision);
+        SessionTreeStopSnapshotFacts facts;
+        try
+        {
+            facts = await snapshotReader.ReadAtAsync(
+                command.ProjectId,
+                command.RootSessionId,
+                materializing.GraphRevision);
+        }
+        catch (SessionTreeProjectionInconsistentException)
+        {
+            state.State = (state.State ?? current) with
+            {
+                ReconciliationRequired = true,
+                ReconciliationReason = "session_tree_reconciliation_required",
+            };
+            await state.WriteStateAsync();
+            return new SessionTreeStopSnapshotResult(
+                SessionTreeStopSnapshotDisposition.Blocked,
+                RejectionReason: "session_tree_reconciliation_required");
+        }
         ValidateFacts(facts, materializing);
         var targets = facts.Targets
             .Select(item => new SessionTreeStopTargetSnapshot(
