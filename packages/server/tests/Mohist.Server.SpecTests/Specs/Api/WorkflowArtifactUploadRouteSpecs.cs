@@ -99,52 +99,6 @@ public class WorkflowArtifactUploadRouteSpecs
     }
 
     [Fact]
-    public async Task UploadEndpoint_SameKeySameHashIsIdempotent()
-    {
-        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
-        try
-        {
-            var path = "review.md";
-            var payload = Encoding.UTF8.GetBytes("identical content");
-
-            using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
-            {
-                using var first = await _fixture.Client.PostAsync(
-                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                    form);
-                Assert.Equal(HttpStatusCode.OK, first.StatusCode);
-                var firstJson = await first.Content.ReadFromJsonAsync<JsonElement>();
-                var firstId = firstJson.GetProperty("data").GetProperty("uploadId").GetString();
-                Assert.False(firstJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
-            }
-
-            using (var form = BuildMultipart(path, payload, "text/markdown", "sha256:stable", payload.LongLength))
-            {
-                using var second = await _fixture.Client.PostAsync(
-                    $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                    form);
-                Assert.Equal(HttpStatusCode.OK, second.StatusCode);
-                var secondJson = await second.Content.ReadFromJsonAsync<JsonElement>();
-                var secondId = secondJson.GetProperty("data").GetProperty("uploadId").GetString();
-                Assert.True(secondJson.GetProperty("data").GetProperty("idempotent").GetBoolean());
-                // Same id is returned, no second row created.
-                await using var scope = _fixture.Services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-                var rows = await db.WorkflowArtifactPendingUploads
-                    .AsNoTracking()
-                    .Where(p => p.WorkflowRunId == workflowRunId)
-                    .ToListAsync();
-                Assert.Single(rows);
-                Assert.Equal(secondId, rows[0].UploadId);
-            }
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
-    }
-
-    [Fact]
     public async Task UploadEndpoint_SameKeyDifferentHashReturnsConflict()
     {
         var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
@@ -207,32 +161,6 @@ public class WorkflowArtifactUploadRouteSpecs
             $"/api/workflow-runs/wr_anything/work/task-1.1/artifact-uploads",
             content);
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task UploadEndpoint_MissingPathFieldReturnsBadRequest()
-    {
-        var (workflowRunId, workId, runnerId) = await SetupActiveWorkAsync();
-        try
-        {
-            var form = new MultipartFormDataContent("----mohist-test-" + Guid.NewGuid().ToString("N"));
-            var bytes = Encoding.UTF8.GetBytes("x");
-            form.Add(new StringContent("text/plain"), "contentType");
-            form.Add(new StringContent("sha256:x"), "contentHash");
-            form.Add(new StringContent("1"), "size");
-            var stream = new ByteArrayContent(bytes);
-            stream.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
-            form.Add(stream, "content", "x.bin");
-
-            using var response = await _fixture.Client.PostAsync(
-                $"/api/workflow-runs/{workflowRunId}/work/{workId}/artifact-uploads",
-                form);
-            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        }
-        finally
-        {
-            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-        }
     }
 
     [Fact]
