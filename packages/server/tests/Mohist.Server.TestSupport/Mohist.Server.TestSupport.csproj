@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="xunit.v3.assert" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
   </ItemGroup>
 
   <ItemGroup>
