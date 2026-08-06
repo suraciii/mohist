@@ -20,6 +20,22 @@ import type { WorkspaceRegistryPhase } from "./workspace-registry.js"
 
 export const DEFAULT_AGENT_WORKSPACE_REGISTRY_FILE = ".mohist/runner-state/agent-workspaces.json"
 
+// The Server-authoritative activity observation for a child Session,
+// addressed by `(ProjectId, ChildSessionId)`. `active`/`idle`/`pending`/
+// `unknown` confirm the Session exists and therefore cancel any orphan
+// suspicion; only `not-found` feeds the orphan grace counter. `idle`
+// eligibility (against a retention threshold) is decided by the caller
+// and applied via `markEligible` — the registry's activity method only
+// owns the orphan grace state machine.
+export type AgentWorkspaceActivityState = "active" | "idle" | "pending" | "not-found" | "unknown"
+
+// Consecutive `not-found` observations required before an active entry
+// becomes eligible. The first `not-found` only records an orphan
+// candidate; reaching this count transitions the entry to eligible so a
+// single transient `not-found` never reclaims an active child's
+// uncommitted work.
+export const DEFAULT_ORPHAN_GRACE_RECHECKS = 2
+
 export interface AgentWorkspaceRegistryEntry {
   childSessionId: string
   projectId: string | null
@@ -54,13 +70,25 @@ export interface AgentWorkspaceRegistryOptions {
   filePath?: string
   // Override the clock for tests. Defaults to `() => new Date()`.
   now?: () => Date
+  // Consecutive `not-found` activity observations required before an
+  // active entry becomes eligible (orphan grace). Defaults to
+  // `DEFAULT_ORPHAN_GRACE_RECHECKS` (2). A value of 1 disables grace
+  // (a single `not-found` is immediately eligible); values below 1 are
+  // clamped to 1.
+  orphanGraceRechecks?: number
 }
 
 export class AgentWorkspaceRegistry {
   private readonly filePath: string
   private readonly now: () => Date
+  private readonly orphanGraceRechecks: number
   private entries: Map<string, AgentWorkspaceRegistryEntry> = new Map()
   private pathIndex: Map<string, string> = new Map()
+  // In-memory consecutive `not-found` observation count per entry. Not
+  // persisted: the orphan grace window is per-runner-session, so a
+  // restart or reload resets it. That only ever delays reclamation
+  // (fail-safe) — it never makes an active child eligible too early.
+  private orphanCandidates: Map<string, number> = new Map()
   private loaded = false
 
   constructor(runnerRoot: string, options: AgentWorkspaceRegistryOptions = {}) {
@@ -68,6 +96,7 @@ export class AgentWorkspaceRegistry {
       ? resolve(options.filePath)
       : resolve(join(runnerRoot, DEFAULT_AGENT_WORKSPACE_REGISTRY_FILE))
     this.now = options.now ?? (() => new Date())
+    this.orphanGraceRechecks = Math.max(1, options.orphanGraceRechecks ?? DEFAULT_ORPHAN_GRACE_RECHECKS)
   }
 
   getFilePath(): string {
@@ -145,6 +174,9 @@ export class AgentWorkspaceRegistry {
     const existing = this.entries.get(childSessionId)
     if (!existing) return null
     if (existing.phase === "eligible") return { ...existing }
+    // Explicit release bypasses grace: drop any pending orphan candidate
+    // so the counter stays consistent with the now-eligible phase.
+    this.orphanCandidates.delete(childSessionId)
     existing.phase = "eligible"
     existing.terminalAt = this.now().toISOString()
     await this.persist()
@@ -166,12 +198,60 @@ export class AgentWorkspaceRegistry {
     return { ...existing }
   }
 
+  // Feed a Server activity observation into the orphan grace state
+  // machine. A single `not-found` is recorded as a candidate but does
+  // NOT make the entry eligible; `orphanGraceRechecks` consecutive
+  // `not-found` observations (default 2) transition an active entry to
+  // `eligible`. Any non-`not-found` observation (`active`/`idle`/
+  // `pending`/`unknown`) cancels a pending candidate and resets the
+  // counter — the Session exists, so it is not an orphan. Only the
+  // eligible transition is persisted; the candidate counter is in-memory.
+  //
+  // Terminal phases are sticky: an observation never reverts an
+  // `eligible` or `stuck` entry. Explicit release made it `eligible`
+  // and is Server-authoritative; a removal-fence refusal made it
+  // `stuck`. Re-evaluating either from a fresh query would weaken both.
+  // Returns null when no entry exists.
+  async recordActivity(
+    childSessionId: string,
+    state: AgentWorkspaceActivityState,
+  ): Promise<AgentWorkspaceRegistryEntry | null> {
+    this.ensureLoaded()
+    const existing = this.entries.get(childSessionId)
+    if (!existing) return null
+    if (existing.phase !== "active") return { ...existing }
+    if (state !== "not-found") {
+      this.orphanCandidates.delete(childSessionId)
+      return { ...existing }
+    }
+    const next = (this.orphanCandidates.get(childSessionId) ?? 0) + 1
+    if (next < this.orphanGraceRechecks) {
+      this.orphanCandidates.set(childSessionId, next)
+      return { ...existing }
+    }
+    this.orphanCandidates.delete(childSessionId)
+    existing.phase = "eligible"
+    existing.terminalAt = this.now().toISOString()
+    await this.persist()
+    return { ...existing }
+  }
+
+  // Consecutive `not-found` observations recorded for an active entry
+  // since the last non-`not-found` observation or load. Purely
+  // in-memory: not persisted, resets on load/reload, and is cleared
+  // when the entry becomes eligible. Returns 0 when no entry exists.
+  orphanCandidate(childSessionId: string): number {
+    this.ensureLoaded()
+    return this.orphanCandidates.get(childSessionId) ?? 0
+  }
+
   // Drop a registry entry. Returns true when an entry was removed.
   async remove(childSessionId: string): Promise<boolean> {
     this.ensureLoaded()
     const existing = this.entries.get(childSessionId)
     if (!existing) return false
     this.entries.delete(childSessionId)
+    this.orphanCandidates.delete(childSessionId)
     if (this.pathIndex.get(existing.workspacePath) === childSessionId) this.pathIndex.delete(existing.workspacePath)
     await this.persist()
     return true
@@ -194,6 +274,7 @@ export class AgentWorkspaceRegistry {
   private async loadFromDisk(): Promise<void> {
     this.entries = new Map()
     this.pathIndex = new Map()
+    this.orphanCandidates = new Map()
     if (!exists(this.filePath)) {
       this.loaded = true
       return

@@ -1,7 +1,12 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
-import { AgentWorkspaceRegistry, type AgentWorkspaceRegisterInput } from "../src/runtime/agent-workspace-registry.js"
+import {
+  AgentWorkspaceRegistry,
+  DEFAULT_ORPHAN_GRACE_RECHECKS,
+  type AgentWorkspaceActivityState,
+  type AgentWorkspaceRegisterInput,
+} from "../src/runtime/agent-workspace-registry.js"
 import { createTestTempDir } from "./support/temp-dir.js"
 
 const NOW = new Date("2026-01-01T00:00:00.000Z")
@@ -177,5 +182,156 @@ describe("AgentWorkspaceRegistry", () => {
 
     const ids = registry.list().map((entry) => entry.childSessionId)
     expect(ids).toEqual(["00000000000000000000000000000002"])
+  })
+
+  it("RecordActivity_FirstNotFound_RecordsCandidate_StaysActive", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+
+    const observed = await registry.recordActivity(input().childSessionId, "not-found")
+
+    expect(observed?.phase).toBe("active")
+    expect(registry.get(input().childSessionId)?.phase).toBe("active")
+    expect(registry.get(input().childSessionId)?.terminalAt).toBeNull()
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(1)
+  })
+
+  it("RecordActivity_ConsecutiveNotFound_ReachesDefaultThreshold_BecomesEligible", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+    expect(DEFAULT_ORPHAN_GRACE_RECHECKS).toBe(2)
+
+    await registry.recordActivity(input().childSessionId, "not-found")
+    const confirmed = await registry.recordActivity(input().childSessionId, "not-found")
+
+    expect(confirmed?.phase).toBe("eligible")
+    expect(confirmed?.terminalAt).toBe(NOW.toISOString())
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(0)
+  })
+
+  it("RecordActivity_NonNotFound_Observations_CancelCandidate", async () => {
+    for (const state of ["active", "idle", "pending", "unknown"] as AgentWorkspaceActivityState[]) {
+      const root = await createTestTempDir("mohist-agent-registry-")
+      const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+      await registry.load()
+      await registry.register(input())
+      await registry.recordActivity(input().childSessionId, "not-found")
+      expect(registry.orphanCandidate(input().childSessionId)).toBe(1)
+
+      const observed = await registry.recordActivity(input().childSessionId, state)
+
+      expect(observed?.phase).toBe("active")
+      expect(registry.orphanCandidate(input().childSessionId)).toBe(0)
+    }
+  })
+
+  it("RecordActivity_CancelThenReobserve_RequiresFreshFullThreshold", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+
+    await registry.recordActivity(input().childSessionId, "not-found")
+    await registry.recordActivity(input().childSessionId, "active")
+    // A single fresh not-found after a cancel must NOT be enough.
+    const afterOne = await registry.recordActivity(input().childSessionId, "not-found")
+
+    expect(afterOne?.phase).toBe("active")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(1)
+
+    const afterTwo = await registry.recordActivity(input().childSessionId, "not-found")
+    expect(afterTwo?.phase).toBe("eligible")
+  })
+
+  it("RecordActivity_TerminalPhasesAreSticky_NotRevertedByActivity", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+
+    await registry.markEligible(input().childSessionId)
+    await registry.markStuck(input().childSessionId)
+    expect(registry.get(input().childSessionId)?.phase).toBe("stuck")
+
+    // Neither a confirming nor an orphaning observation may un-stick an
+    // entry: the removal-fence refusal must not be weakened.
+    const afterNotFound = await registry.recordActivity(input().childSessionId, "not-found")
+    const afterActive = await registry.recordActivity(input().childSessionId, "active")
+
+    expect(afterNotFound?.phase).toBe("stuck")
+    expect(afterActive?.phase).toBe("stuck")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(0)
+  })
+
+  it("RecordActivity_ExplicitReleaseBypassesGrace_AndStaysEligible", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+    await registry.recordActivity(input().childSessionId, "not-found")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(1)
+
+    // Explicit release is Server-authoritative and skips grace.
+    const released = await registry.markEligible(input().childSessionId)
+
+    expect(released?.phase).toBe("eligible")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(0)
+
+    // A later not-found must not revert an explicitly-released entry.
+    const afterNotFound = await registry.recordActivity(input().childSessionId, "not-found")
+    expect(afterNotFound?.phase).toBe("eligible")
+  })
+
+  it("RecordActivity_UnknownEntry_ReturnsNull", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+
+    expect(await registry.recordActivity("missing", "not-found")).toBeNull()
+    expect(registry.orphanCandidate("missing")).toBe(0)
+  })
+
+  it("OrphanCandidate_IsInMemory_AndResetsOnReload", async () => {
+    const root = await createTestTempDir("mohist-agent-registry-")
+    const registry = new AgentWorkspaceRegistry(root, { now: () => NOW })
+    await registry.load()
+    await registry.register(input())
+    await registry.recordActivity(input().childSessionId, "not-found")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(1)
+
+    await registry.reload()
+
+    // The phase is the durable fact; the candidate counter is not
+    // persisted, so reload resets the grace window (fail-safe).
+    expect(registry.get(input().childSessionId)?.phase).toBe("active")
+    expect(registry.orphanCandidate(input().childSessionId)).toBe(0)
+  })
+
+  it("OrphanGraceRechecks_ConfigurableThreshold", async () => {
+    const disabled = new AgentWorkspaceRegistry(await createTestTempDir("mohist-agent-registry-"), {
+      now: () => NOW,
+      orphanGraceRechecks: 1,
+    })
+    await disabled.load()
+    await disabled.register(input())
+    const immediate = await disabled.recordActivity(input().childSessionId, "not-found")
+    expect(immediate?.phase).toBe("eligible")
+
+    const strict = new AgentWorkspaceRegistry(await createTestTempDir("mohist-agent-registry-"), {
+      now: () => NOW,
+      orphanGraceRechecks: 3,
+    })
+    await strict.load()
+    await strict.register(input())
+    await strict.recordActivity(input().childSessionId, "not-found")
+    expect(strict.get(input().childSessionId)?.phase).toBe("active")
+    await strict.recordActivity(input().childSessionId, "not-found")
+    expect(strict.get(input().childSessionId)?.phase).toBe("active")
+    const confirmed = await strict.recordActivity(input().childSessionId, "not-found")
+    expect(confirmed?.phase).toBe("eligible")
   })
 })
