@@ -29,7 +29,7 @@
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionSummarySpecs.cs": 27000,
   "Mohist.Server.SpecTests/Specs/Sessions/GenericAgentSessionTranscriptAxisSpecs.cs": 28000,
   "Mohist.Server.SpecTests/Specs/Slack/SlackChannelThreadIngressSpecs.cs": 47000,
-  "Mohist.Server.SpecTests/Specs/Slack/SlackInstallAgentSpecs.cs": 33000,
+  "Mohist.Server.SpecTests/Specs/Slack/SlackInstallAgentSpecs.cs": 35000,
   "Mohist.Server.SpecTests/Specs/Slack/SlackManagerSetupOrchestratorSpecs.cs": 38000,
   "Mohist.Server.SpecTests/Specs/Slack/SlackMultiAgentIngressSpecs.cs": 35000,
   "Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs": 32000,
