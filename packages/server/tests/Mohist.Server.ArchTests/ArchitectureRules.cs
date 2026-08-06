@@ -608,6 +608,7 @@ public class ArchitectureRules
         {
             "Mohist.Server.SpecTests/",
             "Mohist.Server.UnitTests/",
+            "Mohist.Server.TestSupport/",
             "Mohist.Server.ArchTests/",
         };
         foreach (var root in requiredRoots)

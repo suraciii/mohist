@@ -29,6 +29,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Cli.Tests", "package
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.UnitTests", "packages\server\tests\Mohist.Server.UnitTests\Mohist.Server.UnitTests.csproj", "{B2776360-BAF2-4D60-908B-D73225F8D307}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Server.TestSupport", "packages\server\tests\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj", "{c7e63035-9e50-4068-8a54-db41e8528a54}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mohist.Workflow.Definition.Tests", "packages\server\tests\Mohist.Workflow.Definition.Tests\Mohist.Workflow.Definition.Tests.csproj", "{D3F1A4B5-0005-0005-0005-000000000005}"
 EndProject
 Global
@@ -113,6 +115,18 @@ Global
 		{B2776360-BAF2-4D60-908B-D73225F8D307}.Release|x64.Build.0 = Release|Any CPU
 		{B2776360-BAF2-4D60-908B-D73225F8D307}.Release|x86.ActiveCfg = Release|Any CPU
 		{B2776360-BAF2-4D60-908B-D73225F8D307}.Release|x86.Build.0 = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|x64.Build.0 = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Debug|x86.Build.0 = Debug|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|Any CPU.Build.0 = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|x64.ActiveCfg = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|x64.Build.0 = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|x86.ActiveCfg = Release|Any CPU
+		{c7e63035-9e50-4068-8a54-db41e8528a54}.Release|x86.Build.0 = Release|Any CPU
 		{D3F1A4B5-0004-0004-0004-000000000004}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{D3F1A4B5-0004-0004-0004-000000000004}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{D3F1A4B5-0004-0004-0004-000000000004}.Debug|x64.ActiveCfg = Debug|Any CPU
@@ -150,6 +164,7 @@ Global
 		{B89EF008-B110-7D42-B933-EBA1204D5139} = {2AD4A2B0-EA59-F122-62AA-DCFD822C05DC}
 		{E2CF616E-7F27-41A3-AACA-E78E00858850} = {B89EF008-B110-7D42-B933-EBA1204D5139}
 		{B2776360-BAF2-4D60-908B-D73225F8D307} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
+		{c7e63035-9e50-4068-8a54-db41e8528a54} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
 		{D3F1A4B5-0004-0004-0004-000000000004} = {280CF731-FBB2-30F5-136C-A7A60B6467C3}
 		{D3F1A4B5-0005-0005-0005-000000000005} = {5204C9C1-8FDE-E187-EC0A-21FCBD43FA71}
 	EndGlobalSection

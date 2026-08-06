@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Mohist.Server.TestSupport</RootNamespace>
+    <ProjectGuid>{c7e63035-9e50-4068-8a54-db41e8528a54}</ProjectGuid>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3.assert" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
+    <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mohist.Server\Mohist.Server.csproj" />
     <ProjectReference Include="..\..\..\cli\Mohist.Cli\Mohist.Cli.csproj" />
+    <ProjectReference Include="..\Mohist.Server.TestSupport\Mohist.Server.TestSupport.csproj" />
   </ItemGroup>
 
   <Target Name="CopyTemplates" BeforeTargets="Build">
