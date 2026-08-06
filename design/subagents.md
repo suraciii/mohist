@@ -836,7 +836,13 @@ startup-known context、`mo session tree`、terminal callback、cascade stop、d
 mode）已落地：`inherit` 仍复用 parent workDir，`worktree`
 则使用已确认的来源、调用被 pin 的 Runner 物化并把返回的 workspace identity/path 写入 child。
 
-范围 C（Server `IdleSince`、runner-owned activity query、idle/orphan cleanup 与 grace
-recheck）尚未实现。因而增量 4 的创建、来源确认和 spawn 物化路径已具备，但生命周期回收
-契约仍是当前 gap；目标设计与验证清单保持不变，后续实现继续按
-[`agent-workspace.md`](agent-workspace.md) 的范围 C 推进。
+范围 C 已落地：Server 持有 durable `IdleSince`（idle 写入、active/unknown 清空、缺失值
+fail-closed），并提供按 `(ProjectId, ChildSessionId)` 的 activity query
+（active / idle+idleSince / pending / not-found / unknown 五态，runner 身份与项目归属校验
+失败返回 403 而非伪装 not-found，pending/unknown fail-closed）；Runner 维护周期对 active
+worktree 探测 activity，仅 idle 且 `IdleSince` 早于保留阈值才转 eligible，retention 缺省/
+关闭时 fail-closed，`not-found` 经连续 recheck 确认（默认两次）后才 eligible（任一非 not-found
+观测撤销候选）。既有 parent dependency、removal fence（`markStuck`）与 explicit release 保持
+有效，explicit release 不经 grace，eligible/stuck 仍为 sticky 终态。因此增量 4 的创建、来源
+确认、spawn 物化与生命周期回收契约均已落地，以 [`agent-workspace.md`](agent-workspace.md)
+为唯一权威。

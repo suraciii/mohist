@@ -542,7 +542,7 @@ Server spec 必须以 fake Runner、fake clock 与 in-memory stores 覆盖至少
 
 ## Status
 
-交付增量 4 的范围 A、B 已落地；范围 C 尚未实现。
+交付增量 4 的范围 A、B、C 均已落地。
 
 - **范围 A：Runner 原语与 `WorkspaceRepository` source confirmation（已落地）**。Runner
   提供 managed-worktree 的物化与释放原语，并在 parent 首轮执行时确认工作空间来源，回报
@@ -553,10 +553,15 @@ Server spec 必须以 fake Runner、fake clock 与 in-memory stores 覆盖至少
   接入请求指纹和 canonical launch pipeline，`MaterializeState`/`ReleaseState` 及物化后的
   child `WorkspaceRepository` 持久化在 durable launch/session facts 中，物化绑定继续 pin
   parent 的 Runner。
-- **范围 C：生命周期回收（当前 gap）**。Server 尚无 durable `IdleSince`，也尚无按
-  `(ProjectId, ChildSessionId)` 提供给 Runner 的 activity query；Runner 的 idle/orphan cleanup、
-  grace recheck 和 removal fence 尚未实现。因此物化后的 worktree 仍缺少完整的 idle/孤儿安全
-  回收路径。
+- **范围 C：生命周期回收（已落地）**。Server 持有 durable `IdleSince`（idle 写入、active/
+  unknown 清空、缺失值 fail-closed），并通过 `GET /api/runner/{runnerId}/agent-workspaces/
+  {projectId}/{childSessionId}/activity` 提供按 `(ProjectId, ChildSessionId)` 的 activity query，
+  返回 active / idle+idleSince / pending / not-found / unknown 五态（runner 身份与项目归属
+  校验失败返回 403，不伪装 not-found；pending/unknown fail-closed）。Runner 维护周期对 active
+  worktree 探测 activity：仅 idle 且 `IdleSince` 早于保留阈值才转 eligible，retention 缺省/
+  关闭时 fail-closed；`not-found` 经连续 recheck 确认（默认两次）后才 eligible，任一非 not-found
+  观测撤销候选。explicit release 不经 grace；既有 parent dependency、removal fence（`markStuck`）
+  与 explicit release 保持有效，eligible/stuck 仍为 sticky 终态。
 
-本篇仍是目标 spec；范围 C 的未实现状态不改变上文的物化、释放、生命周期和验证契约。增量 1–3、5
-的契约不受影响，仍以 [`subagents.md`](subagents.md) 为权威。
+本篇的目标物化、释放、生命周期和验证契约现已由实现落地。增量 1–3、5 的契约不受影响，
+仍以 [`subagents.md`](subagents.md) 为权威。
