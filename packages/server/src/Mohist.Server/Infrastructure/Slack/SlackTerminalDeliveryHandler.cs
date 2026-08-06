@@ -67,8 +67,6 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
                 SlackDeliveryOwnerKinds.Manager), ct);
             return;
         }
-        var text = SlackFinalReplyRenderer.AppendStableReference(Render(delivery), delivery.JobKey, sessionId);
-        var blocks = await ResolveSessionBlocksAsync(scope.ServiceProvider, projectId, sessionId, ct);
         var projection = scope.ServiceProvider.GetService<SlackStatusProjection>() ?? new SlackStatusProjection(outbox);
         var source = new SlackMessageIdentity(
             delivery.WorkspaceTeamId,
@@ -77,28 +75,19 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         var progressDispatchRef = delivery.JobKey.StartsWith("agent-session-followup:", StringComparison.Ordinal)
             ? $"{delivery.JobKey}:progress"
             : null;
-        var result = await projection.EnqueueTerminalAsync(
+        await projection.FinalizeLivenessAsync(
             projectId,
             delivery.ConnectionId,
             source,
             delivery.ThreadTs ?? delivery.MessageTs,
             delivery.Status,
-            text,
-            $"agent-job:{delivery.JobKey}:terminal-delivery",
             progressDispatchRef,
-            blocks,
             ct);
 
-        if (result.Suppressed)
-            _log.LogInformation(
-                "Suppressed Slack terminal delivery for AgentJob {JobKey} on inactive connection {ConnectionId}",
-                delivery.JobKey,
-                delivery.ConnectionId);
-        else
-            _log.LogInformation(
-                "Queued Slack terminal delivery for AgentJob {JobKey} on connection {ConnectionId}",
-                delivery.JobKey,
-                delivery.ConnectionId);
+        _log.LogInformation(
+            "Finalized Slack liveness for AgentJob {JobKey} on connection {ConnectionId} (reply body is owned by the Agent reply action)",
+            delivery.JobKey,
+            delivery.ConnectionId);
     }
 
     public static string Render(SlackTerminalDelivery delivery)
@@ -147,32 +136,6 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _log.LogWarning(ex, "Could not resolve Session ID for Slack terminal delivery {JobKey}", delivery.JobKey);
-            return null;
-        }
-    }
-
-    private async Task<JsonElement?> ResolveSessionBlocksAsync(
-        IServiceProvider services,
-        string projectId,
-        string? sessionId,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(sessionId))
-            return null;
-
-        var projects = services.GetService<ProjectQuerier>();
-        var links = services.GetService<SlackWebLinkBuilder>();
-        if (projects is null || links is null || !links.HasUsableExternalWebUrl)
-            return null;
-
-        try
-        {
-            var project = await projects.GetByIdAsync(projectId);
-            return project is null ? null : links.BuildOpenSession(project.Name, sessionId)?.Blocks;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _log.LogWarning(ex, "Could not build Slack session link for Project {ProjectId}", projectId);
             return null;
         }
     }
