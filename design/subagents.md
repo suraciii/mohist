@@ -267,10 +267,12 @@ workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
 `workspace` mode 只决定 child workDir 的来源，不放松上述任何条件：
 
 - `inherit`（默认）：child workDir = parent authoritative workDir（第 5 条），不物化。
-- `worktree`：在第 5、6 条之上，额外要求（a）parent 的 authoritative 工作空间是 Project-backed
-  （其 `WorkspaceRepository` 可解析为 Project Repository），以及（b）向被 pin 的 Runner 物化隔离
-  工作空间并把物化路径固定为 child workDir。parent 非 Project-backed 或 Repository 不可解析为
-  terminal pre-plan rejection（`parent_workspace_not_project_backed` / `workspace_repository_unresolved`）。
+- `worktree`：在第 5、6 条之上，额外要求（a）parent 的 `WorkspaceRepository` 处于
+  `confirmed`（即 explicit Project-backed launch 经 Runner 首轮校验确认，或 nested managed child
+  继承确认；真实生产路径见 [`agent-workspace.md`](agent-workspace.md)），以及（b）向被 pin 的
+  Runner 物化隔离工作空间并把物化路径固定为 child workDir。`unconfirmed` 为可重试 observation
+  `workspace_repository_unconfirmed`；`null`/`rejected` 为 terminal pre-plan rejection
+  `parent_workspace_not_project_backed`；快照缺失为 `workspace_repository_unresolved`。
   物化状态机、opaque identity、fail-closed 语义、来源快照校验与生命周期以
   [`agent-workspace.md`](agent-workspace.md) 为唯一权威。两种 mode 都把 child AgentJob pin 到
   parent binding 的 Runner；`worktree` 不换 Runner。
@@ -340,7 +342,7 @@ plan 写入后不重新读取 mutable target Agent 或 parent capability snapsho
 ```text
 persist request fence with fingerprint (incl. workspace mode)
   -> pre-plan validation
-       (worktree mode 额外要求 parent WorkspaceRepository 可解析为 Project Repository)
+       (worktree mode 额外要求 parent WorkspaceRepository 处于 confirmed)
   -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
        or persist launch plan and reserve EdgeId
        at SessionTreeMutationFence
@@ -350,7 +352,8 @@ persist request fence with fingerprint (incl. workspace mode)
        Unknown 保持 MaterializeState=requested；同 key replay 重发同一 stable command 并收敛
        （不回 validation-pending、不猜 path、不回退 inherit）。
   -> prepare child AgentJob with pinned RunnerId and child workDir (inherited or materialized)
-  -> create child AgentSession(workDir immutable) + initial SessionInput + initial AgentTurn
+  -> create child AgentSession(workDir immutable;
+       worktree mode 写入 WorkspaceRepository = plan.Repository @ confirmed) + initial SessionInput + initial AgentTurn
   -> final check reservation, parent workDir, binding, stop admission, and
        (worktree) MaterializeState terminal
   -> finalize the child-owned SessionParentLink through the fence mutation protocol
