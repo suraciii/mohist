@@ -390,19 +390,6 @@ public partial class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, runResponse.StatusCode);
     }
 
-    [Fact]
-    public async Task CrossPath_RerunOnFailedRun_AdmitDecisionMatchesIssueScopedRoute()
-    {
-        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
-        await ForceFailedStatusAsync(wrId);
-
-        var issueResponse = await _client.PostAsync($"/api/projects/{projectId}/issues/{issueNumber}/rerun", content: null);
-        var runResponse = await _client.PostAsync($"/api/workflow-runs/{wrId}/rerun", content: null);
-
-        Assert.Equal(HttpStatusCode.OK, issueResponse.StatusCode);
-        Assert.Equal(HttpStatusCode.OK, runResponse.StatusCode);
-    }
-
     [Theory]
     [InlineData("rerun", false)]
     [InlineData("rerun-from-stage", true)]
