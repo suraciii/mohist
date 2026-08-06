@@ -239,6 +239,10 @@ binding 历史。首次从无 binding 建立物理 Session 时不写该事实。
 当前 Turn，否则按顺序等待后续 Turn；`unknown` 时拒绝新输入并先核对状态。API 的同步结果
 只确认 Input 是否已被 Mohist 接受，不能假装 Runtime 已经完成处理。
 
+定时输入是到点才投递的一次性 follow-up：Server 在到期时经同一受理路径把一条普通
+`SessionInput` 追加给目标会话，不创建新输入类别、调度器或 Session 终态。完整契约见
+[`subagents.md`](subagents.md) 的「定时输入」节。
+
 Follow-up 命令只需要三种同步结果：
 
 - `accepted`：Mohist 已持久接受 SessionInput，它可能仍在排队；

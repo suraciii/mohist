@@ -542,6 +542,127 @@ pending 或一次 commit 被取消；它在无 pending 时 no-op。每次 fence 
 historic result。commit 后的 reminder tick 见不到 pending 而 no-op；replay 或多余 reminder 不得再调用
 child 或推进 graph。
 
+## 定时输入（Scheduled input）
+
+定时输入是「到点才投递的 follow-up」：调用方现在创建一条带绝对到期时间
+`DueAt` 的 `SessionSchedule`，到期后由 Server 通过既有 `AcceptFollowup` 路径
+把它转成一条普通 `SessionInput`。它不创建新输入类别、消息 aggregate、Session
+终态或第二条 dispatch 管道；Runner 看到的仍是一次普通 follow-up 投递。产品行为
+见 [`../docs/subagents.md`](../docs/subagents.md) 的「定时输入」节。
+
+### 模型
+
+`SessionSchedule` 是 AgentSession 的子记录，与 `SessionInput` / `AgentTurn`
+同级，经 Session 寻址；不另建 aggregate、inbox 或调度器资源。
+
+```text
+SessionSchedule
+  ScheduleId
+  DueAt           绝对到期时间（UTC）
+  Text
+  Status: scheduled | pending-delivery | delivered | cancelled
+  InputId?        投递受理后记录的 SessionInput
+  IdempotencyKey  创建时调用方的幂等键
+  CreatedAt
+  CancelledAt?
+```
+
+状态转移：
+
+```text
+scheduled -> pending-delivery   到期，投递尝试开始
+scheduled -> cancelled          到期前取消
+pending-delivery -> delivered   SessionInput 已受理，记录 InputId
+pending-delivery -> cancelled   投递被阻塞时取消
+```
+
+`delivered` / `cancelled` 是终态；`scheduled` 表示「尚未到期或尚未开始投递」。
+`pending-delivery` 是持久「欠投递」状态：投递被暂时阻塞时保持，恢复后由
+recovery reminder 重试；它不因时间流逝自动过期，取消是唯一退出。「已到期但
+尚未开始投递」只是 reminder 到期与触发之间的瞬时窗口，不是可观察的持久状态。
+
+### 调用面
+
+```text
+POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules
+Idempotency-Key: {key}
+{ "text": "...", "dueAt": "2026-08-06T14:00:00Z" }
+
+GET  /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules
+POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules/{scheduleId}/cancel
+```
+
+- `dueAt` 必须是带时区偏移的 RFC 3339（`Z` 或 `±hh:mm`）；不带偏移的本地时间
+  被拒绝。它必须严格晚于 Server 当前时间（注入 `TimeProvider`）；否则拒绝
+  （`schedule_due_in_past`），调用方应改用普通 follow-up。
+- `text` 与 follow-up 相同：必须包含可见文本；第一版不支持附件。
+- 权限边界与 follow-up 一致：调用方先经既有认证取得 Project 操作权，Session
+  必须属于该 Project。调度不授予投递输入任何额外权限。
+- 创建不要求当前 binding 或 activity：只校验 session 存在、text 与 `dueAt`
+  有效；投递条件在到期时判定。
+- 创建幂等：`(ProjectId, SessionId, IdempotencyKey)` 唯一。同 key 同 body 重放
+  返回原 schedule（含当前状态）；同 key 异 body 返回 HTTP 409。
+- `cancel` 不需要幂等键，按目标状态幂等：`scheduled` / `pending-delivery`
+  推进为 `cancelled`；`delivered` / `cancelled` 返回当前状态；未知 scheduleId
+  返回 not found。已投递的 Input 不因取消删除。取消与投递在 Session grain 内
+  串行化，先提交者决定结果。
+- 列表返回该会话全部 schedule（含终态），按 `DueAt` 升序；第一版不分页。
+
+CLI 的规范命令是：
+
+```bash
+mo session schedule create <session-id> --at <rfc3339> --text "<text>" --idempotency-key <key>
+mo session schedule list <session-id>
+mo session schedule cancel <session-id> <schedule-id>
+```
+
+### 触发与投递
+
+Server 是唯一触发方；Runner 不参与触发。Session grain 在 schedule 创建时（或
+激活后补齐）为该 schedule 注册一次性 reminder（`schedule:{scheduleId}`，
+due = `DueAt`）；reminder 表是持久事实，activation loss / silo 重启后由
+Orleans 重投，投递时刻不早于 `DueAt`。grain 另持有一个固定周期的 recovery
+reminder：存在 `pending-delivery` schedule 时保持注册，逐条重试投递；全部终态
+后注销。挂起调度受正常 Session 存储与 reminder 容量约束，不另建调度器；超过
+一次性 reminder 容量时由 recovery reminder 周期性兜底。
+
+reminder 触发时，grain 以既有 `AcceptFollowup` 语义投递：
+
+```text
+IdempotencyKey: session-schedule:{scheduleId}
+Source:         session-schedule
+Text:           schedule.Text
+Provenance:     携带 scheduleId
+```
+
+- 受理成功 → schedule 标记 `delivered` 并记录 InputId；输入走既有 follow-up
+  dispatch（`AgentSessionFollowupDispatcher` → `IFollowupDeliveryDispatcher` →
+  Runner），Runner 不需要变更。
+- 同 key 重放（handler retry / activation loss / reminder 重投）返回原 Input 与
+  Turn，schedule 幂等收敛为 `delivered`，不产生第二条输入。
+- 投递被阻塞时 schedule 保持 `pending-delivery`，recovery reminder 重试；绝不
+  静默丢弃，也不把受理失败回滚为未到期。
+
+| 投递时状态 | 结果 |
+|---|---|
+| `idle` | 按普通 follow-up 开始新 Turn，唤醒会话 |
+| `active` | 按普通输入顺序加入当前或后续 Turn |
+| `unknown` | 不投递，保持 `pending-delivery`；活动证据恢复后重试 |
+| binding 缺失 / Runtime Session 缺失 / Runner 不可用 | 同 follow-up 的 blocked 语义；空闲且确认缺失时按 [`agent-execution.md`](agent-execution.md) 的自动恢复规则建立新 binding 后投递 |
+| follow-up 容量或 Agent 并发上限 | 保持 `pending-delivery`，恢复后重试 |
+| 停止进行中 | 保持 `pending-delivery`，停止结束后重试 |
+
+### 与生命周期交互
+
+- **cascade stop / turn stop**：停止不删除、不取消 schedule；投递遇到 in-flight
+  stop 时按 follow-up 的 stop-in-progress 语义阻塞并重试，停止结束后照常投递。
+- **detach**：schedule 是 Session 子记录，detach 不触碰；detached 会话的调度
+  照常到期投递。
+- **reset / compact**：不删除 schedule；reset 后投递走新 binding 的普通
+  follow-up，compact 不涉及调度记录。
+- **spawn**：定时输入只投递给已有会话；到点自动 launch / spawn 不在第一版
+  （见 Non-goals）。
+
 ## Delivery increments
 
 | Increment | 独立用户价值 | 依赖与范围 |
@@ -550,6 +671,7 @@ child 或推进 graph。
 | 2. Terminal callback | parent 会收到 child launch job 的一次终态 Input，并可按引用检查结果。 | 依赖 1 的 edge 与 Job identity；实现 pending/delivered/suppressed report recovery。 |
 | 3. Cascade and detach | parent 能停止当前 attached subtree 的工作；需要留下 child 时可 detach。 | 依赖 1 的 link index；实现 `SessionTreeStopOperation`、fence、partial/unknown/retry 与 detach race rules。 |
 | 4. Managed worktree | child 可以请求由 Project Space 定义且由 Runner 物化的隔离工作空间。 | 依赖 1 的 link/launch model 与 Project Space/Runner materialization contract；不接受任意 Server path。 |
+| 5. Scheduled input | 调用方能为一段会话安排一个到点输入：卡住的子会话被明确唤醒，不用人盯会话树。 | 依赖 1–3 的 SessionInput / AcceptFollowup 与既有 follow-up dispatch、Orleans reminder 基础设施；不依赖增量 4。第一版只支持一次性绝对时间 + 文本；无重复调度、附件、scheduled spawn 或 Web 管理面。 |
 
 Increment 1 不需要等待后续生命周期能力即可交付。它必须用 coordinator recovery 证明：在
 reserve、prepare、initial Session creation、final link check、abort 和 submit 任一步中断后，
@@ -567,6 +689,13 @@ reserve、prepare、initial Session creation、final link check、abort 和 subm
 - 不让 Runner 通过扫描工作目录、环境变量或 Runtime Session 猜 parent/child 身份，也不让它
   为 child 选择不同于 parent binding 的 Runner。
 - 不承诺 tree relation 替代 Issue、Workflow 或 Project Space 的工作所有权和隔离模型。
+- 定时输入第一版只支持一次性绝对时间与文本：不做 cron / 重复调度、相对时间
+  （「30 分钟后」）、附件或时区语义；`dueAt` 只接受带偏移的 RFC 3339 绝对时间。
+- 不做系统自动巡逻：Server 不自动为卡住或空闲的会话创建输入；只有显式创建的
+  schedule 会触发投递。
+- 不做到点自动 launch / spawn：定时输入只向已有会话追加输入，不创建 AgentJob。
+- 第一版不在 `mo session view` / `mo session tree` 中展示调度，也不做 Web 调度
+  管理面；读取走 `schedule list`，入口为 API 与 CLI。
 
 ## 验证
 
@@ -612,7 +741,20 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 - cascade target 的 queued/executing/idle/unknown、pre-submit child cancellation、partial outcome、
   同 operation retry、unknown 保持 membership stop admission fence，且 later Turn 不被旧 operation 停止；
 - startup context 在第一轮前包含 own Session ID、parent ID（若有）、snapshot 和规范 CLI
-  command，且 dispatch 不依赖 per-session environment variable。
+  command，且 dispatch 不依赖 per-session environment variable；
+- scheduled input 的创建校验与幂等：body 字段白名单、`dueAt` 必须为带偏移的 RFC 3339
+  且严格晚于当前 fake 时间、text 必填、同 key 同 body 重放返回原 schedule、同 key 异
+  body 409、cancel 的 `scheduled`/`pending-delivery` → `cancelled` 与 `delivered`/
+  `cancelled` 幂等、未知 scheduleId not found；
+- 到点投递：advance fake clock 到 `DueAt` 后 reminder 触发，idle 会话以 `session-schedule`
+  Source 与确定性 key 产生唯一 SessionInput 并开始新 Turn；active 会话按普通输入顺序加入；
+  reminder 重投 / activation loss 重放不产生第二条输入；
+- `unknown` / binding 缺失 / 容量 / stop-in-progress 阻塞投递时 schedule 保持
+  `pending-delivery`，recovery reminder 在条件恢复后投递，cancel 是唯一退出；
+- 生命周期交互：cascade stop、detach、reset、compact 都不删除 schedule；停止结束后投递
+  继续；detached 会话的调度照常到期投递；
+- 成本：pending-delivery 恢复扫描只随该会话自己的挂起调度增长，无关历史调度不增加成本；
+- Runner 不变更：投递复用普通 follow-up dispatch envelope，Runner 观察不到调度语义。
 
 ## 状态
 
@@ -620,4 +762,5 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 startup-known context、`mo session tree`、terminal callback、cascade stop 与 detach
 均已落地。交付增量 4（Managed worktree）尚未实装：child 仍只继承 parent 的 workDir，
 不接受 `--worktree`/`--work-dir`/`workspacePath` 或任意路径输入；它依赖 Project
-Space/Runner materialization contract，由后续 issue 推进。
+Space/Runner materialization contract，由后续 issue 推进。交付增量 5（Scheduled
+input）本篇已定稿契约，尚未实装，由后续 issue 落地。

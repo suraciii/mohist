@@ -113,7 +113,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
-| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
+| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel`；`schedule create/list/cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
 
@@ -224,6 +224,11 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
+- `mo session schedule create <session-id> --at <时间> --text <文本>` 为会话安排一条到点输入：
+  `--at` 只接受带时区偏移的绝对 RFC 3339 时间且必须晚于当前时间。`mo session schedule list`
+  列出该会话的调度，`mo session schedule cancel <session-id> <schedule-id>` 取消尚未投递的
+  调度；已投递的调度取消无效，已投递的输入不受影响。完整契约见
+  [Subagent 与会话树](subagents.md) 的「定时输入」一节。
 - 后续读取、follow-up、compact、reset、cancel 和 stop 都使用稳定的 Session ID；cancel 与 stop
   还必须通过 `--turn-id` 指定目标 Turn。cancel 确定性取消排队中的 Turn，stop 请求 Runtime
   停止执行中的 Turn。follow-up 返回新的
@@ -424,6 +429,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
+- `session schedule create/list/cancel`：定时输入命令面已定稿（见 subagents.md），尚未实装。
 
 ### 已闭合
 
