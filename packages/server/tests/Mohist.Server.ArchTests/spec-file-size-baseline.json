@@ -11,7 +11,6 @@
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueArchivedDetailApiSpecs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueCreationSpecs.cs": 35000,
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueFeedbackApiSpecs.cs": 28000,
-  "Mohist.Server.SpecTests/Specs/Issue/Api/IssueMetricsApiSpecs.cs": 30000,
   "Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCompositeAdvancementGrainSpecs.cs": 25000,
   "Mohist.Server.SpecTests/Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 36000,
