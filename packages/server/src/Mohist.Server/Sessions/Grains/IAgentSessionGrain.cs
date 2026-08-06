@@ -404,7 +404,15 @@ public sealed record EnsureInitialLaunchCommand(
     [property: Id(10)] AgentStartupContext? StartupContext = null,
     [property: Id(11)] AgentExecutionDefinition? Definition = null,
     [property: Id(12)] AgentSessionStartup? AgentSessionStartup = null,
-    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible);
+    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible,
+    /// <summary>
+    /// Confirmed Project Repository source for a managed-worktree child.
+    /// Set by the spawn coordinator after materialization succeeds so the
+    /// child AgentSession owns a confirmed source without a Runner
+    /// first-execution check (the worktree is materialized from a confirmed
+    /// parent). Absent for inherit spawns and non-spawn launches.
+    /// </summary>
+    [property: Id(14)] WorkspaceRepositorySnapshot? ConfirmedWorkspaceRepository = null);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(

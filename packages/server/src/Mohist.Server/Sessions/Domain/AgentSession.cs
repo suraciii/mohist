@@ -75,7 +75,7 @@ public sealed class AgentSession
     /// not reset an already-decided source. Only the initial launch may
     /// set it.
     /// </summary>
-    public void InitializeWorkspaceRepository(WorkspaceRepositorySnapshot snapshot)
+    public void InitializeWorkspaceRepository(WorkspaceRepositorySnapshot snapshot, bool confirmed = false)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         if (WorkspaceRepository is not null)
@@ -84,7 +84,7 @@ public sealed class AgentSession
             snapshot.Name,
             snapshot.GitUrl,
             snapshot.BaseBranch,
-            WorkspaceRepositoryState.Unconfirmed);
+            confirmed ? WorkspaceRepositoryState.Confirmed : WorkspaceRepositoryState.Unconfirmed);
     }
 
     /// <summary>

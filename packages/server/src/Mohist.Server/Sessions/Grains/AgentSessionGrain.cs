@@ -2427,6 +2427,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 Definition: command.Definition,
                 AgentSessionStartup: command.AgentSessionStartup,
                 LaunchVisibility: command.LaunchVisibility));
+            if (command.ConfirmedWorkspaceRepository is { } confirmedSource
+                && _session.WorkspaceRepository is null)
+            {
+                _session.InitializeWorkspaceRepository(confirmedSource, confirmed: true);
+            }
         }
         else
         {

@@ -492,6 +492,7 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string targetAgentRef,
         string prompt,
         string idempotencyKey,
+        string? workspace = null,
         CancellationToken ct = default) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the subagent launch path.");
 

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -28,6 +29,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentLaunchParticipantProbe _participantProbe;
+    private readonly IAgentWorkspaceMaterializer _materializer;
     private readonly ILogger<AgentLaunchCoordinatorGrain> _log;
 
     public AgentLaunchCoordinatorGrain(
@@ -35,12 +37,14 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         IGrainFactory grains,
         TimeProvider timeProvider,
         IAgentLaunchParticipantProbe participantProbe,
+        IAgentWorkspaceMaterializer materializer,
         ILogger<AgentLaunchCoordinatorGrain> log)
     {
         _state = state;
         _grains = grains;
         _timeProvider = timeProvider;
         _participantProbe = participantProbe;
+        _materializer = materializer;
         _log = log;
     }
 
@@ -153,7 +157,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedRuntimeSessionId: command.ParentExpectedRuntimeSessionId,
                 ParentLinkEdgeId: command.ParentLinkEdgeId,
                 SpawnRequestFingerprint: command.SpawnRequestFingerprint,
-                ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch);
+                ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
+                WorkspaceMode: command.WorkspaceMode,
+                WorkspaceRepository: command.WorkspaceRepository);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -294,6 +300,200 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 "AgentLaunchCoordinatorGrain {Key} advance failed; reminder will retry",
                 PrimaryKeyString());
         }
+    }
+
+    private static bool IsWorktreePlan(AgentLaunchCoordinatorPlan plan) =>
+        plan.WorkspaceMode == WorkspaceMode.Worktree && plan.ParentSessionId is not null;
+
+    private static string? EffectiveChildWorkDir(AgentLaunchCoordinatorPlan plan)
+    {
+        if (plan.WorkspaceMode == WorkspaceMode.Worktree
+            && plan.MaterializeState == MaterializeState.Materialized
+            && !string.IsNullOrWhiteSpace(plan.MaterializedWorkDir))
+        {
+            return plan.MaterializedWorkDir;
+        }
+        return plan.WorkspacePath;
+    }
+
+    /// <summary>
+    /// Drives the managed-worktree materialization state machine on the
+    /// forward spawn path to a terminal verdict. <see cref="MaterializeState.Materialized"/>
+    /// returns immediately; <see cref="MaterializeState.Rejected"/> throws the
+    /// durable post-plan rejection; <see cref="MaterializeState.None"/>/
+    /// <see cref="MaterializeState.Requested"/> send (or re-send) the same
+    /// stable <c>MaterializeAgentWorkspace</c> command. The Runner keys
+    /// materialization by <c>ChildSessionId</c>, so a replay always
+    /// converges to the same identity/workDir. <see cref="AgentWorkspaceMaterializeOutcome.Unknown"/>
+    /// leaves the plan <see cref="MaterializeState.Requested"/> so the recovery
+    /// reminder re-sends; it does not roll back to validation-pending.
+    /// </summary>
+    private async Task<AgentLaunchCoordinatorPlan> ConvergeMaterializationAsync(
+        AgentLaunchCoordinatorPlan plan)
+    {
+        switch (plan.MaterializeState)
+        {
+            case MaterializeState.Materialized:
+                return plan;
+            case MaterializeState.Rejected:
+                throw new AgentSpawnPostPlanRejectedException(
+                    $"workspace_materialize_rejected:{plan.MaterializeRejectionReason}");
+        }
+
+        if (plan.MaterializeState == MaterializeState.None)
+        {
+            plan = plan with { MaterializeState = MaterializeState.Requested };
+            _state.State.Plan = plan;
+            await SaveStateAsync();
+        }
+
+        var repository = plan.WorkspaceRepository
+            ?? throw new AgentSpawnPostPlanRejectedException("workspace_repository_unresolved");
+        var runnerId = plan.ParentExpectedRunnerId
+            ?? throw new AgentSpawnPostPlanRejectedException("parent_runner_binding_unavailable");
+        var result = await _materializer.MaterializeAsync(
+            runnerId,
+            new MaterializeAgentWorkspaceRequest(
+                plan.ProjectId,
+                plan.SessionId,
+                plan.ParentExpectedWorkDir ?? plan.WorkspacePath ?? string.Empty,
+                repository));
+
+        switch (result.Outcome)
+        {
+            case AgentWorkspaceMaterializeOutcome.Materialized:
+                if (string.IsNullOrWhiteSpace(result.WorkspaceIdentity)
+                    || string.IsNullOrWhiteSpace(result.WorkDir))
+                {
+                    throw new LaunchSetupPendingException(plan.IdempotencyKey);
+                }
+                plan = plan with
+                {
+                    MaterializeState = MaterializeState.Materialized,
+                    WorkspaceIdentity = result.WorkspaceIdentity,
+                    MaterializedWorkDir = result.WorkDir,
+                };
+                _state.State.Plan = plan;
+                await SaveStateAsync();
+                return plan;
+            case AgentWorkspaceMaterializeOutcome.Rejected:
+                plan = plan with
+                {
+                    MaterializeState = MaterializeState.Rejected,
+                    MaterializeRejectionReason = result.Reason,
+                };
+                _state.State.Plan = plan;
+                await SaveStateAsync();
+                throw new AgentSpawnPostPlanRejectedException(
+                    $"workspace_materialize_rejected:{result.Reason}");
+            default:
+                throw new LaunchSetupPendingException(plan.IdempotencyKey);
+        }
+    }
+
+    /// <summary>
+    /// Abort-path materialization convergence. Non-throwing: brings
+    /// materialization to a terminal verdict (re-sending when Unknown is
+    /// not recoverable this tick is left to the caller), then releases a
+    /// materialized worktree. Release Unknown leaves
+    /// <see cref="AgentLaunchCoordinatorPlan.ReleaseState"/> pending for the
+    /// Runner reclamation cycle; the abort still converges provisional
+    /// artifacts afterwards.
+    /// </summary>
+    private async Task<AgentLaunchCoordinatorPlan> ConvergeMaterializationForAbortAsync(
+        AgentLaunchCoordinatorPlan plan)
+    {
+        // None: materialization never started (e.g. the reservation was
+        // rejected before the worktree stage). Do NOT send a first
+        // MaterializeCommand during abort — there is nothing to release.
+        if (plan.MaterializeState == MaterializeState.Requested
+            && plan.WorkspaceRepository is not null
+            && !string.IsNullOrWhiteSpace(plan.ParentExpectedRunnerId))
+        {
+            var result = await _materializer.MaterializeAsync(
+                plan.ParentExpectedRunnerId!,
+                new MaterializeAgentWorkspaceRequest(
+                    plan.ProjectId,
+                    plan.SessionId,
+                    plan.ParentExpectedWorkDir ?? plan.WorkspacePath ?? string.Empty,
+                    plan.WorkspaceRepository));
+            plan = result.Outcome switch
+            {
+                AgentWorkspaceMaterializeOutcome.Materialized
+                    when !string.IsNullOrWhiteSpace(result.WorkspaceIdentity)
+                        && !string.IsNullOrWhiteSpace(result.WorkDir) => plan with
+                    {
+                        MaterializeState = MaterializeState.Materialized,
+                        WorkspaceIdentity = result.WorkspaceIdentity,
+                        MaterializedWorkDir = result.WorkDir,
+                    },
+                AgentWorkspaceMaterializeOutcome.Materialized => plan,
+                AgentWorkspaceMaterializeOutcome.Rejected => plan with
+                {
+                    MaterializeState = MaterializeState.Rejected,
+                    MaterializeRejectionReason = result.Reason,
+                },
+                _ => plan, // Unknown: stays Requested, abort resumes next tick
+            };
+            _state.State.Plan = plan;
+            await SaveStateAsync();
+        }
+
+        if (plan.MaterializeState == MaterializeState.Materialized
+            && plan.ReleaseState != WorkspaceReleaseState.Released)
+        {
+            if (plan.ReleaseState == WorkspaceReleaseState.None)
+            {
+                plan = plan with { ReleaseState = WorkspaceReleaseState.Pending };
+                _state.State.Plan = plan;
+                await SaveStateAsync();
+            }
+            var release = await _materializer.ReleaseAsync(
+                plan.ParentExpectedRunnerId!,
+                new ReleaseAgentWorkspaceRequest(plan.SessionId, plan.WorkspaceIdentity!));
+            if (release.Outcome is AgentWorkspaceReleaseOutcome.Released
+                or AgentWorkspaceReleaseOutcome.NotFound)
+            {
+                plan = plan with { ReleaseState = WorkspaceReleaseState.Released };
+                _state.State.Plan = plan;
+                await SaveStateAsync();
+            }
+        }
+        return plan;
+    }
+
+    /// <summary>
+    /// Materialize pending stage: reserved + admitted plan materializes the
+    /// child worktree on the pinned Runner, then advances to
+    /// EnsureInitialLaunch. Rejected is a durable post-plan rejection;
+    /// Unknown stays on this stage for the recovery reminder.
+    /// </summary>
+    private async Task BeginMaterializeWorkspaceAsync(AgentLaunchCoordinatorPlan plan)
+    {
+        var commandId = plan.Pending?.CommandId ?? Guid.NewGuid().ToString("N");
+        plan = await ConvergeMaterializationAsync(plan);
+
+        var childWorkDir = EffectiveChildWorkDir(plan);
+        var updatedStartup = plan.AgentSessionStartup is null
+            ? null
+            : plan.AgentSessionStartup with { WorkDir = childWorkDir };
+        if (!string.Equals(childWorkDir, plan.WorkspacePath, StringComparison.Ordinal))
+        {
+            await _grains.GetGrain<IAgentJobGrain>(plan.JobKey)
+                .UpdatePreparedWorkspaceAsync(childWorkDir, updatedStartup);
+        }
+
+        _state.State.Plan = plan with
+        {
+            AgentSessionStartup = updatedStartup ?? plan.AgentSessionStartup,
+            Pending = new AgentLaunchCoordinatorPending(
+                commandId,
+                AgentLaunchCoordinatorCommand.EnsureInitialLaunch,
+                null,
+                null),
+        };
+        await SaveStateAsync();
+        await AdvanceAsync();
     }
 
     private async Task BeginPrepareAsync(AgentLaunchCoordinatorPlan plan)
@@ -438,7 +638,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             ParentLinkRevision = result.Revision,
             Pending = new AgentLaunchCoordinatorPending(
                 commandId,
-                AgentLaunchCoordinatorCommand.EnsureInitialLaunch,
+                IsWorktreePlan(plan)
+                    ? AgentLaunchCoordinatorCommand.MaterializeWorkspace
+                    : AgentLaunchCoordinatorCommand.EnsureInitialLaunch,
                 null,
                 null),
         };
@@ -458,6 +660,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 break;
             case AgentLaunchCoordinatorCommand.ReserveLink:
                 await BeginReserveLinkAsync(plan);
+                break;
+            case AgentLaunchCoordinatorCommand.MaterializeWorkspace:
+                await BeginMaterializeWorkspaceAsync(plan);
                 break;
             case AgentLaunchCoordinatorCommand.EnsureParentLink:
                 await BeginEnsureParentLinkAsync(plan);
@@ -505,8 +710,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             labels[GenericAgentSessionMetadata.IssueNumber] = plan.IssueNumber.Value.ToString();
         if (plan.EpicNumber is > 0)
             labels[GenericAgentSessionMetadata.EpicNumber] = plan.EpicNumber.Value.ToString();
-        if (!string.IsNullOrWhiteSpace(plan.WorkspacePath))
-            labels[GenericAgentSessionMetadata.WorkspacePath] = plan.WorkspacePath!;
+        var childWorkDirLabel = EffectiveChildWorkDir(plan);
+        if (!string.IsNullOrWhiteSpace(childWorkDirLabel))
+            labels[GenericAgentSessionMetadata.WorkspacePath] = childWorkDirLabel!;
         if (!string.IsNullOrWhiteSpace(plan.Repository))
             labels[GenericAgentSessionMetadata.Repository] = plan.Repository!;
         if (plan.ConnectionOrigin is { } origin)
@@ -528,7 +734,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             JobId: plan.JobKey,
             Metadata: metadata,
             Runtime: plan.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
-            WorkDir: plan.WorkspacePath,
+            WorkDir: EffectiveChildWorkDir(plan),
             Attachments: plan.Attachments,
             Provenance: plan.ConnectionOrigin is { } provenanceOrigin
                 ? new AgentSessionInputProvenance(
@@ -551,7 +757,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentSessionStartup: plan.AgentSessionStartup,
             LaunchVisibility: plan.ParentSessionId is null
                 ? AgentLaunchVisibility.Visible
-                : AgentLaunchVisibility.Provisional));
+                : AgentLaunchVisibility.Provisional,
+            ConfirmedWorkspaceRepository: IsWorktreePlan(plan) ? plan.WorkspaceRepository : null));
         await _participantProbe.OnEnsureInitialLaunchAsync(plan.SessionId, commandId);
 
         _state.State.Plan = plan with
@@ -739,6 +946,13 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         var current = plan;
         var reason = plan.RejectionReason ?? "spawn_rejected";
         var fence = _grains.GetGrain<ISessionTreeMutationFenceGrain>(plan.ProjectId);
+
+        if (IsWorktreePlan(current))
+        {
+            current = await ConvergeMaterializationForAbortAsync(current);
+            if (current.MaterializeState == MaterializeState.Requested)
+                return;
+        }
 
         if (!current.AbortFenceAcknowledged)
         {
@@ -976,4 +1190,6 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(30)] string? ParentExpectedRuntimeSessionId = null,
     [property: Id(31)] string? ParentLinkEdgeId = null,
     [property: Id(32)] string? SpawnRequestFingerprint = null,
-    [property: Id(33)] long? ParentExpectedBindingEpoch = null);
+    [property: Id(33)] long? ParentExpectedBindingEpoch = null,
+    [property: Id(34)] WorkspaceMode? WorkspaceMode = null,
+    [property: Id(35)] WorkspaceRepositorySnapshot? WorkspaceRepository = null);

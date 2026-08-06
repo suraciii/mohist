@@ -310,6 +310,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
+        services.AddScoped<IAgentWorkspaceMaterializer, RunnerAgentWorkspaceClient>();
         services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
         services.AddScoped<IRunnerStatusSource>(sp => sp.GetRequiredService<RunnerStatusService>());
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();

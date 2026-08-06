@@ -9,7 +9,7 @@ namespace Mohist.Server.Api;
 public static class AgentSessionSpawnRoutes
 {
     private static readonly IReadOnlySet<string> AllowedFields =
-        new HashSet<string>(StringComparer.Ordinal) { "targetAgentRef", "prompt" };
+        new HashSet<string>(StringComparer.Ordinal) { "targetAgentRef", "prompt", "workspace" };
 
     public static WebApplication MapAgentSessionSpawnRoutes(this WebApplication app)
     {
@@ -47,6 +47,7 @@ public static class AgentSessionSpawnRoutes
                     body.TargetAgentRef.Trim(),
                     body.Prompt,
                     values.First()!.Trim(),
+                    body.Workspace,
                     ct);
                 return Results.Json(new ApiResponse<AgentSessionSpawnResponse>(
                     true,
@@ -115,6 +116,7 @@ public static class AgentSessionSpawnRoutes
     public sealed record AgentSessionSpawnBody(
         string? TargetAgentRef,
         string? Prompt,
+        string? Workspace,
         IReadOnlyList<string> UndeclaredFields,
         bool ParseError)
     {
@@ -124,7 +126,7 @@ public static class AgentSessionSpawnRoutes
             {
                 var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
                 if (raw.ValueKind != JsonValueKind.Object)
-                    return new(null, null, [], true);
+                    return new(null, null, null, [], true);
                 var undeclared = raw.EnumerateObject()
                     .Where(property => !AllowedFields.Contains(property.Name))
                     .Select(property => property.Name)
@@ -137,11 +139,19 @@ public static class AgentSessionSpawnRoutes
                     && promptElement.ValueKind == JsonValueKind.String
                     ? promptElement.GetString()
                     : null;
-                return new(target, prompt, undeclared, false);
+                string? workspace = null;
+                if (raw.TryGetProperty("workspace", out var workspaceElement))
+                {
+                    if (workspaceElement.ValueKind == JsonValueKind.String)
+                        workspace = workspaceElement.GetString();
+                    else if (workspaceElement.ValueKind != JsonValueKind.Null)
+                        return new(null, null, null, [], true);
+                }
+                return new(target, prompt, workspace, undeclared, false);
             }
             catch (JsonException)
             {
-                return new(null, null, [], true);
+                return new(null, null, null, [], true);
             }
         }
     }

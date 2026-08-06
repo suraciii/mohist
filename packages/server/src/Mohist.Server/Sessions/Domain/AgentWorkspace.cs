@@ -101,3 +101,48 @@ public enum MaterializeRejectionReason
     RepositoryMismatch,
     Invalid,
 }
+
+/// <summary>
+/// Normalizes a spawn <c>workspace</c> body value into the constrained
+/// <see cref="WorkspaceMode"/>. <c>null</c>/empty/"inherit" map to
+/// <see cref="WorkspaceMode.Inherit"/> (the default); "worktree" maps to
+/// <see cref="WorkspaceMode.Worktree"/>. Any other value (including
+/// case variants and paths) is invalid and rejected terminally as
+/// <c>invalid-workspace-mode</c>.
+/// </summary>
+public static class WorkspaceModeNormalizer
+{
+    public static bool TryNormalize(string? workspace, out WorkspaceMode mode)
+    {
+        switch (workspace?.Trim())
+        {
+            case null or "" or "inherit":
+                mode = WorkspaceMode.Inherit;
+                return true;
+            case "worktree":
+                mode = WorkspaceMode.Worktree;
+                return true;
+            default:
+                mode = default;
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Stable token folded into the spawn request fingerprint. Valid
+    /// modes normalize to <c>inherit</c>/<c>worktree</c>; an invalid
+    /// value keeps its trimmed raw text so the same invalid replay
+    /// hashes to the same fingerprint (and therefore the same terminal
+    /// rejection) while a different invalid value conflicts as 409.
+    /// </summary>
+    public static string FingerprintToken(string? workspace)
+    {
+        var trimmed = workspace?.Trim();
+        return trimmed switch
+        {
+            null or "" or "inherit" => "inherit",
+            "worktree" => "worktree",
+            _ => trimmed,
+        };
+    }
+}

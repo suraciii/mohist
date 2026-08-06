@@ -188,7 +188,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? parentLinkEdgeId = null,
         string? pinnedRunnerId = null,
         AgentExecutionDefinition? definitionOverride = null,
-        bool skipLaunchability = false)
+        bool skipLaunchability = false,
+        WorkspaceMode? workspaceMode = null,
+        WorkspaceRepositorySnapshot? workspaceRepository = null)
     {
         ArgumentNullException.ThrowIfNull(agent);
         ArgumentNullException.ThrowIfNull(context);
@@ -200,11 +202,13 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 nameof(idempotencyKey));
         }
 
+        var workspaceValue = workspaceMode is WorkspaceMode.Worktree ? "worktree" : null;
         var spawnRequestFingerprint = parentSessionId is null
             ? null
             : AgentLaunchCoordinatorCodec.SpawnFingerprint(
                 request.AgentRef ?? string.Empty,
-                request.Prompt);
+                request.Prompt,
+                WorkspaceModeNormalizer.FingerprintToken(workspaceValue));
         if (parentSessionId is not null)
         {
             var spawnFence = await _spawnAdmission.StartOrValidateFenceAsync(
@@ -212,7 +216,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 parentSessionId,
                 idempotencyKey,
                 request.AgentRef ?? string.Empty,
-                request.Prompt);
+                request.Prompt,
+                workspaceValue);
             if (spawnFence.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
                 throw new AgentSpawnPreplanRejectedException(
                     spawnFence.PreplanRejectionReason ?? "spawn_rejected");
@@ -303,7 +308,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentExpectedRuntimeSessionId: parentExpectedRuntimeSessionId,
             ParentExpectedBindingEpoch: parentExpectedBindingEpoch,
             ParentLinkEdgeId: parentLinkEdgeId,
-            SpawnRequestFingerprint: spawnRequestFingerprint));
+            SpawnRequestFingerprint: spawnRequestFingerprint,
+            WorkspaceMode: workspaceMode,
+            WorkspaceRepository: workspaceRepository));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -321,15 +328,18 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string targetAgentRef,
         string prompt,
         string idempotencyKey,
+        string? workspace = null,
         CancellationToken ct = default)
     {
         var normalizedTargetAgentRef = targetAgentRef.Trim();
+        var workspaceToken = WorkspaceModeNormalizer.FingerprintToken(workspace);
         var spawnFence = await _spawnAdmission.StartOrValidateFenceAsync(
             projectId,
             parentSessionId,
             idempotencyKey,
             normalizedTargetAgentRef,
-            prompt);
+            prompt,
+            workspace);
         if (spawnFence.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
             throw new AgentSpawnPreplanRejectedException(
                 spawnFence.PreplanRejectionReason ?? "spawn_rejected");
@@ -337,7 +347,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var existingSpawn = await _grains.GetGrain<IAgentLaunchCoordinatorGrain>(
                 AgentLaunchCoordinatorCodec.KeyFor(projectId, parentSessionId, idempotencyKey))
             .ResumeExistingSpawnAsync(
-                AgentLaunchCoordinatorCodec.SpawnFingerprint(normalizedTargetAgentRef, prompt));
+                AgentLaunchCoordinatorCodec.SpawnFingerprint(normalizedTargetAgentRef, prompt, workspaceToken));
         if (existingSpawn is not null)
         {
             return new AgentLaunchResult(
@@ -358,6 +368,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             idempotencyKey,
             normalizedTargetAgentRef,
             prompt,
+            workspace,
             ct);
         var childSessionId = _sessions.NewSessionId();
         var edgeId = $"agent-edge-{AgentLaunchCoordinatorCodec.StableToken(
@@ -390,7 +401,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             pinnedRunnerId: admission.RunnerId,
             preMintedSessionId: childSessionId,
             definitionOverride: admission.Definition,
-            skipLaunchability: true);
+            skipLaunchability: true,
+            workspaceMode: admission.WorkspaceMode,
+            workspaceRepository: admission.WorkspaceRepository);
     }
 
     public async Task<AgentLaunchResult> LaunchConnectionAsync(

@@ -110,6 +110,7 @@ public interface IAgentLauncher
         string targetAgentRef,
         string prompt,
         string idempotencyKey,
+        string? workspace = null,
         CancellationToken ct = default);
 
     Task<AgentLaunchResult> LaunchConnectionAsync(
