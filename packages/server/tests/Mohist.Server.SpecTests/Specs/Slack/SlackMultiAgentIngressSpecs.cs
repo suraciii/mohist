@@ -655,9 +655,6 @@ public sealed class SlackMultiAgentIngressSpecs
         var resolvedProjectId = projectId ?? $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
-        _fixture.Slack.UsersInfo = new(true, null,
-            new(ownerSlackUserId, workspaceTeamId, false, false, false, false, false));
-
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         var existingProject = await db.Projects

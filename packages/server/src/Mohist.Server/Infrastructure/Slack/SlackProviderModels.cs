@@ -45,6 +45,17 @@ public readonly record struct SlackProviderMessageIdentity(
     }
 }
 
+public sealed record SlackConversationMessage(
+    [property: JsonPropertyName("type")] string? Type,
+    [property: JsonPropertyName("subtype")] string? Subtype,
+    [property: JsonPropertyName("ts")] string? Ts,
+    [property: JsonPropertyName("user")] string? User,
+    [property: JsonPropertyName("text")] string? Text,
+    [property: JsonPropertyName("bot_id")] string? BotId,
+    [property: JsonPropertyName("thread_ts")] string? ThreadTs,
+    [property: JsonPropertyName("parent_user_id")] string? ParentUserId,
+    [property: JsonPropertyName("client_msg_id")] string? ClientMessageId = null);
+
 public static class SlackDeliveryOperations
 {
     public const string PostMessage = "post_message";

@@ -20,7 +20,7 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 | Session | logical execution conversation, input delivery, turn execution, compression, query, audit | AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity, Transcript, Context, Usage |
 | Runner | execution resource availability and capacity | resource, presence, registration, capacity |
 | Skill·Explore | refine vague needs into bounded issues | — |
-| Slack integration | Server-side workspace Manager enrollment and managed child App external lifecycle (App create/OAuth/approval, manifest, transport readiness, operation fence, unknown outcome) | Slack workspace, Manager, managed child App, enrollment, App lifecycle, authorization, manifest drift, transport readiness |
+| Slack integration | Server-side workspace Mohist App enrollment and managed Agent App external lifecycle (App create/install approval, manifest, Socket readiness, operation fence, unknown outcome) | Slack workspace, Mohist App, Agent App, enrollment, App lifecycle, authorization, manifest drift, Socket readiness |
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
 Issue 与 Epic 是同一限界上下文中的两个聚合。Issue 持有自己的当前 `EpicNumber?`；Epic
@@ -52,7 +52,7 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 - External Agent hosts, Skills, CLI, Web UI, Slack and the Slack adapter (`mohist-slack`) are interaction
   adapters, not business domains. Agent Connection belongs to Agent because its binding, access policy and
   lifecycle are persistent Agent-facing product behavior; Slack protocol state does not. The Server-side
-  Slack integration control plane (Slack workspace enrollment and managed child App lifecycle) is a separate
+  Slack integration control plane (Slack workspace enrollment and managed Agent App lifecycle) is a separate
   supporting context (see table above): it holds external-App business facts that must survive restarts, and
   is distinct from the stateless protocol adapter and from the Agent domain.
 - Generic: Label, User, SystemInfo — infrastructure.
@@ -116,15 +116,15 @@ and AgentJob dispatch contracts.
   infrastructure, not Agent Connection or Session facts. The adapter holds only transient protocol state
   and cannot become a second authority for Agent, Job or Session.
 - The Slack integration supporting context owns two independent aggregates: `SlackWorkspaceEnrollment`
-  (workspace-level Manager identity/capability/lifecycle and Manager credential refs; key without Project by
-  default) and `ManagedSlackChildApp` (a child App's external lifecycle/OAuth/manifest/transport/fence/unknown/audit,
-  referencing an `AgentConnectionId`). They are not Agent-domain and not process managers; ChildApp → Connection
+  (workspace-level Mohist App identity/capability/lifecycle and credential refs; key without Project by
+  default) and `ManagedSlackAgentApp` (an Agent App's external lifecycle/install/manifest/Socket/fence/unknown/audit,
+  referencing an `AgentConnectionId`). They are not Agent-domain and not process managers; AgentApp → Connection
   converges via durable fact + idempotent bind, not a cross-aggregate transaction.
-- Agent Connection supports staged binding for the Manager path: `AgentId + WorkspaceTeamId` are fixed at
+- Agent Connection supports staged binding for the `install-agent` path: `AgentId + WorkspaceTeamId` are fixed at
   creation, while `AppId + BotUserId` go from both-empty to both-set exactly once and atomically; half-binding,
   team re-binding and second app/bot re-binding are rejected. Removing a Connection does not delete a
-  separately-retained managed child App; managed child App runtime secrets and the Manager credential are
-  addressed by their owning aggregate (ChildApp / Enrollment), not by Agent Connection.
+  separately-retained managed Agent App; Agent App runtime secrets and the Mohist App credential are
+  addressed by their owning aggregate (AgentApp / Enrollment), not by Agent Connection.
 - SessionInput and AgentTurn are AgentSession-owned child records. They express ordered input and one
   continuous Runtime processing lifecycle, not new top-level work or a replacement for AgentJob result.
 - Session is horizontal leaf. Model evolves independently. No reverse dependencies.

@@ -1,21 +1,5 @@
 namespace Mohist.Server.Slack.Domain;
 
-public static class SlackOAuthStateOutcome
-{
-    public const string Accepted = "accepted";
-    public const string Expired = "expired";
-}
-
-public static class SlackOAuthAttemptStatus
-{
-    public const string Issued = "issued";
-    public const string Consumed = "consumed";
-    public const string SecretStored = "secret_stored";
-    public const string Applied = "applied";
-    public const string Expired = "expired";
-    public const string RecoveryRequired = "recovery_required";
-}
-
 public static class SlackStateTransitions
 {
     public static void RequireEnrollmentLifecycleTransition(string current, string next)
@@ -39,7 +23,7 @@ public static class SlackStateTransitions
             SlackManagerCapability.Unauthorized,
             SlackManagerCapability.CapacityLimited);
 
-    public static void RequireChildAppLifecycleTransition(string current, string next)
+    public static void RequireAgentAppLifecycleTransition(string current, string next)
     {
         var known = new[]
         {
@@ -62,7 +46,7 @@ public static class SlackStateTransitions
             || current == SlackAppLifecycle.Deleting && IsOneOf(next, SlackAppLifecycle.Deleted, SlackAppLifecycle.DeleteUnknown, SlackAppLifecycle.Created)
             || current == SlackAppLifecycle.DeleteUnknown && IsOneOf(next, SlackAppLifecycle.Deleted, SlackAppLifecycle.Created, SlackAppLifecycle.Deleting))
             return;
-        throw InvalidTransition("Child App lifecycle", current, next);
+        throw InvalidTransition("Agent App lifecycle", current, next);
     }
 
     public static void RequireAuthorizationTransition(string current, string next)
@@ -93,11 +77,8 @@ public static class SlackStateTransitions
         throw InvalidTransition("authorization", current, next);
     }
 
-    public static void RequireTransportKind(string value) =>
-        RequireKnown(value, SlackTransportKind.Socket, SlackTransportKind.Https);
-
     public static void RequireManagerTransportKind(string value) =>
-        RequireKnown(value, SlackManagerTransportKind.Socket, SlackManagerTransportKind.Https);
+        RequireKnown(value, SlackManagerTransportKind.Socket);
 
     public static void RequireManagerReadiness(string value) =>
         RequireKnown(value,
@@ -106,64 +87,82 @@ public static class SlackStateTransitions
             SlackManagerReadiness.NotReady,
             SlackManagerReadiness.Degraded);
 
+    public static void RequireManagerAppLifecycleTransition(string current, string next)
+    {
+        var known = new[]
+        {
+            SlackManagerAppLifecycle.NotCreated,
+            SlackManagerAppLifecycle.Creating,
+            SlackManagerAppLifecycle.Created,
+            SlackManagerAppLifecycle.CreateUnknown,
+        };
+        RequireKnown(current, known);
+        RequireKnown(next, known);
+        if (current == next)
+            return;
+        if (current == SlackManagerAppLifecycle.NotCreated && next == SlackManagerAppLifecycle.Creating
+            || current == SlackManagerAppLifecycle.Creating
+            && IsOneOf(next, SlackManagerAppLifecycle.Created, SlackManagerAppLifecycle.CreateUnknown)
+            || current == SlackManagerAppLifecycle.CreateUnknown
+            && IsOneOf(next, SlackManagerAppLifecycle.Creating, SlackManagerAppLifecycle.Created)
+            || current == SlackManagerAppLifecycle.Created && next == SlackManagerAppLifecycle.CreateUnknown)
+            return;
+        throw InvalidTransition("Manager App lifecycle", current, next);
+    }
+
+    public static void RequireRuntimeCredentialValidationTransition(string current, string next)
+    {
+        var known = new[]
+        {
+            SlackRuntimeCredentialValidationState.NotProvided,
+            SlackRuntimeCredentialValidationState.Candidate,
+            SlackRuntimeCredentialValidationState.AwaitingSocket,
+            SlackRuntimeCredentialValidationState.Verified,
+            SlackRuntimeCredentialValidationState.Failed,
+        };
+        RequireKnown(current, known);
+        RequireKnown(next, known);
+        if (current == next)
+            return;
+        if (current == SlackRuntimeCredentialValidationState.NotProvided
+            && next == SlackRuntimeCredentialValidationState.Candidate
+            || current == SlackRuntimeCredentialValidationState.Candidate
+            && IsOneOf(next, SlackRuntimeCredentialValidationState.AwaitingSocket, SlackRuntimeCredentialValidationState.Verified, SlackRuntimeCredentialValidationState.Failed)
+            || current == SlackRuntimeCredentialValidationState.AwaitingSocket
+            && IsOneOf(next, SlackRuntimeCredentialValidationState.Verified, SlackRuntimeCredentialValidationState.Failed)
+            || current == SlackRuntimeCredentialValidationState.Failed
+            && next == SlackRuntimeCredentialValidationState.Candidate
+            || current == SlackRuntimeCredentialValidationState.Verified
+            && next == SlackRuntimeCredentialValidationState.Candidate)
+            return;
+        throw InvalidTransition("runtime credential validation", current, next);
+    }
+
     public static void RequireBindingTransition(string current, string next)
     {
         RequireKnownBinding(current);
         RequireKnownBinding(next);
         if (current == next)
             return;
-        if (current == SlackChildAppBindingState.Pending
-            && IsOneOf(next, SlackChildAppBindingState.InProgress, SlackChildAppBindingState.Bound, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-            || current == SlackChildAppBindingState.InProgress && IsOneOf(next, SlackChildAppBindingState.Bound, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-            || current == SlackChildAppBindingState.Bound && next == SlackChildAppBindingState.ConnectionDeleted
-            || IsOneOf(current, SlackChildAppBindingState.ConnectionDeleted, SlackChildAppBindingState.Conflict)
-                && IsOneOf(next, SlackChildAppBindingState.Pending, SlackChildAppBindingState.InProgress))
+        if (current == SlackAgentAppBindingState.Pending
+            && IsOneOf(next, SlackAgentAppBindingState.InProgress, SlackAgentAppBindingState.Bound, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+            || current == SlackAgentAppBindingState.InProgress && IsOneOf(next, SlackAgentAppBindingState.Bound, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+            || current == SlackAgentAppBindingState.Bound && next == SlackAgentAppBindingState.ConnectionDeleted
+            || IsOneOf(current, SlackAgentAppBindingState.ConnectionDeleted, SlackAgentAppBindingState.Conflict)
+                && IsOneOf(next, SlackAgentAppBindingState.Pending, SlackAgentAppBindingState.InProgress))
             return;
-        throw InvalidTransition("Child App binding", current, next);
-    }
-
-    public static void RequireOAuthAttemptTransition(string current, string next)
-    {
-        var known = new[]
-        {
-            SlackOAuthAttemptStatus.Issued,
-            SlackOAuthAttemptStatus.Consumed,
-            SlackOAuthAttemptStatus.SecretStored,
-            SlackOAuthAttemptStatus.Applied,
-            SlackOAuthAttemptStatus.Expired,
-            SlackOAuthAttemptStatus.RecoveryRequired,
-        };
-        RequireKnown(current, known);
-        RequireKnown(next, known);
-        if (current == next)
-            return;
-        if (current == SlackOAuthAttemptStatus.Issued
-            && IsOneOf(next, SlackOAuthAttemptStatus.Consumed, SlackOAuthAttemptStatus.Expired)
-            || current == SlackOAuthAttemptStatus.Consumed
-            && IsOneOf(next, SlackOAuthAttemptStatus.SecretStored, SlackOAuthAttemptStatus.RecoveryRequired)
-            || current == SlackOAuthAttemptStatus.SecretStored
-            && IsOneOf(next, SlackOAuthAttemptStatus.Applied, SlackOAuthAttemptStatus.RecoveryRequired)
-            || current == SlackOAuthAttemptStatus.RecoveryRequired
-            && IsOneOf(next, SlackOAuthAttemptStatus.SecretStored, SlackOAuthAttemptStatus.Applied))
-            return;
-        throw InvalidTransition("OAuth attempt", current, next);
-    }
-
-    public static void RequireOAuthOutcome(string? value)
-    {
-        if (value is not null && !IsOneOf(value, SlackOAuthStateOutcome.Accepted, SlackOAuthStateOutcome.Expired))
-            throw new ArgumentException($"Unknown OAuth state outcome '{value}'.", nameof(value));
+        throw InvalidTransition("Agent App binding", current, next);
     }
 
     public static void RequireBindingObligationStatus(string value) => RequireKnownBinding(value);
 
     private static void RequireKnownBinding(string value) =>
         RequireKnown(value,
-            SlackChildAppBindingState.Pending,
-            SlackChildAppBindingState.InProgress,
-            SlackChildAppBindingState.Bound,
-            SlackChildAppBindingState.ConnectionDeleted,
-            SlackChildAppBindingState.Conflict);
+            SlackAgentAppBindingState.Pending,
+            SlackAgentAppBindingState.InProgress,
+            SlackAgentAppBindingState.Bound,
+            SlackAgentAppBindingState.ConnectionDeleted,
+            SlackAgentAppBindingState.Conflict);
 
     private static void RequireKnown(string value, params string[] allowed)
     {

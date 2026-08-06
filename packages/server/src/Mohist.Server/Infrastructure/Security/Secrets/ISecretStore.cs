@@ -16,6 +16,9 @@ public interface ISecretStore
 {
     Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default);
 
+    Task StoreAtomicallyAsync(IReadOnlyCollection<SecretStoreWrite> writes, CancellationToken ct = default) =>
+        throw new NotSupportedException("Atomic secret writes are not supported by this secret store.");
+
     Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default);
 
     Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default);
@@ -29,6 +32,8 @@ public interface ISecretStore
     /// </summary>
     IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values);
 }
+
+public sealed record SecretStoreWrite(SecretStoreAddress Address, byte[] Plaintext);
 
 public sealed class SecretStoreException : Exception
 {

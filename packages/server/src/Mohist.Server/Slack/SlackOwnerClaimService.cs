@@ -33,21 +33,15 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
 {
     private static readonly TimeSpan DefaultLifetime = TimeSpan.FromMinutes(10);
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly ISecretStore _secrets;
-    private readonly ISlackApiClient _slack;
     private readonly TimeProvider _time;
     private readonly SlackConnectionAccessDecider _accessDecider;
 
     public SlackOwnerClaimService(
         IDbContextFactory<MohistDbContext> dbFactory,
-        ISecretStore secrets,
-        ISlackApiClient slack,
         TimeProvider time,
         SlackConnectionAccessDecider accessDecider)
     {
         _dbFactory = dbFactory;
-        _secrets = secrets;
-        _slack = slack;
         _time = time;
         _accessDecider = accessDecider;
     }
@@ -186,16 +180,6 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         string senderSlackUserId,
         CancellationToken ct)
     {
-        var token = await _secrets.LoadAsync(
-            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-        if (token is null || token.Length == 0)
-            return Reject("Slack setup is incomplete: configure the Bot token before claiming ownership.");
-
-        var userResponse = await _slack.UsersInfoAsync(
-            senderSlackUserId, Encoding.UTF8.GetString(token), ct);
-        if (!IsEligibleMember(userResponse, connection.WorkspaceTeamId, senderSlackUserId))
-            return Reject("Only a current regular member of this Slack workspace can claim ownership.");
-
         var now = _time.GetUtcNow();
         var changed = await db.AgentConnections
             .Where(row => row.ProjectId == connection.ProjectId && row.Id == connection.Id && row.DeletedAt == null && row.OwnerSlackUserId == null)
@@ -218,16 +202,6 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         string senderSlackUserId,
         CancellationToken ct)
     {
-        var token = await _secrets.LoadAsync(
-            new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-        if (token is null || token.Length == 0)
-            return Reject("Slack setup is incomplete: configure the Bot token before transferring ownership.");
-
-        var userResponse = await _slack.UsersInfoAsync(
-            senderSlackUserId, Encoding.UTF8.GetString(token), ct);
-        if (!IsEligibleMember(userResponse, connection.WorkspaceTeamId, senderSlackUserId))
-            return Reject("Only a current regular member of this Slack workspace can take over ownership.");
-
         var currentOwner = connection.OwnerSlackUserId;
         if (currentOwner is null)
             return Reject("This Connection no longer has a current owner. Use claim-owner instead.");
@@ -246,18 +220,6 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         code.UsedAt = now;
         await db.SaveChangesAsync(ct);
         return new(SlackInboundDecisionKind.Transferred, null);
-    }
-
-    public static bool IsEligibleMember(
-        SlackUserInfoResponse response,
-        string workspaceTeamId,
-        string senderSlackUserId)
-    {
-        var user = response.User;
-        if (!response.Ok || user is null || !string.Equals(user.Id, senderSlackUserId, StringComparison.Ordinal)) return false;
-        if (!string.Equals(user.TeamId, workspaceTeamId, StringComparison.Ordinal)) return false;
-        if (user.TeamIds is { Count: > 0 } && user.TeamIds.Any(teamId => !string.Equals(teamId, workspaceTeamId, StringComparison.Ordinal))) return false;
-        return !user.IsBot && !user.Deleted && !user.IsGuest && !user.IsRestricted && !user.IsUltraRestricted;
     }
 
     private static SlackInboundDecision Reject(string reason) => new(SlackInboundDecisionKind.Rejected, reason);

@@ -14,7 +14,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 
-public sealed class AgentConnectionStoreSpecs : IAsyncLifetime
+public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
 {
     private readonly FakeTimeProvider _timeProvider;
     private TestSqliteDatabase _database = null!;

@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -22,14 +20,15 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     private TestSqliteDatabase _database = null!;
     private TestDbContextFactory _factory = null!;
     private FakeSlackAppManagementPort _apps = null!;
-    private ManagedSlackChildAppApplicationService _appService = null!;
+    private readonly FakeSecretStore _secrets = new();
+    private ManagedSlackAgentAppApplicationService _appService = null!;
 
     public ValueTask InitializeAsync()
     {
         _database = TestSqliteDatabase.CreateMigrated();
         _factory = new TestDbContextFactory(_database.Options);
         _apps = new FakeSlackAppManagementPort();
-        _appService = new ManagedSlackChildAppApplicationService(_factory, _apps, _apps, _time);
+        _appService = new ManagedSlackAgentAppApplicationService(_factory, new AgentQuerier(_factory), _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
         return ValueTask.CompletedTask;
     }
 
@@ -50,11 +49,11 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             _appService.CreateAsync(child.Id),
             _appService.CreateAsync(child.Id));
 
-        Assert.Equal(1, results.Count(result => result.Status == ManagedSlackChildAppOperationStatus.Completed));
-        Assert.Contains(results, result => result.Status is ManagedSlackChildAppOperationStatus.Concurrent or ManagedSlackChildAppOperationStatus.NotAllowed);
+        Assert.Equal(1, results.Count(result => result.Status == ManagedSlackAgentAppOperationStatus.Completed));
+        Assert.Contains(results, result => result.Status is ManagedSlackAgentAppOperationStatus.Concurrent or ManagedSlackAgentAppOperationStatus.NotAllowed);
         Assert.Equal(1, _apps.CreateCalls);
         await using var db = _factory.CreateDbContext();
-        var row = await db.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
+        var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
         Assert.Equal(SlackAppLifecycle.Created, row.AppLifecycle);
         Assert.Equal(1, row.OperationFence);
     }
@@ -69,9 +68,9 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         var create = await _appService.CreateAsync(child.Id);
         var retry = await _appService.CreateAsync(child.Id);
 
-        Assert.Equal(ManagedSlackChildAppOperationStatus.Completed, create.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Completed, create.Status);
         Assert.Equal(SlackAppManagementOutcome.Unknown, create.Outcome);
-        Assert.Equal(ManagedSlackChildAppOperationStatus.NotAllowed, retry.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.NotAllowed, retry.Status);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(SlackAppLifecycle.CreateUnknown, await LifecycleAsync(child.Id));
 
@@ -79,7 +78,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             Inspect: new SlackAppManagementFact(SlackAppManagementFactOutcome.Present, "A_FACT")));
         var reconciled = await _appService.ReconcileCreateAsync(child.Id);
 
-        Assert.Equal(ManagedSlackChildAppOperationStatus.Reconciled, reconciled.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Reconciled, reconciled.Status);
         Assert.Equal(SlackAppManagementFactOutcome.Present, reconciled.FactOutcome);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(SlackAppLifecycle.Created, await LifecycleAsync(child.Id));
@@ -99,9 +98,9 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         var delete = await _appService.DeleteAsync(child.Id, "DELETE");
         var retry = await _appService.DeleteAsync(child.Id, "DELETE");
 
-        Assert.Equal(ManagedSlackChildAppOperationStatus.Completed, delete.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Completed, delete.Status);
         Assert.Equal(SlackAppManagementOutcome.Unknown, delete.Outcome);
-        Assert.Equal(ManagedSlackChildAppOperationStatus.NotAllowed, retry.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.NotAllowed, retry.Status);
         Assert.Equal(1, _apps.DeleteCalls);
         Assert.Equal(SlackAppLifecycle.DeleteUnknown, await LifecycleAsync(child.Id));
 
@@ -109,7 +108,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             Inspect: new SlackAppManagementFact(SlackAppManagementFactOutcome.Absent)));
         var reconciled = await _appService.ReconcileDeleteAsync(child.Id);
 
-        Assert.Equal(ManagedSlackChildAppOperationStatus.Reconciled, reconciled.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Reconciled, reconciled.Status);
         Assert.Equal(SlackAppManagementFactOutcome.Absent, reconciled.FactOutcome);
         Assert.Equal(1, _apps.DeleteCalls);
         Assert.Equal(SlackAppLifecycle.Deleted, await LifecycleAsync(child.Id));
@@ -134,11 +133,11 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             Delete: new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded)));
         var deleted = await _appService.DeleteAsync(active.Id, "DELETE");
 
-        Assert.Equal(ManagedSlackChildAppOperationStatus.Completed, deleted.Status);
+        Assert.Equal(ManagedSlackAgentAppOperationStatus.Completed, deleted.Status);
         Assert.Equal(SlackAppManagementOutcome.Succeeded, deleted.Outcome);
         Assert.Equal(SlackAppLifecycle.Deleted, await LifecycleAsync(active.Id));
         await using var db = _factory.CreateDbContext();
-        var audit = await db.ManagedSlackChildApps.Where(row => row.Id == active.Id).Select(row => row.AuditJson).SingleAsync();
+        var audit = await db.ManagedSlackAgentApps.Where(row => row.Id == active.Id).Select(row => row.AuditJson).SingleAsync();
         Assert.Contains("permanent_delete", audit, StringComparison.Ordinal);
         Assert.DoesNotContain("operator-1", audit, StringComparison.Ordinal);
     }
@@ -146,16 +145,15 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     [Fact]
     public void Status_axes_derive_transport_readiness_manifest_drift_and_one_next_action()
     {
-        var child = new ManagedSlackChildApp
+        var child = new ManagedSlackAgentApp
         {
             AppLifecycle = SlackAppLifecycle.NotCreated,
             Authorization = SlackAuthorizationState.NotStarted,
-            TransportKind = SlackTransportKind.Socket,
         };
-        Assert.Equal(SlackChildAppNextAction.CreateChildApp, child.NextAction);
+        Assert.Equal(SlackAgentAppNextAction.CreateAgentApp, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.CreateUnknown;
-        Assert.Equal(SlackChildAppNextAction.ReconcileCreate, child.NextAction);
+        Assert.Equal(SlackAgentAppNextAction.ReconcileCreate, child.NextAction);
 
         child.AppLifecycle = SlackAppLifecycle.Created;
         child.Authorization = SlackAuthorizationState.Authorized;
@@ -163,163 +161,26 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         child.DesiredManifestHash = "desired";
         child.AppliedManifestVersion = 1;
         child.AppliedManifestHash = "old";
-        child.BindingState = SlackChildAppBindingState.Bound;
-        child.TransportKind = SlackTransportKind.Https;
-        child.PublicIngressBaseUrl = "https://mohist.example/slack";
-        child.SigningSecretRef = "secret-ref";
-        child.AppLevelTokenRef = string.Empty;
-        child.BotTokenRef = string.Empty;
+        child.BindingState = SlackAgentAppBindingState.Bound;
+        child.AppLevelTokenRef = "app-token-ref";
+        child.BotTokenRef = "bot-token-ref";
 
-        var status = ManagedSlackChildAppStatusDeriver.Derive(child);
+        var status = ManagedSlackAgentAppStatusDeriver.Derive(child);
         Assert.Equal(SlackManifestState.DriftKnown, status.ManifestState);
         Assert.Equal(SlackTransportReadiness.Ready, status.TransportReadiness);
-        Assert.Equal(SlackChildAppNextAction.ApplyManifest, status.NextAction);
+        Assert.Equal(SlackAgentAppNextAction.ApplyManifest, status.NextAction);
 
         child.AppliedManifestVersion = 2;
         child.AppliedManifestHash = "desired";
-        status = ManagedSlackChildAppStatusDeriver.Derive(child);
-        Assert.Equal(SlackChildAppNextAction.Ready, status.NextAction);
+        status = ManagedSlackAgentAppStatusDeriver.Derive(child);
+        Assert.Equal(SlackAgentAppNextAction.Ready, status.NextAction);
 
-        child.SigningSecretRef = string.Empty;
-        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackChildAppStatusDeriver.DeriveTransportReadiness(child));
-        Assert.Equal(SlackChildAppNextAction.ConfigureHttpsIngress, child.NextAction);
-
-        child.TransportKind = SlackTransportKind.Socket;
         child.AppLevelTokenRef = string.Empty;
+        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
+        Assert.Equal(SlackAgentAppNextAction.ConfigureSocketCredentials, child.NextAction);
+
         child.BotTokenRef = "bot-ref";
-        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackChildAppStatusDeriver.DeriveTransportReadiness(child));
-    }
-
-    [Fact]
-    public void Manifest_is_canonical_and_drift_fingerprint_excludes_secrets_and_metadata_from_live_schema()
-    {
-        var generator = new SlackManifestGenerator();
-        var first = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["chat:write", "commands"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var reordered = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var capabilityDrift = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-2",
-            new SlackManifestIdentitySnapshot("connection-1", "agent-1", "T123")));
-        var identityDrift = generator.Generate(new SlackManifestInput(
-            "Mohist Agent",
-            "Handles work",
-            ["commands", "chat:write"],
-            SlackManifestTransport.Socket,
-            null,
-            "capability-1",
-            new SlackManifestIdentitySnapshot("connection-2", "agent-1", "T123")));
-
-        Assert.Equal(first.CanonicalJson, reordered.CanonicalJson);
-        Assert.Equal(first.Hash, reordered.Hash);
-        Assert.NotEqual(first.Hash, capabilityDrift.Hash);
-        Assert.NotEqual(first.Hash, identityDrift.Hash);
-        Assert.DoesNotContain("product_capability_version", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.DoesNotContain("agent-1", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.DoesNotContain("xoxb-", first.CanonicalJson, StringComparison.Ordinal);
-        Assert.Throws<ArgumentException>(() => generator.Generate(new SlackManifestInput(
-            "HTTPS Agent", "Handles work", ["chat:write"], SlackManifestTransport.Https, null,
-            "capability-1", new SlackManifestIdentitySnapshot("c", "a", "T"))));
-
-        var https = generator.Generate(new SlackManifestInput(
-            "HTTPS Agent", "Handles work", ["chat:write"], SlackManifestTransport.Https,
-            "https://mohist.example", "capability-1", new SlackManifestIdentitySnapshot("c", "a", "T")));
-        Assert.Contains("request_url", https.CanonicalJson, StringComparison.Ordinal);
-        Assert.Contains("https://mohist.example/slack/events", https.CanonicalJson, StringComparison.Ordinal);
-
-        using var socketJson = JsonDocument.Parse(first.CanonicalJson);
-        var socketRoot = socketJson.RootElement;
-        Assert.Equal(["display_information", "features", "oauth_config", "settings"],
-            socketRoot.EnumerateObject().Select(property => property.Name).ToArray());
-        var socketEvents = socketRoot.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention", "message.im"], socketEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
-        Assert.Contains("reactions:read", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
-        Assert.Contains("reactions:write", socketRoot.GetProperty("oauth_config").GetProperty("scopes").GetProperty("bot").EnumerateArray().Select(item => item.GetString()!), StringComparer.Ordinal);
-        Assert.False(socketEvents.TryGetProperty("request_url", out _));
-        Assert.False(socketRoot.GetProperty("settings").TryGetProperty("socket_mode", out _));
-        var socketAppHome = socketRoot.GetProperty("features").GetProperty("app_home");
-        Assert.False(socketAppHome.GetProperty("home_tab_enabled").GetBoolean());
-        Assert.True(socketAppHome.GetProperty("messages_tab_enabled").GetBoolean());
-        Assert.False(socketAppHome.GetProperty("messages_tab_read_only_enabled").GetBoolean());
-
-        using var httpsJson = JsonDocument.Parse(https.CanonicalJson);
-        var httpsEvents = httpsJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions");
-        Assert.Equal(["app_mention", "message.im"], httpsEvents.GetProperty("bot_events").EnumerateArray().Select(item => item.GetString()!).ToArray());
-        Assert.Equal("https://mohist.example/slack/events", httpsEvents.GetProperty("request_url").GetString());
-    }
-
-    [Fact]
-    public async Task OAuth_state_is_hashed_single_use_and_mismatch_never_stores_a_bot_token()
-    {
-        var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_OAUTH");
-        var states = new SlackOAuthStateService(_factory, _time);
-        var issued = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId);
-
-        await using (var before = _factory.CreateDbContext())
-        {
-            var row = await before.SlackOAuthStates.SingleAsync();
-            Assert.Equal(SlackOAuthStateService.Hash(issued.State), row.StateHash);
-            Assert.DoesNotContain(issued.State, row.StateHash, StringComparison.Ordinal);
-            Assert.Null(row.ConsumedAt);
-        }
-
-        Assert.Equal(SlackOAuthStateValidation.Mismatch,
-            await states.ConsumeAsync(issued.State, child.Id, "T_OTHER", child.AppId));
-        var accepted = await states.ConsumeAsync(issued.State, child.Id, child.WorkspaceTeamId, child.AppId);
-        var replay = await states.ConsumeAsync(issued.State, child.Id, child.WorkspaceTeamId, child.AppId);
-        Assert.Equal(SlackOAuthStateValidation.Accepted, accepted);
-        Assert.Equal(SlackOAuthStateValidation.ReplayAccepted, replay);
-
-        var expired = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId, TimeSpan.FromMinutes(1));
-        _time.Advance(TimeSpan.FromMinutes(1));
-        Assert.Equal(SlackOAuthStateValidation.Expired,
-            await states.ConsumeAsync(expired.State, child.Id, child.WorkspaceTeamId, child.AppId));
-    }
-
-    [Fact]
-    public async Task OAuth_authorization_stores_only_reference_and_replay_is_idempotent()
-    {
-        var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_AUTH");
-        var states = new SlackOAuthStateService(_factory, _time);
-        var issued = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId);
-        var sink = new FakeSlackOAuthCredentialSink();
-        var authorization = new SlackOAuthAuthorizationService(_factory, states, sink, _time);
-
-        var mismatch = await authorization.AuthorizeAsync(
-            issued.State, child.Id, "T_OTHER", child.AppId, "U_AUTH", "xoxb-secret");
-        Assert.Equal(SlackOAuthAuthorizationStatus.Rejected, mismatch.Status);
-        Assert.Empty(sink.Tokens);
-        Assert.Equal(string.Empty, await BotUserIdAsync(child.Id));
-
-        var accepted = await authorization.AuthorizeAsync(
-            issued.State, child.Id, child.WorkspaceTeamId, child.AppId, "U_AUTH", "xoxb-secret");
-        var replay = await authorization.AuthorizeAsync(
-            issued.State, child.Id, child.WorkspaceTeamId, child.AppId, "U_AUTH", "xoxb-secret");
-
-        Assert.Equal(SlackOAuthAuthorizationStatus.Accepted, accepted.Status);
-        Assert.Equal(SlackOAuthAuthorizationStatus.AlreadyApplied, replay.Status);
-        Assert.Single(sink.Tokens);
-        await using var db = _factory.CreateDbContext();
-        var row = await db.ManagedSlackChildApps.SingleAsync(item => item.Id == child.Id);
-        Assert.StartsWith("slack-oauth-attempt:", row.BotTokenRef, StringComparison.Ordinal);
-        Assert.DoesNotContain("xoxb-secret", JsonSerializer.Serialize(row), StringComparison.Ordinal);
+        Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
     }
 
     [Fact]
@@ -329,25 +190,50 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_BIND",
-            botUserId: "U_BIND");
+            botUserId: "U_BIND",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var connections = new AgentConnectionStore(
             _factory,
             new AgentQuerier(_factory),
             new FakeSecretStore(),
             Array.Empty<IAgentConnectionProviderCleanup>(),
             _time);
-        var binding = new SlackChildAppBindingService(_factory, connections, _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
 
         var first = await binding.ReconcileAsync(child.Id);
         var replay = await binding.ReconcileAsync(child.Id);
-        Assert.Equal(SlackChildAppBindingStatus.Bound, first.Status);
-        Assert.Equal(SlackChildAppBindingStatus.Bound, replay.Status);
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, first.Status);
+        Assert.Equal(SlackAgentAppBindingStatus.Bound, replay.Status);
         Assert.Equal(("A_BIND", "U_BIND"), await ConnectionIdentityAsync(child.AgentConnectionId));
 
         await SoftDeleteConnectionAsync(child.AgentConnectionId);
         var deleted = await binding.ReconcileAsync(child.Id);
-        Assert.Equal(SlackChildAppBindingStatus.ConnectionDeleted, deleted.Status);
-        Assert.Equal(SlackChildAppBindingState.ConnectionDeleted, await BindingStateAsync(child.Id));
+        Assert.Equal(SlackAgentAppBindingStatus.ConnectionDeleted, deleted.Status);
+        Assert.Equal(SlackAgentAppBindingState.ConnectionDeleted, await BindingStateAsync(child.Id));
+    }
+
+    [Fact]
+    public async Task Unverified_child_is_not_bound_before_socket_hello()
+    {
+        var child = await SeedChildAsync(
+            lifecycle: SlackAppLifecycle.Created,
+            authorization: SlackAuthorizationState.Authorized,
+            appId: "A_UNVERIFIED",
+            botUserId: "U_UNVERIFIED",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Candidate);
+        var connections = new AgentConnectionStore(
+            _factory,
+            new AgentQuerier(_factory),
+            new FakeSecretStore(),
+            Array.Empty<IAgentConnectionProviderCleanup>(),
+            _time);
+        var binding = new SlackAgentAppBindingService(_factory, connections, _time);
+
+        var result = await binding.ReconcileAsync(child.Id);
+
+        Assert.Equal(SlackAgentAppBindingStatus.NotVerified, result.Status);
+        Assert.Equal(SlackAgentAppBindingState.Pending, await BindingStateAsync(child.Id));
+        Assert.Equal((string.Empty, string.Empty), await ConnectionIdentityAsync(child.AgentConnectionId));
     }
 
     [Fact]
@@ -357,22 +243,24 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_OLDEST",
-            botUserId: "U_OLDEST");
+            botUserId: "U_OLDEST",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
         var newest = await SeedChildAsync(
             lifecycle: SlackAppLifecycle.Created,
             authorization: SlackAuthorizationState.Authorized,
             appId: "A_NEWEST",
-            botUserId: "U_NEWEST");
-        await SeedBindingObligationAsync(oldest, SlackChildAppBindingObligationStatus.Pending, _time.GetUtcNow().AddMinutes(-1));
-        await SeedBindingObligationAsync(newest, SlackChildAppBindingObligationStatus.Pending, _time.GetUtcNow());
+            botUserId: "U_NEWEST",
+            runtimeCredentialValidationState: SlackRuntimeCredentialValidationState.Verified);
+        await SeedBindingObligationAsync(oldest, SlackAgentAppBindingObligationStatus.Pending, _time.GetUtcNow().AddMinutes(-1));
+        await SeedBindingObligationAsync(newest, SlackAgentAppBindingObligationStatus.Pending, _time.GetUtcNow());
 
         var port = new RecordingBindingPort();
-        var binding = new SlackChildAppBindingService(_factory, port, _time);
+        var binding = new SlackAgentAppBindingService(_factory, port, _time);
 
         var results = await binding.ProcessPendingAsync();
 
         Assert.Equal([oldest.AgentConnectionId, newest.AgentConnectionId], port.ConnectionIds);
-        Assert.All(results, result => Assert.Equal(SlackChildAppBindingStatus.Bound, result.Status));
+        Assert.All(results, result => Assert.Equal(SlackAgentAppBindingStatus.Bound, result.Status));
     }
 
     [Fact]
@@ -453,12 +341,13 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         }));
     }
 
-    private async Task<ManagedSlackChildAppRow> SeedChildAsync(
+    private async Task<ManagedSlackAgentAppRow> SeedChildAsync(
         string lifecycle,
         string authorization = SlackAuthorizationState.NotStarted,
         string appId = "",
         string botUserId = "",
-        string bindingState = SlackChildAppBindingState.Pending)
+        string bindingState = SlackAgentAppBindingState.Pending,
+        string runtimeCredentialValidationState = SlackRuntimeCredentialValidationState.NotProvided)
     {
         var suffix = Guid.NewGuid().ToString("N");
         var enrollmentId = $"enrollment-{suffix}";
@@ -497,7 +386,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now,
         });
-        var row = new ManagedSlackChildAppRow
+        var row = new ManagedSlackAgentAppRow
         {
             Id = childId,
             EnrollmentId = enrollmentId,
@@ -507,7 +396,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             BotUserId = botUserId,
             AppLifecycle = lifecycle,
             Authorization = authorization,
-            TransportKind = SlackTransportKind.Socket,
+            RuntimeCredentialValidationState = runtimeCredentialValidationState,
             DesiredManifestVersion = 2,
             DesiredManifestHash = "desired",
             VerifiedScopesJson = "[]",
@@ -521,7 +410,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
             CreatedAt = now,
             UpdatedAt = now,
         };
-        db.ManagedSlackChildApps.Add(row);
+        db.ManagedSlackAgentApps.Add(row);
         await db.SaveChangesAsync();
         return row;
     }
@@ -536,16 +425,16 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     }
 
     private async Task SeedBindingObligationAsync(
-        ManagedSlackChildAppRow child,
+        ManagedSlackAgentAppRow child,
         string status,
         DateTimeOffset? updatedAt = null)
     {
         await using var db = _factory.CreateDbContext();
         var now = updatedAt ?? _time.GetUtcNow();
-        db.SlackChildAppBindingObligations.Add(new SlackChildAppBindingObligationRow
+        db.SlackAgentAppBindingObligations.Add(new SlackAgentAppBindingObligationRow
         {
             Id = $"obligation-{Guid.NewGuid():N}",
-            ChildAppId = child.Id,
+            AgentAppId = child.Id,
             AgentConnectionId = child.AgentConnectionId,
             Status = status,
             CreatedAt = now,
@@ -557,19 +446,13 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     private async Task<string> LifecycleAsync(string childId)
     {
         await using var db = _factory.CreateDbContext();
-        return await db.ManagedSlackChildApps.Where(item => item.Id == childId).Select(item => item.AppLifecycle).SingleAsync();
-    }
-
-    private async Task<string> BotUserIdAsync(string childId)
-    {
-        await using var db = _factory.CreateDbContext();
-        return await db.ManagedSlackChildApps.Where(item => item.Id == childId).Select(item => item.BotUserId).SingleAsync();
+        return await db.ManagedSlackAgentApps.Where(item => item.Id == childId).Select(item => item.AppLifecycle).SingleAsync();
     }
 
     private async Task<string> BindingStateAsync(string childId)
     {
         await using var db = _factory.CreateDbContext();
-        return await db.ManagedSlackChildApps.Where(item => item.Id == childId).Select(item => item.BindingState).SingleAsync();
+        return await db.ManagedSlackAgentApps.Where(item => item.Id == childId).Select(item => item.BindingState).SingleAsync();
     }
 
     private async Task<(string AppId, string BotUserId)> ConnectionIdentityAsync(string connectionId)
@@ -587,7 +470,7 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
         public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
     }
 
-    private sealed class RecordingBindingPort : ISlackChildAppBindingPort
+    private sealed class RecordingBindingPort : ISlackAgentAppBindingPort
     {
         public List<string> ConnectionIds { get; } = [];
 

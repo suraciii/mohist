@@ -3,7 +3,7 @@ namespace Mohist.Server.Infrastructure.Data.Slack;
 public sealed class SlackOAuthAttemptRow
 {
     public string Id { get; set; } = string.Empty;
-    public string ChildAppId { get; set; } = string.Empty;
+    public string AgentAppId { get; set; } = string.Empty;
     public string WorkspaceTeamId { get; set; } = string.Empty;
     public string AppId { get; set; } = string.Empty;
     public string StateHash { get; set; } = string.Empty;

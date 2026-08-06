@@ -1,9 +1,7 @@
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Slack;
@@ -64,19 +62,13 @@ public sealed class SlackConnectionAccessDecider : IScopedService
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly SlackConnectionAllowedMemberStore _allowedMembers;
-    private readonly ISlackApiClient _slack;
-    private readonly ISecretStore _secrets;
 
     public SlackConnectionAccessDecider(
         IDbContextFactory<MohistDbContext> dbFactory,
-        SlackConnectionAllowedMemberStore allowedMembers,
-        ISlackApiClient slack,
-        ISecretStore secrets)
+        SlackConnectionAllowedMemberStore allowedMembers)
     {
         _dbFactory = dbFactory;
         _allowedMembers = allowedMembers;
-        _slack = slack;
-        _secrets = secrets;
     }
 
     /// <summary>
@@ -133,10 +125,8 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         return policy switch
         {
             AccessPolicyKind.OwnerOnly => AccessDecision.Deny(OwnerOnlyReason),
-            AccessPolicyKind.Allowlist => await EvaluateAllowlistAsync(
-                connection, senderSlackUserId, workspaceTeamId, ct),
-            AccessPolicyKind.Anyone => await EvaluateAnyoneAsync(
-                connection, senderSlackUserId, workspaceTeamId, conversationId, ct),
+            AccessPolicyKind.Allowlist => await EvaluateAllowlistAsync(connection, senderSlackUserId, ct),
+            AccessPolicyKind.Anyone => AccessDecision.Deny(VerificationFailedReason),
             _ => AccessDecision.Deny(OwnerOnlyReason),
         };
     }
@@ -144,7 +134,6 @@ public sealed class SlackConnectionAccessDecider : IScopedService
     private async Task<AccessDecision> EvaluateAllowlistAsync(
         AgentConnection connection,
         string senderSlackUserId,
-        string workspaceTeamId,
         CancellationToken ct)
     {
         var allowed = await _allowedMembers.IsAllowedAsync(
@@ -152,92 +141,7 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         if (!allowed)
             return AccessDecision.Deny(AllowlistUnlistedReason);
 
-        return await ConfirmLiveWorkspaceMemberAsync(
-            connection, senderSlackUserId, workspaceTeamId, ct);
-    }
-
-    private async Task<AccessDecision> EvaluateAnyoneAsync(
-        AgentConnection connection,
-        string senderSlackUserId,
-        string workspaceTeamId,
-        string conversationId,
-        CancellationToken ct)
-    {
-        var memberDecision = await ConfirmLiveWorkspaceMemberAsync(
-            connection, senderSlackUserId, workspaceTeamId, ct);
-        if (!memberDecision.Allowed)
-            return memberDecision;
-
-        var botToken = await TryLoadBotTokenAsync(connection, ct);
-        if (botToken is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        SlackConversationInfoResponse channel;
-        try
-        {
-            channel = await _slack.ConversationsInfoAsync(conversationId, botToken, ct);
-        }
-        catch
-        {
-            // Safe-degrade: an unverifiable channel-membership fact
-            // never authorizes. Matches the spec ("any identity that
-            // cannot be confirmed SHALL NOT trigger the Agent") and the
-            // proposal's safe-deny direction.
-            return AccessDecision.Deny(VerificationFailedReason);
-        }
-
-        if (!channel.Ok || channel.Channel is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        if (!channel.Channel.IsMember)
-            return AccessDecision.Deny(ChannelNotVisibleReason);
-
-        return AccessDecision.Allow("anyone_workspace_member");
-    }
-
-    private async Task<AccessDecision> ConfirmLiveWorkspaceMemberAsync(
-        AgentConnection connection,
-        string senderSlackUserId,
-        string workspaceTeamId,
-        CancellationToken ct)
-    {
-        var botToken = await TryLoadBotTokenAsync(connection, ct);
-        if (botToken is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        SlackUserInfoResponse userResponse;
-        try
-        {
-            userResponse = await _slack.UsersInfoAsync(senderSlackUserId, botToken, ct);
-        }
-        catch
-        {
-            return AccessDecision.Deny(VerificationFailedReason);
-        }
-
-        if (!userResponse.Ok || userResponse.User is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        if (!SlackOwnerClaimService.IsEligibleMember(userResponse, workspaceTeamId, senderSlackUserId))
-            return AccessDecision.Deny(MemberNotEligibleReason);
-
-        return AccessDecision.Allow("live_workspace_member");
-    }
-
-    private async Task<string?> TryLoadBotTokenAsync(AgentConnection connection, CancellationToken ct)
-    {
-        try
-        {
-            var token = await _secrets.LoadAsync(
-                new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-            if (token is null || token.Length == 0)
-                return null;
-            return Encoding.UTF8.GetString(token);
-        }
-        catch
-        {
-            return null;
-        }
+        return AccessDecision.Allow("allowlist_member");
     }
 
     private static bool IsOwner(AgentConnection connection, string senderSlackUserId) =>

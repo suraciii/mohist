@@ -49,7 +49,7 @@ public sealed class AesGcmSecretStoreTests
         Assert.Equal("second", Encoding.UTF8.GetString(loaded));
 
         await using var db = database.CreateContext();
-        Assert.Single(db.ConnectionSecrets);
+        Assert.Single(db.StoredSecrets);
     }
 
     [Fact]
@@ -78,7 +78,7 @@ public sealed class AesGcmSecretStoreTests
         Assert.False(second);
 
         await using var db = database.CreateContext();
-        Assert.Empty(db.ConnectionSecrets);
+        Assert.Empty(db.StoredSecrets);
     }
 
     [Fact]
@@ -96,7 +96,7 @@ public sealed class AesGcmSecretStoreTests
         Assert.Equal("bot", Encoding.UTF8.GetString(bot));
 
         await using var db = database.CreateContext();
-        Assert.Single(db.ConnectionSecrets);
+        Assert.Single(db.StoredSecrets);
     }
 
     [Fact]
@@ -144,9 +144,10 @@ public sealed class AesGcmSecretStoreTests
         var database = NewDatabase();
         var store = NewStore(database);
 
-        var address = new SecretStoreAddress("proj_a", "", SecretKind.AppToken);
         await Assert.ThrowsAsync<ArgumentException>(
-            () => store.StoreAsync(address, "value"u8.ToArray()));
+            () => store.StoreAsync(
+                SecretStoreAddress.ForAgentConnection("proj_a", "", SecretKind.AppToken),
+                "value"u8.ToArray()));
     }
 
     [Fact]
@@ -180,15 +181,20 @@ public sealed class AesGcmSecretStoreTests
         await store.StoreAsync(Address("proj_a", "conn_2", SecretKind.AppToken), "other"u8.ToArray());
 
         await using var db = database.CreateContext();
-        var rows = db.ConnectionSecrets
-            .OrderBy(r => r.ProjectId)
-            .ThenBy(r => r.ConnectionId)
+        var rows = db.StoredSecrets
+            .OrderBy(r => r.OwnerScope)
+            .ThenBy(r => r.OwnerId)
             .ThenBy(r => r.Kind)
             .ToList();
         Assert.Equal(3, rows.Count);
         Assert.Equal(
-            new[] { ("proj_a", "conn_1", "appToken"), ("proj_a", "conn_1", "botToken"), ("proj_a", "conn_2", "appToken") },
-            rows.Select(r => (r.ProjectId, r.ConnectionId, r.Kind)).ToArray());
+            new[]
+            {
+                (SecretOwnerKinds.AgentConnection, "proj_a", "conn_1", "appToken"),
+                (SecretOwnerKinds.AgentConnection, "proj_a", "conn_1", "botToken"),
+                (SecretOwnerKinds.AgentConnection, "proj_a", "conn_2", "appToken"),
+            },
+            rows.Select(r => (r.OwnerKind, r.OwnerScope, r.OwnerId, r.Kind)).ToArray());
         Assert.All(rows, r => Assert.NotEmpty(r.Blob));
         Assert.All(rows, r => Assert.Equal(
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
@@ -196,7 +202,7 @@ public sealed class AesGcmSecretStoreTests
     }
 
     private static SecretStoreAddress Address(string projectId, string connectionId, SecretKind kind) =>
-        new(projectId, connectionId, kind);
+        SecretStoreAddress.ForAgentConnection(projectId, connectionId, kind);
 
     private static AesGcmSecretStore NewStore(
         TestDatabase database,

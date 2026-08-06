@@ -12,11 +12,21 @@ public sealed class SlackWorkspaceEnrollmentRow
     public DateTimeOffset? LastVerifiedAt { get; set; }
     public string PlanCode { get; set; } = string.Empty;
     public int ManagedAppLimit { get; set; }
+    public string ConfigurationCredentialRef { get; set; } = string.Empty;
+    public int ConfigurationCredentialGeneration { get; set; }
+    public DateTimeOffset? ConfigurationCredentialExpiresAt { get; set; }
     public string ManagerCredentialRef { get; set; } = string.Empty;
     public string ManagerAppId { get; set; } = string.Empty;
     public string ManagerBotUserId { get; set; } = string.Empty;
     public string ManagerTransportKind { get; set; } = SlackManagerTransportKind.Socket;
     public string ManagerReadiness { get; set; } = SlackManagerReadiness.Unknown;
+    public string ManagerAppLifecycle { get; set; } = SlackManagerAppLifecycle.NotCreated;
+    public int ManagerAppOperationFence { get; set; }
+    public string? ManagerAppOperationId { get; set; }
+    public string? ManagerAppOperationOutcome { get; set; }
+    public string ManagerAppManifestHash { get; set; } = string.Empty;
+    public string ManagerAppInstallUrl { get; set; } = string.Empty;
+    public string RuntimeCredentialValidationState { get; set; } = SlackRuntimeCredentialValidationState.NotProvided;
     public string ManagerActorId { get; set; } = string.Empty;
     public string? ClaimedSlackUserId { get; set; }
     public string? ManagerClaimHash { get; set; }

@@ -286,8 +286,6 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var projectId = $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
-        _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
-
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.Projects.Add(new ProjectRow

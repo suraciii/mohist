@@ -40,7 +40,6 @@ public sealed class SlackManagerConversationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = "U_MANAGER_BOT_CONVERSATION",
-            managerCredentialRef = "manager-credential-conversation",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
@@ -229,7 +228,6 @@ public sealed class SlackManagerConversationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = $"U_MANAGER_BOT_RECOVERY_{suffix}",
-            managerCredentialRef = $"manager-credential-recovery-{suffix}",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;

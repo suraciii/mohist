@@ -55,42 +55,64 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         _logger = logger;
     }
 
-    public async Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default)
+    public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default) =>
+        StoreAtomicallyAsync([new SecretStoreWrite(address, plaintext)], ct);
+
+    public async Task StoreAtomicallyAsync(IReadOnlyCollection<SecretStoreWrite> writes, CancellationToken ct = default)
     {
-        ValidateAddress(address);
-        ArgumentNullException.ThrowIfNull(plaintext);
-
-        var nonce = RandomNumberGenerator.GetBytes(NonceLength);
-        var blob = Encrypt(address, plaintext, nonce);
-
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var existing = await db.ConnectionSecrets
-            .FirstOrDefaultAsync(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind),
-                ct)
-            .ConfigureAwait(false);
+        await StoreAtomicallyAsync(db, writes, ct).ConfigureAwait(false);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    internal async Task StoreAtomicallyAsync(
+        MohistDbContext db,
+        IReadOnlyCollection<SecretStoreWrite> writes,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(writes);
+        if (writes.Count == 0)
+            throw new ArgumentException("At least one secret write is required.", nameof(writes));
+
+        var pending = writes.Select(write =>
+        {
+            ValidateAddress(write.Address);
+            ArgumentNullException.ThrowIfNull(write.Plaintext);
+            return (write.Address, Blob: Encrypt(write.Address, write.Plaintext, RandomNumberGenerator.GetBytes(NonceLength)));
+        }).ToArray();
+        if (pending.Select(write => (write.Address.OwnerKind, write.Address.OwnerScope, write.Address.OwnerId, write.Address.Kind)).Distinct().Count() != pending.Length)
+            throw new ArgumentException("Atomic secret writes must not contain duplicate addresses.", nameof(writes));
 
         var now = _timeProvider.GetUtcNow();
-        if (existing is null)
+        foreach (var write in pending)
         {
-            db.ConnectionSecrets.Add(new ConnectionSecretRow
+            var existing = await db.StoredSecrets
+                .FirstOrDefaultAsync(
+                    row => row.OwnerKind == write.Address.OwnerKind
+                        && row.OwnerScope == write.Address.OwnerScope
+                        && row.OwnerId == write.Address.OwnerId
+                        && row.Kind == StoredSecretRow.WireKind(write.Address.Kind),
+                    ct)
+                .ConfigureAwait(false);
+            if (existing is null)
             {
-                ProjectId = address.ProjectId,
-                ConnectionId = address.ConnectionId,
-                Kind = ConnectionSecretRow.WireKind(address.Kind),
-                Blob = blob,
-                UpdatedAt = now,
-            });
+                db.StoredSecrets.Add(new StoredSecretRow
+                {
+                    OwnerKind = write.Address.OwnerKind,
+                    OwnerScope = write.Address.OwnerScope,
+                    OwnerId = write.Address.OwnerId,
+                    Kind = StoredSecretRow.WireKind(write.Address.Kind),
+                    Blob = write.Blob,
+                    UpdatedAt = now,
+                });
+            }
+            else
+            {
+                existing.Blob = write.Blob;
+                existing.UpdatedAt = now;
+            }
         }
-        else
-        {
-            existing.Blob = blob;
-            existing.UpdatedAt = now;
-        }
-
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
     }
 
     public async Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default)
@@ -98,12 +120,13 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         ValidateAddress(address);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var row = await db.ConnectionSecrets
+        var row = await db.StoredSecrets
             .AsNoTracking()
             .FirstOrDefaultAsync(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind),
+                r => r.OwnerKind == address.OwnerKind
+                    && r.OwnerScope == address.OwnerScope
+                    && r.OwnerId == address.OwnerId
+                    && r.Kind == StoredSecretRow.WireKind(address.Kind),
                 ct)
             .ConfigureAwait(false);
         if (row is null)
@@ -127,17 +150,18 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
         ValidateAddress(address);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
-        var rows = await db.ConnectionSecrets
+        var rows = await db.StoredSecrets
             .Where(
-                r => r.ProjectId == address.ProjectId
-                    && r.ConnectionId == address.ConnectionId
-                    && r.Kind == ConnectionSecretRow.WireKind(address.Kind))
+                r => r.OwnerKind == address.OwnerKind
+                    && r.OwnerScope == address.OwnerScope
+                    && r.OwnerId == address.OwnerId
+                    && r.Kind == StoredSecretRow.WireKind(address.Kind))
             .ToListAsync(ct)
             .ConfigureAwait(false);
         if (rows.Count == 0)
             return false;
 
-        db.ConnectionSecrets.RemoveRange(rows);
+        db.StoredSecrets.RemoveRange(rows);
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         return true;
     }
@@ -237,9 +261,8 @@ public sealed class AesGcmSecretStore : ISecretStore, ISingletonService
 
     private static void ValidateAddress(SecretStoreAddress address)
     {
-        if (string.IsNullOrWhiteSpace(address.ProjectId))
-            throw new ArgumentException("ProjectId is required.", nameof(address));
-        if (string.IsNullOrWhiteSpace(address.ConnectionId))
-            throw new ArgumentException("ConnectionId is required.", nameof(address));
+        if (address.Owner is null)
+            throw new ArgumentException("Secret owner is required.", nameof(address));
+        _ = new SecretStoreAddress(address.Owner, address.Kind);
     }
 }

@@ -2,7 +2,6 @@ using System.Globalization;
 using System.Text;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 
 namespace Mohist.Server.Slack;
@@ -30,21 +29,7 @@ public sealed class SlackThreadHistoryReader : IScopedService
     /// </summary>
     public const string TruncationMarkerFormat = "{0} oldest messages omitted";
 
-    private readonly ISlackApiClient _slack;
-    private readonly ISecretStore _secrets;
-    private readonly IOptions<SlackProviderOptions> _options;
-
-    public SlackThreadHistoryReader(
-        ISlackApiClient slack,
-        ISecretStore secrets,
-        IOptions<SlackProviderOptions> options)
-    {
-        _slack = slack;
-        _secrets = secrets;
-        _options = options;
-    }
-
-    public async Task<SlackThreadHistoryReadResult> ReadAsync(
+    public Task<SlackThreadHistoryReadResult> ReadAsync(
         string projectId,
         string connectionId,
         string conversationId,
@@ -58,75 +43,7 @@ public sealed class SlackThreadHistoryReader : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(threadTs);
         ArgumentException.ThrowIfNullOrWhiteSpace(mentionTs);
 
-        var token = await _secrets.LoadAsync(
-            new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), ct);
-        if (token is null || token.Length == 0)
-            return Refused("missing bot token");
-        var botToken = Encoding.UTF8.GetString(token);
-
-        var depthCap = Math.Max(1, _options.Value.StartupContextPaginationDepthCap);
-        if (!TryReadMessageTs(mentionTs, out var mentionBoundary))
-            return Refused("mention timestamp is not readable");
-
-        var collected = new List<SlackConversationMessage>();
-        var reachedMention = false;
-        var paginationComplete = false;
-        string? cursor = null;
-        for (var page = 0; page < depthCap; page++)
-        {
-            SlackConversationsRepliesPage response;
-            try
-            {
-                response = await _slack.ConversationsRepliesAsync(
-                    conversationId, threadTs, cursor, botToken, ct);
-            }
-            catch (HttpRequestException)
-            {
-                return Refused("transport failure");
-            }
-            catch (TaskCanceledException)
-            {
-                return Refused("transport failure");
-            }
-
-            if (!response.Ok)
-                return Refused($"slack rejected the read: {response.Error ?? "unknown_error"}");
-            foreach (var message in response.Messages ?? [])
-            {
-                if (message is null)
-                    continue;
-                if (!TryReadMessageTs(message.Ts, out var messageTs))
-                    continue;
-                if (messageTs >= mentionBoundary)
-                {
-                    reachedMention = true;
-                    break;
-                }
-                collected.Add(message);
-            }
-
-            if (reachedMention)
-                break;
-
-            var nextCursor = response.ResponseMetadata?.NextCursor;
-            if (string.IsNullOrWhiteSpace(nextCursor))
-            {
-                paginationComplete = true;
-                break;
-            }
-            cursor = nextCursor;
-        }
-
-        if (!reachedMention && !paginationComplete)
-            return Refused("pagination depth cap reached before the mention");
-
-        if (collected.Count == 0)
-            return Empty(0);
-        return new SlackThreadHistoryReadResult(
-            SlackThreadHistoryReadOutcome.Imported,
-            collected,
-            null,
-            collected.Count);
+        return Task.FromResult(Empty(0));
     }
 
     public static (string Text, string? TruncationMarker, int OmittedCount) ApplyBudget(
