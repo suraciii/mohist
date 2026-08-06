@@ -87,7 +87,8 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
                 || !TryReadBool(user, "is_bot", out var isBot)
                 || !TryReadBool(user, "is_app_user", out var isAppUser)
                 || !TryReadBool(user, "is_restricted", out var isRestricted)
-                || !TryReadBool(user, "is_ultra_restricted", out var isUltraRestricted))
+                || !TryReadBool(user, "is_ultra_restricted", out var isUltraRestricted)
+                || !TryReadBool(user, "is_stranger", out var isStranger))
             {
                 return new(false, ErrorClass: "invalid_identity_response");
             }
@@ -101,7 +102,7 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
                 IsAppUser: isAppUser,
                 IsRestricted: isRestricted,
                 IsUltraRestricted: isUltraRestricted,
-                IsStranger: ReadBool(user, "is_stranger"));
+                IsStranger: isStranger);
         }
     }
 
@@ -136,9 +137,6 @@ public sealed class SlackMemberIdentityPortAdapter(SlackApiTransport transport) 
         value = false;
         return false;
     }
-
-    private static bool ReadBool(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var candidate) && candidate.ValueKind == JsonValueKind.True;
 
     private static string? ReadString(JsonElement element, string propertyName) =>
         element.TryGetProperty(propertyName, out var candidate) && candidate.ValueKind == JsonValueKind.String

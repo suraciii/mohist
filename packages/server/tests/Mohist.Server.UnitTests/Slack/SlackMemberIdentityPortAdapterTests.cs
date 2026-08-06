@@ -59,6 +59,19 @@ public sealed class SlackMemberIdentityPortAdapterTests
         });
     }
 
+    [Theory]
+    [InlineData("""{"ok":true,"user":{"id":"U123","team_id":"T123","deleted":false,"is_bot":false,"is_app_user":false,"is_restricted":false,"is_ultra_restricted":false}}""")]
+    [InlineData("""{"ok":true,"user":{"id":"U123","team_id":"T123","deleted":false,"is_bot":false,"is_app_user":false,"is_restricted":false,"is_ultra_restricted":false,"is_stranger":"maybe"}}""")]
+    public async Task LookupMember_missing_or_malformed_is_stranger_is_unconfirmed(string json)
+    {
+        var adapter = NewAdapter(_ => JsonResponse(json));
+
+        var result = await adapter.LookupMemberAsync(new SlackMemberIdentityRequest("xoxb-bot", "U123"));
+
+        Assert.False(result.Confirmed);
+        Assert.Equal("invalid_identity_response", result.ErrorClass);
+    }
+
     [Fact]
     public async Task LookupMember_posts_user_form_with_the_bot_token()
     {
