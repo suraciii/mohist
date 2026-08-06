@@ -434,7 +434,15 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
     {
         var previous = SlackDeliveryPayload.Parse(progress.PayloadJson);
         var dispatchRef = progress.DispatchRef ?? progress.Id;
-        var payload = BuildReplyPayload(redactedText, dispatchRef, previous.ProviderMessageIdentity);
+        // Carry the liveness StatusDispatchRef forward so the in-place update is
+        // a faithful replacement of the progress message: the post-reply
+        // liveness finalization derives the reaction target (projectionSource)
+        // from this authoritative field, exactly as the prior terminal path did.
+        var payload = BuildReplyPayload(
+            redactedText,
+            dispatchRef,
+            previous.ProviderMessageIdentity,
+            previous.StatusDispatchRef);
         progress.Kind = SlackOutboxKinds.TerminalResult;
         progress.PayloadJson = JsonSerializer.Serialize(payload);
         if (!string.IsNullOrWhiteSpace(threadTs))
@@ -469,7 +477,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
     private static SlackDeliveryPayload BuildReplyPayload(
         string text,
         string dispatchRef,
-        SlackProviderMessageIdentity? providerIdentity)
+        SlackProviderMessageIdentity? providerIdentity,
+        string? statusDispatchRef = null)
     {
         var operation = providerIdentity is null
             ? SlackDeliveryOperations.PostMessage
@@ -480,7 +489,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             ClientMessageId: dispatchRef,
             ProviderMessageIdentity: providerIdentity,
             FallbackText: text,
-            FallbackDispatchRef: $"{dispatchRef}:fallback");
+            FallbackDispatchRef: $"{dispatchRef}:fallback",
+            StatusDispatchRef: statusDispatchRef);
     }
 
     private static async Task<bool> IsLiveOwnerRowAsync(

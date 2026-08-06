@@ -230,6 +230,43 @@ public sealed class SlackDeliveryOutcomesSpecs
     }
 
     [Fact]
+    public async Task Agent_reply_promotion_carries_liveness_status_ref_so_finalization_locates_the_reaction_target()
+    {
+        var connection = await CreateConnectionAsync();
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var projection = scope.ServiceProvider.GetRequiredService<SlackStatusProjection>();
+        var outbox = scope.ServiceProvider.GetRequiredService<SlackOutboxStore>();
+        var source = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-statusref", "1710000000.000030");
+        var progressDispatchRef = "agent-session-followup:session-statusref:turn-1:progress";
+        await projection.EnqueueWorkingAsync(connection.ProjectId, connection.Id, source, threadTs: null, progressDispatchRef);
+
+        var reply = await outbox.EnqueueAgentReplyAsync(connection.ProjectId, "C-reply-statusref", null, "the answer");
+
+        Assert.True(reply.Accepted);
+        var promoted = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries
+            .Single(row => row.Kind == SlackOutboxKinds.TerminalResult);
+        // The in-place promotion must carry the liveness StatusDispatchRef so the
+        // post-reply liveness finalization can derive the reaction target from the
+        // authoritative progress-row metadata, not from a potentially-wrong delivery source.
+        Assert.Equal(SlackStatusProjection.DispatchRef(source, "status"),
+            SlackDeliveryPayload.Parse(promoted.PayloadJson).StatusDispatchRef);
+
+        // Simulate the terminal handler's source differing from the ingress source
+        // (e.g. delivery.MessageTs null -> synthetic ts). FinalizeLivenessAsync must
+        // target the ORIGINAL message (from StatusDispatchRef), not the synthetic one —
+        // otherwise the reaction mutation targets a non-existent message and stalls.
+        var deliverySource = new SlackMessageIdentity(connection.WorkspaceTeamId, "C-reply-statusref", "terminal:synthetic");
+        await projection.FinalizeLivenessAsync(
+            connection.ProjectId, connection.Id, deliverySource, threadTs: null, "completed", progressDispatchRef);
+
+        var finalized = (await outbox.ListAsync(connection.ProjectId, connection.Id)).Entries;
+        Assert.Contains(finalized, row => row.Kind == SlackOutboxKinds.ReactionMutation
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(source, "terminal-add"));
+        Assert.DoesNotContain(finalized, row => row.Kind == SlackOutboxKinds.ReactionMutation
+            && row.DispatchRef == SlackStatusProjection.DispatchRef(deliverySource, "terminal-add"));
+    }
+
+    [Fact]
     public async Task Agent_reply_without_an_active_conversation_is_not_accepted()
     {
         var connection = await CreateConnectionAsync();
