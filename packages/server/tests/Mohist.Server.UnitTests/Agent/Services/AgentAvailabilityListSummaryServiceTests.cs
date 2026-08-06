@@ -2,7 +2,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Runner.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Services;
+namespace Mohist.Server.UnitTests.Agent.Services;
 
 /// <summary>
 /// Spec coverage for the list-scoped
@@ -17,7 +17,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Services;
 /// and the pending-jobs table respectively, while runner capacity is
 /// fetched exactly once across the whole list.
 /// </summary>
-public sealed class AgentAvailabilityListSummaryServiceSpecs
+public sealed class AgentAvailabilityListSummaryServiceTests
 {
     private static readonly DateTimeOffset ObservedAt = new(2026, 7, 30, 12, 0, 0, TimeSpan.Zero);
     private static readonly AgentInfo ReadyAgent = new(

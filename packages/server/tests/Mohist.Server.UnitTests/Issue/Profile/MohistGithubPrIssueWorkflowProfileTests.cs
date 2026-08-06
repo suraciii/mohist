@@ -1,13 +1,12 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.SpecTests.Support;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
+namespace Mohist.Server.UnitTests.Issue.Profile;
 
-public class MohistGithubPrIssueWorkflowProfileSpecs
+public class MohistGithubPrIssueWorkflowProfileTests
 {
     private static WorkflowDefinition GithubPrDefinition => WorkflowProfileCatalog.GithubPrWorkflowDefinition;
 
