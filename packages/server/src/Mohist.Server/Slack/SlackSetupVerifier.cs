@@ -9,15 +9,6 @@ namespace Mohist.Server.Slack;
 
 public sealed record SlackSetupVerificationResult(bool Verified, string SetupProgress, string? Reason, IReadOnlyList<string> RequiredScopes);
 
-public sealed record RotationCheckResult(
-    bool Verified,
-    string? Reason,
-    string? ResolvedTeamId,
-    string? ResolvedAppId,
-    string? ResolvedBotUserId,
-    string? VerifiedBotName,
-    string? VerifiedBotIconUrl);
-
 public sealed class SlackSetupVerifier
 {
     private static readonly string[] RequiredScopes = ["chat:write", "users:read", "im:history"];
@@ -74,24 +65,6 @@ public sealed class SlackSetupVerifier
             "setupProgress", "connectionHealth", "healthReason",
         }, setupProgress: setupProgress, connectionHealth: ConnectionHealthKind.Healthy, healthReason: null, ct: ct);
         return new(true, setupProgress, null, RequiredScopes);
-    }
-
-    public async Task<RotationCheckResult> VerifyRotationAsync(
-        string projectId,
-        string connectionId,
-        string appToken,
-        string botToken,
-        CancellationToken ct = default)
-    {
-        _ = await _connections.GetAsync(projectId, connectionId, ct)
-            ?? throw new InvalidOperationException("Connection was not found.");
-        var verified = await _identity.VerifyAsync(new(botToken), ct);
-        if (!verified.Verified || string.IsNullOrWhiteSpace(verified.WorkspaceTeamId)
-            || string.IsNullOrWhiteSpace(verified.AppId) || string.IsNullOrWhiteSpace(verified.BotUserId))
-            return new(false, "Slack rejected the Bot token. Generate a new token.", null, null, null, null, null);
-        if (verified.GrantedScopes is null || RequiredScopes.Any(scope => !verified.GrantedScopes.Contains(scope)))
-            return new(false, "Slack is missing required scopes. Add the scopes and reinstall the App.", null, null, null, null, null);
-        return new(true, null, verified.WorkspaceTeamId, verified.AppId, verified.BotUserId, null, null);
     }
 
     public async Task<AgentConnection?> RecordAdapterHeartbeatAsync(string projectId, string connectionId, CancellationToken ct = default)

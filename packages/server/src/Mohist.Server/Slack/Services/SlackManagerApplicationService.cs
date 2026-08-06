@@ -1,4 +1,3 @@
-using System.Text;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -24,8 +23,6 @@ public sealed class SlackManagerApplicationService : IScopedService
     private readonly ManagedSlackAgentAppStore _agentApps;
     private readonly SlackManifestGenerator _manifests;
     private readonly ManagedSlackAgentAppApplicationService _childOperations;
-    private readonly SlackOAuthStateService _oauthStates;
-    private readonly SlackOAuthAuthorizationService _oauthAuthorization;
     private readonly ManagerClaimService _claims;
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly ISecretStore _secrets;
@@ -37,8 +34,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         ManagedSlackAgentAppStore agentApps,
         SlackManifestGenerator manifests,
         ManagedSlackAgentAppApplicationService childOperations,
-        SlackOAuthStateService oauthStates,
-        SlackOAuthAuthorizationService oauthAuthorization,
         ManagerClaimService claims,
         IDbContextFactory<MohistDbContext> dbFactory,
         ISecretStore secrets)
@@ -49,8 +44,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         _agentApps = agentApps;
         _manifests = manifests;
         _childOperations = childOperations;
-        _oauthStates = oauthStates;
-        _oauthAuthorization = oauthAuthorization;
         _claims = claims;
         _dbFactory = dbFactory;
         _secrets = secrets;
@@ -126,31 +119,6 @@ public sealed class SlackManagerApplicationService : IScopedService
             claim.Code,
             claim.ExpiresAt,
             NextAction(enrollment, credentialProvisioned));
-    }
-
-    public async Task<SlackManagerCredentialProvisionResult> ProvisionManagerCredentialAsync(
-        string workspaceTeamId,
-        string managerBotToken,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(managerBotToken);
-
-        var enrollment = await _enrollments.GetActiveByTeamAsync(workspaceTeamId.Trim(), ct)
-            ?? throw new SlackManagerConflictException(
-                "Run Manager setup for this workspace before provisioning its credential.",
-                "enrollment_required");
-        if (string.IsNullOrWhiteSpace(enrollment.ManagerCredentialRef))
-            throw new SlackManagerConflictException(
-                "Manager setup has not configured a credential reference.",
-                "manager_credential_reference_required");
-
-        await _secrets.StoreAsync(
-            ManagerCredentialAddress(enrollment.Id),
-            Encoding.UTF8.GetBytes(managerBotToken.Trim()),
-            ct);
-
-        return new(enrollment.WorkspaceTeamId, true);
     }
 
     public async Task<SlackManagerStatusProjection?> GetStatusAsync(
@@ -338,43 +306,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         CancellationToken ct = default) =>
         await RunChildOperationAsync(projectId, connectionId, _childOperations.ReconcileDeleteAsync, ct);
 
-    public async Task<SlackOAuthStateIssued> BeginAuthorizationAsync(
-        string projectId,
-        string connectionId,
-        CancellationToken ct = default)
-    {
-        var agentApp = await RequireChildAsync(projectId, connectionId, ct);
-        if (agentApp.AppLifecycle != SlackAppLifecycle.Created || string.IsNullOrWhiteSpace(agentApp.AppId))
-            throw new SlackManagerConflictException("The Agent App must be created before authorization.", "agent_app_not_created");
-        await _oauthAuthorization.RecordProgressAsync(agentApp.Id, SlackAuthorizationState.AwaitingUser, ct);
-        return await _oauthStates.IssueAsync(agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId, ct: ct);
-    }
-
-    public Task<SlackOAuthAuthorizationResult> RecordAuthorizationProgressAsync(
-        string projectId,
-        string connectionId,
-        string authorization,
-        CancellationToken ct = default) =>
-        RunOAuthOperationAsync(projectId, connectionId,
-            agentApp => _oauthAuthorization.RecordProgressAsync(agentApp.Id, authorization, ct), ct);
-
-    public Task<SlackOAuthAuthorizationResult> AuthorizeAsync(
-        string projectId,
-        string connectionId,
-        string state,
-        string botUserId,
-        string botToken,
-        CancellationToken ct = default) =>
-        RunOAuthOperationAsync(projectId, connectionId, async agentApp =>
-            await _oauthAuthorization.AuthorizeAsync(
-                state,
-                agentApp.Id,
-                agentApp.WorkspaceTeamId,
-                agentApp.AppId,
-                botUserId,
-                botToken,
-                ct), ct);
-
     private async Task<ManagedSlackAgentApp> CreateChildAsync(
         AgentConnection connection,
         SlackWorkspaceEnrollment enrollment,
@@ -401,18 +332,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         }, ct);
     }
 
-    private async Task<ManagedSlackAgentApp> RequireChildAsync(
-        string projectId,
-        string connectionId,
-        CancellationToken ct)
-    {
-        var connection = await _connections.GetAsync(projectId, connectionId, ct);
-        if (connection is null)
-            throw new SlackManagerNotFoundException("The Slack Connection was not found.");
-        return await _agentApps.GetByConnectionAsync(connectionId, ct)
-            ?? throw new SlackManagerNotFoundException("The managed Agent App was not found.");
-    }
-
     private async Task<ManagedSlackAgentAppOperationResult> RunChildOperationAsync(
         string projectId,
         string connectionId,
@@ -434,16 +353,6 @@ public sealed class SlackManagerApplicationService : IScopedService
         if (connection is null) return null;
         var agentApp = await _agentApps.GetByConnectionAsync(connectionId, ct);
         return agentApp;
-    }
-
-    private async Task<SlackOAuthAuthorizationResult> RunOAuthOperationAsync(
-        string projectId,
-        string connectionId,
-        Func<ManagedSlackAgentApp, Task<SlackOAuthAuthorizationResult>> operation,
-        CancellationToken ct)
-    {
-        var agentApp = await RequireChildAsync(projectId, connectionId, ct);
-        return await operation(agentApp);
     }
 
     private static SlackManagerConnectionProjection ProjectConnection(AgentConnection connection) => new(
@@ -558,10 +467,6 @@ public sealed record SlackManagerSetupRequest(
     string TransportKind = SlackManagerTransportKind.Socket,
     string Readiness = SlackManagerReadiness.Ready);
 
-public sealed record SlackManagerCredentialProvisionResult(
-    string WorkspaceTeamId,
-    bool CredentialProvisioned);
-
 public sealed record SlackManagerClaimIssued(
     string? Code,
     DateTimeOffset? ExpiresAt)
@@ -667,5 +572,3 @@ public sealed class SlackManagerConflictException(string message, string code) :
 {
     public string Code { get; } = code;
 }
-
-public sealed class SlackManagerNotFoundException(string message) : Exception(message);

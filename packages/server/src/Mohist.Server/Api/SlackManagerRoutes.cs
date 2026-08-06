@@ -155,54 +155,6 @@ public static class SlackManagerRoutes
             OperationResult(await service.ReconcileCreateAsync(
                 context.GetResolvedProject().Id, connectionId, ct)));
 
-        manager.MapPost("/connections/{connectionId}/begin-authorization", async (
-            HttpContext context,
-            string connectionId,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-            ApiResults.Ok(await service.BeginAuthorizationAsync(
-                context.GetResolvedProject().Id, connectionId, ct)));
-
-        manager.MapPost("/connections/{connectionId}/authorization-progress", async (
-            HttpContext context,
-            string connectionId,
-            SlackAuthorizationProgressBody body,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.Authorization))
-                return ApiResults.BadRequest("authorization is required.");
-            try
-            {
-                return ApiResults.Ok(await service.RecordAuthorizationProgressAsync(
-                    context.GetResolvedProject().Id, connectionId, body.Authorization, ct));
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "invalid_authorization");
-            }
-        });
-
-        manager.MapPost("/connections/{connectionId}/authorize", async (
-            HttpContext context,
-            string connectionId,
-            SlackAuthorizeBody body,
-            SlackManagerApplicationService service,
-            CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.State)
-                || string.IsNullOrWhiteSpace(body.BotUserId)
-                || string.IsNullOrWhiteSpace(body.BotToken))
-                return ApiResults.BadRequest("state, botUserId, and botToken are required.");
-            return ApiResults.Ok(await service.AuthorizeAsync(
-                context.GetResolvedProject().Id,
-                connectionId,
-                body.State,
-                body.BotUserId,
-                body.BotToken,
-                ct));
-        });
-
         manager.MapPost("/connections/{connectionId}/disable", async (
             HttpContext context,
             string connectionId,
@@ -343,18 +295,6 @@ public sealed class SlackManagerCreateBody
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }
-}
-
-public sealed class SlackAuthorizationProgressBody
-{
-    public string Authorization { get; init; } = string.Empty;
-}
-
-public sealed class SlackAuthorizeBody
-{
-    public string State { get; init; } = string.Empty;
-    public string BotUserId { get; init; } = string.Empty;
-    public string BotToken { get; init; } = string.Empty;
 }
 
 public sealed class PermanentDeleteBody

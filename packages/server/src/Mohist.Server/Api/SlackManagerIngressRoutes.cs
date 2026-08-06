@@ -71,44 +71,6 @@ public static class SlackManagerIngressRoutes
             }
         });
 
-        manager.MapPost("/credentials", async (
-            HttpContext context,
-            SlackManagerCredentialBody body,
-            SlackManagerApplicationService service,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail("Manager credential provisioning requires an operator credential.", 403, "operator_credential_required");
-            if (context.Connection.RemoteIpAddress is not { } remoteAddress
-                || !IPAddress.IsLoopback(remoteAddress))
-                return ApiResults.Fail("Manager credential provisioning is only available over loopback.", 403, "loopback_required");
-            if (body is null
-                || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
-                || string.IsNullOrWhiteSpace(body.ManagerBotToken))
-                return ApiResults.BadRequest("workspaceTeamId and managerBotToken are required.");
-            if (HasCredentialAddressOverride(body.ExtensionData))
-                return ApiResults.BadRequest(
-                    "Credential address fields are not supported by the Manager API.",
-                    "credential_address_not_supported");
-
-            try
-            {
-                return ApiResults.Ok(await service.ProvisionManagerCredentialAsync(
-                    body.WorkspaceTeamId,
-                    body.ManagerBotToken,
-                    ct));
-            }
-            catch (SlackManagerConflictException ex)
-            {
-                return ApiResults.Conflict(ex.Message, ex.Code);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "invalid_manager_credential");
-            }
-        });
-
         manager.MapGet("/status", async (
             HttpContext context,
             string? workspaceTeamId,
@@ -304,15 +266,6 @@ public sealed class SlackControlSetupRuntimeBody
     public string WorkspaceTeamId { get; init; } = string.Empty;
     public string BotToken { get; init; } = string.Empty;
     public string AppLevelToken { get; init; } = string.Empty;
-
-    [JsonExtensionData]
-    public Dictionary<string, JsonElement>? ExtensionData { get; init; }
-}
-
-public sealed class SlackManagerCredentialBody
-{
-    public string WorkspaceTeamId { get; init; } = string.Empty;
-    public string ManagerBotToken { get; init; } = string.Empty;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

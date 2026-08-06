@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
@@ -183,63 +181,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
 
         child.BotTokenRef = "bot-ref";
         Assert.Equal(SlackTransportReadiness.NotReady, ManagedSlackAgentAppStatusDeriver.DeriveTransportReadiness(child));
-    }
-
-    [Fact]
-    public async Task OAuth_state_is_hashed_single_use_and_mismatch_never_stores_a_bot_token()
-    {
-        var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_OAUTH");
-        var states = new SlackOAuthStateService(_factory, _time);
-        var issued = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId);
-
-        await using (var before = _factory.CreateDbContext())
-        {
-            var row = await before.SlackOAuthStates.SingleAsync();
-            Assert.Equal(SlackOAuthStateService.Hash(issued.State), row.StateHash);
-            Assert.DoesNotContain(issued.State, row.StateHash, StringComparison.Ordinal);
-            Assert.Null(row.ConsumedAt);
-        }
-
-        Assert.Equal(SlackOAuthStateValidation.Mismatch,
-            await states.ConsumeAsync(issued.State, child.Id, "T_OTHER", child.AppId));
-        var accepted = await states.ConsumeAsync(issued.State, child.Id, child.WorkspaceTeamId, child.AppId);
-        var replay = await states.ConsumeAsync(issued.State, child.Id, child.WorkspaceTeamId, child.AppId);
-        Assert.Equal(SlackOAuthStateValidation.Accepted, accepted);
-        Assert.Equal(SlackOAuthStateValidation.ReplayAccepted, replay);
-
-        var expired = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId, TimeSpan.FromMinutes(1));
-        _time.Advance(TimeSpan.FromMinutes(1));
-        Assert.Equal(SlackOAuthStateValidation.Expired,
-            await states.ConsumeAsync(expired.State, child.Id, child.WorkspaceTeamId, child.AppId));
-    }
-
-    [Fact]
-    public async Task OAuth_authorization_stores_only_reference_and_replay_is_idempotent()
-    {
-        var child = await SeedChildAsync(lifecycle: SlackAppLifecycle.Created, appId: "A_AUTH");
-        var states = new SlackOAuthStateService(_factory, _time);
-        var issued = await states.IssueAsync(child.Id, child.WorkspaceTeamId, child.AppId);
-        var sink = new FakeSlackOAuthCredentialSink();
-        var authorization = new SlackOAuthAuthorizationService(_factory, states, sink, _time);
-
-        var mismatch = await authorization.AuthorizeAsync(
-            issued.State, child.Id, "T_OTHER", child.AppId, "U_AUTH", "xoxb-secret");
-        Assert.Equal(SlackOAuthAuthorizationStatus.Rejected, mismatch.Status);
-        Assert.Empty(sink.Tokens);
-        Assert.Equal(string.Empty, await BotUserIdAsync(child.Id));
-
-        var accepted = await authorization.AuthorizeAsync(
-            issued.State, child.Id, child.WorkspaceTeamId, child.AppId, "U_AUTH", "xoxb-secret");
-        var replay = await authorization.AuthorizeAsync(
-            issued.State, child.Id, child.WorkspaceTeamId, child.AppId, "U_AUTH", "xoxb-secret");
-
-        Assert.Equal(SlackOAuthAuthorizationStatus.Accepted, accepted.Status);
-        Assert.Equal(SlackOAuthAuthorizationStatus.AlreadyApplied, replay.Status);
-        Assert.Single(sink.Tokens);
-        await using var db = _factory.CreateDbContext();
-        var row = await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == child.Id);
-        Assert.StartsWith("slack-oauth-attempt:", row.BotTokenRef, StringComparison.Ordinal);
-        Assert.DoesNotContain("xoxb-secret", JsonSerializer.Serialize(row), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -506,12 +447,6 @@ public sealed partial class SlackManagerCorrectnessKernelSpecs : IAsyncLifetime
     {
         await using var db = _factory.CreateDbContext();
         return await db.ManagedSlackAgentApps.Where(item => item.Id == childId).Select(item => item.AppLifecycle).SingleAsync();
-    }
-
-    private async Task<string> BotUserIdAsync(string childId)
-    {
-        await using var db = _factory.CreateDbContext();
-        return await db.ManagedSlackAgentApps.Where(item => item.Id == childId).Select(item => item.BotUserId).SingleAsync();
     }
 
     private async Task<string> BindingStateAsync(string childId)

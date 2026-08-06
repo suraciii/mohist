@@ -1,21 +1,5 @@
 namespace Mohist.Server.Slack.Domain;
 
-public static class SlackOAuthStateOutcome
-{
-    public const string Accepted = "accepted";
-    public const string Expired = "expired";
-}
-
-public static class SlackOAuthAttemptStatus
-{
-    public const string Issued = "issued";
-    public const string Consumed = "consumed";
-    public const string SecretStored = "secret_stored";
-    public const string Applied = "applied";
-    public const string Expired = "expired";
-    public const string RecoveryRequired = "recovery_required";
-}
-
 public static class SlackStateTransitions
 {
     public static void RequireEnrollmentLifecycleTransition(string current, string next)
@@ -168,39 +152,6 @@ public static class SlackStateTransitions
                 && IsOneOf(next, SlackAgentAppBindingState.Pending, SlackAgentAppBindingState.InProgress))
             return;
         throw InvalidTransition("Agent App binding", current, next);
-    }
-
-    public static void RequireOAuthAttemptTransition(string current, string next)
-    {
-        var known = new[]
-        {
-            SlackOAuthAttemptStatus.Issued,
-            SlackOAuthAttemptStatus.Consumed,
-            SlackOAuthAttemptStatus.SecretStored,
-            SlackOAuthAttemptStatus.Applied,
-            SlackOAuthAttemptStatus.Expired,
-            SlackOAuthAttemptStatus.RecoveryRequired,
-        };
-        RequireKnown(current, known);
-        RequireKnown(next, known);
-        if (current == next)
-            return;
-        if (current == SlackOAuthAttemptStatus.Issued
-            && IsOneOf(next, SlackOAuthAttemptStatus.Consumed, SlackOAuthAttemptStatus.Expired)
-            || current == SlackOAuthAttemptStatus.Consumed
-            && IsOneOf(next, SlackOAuthAttemptStatus.SecretStored, SlackOAuthAttemptStatus.RecoveryRequired)
-            || current == SlackOAuthAttemptStatus.SecretStored
-            && IsOneOf(next, SlackOAuthAttemptStatus.Applied, SlackOAuthAttemptStatus.RecoveryRequired)
-            || current == SlackOAuthAttemptStatus.RecoveryRequired
-            && IsOneOf(next, SlackOAuthAttemptStatus.SecretStored, SlackOAuthAttemptStatus.Applied))
-            return;
-        throw InvalidTransition("OAuth attempt", current, next);
-    }
-
-    public static void RequireOAuthOutcome(string? value)
-    {
-        if (value is not null && !IsOneOf(value, SlackOAuthStateOutcome.Accepted, SlackOAuthStateOutcome.Expired))
-            throw new ArgumentException($"Unknown OAuth state outcome '{value}'.", nameof(value));
     }
 
     public static void RequireBindingObligationStatus(string value) => RequireKnownBinding(value);

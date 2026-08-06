@@ -227,61 +227,14 @@ public static class SlackConnectionRoutes
             if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
             if (AgentConnectionStore.HasBoundIdentity(connection))
                 return ApiResults.Conflict(
-                    "Connection identity is already bound. Use rotate-credentials to update credentials.",
-                    "use_rotate_credentials");
+                    "Connection identity is already bound. Re-run `mo slack install-agent` and re-supply credentials to rotate them.",
+                    "identity_already_bound");
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
             await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
             var updated = await connections.UpdateAsync(projectId, connectionId,
                 new HashSet<string>(StringComparer.Ordinal) { "setupProgress" },
                 setupProgress: SetupProgressKind.WaitingForSlackService, ct: ct);
             return ApiResults.Ok(updated);
-        });
-
-        management.MapPost("/{connectionId}/rotate-credentials", async (HttpContext context, string connectionId, SlackCredentialsBody body, AgentConnectionStore connections, ISecretStore secrets, SlackSetupVerifier verifier, CancellationToken ct) =>
-        {
-            if (body is null || string.IsNullOrWhiteSpace(body.AppToken) || string.IsNullOrWhiteSpace(body.BotToken))
-                return ApiResults.BadRequest("appToken and botToken are required.");
-            var projectId = context.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null) return ApiResults.NotFound("Slack Connection was not found.");
-            if (!AgentConnectionStore.HasBoundIdentity(connection))
-                return ApiResults.BadRequest(
-                    "Connection identity is not bound yet. Use configure to set up credentials.",
-                    "identity_not_bound");
-
-            var check = await verifier.VerifyRotationAsync(projectId, connectionId, body.AppToken, body.BotToken, ct);
-            if (!check.Verified)
-                return ApiResults.BadRequest(check.Reason ?? "Slack rejected the credentials.", "credential_verification_failed");
-
-            if (!string.Equals(check.ResolvedTeamId, connection.WorkspaceTeamId, StringComparison.Ordinal)
-                || !string.Equals(check.ResolvedAppId, connection.AppId, StringComparison.Ordinal)
-                || !string.Equals(check.ResolvedBotUserId, connection.BotUserId, StringComparison.Ordinal))
-                return ApiResults.BadRequest(
-                    $"New tokens resolve to workspace/App/Bot '{check.ResolvedTeamId}/{check.ResolvedAppId}/{check.ResolvedBotUserId}', which does not match the bound identity. Rotation cannot rebind; create a new Connection instead.",
-                    "credential_binding_mismatch");
-
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), Encoding.UTF8.GetBytes(body.AppToken), ct);
-            await secrets.StoreAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), Encoding.UTF8.GetBytes(body.BotToken), ct);
-
-            string? newHealth = null;
-            var fields = new HashSet<string>(StringComparer.Ordinal)
-            {
-                "healthReason", "verifiedBotName", "verifiedBotIconUrl",
-            };
-            if (connection.ConnectionHealth == ConnectionHealthKind.Unhealthy
-                && IsCredentialRelatedHealthReason(connection.HealthReason))
-            {
-                fields.Add("connectionHealth");
-                newHealth = ConnectionHealthKind.Healthy;
-            }
-            await connections.UpdateAsync(projectId, connectionId, fields,
-                healthReason: null,
-                connectionHealth: newHealth,
-                verifiedBotName: check.VerifiedBotName,
-                verifiedBotIconUrl: check.VerifiedBotIconUrl,
-                ct: ct);
-
-            return ApiResults.Ok(await connections.GetAsync(projectId, connectionId, ct));
         });
 
         management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
@@ -1129,16 +1082,6 @@ public static class SlackConnectionRoutes
         if (connection.OwnerSlackUserId is null)
             return OwnerAvailabilityKind.NotConfigured;
         return OwnerAvailabilityKind.Unknown;
-    }
-
-    private static bool IsCredentialRelatedHealthReason(string? reason)
-    {
-        if (string.IsNullOrWhiteSpace(reason)) return false;
-        if (reason.Contains("token", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("scope", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("credential", StringComparison.OrdinalIgnoreCase)) return true;
-        if (reason.Contains("App and Bot", StringComparison.OrdinalIgnoreCase)) return true;
-        return false;
     }
 
     /// <summary>
