@@ -10,8 +10,7 @@ namespace Mohist.Server.Infrastructure.Slack.Ports;
 /// expiry are the only facts the port exposes; no app management here.
 /// </summary>
 public sealed class SlackConfigurationCredentialPortAdapter(
-    SlackApiTransport transport,
-    TimeProvider timeProvider) : ISlackConfigurationCredentialPort
+    SlackApiTransport transport) : ISlackConfigurationCredentialPort
 {
     public const string RotationEndpoint = "tooling.tokens.rotate";
 
@@ -34,7 +33,7 @@ public sealed class SlackConfigurationCredentialPortAdapter(
         switch (response.Outcome)
         {
             case SlackApiCallOutcome.Ok:
-                return ParseRotation(response.Body, timeProvider.GetUtcNow());
+                return ParseRotation(response.Body);
             case SlackApiCallOutcome.Rejected:
                 return new(SlackConfigurationCredentialRotationOutcome.DefiniteFailure,
                     ErrorClass: response.Error ?? "rotation_rejected");
@@ -45,28 +44,28 @@ public sealed class SlackConfigurationCredentialPortAdapter(
         }
     }
 
-    private static SlackConfigurationCredentialRotationResult ParseRotation(JsonDocument? body, DateTimeOffset now)
+    private static SlackConfigurationCredentialRotationResult ParseRotation(JsonDocument? body)
     {
         if (body is null)
             return new(SlackConfigurationCredentialRotationOutcome.Unknown, ErrorClass: "unparseable_response");
         using (body)
         {
             var root = body.RootElement;
-            var accessToken = ReadString(root, "access_token");
+            var accessToken = ReadString(root, "token");
             var refreshToken = ReadString(root, "refresh_token");
             var teamId = ReadString(root, "team_id");
-            var expiresIn = root.TryGetProperty("expires_in", out var expiresElement)
+            var expiresAt = root.TryGetProperty("exp", out var expiresElement)
                 && expiresElement.ValueKind == JsonValueKind.Number
-                ? expiresElement.GetInt64()
-                : (long?)null;
-            if (accessToken is null || refreshToken is null || teamId is null || expiresIn is null)
+                ? DateTimeOffset.FromUnixTimeSeconds(expiresElement.GetInt64())
+                : (DateTimeOffset?)null;
+            if (accessToken is null || refreshToken is null || teamId is null || expiresAt is null)
                 return new(SlackConfigurationCredentialRotationOutcome.DefiniteFailure,
                     ErrorClass: "invalid_rotation_result");
             return new(
                 SlackConfigurationCredentialRotationOutcome.Succeeded,
                 new SlackConfigurationCredentialPair(accessToken, refreshToken),
                 teamId,
-                now.AddSeconds(expiresIn.Value));
+                expiresAt.Value);
         }
     }
 

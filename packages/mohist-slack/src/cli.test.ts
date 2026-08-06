@@ -47,7 +47,7 @@ vi.mock("@slack/socket-mode", () => ({
 
     async start() {
       this.starts += 1
-      this.emit("ws_message", JSON.stringify({ type: "hello", app_id: "A1" }), false)
+      this.emit("ws_message", JSON.stringify({ type: "hello", num_connections: 1, connection_info: { app_id: "A1", team_id: "T1" } }), false)
       this.emit("connected")
       return { url: "wss://socket.test" }
     }
@@ -310,6 +310,7 @@ describe("mohist-slack CLI composition", () => {
       id: delivery.id,
       outcome: "delivered",
       adapterId: "adapter-manager",
+      leaseId: "lease-manager",
       providerMessageIdentity: { conversationId: "D_MANAGER", messageTs: "1700000000.001" },
     }])
     expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)

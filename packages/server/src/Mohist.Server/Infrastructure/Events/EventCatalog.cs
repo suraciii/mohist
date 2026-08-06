@@ -72,6 +72,11 @@ public static class EventCatalog
         ReverseDns.EpicClosed,
         ReverseDns.EpicReopened,
         ReverseDns.EpicStartAttemptFailed,
+        ReverseDns.GitHubIssuesLabeled,
+        ReverseDns.GitHubIssuesClosed,
+        ReverseDns.GitHubIssuesReopened,
+        ReverseDns.GitHubPullRequestReviewed,
+        ReverseDns.GitHubCheckSuiteCompleted,
     };
 
     /// <summary>
@@ -122,6 +127,8 @@ public static class EventCatalog
         public const string AgentId = "agentid";
         public const string SessionId = "sessionid";
         public const string RunnerId = "runnerid";
+        public const string GitHubRepo = "githubrepo";
+        public const string GitHubIssue = "githubissue";
     }
 
     /// <summary>
@@ -201,5 +208,11 @@ public static class EventCatalog
         public const string EpicStartAttemptFailed = "com.mohist.epic.start-attempt-failed";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
+
+        public const string GitHubIssuesLabeled = "com.mohist.github.issues.labeled";
+        public const string GitHubIssuesClosed = "com.mohist.github.issues.closed";
+        public const string GitHubIssuesReopened = "com.mohist.github.issues.reopened";
+        public const string GitHubPullRequestReviewed = "com.mohist.github.pull-request.reviewed";
+        public const string GitHubCheckSuiteCompleted = "com.mohist.github.check-suite.completed";
     }
 }

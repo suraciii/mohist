@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Agent.Domain;
@@ -64,6 +65,9 @@ public class MohistDbContext : DbContext
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
     public DbSet<AgentJobEventRow> AgentJobEvents { get; set; } = null!;
+    public DbSet<IngressEventRow> IngressEvents { get; set; } = null!;
+    public DbSet<GitHubConnectionRow> GitHubConnections { get; set; } = null!;
+    public DbSet<GitHubIssueLinkRow> GitHubIssueLinks { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -1079,6 +1083,119 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentJobEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<IngressEventRow>(entity =>
+        {
+            entity.ToTable("IngressEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.Property(e => e.DispatchedAt);
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_IngressEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<GitHubConnectionRow>(entity =>
+        {
+            entity.ToTable("GitHubConnections");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.Owner)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.Repo)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.HasIndex(e => new { e.Owner, e.Repo })
+                .IsUnique();
+            entity.Property(e => e.RepositoryName)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.IntakeLabel)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.FeedMode)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.ApproversJson)
+                .HasColumnType("JSON")
+                .IsRequired();
+            entity.Property(e => e.Status)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.IdentityKind)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.InstallationId)
+                .HasMaxLength(256);
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<GitHubIssueLinkRow>(entity =>
+        {
+            entity.ToTable("GitHubIssueLinks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.RepositoryName)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.GithubIssueNumber)
+                .IsRequired();
+            entity.Property(e => e.IssueNumber)
+                .IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
+                .IsUnique();
+            entity.Property(e => e.PostedCommentsJson)
+                .HasColumnType("JSON")
+                .IsRequired();
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
         });
 
         modelBuilder.Entity<DeadLetterRow>(entity =>

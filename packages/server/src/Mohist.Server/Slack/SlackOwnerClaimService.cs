@@ -155,7 +155,7 @@ public sealed class SlackOwnerClaimService : IScopedService, IAgentConnectionPro
         };
         var decision = await _accessDecider.EvaluateAsync(
             domain, inbound.SenderSlackUserId, connection.WorkspaceTeamId,
-            conversationId: string.Empty, isDirectMessage: true, ct);
+            conversationId: string.Empty, isDirectMessage: true, ct: ct);
         return decision.Allowed
             ? new(SlackInboundDecisionKind.AcceptedOwnerTask, null)
             : Reject(decision.Reason);

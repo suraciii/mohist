@@ -226,9 +226,33 @@ public sealed class SlackInstallAgentService : IScopedService
             SlackAppLifecycle.Created when agentApp.RuntimeCredentialValidationState != SlackRuntimeCredentialValidationState.Verified
                 => Progress(connection, agentApp, SlackAgentAppNextAction.ProvideCredentials),
             SlackAppLifecycle.Created when agentApp.BindingState != SlackAgentAppBindingState.Bound => await BindAsync(connection, agentApp, ct),
-            SlackAppLifecycle.Created => Progress(connection, agentApp, SlackAgentAppNextAction.Ready),
+            SlackAppLifecycle.Created => await MarkReadyAsync(connection, agentApp, ct),
             _ => Progress(connection, agentApp, SlackAgentAppNextAction.WaitForOperation),
         };
+    }
+
+    private async Task<SlackInstallAgentProgress> MarkReadyAsync(
+        AgentConnection connection,
+        ManagedSlackAgentApp agentApp,
+        CancellationToken ct)
+    {
+        if (connection.SetupProgress != SetupProgressKind.CreateAppCredentials)
+            return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
+        var setupProgress = connection.OwnerSlackUserId is null
+            ? SetupProgressKind.ClaimOwner
+            : SetupProgressKind.Complete;
+        await _connections.UpdateAsync(
+            connection.ProjectId,
+            connection.Id,
+            new HashSet<string>(StringComparer.Ordinal) { "setupProgress", "connectionHealth", "healthReason" },
+            setupProgress: setupProgress,
+            connectionHealth: ConnectionHealthKind.Healthy,
+            healthReason: null,
+            ct: ct).ConfigureAwait(false);
+        connection.SetupProgress = setupProgress;
+        connection.ConnectionHealth = ConnectionHealthKind.Healthy;
+        connection.HealthReason = null;
+        return Progress(connection, agentApp, SlackAgentAppNextAction.Ready);
     }
 
     private async Task<SlackInstallAgentProgress> BindAsync(
