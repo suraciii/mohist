@@ -291,7 +291,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                     context.WorkspacePath,
                     pinnedRunnerId,
                     agent.Id,
-                    agent.Name),
+                    agent.Name,
+                    context.WorkspaceRepository),
             PinnedRunnerId: pinnedRunnerId,
             ParentSessionId: parentSessionId,
             ParentAgentId: parentAgentId,
@@ -710,7 +711,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? workDir = null,
         string? pinnedRunnerId = null,
         string? agentId = null,
-        string? agentName = null) =>
+        string? agentName = null,
+        WorkspaceRepositorySnapshot? workspaceRepository = null) =>
         new(
             ProjectId: projectId,
             SessionId: sessionId,
@@ -720,7 +722,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             WorkDir: workDir,
             PinnedRunnerId: pinnedRunnerId,
             AgentId: agentId,
-            AgentName: agentName);
+            AgentName: agentName,
+            WorkspaceRepository: workspaceRepository);
 
     private static string? BuildTriggerIdentity(
         string projectId,

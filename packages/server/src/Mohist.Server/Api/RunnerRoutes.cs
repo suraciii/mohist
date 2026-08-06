@@ -598,7 +598,8 @@ public static class RunnerRoutes
             RecoveryRemaining: work.RecoveryRemaining,
             Expect: work.Expect,
             ParentIssueContext: parentIssueContext,
-            AgentDefinition: work.AgentDefinition);
+            AgentDefinition: work.AgentDefinition,
+            AgentSessionStartup: work.AgentSessionStartup);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
@@ -900,7 +901,8 @@ public record WorkDispatchResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
     string? Expect = null,
     ParentIssueContextResponse? ParentIssueContext = null,
-    AgentExecutionDefinition? AgentDefinition = null);
+    AgentExecutionDefinition? AgentDefinition = null,
+    AgentSessionStartup? AgentSessionStartup = null);
 
 public sealed record ParentIssueContextResponse(string Title, string? Body);
 

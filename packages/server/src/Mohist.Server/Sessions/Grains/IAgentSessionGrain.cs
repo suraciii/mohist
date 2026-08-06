@@ -328,7 +328,15 @@ public sealed record AgentSessionInfo(
     [property: Id(21)] int? ToolErrorCount,
     [property: Id(22)] string? Runtime,
     [property: Id(23)] long? CachedWriteTokens,
-    [property: Id(24)] long BindingEpoch = 0);
+    [property: Id(24)] long BindingEpoch = 0,
+    /// <summary>
+    /// Durable Project Repository workspace source, if any. <c>null</c>
+    /// for sessions without a Project-backed source; otherwise carries
+    /// the immutable snapshot and the <c>unconfirmed/confirmed/rejected</c>
+    /// state advanced by the Runner first-execution report. Append-only
+    /// Orleans field id.
+    /// </summary>
+    [property: Id(25)] WorkspaceRepository? WorkspaceRepository = null);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

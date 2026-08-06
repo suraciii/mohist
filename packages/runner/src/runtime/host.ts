@@ -8,7 +8,7 @@ import { WorkspaceRegistry } from "./workspace-registry.js"
 import { AgentWorkspaceRegistry, type AgentWorkspaceRegistryEntry } from "./agent-workspace-registry.js"
 import { AgentWorkspaceManager } from "./agent-workspace.js"
 import { AgentCleanupRunner } from "./agent-workspace-cleanup.js"
-import { WorkspaceSourceConfirmer } from "./workspace-source.js"
+import { WorkspaceSourceConfirmer, createServerConnectionWorkspaceSourceReporter } from "./workspace-source.js"
 import {
   createAgentSessionRuntimeEventOutbox,
   RUNTIME_EVENT_OUTBOX_FILE,
@@ -200,7 +200,10 @@ export class RunnerHost {
       workflowRegistry: this.workspaceRegistry,
       getStorageBudgetBytes: () => this.lastCleanupPolicy?.storageBudgetBytes ?? null,
     })
-    this.workspaceSourceConfirmer = new WorkspaceSourceConfirmer(this.agentWorkspaceManager)
+    this.workspaceSourceConfirmer = new WorkspaceSourceConfirmer(
+      this.agentWorkspaceManager,
+      createServerConnectionWorkspaceSourceReporter(() => this.connection),
+    )
     this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
       filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
       deliver: createServerRuntimeEventDelivery({ connection: this.connection }),

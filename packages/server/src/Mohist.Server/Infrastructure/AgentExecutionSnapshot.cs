@@ -32,6 +32,21 @@ public sealed record AllowedSubagentSnapshot(
     [property: Id(1)] string NameAtLaunch,
     [property: Id(2)] string DescriptionAtLaunch);
 
+/// <summary>
+/// Immutable Project Repository snapshot the Server resolves from
+/// <c>Project.Repository(name)</c> at explicit Project-backed launch
+/// and carries in <see cref="AgentSessionStartup"/> to the Runner for
+/// first-execution source confirmation. The Server never constructs or
+/// reads the workDir path; it only hands the snapshot and the workDir
+/// string to the Runner. See design/agent-workspace.md
+/// "WorkspaceRepository".
+/// </summary>
+[GenerateSerializer]
+public sealed record WorkspaceRepositorySnapshot(
+    [property: Id(0)] string Name,
+    [property: Id(1)] string GitUrl,
+    [property: Id(2)] string BaseBranch);
+
 [GenerateSerializer]
 public sealed record AgentSessionStartup(
     [property: Id(0)] string ProjectId,
@@ -42,7 +57,18 @@ public sealed record AgentSessionStartup(
     [property: Id(5)] string? WorkDir = null,
     [property: Id(6)] string? PinnedRunnerId = null,
     [property: Id(7)] string? AgentId = null,
-    [property: Id(8)] string? AgentName = null);
+    [property: Id(8)] string? AgentName = null,
+    /// <summary>
+    /// Project Repository snapshot for a Project-backed authoritative
+    /// workDir. The Server resolves it from <c>Project.Repository(name)</c>
+    /// at explicit Project-backed launch (both <c>repository</c> and
+    /// <c>workspacePath</c> supplied) and carries it here so the Runner
+    /// can verify the workDir's ownership + origin on first execution
+    /// and report <c>workspace_source_confirmed</c> /
+    /// <c>workspace_source_rejected</c>. Absent for launches without a
+    /// Project-backed source. Append-only Orleans field id.
+    /// </summary>
+    [property: Id(9)] WorkspaceRepositorySnapshot? WorkspaceRepository = null);
 
 public interface IAgentExecutionSnapshotResolver
 {

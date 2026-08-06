@@ -1,6 +1,7 @@
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -231,7 +232,17 @@ public sealed record AgentLaunchContext(
     int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null,
-    string? Title = null);
+    string? Title = null,
+    /// <summary>
+    /// Resolved Project Repository snapshot for an explicit
+    /// Project-backed launch (both <c>repository</c> and
+    /// <c>workspacePath</c> supplied). The route resolves it from
+    /// <c>Project.Repository(name)</c> (fail-fast on unknown) and the
+    /// launcher threads it into <see cref="AgentSessionStartup"/> so
+    /// the Runner can confirm the workDir source on first execution.
+    /// Null for launches without a Project-backed source.
+    /// </summary>
+    WorkspaceRepositorySnapshot? WorkspaceRepository = null);
 
 [Orleans.GenerateSerializer]
 public sealed record ConnectionLaunchOrigin(

@@ -79,7 +79,7 @@ describe("WorkspaceSourceConfirmer", () => {
     expect(first).toEqual({ kind: "confirmed" })
     expect(second).toEqual({ kind: "confirmed" })
     expect(spy.confirmed).toHaveBeenCalledTimes(1)
-    expect(spy.confirmed).toHaveBeenCalledWith(request(parentPath))
+    expect(spy.confirmed).toHaveBeenCalledWith(request(parentPath), expect.any(AbortSignal))
     expect(spy.rejected).not.toHaveBeenCalled()
   })
 
@@ -98,7 +98,7 @@ describe("WorkspaceSourceConfirmer", () => {
     const result = await confirmer.confirm(request(parentPath), new AbortController().signal)
 
     expect(result).toEqual({ kind: "rejected", reason: "origin-mismatch" })
-    expect(spy.rejected).toHaveBeenCalledWith(request(parentPath), "origin-mismatch")
+    expect(spy.rejected).toHaveBeenCalledWith(request(parentPath), "origin-mismatch", expect.any(AbortSignal))
   })
 
   it("UnregisteredWorkDir_ReportsRejectedWithNotRunnerOwned", async () => {
@@ -115,7 +115,7 @@ describe("WorkspaceSourceConfirmer", () => {
     const result = await confirmer.confirm(request(rogue), new AbortController().signal)
 
     expect(result).toEqual({ kind: "rejected", reason: "not-runner-owned" })
-    expect(spy.rejected).toHaveBeenCalledWith(request(rogue), "not-runner-owned")
+    expect(spy.rejected).toHaveBeenCalledWith(request(rogue), "not-runner-owned", expect.any(AbortSignal))
   })
 
   it("SymlinkedWorkDir_ReportsRejectedWithNotRunnerOwned", async () => {
@@ -158,7 +158,7 @@ describe("WorkspaceSourceConfirmer", () => {
 })
 
 describe("AgentJobExecutor source-confirmation hook", () => {
-  it("ConfirmsOnExecution_WhenTheStartupCarriesARepositorySnapshot", async () => {
+  it("DefersConfirmationUntilTheRuntimeSessionAttaches_WhenTheTurnFailsBeforeAttach", async () => {
     const confirmer = { confirm: vi.fn(async () => ({ kind: "confirmed" as const })) } as unknown as WorkspaceSourceConfirmer
     const executor = new AgentJobExecutor({} as never, { openCode: null, pi: null }, null, "/fallback", undefined, confirmer)
     const work: DispatchWorkItem = {
@@ -180,11 +180,10 @@ describe("AgentJobExecutor source-confirmation hook", () => {
 
     const result = await executor.execute(work, new AbortController().signal)
 
+    // Confirmation runs only after the runtime session attaches; a turn
+    // that fails before attach must not report a verdict.
     expect(result.status).toBe("failed")
-    expect(confirmer.confirm).toHaveBeenCalledExactlyOnceWith(
-      { sessionId: "session-9", workDir: "/owned/workdir", repository: { name: "main", gitUrl: GIT_URL, baseBranch: "master" } },
-      expect.any(AbortSignal),
-    )
+    expect(confirmer.confirm).not.toHaveBeenCalled()
   })
 
   it("SkipsConfirmation_WhenTheStartupHasNoRepositorySnapshot", async () => {
@@ -210,35 +209,5 @@ describe("AgentJobExecutor source-confirmation hook", () => {
 
     expect(result.status).toBe("failed")
     expect(confirmer.confirm).not.toHaveBeenCalled()
-  })
-
-  it("ConfirmationFailure_DoesNotFailTheTurn", async () => {
-    const confirmer = {
-      confirm: vi.fn(async () => {
-        throw new Error("verification exploded")
-      }),
-    } as unknown as WorkspaceSourceConfirmer
-    const executor = new AgentJobExecutor({} as never, { openCode: null, pi: null }, null, "/fallback", undefined, confirmer)
-    const work: DispatchWorkItem = {
-      ownerKind: "agent-job",
-      workflowRunId: "wr-agent",
-      workId: "job.1",
-      workType: "task",
-      agentJobId: "job-1",
-      with: { prompt: "do the thing" },
-      agentSessionStartup: {
-        projectId: "project-1",
-        sessionId: "session-9",
-        spawnCommand: "spawn",
-        allowedSubagents: [],
-        workspaceRepository: { name: "main", gitUrl: GIT_URL, baseBranch: "master" },
-      },
-    }
-
-    const result = await executor.execute(work, new AbortController().signal)
-
-    // The session's own work is not gated on source confirmation.
-    expect(result.status).toBe("failed")
-    expect(result.error?.code).toBe("runtime-unavailable")
   })
 })

@@ -186,6 +186,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             runtime: command.AgentRuntime);
         session.LaunchVisibility = command.LaunchVisibility;
         session.Settings = new AgentSessionSettings(command.Model, command.Definition, command.AgentSessionStartup);
+        if (command.AgentSessionStartup?.WorkspaceRepository is { } workspaceRepository)
+            session.InitializeWorkspaceRepository(workspaceRepository);
         return session;
     }
 
@@ -1401,12 +1403,68 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
     }
 
+    private const string WorkspaceSourceConfirmedEvent = "workspace_source_confirmed";
+    private const string WorkspaceSourceRejectedEvent = "workspace_source_rejected";
+
+    private static bool IsWorkspaceSourceEvent(AgentSessionRuntimeEventInput e) =>
+        string.Equals(e.Type, WorkspaceSourceConfirmedEvent, StringComparison.Ordinal)
+        || string.Equals(e.Type, WorkspaceSourceRejectedEvent, StringComparison.Ordinal);
+
+    private static WorkspaceSourceRejectionReason MapWorkspaceSourceRejectionReason(string? reason) =>
+        string.Equals(reason, "origin-mismatch", StringComparison.Ordinal)
+            ? WorkspaceSourceRejectionReason.OriginMismatch
+            : WorkspaceSourceRejectionReason.NotRunnerOwned;
+
+    private async Task<IReadOnlyList<AgentSessionRuntimeEventInput>> ApplyWorkspaceSourceEventsAsync(
+        IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents)
+    {
+        var session = await GetRequiredAsync();
+        var changed = false;
+        foreach (var e in runtimeEvents.Where(IsWorkspaceSourceEvent))
+        {
+            var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(e.PayloadJson);
+            var repositoryName = AgentSessionJsonHelper.GetStringProp(payload, "repositoryName");
+            var gitUrl = AgentSessionJsonHelper.GetStringProp(payload, "gitUrl");
+            if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(gitUrl))
+                continue;
+            if (string.Equals(e.Type, WorkspaceSourceConfirmedEvent, StringComparison.Ordinal))
+                changed |= session.ApplyWorkspaceSourceConfirmation(repositoryName!, gitUrl!);
+            else
+                changed |= session.ApplyWorkspaceSourceRejection(
+                    repositoryName!,
+                    gitUrl!,
+                    MapWorkspaceSourceRejectionReason(AgentSessionJsonHelper.GetStringProp(payload, "reason")));
+        }
+        if (changed)
+        {
+            _session = session;
+            _stateDirty = true;
+            await _stateStore.SaveAsync(SessionId, _session);
+        }
+        return runtimeEvents.Where(e => !IsWorkspaceSourceEvent(e)).ToArray();
+    }
+
     private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendEventsAsync(
         IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents,
         string? runtimeSessionId,
         bool requireCurrentRuntimeBinding)
     {
         if (runtimeEvents.Count == 0) return [];
+
+        // Workspace source confirmation/rejection is a control fact, not
+        // transcript content: it arrives on the runner-owned session
+        // runtime-events route before the runtime turn is bound, so it is
+        // handled here without requiring a current runtime binding and is
+        // never persisted as transcript. The route already validated that
+        // the reporting runner owns this session (existing.RunnerId ==
+        // runnerId); the transition additionally requires the report to
+        // name the session's durable Project Repository snapshot and only
+        // advances an unconfirmed source. Idempotent by construction.
+        if (runtimeEvents.Any(IsWorkspaceSourceEvent))
+        {
+            runtimeEvents = await ApplyWorkspaceSourceEventsAsync(runtimeEvents);
+            if (runtimeEvents.Count == 0) return [];
+        }
 
         var supportedEvents = runtimeEvents
             .Where(runtimeEvent => TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
@@ -2037,7 +2095,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
             usage.CachedWriteTokens,
-            s.BindingEpoch);
+            s.BindingEpoch,
+            s.WorkspaceRepository);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)

@@ -1,4 +1,5 @@
 import type { AgentWorkspaceManager, RepositorySnapshot } from "./agent-workspace.js"
+import type { ServerConnection } from "../server/connection.js"
 import { runnerLogger } from "../system/logger.js"
 
 const log = runnerLogger.child("source")
@@ -18,6 +19,13 @@ export interface WorkspaceSourceConfirmationRequest {
   sessionId: string
   workDir: string
   repository: RepositorySnapshot
+  /**
+   * Runtime session id bound at attach time. Carried in the report so
+   * the Server's runner-owned runtime-events route can accept it; the
+   * transition itself does not require a current binding. Null when the
+   * report is produced before a binding exists.
+   */
+  runtimeSessionId?: string | null
 }
 
 export type WorkspaceSourceConfirmationResult =
@@ -25,8 +33,8 @@ export type WorkspaceSourceConfirmationResult =
   | { kind: "rejected"; reason: WorkspaceSourceRejectionReason }
 
 export interface WorkspaceSourceReporter {
-  reportConfirmed(request: WorkspaceSourceConfirmationRequest): Promise<void>
-  reportRejected(request: WorkspaceSourceConfirmationRequest, reason: WorkspaceSourceRejectionReason): Promise<void>
+  reportConfirmed(request: WorkspaceSourceConfirmationRequest, signal: AbortSignal): Promise<void>
+  reportRejected(request: WorkspaceSourceConfirmationRequest, reason: WorkspaceSourceRejectionReason, signal: AbortSignal): Promise<void>
 }
 
 export class WorkspaceSourceConfirmer {
@@ -58,8 +66,8 @@ export class WorkspaceSourceConfirmer {
     }
 
     try {
-      if (verdict.kind === "confirmed") await this.reporter.reportConfirmed(request)
-      else await this.reporter.reportRejected(request, verdict.reason)
+      if (verdict.kind === "confirmed") await this.reporter.reportConfirmed(request, signal)
+      else await this.reporter.reportRejected(request, verdict.reason, signal)
       this.reported.set(key, verdict)
     } catch (error) {
       log.error("workspace source report failed; will retry on next execution", { session: request.sessionId, exception: error })
@@ -70,11 +78,57 @@ export class WorkspaceSourceConfirmer {
 
 export function loggingWorkspaceSourceReporter(): WorkspaceSourceReporter {
   return {
-    async reportConfirmed(request) {
+    async reportConfirmed(request, _signal) {
       log.info("workspace source confirmed", { session: request.sessionId, repository: request.repository.name })
     },
-    async reportRejected(request, reason) {
+    async reportRejected(request, reason, _signal) {
       log.warn("workspace source rejected", { session: request.sessionId, repository: request.repository.name, reason })
+    },
+  }
+}
+
+// Reports the verdict to the Server through the runner-owned session
+// runtime-events route (`POST /api/runner/{runnerId}/agent-sessions/
+// {sessionId}/runtime-events`). That route already validates that the
+// reporting runner owns the session (`existing.RunnerId == runnerId`),
+// so this carries no fake runtime session identity: runtimeSessionId is
+// the real attached id (null only in the pre-binding window). A failed
+// report throws so the confirmer does not cache it and retries on the
+// next execution.
+export function createServerConnectionWorkspaceSourceReporter(
+  getConnection: () => ServerConnection | null,
+): WorkspaceSourceReporter {
+  return {
+    async reportConfirmed(request, signal) {
+      const connection = getConnection()
+      if (!connection) return
+      await connection.reconcileAgentSessionRuntimeEvents(request.sessionId, {
+        runtimeSessionId: request.runtimeSessionId ?? "",
+        runtimeEvents: [{
+          type: "workspace_source_confirmed",
+          payload: {
+            repositoryName: request.repository.name,
+            gitUrl: request.repository.gitUrl,
+            baseBranch: request.repository.baseBranch,
+          },
+        }],
+      }, signal)
+    },
+    async reportRejected(request, reason, signal) {
+      const connection = getConnection()
+      if (!connection) return
+      await connection.reconcileAgentSessionRuntimeEvents(request.sessionId, {
+        runtimeSessionId: request.runtimeSessionId ?? "",
+        runtimeEvents: [{
+          type: "workspace_source_rejected",
+          payload: {
+            repositoryName: request.repository.name,
+            gitUrl: request.repository.gitUrl,
+            baseBranch: request.repository.baseBranch,
+            reason,
+          },
+        }],
+      }, signal)
     },
   }
 }
