@@ -15,6 +15,7 @@ public sealed class GitHubConnectionRow
     public required string Status { get; set; }
     public required string IdentityKind { get; set; }
     public string? InstallationId { get; set; }
+    public required bool NeedsAttention { get; set; }
     public required DateTimeOffset CreatedAt { get; set; }
     public required DateTimeOffset UpdatedAt { get; set; }
 }

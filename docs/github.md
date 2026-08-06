@@ -104,10 +104,14 @@ mo github connect owner/repo
 > （`mo github connect --approver` / `mo github update`）可配置审批者名单，名单内用户
 > 在 PR 上的 Approve / Request changes 分别通过 / 打回 Check 审批门（署名
 > `github:<login>`，打回理由为 review 正文），Comment 与名单外用户无动作；按事件到达时
-> 状态决策，不追溯 dismiss 或过期 review。进度回写器仍未实装；
-> GitHub 身份（App / PAT）的配置与使用也未交付。
+> 状态决策，不追溯 dismiss 或过期 review。进度回写（issue 级）已实装：工作开始、
+> 到达审批点、运行失败、完成、取消五类事件投影为互斥状态标签与关键节点评论，
+> 完成 / 取消同时关闭 GitHub issue；评论与标签幂等，单个操作失败不阻塞其余操作，
+> 失败落库（连接 401/403 时同时标记连接待运维）。仍未实装：完成评论的交付摘要与
+> PR 链接、取消原因、写回失败的可见可查入口（Web / CLI 查询）、GitHub App 身份
+> （当前以 PAT 身份回写，App 安装与按仓库短令牌交换未交付）。
 
-当前 GitHub 仅是交付目标（`mohist/github-pr` profile），完整回写 / 审批各能力由
+当前 GitHub 仍是交付目标（`mohist/github-pr` profile），App 身份与写回失败的可见可查入口由
 后续 issue 推进落地。
 
 ---

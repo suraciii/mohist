@@ -20,8 +20,12 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
 {
     public sealed record PostedComment(string ConnectionId, int GithubIssueNumber, string Body);
+    public sealed record StateLabelChange(string ConnectionId, int GithubIssueNumber, string StateLabel);
+    public sealed record IssueClose(string ConnectionId, int GithubIssueNumber, string StateReason);
 
     public List<PostedComment> Comments { get; } = [];
+    public List<StateLabelChange> StateLabels { get; } = [];
+    public List<IssueClose> Closes { get; } = [];
 
     public Task PostCommentAsync(
         GitHubConnection connection,
@@ -30,6 +34,26 @@ public sealed class RecordingGitHubCommentPort : IGitHubCommentPort
         CancellationToken ct = default)
     {
         Comments.Add(new PostedComment(connection.Id, githubIssueNumber, body));
+        return Task.CompletedTask;
+    }
+
+    public Task ReplaceStateLabelAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string stateLabel,
+        CancellationToken ct = default)
+    {
+        StateLabels.Add(new StateLabelChange(connection.Id, githubIssueNumber, stateLabel));
+        return Task.CompletedTask;
+    }
+
+    public Task CloseIssueAsync(
+        GitHubConnection connection,
+        int githubIssueNumber,
+        string stateReason,
+        CancellationToken ct = default)
+    {
+        Closes.Add(new IssueClose(connection.Id, githubIssueNumber, stateReason));
         return Task.CompletedTask;
     }
 }

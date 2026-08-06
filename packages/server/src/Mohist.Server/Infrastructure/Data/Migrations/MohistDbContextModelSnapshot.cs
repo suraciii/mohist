@@ -3698,6 +3698,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasMaxLength(256);
 
+                    b.Property<bool>("NeedsAttention")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("IntakeLabel")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -3757,6 +3760,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsRequired()
                         .HasColumnType("JSON");
 
+                    b.Property<string>("StateLabel")
+                        .HasColumnType("TEXT")
+                        .HasMaxLength(256);
+
                     b.Property<string>("ProjectId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -3776,6 +3783,61 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("GitHubIssueLinks", (string)null);
+                });
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubWriteBackFailureRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConnectionId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ErrorDetail")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("GithubIssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("IssueNumber")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RepositoryName")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId", "CreatedAt");
+
+                    b.ToTable("GitHubWriteBackFailures", (string)null);
                 });
 #pragma warning restore 612, 618
         }
