@@ -4,7 +4,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.TestSupport.SystemSpecs;
 
 internal static class SystemUpdateTestFactory
 {

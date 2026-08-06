@@ -1,11 +1,10 @@
-using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Xunit;
-using static Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory;
+using static Mohist.Server.TestSupport.SystemSpecs.SystemUpdateTestFactory;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class SystemUpdateCliOutcomeSpecs
+public class SystemUpdateCliOutcomeTests
 {
     [Fact]
     public async Task RecordCliOutcomeAsync_PersistsOutcomeViaStore()

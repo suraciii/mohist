@@ -1,12 +1,11 @@
-using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
-using static Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory;
+using static Mohist.Server.TestSupport.SystemSpecs.SystemUpdateTestFactory;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class SystemUpdateConsistencySpecs
+public class SystemUpdateConsistencyTests
 {
     [Fact]
     public async Task GetConsistencyAsync_AllCoherentReturnsConsistent()

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.SystemInfo;
 using Xunit;
-using static Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory;
+using static Mohist.Server.TestSupport.SystemSpecs.SystemUpdateTestFactory;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
