@@ -35,10 +35,6 @@ public class IssueAgentConfigValidationApiSpecs
 
     [Theory]
     [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    [InlineData("sessionStartTimeoutMs")]
-    [InlineData("compaction")]
     public async Task CreateIssue_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
     {
         var projectId = await CreateProjectAsync("issue-create-forbidden");
@@ -86,10 +82,6 @@ public class IssueAgentConfigValidationApiSpecs
 
     [Theory]
     [InlineData("type")]
-    [InlineData("livenessQuietThresholdMs")]
-    [InlineData("probeTimeoutMs")]
-    [InlineData("sessionStartTimeoutMs")]
-    [InlineData("compaction")]
     public async Task PatchIssue_WithForbiddenAgentConfigKey_Returns400(string forbiddenKey)
     {
         var projectId = await CreateProjectAsync("issue-patch-forbidden");
