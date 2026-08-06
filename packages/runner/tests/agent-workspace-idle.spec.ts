@@ -94,7 +94,7 @@ describe("AgentWorkspaceIdleProbe eligibility", () => {
     expect(registry.get(id)?.phase).toBe("active")
   })
 
-  it.each([
+  it.each<[string, AgentWorkspaceActivity]>([
     ["active", { state: "active", idleSince: null }],
     ["pending", { state: "pending", idleSince: null }],
     ["unknown", { state: "unknown", idleSince: null }],
@@ -190,7 +190,7 @@ describe("AgentWorkspaceIdleProbe eligibility", () => {
     expect(connection.calls).toHaveLength(1)
   })
 
-  it.each([
+  it.each<[string, AgentWorkspaceActivity]>([
     ["active", { state: "active", idleSince: null }],
     ["pending", { state: "pending", idleSince: null }],
     ["unknown", { state: "unknown", idleSince: null }],
