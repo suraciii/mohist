@@ -126,7 +126,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
-| `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
+| `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`message send`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
@@ -261,6 +261,11 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
   当前步骤需要的字段，验证后由 Mohist 加密保存，输出、错误、JSON 与日志均不回显。
 - `mo slack status` 查看 Mohist App、各 Agent 接入和本机连接的当前状态与唯一下一步；
   缺少供给凭据时指向 `setup`，Agent 安装未完成时指向同一条 `install-agent` 命令。
+- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] --text <body> [--image <url> | --file <path>]`
+  是 Agent 在 Slack 里发声的命令面：正文按 markdown 渲染为 Slack 原生格式（粗体 / 行内代码 /
+  代码块 / 列表 / 引用，表格与标题降级为可读纯文本）；`--image` 内嵌公网图片 URL，`--file`
+  上传本地图片文件（上限 10 MB），两者互斥。`--text -` 从标准输入读取正文并保留换行；
+  附带图片时 `--text` 可省略。
 - `mo slack claim-owner <id>` 只在 identity verification 完成后生成并显示一次 setup
   claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
 - `mo slack view <id>` 始终返回 setup progress、status 和唯一 next action；命令可以退出，

@@ -393,14 +393,31 @@ public static class SlackConnectionRoutes
             SlackOutboxStore outbox,
             CancellationToken ct) =>
         {
-            if (body is null
-                || string.IsNullOrWhiteSpace(body.ConversationId)
-                || string.IsNullOrWhiteSpace(body.Text))
-                return ApiResults.BadRequest("conversationId and text are required.");
+            if (body is null || string.IsNullOrWhiteSpace(body.ConversationId))
+                return ApiResults.BadRequest("conversationId is required.");
+
+            var hasAttachment = !string.IsNullOrWhiteSpace(body.ImageUrl)
+                || !string.IsNullOrWhiteSpace(body.FileContentBase64);
+            if (string.IsNullOrWhiteSpace(body.Text) && !hasAttachment)
+                return ApiResults.BadRequest("text, imageUrl, or a file is required.");
+            if (!string.IsNullOrWhiteSpace(body.FileContentBase64)
+                && string.IsNullOrWhiteSpace(body.FileName))
+                return ApiResults.BadRequest("fileName is required when a file is attached.");
+            if (!string.IsNullOrWhiteSpace(body.FileContentBase64))
+            {
+                try
+                {
+                    _ = Convert.FromBase64String(body.FileContentBase64);
+                }
+                catch (FormatException)
+                {
+                    return ApiResults.BadRequest("fileContentBase64 is not valid base64.");
+                }
+            }
 
             var projectId = context.GetResolvedProject().Id;
-            var text = SlackFinalReplyRenderer.RedactReplyText(body.Text);
-            if (string.IsNullOrWhiteSpace(text))
+            var text = SlackMarkdownRenderer.ToMrkdwn(SlackFinalReplyRenderer.RedactReplyText(body.Text));
+            if (string.IsNullOrWhiteSpace(text) && !hasAttachment)
                 return ApiResults.BadRequest("text must not be empty.");
 
             var result = await outbox.EnqueueAgentReplyAsync(
@@ -408,6 +425,9 @@ public static class SlackConnectionRoutes
                 body.ConversationId.Trim(),
                 string.IsNullOrWhiteSpace(body.ThreadTs) ? null : body.ThreadTs.Trim(),
                 text,
+                imageUrl: string.IsNullOrWhiteSpace(body.ImageUrl) ? null : body.ImageUrl.Trim(),
+                fileName: string.IsNullOrWhiteSpace(body.FileName) ? null : body.FileName.Trim(),
+                fileContentBase64: string.IsNullOrWhiteSpace(body.FileContentBase64) ? null : body.FileContentBase64,
                 ct);
             if (!result.Accepted)
                 return ApiResults.Fail(
@@ -2283,7 +2303,10 @@ public sealed class SlackReplyBody
 {
     public string ConversationId { get; init; } = string.Empty;
     public string? ThreadTs { get; init; }
-    public string Text { get; init; } = string.Empty;
+    public string? Text { get; init; }
+    public string? ImageUrl { get; init; }
+    public string? FileName { get; init; }
+    public string? FileContentBase64 { get; init; }
 }
 
 public sealed class SlackIngressBody
