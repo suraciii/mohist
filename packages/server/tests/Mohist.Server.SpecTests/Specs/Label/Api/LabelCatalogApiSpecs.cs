@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Text.Json;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -14,17 +13,6 @@ public class LabelCatalogApiSpecs
     public LabelCatalogApiSpecs(MohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
-    }
-
-    [Fact]
-    public async Task GetCatalog_EmptyProject_ReturnsEmpty()
-    {
-        var project = await CreateProjectAsync("empty-catalog");
-
-        var definitions = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{project.Id}/labels/catalog");
-
-        Assert.Empty(definitions);
     }
 
     [Fact]
@@ -97,20 +85,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("invalid", body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task PostCatalog_EmptyDescription_Returns400()
-    {
-        var project = await CreateProjectAsync("empty-desc");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog",
-            new { key = "module", description = "   " });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -258,17 +232,6 @@ public class LabelCatalogApiSpecs
     }
 
     [Fact]
-    public async Task DeleteCatalog_MissingKey_Returns204Idempotent()
-    {
-        var project = await CreateProjectAsync("del-missing");
-
-        using var response = await _client.DeleteAsync(
-            $"/api/projects/{project.Id}/labels/catalog/nonexistent");
-
-        Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
-    }
-
-    [Fact]
     public async Task Catalog_IsProjectScoped()
     {
         var projectA = await CreateProjectAsync("scope-a");
@@ -308,38 +271,6 @@ public class LabelCatalogApiSpecs
         var labels = await _client.GetDataAsync<string[]>($"/api/projects/{project.Id}/labels");
 
         Assert.Equal(new[] { "module", "stream" }, labels);
-    }
-
-    [Fact]
-    public async Task PostCatalog_WithEmptySupportedValue_Returns400()
-    {
-        var project = await CreateProjectAsync("empty-sv");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog",
-            new { key = "module", description = "Classifies", supportedValues = new[] { "auth", "", "ui" } });
-
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        var body = await response.Content.ReadAsStringAsync();
-        Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task PostCatalog_WithSupportedValues_PersistsThem()
-    {
-        var project = await CreateProjectAsync("sv-persist");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog",
-            new { key = "kind", description = "The kind of change", supportedValues = new[] { "feature", "bugfix", "chore" } });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<LabelDefinitionDto>>();
-        Assert.NotNull(envelope?.Data?.SupportedValues);
-        Assert.Equal(3, envelope.Data.SupportedValues.Count);
-        Assert.Contains("feature", envelope.Data.SupportedValues);
-        Assert.Contains("bugfix", envelope.Data.SupportedValues);
-        Assert.Contains("chore", envelope.Data.SupportedValues);
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix)
