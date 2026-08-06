@@ -98,7 +98,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             definition,
             workDir: context.WorkspacePath,
             agentId: agent.Id,
-            agentName: agent.Name);
+            agentName: agent.Name,
+            workspaceRepository: context.WorkspaceRepository);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
@@ -638,7 +639,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             definition,
             workDir: context.WorkspacePath,
             agentId: agent.Id,
-            agentName: agent.Name);
+            agentName: agent.Name,
+            workspaceRepository: context.WorkspaceRepository);
 
         var sessionGrain = _sessions.GetGrain(sessionId);
         await sessionGrain.OpenAsync(
