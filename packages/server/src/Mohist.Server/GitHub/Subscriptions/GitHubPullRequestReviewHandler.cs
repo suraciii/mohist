@@ -85,6 +85,13 @@ public sealed class GitHubPullRequestReviewHandler : ICloudEventHandler
             return;
         }
 
+        // An issue that does not exist (stale branch, wrong project) is a
+        // no-op, never a handler failure: the dispatcher must settle the
+        // event instead of retrying or dead-lettering it.
+        var issueStore = sp.GetRequiredService<IIssueStore>();
+        if (await issueStore.LoadAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber))) is null)
+            return;
+
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         string? workflowRunId;
         try

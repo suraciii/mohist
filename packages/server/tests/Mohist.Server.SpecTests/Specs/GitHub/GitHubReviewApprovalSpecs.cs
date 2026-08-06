@@ -8,8 +8,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.GitHub.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Workflow;
+using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -26,6 +28,7 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 public sealed class GitHubReviewApprovalSpecs
 {
     private const string RepoName = "hello-world";
+    private const string GitHubReviewHandlerIdentity = "Mohist.Server.GitHub.Subscriptions.GitHubPullRequestReviewHandler";
 
     private readonly GitHubFeedFixture _fixture;
 
@@ -84,6 +87,7 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Null(check.ApprovalStatus!.Result);
         Assert.Null(check.ApprovalStatus.DecidedBy);
         Assert.Equal("check", status.Workflow.CurrentStage);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-comment-1");
     }
 
     [Fact]
@@ -98,6 +102,7 @@ public sealed class GitHubReviewApprovalSpecs
         var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
         Assert.Equal("awaiting-approval", check.Status);
         Assert.Null(check.ApprovalStatus!.Result);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-outsider-1");
     }
 
     [Fact]
@@ -112,6 +117,7 @@ public sealed class GitHubReviewApprovalSpecs
         var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
         Assert.Equal("awaiting-approval", check.Status);
         Assert.Null(check.ApprovalStatus!.Result);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-empty-list-1");
     }
 
     [Fact]
@@ -128,6 +134,7 @@ public sealed class GitHubReviewApprovalSpecs
         var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
         Assert.Equal("approved", check.ApprovalStatus!.Result);
         Assert.Equal("integrate", status.Workflow.CurrentStage);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-gate-2");
     }
 
     [Fact]
@@ -142,15 +149,18 @@ public sealed class GitHubReviewApprovalSpecs
         var check = status!.Workflow!.Stages.Single(s => s.Stage == "check");
         Assert.Equal("awaiting-approval", check.Status);
         Assert.Null(check.ApprovalStatus!.Result);
+        await AssertReviewSettledAsync(projectId, connectionId, "review-branch-1");
     }
 
     [Fact]
-    public async Task Review_UnknownIssueNumber_NoAction()
+    public async Task Review_UnknownIssueNumber_NoAction_AndSettlesWithoutRetryOrDeadLetter()
     {
         var (projectId, connectionId, secret, _) = await SetupAtCheckGateAsync(["alice"]);
 
         await DeliverAsync(connectionId, secret, "review-unknown-1", ReviewPayload("approved", "alice", 99999));
         await PumpAsync();
+
+        await AssertReviewSettledAsync(projectId, connectionId, "review-unknown-1");
     }
 
     [Fact]
@@ -169,6 +179,29 @@ public sealed class GitHubReviewApprovalSpecs
         Assert.Equal("approved", check.ApprovalStatus!.Result);
         Assert.Equal("github:alice", check.ApprovalStatus.DecidedBy);
         Assert.Equal("integrate", status.Workflow.CurrentStage);
+    }
+
+    /// <summary>
+    /// Every review delivery must settle: the ingress event is marked
+    /// dispatched and the approval handler leaves no dead-letter row.
+    /// A handler exception would leave the event undelivered for retry
+    /// (and eventually dead-letter it), so this is the observable proof
+    /// that a no-op path never fails the dispatch.
+    /// </summary>
+    private async Task AssertReviewSettledAsync(string projectId, string connectionId, string deliveryId)
+    {
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var source = IngressEventPersistence.ConnectionSource(projectId, connectionId);
+        var row = await db.IngressEvents.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Source == source && r.EventId == deliveryId);
+        Assert.NotNull(row);
+        Assert.NotNull(row!.DispatchedAt);
+
+        var deadLetters = scope.ServiceProvider.GetRequiredService<IDeadLetterStore>();
+        var rows = await deadLetters.QueryAsync(GitHubReviewHandlerIdentity, 10);
+        Assert.Empty(rows);
     }
 
     private async Task<(string ProjectId, string ConnectionId, string Secret, int IssueNumber)> SetupAtCheckGateAsync(

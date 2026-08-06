@@ -65,6 +65,7 @@ public sealed class GitHubConnectionStore : IScopedService
         ArgumentNullException.ThrowIfNull(connection);
         connection.Owner = connection.Owner.Trim().ToLowerInvariant();
         connection.Repo = connection.Repo.Trim().ToLowerInvariant();
+        connection.Approvers = NormalizeApprovers(connection.Approvers);
         connection.Validate(requireInstallationId: false);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
@@ -117,6 +118,8 @@ public sealed class GitHubConnectionStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
         if (row is null) return null;
+        // Absent field means no change; an explicit empty array clears the list.
+        if (approvers is null) return ToDomain(row);
         row.ApproversJson = SerializeApprovers(NormalizeApprovers(approvers));
         row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);

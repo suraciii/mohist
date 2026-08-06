@@ -152,6 +152,20 @@ public sealed class GitHubConnectionStoreTests
     }
 
     [Fact]
+    public async Task CreateAsync_NormalizesApprovers()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var store = NewStore(database, new FakeSecretStore());
+
+        var connection = Connection();
+        connection.Approvers = [" alice ", "Alice", "", "bob"];
+        await store.CreateAsync(connection);
+
+        Assert.Equal(["alice", "bob"], connection.Approvers);
+        Assert.Equal(["alice", "bob"], (await store.GetAsync("proj_1", connection.Id))!.Approvers);
+    }
+
+    [Fact]
     public async Task SetStatusAsync_DisablesAndEnables()
     {
         var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
@@ -182,6 +196,27 @@ public sealed class GitHubConnectionStoreTests
         Assert.NotNull(updated);
         Assert.Equal(["alice", "bob"], updated!.Approvers);
         Assert.Equal(["alice", "bob"], (await store.GetAsync("proj_1", connection.Id))!.Approvers);
+    }
+
+    [Fact]
+    public async Task UpdateApproversAsync_NullApprovers_DoesNotChangeList()
+    {
+        var database = NewDatabase(RepositoriesJson("https://github.com/octocat/hello-world.git"));
+        var timeProvider = new FakeTimeProvider(Now);
+        var store = new GitHubConnectionStore(
+            new TestDbContextFactory(database.Options),
+            new FakeSecretStore(),
+            timeProvider);
+        var connection = Connection();
+        connection.Approvers = ["alice"];
+        await store.CreateAsync(connection);
+        timeProvider.Advance(TimeSpan.FromMinutes(5));
+
+        var updated = await store.UpdateApproversAsync("proj_1", connection.Id, null);
+
+        Assert.NotNull(updated);
+        Assert.Equal(["alice"], updated!.Approvers);
+        Assert.Equal(Now, updated.UpdatedAt);
     }
 
     [Fact]

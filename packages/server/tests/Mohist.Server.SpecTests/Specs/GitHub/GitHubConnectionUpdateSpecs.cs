@@ -49,6 +49,19 @@ public sealed class GitHubConnectionUpdateSpecs
     }
 
     [Fact]
+    public async Task UpdateApprovers_EmptyBody_DoesNotChangeList()
+    {
+        var (projectId, connectionId, _) = await ConnectAsync(["alice"]);
+
+        var updated = await Client.PatchDataAsync<JsonElement>(
+            $"/api/projects/{projectId}/github-connections/{connectionId}",
+            new { });
+
+        var approvers = updated.GetProperty("approvers").EnumerateArray().Select(a => a.GetString()).ToArray();
+        Assert.Equal(new[] { "alice" }, approvers.Cast<string>().ToArray());
+    }
+
+    [Fact]
     public async Task UpdateApprovers_UnknownConnection_NotFound()
     {
         var (projectId, _, _) = await ConnectAsync(["alice"]);
