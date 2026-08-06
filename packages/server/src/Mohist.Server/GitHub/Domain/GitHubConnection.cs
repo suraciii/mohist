@@ -13,6 +13,14 @@ public sealed class GitHubConnection
     public string Status { get; set; } = GitHubConnectionStatus.Active;
     public string IdentityKind { get; set; } = GitHubIdentityKind.App;
     public string? InstallationId { get; set; }
+
+    /// <summary>
+    /// Set when a write-back attempt hit an authentication/authorization
+    /// failure (401/403): the connection's GitHub identity needs operator
+    /// attention. Surfaced in the connection list; cleared by the operator
+    /// after fixing the credential.
+    /// </summary>
+    public bool NeedsAttention { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 

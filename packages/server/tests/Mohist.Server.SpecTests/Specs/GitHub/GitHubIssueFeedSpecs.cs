@@ -33,6 +33,8 @@ public sealed class GitHubIssueFeedSpecs
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
+        fixture.Comments.StateLabels.Clear();
+        fixture.Comments.Closes.Clear();
     }
 
     private HttpClient Client => _fixture.Client;
@@ -70,8 +72,15 @@ public sealed class GitHubIssueFeedSpecs
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
-    private Task PumpAsync() =>
-        _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global).DispatchNowAsync();
+    private async Task PumpAsync()
+    {
+        // Dispatch twice: the ingest response may return before the event
+        // row is visible to the dispatcher, so the first pass can settle
+        // only earlier leftovers and the second delivers this test's event.
+        var dispatcher = _fixture.Grains.GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global);
+        await dispatcher.DispatchNowAsync();
+        await dispatcher.DispatchNowAsync();
+    }
 
     private async Task<GitHubIssueLink?> LoadLinkAsync(string projectId, string repositoryName)
     {
@@ -141,7 +150,12 @@ public sealed class GitHubIssueFeedSpecs
         Assert.False(string.IsNullOrWhiteSpace(issue.WorkflowRunId));
         Assert.True(issue.Labels.TryGetValue(GitHubIssueSource.LabelKey, out var source));
         Assert.Equal($"{owner}/{RepoName}#{GithubIssueNumber}", source);
-        Assert.Empty(_fixture.Comments.Comments);
+        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
+        Assert.Equal(GithubIssueNumber, comment.GithubIssueNumber);
+        Assert.Equal(GitHubWriteBackComments.WorkStarted(link.IssueNumber), comment.Body);
+        var label = Assert.Single(_fixture.Comments.StateLabels, s => s.ConnectionId == connectionId);
+        Assert.Equal(GithubIssueNumber, label.GithubIssueNumber);
+        Assert.Equal(GitHubStateLabels.InProgress, label.StateLabel);
     }
 
     [Fact]
@@ -169,7 +183,7 @@ public sealed class GitHubIssueFeedSpecs
         var issue = await LoadIssueAsync(projectId, link!.IssueNumber);
         Assert.Equal(IssueStatus.Backlog, issue!.Status);
         Assert.Null(issue.WorkflowRunId);
-        Assert.Empty(_fixture.Comments.Comments);
+        Assert.DoesNotContain(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
     }
 
     [Fact]
@@ -254,8 +268,7 @@ public sealed class GitHubIssueFeedSpecs
         var issue = await LoadIssueAsync(projectId, issueNumber);
         Assert.Equal(IssueStatus.Backlog, issue!.Status);
         Assert.Null(issue.WorkflowRunId);
-        var comment = Assert.Single(_fixture.Comments.Comments);
-        Assert.Equal(connectionId, comment.ConnectionId);
+        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
         Assert.Equal(GithubIssueNumber, comment.GithubIssueNumber);
         Assert.Contains($"#{issueNumber}", comment.Body);
         var link = await LoadLinkAsync(projectId, RepoName);
@@ -292,8 +305,7 @@ public sealed class GitHubIssueFeedSpecs
         var issue = await LoadIssueAsync(project.Id, link!.IssueNumber);
         Assert.Equal(IssueStatus.Backlog, issue!.Status);
         Assert.Null(issue.WorkflowRunId);
-        var comment = Assert.Single(_fixture.Comments.Comments);
-        Assert.Equal(connectionId, comment.ConnectionId);
+        var comment = Assert.Single(_fixture.Comments.Comments, c => c.ConnectionId == connectionId);
         Assert.Contains($"#{link.IssueNumber}", comment.Body);
         Assert.Contains("not found", comment.Body);
     }

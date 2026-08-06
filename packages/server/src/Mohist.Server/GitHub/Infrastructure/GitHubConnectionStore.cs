@@ -60,6 +60,24 @@ public sealed class GitHubConnectionStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
+    /// <summary>
+    /// Finds the connection serving a repository (one connection per
+    /// <c>(owner, repo)</c>, enforced at create). The write-back writer
+    /// resolves the connection from the link's repository name.
+    /// </summary>
+    public async Task<GitHubConnection?> GetByRepositoryAsync(
+        string projectId,
+        string repositoryName,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryName);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubConnections.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.RepositoryName == repositoryName, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
     public async Task<string> CreateAsync(GitHubConnection connection, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -126,6 +144,28 @@ public sealed class GitHubConnectionStore : IScopedService
         return ToDomain(row);
     }
 
+    /// <summary>
+    /// Flips the NeedsAttention flag, set by the write-back writer when an
+    /// operation hit 401/403 (the connection's GitHub identity needs
+    /// operator attention). Clearing is an operator action and stays
+    /// outside this minimal loop.
+    /// </summary>
+    public async Task<GitHubConnection?> MarkNeedsAttentionAsync(
+        string projectId,
+        string id,
+        bool needsAttention,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
+        if (row is null) return null;
+        if (row.NeedsAttention == needsAttention) return ToDomain(row);
+        row.NeedsAttention = needsAttention;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return ToDomain(row);
+    }
+
     public async Task<byte[]?> LoadWebhookSecretAsync(string projectId, string id, CancellationToken ct = default) =>
         await _secretStore.LoadAsync(WebhookSecretAddress(projectId, id), ct);
 
@@ -177,6 +217,7 @@ public sealed class GitHubConnectionStore : IScopedService
         Status = row.Status,
         IdentityKind = row.IdentityKind,
         InstallationId = row.InstallationId,
+        NeedsAttention = row.NeedsAttention,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
     };
@@ -194,6 +235,7 @@ public sealed class GitHubConnectionStore : IScopedService
         Status = connection.Status,
         IdentityKind = connection.IdentityKind,
         InstallationId = connection.InstallationId,
+        NeedsAttention = connection.NeedsAttention,
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,
     };

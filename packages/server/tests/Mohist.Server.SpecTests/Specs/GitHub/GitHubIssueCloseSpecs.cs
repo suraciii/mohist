@@ -30,6 +30,8 @@ public sealed class GitHubIssueCloseSpecs
     {
         _fixture = fixture;
         fixture.Comments.Comments.Clear();
+        fixture.Comments.StateLabels.Clear();
+        fixture.Comments.Closes.Clear();
     }
 
     private HttpClient Client => _fixture.Client;
