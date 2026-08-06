@@ -7,6 +7,20 @@ using Mohist.Server.Infrastructure.Hosting;
 namespace Mohist.Server.Infrastructure.Slack;
 
 /// <summary>
+/// Narrow membership query the access decider needs: is this stable Slack
+/// user id on the Connection's allowlist? The Owner is never stored in the
+/// table — owner authority is implicit and unconditional.
+/// </summary>
+public interface ISlackConnectionAllowedMemberStore
+{
+    Task<bool> IsAllowedAsync(
+        string projectId,
+        string connectionId,
+        string slackUserId,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Persistence boundary for the allowlist members a Connection Owner
 /// explicitly grants access to under the <c>allowlist</c> access policy.
 /// The Owner is never stored in this table — owner authority is implicit
@@ -17,7 +31,8 @@ namespace Mohist.Server.Infrastructure.Slack;
 /// (only the Owner is allowed). Cascades via
 /// <see cref="IAgentConnectionProviderCleanup"/> on Connection deletion.
 /// </summary>
-public sealed class SlackConnectionAllowedMemberStore : IScopedService, IAgentConnectionProviderCleanup
+public sealed class SlackConnectionAllowedMemberStore
+    : IScopedService, ISlackConnectionAllowedMemberStore, IAgentConnectionProviderCleanup
 {
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
     private readonly TimeProvider _timeProvider;

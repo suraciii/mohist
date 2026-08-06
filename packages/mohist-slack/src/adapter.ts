@@ -1,4 +1,5 @@
 import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, RuntimeLease, SlackAdapterTarget, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import { LeaseStaleError } from "./transport.js"
 import { slackLogger } from "./logger.js"
 
 export interface SlackAdapterOptions {
@@ -204,7 +205,11 @@ export class SlackAdapter {
   }
 
   private async removeRuntime(runtime: ConnectionRuntime): Promise<void> {
-    this.runtimes.delete(connectionKey(runtime.target))
+    // Only the runtime the map still points at may be evicted: a stale error
+    // surfacing from a superseded runtime must never delete its replacement.
+    // The old runtime itself is always disconnected either way.
+    if (this.runtimes.get(connectionKey(runtime.target)) === runtime)
+      this.runtimes.delete(connectionKey(runtime.target))
     await this.disconnect(runtime)
   }
 
@@ -265,7 +270,7 @@ export class SlackAdapter {
       this.log.info("envelope forwarding", { target, event: eventType })
       if (interaction) {
         this.assertCurrent(runtime, snapshot, signal)
-        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
+        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), runtime.lease.leaseId, this.options.adapterId, signal)
         this.assertCurrent(runtime, snapshot, signal)
         this.log.info("interaction forwarded", { target, event: eventType })
         await this.drain(runtime, signal)
@@ -273,7 +278,7 @@ export class SlackAdapter {
       }
       const envelope = normalizeSocketEvent(body)
       this.assertCurrent(runtime, snapshot, signal)
-      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
+      const result = await this.options.transport.ingress(runtime.target, envelope, runtime.lease.leaseId, this.options.adapterId, signal)
       this.assertCurrent(runtime, snapshot, signal)
       this.log.info("ingress accepted", { target, event: eventType, kind: result.kind })
       if (!await this.renderUserFacingRejection(runtime, snapshot, envelope, result, signal)) return
@@ -283,6 +288,10 @@ export class SlackAdapter {
       await this.drain(runtime, signal)
     } catch (error) {
       if (error instanceof StaleRuntimeError) return
+      if (error instanceof LeaseStaleError) {
+        await this.removeRuntime(runtime)
+        return
+      }
       throw error
     } finally {
       if (acquired) this.inFlight -= 1
@@ -323,14 +332,14 @@ export class SlackAdapter {
       this.assertCurrent(runtime, snapshot, signal)
       while (!signal.aborted) {
         this.assertCurrent(runtime, snapshot, signal)
-        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, runtime.lease.leaseId, this.options.adapterId, signal)
         this.assertCurrent(runtime, snapshot, signal)
         if (!delivery) break
         try {
           this.assertCurrent(runtime, snapshot, signal)
           const ack = await this.mutateDelivery(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
           this.assertCurrent(runtime, snapshot, signal)
-          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), runtime.lease.leaseId, signal)
           this.assertCurrent(runtime, snapshot, signal)
         } catch (error) {
           if (error instanceof StaleRuntimeError) return
@@ -339,13 +348,18 @@ export class SlackAdapter {
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
-          }, this.options.adapterId), signal)
+          }, this.options.adapterId), runtime.lease.leaseId, signal)
           this.assertCurrent(runtime, snapshot, signal)
           continue
         }
       }
     } catch (error) {
-      if (!(error instanceof StaleRuntimeError)) throw error
+      if (error instanceof StaleRuntimeError) return
+      if (error instanceof LeaseStaleError) {
+        await this.removeRuntime(runtime)
+        return
+      }
+      throw error
     } finally {
       runtime.draining = false
       if (runtime.drainRequested) {
@@ -543,24 +557,25 @@ export class SlackAdapter {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
       this.assertCurrent(runtime, snapshot, signal)
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, runtime.lease.leaseId, this.options.adapterId, signal)
       this.assertCurrent(runtime, snapshot, signal)
       if (!delivery) return
       try {
         this.assertCurrent(runtime, snapshot, signal)
         const ack = await this.reconcile(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
         this.assertCurrent(runtime, snapshot, signal)
-        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), runtime.lease.leaseId, signal)
         this.assertCurrent(runtime, snapshot, signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
         if (error instanceof StaleRuntimeError) throw error
+        if (error instanceof LeaseStaleError) throw error
         this.assertCurrent(runtime, snapshot, signal)
         await this.options.transport.ackDelivery(runtime.target, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
-        }, this.options.adapterId), signal)
+        }, this.options.adapterId), runtime.lease.leaseId, signal)
         this.assertCurrent(runtime, snapshot, signal)
         return
       }

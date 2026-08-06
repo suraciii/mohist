@@ -17,6 +17,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
@@ -89,6 +90,9 @@ public class MohistIntegrationFixture : IAsyncLifetime
             _otelEnabled);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
+        Client.DefaultRequestHeaders.Add(
+            Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
+            "spec-operator");
         await _factory.EnsureSchemaAsync();
     }
 
@@ -272,6 +276,21 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 provider.GetRequiredService<IEnvironmentVariableProvider>(),
                 provider.GetRequiredService<ILogger<ConfigService>>(),
                 provider.GetRequiredService<IConfigDocumentStore>()));
+            // The production Slack port adapters reach Slack over the typed
+            // SlackApiTransport client. Replace its handler chain with the
+            // scripted fake so no spec can ever touch the real network, and
+            // access-policy specs drive users.info / conversations.info
+            // through the production adapter + transport against scripted
+            // responses. The handler is transient and delegates to the
+            // singleton script; the typed client may dispose its handler
+            // chain without disposing shared test state.
+            services.RemoveAll<SlackApiTransport>();
+            services.AddSingleton<SlackApiTestScript>();
+            services.AddTransient<SlackApiTestHandler>();
+            services.AddHttpClient<SlackApiTransport>(client =>
+            {
+                client.BaseAddress = new Uri("https://slack.test/api/");
+            }).ConfigurePrimaryHttpMessageHandler<SlackApiTestHandler>();
 
             services.RemoveAll<IDbContextFactory<MohistDbContext>>();
             services.AddDbContextFactory<MohistDbContext>(options =>

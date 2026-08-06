@@ -16,6 +16,7 @@ using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -29,11 +30,15 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
 [Collection("MohistIntegration")]
-public sealed class SlackAccessPolicySpecs
+public sealed partial class SlackAccessPolicySpecs
 {
+    private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
 
     public SlackAccessPolicySpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+
+    private SlackApiTestScript SlackApi =>
+        _fixture.Services.GetRequiredService<SlackApiTestScript>();
 
     [Fact]
     public async Task New_connection_defaults_to_owner_only_policy()
@@ -239,6 +244,8 @@ public sealed class SlackAccessPolicySpecs
             senderSlackUserId,
             senderKind = "human",
             text,
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -264,6 +271,8 @@ public sealed class SlackAccessPolicySpecs
             senderSlackUserId,
             senderKind = "human",
             text,
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -274,7 +283,9 @@ public sealed class SlackAccessPolicySpecs
     private static string IngressPath(AgentConnection connection) =>
         $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}/ingress";
 
-    private async Task<AgentConnection> CreateConnectionAsync()
+    private async Task<AgentConnection> CreateConnectionAsync(
+        string? accessPolicy = null,
+        IReadOnlyList<string>? allowMembers = null)
     {
         var id = $"connection_{Guid.NewGuid():N}";
         var projectId = $"project_{Guid.NewGuid():N}";
@@ -319,15 +330,68 @@ public sealed class SlackAccessPolicySpecs
             ConnectionHealth = ConnectionHealthKind.Healthy,
             AgentReadiness = AgentReadinessKind.Ready,
             OwnerSlackUserId = "U_OWNER",
+            AccessPolicy = accessPolicy ?? AccessPolicyKind.OwnerOnly,
             LastHeartbeatAt = now,
             CreatedAt = now,
             UpdatedAt = now,
         });
         await db.SaveChangesAsync();
 
+        if (allowMembers is { Count: > 0 })
+        {
+            foreach (var member in allowMembers)
+            {
+                db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
+                {
+                    Id = $"slkalm_{Guid.NewGuid():N}",
+                    ProjectId = projectId,
+                    ConnectionId = id,
+                    SlackUserId = member,
+                    WorkspaceTeamId = "T123",
+                    CreatedAt = now,
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
+
+        var agentAppId = $"agent_app_{Guid.NewGuid():N}";
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
+        {
+            Id = agentAppId,
+            EnrollmentId = enrollmentId,
+            WorkspaceTeamId = "T123",
+            AgentConnectionId = id,
+            AppId = $"A_SPEC_{Guid.NewGuid():N}",
+            BotUserId = "U123",
+            AppLifecycle = SlackAppLifecycle.Created,
+            Authorization = SlackAuthorizationState.Authorized,
+            RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
+            DesiredManifestVersion = 1,
+            DesiredManifestHash = "desired",
+            VerifiedScopesJson = "[]",
+            OperationFence = 0,
+            AppLevelTokenRef = agentAppId,
+            BotTokenRef = agentAppId,
+            BindingState = SlackAgentAppBindingState.Bound,
+            AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        // The legacy connection-scoped addresses are dead seams: the lease
+        // core and the access decider resolve the AgentApp addresses only.
+        // Distinct values prove the live identity gate uses the verified
+        // Agent App Bot token, never the old project/connection secret.
+        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp-legacy"));
+        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-legacy"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-verified"));
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
+        _connectionLeases[id] = leaseId;
         return new AgentConnection
         {
             Id = id,

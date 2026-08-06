@@ -97,7 +97,7 @@ public sealed record SlackManifestDefinition(
     {
         SlackManifestKind.MohistApp => new(["chat:write", "im:history", "users:read"], ["message.im"]),
         SlackManifestKind.AgentApp => new(
-            ["app_mentions:read", "channels:history", "chat:write", "groups:history", "im:history", "reactions:read", "reactions:write", "users:read"],
+            ["app_mentions:read", "channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "im:history", "reactions:read", "reactions:write", "users:read"],
             ["app_mention", "message.im"]),
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
