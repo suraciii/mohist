@@ -32,6 +32,10 @@ public static class AgentSessionTreeRoutes
             {
                 return ApiResults.BadRequest("continuation is invalid", "invalid_continuation");
             }
+            catch (SessionTreeProjectionInconsistentException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "session_tree_projection_inconsistent");
+            }
         });
 
         return app;

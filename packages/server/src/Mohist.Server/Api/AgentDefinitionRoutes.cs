@@ -48,6 +48,10 @@ public static class AgentDefinitionRoutes
             {
                 return ApiResults.Conflict($"Agent name '{req.Name}' is already used", "AGENT_NAME_CONFLICT", new { name = req.Name });
             }
+            catch (AgentCapabilityReferenceException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "agent_capability_reference", new { agentId = ex.AgentId });
+            }
         });
 
         group.MapGet("/", async (HttpContext context, bool? all, string? status, AgentQuerier query) =>
@@ -114,6 +118,10 @@ public static class AgentDefinitionRoutes
             catch (Exception ex) when (IsNameConflict(ex))
             {
                 return ApiResults.Conflict($"Agent name '{req.Name}' is already used", "AGENT_NAME_CONFLICT", new { name = req.Name });
+            }
+            catch (AgentCapabilityReferenceException ex)
+            {
+                return ApiResults.BadRequest(ex.Message, "agent_capability_reference", new { agentId = ex.AgentId });
             }
         });
 

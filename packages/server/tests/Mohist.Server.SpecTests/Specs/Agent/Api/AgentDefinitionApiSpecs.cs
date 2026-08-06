@@ -290,6 +290,78 @@ public class AgentDefinitionApiSpecs
         Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task Create_WithUnknownAllowedSubagentAgentId_Returns400WithCapabilityReferenceCode()
+    {
+        var project = await CreateProjectAsync("agent-capability-ref-create");
+        var missingAgentId = $"agent_{Guid.NewGuid():N}";
+
+        using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", new
+        {
+            name = "with-missing-subagent",
+            description = "agent description",
+            instructions = "instructions",
+            agentConfig = new { model = "openai/gpt-5.6" },
+            skills = new[] { "coding" },
+            maxConcurrentRuns = 1,
+            allowedSubagentAgentIds = new[] { missingAgentId },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("success").GetBoolean());
+        Assert.Equal("agent_capability_reference", body.GetProperty("code").GetString());
+        Assert.Contains(missingAgentId, body.GetProperty("error").GetString());
+        Assert.Equal(missingAgentId, body.GetProperty("details").GetProperty("agentId").GetString());
+    }
+
+    [Fact]
+    public async Task Patch_WithUnknownAllowedSubagentAgentId_Returns400WithCapabilityReferenceCode()
+    {
+        var project = await CreateProjectAsync("agent-capability-ref-patch");
+        var created = await _client.PostDataAsync<AgentDto>(
+            $"/api/projects/{project.Id}/agents", NewAgent("patch-target"));
+        var missingAgentId = $"agent_{Guid.NewGuid():N}";
+
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/agents/{created.Id}",
+            new { allowedSubagentAgentIds = new[] { missingAgentId } });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(body.GetProperty("success").GetBoolean());
+        Assert.Equal("agent_capability_reference", body.GetProperty("code").GetString());
+        Assert.Contains(missingAgentId, body.GetProperty("error").GetString());
+        Assert.Equal(missingAgentId, body.GetProperty("details").GetProperty("agentId").GetString());
+    }
+
+    [Fact]
+    public async Task CreateAndPatch_WithExistingAllowedSubagentAgentIds_Succeeds()
+    {
+        var project = await CreateProjectAsync("agent-capability-ref-ok");
+        var target = await _client.PostDataAsync<AgentDto>(
+            $"/api/projects/{project.Id}/agents", NewAgent("sub-target"));
+
+        var parent = await _client.PostDataAsync<AgentDto>(
+            $"/api/projects/{project.Id}/agents",
+            new
+            {
+                name = "sub-parent",
+                description = "agent description",
+                instructions = "instructions",
+                agentConfig = new { model = "openai/gpt-5.6" },
+                skills = new[] { "coding" },
+                maxConcurrentRuns = 1,
+                allowedSubagentAgentIds = new[] { target.Id },
+            });
+        Assert.Equal([target.Id], parent.AllowedSubagentAgentIds!);
+
+        var patched = await _client.PatchDataAsync<AgentDto>(
+            $"/api/projects/{project.Id}/agents/{parent.Id}",
+            new { allowedSubagentAgentIds = new[] { target.Id, parent.Id } });
+        Assert.Equal([target.Id, parent.Id], patched.AllowedSubagentAgentIds!);
+    }
+
     private async Task<ProjectDto> CreateProjectAsync(string prefix) =>
         await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"{prefix}-{Guid.NewGuid():N}");
 
@@ -322,5 +394,6 @@ public class AgentDefinitionApiSpecs
         int? MaxConcurrentRuns,
         string Status,
         string CreatedAt,
-        string UpdatedAt);
+        string UpdatedAt,
+        string[]? AllowedSubagentAgentIds);
 }
