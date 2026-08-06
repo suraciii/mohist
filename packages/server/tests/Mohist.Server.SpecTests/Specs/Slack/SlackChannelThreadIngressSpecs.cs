@@ -12,20 +12,23 @@ using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
 [Collection("MohistIntegration")]
-public sealed class SlackChannelThreadIngressSpecs
+public sealed partial class SlackChannelThreadIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
     public SlackChannelThreadIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -44,6 +47,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "<@U123> summarize the bug",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -137,6 +142,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "<@U123|Mohist>",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -427,6 +434,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OTHER",
             senderKind = "human",
             text = "<@U123> do something",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -470,6 +479,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "<@U123> do work",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -518,6 +529,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "do work",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -565,6 +578,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "first message after reconnect",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         response.EnsureSuccessStatusCode();
 
@@ -590,6 +605,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_BOT",
             senderKind = "bot",
             text = "<@U123> ignorable",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -620,6 +637,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = (string?)null,
             senderKind = "unknown",
             text = "<@U123> ignorable",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -643,6 +662,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "no mention here",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -673,6 +694,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "just chatting",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -711,6 +734,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text = "follow-up not for you",
+            leaseId = _connectionLeases[otherConnection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(otherConnection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -810,89 +835,6 @@ public sealed class SlackChannelThreadIngressSpecs
         Assert.Equal(originalSessionId, reloaded);
     }
 
-    [Fact]
-    public async Task Redelivered_root_mention_creates_no_duplicate_resources()
-    {
-        var connection = await CreateConnectionAsync();
-        var first = await PostChannelAsync(connection, "C-channel-L",
-            messageTs: "1710000000.001200",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            text: "<@U123> replay me");
-        var firstSessionId = first.GetProperty("sessionId").GetString();
-        List<string> beforeProjection;
-        await using (var beforeScope = _fixture.Services.CreateAsyncScope())
-        {
-            var beforeDb = beforeScope.ServiceProvider.GetRequiredService<MohistDbContext>();
-            beforeProjection = await beforeDb.SlackOutboxRows
-                .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "C-channel-L")
-                .OrderBy(row => row.Id)
-                .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
-                .ToListAsync();
-        }
-
-        var replay = await PostChannelAsync(connection, "C-channel-L",
-            messageTs: "1710000000.001200",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            text: "<@U123> replay me");
-
-        Assert.Equal(firstSessionId, replay.GetProperty("sessionId").GetString());
-        Assert.Equal("queued", replay.GetProperty("kind").GetString());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var sessions = await db.AgentSessions
-            .Where(row => row.LabelConnectionId == connection.Id
-                && row.LabelSlackConversationId == "C-channel-L")
-            .ToListAsync();
-        Assert.Single(sessions);
-
-        var inboxRows = await db.SlackProviderInboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-L"
-                && row.SlackMessageIdentity.EndsWith("1710000000.001200"))
-            .ToListAsync();
-        Assert.Single(inboxRows);
-
-        var threadMapping = scope.ServiceProvider.GetRequiredService<SlackThreadSessionMappingStore>();
-        var bindings = await threadMapping.ListBindingsAsync(
-            connection.ProjectId, connection.WorkspaceTeamId,
-            "C-channel-L", "1710000000.001200");
-        Assert.Single(bindings);
-        var afterProjection = await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connection.Id && row.ConversationId == "C-channel-L")
-            .OrderBy(row => row.Id)
-            .Select(row => row.Kind + "|" + row.DispatchRef + "|" + row.ThreadTs + "|" + row.PayloadJson)
-            .ToListAsync();
-        Assert.Equal(beforeProjection, afterProjection);
-        Assert.DoesNotContain(afterProjection, row => row.Contains("xoxb-", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public async Task Threaded_launch_post_replies_are_addressed_into_thread()
-    {
-        var connection = await CreateConnectionAsync();
-        var first = await PostChannelAsync(connection, "C-channel-M",
-            messageTs: "1710000000.001300",
-            threadTs: null,
-            mentions: new[] { connection.BotUserId },
-            text: "<@U123> post into thread");
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var received = await db.SlackOutboxRows
-            .Where(row => row.ConnectionId == connection.Id
-                && row.ConversationId == "C-channel-M"
-                && row.ThreadTs == "1710000000.001300"
-                && row.DispatchRef == SlackStatusProjection.DispatchRef(
-                    new SlackMessageIdentity("T123", "C-channel-M", "1710000000.001300"), "received"))
-            .Select(row => row.PayloadJson)
-            .FirstOrDefaultAsync();
-        Assert.NotNull(received);
-        Assert.Equal(SlackDeliveryOperations.ReactionAdd, SlackDeliveryPayload.Parse(received!).Operation);
-    }
-
     private async Task<JsonElement> PostChannelAsync(
         AgentConnection connection,
         string conversationId,
@@ -912,6 +854,8 @@ public sealed class SlackChannelThreadIngressSpecs
             senderSlackUserId = "U_OWNER",
             senderKind = "human",
             text,
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         response.EnsureSuccessStatusCode();
@@ -946,8 +890,6 @@ public sealed class SlackChannelThreadIngressSpecs
         var projectId = $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
-        _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
-
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.Projects.Add(new ProjectRow
@@ -957,6 +899,7 @@ public sealed class SlackChannelThreadIngressSpecs
             CreatedAt = now,
             UpdatedAt = now,
         });
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
         var botUserId = string.IsNullOrEmpty(agentNameSuffix) ? "U123" : $"U{agentNameSuffix.GetHashCode():X}".PadRight(8, '0').Substring(0, 8);
         db.Agents.Add(new AgentRow
         {
@@ -994,9 +937,38 @@ public sealed class SlackChannelThreadIngressSpecs
         });
         await db.SaveChangesAsync();
 
+        var agentAppId = $"agent_app_{Guid.NewGuid():N}";
+        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
+        {
+            Id = agentAppId,
+            EnrollmentId = enrollmentId,
+            WorkspaceTeamId = "T123",
+            AgentConnectionId = id,
+            AppId = $"A_SPEC_{Guid.NewGuid():N}",
+            BotUserId = botUserId,
+            AppLifecycle = SlackAppLifecycle.Created,
+            Authorization = SlackAuthorizationState.Authorized,
+            RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
+            DesiredManifestVersion = 1,
+            DesiredManifestHash = "desired",
+            VerifiedScopesJson = "[]",
+            OperationFence = 0,
+            AppLevelTokenRef = agentAppId,
+            BotTokenRef = agentAppId,
+            BindingState = SlackAgentAppBindingState.Bound,
+            AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
+        _connectionLeases[id] = leaseId;
         return new AgentConnection
         {
             Id = id,

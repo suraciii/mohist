@@ -2,6 +2,8 @@ using Mohist.Server.SpecTests.Specs.Events;
 using Mohist.Server.SpecTests.Specs.Agent.Grain;
 using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.SpecTests.Specs.Workflow.Grain;
+using Mohist.Server.SpecTests.Specs.Slack;
+using Mohist.Server.SpecTests.Specs.GitHub;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Support;
@@ -11,6 +13,12 @@ namespace Mohist.Server.SpecTests.Support;
 /// files declare only their membership with
 /// <c>[Collection("Name")]</c>; the corresponding definition is here.
 /// </summary>
+[CollectionDefinition("SlackLeaseRoutes")]
+public class SlackLeaseRoutesCollection : ICollectionFixture<SlackAdapterLeaseRoutesFixture>;
+
+[CollectionDefinition("SlackControlPlaneRoutes")]
+public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControlPlaneRoutesFixture>;
+
 // Parallel integration collections. Each shares one MohistIntegrationFixture
 // (one silo + one web host) whose silo/gateway ports are allocated via
 // TestClusterPortAllocator, so the collections run concurrently without
@@ -64,6 +72,9 @@ public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegratio
 
 [CollectionDefinition("IntegrationRunner")]
 public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("GitHubFeed")]
+public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 
 [CollectionDefinition("IntegrationMisc")]
 public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;

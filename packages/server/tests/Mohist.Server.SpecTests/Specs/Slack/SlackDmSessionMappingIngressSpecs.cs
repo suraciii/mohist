@@ -11,8 +11,10 @@ using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -30,6 +32,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackDmSessionMappingIngressSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
 
     public SlackDmSessionMappingIngressSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -46,6 +49,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000100",
             senderSlackUserId = "U_OWNER",
             text = "first task",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -71,6 +76,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000200",
             senderSlackUserId = "U_OWNER",
             text = "do this",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         Assert.Equal(HttpStatusCode.OK, first.StatusCode);
 
@@ -93,6 +100,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000200",
             senderSlackUserId = "U_OWNER",
             text = "do this",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
 
@@ -170,6 +179,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000300",
             senderSlackUserId = "U_OWNER",
             text = "more details",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
 
         Assert.Equal(HttpStatusCode.OK, followup.StatusCode);
@@ -209,6 +220,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000400",
             senderSlackUserId = "U_OWNER",
             text = "new task separate work",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         switched.EnsureSuccessStatusCode();
 
@@ -231,6 +244,8 @@ public sealed class SlackDmSessionMappingIngressSpecs
             messageTs = "1710000000.000300",
             senderSlackUserId = "U_OWNER",
             text = "more details",
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         replay.EnsureSuccessStatusCode();
         using var replayDocument = JsonDocument.Parse(await replay.Content.ReadAsStringAsync());
@@ -289,16 +304,6 @@ public sealed class SlackDmSessionMappingIngressSpecs
         var projectId = $"project_{Guid.NewGuid():N}";
         var agentId = $"agent_{Guid.NewGuid():N}";
         var now = _fixture.TimeProvider.GetUtcNow();
-        _fixture.Slack.AppsConnectionOpen = new(true, null, "wss://socket.slack.com/?app_id=A123");
-        _fixture.Slack.AuthTest = new(true, null, "T123", "Workspace", "U123", "Mohist", "B123", "A123");
-        _fixture.Slack.BotsInfo = new(true, null, new("B123", "Mohist", "A123"));
-        _fixture.Slack.PermissionsScopesList = new(true, null, new Dictionary<string, IReadOnlyList<string>>
-        {
-            ["im"] = ["chat:write", "im:history", "channels:history", "groups:history", "mpim:history", "reactions:write"],
-            ["team"] = ["users:read"],
-        });
-        _fixture.Slack.UsersInfo = new(true, null, new("U_OWNER", "T123", false, false, false, false, false));
-
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         db.Projects.Add(new ProjectRow
@@ -348,9 +353,39 @@ public sealed class SlackDmSessionMappingIngressSpecs
         });
         await db.SaveChangesAsync();
 
+        var agentAppId = $"agent_app_{Guid.NewGuid():N}";
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
+        {
+            Id = agentAppId,
+            EnrollmentId = enrollmentId,
+            WorkspaceTeamId = "T123",
+            AgentConnectionId = id,
+            AppId = $"A_SPEC_{Guid.NewGuid():N}",
+            BotUserId = "U123",
+            AppLifecycle = SlackAppLifecycle.Created,
+            Authorization = SlackAuthorizationState.Authorized,
+            RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
+            DesiredManifestVersion = 1,
+            DesiredManifestHash = "desired",
+            VerifiedScopesJson = "[]",
+            OperationFence = 0,
+            AppLevelTokenRef = agentAppId,
+            BotTokenRef = agentAppId,
+            BindingState = SlackAgentAppBindingState.Bound,
+            AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp-old"));
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-old"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
+        _connectionLeases[id] = leaseId;
         return new AgentConnection
         {
             Id = id,

@@ -1,4 +1,5 @@
-import type { AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, RuntimeLease, SlackAdapterTarget, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import { LeaseStaleError } from "./transport.js"
 import { slackLogger } from "./logger.js"
 
 export interface SlackAdapterOptions {
@@ -15,11 +16,24 @@ export interface SlackAdapterOptions {
 
 interface ConnectionRuntime {
   readonly target: SlackAdapterTarget
+  generation: number
+  lease: RuntimeLease
   socket?: SocketClient
   web?: SlackWebClient
   heartbeatTimer?: ReturnType<typeof setInterval>
   deliveryTimer?: ReturnType<typeof setInterval>
   draining: boolean
+  drainRequested: boolean
+}
+
+interface RuntimeSnapshot {
+  readonly generation: number
+  readonly lease: RuntimeLease
+  readonly socket: SocketClient
+  readonly web: SlackWebClient
+}
+
+class StaleRuntimeError extends Error {
 }
 
 export class SlackAdapter {
@@ -58,25 +72,33 @@ export class SlackAdapter {
 
   async refreshConnections(signal: AbortSignal): Promise<void> {
     if (this.stopped || signal.aborted) return
-    const connections = await this.options.transport.discoverConnections(signal)
-    const currentKeys = new Set(connections.map(connectionKey))
+    const targets = await this.options.transport.discover(signal)
+    const currentKeys = new Set(targets.map(connectionKey))
     for (const [key, runtime] of this.runtimes) {
       if (!currentKeys.has(key)) {
-        void this.disconnect(runtime)
         this.runtimes.delete(key)
+        void this.disconnect(runtime)
       }
     }
-    await Promise.all(connections.map(async (ref) => {
+    await Promise.all(targets.map(async (ref) => {
       const key = connectionKey(ref)
       if (this.runtimes.has(key)) return
-      const runtime: ConnectionRuntime = { target: ref, draining: false }
-      this.runtimes.set(key, runtime)
       try {
-        await this.connect(runtime, signal)
+        const validationLease = await this.options.transport.acquireLease(ref, "validation", this.options.adapterId, signal)
+        if (validationLease && validationLease.kind === "validation") await this.validate(ref, validationLease, signal)
+        const lease = await this.options.transport.acquireLease(ref, "runtime", this.options.adapterId, signal)
+        if (!lease || lease.kind !== "runtime") return
+        const runtime: ConnectionRuntime = { target: ref, generation: 0, lease, draining: false, drainRequested: false }
+        this.runtimes.set(key, runtime)
+        try {
+          await this.startRuntime(runtime, signal)
+        } catch (error) {
+          await this.removeRuntime(runtime)
+          throw error
+        }
       } catch (error) {
         this.log.error("target connection failed", { target: key, reason: safeErrorMessage(error) })
         this.runtimes.delete(key)
-        void this.disconnect(runtime)
       }
     }))
   }
@@ -84,43 +106,36 @@ export class SlackAdapter {
   private async disconnect(runtime: ConnectionRuntime): Promise<void> {
     if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer)
     if (runtime.deliveryTimer) clearInterval(runtime.deliveryTimer)
+    await this.disconnectSocket(runtime.socket, runtime.target)
+  }
+
+  private async disconnectSocket(socket: SocketClient | undefined, target: SlackAdapterTarget): Promise<void> {
     try {
-      await runtime.socket?.disconnect?.()
+      await socket?.disconnect?.()
     } catch (error) {
       this.log.error("socket disconnect failed", {
-        target: connectionKey(runtime.target),
+        target: connectionKey(target),
         reason: safeErrorMessage(error),
       })
     }
   }
 
-  private async connect(runtime: ConnectionRuntime, signal: AbortSignal) {
-    const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
-    if (isManagerTarget(runtime.target)) {
-      if (!session.botToken) throw new Error("Manager lease did not return Slack credentials")
-      runtime.web = this.options.webFactory(session.botToken, runtime.target)
-    } else {
-      if (!session.appToken || !session.botToken) throw new Error("Connection lease did not return Slack credentials")
-      runtime.web = this.options.webFactory(session.botToken, runtime.target)
-      runtime.socket = this.options.socketFactory(session.appToken, runtime.target)
-      this.observeSocket(runtime.socket, runtime.target)
-      runtime.socket.on("slack_event", async (event) => {
-        const interaction = isSlackInteraction(event.body)
-        const eventType = slackEventType(event.body)
-        const target = connectionKey(runtime.target)
-        this.log.info("envelope received", { target, event: eventType })
-        try {
-          await this.handleEvent(runtime, event.body, event.ack, eventType, signal)
-        } catch (error) {
-          this.log.error(
-            interaction
-              ? "interaction processing failed after acknowledgement"
-              : "event handling failed before acknowledgement",
-            { target, event: eventType, reason: safeErrorMessage(error) },
-          )
-        }
-      })
-      await runtime.socket.start()
+  private async validate(target: SlackAdapterTarget, lease: Extract<AdapterLease, { kind: "validation" }>, signal: AbortSignal) {
+    const socket = this.options.socketFactory(lease.appToken, target)
+    try {
+      this.observeSocket(socket, target)
+      const hello = await socket.start()
+      await this.options.transport.reportHello(target, lease.leaseId, hello.appId, signal)
+    } finally {
+      await socket.disconnect?.()
+    }
+  }
+
+  private async startRuntime(runtime: ConnectionRuntime, signal: AbortSignal) {
+    if (!await this.openRuntimeSocket(runtime, signal, runtime.generation)) return
+    if (!this.isActive(runtime, signal)) {
+      await this.disconnect(runtime)
+      return
     }
     const heartbeatMs = Math.max(1_000, this.options.heartbeatIntervalMs ?? 15_000)
     const pollMs = Math.max(100, this.options.deliveryPollIntervalMs ?? 1_000)
@@ -129,17 +144,55 @@ export class SlackAdapter {
     await this.drain(runtime, signal)
   }
 
-  private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
-    if (this.stopped || signal.aborted) return
-    try {
-      const session = await this.options.transport.lease(runtime.target, this.options.adapterId, signal)
-      if (isManagerTarget(runtime.target)) {
-        runtime.web = session.botToken
-          ? this.options.webFactory(session.botToken, runtime.target)
-          : undefined
-      } else if (session.botToken) {
-        runtime.web = this.options.webFactory(session.botToken, runtime.target)
+  private async openRuntimeSocket(runtime: ConnectionRuntime, signal: AbortSignal, generation: number): Promise<boolean> {
+    const web = this.options.webFactory(runtime.lease.botToken, runtime.target)
+    const socket = this.options.socketFactory(runtime.lease.appToken, runtime.target)
+    this.observeSocket(socket, runtime.target)
+    socket.on("slack_event", async (event) => {
+      const interaction = isSlackInteraction(event.body)
+      const eventType = slackEventType(event.body)
+      const target = connectionKey(runtime.target)
+      if (this.stopped || signal.aborted || this.runtimes.get(target) !== runtime || runtime.socket !== socket) return
+      this.log.info("envelope received", { target, event: eventType })
+      try {
+        await this.handleEvent(runtime, event.body, event.ack, eventType, signal)
+      } catch (error) {
+        this.log.error(
+          interaction
+            ? "interaction processing failed after acknowledgement"
+            : "event handling failed before acknowledgement",
+          { target, event: eventType, reason: safeErrorMessage(error) },
+        )
       }
+    })
+    try {
+      await socket.start()
+    } catch (error) {
+      if (this.isGenerationCurrent(runtime, generation, signal)) throw error
+      await this.disconnectSocket(socket, runtime.target)
+      return false
+    }
+    if (!this.isGenerationCurrent(runtime, generation, signal)) {
+      await this.disconnectSocket(socket, runtime.target)
+      return false
+    }
+    runtime.web = web
+    runtime.socket = socket
+    return true
+  }
+
+  private async refresh(runtime: ConnectionRuntime, signal: AbortSignal) {
+    if (!this.isActive(runtime, signal)) return
+    const generation = runtime.generation
+    const currentLease = runtime.lease
+    try {
+      const renewal = await this.options.transport.renewLease(runtime.target, currentLease.leaseId, this.options.adapterId, signal)
+      if (!this.isActive(runtime, signal) || runtime.generation !== generation) return
+      if (!renewal || renewal.kind !== "runtime" || renewal.leaseId !== currentLease.leaseId) {
+        await this.removeRuntime(runtime)
+        return
+      }
+      runtime.lease = { ...currentLease, generation: renewal.generation, expiresAt: renewal.expiresAt }
       await this.drain(runtime, signal)
     } catch (error) {
       if (this.stopped || signal.aborted) return
@@ -147,10 +200,43 @@ export class SlackAdapter {
         target: connectionKey(runtime.target),
         reason: safeErrorMessage(error),
       })
+      await this.removeRuntime(runtime)
     }
   }
 
-  private observeSocket(socket: SocketClient, target: SlackConnectionRef) {
+  private async removeRuntime(runtime: ConnectionRuntime): Promise<void> {
+    // Only the runtime the map still points at may be evicted: a stale error
+    // surfacing from a superseded runtime must never delete its replacement.
+    // The old runtime itself is always disconnected either way.
+    if (this.runtimes.get(connectionKey(runtime.target)) === runtime)
+      this.runtimes.delete(connectionKey(runtime.target))
+    await this.disconnect(runtime)
+  }
+
+  private isActive(runtime: ConnectionRuntime, signal: AbortSignal): boolean {
+    return !this.stopped && !signal.aborted && this.runtimes.get(connectionKey(runtime.target)) === runtime
+  }
+
+  private isGenerationCurrent(runtime: ConnectionRuntime, generation: number, signal: AbortSignal): boolean {
+    return this.isActive(runtime, signal) && runtime.generation === generation
+  }
+
+  private snapshot(runtime: ConnectionRuntime, signal: AbortSignal): RuntimeSnapshot | undefined {
+    if (!this.isActive(runtime, signal) || !runtime.socket || !runtime.web) return
+    return { generation: runtime.generation, lease: runtime.lease, socket: runtime.socket, web: runtime.web }
+  }
+
+  private isCurrent(runtime: ConnectionRuntime, snapshot: RuntimeSnapshot, signal: AbortSignal): boolean {
+    return this.isGenerationCurrent(runtime, snapshot.generation, signal)
+      && runtime.socket === snapshot.socket
+      && runtime.web === snapshot.web
+  }
+
+  private assertCurrent(runtime: ConnectionRuntime, snapshot: RuntimeSnapshot, signal: AbortSignal): void {
+    if (!this.isCurrent(runtime, snapshot, signal)) throw new StaleRuntimeError()
+  }
+
+  private observeSocket(socket: SocketClient, target: SlackAdapterTarget) {
     const key = connectionKey(target)
     for (const state of ["connecting", "connected", "reconnecting", "disconnected"] as const) {
       socket.onState?.(state, () => this.log.info("socket state changed", { target: key, state }))
@@ -167,108 +253,175 @@ export class SlackAdapter {
     eventType: string,
     signal: AbortSignal,
   ): Promise<void> {
+    const snapshot = this.snapshot(runtime, signal)
+    if (!snapshot) return
     const interaction = isSlackInteraction(body)
-    if (interaction) await ack()
-    await this.acquire(signal)
-    const target = connectionKey(runtime.target)
-    this.log.info("envelope forwarding", { target, event: eventType })
+    let acquired = false
     try {
       if (interaction) {
-        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), signal)
+        this.assertCurrent(runtime, snapshot, signal)
+        await ack()
+        this.assertCurrent(runtime, snapshot, signal)
+      }
+      await this.acquire(signal)
+      acquired = true
+      this.assertCurrent(runtime, snapshot, signal)
+      const target = connectionKey(runtime.target)
+      this.log.info("envelope forwarding", { target, event: eventType })
+      if (interaction) {
+        this.assertCurrent(runtime, snapshot, signal)
+        await this.options.transport.interaction(runtime.target, normalizeSlackInteraction(body), runtime.lease.leaseId, this.options.adapterId, signal)
+        this.assertCurrent(runtime, snapshot, signal)
         this.log.info("interaction forwarded", { target, event: eventType })
         await this.drain(runtime, signal)
         return
       }
       const envelope = normalizeSocketEvent(body)
-      const result = await this.options.transport.ingress(runtime.target, envelope, signal)
+      this.assertCurrent(runtime, snapshot, signal)
+      const result = await this.options.transport.ingress(runtime.target, envelope, runtime.lease.leaseId, this.options.adapterId, signal)
+      this.assertCurrent(runtime, snapshot, signal)
       this.log.info("ingress accepted", { target, event: eventType, kind: result.kind })
-      await this.renderUserFacingRejection(runtime, envelope, result, signal)
+      if (!await this.renderUserFacingRejection(runtime, snapshot, envelope, result, signal)) return
+      this.assertCurrent(runtime, snapshot, signal)
       await ack()
+      this.assertCurrent(runtime, snapshot, signal)
       await this.drain(runtime, signal)
+    } catch (error) {
+      if (error instanceof StaleRuntimeError) return
+      if (error instanceof LeaseStaleError) {
+        await this.removeRuntime(runtime)
+        return
+      }
+      throw error
     } finally {
-      this.inFlight -= 1
+      if (acquired) this.inFlight -= 1
     }
   }
 
   private async renderUserFacingRejection(
     runtime: ConnectionRuntime,
+    snapshot: RuntimeSnapshot,
     envelope: SlackEnvelope,
     result: IngressResult,
     signal: AbortSignal,
-  ): Promise<void> {
-    if (result.kind !== "backpressured") return
-    if (runtime.draining || this.stopped || !runtime.web) return
+  ): Promise<boolean> {
+    if (result.kind !== "backpressured") return this.isCurrent(runtime, snapshot, signal)
+    if (runtime.draining) return this.isCurrent(runtime, snapshot, signal)
+    if (!this.isCurrent(runtime, snapshot, signal)) return false
     const reason = result.reason ?? "This Slack Connection is backpressured; retry after pending deliveries drain."
     const message: { channel: string; text: string; thread_ts?: string } = {
       channel: envelope.conversationId,
       text: reason,
     }
     if (envelope.threadTs) message.thread_ts = envelope.threadTs
-    await runtime.web.chat.postMessage(message)
+    this.assertCurrent(runtime, snapshot, signal)
+    await snapshot.web.chat.postMessage(message)
+    return this.isCurrent(runtime, snapshot, signal)
   }
 
   private async drain(runtime: ConnectionRuntime, signal: AbortSignal) {
-    if (runtime.draining || this.stopped || !runtime.web) return
+    const snapshot = this.snapshot(runtime, signal)
+    if (!snapshot) return
+    if (runtime.draining) {
+      runtime.drainRequested = true
+      return
+    }
     runtime.draining = true
     try {
-      await this.drainUncertain(runtime, signal)
+      await this.drainUncertain(runtime, snapshot, signal)
+      this.assertCurrent(runtime, snapshot, signal)
       while (!signal.aborted) {
-        const delivery = await this.options.transport.claimDelivery(runtime.target, this.options.adapterId, signal)
+        this.assertCurrent(runtime, snapshot, signal)
+        const delivery = await this.options.transport.claimDelivery(runtime.target, runtime.lease.leaseId, this.options.adapterId, signal)
+        this.assertCurrent(runtime, snapshot, signal)
         if (!delivery) break
         try {
-          const ack = await this.mutateDelivery(runtime.web, delivery)
-          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+          this.assertCurrent(runtime, snapshot, signal)
+          const ack = await this.mutateDelivery(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
+          this.assertCurrent(runtime, snapshot, signal)
+          await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), runtime.lease.leaseId, signal)
+          this.assertCurrent(runtime, snapshot, signal)
         } catch (error) {
+          if (error instanceof StaleRuntimeError) return
+          this.assertCurrent(runtime, snapshot, signal)
           await this.options.transport.ackDelivery(runtime.target, withAdapterId({
             id: delivery.id,
             outcome: "uncertain",
             reason: error instanceof Error ? error.message : String(error),
-          }, this.options.adapterId), signal)
+          }, this.options.adapterId), runtime.lease.leaseId, signal)
+          this.assertCurrent(runtime, snapshot, signal)
           continue
         }
       }
+    } catch (error) {
+      if (error instanceof StaleRuntimeError) return
+      if (error instanceof LeaseStaleError) {
+        await this.removeRuntime(runtime)
+        return
+      }
+      throw error
     } finally {
       runtime.draining = false
+      if (runtime.drainRequested) {
+        runtime.drainRequested = false
+        if (this.isActive(runtime, signal)) await this.drain(runtime, signal)
+      }
     }
   }
 
-  private async mutateDelivery(web: SlackWebClient, delivery: Delivery): Promise<DeliveryAck> {
+  private async mutateDelivery(web: SlackWebClient, delivery: Delivery, ensureCurrent: () => void): Promise<DeliveryAck> {
+    ensureCurrent()
     const payload = parseDeliveryPayload(delivery.payloadJson)
     const operation = payload.operation ?? "post_message"
-    if (!isKnownDeliveryOperation(operation))
-      return await this.reconcileForUnknownOperation(web, delivery)
+    if (!isKnownDeliveryOperation(operation)) {
+      const ack = await this.reconcileForUnknownOperation(web, delivery, ensureCurrent)
+      ensureCurrent()
+      return ack
+    }
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
+      ensureCurrent()
       const response = await web.chat.update?.({
         channel: target.conversationId,
         ts: target.messageTs,
         text: requiredText(payload),
         ...(payload.blocks ? { blocks: payload.blocks } : {}),
       })
+      ensureCurrent()
       if (!response) throw new Error("Slack client does not support chat.update")
-      if (response.ok === false)
-        return await this.fallbackAfterUpdateFailure(web, delivery, payload, response.error ?? "Slack rejected chat.update")
+      if (response.ok === false) {
+        const ack = await this.fallbackAfterUpdateFailure(web, delivery, payload, response.error ?? "Slack rejected chat.update", ensureCurrent)
+        ensureCurrent()
+        return ack
+      }
       return delivered(delivery, { conversationId: target.conversationId, messageTs: response.ts ?? target.messageTs })
     }
 
     if (operation === "reaction_add" || operation === "reaction_remove") {
       const target = payload.targetMessageIdentity
       if (!target || !payload.reaction) throw new Error(`${operation} delivery is missing its target`)
-      const response = await mutateReaction(web, operation, target, payload.reaction)
+      ensureCurrent()
+      const response = await mutateReaction(web, operation, target, payload.reaction, ensureCurrent)
+      ensureCurrent()
       if (!response) throw new Error("Slack client does not support reactions")
       if (response.ok === false) {
         if (!isUnsupportedReactionError(response.error))
           return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the reaction" }
-        if (response.error === "missing_scope")
-          return payload.fallbackText && payload.fallbackDispatchRef
-            ? await this.postFallback(web, delivery, payload, response.error)
-            : delivered(delivery)
+        if (response.error === "missing_scope") {
+          if (!payload.fallbackText || !payload.fallbackDispatchRef) return delivered(delivery)
+          const ack = await this.postFallback(web, delivery, payload, response.error, ensureCurrent)
+          ensureCurrent()
+          return ack
+        }
         const statusTarget = payload.statusDispatchRef
-          ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef)
+          ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef, ensureCurrent)
           : undefined
+        ensureCurrent()
         if (statusTarget && statusTarget.messageTs !== target.messageTs) {
-          const statusResponse = await mutateReaction(web, operation, statusTarget, payload.reaction)
+          ensureCurrent()
+          const statusResponse = await mutateReaction(web, operation, statusTarget, payload.reaction, ensureCurrent)
+          ensureCurrent()
           if (!statusResponse) throw new Error("Slack client does not support reactions")
           if (statusResponse.ok !== false)
             return delivered(delivery)
@@ -277,8 +430,11 @@ export class SlackAdapter {
         }
         if (operation === "reaction_remove")
           return delivered(delivery)
-        if (payload.fallbackText && payload.fallbackDispatchRef)
-          return await this.postFallback(web, delivery, payload, response.error ?? "Slack does not support reactions")
+        if (payload.fallbackText && payload.fallbackDispatchRef) {
+          const ack = await this.postFallback(web, delivery, payload, response.error ?? "Slack does not support reactions", ensureCurrent)
+          ensureCurrent()
+          return ack
+        }
         return delivered(delivery)
       }
       return delivered(delivery)
@@ -286,19 +442,23 @@ export class SlackAdapter {
 
     const text = requiredText(payload)
     const existingStatus = payload.statusDispatchRef
-      ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef)
+      ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef, ensureCurrent)
       : undefined
+    ensureCurrent()
     if (existingStatus && web.chat.update) {
+      ensureCurrent()
       const response = await web.chat.update({
         channel: existingStatus.conversationId,
         ts: existingStatus.messageTs,
         text,
         ...(payload.blocks ? { blocks: payload.blocks } : {}),
       })
+      ensureCurrent()
       if (response.ok === false)
         return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the status update" }
       return delivered(delivery, { conversationId: existingStatus.conversationId, messageTs: response.ts ?? existingStatus.messageTs })
     }
+    ensureCurrent()
     const response = await web.chat.postMessage({
       channel: delivery.conversationId,
       text,
@@ -306,18 +466,22 @@ export class SlackAdapter {
       ...(payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
       ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
+    ensureCurrent()
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }
     return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
   }
 
-  private async fallbackAfterUpdateFailure(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string) {
+  private async fallbackAfterUpdateFailure(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string, ensureCurrent: () => void) {
     if (!payload.fallbackText || !payload.fallbackDispatchRef)
       return { id: delivery.id, outcome: "retry" as const, reason }
-    return await this.postFallback(web, delivery, payload, reason)
+    const ack = await this.postFallback(web, delivery, payload, reason, ensureCurrent)
+    ensureCurrent()
+    return ack
   }
 
-  private async postFallback(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string): Promise<DeliveryAck> {
+  private async postFallback(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string, ensureCurrent: () => void): Promise<DeliveryAck> {
+    ensureCurrent()
     const response = await web.chat.postMessage({
       channel: delivery.conversationId,
       text: payload.fallbackText ?? requiredText(payload),
@@ -325,35 +489,41 @@ export class SlackAdapter {
       client_msg_id: payload.fallbackDispatchRef,
       ...(payload.blocks ? { blocks: payload.blocks } : {}),
     })
+    ensureCurrent()
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? reason }
     return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
   }
 
-  private async reconcile(web: SlackWebClient | undefined, delivery: Delivery): Promise<DeliveryAck> {
+  private async reconcile(web: SlackWebClient | undefined, delivery: Delivery, ensureCurrent: () => void): Promise<DeliveryAck> {
+    ensureCurrent()
     const payload = parseDeliveryPayload(delivery.payloadJson)
     const target = payload.providerMessageIdentity ?? payload.targetMessageIdentity
     if ((payload.operation === "reaction_add" || payload.operation === "reaction_remove") && target && payload.reaction) {
-      const response = await getReaction(web, target)
+      const response = await getReaction(web, target, ensureCurrent)
+      ensureCurrent()
       if (!web || !response) return { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot reconcile reactions" }
       if (response.ok === false) {
         if (!isUnsupportedReactionError(response.error))
           return { id: delivery.id, outcome: "uncertain", reason: response.error ?? "Slack reaction reconciliation failed" }
-        return payload.fallbackText && payload.fallbackDispatchRef
-          ? await this.postFallback(web, delivery, payload, response.error ?? "Slack reaction reconciliation failed")
-          : delivered(delivery, target)
+        if (!payload.fallbackText || !payload.fallbackDispatchRef) return delivered(delivery, target)
+        const ack = await this.postFallback(web, delivery, payload, response.error ?? "Slack reaction reconciliation failed", ensureCurrent)
+        ensureCurrent()
+        return ack
       }
       const present = response.message?.reactions?.some(reaction => reaction.name === payload.reaction)
       const deliveredState = payload.operation === "reaction_add" ? present : !present
       return deliveredState ? delivered(delivery, target) : { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
     }
 
+    ensureCurrent()
     const history = await web?.conversations?.history?.({
       channel: delivery.conversationId,
       ...(target ? { latest: target.messageTs, oldest: target.messageTs } : {}),
       inclusive: true,
       limit: 200,
     })
+    ensureCurrent()
     if (!history) return { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot reconcile messages" }
     if (history.ok === false) return { id: delivery.id, outcome: "uncertain", reason: history.error ?? "Slack message reconciliation failed" }
     const message = history.messages?.find(candidate =>
@@ -367,32 +537,46 @@ export class SlackAdapter {
         ? delivered(delivery, { conversationId: delivery.conversationId, messageTs: message.ts })
         : delivered(delivery)
     }
-    if (payload.operation === "chat_update" && payload.fallbackText && payload.fallbackDispatchRef)
-      return web
-        ? await this.postFallback(web, delivery, payload, "provider_mutation_absent")
-        : { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot post fallback" }
+    if (payload.operation === "chat_update" && payload.fallbackText && payload.fallbackDispatchRef) {
+      const fallbackWeb = web
+      if (!fallbackWeb) return { id: delivery.id, outcome: "uncertain", reason: "Slack client cannot post fallback" }
+      const ack = await this.postFallback(fallbackWeb, delivery, payload, "provider_mutation_absent", ensureCurrent)
+      ensureCurrent()
+      return ack
+    }
     return { id: delivery.id, outcome: "retry", reason: "provider_mutation_absent" }
   }
 
-  private async reconcileForUnknownOperation(web: SlackWebClient, delivery: Delivery): Promise<DeliveryAck> {
-    return await this.reconcile(web, delivery)
+  private async reconcileForUnknownOperation(web: SlackWebClient, delivery: Delivery, ensureCurrent: () => void): Promise<DeliveryAck> {
+    const ack = await this.reconcile(web, delivery, ensureCurrent)
+    ensureCurrent()
+    return ack
   }
 
-  private async drainUncertain(runtime: ConnectionRuntime, signal: AbortSignal) {
+  private async drainUncertain(runtime: ConnectionRuntime, snapshot: RuntimeSnapshot, signal: AbortSignal) {
     if (!this.options.transport.claimUncertainDelivery) return
     while (!signal.aborted) {
-      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, this.options.adapterId, signal)
+      this.assertCurrent(runtime, snapshot, signal)
+      const delivery = await this.options.transport.claimUncertainDelivery(runtime.target, runtime.lease.leaseId, this.options.adapterId, signal)
+      this.assertCurrent(runtime, snapshot, signal)
       if (!delivery) return
       try {
-        const ack = await this.reconcile(runtime.web, delivery)
-        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), signal)
+        this.assertCurrent(runtime, snapshot, signal)
+        const ack = await this.reconcile(snapshot.web, delivery, () => this.assertCurrent(runtime, snapshot, signal))
+        this.assertCurrent(runtime, snapshot, signal)
+        await this.options.transport.ackDelivery(runtime.target, withAdapterId(ack, this.options.adapterId), runtime.lease.leaseId, signal)
+        this.assertCurrent(runtime, snapshot, signal)
         if (ack.outcome === "uncertain") return
       } catch (error) {
+        if (error instanceof StaleRuntimeError) throw error
+        if (error instanceof LeaseStaleError) throw error
+        this.assertCurrent(runtime, snapshot, signal)
         await this.options.transport.ackDelivery(runtime.target, withAdapterId({
           id: delivery.id,
           outcome: "uncertain",
           reason: error instanceof Error ? error.message : String(error),
-        }, this.options.adapterId), signal)
+        }, this.options.adapterId), runtime.lease.leaseId, signal)
+        this.assertCurrent(runtime, snapshot, signal)
         return
       }
     }
@@ -419,19 +603,21 @@ function safeErrorMessage(error: unknown) {
 }
 
 function isManagerTarget(value: SlackAdapterTarget): value is SlackManagerRef {
-  return value.ownerKind === "manager"
+  return value.kind === "manager"
 }
 
 export function normalizeSocketEvent(body: unknown): SlackEnvelope {
   const event = isRecord(body) && isRecord(body.event) ? body.event : body
   if (!isRecord(event)) throw new Error("Slack Socket Mode event is malformed")
+  const apiAppId = stringValue(event.api_app_id) ?? stringValue(body, "api_app_id")
   const teamId = stringValue(event.team_id) ?? stringValue(body, "team_id")
   const conversationId = stringValue(event.channel)
   const messageTs = stringValue(event.ts) ?? stringValue(event.event_ts)
-  if (!teamId || !conversationId || !messageTs) throw new Error("Slack event is missing its stable identity")
+  if (!apiAppId || !teamId || !conversationId || !messageTs) throw new Error("Slack event is missing its stable identity")
   const senderSlackUserId = stringValue(event.user)
   return {
     eventType: stringValue(event.type) ?? "message",
+    apiAppId,
     isDirectMessage: event.channel_type === "im" || conversationId.startsWith("D"),
     teamId,
     conversationId,
@@ -448,6 +634,7 @@ export function normalizeSocketEvent(body: unknown): SlackEnvelope {
 export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelope {
   const payload = interactionPayload(body)
   if (!payload || payload.type !== "block_actions") throw new Error("Slack interaction is malformed")
+  const apiAppId = stringValue(payload.api_app_id)
   const team = isRecord(payload.team) ? stringValue(payload.team.id) : stringValue(payload, "team_id")
   const user = isRecord(payload.user) ? stringValue(payload.user.id) : null
   const container = isRecord(payload.container) ? payload.container : undefined
@@ -458,10 +645,11 @@ export function normalizeSlackInteraction(body: unknown): SlackInteractionEnvelo
   const interactionId = stringValue(payload.trigger_id) ?? stringValue(action?.action_ts) ?? stringValue(payload, "event_id")
   const actionId = stringValue(action?.action_id)
   const actionValue = stringValue(action?.value)
-  if (!team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
+  if (!apiAppId || !team || !user || !conversationId || !messageTs || !interactionId || !actionId || !actionValue)
     throw new Error("Slack interaction is missing its stable identity")
   return {
     eventType: "block_actions",
+    apiAppId,
     interactionId,
     teamId: team,
     conversationId,
@@ -588,29 +776,38 @@ async function mutateReaction(
   operation: "reaction_add" | "reaction_remove",
   target: ProviderMessageIdentity,
   reaction: string,
+  ensureCurrent: () => void,
 ) {
   const method = operation === "reaction_add" ? web.reactions?.add : web.reactions?.remove
   try {
-    return await method?.call(web.reactions, {
+    ensureCurrent()
+    const response = await method?.call(web.reactions, {
       channel: target.conversationId,
       name: reaction,
       timestamp: target.messageTs,
     })
+    ensureCurrent()
+    return response
   } catch (error) {
+    ensureCurrent()
     const code = slackErrorCode(error)
     if (!code) throw error
     return { ok: false, error: code }
   }
 }
 
-async function getReaction(web: SlackWebClient | undefined, target: ProviderMessageIdentity) {
+async function getReaction(web: SlackWebClient | undefined, target: ProviderMessageIdentity, ensureCurrent: () => void) {
   try {
-    return await web?.reactions?.get?.({
+    ensureCurrent()
+    const response = await web?.reactions?.get?.({
       channel: target.conversationId,
       timestamp: target.messageTs,
       full: true,
     })
+    ensureCurrent()
+    return response
   } catch (error) {
+    ensureCurrent()
     const code = slackErrorCode(error)
     if (!code) throw error
     return { ok: false, error: code }
@@ -638,8 +835,11 @@ async function findStatusMessage(
   web: SlackWebClient,
   conversationId: string,
   clientMessageId: string,
+  ensureCurrent: () => void,
 ): Promise<ProviderMessageIdentity | undefined> {
+  ensureCurrent()
   const history = await web.conversations?.history?.({ channel: conversationId, limit: 200 })
+  ensureCurrent()
   if (!history || history.ok === false) return undefined
   const message = history.messages?.find(candidate => candidate.client_msg_id === clientMessageId && candidate.ts)
   return message?.ts ? { conversationId, messageTs: message.ts } : undefined

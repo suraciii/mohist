@@ -1,10 +1,8 @@
-using System.Text;
-using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Agent.Domain;
-using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Domain;
+using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Slack;
 
@@ -24,11 +22,27 @@ public sealed record AccessDecision(bool Allowed, string Reason)
 }
 
 /// <summary>
+/// Lease proof the ingress route already validated before any inbox/outbox
+/// side effect, plus the narrow capability the decider invokes to re-prove
+/// the runtime lease and resolve the verified Agent App Bot token for the
+/// live identity gate. The route binds <see cref="ResolveVerifiedBotToken"/>
+/// to the lease core, so the decider never depends on the lease target
+/// provider: that constructor edge would close a DI cycle
+/// (<c>AgentConnectionStore</c> cleanup graph → decider → lease target
+/// provider → <c>SlackAgentAppBindingService</c> →
+/// <c>ISlackAgentAppBindingPort</c> → <c>AgentConnectionStore</c>). The gate
+/// still runs under the same lease fence as every adapter-facing route and
+/// never resolves a legacy connection-scoped secret address.
+/// </summary>
+public sealed record SlackLeaseContext(
+    string OperatorId,
+    string LeaseId,
+    string AdapterId,
+    Func<SlackLeaseTargetRef, CancellationToken, Task<string?>> ResolveVerifiedBotToken);
+
+/// <summary>
 /// Single decision point for who may invoke a Slack-bound Agent in a
-/// channel or DM. Replaces the six inlined <c>sender ==
-/// connection.OwnerSlackUserId</c> equality checks in
-/// <c>SlackConnectionRoutes</c> + the DM gate in
-/// <c>SlackOwnerClaimService</c>. The decision reads current
+/// channel or DM. The decision reads current
 /// <see cref="AgentConnection.AccessPolicy"/> on every call; it caches
 /// nothing, so a policy or allowlist change takes effect on the next
 /// received input without any cache to invalidate.
@@ -37,22 +51,22 @@ public sealed record AccessDecision(bool Allowed, string Reason)
 /// decider authorizes only the Owner, reads no Slack API, and short-circuits
 /// on a single equality check.</para>
 ///
-/// <para>Under <c>allowlist</c> a non-Owner sender must (a) appear in the
-/// allowlist child table by stable Slack user id and (b) be a current
-/// regular workspace member right now per
-/// <see cref="SlackOwnerClaimService.IsEligibleMember"/> — the lookup
-/// hits <c>users.info</c> on every non-Owner invocation so a listed
-/// member who has since become a guest, been deleted, or been restricted
-/// is rejected, and a display-name match against a different stable
-/// identity never authorizes.</para>
+/// <para>Under <c>allowlist</c> a non-Owner sender must appear in the
+/// allowlist child table by stable Slack user id <em>and</em> be a current
+/// regular workspace member right now per <c>users.info</c> (stable id and
+/// team match, not deleted / restricted / ultra-restricted / bot /
+/// app-user / Slack Connect stranger, same workspace). The lookup runs on
+/// every non-Owner invocation, so a listed member who has since become a
+/// guest, been deleted, or been restricted is rejected.</para>
 ///
-/// <para>Under <c>anyone</c> a sender must additionally be in a channel
-/// the Bot is a member of (<c>conversations.info</c>); a Slack Connect
-/// external participant, a guest, a Bot, a deleted member, and any
-/// identity whose status or channel-membership fact cannot be confirmed
-/// are rejected. Slack API failures are safe-denied: an unverifiable
-/// identity never triggers the Agent. The Owner is invokable in every
-/// policy because the Owner check needs no Slack API call.</para>
+/// <para>Under <c>anyone</c> a sender must pass the same current regular
+/// member check and the Bot must be a member of the conversation
+/// (<c>conversations.info</c>). A Slack Connect external participant, a
+/// guest, a Bot, a deleted member, and any identity whose status or
+/// channel-membership fact cannot be confirmed are rejected. Slack API
+/// failures are safe-denied: an unverifiable identity never triggers the
+/// Agent. The Owner is invokable in every policy because the Owner check
+/// needs no Slack API call.</para>
 /// </summary>
 public sealed class SlackConnectionAccessDecider : IScopedService
 {
@@ -61,22 +75,18 @@ public sealed class SlackConnectionAccessDecider : IScopedService
     private const string MemberNotEligibleReason = "You are not a current regular member of this Slack workspace.";
     private const string ChannelNotVisibleReason = "The Bot cannot see you in this channel; a workspace member must be in a channel where the Bot is present to invoke the Agent.";
     private const string VerificationFailedReason = "Your Slack identity could not be confirmed right now; please retry.";
+    private const string NotInChannelError = "not_in_channel";
+    private const string UserNotFoundError = "user_not_found";
 
-    private readonly IDbContextFactory<MohistDbContext> _dbFactory;
-    private readonly SlackConnectionAllowedMemberStore _allowedMembers;
-    private readonly ISlackApiClient _slack;
-    private readonly ISecretStore _secrets;
+    private readonly ISlackConnectionAllowedMemberStore _allowedMembers;
+    private readonly ISlackMemberIdentityPort _memberIdentity;
 
     public SlackConnectionAccessDecider(
-        IDbContextFactory<MohistDbContext> dbFactory,
-        SlackConnectionAllowedMemberStore allowedMembers,
-        ISlackApiClient slack,
-        ISecretStore secrets)
+        ISlackConnectionAllowedMemberStore allowedMembers,
+        ISlackMemberIdentityPort memberIdentity)
     {
-        _dbFactory = dbFactory;
         _allowedMembers = allowedMembers;
-        _slack = slack;
-        _secrets = secrets;
+        _memberIdentity = memberIdentity;
     }
 
     /// <summary>
@@ -84,8 +94,9 @@ public sealed class SlackConnectionAccessDecider : IScopedService
     /// the Connection for this message. The decision reads the current
     /// <c>AccessPolicy</c> column and (under <c>allowlist</c>) the
     /// current child rows on every call; under <c>allowlist</c> and
-    /// <c>anyone</c> it additionally loads the Connection's Bot token
-    /// and calls <c>users.info</c> (<c>conversations.info</c> under
+    /// <c>anyone</c> it additionally re-proves <paramref name="leaseContext"/>
+    /// through the runtime lease seam, resolves the verified Bot token and
+    /// calls <c>users.info</c> (<c>conversations.info</c> under
     /// <c>anyone</c>) so the authorization reflects live Slack state.
     /// The decider caches nothing, so a policy or allowlist change takes
     /// effect on the next received input without any cache to invalidate.
@@ -95,6 +106,9 @@ public sealed class SlackConnectionAccessDecider : IScopedService
     /// <param name="workspaceTeamId">Workspace team id of the install.</param>
     /// <param name="conversationId">Channel or DM conversation id.</param>
     /// <param name="isDirectMessage">True iff the message is a 1:1 DM.</param>
+    /// <param name="leaseContext">Lease proof from the ingress route; required
+    /// when the policy needs the live member gate, ignored on the Owner and
+    /// DM fast paths.</param>
     /// <param name="ct">Cancellation token.</param>
     public async Task<AccessDecision> EvaluateAsync(
         AgentConnection connection,
@@ -102,6 +116,7 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         string workspaceTeamId,
         string conversationId,
         bool isDirectMessage,
+        SlackLeaseContext? leaseContext = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
@@ -115,9 +130,9 @@ public sealed class SlackConnectionAccessDecider : IScopedService
                 ? AccessDecision.Allow("dm_owner")
                 : AccessDecision.Deny(OwnerOnlyReason);
 
-        var policy = connection.AccessPolicy;
-        if (string.IsNullOrEmpty(policy))
-            policy = AccessPolicyKind.OwnerOnly;
+        var policy = string.IsNullOrEmpty(connection.AccessPolicy)
+            ? AccessPolicyKind.OwnerOnly
+            : connection.AccessPolicy;
 
         // Owner check first so the Owner is always invokable in every
         // policy branch without burning a Slack API call.
@@ -134,9 +149,9 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         {
             AccessPolicyKind.OwnerOnly => AccessDecision.Deny(OwnerOnlyReason),
             AccessPolicyKind.Allowlist => await EvaluateAllowlistAsync(
-                connection, senderSlackUserId, workspaceTeamId, ct),
+                connection, senderSlackUserId, workspaceTeamId, leaseContext, ct),
             AccessPolicyKind.Anyone => await EvaluateAnyoneAsync(
-                connection, senderSlackUserId, workspaceTeamId, conversationId, ct),
+                connection, senderSlackUserId, workspaceTeamId, conversationId, leaseContext, ct),
             _ => AccessDecision.Deny(OwnerOnlyReason),
         };
     }
@@ -145,15 +160,25 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         AgentConnection connection,
         string senderSlackUserId,
         string workspaceTeamId,
+        SlackLeaseContext? leaseContext,
         CancellationToken ct)
     {
+        // Local allowlist first: an unlisted sender is rejected before any
+        // Slack API call.
         var allowed = await _allowedMembers.IsAllowedAsync(
             connection.ProjectId, connection.Id, senderSlackUserId, ct);
         if (!allowed)
             return AccessDecision.Deny(AllowlistUnlistedReason);
 
-        return await ConfirmLiveWorkspaceMemberAsync(
-            connection, senderSlackUserId, workspaceTeamId, ct);
+        var botToken = await ResolveLeasedBotTokenAsync(connection, leaseContext, ct);
+        if (botToken is null)
+            return AccessDecision.Deny(VerificationFailedReason);
+
+        var member = await _memberIdentity.LookupMemberAsync(
+            new SlackMemberIdentityRequest(botToken, senderSlackUserId), ct);
+        return IsEligibleRegularMember(member, senderSlackUserId, workspaceTeamId)
+            ? AccessDecision.Allow("allowlist_member")
+            : DenyForMember(member);
     }
 
     private async Task<AccessDecision> EvaluateAnyoneAsync(
@@ -161,84 +186,66 @@ public sealed class SlackConnectionAccessDecider : IScopedService
         string senderSlackUserId,
         string workspaceTeamId,
         string conversationId,
+        SlackLeaseContext? leaseContext,
         CancellationToken ct)
     {
-        var memberDecision = await ConfirmLiveWorkspaceMemberAsync(
-            connection, senderSlackUserId, workspaceTeamId, ct);
-        if (!memberDecision.Allowed)
-            return memberDecision;
-
-        var botToken = await TryLoadBotTokenAsync(connection, ct);
+        var botToken = await ResolveLeasedBotTokenAsync(connection, leaseContext, ct);
         if (botToken is null)
             return AccessDecision.Deny(VerificationFailedReason);
 
-        SlackConversationInfoResponse channel;
-        try
+        var member = await _memberIdentity.LookupMemberAsync(
+            new SlackMemberIdentityRequest(botToken, senderSlackUserId), ct);
+        if (!IsEligibleRegularMember(member, senderSlackUserId, workspaceTeamId))
+            return DenyForMember(member);
+
+        var conversation = await _memberIdentity.LookupConversationAsync(
+            new SlackConversationMembershipRequest(botToken, conversationId), ct);
+        if (!conversation.Confirmed)
         {
-            channel = await _slack.ConversationsInfoAsync(conversationId, botToken, ct);
-        }
-        catch
-        {
-            // Safe-degrade: an unverifiable channel-membership fact
-            // never authorizes. Matches the spec ("any identity that
-            // cannot be confirmed SHALL NOT trigger the Agent") and the
-            // proposal's safe-deny direction.
-            return AccessDecision.Deny(VerificationFailedReason);
+            // not_in_channel is a definite Slack fact (the Bot is not a
+            // member), so it gets the actionable visibility reason; every
+            // other failure is uncertain and gets the retry reason.
+            return AccessDecision.Deny(
+                string.Equals(conversation.ErrorClass, NotInChannelError, StringComparison.Ordinal)
+                    ? ChannelNotVisibleReason
+                    : VerificationFailedReason);
         }
 
-        if (!channel.Ok || channel.Channel is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        if (!channel.Channel.IsMember)
-            return AccessDecision.Deny(ChannelNotVisibleReason);
-
-        return AccessDecision.Allow("anyone_workspace_member");
+        return conversation.IsMember
+            ? AccessDecision.Allow("anyone_member")
+            : AccessDecision.Deny(ChannelNotVisibleReason);
     }
 
-    private async Task<AccessDecision> ConfirmLiveWorkspaceMemberAsync(
+    private static async Task<string?> ResolveLeasedBotTokenAsync(
         AgentConnection connection,
-        string senderSlackUserId,
-        string workspaceTeamId,
+        SlackLeaseContext? leaseContext,
         CancellationToken ct)
     {
-        var botToken = await TryLoadBotTokenAsync(connection, ct);
-        if (botToken is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        SlackUserInfoResponse userResponse;
-        try
-        {
-            userResponse = await _slack.UsersInfoAsync(senderSlackUserId, botToken, ct);
-        }
-        catch
-        {
-            return AccessDecision.Deny(VerificationFailedReason);
-        }
-
-        if (!userResponse.Ok || userResponse.User is null)
-            return AccessDecision.Deny(VerificationFailedReason);
-
-        if (!SlackOwnerClaimService.IsEligibleMember(userResponse, workspaceTeamId, senderSlackUserId))
-            return AccessDecision.Deny(MemberNotEligibleReason);
-
-        return AccessDecision.Allow("live_workspace_member");
-    }
-
-    private async Task<string?> TryLoadBotTokenAsync(AgentConnection connection, CancellationToken ct)
-    {
-        try
-        {
-            var token = await _secrets.LoadAsync(
-                new SecretStoreAddress(connection.ProjectId, connection.Id, SecretKind.BotToken), ct);
-            if (token is null || token.Length == 0)
-                return null;
-            return Encoding.UTF8.GetString(token);
-        }
-        catch
-        {
+        if (leaseContext is null)
             return null;
-        }
+        return await leaseContext.ResolveVerifiedBotToken(
+            new SlackLeaseTargetRef.Connection(connection.ProjectId, connection.Id),
+            ct);
     }
+
+    private static bool IsEligibleRegularMember(
+        SlackMemberIdentityResult member,
+        string senderSlackUserId,
+        string workspaceTeamId) =>
+        member.Confirmed
+        && string.Equals(member.UserId, senderSlackUserId, StringComparison.Ordinal)
+        && string.Equals(member.TeamId, workspaceTeamId, StringComparison.Ordinal)
+        && !member.Deleted
+        && !member.IsBot
+        && !member.IsAppUser
+        && !member.IsRestricted
+        && !member.IsUltraRestricted
+        && !member.IsStranger;
+
+    private static AccessDecision DenyForMember(SlackMemberIdentityResult member) =>
+        member.Confirmed || string.Equals(member.ErrorClass, UserNotFoundError, StringComparison.Ordinal)
+            ? AccessDecision.Deny(MemberNotEligibleReason)
+            : AccessDecision.Deny(VerificationFailedReason);
 
     private static bool IsOwner(AgentConnection connection, string senderSlackUserId) =>
         !string.IsNullOrEmpty(connection.OwnerSlackUserId)

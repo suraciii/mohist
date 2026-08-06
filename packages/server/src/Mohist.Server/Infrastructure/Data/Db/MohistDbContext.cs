@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using System.Text.Json;
+using Mohist.Server.Infrastructure.Data.GitHub;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Agent.Domain;
@@ -64,6 +65,9 @@ public class MohistDbContext : DbContext
     public DbSet<EpicEventRow> EpicEvents { get; set; } = null!;
     public DbSet<AgentSessionEventRow> AgentSessionEvents { get; set; } = null!;
     public DbSet<AgentJobEventRow> AgentJobEvents { get; set; } = null!;
+    public DbSet<IngressEventRow> IngressEvents { get; set; } = null!;
+    public DbSet<GitHubConnectionRow> GitHubConnections { get; set; } = null!;
+    public DbSet<GitHubIssueLinkRow> GitHubIssueLinks { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -85,7 +89,7 @@ public class MohistDbContext : DbContext
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
     public DbSet<AgentJobRow> AgentJobs { get; set; } = null!;
-    public DbSet<ConnectionSecretRow> ConnectionSecrets { get; set; } = null!;
+    public DbSet<StoredSecretRow> StoredSecrets { get; set; } = null!;
     public DbSet<SlackProviderInboxRow> SlackProviderInboxRows { get; set; } = null!;
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
     public DbSet<SlackManagerToolExecutionFenceRow> SlackManagerToolExecutionFences { get; set; } = null!;
@@ -94,13 +98,14 @@ public class MohistDbContext : DbContext
     public DbSet<SlackThreadSessionMappingRow> SlackThreadSessionMappings { get; set; } = null!;
     public DbSet<SlackConnectionAllowedMemberRow> SlackConnectionAllowedMembers { get; set; } = null!;
     public DbSet<SlackWorkspaceEnrollmentRow> SlackWorkspaceEnrollments { get; set; } = null!;
-    public DbSet<ManagedSlackChildAppRow> ManagedSlackChildApps { get; set; } = null!;
+    public DbSet<ManagedSlackAgentAppRow> ManagedSlackAgentApps { get; set; } = null!;
     public DbSet<SlackOAuthStateRow> SlackOAuthStates { get; set; } = null!;
     public DbSet<SlackOAuthAttemptRow> SlackOAuthAttempts { get; set; } = null!;
-    public DbSet<SlackChildAppBindingObligationRow> SlackChildAppBindingObligations { get; set; } = null!;
+    public DbSet<SlackAgentAppBindingObligationRow> SlackAgentAppBindingObligations { get; set; } = null!;
 
     public DbSet<SlackThreadLaunchReservationRow> SlackThreadLaunchReservations { get; set; } = null!;
     public DbSet<SlackAmbiguousPromptRow> SlackAmbiguousPrompts { get; set; } = null!;
+    public DbSet<SlackAdapterLeaseRow> SlackAdapterLeases { get; set; } = null!;
 
     public MohistDbContext(DbContextOptions<MohistDbContext> options) : base(options)
     {
@@ -638,10 +643,16 @@ public class MohistDbContext : DbContext
                     "\"ManagerCapability\" IN ('unknown', 'available', 'unauthorized', 'capacity_limited')");
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerTransportKind",
-                    "\"ManagerTransportKind\" IN ('socket', 'https')");
+                    "\"ManagerTransportKind\" = 'socket'");
                 table.HasCheckConstraint(
                     "CK_SlackWorkspaceEnrollments_ManagerReadiness",
                     "\"ManagerReadiness\" IN ('unknown', 'ready', 'not_ready', 'degraded')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_ManagerAppLifecycle",
+                    "\"ManagerAppLifecycle\" IN ('not_created', 'creating', 'created', 'create_unknown')");
+                table.HasCheckConstraint(
+                    "CK_SlackWorkspaceEnrollments_RuntimeCredentialValidationState",
+                    "\"RuntimeCredentialValidationState\" IN ('not_provided', 'candidate', 'awaiting_socket', 'verified', 'failed')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
@@ -651,11 +662,21 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.CapabilityReason).HasMaxLength(1024);
             entity.Property(e => e.PlanCode).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ManagedAppLimit).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialRef).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialGeneration).IsRequired();
+            entity.Property(e => e.ConfigurationCredentialExpiresAt);
             entity.Property(e => e.ManagerCredentialRef).HasMaxLength(512).IsRequired();
             entity.Property(e => e.ManagerAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ManagerBotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ManagerTransportKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerReadiness).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerAppLifecycle).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.ManagerAppOperationFence).IsRequired();
+            entity.Property(e => e.ManagerAppOperationId).HasMaxLength(256);
+            entity.Property(e => e.ManagerAppOperationOutcome).HasMaxLength(1024);
+            entity.Property(e => e.ManagerAppManifestHash).HasMaxLength(128).IsRequired();
+            entity.Property(e => e.ManagerAppInstallUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(e => e.RuntimeCredentialValidationState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ManagerActorId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.ClaimedSlackUserId).HasMaxLength(256);
             entity.Property(e => e.ManagerClaimHash).HasMaxLength(128);
@@ -670,30 +691,27 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_SlackWorkspaceEnrollments_Lifecycle_UpdatedAt");
         });
 
-        modelBuilder.Entity<ManagedSlackChildAppRow>(entity =>
+        modelBuilder.Entity<ManagedSlackAgentAppRow>(entity =>
         {
-            entity.ToTable("ManagedSlackChildApps", table =>
+            entity.ToTable("ManagedSlackAgentApps", table =>
             {
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_AppLifecycle",
+                    "CK_ManagedSlackAgentApps_AppLifecycle",
                     "\"AppLifecycle\" IN ('not_created', 'creating', 'create_unknown', 'created', 'deleting', 'delete_unknown', 'deleted')");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_Authorization",
+                    "CK_ManagedSlackAgentApps_Authorization",
                     "\"Authorization\" IN ('not_started', 'awaiting_user', 'pending_admin', 'authorized', 'expired_or_cancelled', 'revoked')");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_TransportKind",
-                    "\"TransportKind\" IN ('socket', 'https')");
-                table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_BindingState",
+                    "CK_ManagedSlackAgentApps_BindingState",
                     "\"BindingState\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_DesiredManifest",
+                    "CK_ManagedSlackAgentApps_DesiredManifest",
                     "\"DesiredManifestVersion\" > 0 AND \"DesiredManifestHash\" <> ''");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_AppliedManifestPair",
+                    "CK_ManagedSlackAgentApps_AppliedManifestPair",
                     "(\"AppliedManifestVersion\" IS NULL AND \"AppliedManifestHash\" IS NULL) OR (\"AppliedManifestVersion\" IS NOT NULL AND \"AppliedManifestHash\" IS NOT NULL AND \"AppliedManifestVersion\" > 0 AND \"AppliedManifestHash\" <> '')");
                 table.HasCheckConstraint(
-                    "CK_ManagedSlackChildApps_IdentityPair",
+                    "CK_ManagedSlackAgentApps_IdentityPair",
                     "\"BotUserId\" = '' OR \"AppId\" <> ''");
             });
             entity.HasKey(e => e.Id);
@@ -701,15 +719,15 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.EnrollmentId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AgentConnectionId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.PublicIngressBaseUrl).HasMaxLength(2048);
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.BotUserId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppLifecycle).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Authorization).HasMaxLength(32).IsRequired();
-            entity.Property(e => e.TransportKind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.DesiredManifestHash).HasMaxLength(128).IsRequired();
             entity.Property(e => e.AppliedManifestHash).HasMaxLength(128);
             entity.Property(e => e.VerifiedScopesJson).HasColumnType("JSON").IsRequired();
+            entity.Property(e => e.InstallUrl).HasMaxLength(1024).IsRequired();
+            entity.Property(e => e.RuntimeCredentialValidationState).HasMaxLength(32).IsRequired();
             entity.Property(e => e.OperationId).HasMaxLength(256);
             entity.Property(e => e.OperationKind).HasMaxLength(32);
             entity.Property(e => e.UnknownOutcome).HasMaxLength(1024);
@@ -734,17 +752,15 @@ public class MohistDbContext : DbContext
                 .HasForeignKey(e => e.AgentConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.AgentConnectionId)
-                .HasDatabaseName("IX_ManagedSlackChildApps_AgentConnectionId");
-            entity.HasIndex(e => e.AgentConnectionId)
                 .IsUnique()
                 .HasFilter("\"DeletedAt\" IS NULL")
-                .HasDatabaseName("UX_ManagedSlackChildApps_AgentConnectionId");
+                .HasDatabaseName("UX_ManagedSlackAgentApps_AgentConnectionId");
             entity.HasIndex(e => new { e.WorkspaceTeamId, e.AppId })
                 .IsUnique()
                 .HasFilter("\"DeletedAt\" IS NULL AND \"AppId\" <> ''")
-                .HasDatabaseName("UX_ManagedSlackChildApps_WorkspaceTeamId_AppId");
+                .HasDatabaseName("UX_ManagedSlackAgentApps_WorkspaceTeamId_AppId");
             entity.HasIndex(e => new { e.EnrollmentId, e.UpdatedAt })
-                .HasDatabaseName("IX_ManagedSlackChildApps_EnrollmentId_UpdatedAt");
+                .HasDatabaseName("IX_ManagedSlackAgentApps_EnrollmentId_UpdatedAt");
         });
 
         modelBuilder.Entity<SlackOAuthAttemptRow>(entity =>
@@ -757,7 +773,7 @@ public class MohistDbContext : DbContext
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.StateHash).HasMaxLength(64).IsRequired();
@@ -767,47 +783,49 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.FailureClass).HasMaxLength(128);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasOne<ManagedSlackChildAppRow>()
+            entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.StateHash)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackOAuthAttempts_StateHash");
-            entity.HasIndex(e => new { e.ChildAppId, e.Status, e.UpdatedAt })
-                .HasDatabaseName("IX_SlackOAuthAttempts_ChildAppId_Status_UpdatedAt");
+            entity.HasIndex(e => new { e.AgentAppId, e.Status, e.UpdatedAt })
+                .HasDatabaseName("IX_SlackOAuthAttempts_AgentAppId_Status_UpdatedAt");
         });
 
-        modelBuilder.Entity<SlackChildAppBindingObligationRow>(entity =>
+        modelBuilder.Entity<SlackAgentAppBindingObligationRow>(entity =>
         {
-            entity.ToTable("SlackChildAppBindingObligations", table =>
+            entity.ToTable("SlackAgentAppBindingObligations", table =>
             {
                 table.HasCheckConstraint(
-                    "CK_SlackChildAppBindingObligations_Status",
+                    "CK_SlackAgentAppBindingObligations_Status",
                     "\"Status\" IN ('pending', 'in_progress', 'bound', 'connection_deleted', 'conflict')");
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AgentConnectionId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.ClaimToken).HasMaxLength(64).IsRequired();
             entity.Property(e => e.FailureClass).HasMaxLength(128);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
-            entity.HasOne<ManagedSlackChildAppRow>()
+            entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<AgentConnectionRow>()
                 .WithMany()
                 .HasForeignKey(e => e.AgentConnectionId)
                 .OnDelete(DeleteBehavior.Restrict);
-            entity.HasIndex(e => e.ChildAppId)
+            entity.HasIndex(e => e.AgentConnectionId)
+                .HasDatabaseName("IX_SlackAgentAppBindingObligations_AgentConnectionId");
+            entity.HasIndex(e => e.AgentAppId)
                 .IsUnique()
-                .HasDatabaseName("UX_SlackChildAppBindingObligations_ChildAppId");
+                .HasDatabaseName("UX_SlackAgentAppBindingObligations_AgentAppId");
             entity.HasIndex(e => new { e.Status, e.UpdatedAt })
-                .HasDatabaseName("IX_SlackChildAppBindingObligations_Status_UpdatedAt");
+                .HasDatabaseName("IX_SlackAgentAppBindingObligations_Status_UpdatedAt");
         });
 
         modelBuilder.Entity<SlackOAuthStateRow>(entity =>
@@ -820,7 +838,7 @@ public class MohistDbContext : DbContext
             });
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Id).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ChildAppId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.AgentAppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.WorkspaceTeamId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.AppId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.StateHash).HasMaxLength(64).IsRequired();
@@ -828,19 +846,21 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ExpiresAt).IsRequired();
             entity.Property(e => e.Outcome).HasMaxLength(64);
             entity.Property(e => e.CreatedAt).IsRequired();
-            entity.HasOne<ManagedSlackChildAppRow>()
+            entity.HasOne<ManagedSlackAgentAppRow>()
                 .WithMany()
-                .HasForeignKey(e => e.ChildAppId)
+                .HasForeignKey(e => e.AgentAppId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SlackOAuthAttemptRow>()
                 .WithMany()
                 .HasForeignKey(e => e.AuthorizationAttemptId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.AuthorizationAttemptId)
+                .HasDatabaseName("IX_SlackOAuthStates_AuthorizationAttemptId");
             entity.HasIndex(e => e.StateHash)
                 .IsUnique()
                 .HasDatabaseName("UX_SlackOAuthStates_StateHash");
-            entity.HasIndex(e => new { e.ChildAppId, e.ConsumedAt, e.ExpiresAt })
-                .HasDatabaseName("IX_SlackOAuthStates_ChildAppId_ConsumedAt_ExpiresAt");
+            entity.HasIndex(e => new { e.AgentAppId, e.ConsumedAt, e.ExpiresAt })
+                .HasDatabaseName("IX_SlackOAuthStates_AgentAppId_ConsumedAt_ExpiresAt");
         });
 
         modelBuilder.Entity<SlackOwnerClaimCodeRow>(entity =>
@@ -1063,6 +1083,119 @@ public class MohistDbContext : DbContext
             entity.HasIndex(e => new { e.Source, e.Id })
                 .HasFilter("\"DispatchedAt\" IS NULL")
                 .HasDatabaseName("IX_AgentJobEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<IngressEventRow>(entity =>
+        {
+            entity.ToTable("IngressEvents");
+            entity.HasKey(e => new { e.Source, e.Id });
+            entity.Property(e => e.Id).IsRequired();
+            entity.Property(e => e.Source)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.EventId)
+                .HasMaxLength(128)
+                .IsRequired();
+            entity.Property(e => e.Type)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.SpecVersion)
+                .HasMaxLength(16)
+                .IsRequired();
+            entity.Property(e => e.Subject)
+                .HasMaxLength(256);
+            entity.Property(e => e.DataContentType)
+                .HasMaxLength(64)
+                .IsRequired();
+            entity.Property(e => e.Data)
+                .IsRequired()
+                .HasColumnType("JSON")
+                .HasConversion(
+                    data => data.GetRawText(),
+                    json => JsonDocument.Parse(json).RootElement.Clone());
+            entity.Property(e => e.ExtensionsJson)
+                .HasColumnType("JSON")
+                .HasConversion(
+                    json => json,
+                    raw => raw);
+            entity.Property(e => e.Time)
+                .IsRequired();
+            entity.Property(e => e.DispatchedAt);
+            entity.HasIndex(e => new { e.Source, e.Id })
+                .HasFilter("\"DispatchedAt\" IS NULL")
+                .HasDatabaseName("IX_IngressEvents_Undelivered");
+        });
+
+        modelBuilder.Entity<GitHubConnectionRow>(entity =>
+        {
+            entity.ToTable("GitHubConnections");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.Owner)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.Repo)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.HasIndex(e => new { e.Owner, e.Repo })
+                .IsUnique();
+            entity.Property(e => e.RepositoryName)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.IntakeLabel)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.FeedMode)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.ApproversJson)
+                .HasColumnType("JSON")
+                .IsRequired();
+            entity.Property(e => e.Status)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.IdentityKind)
+                .HasMaxLength(32)
+                .IsRequired();
+            entity.Property(e => e.InstallationId)
+                .HasMaxLength(256);
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<GitHubIssueLinkRow>(entity =>
+        {
+            entity.ToTable("GitHubIssueLinks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.RepositoryName)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.GithubIssueNumber)
+                .IsRequired();
+            entity.Property(e => e.IssueNumber)
+                .IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
+                .IsUnique();
+            entity.Property(e => e.PostedCommentsJson)
+                .HasColumnType("JSON")
+                .IsRequired();
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
         });
 
         modelBuilder.Entity<DeadLetterRow>(entity =>
@@ -1506,20 +1639,30 @@ public class MohistDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<ConnectionSecretRow>(entity =>
+        modelBuilder.Entity<StoredSecretRow>(entity =>
         {
-            entity.ToTable("ConnectionSecrets");
-            entity.HasKey(e => new { e.ProjectId, e.ConnectionId, e.Kind });
-            entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
-            entity.Property(e => e.ConnectionId).HasMaxLength(256).IsRequired();
+            entity.ToTable("StoredSecrets");
+            entity.HasKey(e => new { e.OwnerKind, e.OwnerScope, e.OwnerId, e.Kind });
+            entity.Property(e => e.OwnerKind).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.OwnerScope).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OwnerId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Blob).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
             entity.ToTable(t => t.HasCheckConstraint(
-                "CK_ConnectionSecrets_Kind",
-                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret')"));
-            entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
-                .HasDatabaseName("IX_ConnectionSecrets_ProjectId_ConnectionId");
+                "CK_StoredSecrets_OwnerKind",
+                "\"OwnerKind\" IN ('agent_connection', 'webhook_subscription', 'slack_workspace_enrollment', 'managed_slack_agent_app')"));
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_StoredSecrets_Kind",
+                "\"Kind\" IN ('appToken', 'botToken', 'webhookSecret', 'clientSecret', 'signingSecret', 'configurationAccessToken', 'configurationRefreshToken', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')"));
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_StoredSecrets_OwnerKindKind",
+                "(\"OwnerKind\" = 'agent_connection' AND \"Kind\" IN ('appToken', 'botToken')) OR " +
+                "(\"OwnerKind\" = 'webhook_subscription' AND \"Kind\" = 'webhookSecret') OR " +
+                "(\"OwnerKind\" = 'slack_workspace_enrollment' AND \"Kind\" IN ('configurationAccessToken', 'configurationRefreshToken', 'appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken')) OR " +
+                "(\"OwnerKind\" = 'managed_slack_agent_app' AND \"Kind\" IN ('appToken', 'botToken', 'clientSecret', 'signingSecret', 'previousBotToken', 'previousAppToken', 'candidateBotToken', 'candidateAppToken'))"));
+            entity.HasIndex(e => new { e.OwnerKind, e.OwnerScope, e.OwnerId })
+                .HasDatabaseName("IX_StoredSecrets_Owner");
         });
 
         modelBuilder.Entity<SlackProviderInboxRow>(entity =>
@@ -1711,6 +1854,30 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("UX_SlackConnectionAllowedMembers_ProjectId_ConnectionId_SlackUserId");
             entity.HasIndex(e => new { e.ProjectId, e.ConnectionId })
                 .HasDatabaseName("IX_SlackConnectionAllowedMembers_ProjectId_ConnectionId");
+        });
+
+        modelBuilder.Entity<SlackAdapterLeaseRow>(entity =>
+        {
+            entity.ToTable("SlackAdapterLeases", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_SlackAdapterLeases_LeaseKind",
+                    "\"LeaseKind\" IS NULL OR \"LeaseKind\" IN ('validation', 'runtime')");
+                table.HasCheckConstraint(
+                    "CK_SlackAdapterLeases_ActiveLeaseCoherent",
+                    "(\"LeaseId\" IS NULL) = (\"LeaseKind\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"AdapterId\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"IssuedAt\" IS NULL) AND " +
+                    "(\"LeaseId\" IS NULL) = (\"ExpiresAt\" IS NULL)");
+            });
+            entity.HasKey(e => e.TargetKey);
+            entity.Property(e => e.TargetKey).HasMaxLength(320).IsRequired();
+            entity.Property(e => e.Generation).IsRequired();
+            entity.Property(e => e.LeaseId).HasMaxLength(64);
+            entity.Property(e => e.LeaseKind).HasMaxLength(32);
+            entity.Property(e => e.AdapterId).HasMaxLength(256);
+            entity.Property(e => e.CredentialFingerprint).HasMaxLength(64);
+            entity.Property(e => e.UpdatedAt).IsRequired();
         });
     }
 

@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -41,14 +42,19 @@ public sealed class SlackManagerAdapterSpecs
                 ManagerCredentialRef = credentialRef,
                 ManagerReadiness = SlackManagerReadiness.Ready,
                 ManagerTransportKind = SlackManagerTransportKind.Socket,
+                RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
                 PlanCode = "unknown",
                 AuditJson = "[]",
                 CreatedAt = _fixture.TimeProvider.GetUtcNow(),
                 UpdatedAt = _fixture.TimeProvider.GetUtcNow(),
             });
             await db.SaveChangesAsync();
-            await scope.ServiceProvider.GetRequiredService<ISecretStore>().StoreAsync(
-                new SecretStoreAddress(SlackDeliveryOwnerIds.ManagerProjectId, credentialRef, SecretKind.BotToken),
+            var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.AppToken),
+                Encoding.UTF8.GetBytes("xapp-manager-adapter"));
+            await secrets.StoreAsync(
+                SecretStoreAddress.ForSlackWorkspaceEnrollment(enrollmentId, SecretKind.BotToken),
                 Encoding.UTF8.GetBytes(managerCredential));
         }
 
@@ -67,17 +73,6 @@ public sealed class SlackManagerAdapterSpecs
         Assert.False(target.TryGetProperty("projectId", out _));
         Assert.False(target.TryGetProperty("connectionId", out _));
 
-        using var session = await _fixture.Client.PostAsJsonAsync(
-            $"/api/slack-manager/adapter/{enrollmentId}/session",
-            new { adapterId = "adapter-manager" });
-        session.EnsureSuccessStatusCode();
-        using var sessionDocument = JsonDocument.Parse(await session.Content.ReadAsStringAsync());
-        var sessionData = sessionDocument.RootElement.GetProperty("data");
-        Assert.Equal("manager", sessionData.GetProperty("ownerKind").GetString());
-        Assert.Equal(teamId, sessionData.GetProperty("workspaceTeamId").GetString());
-        Assert.False(sessionData.TryGetProperty("appToken", out _));
-        Assert.Equal(managerCredential, sessionData.GetProperty("botToken").GetString());
-
         string deliveryId;
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
@@ -95,9 +90,12 @@ public sealed class SlackManagerAdapterSpecs
                 OwnerKind: SlackDeliveryOwnerKinds.Manager))).Id;
         }
 
+        var firstLease = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
+            _fixture, enrollmentId, teamId, "adapter-manager");
+
         using var claim = await _fixture.Client.PostAsJsonAsync(
             $"/api/slack-manager/adapter/{enrollmentId}/deliveries/claim",
-            new { adapterId = "adapter-manager" });
+            new { adapterId = "adapter-manager", leaseId = firstLease });
         claim.EnsureSuccessStatusCode();
         using var claimDocument = JsonDocument.Parse(await claim.Content.ReadAsStringAsync());
         var claimed = claimDocument.RootElement.GetProperty("data");
@@ -106,21 +104,26 @@ public sealed class SlackManagerAdapterSpecs
 
         using var uncertain = await _fixture.Client.PostAsJsonAsync(
             $"/api/slack-manager/adapter/{enrollmentId}/deliveries/ack",
-            new { id = deliveryId, adapterId = "adapter-manager", outcome = "uncertain", reason = "provider_unknown" });
+            new { id = deliveryId, adapterId = "adapter-manager", outcome = "uncertain", reason = "provider_unknown", leaseId = firstLease });
         uncertain.EnsureSuccessStatusCode();
         using var uncertainDocument = JsonDocument.Parse(await uncertain.Content.ReadAsStringAsync());
         Assert.Equal("manager", uncertainDocument.RootElement.GetProperty("data").GetProperty("ownerKind").GetString());
 
+        // The retry adapter takes over: a fresh lease under its own adapter
+        // id supersedes the first holder, mirroring the real handover.
+        var retryLease = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
+            _fixture, enrollmentId, teamId, "adapter-manager-retry");
+
         using var reclaim = await _fixture.Client.PostAsJsonAsync(
             $"/api/slack-manager/adapter/{enrollmentId}/deliveries/claim-uncertain",
-            new { adapterId = "adapter-manager-retry" });
+            new { adapterId = "adapter-manager-retry", leaseId = retryLease });
         reclaim.EnsureSuccessStatusCode();
         using var reclaimDocument = JsonDocument.Parse(await reclaim.Content.ReadAsStringAsync());
         Assert.Equal(deliveryId, reclaimDocument.RootElement.GetProperty("data").GetProperty("id").GetString());
 
         using var delivered = await _fixture.Client.PostAsJsonAsync(
             $"/api/slack-manager/adapter/{enrollmentId}/deliveries/ack",
-            new { id = deliveryId, adapterId = "adapter-manager-retry", outcome = "delivered" });
+            new { id = deliveryId, adapterId = "adapter-manager-retry", outcome = "delivered", leaseId = retryLease });
         delivered.EnsureSuccessStatusCode();
 
         await using var verify = _fixture.Services.CreateAsyncScope();
@@ -130,5 +133,14 @@ public sealed class SlackManagerAdapterSpecs
         Assert.Equal(enrollmentId, row.ConnectionId);
         Assert.Equal(SlackDeliveryOwnerKinds.Manager, row.OwnerKind);
         Assert.Equal(SlackOutboxStates.Delivered, row.State);
+    }
+
+    [Fact]
+    public async Task Legacy_manager_adapter_session_route_is_removed()
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            "/api/slack-manager/adapter/enrollment-legacy/session",
+            new { adapterId = "adapter-legacy" });
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 }

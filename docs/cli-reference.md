@@ -126,7 +126,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
 | `notification` | `setup` |
-| `slack` | `setup`、`configure-manager`、`status`；`list`、`view`、`create`、`configure`、`claim-owner`、`edit`、`rotate-credentials`、`transfer-owner`、`enable`、`disable`、`delete`；`deliveries`、`resend-delivery`、`clear-gap`、`create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、`permanent-delete` |
+| `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
@@ -247,34 +247,56 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 `mo slack` 管理 Slack 接入：一个 Mohist Agent 与一个 Slack 工作区中 Bot 身份的绑定，
 以及 workspace 级 Mohist App 的安装。
 
-- `mo slack setup` 用显式参数登记工作区级 Mohist App；完整的路径选择、安装授权与操作者认领
-  向导尚未实装。`mo slack status` 查看该工作区各接入的整体状态与唯一下一步。
-- `mo slack configure-manager --workspace-team <team> [--credentials-file <path>]` 为活动 workspace
-  enrollment 提供或轮换 Manager Bot 凭据。无文件时使用隐藏输入；有文件时要求用户专属、受保护且
-  非符号链接的文件，文件只包含一个非空的 Bot 凭据字段。命令不接受 token 字面量参数，成功输出
-  只确认 workspace 和凭据已 provisioned，不显示凭据。`status` 区分凭据引用已配置与凭据已提供。
-- `mo slack create <agent>` 只创建可恢复接入，输出 Slack identity preview、预填创建地址
-  与接入 ID；不要求 `mohist-slack` 在线，也不读取凭据。
-- `mo slack configure <id>` 使用隐藏输入提交 Slack 凭据，不接受 token literal flag。非交互
-  环境增加 `--credentials-file <path>`；缺少时立即失败，不等待输入。接入服务离线时保存后
-  返回 Waiting for Slack service。
+- `mo slack setup [--workspace-team <team-id>] [--configuration-token-file <path>] [--credentials-file <path>]`
+  把工作区级 Mohist App
+  安装到 Slack，并接入本机 Socket Mode。命令创建或恢复同一条工作区安装记录，自动创建和
+  配置 App，再引导用户完成 Slack 安装确认和 App-level token 生成。首次安装时工作区由
+  Configuration token 的验证结果确定；已接入多个工作区时用 flag 选择。
+- `mo slack install-agent <agent> [--workspace-team <team-id>] [--credentials-file <path>]` 把一个
+  已存在的 Mohist Agent 安装到 Slack。它创建或恢复该 Agent 的接入与专属 Agent App，
+  自动完成 App 配置、安装引导、身份与凭据验证、连接上线和 Owner 认领。只接入一个
+  工作区时 workspace flag 可省略；同一 Agent 在同一工作区已有安装记录时接着它继续，
+  不创建第二个 App。
+- `setup` 与 `install-agent` 都是幂等、可续跑的向导。遇到必须在 Slack 页面完成的步骤时，
+  命令返回安装链接、精确页面和同一条继续命令；重跑命令从已确认的步骤继续。重跑会重新
+  校验已保存凭据，失效即回到凭据步骤；对就绪记录显式重供凭据即轮换，新凭据必须仍属于
+  原工作区、App 与 Bot。非交互模式不等待输入，缺少当前步骤所需文件时以非零退出并给出
+  继续命令。
+- Configuration Token 文件只包含
+  `{ "configurationToken": "...", "configurationRefreshToken": "..." }`；运行凭据文件只包含
+  `{ "botToken": "...", "appToken": "..." }`。两者必须是当前用户拥有、仅当前用户可读写且
+  非符号链接的普通文件。交互模式使用隐藏输入；命令行不接受任何 token 字面量。CLI 只读取
+  当前步骤需要的字段，验证后由 Mohist 加密保存，输出、错误、JSON 与日志均不回显。
+- `mo slack status` 查看 Mohist App、各 Agent 接入和本机连接的当前状态与唯一下一步；
+  缺少供给凭据时指向 `setup`，Agent 安装未完成时指向同一条 `install-agent` 命令。
 - `mo slack claim-owner <id>` 只在 identity verification 完成后生成并显示一次 setup
   claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
 - `mo slack view <id>` 始终返回 setup progress、status 和唯一 next action；命令可以退出，
   安装与认领不依赖原进程存活。
 - `mo slack list <agent>` 读取该 Agent 的所有接入；
-  `view/configure/claim-owner/edit/rotate-credentials/transfer-owner/enable/disable/delete <id>`
+  `view/claim-owner/edit/transfer-owner/enable/disable <id>`
   管理一个接入。`edit --access-policy allowlist` 用可重复的 `--allow-member <slack-member-id>`
   原子替换非 Owner 成员；Owner 转移通过新的单次认领完成。
-- `disable` 可恢复并保留 Agent 与全部执行历史；`delete --yes` 删除连接凭据与关系，但不
-  删除 Agent、AgentJob 或 AgentSession，也不代替用户从 Slack 卸载 App。
-- 受管子 App 与投递诊断：`deliveries`、`resend-delivery`、`clear-gap`、
-  `create-child-app`、`reconcile-create`、`reconcile-delete`、`remove-binding`、
-  `permanent-delete`（高危动作要求显式确认，不出现在 Mohist App 对话中）。
+- `disable` 可恢复并保留 Agent 与全部执行历史；`remove-binding` 解除 Connection 但保留
+  Agent App 管理事实；`permanent-delete --yes` 在无 active binding 时永久删除 Agent App。
+  后两者不删除 Agent、AgentJob 或 AgentSession。
+- App 外部写入结果未知时，`reconcile-create` / `reconcile-delete` 核对原操作，不盲目重放；
+  投递诊断使用 `deliveries`、`resend-delivery`、`clear-gap`。这些恢复命令不会替代
+  `install-agent` 的日常安装主路径。
 
 接入只拥有外部身份、权限和连接状态；Agent 配置仍由 `agent edit` 修改。日常挂载与调整的
 主路径是在 Slack 中与 Mohist App 对话；CLI 与 Web 操作同一条接入记录。完整产品语义见
 [Slack](slack.md)。
+
+## GitHub
+
+`mo github connect owner/repo [--feed-mode start|backlog] [--approver <login> ...]`
+把 GitHub 仓库接入当前 Project：按仓库地址匹配已注册仓库，建立连接并生成入站验签
+secret，然后打印 GitHub 侧配置清单（webhook 地址、内容类型、secret 与事件订阅）。
+配置完成后，GitHub 上的打标签、关闭 issue、PR review、check suite 完成等动作会实时
+进入 Mohist 事件路由。GitHub 身份（App / PAT）的配置步骤会在输出中提示，本版本不要求。
+
+完整产品语义见 [GitHub](github.md)。
 
 ## Activity、Event 与本机 Service
 
@@ -420,8 +442,6 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
-- `install/update/service ... slack` 与 `mohist-slack` 受管服务。
-- `mo slack setup` 的完整托管或本机安装向导，以及真实 Slack 子 App 的创建、授权和审批流程。
 
 ### 已闭合
 
@@ -439,6 +459,11 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
   `--feedback/--latest`、`--yaml/--json`、`--inherit-workflow-profile/--workflow-profile` 等）。
 - 裸 `--json` 字段发现优先于其它参数校验（当前 `session list --json` 先报筛选缺失）。
 - 根级 `slack` 命令组及其 setup/status 已交付；接入动作只保留 `mo slack` 这一命令面。
+- `mo slack setup` / `mo slack install-agent` 本机安装向导与 `mo install/update/service ... slack`
+  受管服务已交付：setup/install-agent 从持久进度幂等续跑，自动完成 App 创建与配置，只在
+  Slack 安装确认和本机凭据输入时停下；`configure-manager`、`create`、`configure`、
+  `create-child-app`、`rotate-credentials` 底层动作已从命令面移除，凭据轮换由重跑
+  `setup` / `install-agent` 完成。
 - Agent launch/follow-up 以稳定的 SessionInput 与 AgentTurn 身份返回；Slack 输入进一步保留
   Server 生成的回复锚点和协作上下文。
 - 返回资源的 mutation 一律接受 `--json`（当前 `agent create/edit/archive` 等缺；`issue rebase`

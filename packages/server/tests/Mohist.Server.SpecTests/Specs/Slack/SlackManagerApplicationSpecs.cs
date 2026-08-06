@@ -45,7 +45,7 @@ public sealed class SlackManagerApplicationSpecs
         var childId = first.GetProperty("managedApp").GetProperty("id").GetString()!;
         Assert.Equal("release_helper", first.GetProperty("preview").GetProperty("botName").GetString());
         Assert.Equal("not_created", first.GetProperty("managedApp").GetProperty("appLifecycle").GetString());
-        Assert.Equal("create_child_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
+        Assert.Equal("create_agent_app", first.GetProperty("managedApp").GetProperty("nextAction").GetString());
 
         using var secondResponse = await _fixture.Client.PostAsJsonAsync(ManagerPath(seeded.ProjectId, "/apps"), request);
         Assert.Equal(HttpStatusCode.OK, secondResponse.StatusCode);
@@ -68,7 +68,7 @@ public sealed class SlackManagerApplicationSpecs
         var connection = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
         Assert.Equal(AccessPolicyKind.Allowlist, connection.AccessPolicy);
         Assert.Equal("T_MANAGER_CREATE", connection.WorkspaceTeamId);
-        var child = await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId);
+        var child = await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId);
         Assert.Equal(connectionId, child.AgentConnectionId);
         Assert.NotEmpty(child.DesiredManifestHash);
         Assert.Equal(seeded.Agent.Id, (await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id)).Id);
@@ -115,10 +115,12 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = appId,
             managerBotUserId = "U_MANAGER_BOT_DEFAULT_AGENT",
-            managerCredentialRef = "manager-credential-default-agent",
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-default-agent", "xoxb-manager-default-agent");
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(_fixture, enrollmentId, team);
 
         using var claimResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
@@ -129,6 +131,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = owner,
             text = $"claim {claimCode}",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         claimResponse.EnsureSuccessStatusCode();
 
@@ -192,7 +196,7 @@ public sealed class SlackManagerApplicationSpecs
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
         Assert.NotNull(await db.AgentConnections.SingleAsync(row => row.Id == connectionId && row.DeletedAt != null));
-        Assert.NotNull(await db.ManagedSlackChildApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
+        Assert.NotNull(await db.ManagedSlackAgentApps.SingleAsync(row => row.Id == childId && row.DeletedAt == null));
         Assert.NotNull(await db.Agents.SingleAsync(row => row.Id == seeded.Agent.Id));
     }
 
@@ -239,7 +243,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         setupResponse.EnsureSuccessStatusCode();
         var setupJson = await setupResponse.Content.ReadAsStringAsync();
@@ -255,6 +258,38 @@ public sealed class SlackManagerApplicationSpecs
         Assert.Equal("configure_manager_credentials", status.GetProperty("nextAction").GetString());
 
         var claimCode = setup.GetProperty("claimCode").GetString()!;
+
+        // While credentials are not provisioned the manager cannot hold a
+        // runtime lease: ingress fails closed with no inbox/outbox side effect.
+        using var notReady = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId = "A_MANAGER_S0_INGRESS",
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_S0",
+            messageTs = "1710000000.000001",
+            senderSlackUserId = "U_MANAGER_OWNER",
+            text = $"claim {claimCode}",
+            isDirectMessage = true,
+            leaseId = "lease-before-provisioning",
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+        });
+        Assert.Equal(HttpStatusCode.Conflict, notReady.StatusCode);
+        using (var notReadyError = JsonDocument.Parse(await notReady.Content.ReadAsStringAsync()))
+            Assert.Equal("lease_stale_or_expired", notReadyError.RootElement.GetProperty("code").GetString());
+        await using (var noSideEffectScope = _fixture.Services.CreateAsyncScope())
+        {
+            var noSideEffectDb = noSideEffectScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var enrollmentRow = await noSideEffectDb.SlackWorkspaceEnrollments
+                .SingleAsync(row => row.WorkspaceTeamId == team);
+            Assert.Empty(await noSideEffectDb.SlackProviderInboxRows
+                .Where(row => row.ConnectionId == enrollmentRow.Id)
+                .ToListAsync());
+        }
+
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-s0-ingress", "xoxb-manager-s0-ingress");
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(_fixture, enrollmentId, team);
+
         using var deniedIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
             appId = "A_MANAGER_S0_INGRESS",
@@ -265,6 +300,8 @@ public sealed class SlackManagerApplicationSpecs
             text = "list agents",
             isDirectMessage = true,
             actor = "forged-actor",
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         Assert.Equal(HttpStatusCode.BadRequest, deniedIngress.StatusCode);
         using (var deniedError = JsonDocument.Parse(await deniedIngress.Content.ReadAsStringAsync()))
@@ -279,6 +316,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = "U_MANAGER_UNCLAIMED",
             text = "list agents",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         unclaimedIngress.EnsureSuccessStatusCode();
         var unclaimed = await ReadDataAsync(unclaimedIngress);
@@ -294,6 +333,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = "U_MANAGER_OWNER",
             text = $"claim {claimCode}",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var firstIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", message);
         firstIngress.EnsureSuccessStatusCode();
@@ -354,7 +395,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId = team,
             managerAppId = "A_MANAGER_S0_INGRESS",
             managerBotUserId = "U_MANAGER_S0_INGRESS",
-            managerCredentialRef = credentialRef,
         });
         repeatedSetup.EnsureSuccessStatusCode();
         var repeated = await ReadDataAsync(repeatedSetup);
@@ -405,7 +445,6 @@ public sealed class SlackManagerApplicationSpecs
             workspaceTeamId,
             managerAppId = $"A_MANAGER_{workspaceTeamId}",
             managerBotUserId = $"U_MANAGER_{workspaceTeamId}",
-            managerCredentialRef = $"manager-credential-{workspaceTeamId}",
             transportKind = SlackManagerTransportKind.Socket,
             readiness = SlackManagerReadiness.Ready,
         });

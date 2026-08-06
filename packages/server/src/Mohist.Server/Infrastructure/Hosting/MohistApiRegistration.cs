@@ -46,9 +46,12 @@ public static class MohistApiRegistration
         app.MapSlackInteractionRoutes();
         app.MapSlackManagerRoutes();
         app.MapSlackManagerIngressRoutes();
+        app.MapSlackAdapterLeaseRoutes();
         app.MapAgentLaunchObservationRoutes();
         app.MapRoutingRulesRoutes();
         app.MapWebhookSubscriptionsRoutes();
+        app.MapGitHubConnectionRoutes();
+        app.MapGitHubIngressRoutes();
         app.MapRoutingTestRoutes();
         app.MapAgentSessionListRoutes();
         app.MapAgentSessionContextAssociationRoutes();

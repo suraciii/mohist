@@ -1,21 +1,120 @@
 namespace Mohist.Server.Infrastructure.Security.Secrets;
 
-/// <summary>
-/// Identity of a single encrypted secret. A
-/// <see cref="SecretStoreAddress"/> is the seam the rest of Server uses to
-/// reference a secret — never an internal row id or a raw connection id
-/// alone, so a Connection cannot accidentally read another Connection's
-/// token. <see cref="ProjectId"/> scopes the address to the Agent
-/// project; <see cref="ConnectionId"/> namespaces one Connection's
-/// app/bot pair; <see cref="Kind"/> distinguishes which slot is
-/// addressed.
-/// </summary>
-public readonly record struct SecretStoreAddress(
-    string ProjectId,
-    string ConnectionId,
-    SecretKind Kind)
+public abstract record SecretOwnerAddress
 {
-    public string ProjectId { get; init; } = ProjectId;
-    public string ConnectionId { get; init; } = ConnectionId;
-    public SecretKind Kind { get; init; } = Kind;
+    internal abstract string OwnerKind { get; }
+    internal abstract string OwnerScope { get; }
+    internal abstract string OwnerId { get; }
+
+    public sealed record AgentConnection(string ProjectId, string ConnectionId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.AgentConnection;
+        internal override string OwnerScope => ProjectId;
+        internal override string OwnerId => ConnectionId;
+    }
+
+    public sealed record WebhookSubscription(string ProjectId, string SubscriptionId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.WebhookSubscription;
+        internal override string OwnerScope => ProjectId;
+        internal override string OwnerId => SubscriptionId;
+    }
+
+    public sealed record SlackWorkspaceEnrollment(string EnrollmentId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.SlackWorkspaceEnrollment;
+        internal override string OwnerScope => string.Empty;
+        internal override string OwnerId => EnrollmentId;
+    }
+
+    public sealed record ManagedSlackAgentApp(string AgentAppId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.ManagedSlackAgentApp;
+        internal override string OwnerScope => string.Empty;
+        internal override string OwnerId => AgentAppId;
+    }
+
+    public sealed record GitHubConnection(string ProjectId, string ConnectionId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.GitHubConnection;
+        internal override string OwnerScope => ProjectId;
+        internal override string OwnerId => ConnectionId;
+    }
+}
+
+public static class SecretOwnerKinds
+{
+    public const string AgentConnection = "agent_connection";
+    public const string WebhookSubscription = "webhook_subscription";
+    public const string SlackWorkspaceEnrollment = "slack_workspace_enrollment";
+    public const string ManagedSlackAgentApp = "managed_slack_agent_app";
+    public const string GitHubConnection = "github_connection";
+}
+
+public readonly record struct SecretStoreAddress
+{
+    public SecretStoreAddress(string projectId, string resourceId, SecretKind kind)
+        : this(
+            kind == SecretKind.WebhookSecret
+                ? new SecretOwnerAddress.WebhookSubscription(projectId, resourceId)
+                : new SecretOwnerAddress.AgentConnection(projectId, resourceId),
+            kind)
+    {
+    }
+
+    public SecretStoreAddress(SecretOwnerAddress owner, SecretKind kind)
+    {
+        Owner = owner ?? throw new ArgumentNullException(nameof(owner));
+        Kind = kind;
+        Validate(owner, kind);
+    }
+
+    public SecretOwnerAddress Owner { get; }
+    public SecretKind Kind { get; }
+
+    internal string OwnerKind => Owner.OwnerKind;
+    internal string OwnerScope => Owner.OwnerScope;
+    internal string OwnerId => Owner.OwnerId;
+
+    public static SecretStoreAddress ForAgentConnection(string projectId, string connectionId, SecretKind kind) =>
+        new(new SecretOwnerAddress.AgentConnection(projectId, connectionId), kind);
+
+    public static SecretStoreAddress ForWebhookSubscription(string projectId, string subscriptionId) =>
+        new(new SecretOwnerAddress.WebhookSubscription(projectId, subscriptionId), SecretKind.WebhookSecret);
+
+    public static SecretStoreAddress ForSlackWorkspaceEnrollment(string enrollmentId, SecretKind kind) =>
+        new(new SecretOwnerAddress.SlackWorkspaceEnrollment(enrollmentId), kind);
+
+    public static SecretStoreAddress ForManagedSlackAgentApp(string agentAppId, SecretKind kind) =>
+        new(new SecretOwnerAddress.ManagedSlackAgentApp(agentAppId), kind);
+
+    private static void Validate(SecretOwnerAddress owner, SecretKind kind)
+    {
+        if (string.IsNullOrWhiteSpace(owner.OwnerId))
+            throw new ArgumentException("Secret owner id is required.", nameof(owner));
+        if (owner is SecretOwnerAddress.AgentConnection or SecretOwnerAddress.WebhookSubscription
+            && string.IsNullOrWhiteSpace(owner.OwnerScope))
+            throw new ArgumentException("Project-scoped secret owners require a project id.", nameof(owner));
+
+        var valid = owner switch
+        {
+            SecretOwnerAddress.AgentConnection => kind is SecretKind.AppToken or SecretKind.BotToken,
+            SecretOwnerAddress.WebhookSubscription => kind is SecretKind.WebhookSecret,
+            SecretOwnerAddress.GitHubConnection => kind is SecretKind.WebhookSecret or SecretKind.AppToken,
+            SecretOwnerAddress.SlackWorkspaceEnrollment => kind is SecretKind.ConfigurationAccessToken
+                or SecretKind.ConfigurationRefreshToken
+                or SecretKind.AppToken
+                or SecretKind.BotToken
+                or SecretKind.ClientSecret
+                or SecretKind.SigningSecret
+                or SecretKind.PreviousBotToken
+                or SecretKind.PreviousAppToken
+                or SecretKind.CandidateBotToken
+                or SecretKind.CandidateAppToken,
+            SecretOwnerAddress.ManagedSlackAgentApp => kind is SecretKind.ClientSecret or SecretKind.SigningSecret or SecretKind.AppToken or SecretKind.BotToken or SecretKind.PreviousBotToken or SecretKind.PreviousAppToken or SecretKind.CandidateBotToken or SecretKind.CandidateAppToken,
+            _ => false,
+        };
+        if (!valid)
+            throw new ArgumentException($"Secret kind '{kind}' is not valid for owner '{owner.GetType().Name}'.", nameof(kind));
+    }
 }

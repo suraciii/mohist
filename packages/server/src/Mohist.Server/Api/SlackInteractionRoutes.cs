@@ -4,6 +4,7 @@ using System.Text.Json;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Api;
@@ -22,11 +23,25 @@ public static class SlackInteractionRoutes
             AgentConnectionStore connections,
             SlackTurnControlService controls,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    request?.LeaseId ?? string.Empty,
+                    request?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return ApiResults.Conflict(
+                    "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",
+                    "lease_stale_or_expired");
+            }
             if (request is null)
                 return ApiResults.BadRequest("Interaction is required.", "interaction_missing");
             if (string.IsNullOrWhiteSpace(request.InteractionId)
@@ -38,7 +53,6 @@ public static class SlackInteractionRoutes
                 || string.IsNullOrWhiteSpace(request.ActionValue))
                 return ApiResults.BadRequest("A complete Slack interaction envelope is required.", "invalid_interaction");
 
-            var projectId = http.GetResolvedProject().Id;
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
@@ -85,4 +99,6 @@ public sealed class SlackInteractionRequest
     public string ActorSlackUserId { get; init; } = string.Empty;
     public string ActionId { get; init; } = string.Empty;
     public string ActionValue { get; init; } = string.Empty;
+    public string LeaseId { get; init; } = string.Empty;
+    public string AdapterId { get; init; } = string.Empty;
 }
