@@ -234,7 +234,7 @@ public sealed class CliSlackCommandSpecs
 
         var stdout = output.ToString();
         Assert.Contains("report_socket_hello", stdout, StringComparison.Ordinal);
-        Assert.Contains("https://slack.com/oauth/v2/authorize?client_id=A_1", stdout, StringComparison.Ordinal);
+        Assert.Contains("https://api.slack.com/apps/A_1/oauth", stdout, StringComparison.Ordinal);
         Assert.Contains("Configuration credentials accepted for T_W.", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("Runtime credentials accepted for T_W.", error.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain(configurationToken, stdout, StringComparison.Ordinal);
@@ -469,7 +469,7 @@ public sealed class CliSlackCommandSpecs
 
         Assert.Equal(0, exit);
         var projected = JsonNode.Parse(output.ToString())!.AsObject();
-        Assert.Equal("https://slack.com/oauth/v2/authorize?client_id=A_1", projected["installUrl"]!.GetValue<string>());
+        Assert.Equal("https://api.slack.com/apps/A_1/oauth", projected["installUrl"]!.GetValue<string>());
         Assert.Equal("report_socket_hello", projected["nextAction"]!.GetValue<string>());
         Assert.Equal(2, projected.Count);
         Assert.Equal(string.Empty, error.ToString());
@@ -836,7 +836,7 @@ public sealed class CliSlackCommandSpecs
         Assert.Equal(string.Empty, output.ToString());
         var stderr = error.ToString();
         Assert.Contains("supply_runtime_credentials", stderr, StringComparison.Ordinal);
-        Assert.Contains("https://slack.com/oauth/v2/authorize?client_id=A_1", stderr, StringComparison.Ordinal);
+        Assert.Contains("https://api.slack.com/apps/A_1/oauth", stderr, StringComparison.Ordinal);
         Assert.Contains("--credentials-file", stderr, StringComparison.Ordinal);
         Assert.Contains("mo slack setup", stderr, StringComparison.Ordinal);
     }
@@ -1097,7 +1097,22 @@ public sealed class CliSlackCommandSpecs
     }
 
     [Fact]
-    public async Task ClaimOwner_PrintsServerCodeOnce()
+    public async Task ClaimOwner_PrintsServerCodeOnce_WithAgentBotDmHint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { code = "claim_once", expiresAt = "2026-07-29T10:00:00Z", botName = "Mohist Agent" } })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "claim-owner", "connection_1"], output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(1, Count(output.ToString(), "claim_once"));
+        Assert.Contains("Send the code to the Agent bot DM (Mohist Agent)", error.ToString(), StringComparison.Ordinal);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/claim-owner", handler.Requests.Single().RequestUri?.PathAndQuery);
+    }
+
+    [Fact]
+    public async Task ClaimOwner_WithoutBotName_FallsBackToGenericHint()
     {
         var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { code = "claim_once", expiresAt = "2026-07-29T10:00:00Z" } })));
@@ -1106,8 +1121,7 @@ public sealed class CliSlackCommandSpecs
             ["slack", "claim-owner", "connection_1"], output, error, fs, executor);
 
         Assert.Equal(0, exit);
-        Assert.Equal(1, Count(output.ToString(), "claim_once"));
-        Assert.Equal("/api/projects/proj_abc/slack-connections/connection_1/claim-owner", handler.Requests.Single().RequestUri?.PathAndQuery);
+        Assert.Contains("Send the code to the Agent bot DM to claim ownership.", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1342,7 +1356,7 @@ public sealed class CliSlackCommandSpecs
     private static object EnrollmentProgress(
         string nextAction,
         string? phase = null,
-        string? installUrl = "https://slack.com/oauth/v2/authorize?client_id=A_1",
+        string? installUrl = "https://api.slack.com/apps/A_1/oauth",
         string? errorClass = null) => new
     {
         enrollmentId = "enrollment_1",

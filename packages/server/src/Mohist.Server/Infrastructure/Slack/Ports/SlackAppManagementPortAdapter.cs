@@ -226,9 +226,11 @@ public sealed class SlackAppManagementPortAdapter(
                     .ToArray();
             }
 
-            var installUrl = string.IsNullOrWhiteSpace(clientId)
-                ? null
-                : BuildInstallUrl(clientId, scopes);
+            // The App settings install page is the reliable install entry for an
+            // existing App: an oauth authorize link requires a configured
+            // redirect_urls entry that this self-hosted deployment cannot
+            // promise, and Slack rejects the link without one.
+            var installUrl = $"https://api.slack.com/apps/{appId}/oauth";
             return new SlackAppManagementResult(
                 SlackAppManagementOutcome.Succeeded,
                 appId,
@@ -254,10 +256,6 @@ public sealed class SlackAppManagementPortAdapter(
                 : new SlackAppManifestExport(SlackAppManagementFactOutcome.Present, manifestJson);
         }
     }
-
-    private static string BuildInstallUrl(string clientId, IReadOnlyCollection<string> scopes) =>
-        $"https://slack.com/oauth/v2/authorize?client_id={Uri.EscapeDataString(clientId)}"
-        + (scopes.Count > 0 ? $"&scope={Uri.EscapeDataString(string.Join(",", scopes))}" : string.Empty);
 
     private static string? ReadString(JsonElement root, string propertyName) =>
         root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String

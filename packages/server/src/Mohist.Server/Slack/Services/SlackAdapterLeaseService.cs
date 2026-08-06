@@ -1,3 +1,4 @@
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
@@ -67,7 +68,8 @@ public sealed class SlackAdapterLeaseService(
     ISlackLeaseStore store,
     ISlackLeaseTargetProvider targetProvider,
     ISlackLeaseSecretResolver secretResolver,
-    TimeProvider timeProvider) : IScopedService
+    TimeProvider timeProvider,
+    AgentConnectionStore? connections = null) : IScopedService
 {
     public static readonly TimeSpan ValidationLeaseTtl = TimeSpan.FromMinutes(2);
     public static readonly TimeSpan RuntimeLeaseTtl = TimeSpan.FromMinutes(5);
@@ -319,9 +321,22 @@ public sealed class SlackAdapterLeaseService(
 
         var ttl = active.Kind == SlackLeaseKind.Runtime ? RuntimeLeaseTtl : ValidationLeaseTtl;
         var renewed = await store.RenewAsync(targetRef.TargetKey, leaseId, adapterId, now + ttl, now, ct);
-        return renewed is null
-            ? null
-            : new SlackLeaseRenewalResult(renewed.LeaseId, renewed.Kind, renewed.Generation, renewed.ExpiresAt);
+        if (renewed is null)
+            return null;
+        // A renewed runtime lease is the adapter liveness signal for the
+        // connection diagnostic (SlackSetupVerifier.IsAdapterOnline): the
+        // adapter renews while its Socket is connected, so the heartbeat
+        // follows the lease and flips stale when the adapter stops renewing.
+        if (connections is not null && active.Kind == SlackLeaseKind.Runtime && targetRef is SlackLeaseTargetRef.Connection connectionRef)
+        {
+            await connections.UpdateAsync(
+                connectionRef.ProjectId,
+                connectionRef.ConnectionId,
+                new HashSet<string>(StringComparer.Ordinal) { "lastHeartbeatAt" },
+                lastHeartbeatAt: now,
+                ct: ct);
+        }
+        return new SlackLeaseRenewalResult(renewed.LeaseId, renewed.Kind, renewed.Generation, renewed.ExpiresAt);
     }
 
     private async Task<bool> CredentialGenerationMatchesAsync(

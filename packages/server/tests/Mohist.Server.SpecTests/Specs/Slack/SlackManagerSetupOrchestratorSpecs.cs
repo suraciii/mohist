@@ -77,7 +77,7 @@ public sealed class SlackManagerSetupOrchestratorSpecs : IAsyncLifetime
         Assert.Equal(SlackSetupPhase.AwaitingInstall, configuration.Phase);
         Assert.Equal(SlackSetupNextAction.SupplyRuntimeCredentials, configuration.NextAction);
         Assert.NotNull(configuration.ManagerAppId);
-        Assert.StartsWith("https://slack.com/oauth/v2/authorize", configuration.InstallUrl);
+        Assert.StartsWith("https://api.slack.com/apps/", configuration.InstallUrl);
         Assert.Equal(1, _appManagement.CreateCalls);
 
         await AssertConfigurationSecretsPersistedAsync("T_SETUP");

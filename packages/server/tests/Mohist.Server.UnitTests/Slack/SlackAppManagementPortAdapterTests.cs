@@ -27,7 +27,7 @@ public sealed class SlackAppManagementPortAdapterTests
 
         Assert.Equal(SlackAppManagementOutcome.Succeeded, result.Outcome);
         Assert.Equal("A999", result.AppId);
-        Assert.Equal("https://slack.com/oauth/v2/authorize?client_id=C1&scope=chat%3Awrite%2Cusers%3Aread", result.InstallUrl);
+        Assert.Equal("https://api.slack.com/apps/A999/oauth", result.InstallUrl);
         Assert.Equal("xoxc-1", result.ClientSecret);
         Assert.Equal("sig-1", result.SigningSecret);
         var recorded = Assert.Single(handler.Requests);
@@ -92,7 +92,7 @@ public sealed class SlackAppManagementPortAdapterTests
     }
 
     [Fact]
-    public async Task Create_success_without_credentials_keeps_secrets_null_and_install_url_null()
+    public async Task Create_success_without_credentials_keeps_secrets_null_and_install_url_from_app_id()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""{"ok":true,"app_id":"A7"}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
@@ -102,7 +102,7 @@ public sealed class SlackAppManagementPortAdapterTests
 
         Assert.Equal(SlackAppManagementOutcome.Succeeded, result.Outcome);
         Assert.Equal("A7", result.AppId);
-        Assert.Null(result.InstallUrl);
+        Assert.Equal("https://api.slack.com/apps/A7/oauth", result.InstallUrl);
         Assert.Null(result.ClientSecret);
         Assert.Null(result.SigningSecret);
     }
