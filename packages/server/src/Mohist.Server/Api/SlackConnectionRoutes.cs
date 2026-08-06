@@ -472,39 +472,6 @@ public static class SlackConnectionRoutes
                 ct);
         });
 
-        group.MapPost("/adapter-session", async (
-            HttpContext http,
-            string connectionId,
-            AdapterSessionBody body,
-            AgentConnectionStore connections,
-            ISecretStore secrets,
-            SlackSetupVerifier verifier,
-            OperatorCredential credential,
-            CancellationToken ct) =>
-        {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-            var projectId = http.GetResolvedProject().Id;
-            var connection = await connections.GetAsync(projectId, connectionId, ct);
-            if (connection is null)
-                return ApiResults.NotFound("Slack Connection was not found.");
-            if (connection.DesiredState == DesiredStateKind.Disabled)
-                return ApiResults.Conflict("This Slack Connection is disabled.", "connection_disabled");
-            if (string.IsNullOrWhiteSpace(body?.AdapterId))
-                return ApiResults.BadRequest("adapterId is required.");
-            var appToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.AppToken), ct);
-            var botToken = await secrets.LoadAsync(new SecretStoreAddress(projectId, connectionId, SecretKind.BotToken), ct);
-            if (appToken is null || botToken is null)
-                return ApiResults.Conflict("Configure both Slack credentials before starting the adapter.", "credentials_required");
-            await verifier.RecordAdapterHeartbeatAsync(projectId, connectionId, ct);
-            return ApiResults.Ok(new
-            {
-                adapterId = body.AdapterId,
-                appToken = Encoding.UTF8.GetString(appToken),
-                botToken = Encoding.UTF8.GetString(botToken),
-            });
-        });
-
         group.MapPost("/deliveries/claim", async (
             HttpContext http,
             string connectionId,
@@ -2212,11 +2179,6 @@ public sealed class SlackIngressBody
     public IReadOnlyList<SlackIngressFile> Files { get; init; } = Array.Empty<SlackIngressFile>();
 }
 
-
-public sealed class AdapterSessionBody
-{
-    public string AdapterId { get; init; } = string.Empty;
-}
 
 public sealed class DeliveryClaimBody
 {

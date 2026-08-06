@@ -10,10 +10,11 @@ namespace Mohist.Server.Infrastructure.Hosting;
 /// them as themselves; this explicit registration guarantees route
 /// handlers resolve them by concrete type and collects the control-plane
 /// wiring into a single seam so the CLI/adapter slice can depend on it.
-/// The three outbound Slack ports they call remain <c>Unavailable</c> by
-/// default and are overridden with fakes in tests
-/// (<see cref="ISlackAppManagementPort"/> etc.), so existing fake
-/// substitution is unchanged.
+/// The outbound Slack ports these services call are registered to
+/// production adapters in the main composition (e.g.
+/// <see cref="Mohist.Server.Infrastructure.Slack.Ports.SlackAppManagementPortAdapter"/>
+/// for <see cref="ISlackAppManagementPort"/>); test hosts override the
+/// port interfaces with fakes, which this registration does not disturb.
 /// </summary>
 public static class SlackControlPlaneServiceRegistration
 {

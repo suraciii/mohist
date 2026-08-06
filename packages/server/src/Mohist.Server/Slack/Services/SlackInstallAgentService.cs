@@ -193,45 +193,6 @@ public sealed class SlackInstallAgentService : IScopedService
         return new SlackInstallAgentCredentialResult(true, agentApp.RuntimeCredentialValidationState);
     }
 
-    public async Task<SlackInstallAgentValidationResult> ApplySocketValidationAsync(
-        string agentAppId,
-        string helloAppId,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(agentAppId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(helloAppId);
-
-        var agentApp = await _agentApps.GetAsync(agentAppId, ct)
-            ?? throw new SlackManagerConflictException("The Agent App was not found.", "agent_app_not_found");
-        if (agentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Verified)
-        {
-            var bound = await _binding.ReconcileAsync(agentAppId, ct);
-            return new SlackInstallAgentValidationResult(SlackInstallAgentValidationOutcome.AlreadyVerified, bound.Status);
-        }
-
-        if (!string.Equals(helloAppId, agentApp.AppId, StringComparison.Ordinal))
-        {
-            await RejectOrRestoreAsync(agentApp, ct);
-            return new SlackInstallAgentValidationResult(SlackInstallAgentValidationOutcome.Mismatch);
-        }
-
-        if (agentApp.RuntimeCredentialValidationState == SlackRuntimeCredentialValidationState.Candidate)
-        {
-            await _agentApps.ApplyCredentialValidationAsync(
-                agentAppId, SlackRuntimeCredentialValidationState.AwaitingSocket, ct);
-        }
-        // The confirmed hello promotes the candidate to the runtime pair; the
-        // candidate slot and the previous pair parked by a rotation are no
-        // longer needed. Promote before marking Verified so a crash between
-        // the two can never serve a stale pair from a Verified state.
-        await PromoteCandidateSecretsAsync(agentApp.Id, ct);
-        await DeleteCandidateSecretsAsync(agentApp.Id, ct);
-        await DeletePreviousSecretsAsync(agentApp.Id, ct);
-        await _agentApps.ApplyCredentialValidationAsync(agentAppId, SlackRuntimeCredentialValidationState.Verified, ct);
-        var binding = await _binding.ReconcileAsync(agentAppId, ct);
-        return new SlackInstallAgentValidationResult(SlackInstallAgentValidationOutcome.Verified, binding.Status);
-    }
-
     private async Task<SlackInstallAgentProgress> AdvanceAsync(
         AgentConnection connection,
         ManagedSlackAgentApp agentApp,
@@ -428,20 +389,6 @@ public sealed class SlackInstallAgentService : IScopedService
             ct);
     }
 
-    private async Task PromoteCandidateSecretsAsync(string agentAppId, CancellationToken ct)
-    {
-        var bot = await _secrets.LoadAsync(
-            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateBotToken), ct);
-        var app = await _secrets.LoadAsync(
-            SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.CandidateAppToken), ct);
-        if (bot is not null)
-            await _secrets.StoreAsync(
-                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), bot, ct);
-        if (app is not null)
-            await _secrets.StoreAsync(
-                SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), app, ct);
-    }
-
     private async Task DeleteCandidateSecretsAsync(string agentAppId, CancellationToken ct)
     {
         await _secrets.DeleteAsync(
@@ -582,14 +529,3 @@ public sealed record SlackInstallAgentCredentialResult(
     bool Accepted,
     string RuntimeCredentialValidationState,
     string? ErrorClass = null);
-
-public sealed record SlackInstallAgentValidationResult(
-    SlackInstallAgentValidationOutcome Outcome,
-    SlackAgentAppBindingStatus? Binding = null);
-
-public enum SlackInstallAgentValidationOutcome
-{
-    Verified,
-    AlreadyVerified,
-    Mismatch,
-}
