@@ -236,6 +236,68 @@ public sealed class AgentSessionScheduleGrainSpecs : IClassFixture<AgentSessionG
         Assert.Empty(final.Status.Inputs ?? []);
     }
 
+    [Fact]
+    public async Task RecoveryTick_ActiveSession_AppendsQueuedTurnLikeOrdinaryFollowup()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("recovery-active");
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-existing",
+            "turn-existing",
+            "existing work",
+            "generic-followup"));
+        await grain.MarkTurnExecutingAsync("turn-existing");
+        var created = await grain.CreateScheduleAsync(CreateCommand("wake while busy", _fixture.TimeProvider.GetUtcNow().AddHours(1)));
+        _fixture.TimeProvider.Advance(TimeSpan.FromHours(2));
+
+        await grain.RunScheduledInputRecoveryAsync();
+
+        var state = Assert.IsType<AgentSession>(await LoadAsync(sessionId));
+        var delivered = Assert.IsType<SessionScheduleRecord>(state.FindSchedule(created.Schedule.ScheduleId));
+        Assert.Equal(SessionScheduleStatus.Delivered, delivered.Status);
+        var scheduleInput = state.Status.Inputs!.Single(input => input.Id == delivered.InputId);
+        Assert.Equal("session-schedule", scheduleInput.Source);
+        var scheduleTurn = state.Status.Turns!.Single(turn => turn.InputIds.Contains(delivered.InputId!));
+        Assert.Equal(AgentTurnStatus.Queued, scheduleTurn.Status);
+        Assert.Equal(AgentTurnStatus.Executing, state.Status.Turns!.Single(turn => turn.Id == "turn-existing").Status);
+    }
+
+    [Fact]
+    public async Task RecoveryTick_UnknownActivity_StaysPendingThenDeliversAfterEvidence()
+    {
+        var (grain, sessionId) = await CreateAttachedSessionAsync("recovery-unknown");
+        await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-unknown",
+            "turn-unknown",
+            "unknown work",
+            "generic-followup"));
+        await grain.MarkTurnExecutingAsync("turn-unknown");
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"unknown\",\"status\":\"failed\",\"turnId\":\"turn-unknown\"}") },
+            "runtime-recovery-unknown"));
+        var created = await grain.CreateScheduleAsync(CreateCommand("wait for evidence", _fixture.TimeProvider.GetUtcNow().AddHours(1)));
+        _fixture.TimeProvider.Advance(TimeSpan.FromHours(2));
+
+        await grain.RunScheduledInputRecoveryAsync();
+
+        var state = Assert.IsType<AgentSession>(await LoadAsync(sessionId));
+        var pending = Assert.IsType<SessionScheduleRecord>(state.FindSchedule(created.Schedule.ScheduleId));
+        Assert.Equal(SessionScheduleStatus.PendingDelivery, pending.Status);
+        Assert.DoesNotContain(state.Status.Inputs ?? [], input => input.Source == "session-schedule");
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"idle\",\"status\":\"completed\",\"turnId\":\"turn-unknown\"}") },
+            "runtime-recovery-unknown"));
+        await grain.RunScheduledInputRecoveryAsync();
+
+        state = Assert.IsType<AgentSession>(await LoadAsync(sessionId));
+        Assert.Equal(SessionScheduleStatus.Delivered, state.FindSchedule(created.Schedule.ScheduleId)!.Status);
+        Assert.Single(state.Status.Inputs!, input => input.Source == "session-schedule");
+    }
+
     private async Task<AgentSession?> LoadAsync(string sessionId) =>
         await _fixture.StateStore.LoadAsync(sessionId);
 

@@ -151,8 +151,16 @@ public static class AgentSessionScheduleRoutes
             if (target is null)
                 return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-            var schedules = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ListSchedulesAsync();
-            return ApiResults.Ok(schedules.Select(schedule => ToDto(schedule)).ToArray());
+            try
+            {
+                var schedules = await grains.GetGrain<IAgentSessionGrain>(target.SessionId).ListSchedulesAsync();
+                return ApiResults.Ok(schedules.Select(schedule => ToDto(schedule)).ToArray());
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message.StartsWith($"Agent session {target.SessionId} does not exist", StringComparison.Ordinal))
+            {
+                return ApiResults.NotFound(ex.Message);
+            }
         });
 
         group.MapPost("/{sessionId}/schedules/{scheduleId}/cancel", async (

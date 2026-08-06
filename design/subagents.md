@@ -775,9 +775,9 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 
 ## 状态
 
-交付增量 1–3 已实装：capability declaration 与 launch snapshot、`mo agent spawn`、
-startup-known context、`mo session tree`、terminal callback、cascade stop 与 detach
+交付增量 1–3 与 5 已实装：capability declaration 与 launch snapshot、`mo agent spawn`、
+startup-known context、`mo session tree`、terminal callback、cascade stop、detach 与
+定时输入（SessionSchedule 子记录、API/CLI 命令面、一次性与 recovery reminder 投递）
 均已落地。交付增量 4（Managed worktree）尚未实装：child 仍只继承 parent 的 workDir，
 不接受 `--worktree`/`--work-dir`/`workspacePath` 或任意路径输入；它依赖 Project
-Space/Runner materialization contract，由后续 issue 推进。交付增量 5（Scheduled
-input）本篇已定稿契约，尚未实装，由后续 issue 落地。
+Space/Runner materialization contract，由后续 issue 推进。
