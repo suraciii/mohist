@@ -58,6 +58,12 @@ public sealed class MohistDbFixture : IAsyncLifetime
     public RecordingEventStore EventStore => _eventStore;
 
     /// <summary>
+    /// Fixed clock registered in DI below so services resolved from
+    /// <c>Services</c> never fall through to <c>TimeProvider.System</c>.
+    /// </summary>
+    public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+
+    /// <summary>
     /// Grain factory is not provided by this fixture. Specs that exercise
     /// Orleans grains directly must use <c>WorkflowGrainFixture</c> instead.
     /// Throws to surface the misuse rather than returning a half-working
@@ -96,6 +102,8 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         // Test-only overrides so the fixture doesn't touch the real
         // filesystem or the real env vars.
+        services.RemoveAll<TimeProvider>();
+        services.AddSingleton<TimeProvider>(TimeProvider);
         services.RemoveAll<IFileSystem>();
         services.AddSingleton<IFileSystem, InMemoryServerFileSystem>();
         services.RemoveAll<ISystemUpdateStore>();
