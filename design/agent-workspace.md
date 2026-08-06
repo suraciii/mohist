@@ -4,14 +4,14 @@ status: wip
 
 # Agent 受管工作空间（Managed worktree）
 
-子会话可以请求一个**隔离工作空间**：由 Project Space 定义其来源、由被 pin 的 Runner
-物化、由子 AgentSession 拥有工作目录。它是会话树交付增量 4（Managed worktree）的执行
+子会话可以请求一个**隔离工作空间**：来源由 Project Space 的 Repository 定义、由被 pin 的
+Runner 物化、由子 AgentSession 拥有工作目录。它是会话树交付增量 4（Managed worktree）的执行
 契约，依赖增量 1 的 link/launch 模型与 Runner pinning。
 
 产品行为见 [`../docs/subagents.md`](../docs/subagents.md) 的「实装差距」。会话树的 spawn、
 接受条件、父子 link、terminal callback、cascade stop 与 detach 的完整契约以
-[`subagents.md`](subagents.md) 为唯一权威；本篇只定义隔离工作空间的资源身份、物化契约与
-生命周期，以及它如何接入 spawn。
+[`subagents.md`](subagents.md) 为唯一权威；本篇只定义隔离工作空间的资源身份、物化状态机、
+物化/释放契约与生命周期，以及它如何接入 spawn 的 canonical launch pipeline。
 
 ## 边界与放置
 
@@ -19,15 +19,18 @@ status: wip
 |---|---|---|
 | Repository 资源（gitUrl / baseBranch） | Project Space | 唯一定义工作空间的来源仓库；本篇不新增第二个资源类型 |
 | 工作空间请求意图（mode） | spawn 调用面 | 只能是受约束的 `inherit` / `worktree`，不是路径 |
+| 父工作空间来源 `WorkspaceRepository` | Session context | 父会话 authoritative 工作空间的 Project Repository 资源名；worktree mode 的来源锁 |
 | 子 AgentSession.workDir | Session context | 物化成功后固定为物化路径，不可变 |
 | 物化权威（worktree 落盘、注册表、回收） | Runner | 唯一接触文件系统者 |
 | 物化 binding（哪个 Runner、opaque identity） | Session context | 与 Runtime binding 并列的另一条绑定事实 |
-| binding / activity 裁判 | Server | 决定 workDir、解析 mode、签发物化请求；从不读写文件系统 |
+| 物化状态机（Materialize/ReleaseState） | spawn launch plan | durable，coordinator/abort 在 child Session 创建前即可读取 |
+| binding / activity 裁判 | Server | 决定 workDir、解析 mode 与来源、签发物化请求；从不读写文件系统 |
 
-- **Server 不碰文件系统**：Server 只持久化 Runner 返回的 path 字符串与 opaque identity，
-  从不构造、推导、校验或读写任何工作空间路径。
-- **Runner 不猜身份、不换 Runner**：Runner 用请求携带的 child 身份与 opaque identity 寻址
-  自己物化的 worktree，不从环境、目录扫描或 Runtime Session 反推身份；物化始终在 parent
+- **Server 不碰文件系统**：Server 只持久化 Runner 返回的 path 字符串与 opaque identity，从不构造、
+  推导、校验或读写任何工作空间路径。path 的确定性推导（见下）是 Runner 内部的 registry-loss
+  恢复机制，不是 Server 的构造依据。
+- **Runner 不猜身份、不换 Runner**：Runner 用请求携带的 `ChildSessionId` 与 `WorkspaceIdentity`
+  寻址自己物化的 worktree，不从环境、目录扫描或 Runtime Session 反推身份；物化始终在 parent
   binding 的那个 Runner 上本地完成，child AgentJob 也 pin 到同一个 Runner。
 
 ### 与既有工作空间概念的边界
@@ -38,7 +41,7 @@ status: wip
 | WorkflowRun workspace | `WorkflowRunId` 推导 | Issue 目标 Repository | WorkflowRun 终态 | Runner（`<runnerRoot>/workspaces/<workflowRunId>`） |
 | AgentSession.workDir | Session 不变事实 | launch 时固定 | Session 无终态 | launch 来源决定 |
 | Runtime workspace（如 OpenCode directory Instance） | Runtime 物理资源 | directory = workDir | Runtime 自有 | Runtime adapter |
-| **Managed worktree（本篇）** | child AgentSession | Project Repository + parent revision | 见下「生命周期」 | 被 pin 的 Runner（git worktree） |
+| **Managed worktree（本篇）** | child AgentSession | Project Repository + parent HEAD | 见「生命周期」 | 被 pin 的 Runner（git worktree） |
 
 Managed worktree 不是新的 Project Space 聚合，也不是 Repository 的第二份真源。它是 Runner
 的可重建执行状态，身份由 child AgentSession 推导，配置由 Project Repository 决定——这与
@@ -56,199 +59,336 @@ WorkspaceMode
   worktree  child 请求隔离 worktree（增量 4，由被 pin 的 Runner 物化）
 ```
 
-`inherit` 是增量 1 的既有行为，无物化、无本篇契约。`worktree` 触发本篇的全部契约。其它
+`inherit` 是增量 1 的既有行为，无物化、无本篇状态机。`worktree` 触发本篇的全部契约。其它
 取值一律拒绝；调用面不接受 `workDir`、`workspacePath`、repository 名、base branch、revision
 或任意文件系统路径。
 
-### Managed worktree 身份与配置
+### ChildSessionId 语法与确定性推导
+
+`ChildSessionId` 是 child AgentSession 的稳定身份，由 Server 用系统 ID 语法分配（当前为
+`Guid` 的 32 位小写十六进制 "N" 格式）。Runner 校验 `ChildSessionId` 命中系统 ID 语法
+（`^[0-9a-f]{32}$`），拒绝任何不合规则的 ID——因此路径、分支与 worktree 名**无需 sanitize**，
+直接用原始 `ChildSessionId`。
+
+Runner 对一个 `ChildSessionId` 确定性推导出全部本地坐标（这些是 Runner 内部规则，对 Server
+不透明，Server 不构造它们）：
+
+```text
+WorktreePath(ChildSessionId)   = <runnerRoot>/agent-workspaces/<ChildSessionId>
+WorktreeBranch(ChildSessionId) = mohist/wt-<ChildSessionId>
+WorktreeName(ChildSessionId)   = <ChildSessionId>            # git worktree 名
+WorkspaceIdentity(ChildSessionId) = agent-wt:<ChildSessionId> # 返回给 Server 的 opaque 句柄
+```
+
+因为四者都由 `ChildSessionId` 单值推导，registry 丢失后 Runner 能凭 `ChildSessionId` 重新
+定位 path、重建 identity、并在磁盘上重新校验 worktree（见「Recover」），无需 marker，也不污染
+用户的 working tree。
+
+### Managed worktree 配置与来源
 
 ```text
 ManagedWorkspace
-  ChildSessionId        物化键；child AgentSession 的稳定身份，1:1 对应一个 worktree
-  ParentSessionId       parent AgentSession（其 authoritative workDir 是 worktree 的来源）
-  Repository            Project Repository 的稳定资源名（由 parent 上下文解析，不由 child 选择）
-  BaseRevision          parent 工作空间当前已提交的 HEAD（Runner 在本地读取）
-  WorktreeBranch        mohist/wt-<sanitized ChildSessionId>
+  ChildSessionId        物化键；1:1 对应一个 worktree（workDir 不可变）
+  ParentSessionId       parent AgentSession（其 authoritative workDir 是 worktree 的 git 来源）
+  Repository            Project Repository 快照 { name, gitUrl, baseBranch }（Server 解析后交给 Runner）
+  BaseRevision          parent 工作空间当前已提交的 HEAD（Runner 在物化时本地读取）
 ```
 
-- **身份**：worktree 的逻辑身份是 child AgentSession。`workDir` 在 Session 生命周期内不可变，
-  因此一个 child Session 至多一个 managed worktree。
-- **配置**：repository 与 base revision 都从 parent 的 authoritative 工作空间解析，child 不
-  选择仓库或版本。`inherit` 与 `worktree` 的唯一差别是「是否物化隔离工作树」。
-- **base = parent committed HEAD**：worktree 从 parent 工作空间当前已提交的 HEAD 创建，使
-  child 能在 parent 当前进度上继续工作。未提交的 working tree 改动不进入 worktree。
+- **来源 = Project Repository**：`Repository` 由 Server 从 parent 的 authoritative 工作空间来源
+  解析（见下「WorkspaceRepository」），不是 child 选择。Runner 用它校验 parent workDir 的
+  `origin` 与来源一致（见「物化契约」）。
+- **base = parent committed HEAD**：worktree 从 parent 工作空间物化时刻的已提交 HEAD 创建，使
+  child 能在 parent 当前进度上继续工作。未提交的 working tree 改动不进入 worktree。物化是单次
+  同步操作：Runner 在同一调用内读 HEAD 并创建 worktree 分支，HEAD 读写之间无竞态，无需另设
+  revision 锁。base 与来源一致由「parent workDir 的 `origin` == Repository.gitUrl」保证：parent
+  HEAD 必然是 Project Repository 的一个提交。
 
-### Materialization binding
+### WorkspaceRepository（父工作空间来源锁）
+
+worktree mode 要求 parent 的 authoritative 工作空间是 **Project-backed**。Server 在 spawn 接受
+时从 parent 的来源解析 `WorkspaceRepository`（Project Repository 资源名）：
+
+| parent 来源 | WorkspaceRepository 解析 | worktree mode |
+|---|---|---|
+| Workflow 来源 | `WorkflowRun → Issue.RepositoryName → Project.Repository` | 允许 |
+| managed-worktree child（嵌套 parent） | 该 child Session 创建时记录的 `WorkspaceRepository`（= 其 parent 的） | 允许 |
+| 直接 launch / Agent Connection / 其它无 Project 来源 | 不可解析（`null`） | **拒绝** `parent_workspace_not_project_backed` |
+
+`WorkspaceRepository` 是 AgentSession authoritative 工作空间上下文的扩展字段（在
+[`agent-execution.md`](agent-execution.md) 的不可变 `WorkDir` 之外）：Project-backed Session
+创建时写入，不可变。它把「由 Project Space 定义」落实为一条可校验的来源链——Server 解析
+`Project.Repository(name)` 得到 `{ gitUrl, baseBranch }` 快照交给 Runner，Runner 校验 parent
+workDir 的 `origin` 与该快照一致。Server 不构造 path，只传 repository 标量。
+
+### Materialization binding 与 launch plan 状态机
 
 ```text
-WorkspaceBinding
-  RunnerId              被 pin 的 Runner（= parent binding 的 RunnerId）
-  WorkspaceIdentity     Runner 签发的 opaque 句柄；release/recover/校验用它，不用 childSessionId 反推
-  WorkDir               Runner 返回的物化路径；即 child AgentSession.workDir
+WorkspaceBinding                       # 写入 child AgentSession（物化成功后）
+  RunnerId                             被 pin 的 Runner（= parent binding 的 RunnerId）
+  WorkspaceIdentity                    Runner 签发的 opaque 句柄（= agent-wt:<ChildSessionId>）
+  WorkDir                              Runner 返回的物化路径；即 child AgentSession.workDir
+```
+
+物化进度作为 **durable 字段**持久化在 spawn launch plan 上（由 coordinator 持久化，独立于 child
+Session grain 的创建）。因此 recovery 与 abort 能在 child Session 尚未创建时就读取并重放它们：
+
+```text
+SpawnLaunchPlan（worktree-mode 扩展）
+  WorkspaceMode                inherit | worktree（不可变，属于 request fingerprint）
+  MaterializeState             none | requested | materialized | rejected
+  WorkspaceIdentity?           materialized 时写入
+  MaterializedWorkDir?         materialized 时写入（成为 child workDir）
+  MaterializeRejectionReason?  rejected 时写入
+  ReleaseState                 none | pending | released
 ```
 
 `WorkspaceBinding` 与 [`RuntimeBinding`](agent-execution.md#当前-runtime-binding)（RunnerId +
-runtime + runtimeSessionId）是两条并列的绑定事实：
-
-- `WorkspaceBinding.WorkDir` 是不可变的工作目录；`RuntimeBinding` 是可替换的物理 Session。
-- 两者都指向同一个被 pin 的 Runner：worktree 物化要求 parent Runner 在场，child AgentJob 也
-  pin 到该 Runner（增量 1 第 6 条）。
-- `RuntimeBinding` 的缺失恢复 / Reset 不改变 `WorkDir`；`WorkspaceBinding` 的丢失见「Recover」。
+runtime + runtimeSessionId）是两条并列的绑定事实：`WorkDir` 不可变，`RuntimeBinding` 可替换；
+两者都指向同一个被 pin 的 Runner。
 
 ## Semantics
 
 ### Spawn 工作空间意图
 
-CLI 规范命令（在增量 1 的 spawn 上增加一个受约束开关）：
+CLI：
 
 ```bash
 mo agent spawn <agent-ref> --project <project-id> --parent-session <session-id> \
   --prompt "<brief>" --idempotency-key <key> [--workspace inherit|worktree]
 ```
 
-`--workspace` 省略时为 `inherit`。CLI 不得从工作目录、Runtime Session 或环境猜 mode。
-
-Server 规范调用面：
+`--workspace` 省略时为 `inherit`。Server 调用面：
 
 ```text
 POST /api/projects/{projectRef}/agent-sessions/{parentSessionId}/spawns
 Idempotency-Key: {key}
-
 { "targetAgentRef": "reviewer", "prompt": "...", "workspace": "worktree" }
 ```
 
-`workspace` 可选，默认 `inherit`。body 仍不接受 `workDir`、`workspacePath`、Runner、Runtime 或
-任意路径。
-
 `workspace` 进入 spawn 请求指纹：`SpawnRequestFence.RequestFingerprint` 固定
 `(targetAgentRef, prompt, workspaceMode)`。同 key 同 mode 重放收敛；同 key 异 mode 返回 HTTP 409
-idempotency conflict。
+idempotency conflict。body 不接受 `workDir`、`workspacePath` 或任意路径。
 
 ### 接受条件（worktree mode）
 
-`worktree` mode 在增量 1 的全部接受条件之外，额外要求：
+worktree mode 在增量 1 的全部接受条件之外，额外要求（均为 Server 侧 pre-plan acceptance，不
+触碰文件系统）：
 
-1. 增量 1 第 5、6 条已确认 parent 有 authoritative workDir 与当前可用的 Runtime binding；parent
-   binding 的 Runner 在线。这是物化的前提——parent 工作空间必须存在于被 pin 的 Runner 本地。
-2. parent 的 authoritative workDir 是该 Runner 上一个可物化的工作空间（有 `.git`、可读
-   HEAD）。Server 把 parent workDir 作为权威事实交给 Runner 校验，不自行判断磁盘状态。
-3. 物化请求对被 pin 的 Runner 发起后，必须得到确定结果（见「物化契约」），才能进入后续
-   launch pipeline。
+1. 增量 1 第 5、6 条已确认 parent 有 authoritative workDir 与当前可用的 Runtime binding，parent
+   binding 的 Runner 在线。
+2. parent 的 `WorkspaceRepository` 可解析为 Project Repository（即 parent 是 Project-backed）。
+   不可解析时 terminal pre-plan rejection `parent_workspace_not_project_backed`。
+3. Server 能从该 Project Repository 解析出 `{ name, gitUrl, baseBranch }` 快照。Repository 缺失
+   或不可解析时 terminal pre-plan rejection `workspace_repository_unresolved`。
 
 `inherit` mode 不改变增量 1 的任何接受条件；它不物化，Server 直接用 parent authoritative
-workDir 作为 child workDir。
+workDir 作为 child workDir。parent workDir 是否真为可物化的 git 工作空间、其 `origin` 是否与
+Project Repository 一致，属于物化期 Runner 校验（见下），不是 Server pre-plan acceptance。
 
 ### 物化契约（Server → 被 pin 的 Runner）
 
-物化与释放是 Runner 侧原语，经既有 Runner 命令通道（与 Session command / workspace 查询同一
-SignalR 通道）调用，不是工作 dispatch。它们不进入 poll/pull 调度通道，也不创建第二条 dispatch
-管道。
+物化与释放是 Runner 侧 durable 原语，经既有 Runner 命令通道调用（与 Session command / workspace
+查询同一 RPC 通道），不是工作 dispatch，不进 poll/pull 调度通道。Runner 把 agent worktree 状态
+写入本地 durable 注册表（write-through、原子写、fail-open 可重建），注册表条目即物化/释放的
+幂等记录——不需要第二份 operation log。
 
 #### Request identity 与 idempotency
 
 ```text
 MaterializeAgentWorkspace(request)
-  ChildSessionId     稳定物化键
+  ChildSessionId     稳定物化键（系统 ID 语法）
   ParentWorkDir      parent authoritative workDir（被 pin Runner 上的权威路径）
+  Repository         { name, gitUrl, baseBranch }  Server 解析的 Project Repository 快照
 
-  -> Materialized
-       WorkspaceIdentity   Runner 签发的 opaque 句柄
-       WorkDir             物化路径（写入 child AgentSession.workDir）
-  |  Rejected(reason)      capacity | permission | parent-workspace-unavailable | invalid
-  |  Unknown                超时 / 连接丢失 / 结果无法确认
+  -> Materialized { WorkspaceIdentity, WorkDir }
+  |  Rejected(reason)
+       capacity              Runner 本地工作空间 storage budget 已满（与 workflow workspace 共用同一 budget）
+       permission            Runner 无权在该 root 下创建目录
+       parent-workspace-unavailable   ParentWorkDir 不属于本 Runner、无 .git 或不可读 HEAD
+       repository-mismatch   ParentWorkDir 的 origin != Repository.gitUrl（parent 不是该 Project Repository）
+       invalid               ChildSessionId 不合语法，或 path/branch 校验失败
+  |  Unknown                 超时 / 连接丢失 / 结果无法确认
 ```
 
-- **idempotency**：物化键是 `ChildSessionId`。Runner 用它在自己本地注册表里登记 worktree；
-  同一 `ChildSessionId` 的重复请求返回同一个 `(WorkspaceIdentity, WorkDir)`，不重建第二个
-  worktree。
-- **opaque identity**：`WorkspaceIdentity` 由 Runner 签发，Server 视为不透明句柄，仅用于后续
-  release/recover/校验。Server 不从 `ChildSessionId`、path 或 environment 反推它，也不把它
-  当作第二套实体身份。
+- **幂等键 = `ChildSessionId`**：同一 `ChildSessionId` 的重复请求返回同一个
+  `(WorkspaceIdentity, WorkDir)`，不重建第二个 worktree。
+- **opaque identity**：`WorkspaceIdentity = agent-wt:<ChildSessionId>`（Runner 内部规则）。Server
+  视为不透明句柄，仅用于 release/校验；Server 不从 `ChildSessionId`、path 或 environment 反推它，
+  也不把它当作第二套实体身份。
 - **path 不可由 Server 构造**：`WorkDir` 是 Runner 返回的字符串，Server 持久化它但从不构造、
   校验或读写它指向的目录。
 
-Runner 收到 `MaterializeAgentWorkspace` 后的本地顺序：
+#### 物化期 Runner 校验与本地顺序
+
+Runner 收到 `MaterializeAgentWorkspace` 后的本地顺序（每一步 fail-closed，不静默修复）：
 
 ```text
-validate ParentWorkDir is a workspace this runner owns and that has a readable .git
-head = git -C <ParentWorkDir> rev-parse HEAD          # parent committed HEAD
-path   = <runnerRoot>/agent-workspaces/<sanitized ChildSessionId>
-branch = mohist/wt-<sanitized ChildSessionId>
-git -C <ParentWorkDir> worktree add -B <branch> <path> <head>
-register { ChildSessionId, WorkspaceIdentity, path, branch, ParentWorkDir, phase=active }
-return { WorkspaceIdentity, WorkDir=path }
+require ChildSessionId matches ^[0-9a-f]{32}$
+require ParentWorkDir resolves under <runnerRoot>, no path component is a symlink
+require ParentWorkDir is a workspace this runner owns, with a readable .git
+require (git -C <ParentWorkDir> remote get-url origin) trim== Repository.gitUrl   # else repository-mismatch
+path   = WorktreePath(ChildSessionId)
+branch = WorktreeBranch(ChildSessionId)
+if exists(path):
+    require path under <runnerRoot>/agent-workspaces/, no symlink
+    require <path>/.git is a worktree file whose backing entry name == WorktreeName(ChildSessionId)
+    require current branch == branch
+    require backing parent resolves to a workspace this runner owns
+    re-register { ChildSessionId, identity, path, branch, ParentWorkDir, Repository.name, phase=active }   # adoption
+else:
+    head = git -C <ParentWorkDir> rev-parse HEAD                  # parent committed HEAD
+    git -C <ParentWorkDir> worktree add -B <branch> <path> <head>
+    register { ... phase=active }
+return { WorkspaceIdentity = agent-wt:<ChildSessionId>, WorkDir = path }
 ```
 
-worktree 是 parent 工作空间仓库的一个 linked working tree，共享对象库。`inherit` mode 不调用
-此原语。
+worktree 是 parent 工作空间仓库的一个 linked working tree，共享对象库。任何校验失败都返回
+`Rejected(invalid | repository-mismatch | parent-workspace-unavailable)`，**不修改**已存在目录。
+`inherit` mode 不调用此原语。
 
-#### Fail-closed 矩阵
+### 物化状态机与恢复
 
-Server 必须在以下每种情况 fail-closed，绝不猜测 path、绝不换 Runner、绝不让 child 在未确认
-物化的 workDir 上 dispatch：
+`MaterializeState` 转移（持久化在 launch plan 上）：
 
-| 情形 | Server 行为 |
-|---|---|
-| 物化确定成功 | 记录 `WorkDir` + `WorkspaceBinding`，进入 launch pipeline |
-| 物化 `Rejected`（capacity / permission / parent-workspace-unavailable / invalid） | post-plan 拒绝：Job cancelled、initial Turn cancelled、Session idle、无 link/input/callback；同 key 重放同一拒绝 |
-| 物化 `Unknown`（超时 / 连接丢失 / 结果无法确认） | **不猜 workDir**；保持 request fence 为可重试 observation，同 key 重发同一物化请求；Runner 若已物化则返回既有结果，若未物化则现在物化。绝不创建空 workDir 或回退 `inherit` |
-| 重复请求（同 `ChildSessionId`） | Runner 返回既有 `(WorkspaceIdentity, WorkDir)`；幂等 |
-| Runner 在物化后、dispatch 前离线 | child AgentJob pin 到该 Runner，按普通 dispatch 语义等待 Runner 回归；worktree 已落盘，Runner 回归后注册表重新校验并复用 |
-| 停止竞态：物化已成功但 spawn 被 abort（reservation 被 stop snapshot 拒绝 / parent reset / binding 变更） | Server 以稳定 abort command 向 Runner 发 `ReleaseAgentWorkspace(WorkspaceIdentity)`；release 结果未知时保留为 pending，由 Runner 回收周期兜底，绝不让孤儿 worktree 被静默当作已绑定的 child workDir |
-| 物化前 spawn 被 abort | 不发 release（物化未确定发生）；若有 late 物化，Runner 在 child Session 始终无 binding 时由回收周期识别为孤儿 |
+```text
+none      --(worktree mode, send MaterializeCommand)-->  requested
+requested --(Runner Materialized)-->                    materialized   # 记录 identity + workDir
+requested --(Runner Rejected)-->                        rejected        # 记录 reason（durable terminal）
+requested --(Runner Unknown)-->                         requested       # 可恢复，停留
+```
 
-### Release 与 Recover
+- **物化时机**：在 canonical launch pipeline 中「persist launch plan + reserve EdgeId」之后、
+  「prepare child AgentJob」与「create child AgentSession」之前完成（见
+  [`subagents.md`](subagents.md) 的 launch pipeline）。child workDir 在 Session 创建前就已由物化
+  确定。
+- **Unknown 是 admitted plan 内的可恢复状态**，**不是** SpawnRequestFence 回到 `validation-pending`：
+  plan 已 admitted（immutable），`MaterializeState=requested` 是 plan 内的瞬态。外部观察到的是
+  retryable observation（child 尚未 admitted、也未 rejected）；同 key replay 重发同一 stable
+  `MaterializeCommand`，Runner 幂等返回既有结果或现在物化，收敛到 `materialized` 或 `rejected`。
+- **恢复窗口**（coordinator activation loss / reminder 重放，逐个读 `MaterializeState`）：
+  `none`(worktree) → 发 MaterializeCommand；`requested` → 重发同一 command；`materialized` → 用记录的
+  workDir 继续 pipeline（创建 Session）；`rejected` → 重放 durable 拒绝。
+- 与既有规则兼容：plan immutable；`rejected` 是 durable post-plan terminal（同 key 重放固定结果）；
+  `requested` 是其内的可重放瞬态，不创建 child artifact、不改 fingerprint。
+
+### Release
 
 ```text
 ReleaseAgentWorkspace(request)
-  WorkspaceIdentity   （或等价的 ChildSessionId）
+  ChildSessionId       幂等键
+  WorkspaceIdentity    校验句柄
 
-  -> Released        已标记 eligible 或已删除
-  |  NotFound        该 identity 在本 Runner 无登记（可能从未物化或已回收）
+  -> Released        已标记 eligible 或已删除（含 NotFound）
+  |  NotFound        该 identity 在本 Runner 无登记
   |  Unknown         结果无法确认
 ```
 
-#### 生命周期
+请求**同时**携带 `ChildSessionId`（幂等键）与 `WorkspaceIdentity`（校验句柄）。Runner 校验
+`WorkspaceIdentity == agent-wt:<ChildSessionId>`，不匹配一律拒绝（防错放）。两者是 canonical
+identity 对，不再有「或等价」。
+
+Release 由 **abort** 触发（物化已发生但 plan 被拒绝）。abort 是一条稳定 command，按下面顺序
+收敛，任一步中断后重放同一 abort command 完成剩余：
+
+```text
+1. 把 MaterializeState 收敛到 terminal：
+     requested -> 重发 MaterializeCommand 取得 materialized | rejected
+     (materialized 进入下一步；rejected 无需 release)
+2. 若 materialized：发 ReleaseAgentWorkspace -> ReleaseState pending -> released
+     release Unknown 时保持 pending，由 Runner 回收周期兜底
+3. 收敛 provisional artifacts（reservation rejected、Job cancelled、initial Turn cancelled、
+     Session idle、无 visible link/input/callback）
+```
+
+这处理「物化 late + abort」竞态：abort 先把物化收敛到确定结果，再按结果决定是否 release。
+
+### 生命周期
 
 | 阶段 | 含义 |
 |---|---|
 | `active` | worktree 已物化且其 child AgentSession 仍可能被使用；Runner 禁止自动回收 |
-| `eligible` | Server 已确认 child AgentSession 长时间 idle（无 active/queued Turn，超过保留阈值），或显式 release；Runner 可按 storage budget 回收 |
+| `eligible` | 满足下方 eligible 条件之一；Runner 可按 storage budget 回收 |
 | `stuck` | 回收安全检查确定性拒绝；保留目录与登记，不再自动重试 |
 
-- **创建**：`worktree` mode spawn 被接受后，在 launch pipeline 中「预留 child 身份 → 物化 → 创建
-  child AgentSession(workDir=物化路径)」之间完成。
-- **复用**：child Session 的后续 Turn、follow-up、Compact、Reset 复用同一 workDir（不可变），
-  不重新物化。
-- **隔离**：worktree 在独立路径、独立 `mohist/wt-<childSession>` 分支上；与 parent 工作树物理
+**eligible 条件**（任一满足；`active`/`idle-within-retention`/`unknown` 永不 eligible）：
+
+1. **显式 release**：`ReleaseAgentWorkspace` 被 Runner 确认（Server 对自己的 abort 决定是权威）。
+2. **idle 超过保留阈值**：Server 权威 `activity=idle` 且 `IdleSince` 早于保留阈值。
+3. **orphan 确认**：Server 对该 `ChildSessionId` 返回 `not-found`，且在至少一次后续维护周期
+   recheck 仍为 `not-found`（见下「orphan」）。
+
+- **创建**：worktree mode spawn 在 launch pipeline 的物化步骤完成。
+- **复用**：child Session 的后续 Turn、follow-up、Compact、Reset 复用同一 workDir（不可变），不
+  重新物化。
+- **隔离**：worktree 在独立路径、独立 `mohist/wt-<ChildSessionId>` 分支上；与 parent 工作树物理
   隔离，文件冲突由 parent 分单纪律避免，git 是最终仲裁。
-- **清理/保留**：Runner 的 workspace 维护周期处理 agent worktree，与 workflow workspace 共用
-  周期与 single-flight 约束。eligible 判定权在 Server（activity 权威）：Runner 周期性向 Server
-  查询本地仍 `active` 的 agent worktree 所属 Session 的 activity，镜像 workflow workspace 的
-  status 收敛；idle 超过保留阈值的标记 `eligible`。保留阈值是 Runner 运行参数，不是领域概念。
+- **清理/保留**：Runner 的 workspace 维护周期处理 agent worktree，与 workflow workspace 共用周期、
+  single-flight 约束与本地 **storage budget**。eligible 判定权在 Server（activity 权威）：Runner
+  周期性向 Server 查询本地仍 `active` 的 agent worktree 所属 Session 的 activity，镜像 workflow
+  workspace 的 status 收敛。保留阈值与 storage budget 是 Runner 运行参数，不是领域概念。
 - **detach**：child 从树摘下成为新 root；workDir 不变、worktree 不删、Source 不改。detached
   child 的 worktree 照常按 idle/保留回收。
 - **stop / cascade stop**：停止只结束当前 Turn 的执行，不删 worktree。stop snapshot 内的 child
   按 [`subagents.md`](subagents.md) 的 cascade target 语义处理其 Turn；worktree 保持 `active`
-  直到 idle 超过保留阈值。
-- **terminal**：AgentSession 永不进入 terminal。最接近的终态信号是 child launch 的
-  `ChildLaunchJobId` 进入终态——它触发 terminal report，但**不**单独让 worktree 立即 eligible；
-  worktree 的 eligible 仍由 Session idle/保留决定，保证 Job 终态后的 follow-up 仍能复用 workDir。
+  直到满足 eligible 条件。
+- **terminal**：AgentSession 永不进入 terminal。child launch 的 `ChildLaunchJobId` 终态触发
+  terminal report，但**不**单独让 worktree 立即 eligible——worktree 的 eligible 仍由 idle/保留或
+  orphan 决定，保证 Job 终态后的 follow-up 仍能复用 workDir。
 
-#### Recover（Runner 重启 / worktree 丢失）
+#### Activity 查询与 IdleSince
 
-git worktree 是磁盘文件，Runner 重启后存续。Runner 启动时重读本地注册表并重新校验 worktree：
+Server 是 activity 权威，持有 durable `IdleSince`：Session 上次转入 `idle`（无 active/queued Turn）
+的时间戳，由注入的 `TimeProvider` 写入；`activity` 转回 `active` 时清空。Runner 周期查询本地
+`active` agent worktree 所属 Session 的 activity，Server 对每个 `ChildSessionId` 返回确定形状：
+
+```text
+{ state: active }                 有 active/queued Turn；永不 eligible
+{ state: idle, idleSince }        idle；idleSince 与保留阈值比较
+{ state: not-found }              该 Project 无此 Session（orphan 候选）
+{ state: unknown }                activity 不可确认；永不 eligible，下次再查
+```
+
+`unknown` 永不 eligible（fail-closed）。`IdleSince` 的语义由本文固定，实现者不得自行选择替代字段
+或推断。
+
+#### orphan 与 grace
+
+`not-found` 表示 Server 无该 `ChildSessionId` 的 Session 记录，发生在：spawn abort 于 child
+Session 创建前（物化已发生）、late 物化、或 Session 从未 finalize。为防提前回收 active child 的
+未提交改动，`not-found` **不立即** eligible：
+
+- `not-found` → orphan 候选；Runner 在下一次维护周期 recheck。
+- 连续两次（或配置的 recheck 次数）`not-found` 才 → `eligible`。任一次 recheck 返回
+  `active`/`idle`/`unknown` 即撤销 orphan 候选、回到正常判定。
+- 删除前仍须取得该 directory 的 removal fence（与 workflow workspace 同一机制），确认无活跃
+  Runtime 操作占用目录；fence 失败则 `stuck`。
+
+显式 release（条件 1）不经 grace：Server 对 abort 是权威，release 确认即可 eligible。
+
+#### capacity
+
+`Rejected(capacity)` 指 Runner 本地**工作空间 storage budget** 已满——与 workflow workspace
+retention 共用的同一磁盘 budget，**不是**并发 slot（slot 约束工作 dispatch，与物化无关）。Runner
+在物化前检查新增 worktree 是否超出 budget；超出即 `capacity` 拒绝，spawn 走 post-plan rejection。
+
+### Recover（Runner 重启 / registry 丢失 / worktree 丢失）
+
+git worktree 是磁盘文件，Runner 重启后存续；Runner 注册表是 fail-open 索引（可从磁盘重建）。
+Runner 启动与每次物化/释放都凭 `ChildSessionId` 的确定性推导自愈：
 
 | 磁盘事实 | Runner 行为 |
 |---|---|
-| worktree 完好（`.git` link 有效、parent 仓库在位） | 复用，phase 保持 |
-| parent 仓库已被重建/丢失，worktree `.git` link 失效 | worktree 无效；child AgentJob 下次访问以 `workspace-corrupt` 失败；Server 不重建、不换 Runner |
-| worktree 目录消失 | 视为未物化；若 child 仍 bound，下次访问以 `workspace-missing` 失败 |
+| path 存在且校验通过（`.git` worktree 文件 → 期望 backing entry、branch、containment、非 symlink、parent 属本 Runner） | adoption / re-register，phase 保持 |
+| path 存在但校验不通过（branch/parent/identity 不符、symlink、越出 root） | `Rejected(invalid)`；不修改目录；若属已 bound worktree 则 child 访问以 `workspace-corrupt` 失败 |
+| path 不存在 | 视为未物化；若 child 仍 bound，下次访问以 `workspace-missing` 失败 |
+| parent 仓库被重建/丢失，worktree `.git` backing 失效 | worktree 无效；child AgentJob 以 `workspace-corrupt` 失败 |
 
-- **Server 不重建 worktree**：workDir 不可变，Server 不在另一个 Runner 上重新物化。这与
-  WorkflowRun workspace「损坏或 root 丢失后由 Workflow 重新执行」对称——丢失的 child worktree
-  让 child AgentJob 失败，parent 经 terminal report 自行决定是否重新 spawn。
-- **不跨 Runner 迁移**：物化绑定在被 pin 的 Runner。该 Runner 永久消失时，child workDir 失效，
+- **无 marker**：identity 由 git worktree 自身元数据（`.git` 文件 → parent 的 worktree 列表条目）
+  + 确定性 `WorktreeName(ChildSessionId)` 表达，不向用户 working tree 写 marker。
+- **Server 不重建 worktree**：workDir 不可变，Server 不在另一个 Runner 上重新物化。丢失的 child
+  worktree 让 child AgentJob 失败，parent 经 terminal report 自行决定是否重新 spawn——与
+  WorkflowRun workspace「损坏或 root 丢失后由 Workflow 重新执行」对称。
+- **不跨 Runner 迁移**：物化绑定在被 pin 的 Runner。该 Runner 永久消失时 child workDir 失效，
   child AgentJob 失败；不存在「把 worktree 搬到另一个 Runner」的恢复路径。
 
 #### parent-child 工作空间依赖
@@ -259,7 +399,7 @@ child worktree 是 parent 工作空间仓库的 linked working tree，依赖 par
 
 | parent 清理候选时 | Runner 行为 |
 |---|---|
-| 存在 `active` child worktree 指向该 parent | 推迟 parent 清理，直到所有 child worktree 进入 `eligible`/`stuck` 或被 release |
+| 存在 `active` child worktree 指向该 parent | 推迟 parent 清理，直到所有 child worktree 满足 eligible 或被 release |
 | 无 active child worktree | 按既有 workflow workspace 规则清理 parent |
 
 该依赖完全在 Runner 本地（parent 与 child 在同一被 pin Runner），无需跨 Runner 协调，也无需
@@ -271,67 +411,86 @@ Server 维护父子工作空间拓扑。
 |---|---|
 | spawn body 出现非 `inherit`/`worktree` 的 workspace 值 | terminal pre-plan rejection `invalid-workspace-mode`；不创建 child |
 | 同 key 异 mode 重放 | HTTP 409 idempotency conflict |
-| 物化 `Rejected`（capacity/permission/parent 不可物化） | post-plan rejection，收敛 provisional artifacts，同 key 重放同一拒绝 |
-| 物化 `Unknown` | request fence 保持可重试 observation，同 key 重发；不猜 path、不回退 inherit |
-| 物化后 abort | `ReleaseAgentWorkspace`；release 未知则 pending，回收周期兜底 |
+| parent 非 Project-backed（`WorkspaceRepository` 不可解析） | terminal pre-plan rejection `parent_workspace_not_project_backed` |
+| Project Repository 不可解析 | terminal pre-plan rejection `workspace_repository_unresolved` |
+| 物化 `Rejected(capacity)` | post-plan rejection；同 key 重放同一拒绝 |
+| 物化 `Rejected(repository-mismatch)` | post-plan rejection；parent workDir 的 origin 与 Project Repository 不一致 |
+| 物化 `Rejected(parent-workspace-unavailable \| permission \| invalid)` | post-plan rejection；同 key 重放同一拒绝 |
+| 物化 `Unknown` | `MaterializeState=requested`（admitted plan 内可恢复）；同 key 重发收敛，不猜 path、不回退 inherit、不回 validation-pending |
+| 物化后 abort | abort command 先收敛物化到 terminal，再 `ReleaseAgentWorkspace`；release 未知则 pending，回收周期兜底 |
 | worktree 磁盘损坏/丢失 | child AgentJob `workspace-corrupt`/`workspace-missing` 失败；parent 收 terminal report |
 | 被 pin Runner 永久消失 | child workDir 失效，child AgentJob 失败；不跨 Runner 迁移 |
 | parent 工作空间被重建 | 指向它的 child worktree 失效；按上条处理 |
+| Runner activity 查询返回 `unknown` | worktree 永不 eligible；下次再查 |
+| `not-found` 未经 grace recheck | 不 eligible；连续 recheck 确认后才 eligible |
 
 ## 验证
 
 Server spec 必须以 fake Runner、fake clock 与 in-memory stores 覆盖至少：
 
-- workspace mode 白名单：仅 `inherit`/`worktree` 接受，其它 terminal pre-plan reject；同 key
-  同 mode 重放、同 key 异 mode 409；省略 mode 等价 `inherit`；
+- workspace mode 白名单：仅 `inherit`/`worktree` 接受，其它 terminal pre-plan reject；同 key 同
+  mode 重放、同 key 异 mode 409；省略 mode 等价 `inherit`；
 - `inherit` mode 不触发物化，child workDir = parent authoritative workDir（增量 1 行为不变）；
+- `worktree` mode Project 来源：parent `WorkspaceRepository` 可解析才接受；不可解析
+  (`parent_workspace_not_project_backed` / `workspace_repository_unresolved`) 为 terminal pre-plan
+  rejection；Server 把解析的 Repository 快照交给 Runner；
 - `worktree` mode：Server 向被 pin Runner 发 `MaterializeAgentWorkspace`，child workDir = 返回
-  path，child AgentJob pin 到同一 Runner，且 admission 不会改选其它 eligible Runner；
-- 物化 idempotency：同 `ChildSessionId` 重复请求返回同一 `(identity, path)`；
-- 物化 `Unknown`：Server 不写 workDir、不 dispatch、不回退 `inherit`；同 key 重发后 Runner 返回
-  既有结果时收敛为同一 admitted plan；
-- 物化 `Rejected`：post-plan rejection——Job cancelled、initial Turn cancelled、Session idle、
-  无 visible link/input/callback、replay must-not-submit；
-- 物化后 abort：`ReleaseAgentWorkspace` 以稳定 command 调用；release 未知时保留 pending，不产生
-  孤儿 workDir；
-- Server 永不构造/校验/读写 workDir 指向的目录；Runner 永不从环境或目录扫描猜 identity、永不
-  为 child 选择不同 Runner；
+  path，child AgentJob pin 到同一 Runner，admission 不改选其它 eligible Runner；
+- **durable 状态机**：`MaterializeState` 在 plan 上 none→requested→materialized/rejected 的持久
+  化与恢复；`Unknown` 停留 `requested` 且同 key 重发收敛（不回 validation-pending、不猜 path、不
+  回退 inherit）；coordinator activation loss 在 child Session 创建前能读 `MaterializeState` 并
+  重放；`rejected` 是 durable post-plan terminal；
+- **abort 与 release**：物化后 abort 先收敛物化再 release；release 请求同时带 `ChildSessionId` 与
+  `WorkspaceIdentity` 且校验一致才生效；release 未知保持 pending；物化 late + abort 时 abort
+  command 收敛到确定结果；
+- **registry 丢失 / adoption**：Runner 重启或 registry 丢失后，凭 `ChildSessionId` 重新推导
+  path/identity 并校验磁盘 worktree（containment、非 symlink、`.git` backing、branch、parent）；
+  path 已存在且校验通过则 adoption/re-register，校验不通过则 `Rejected(invalid)` 不修改目录；
+  `ChildSessionId` 不合语法被拒；
+- 物化 `Rejected(capacity)` 与 storage budget 关系；`repository-mismatch`（parent origin !=
+  Repository.gitUrl）；`parent-workspace-unavailable`；
 - 生命周期：创建于 spawn、跨 Turn/follow-up 复用同一 workDir、独立路径与分支；detach/stop 不删
-  worktree；`ChildLaunchJobId` 终态不立即让 worktree eligible（保留 follow-up 复用）；
-- eligible 由 Server activity 权威决定：Runner 周期查询后，idle 超过阈值的标记 eligible，active
-  的保持；parent 工作空间在有 active child worktree 时推迟清理；
-- Runner 重启：worktree 完好则复用；parent 仓库丢失致 `.git` link 失效则 child 访问以
-  `workspace-corrupt` 失败；不跨 Runner 迁移。
+  worktree；`ChildLaunchJobId` 终态不立即 eligible；
+- **activity / orphan**：Runner 周期查询返回 `active`/`idle+idleSince`/`not-found`/`unknown`；
+  `unknown` 永不 eligible；`idle` 超阈值 eligible；`not-found` 需连续 recheck 才 eligible（任一次
+  recheck 非 not-found 即撤销）；显式 release 不经 grace；删除前 removal fence；
+- Server 永不构造/校验/读写 workDir 指向的目录；Runner 永不从环境或目录扫描猜 identity、永不
+  为 child 选择不同 Runner。
 
 ## 交付拆分
 
 后续实现可拆成独立 issue，每个能用一句话说清独立交付价值：
 
 1. **Runner managed-worktree 物化原语**：Runner 实现 `MaterializeAgentWorkspace` /
-   `ReleaseAgentWorkspace`（git worktree of parent 工作空间、opaque identity、本地注册表、
-   idempotency、parent-child 依赖推迟清理），配 fake clock/磁盘的 unit 覆盖。独立价值：Runner
-   具备物化与回收隔离 worktree 的能力，可被任何调用方使用。
-2. **Server spawn workspace mode 与物化接入**：CLI `--workspace`、API body、request fingerprint
-   扩展、`worktree` mode 的接受条件与物化请求/失败收敛、post-plan rejection、Unknown 重试。
-   依赖 1 的原语契约。独立价值：`mo agent spawn --workspace worktree` 端到端可用。
-3. **工作空间生命周期与回收收敛**：Server activity 查询、Runner 周期 eligible 判定、storage
-   budget 回收、release 信号。依赖 1、2。独立价值：managed worktree 不无限堆积，按 idle/保留
-   回收。
+   `ReleaseAgentWorkspace`（确定性 identity/path 推导、Project Repository origin 校验、adoption、
+   durable 注册表、parent-child 依赖推迟清理、storage budget），配 fake clock/磁盘的 unit。独立
+   价值：Runner 具备物化与回收隔离 worktree 的能力。
+2. **Server spawn workspace mode、来源解析与物化状态机**：CLI `--workspace`、API body、request
+   fingerprint、`WorkspaceRepository` 解析与 `parent_workspace_not_project_backed` 拒绝、launch
+   plan 的 `MaterializeState`/`ReleaseState` durable 字段、物化请求/Unknown/Rejected/abort 的
+   recovery 收敛、接入 canonical launch pipeline。依赖 1。独立价值：`mo agent spawn --workspace
+   worktree` 端到端可用且 crash-safe。
+3. **生命周期、activity 查询与 orphan 回收**：Server `IdleSince`、activity 查询响应形状、Runner
+   周期 eligible 判定、orphan grace/recheck、removal fence 接入。依赖 1、2。独立价值：managed
+   worktree 不无限堆积，按 idle/保留/orphan 安全回收。
 
 ## Status
 
 交付增量 4（Managed worktree）**尚未实装**。当前全部代码事实：
 
 - 子会话只继承 parent 的 authoritative workDir（增量 1）。`AgentSpawnAdmission.WorkDir` 取自
-  `parent.Session.Runtime.WorkDir`；spawn body 只接受 `targetAgentRef` 与 `prompt`，无
-  workspace mode。
+  `parent.Session.Runtime.WorkDir`；spawn body 只接受 `targetAgentRef` 与 `prompt`，无 workspace
+  mode。
+- AgentSession 领域无 `WorkspaceRepository` 字段；直接 launch 与 Agent Connection launch 的
+  `WorkspacePath = null`，无 workDir，当前不能作为 parent。
 - Runner 只物化 Issue-backed 的 WorkflowRun workspace（`WorkspaceManager.prepare`，键为
   `workflowRunId`，路径 `<runnerRoot>/workspaces/<workflowRunId>`，marker `{workflowRunId,
-  runBranch}`）。不存在 `git worktree add` 形式的 child 工作空间物化，也没有 agent worktree
-  注册表。
-- 直接 launch 与 Agent Connection launch 的 `WorkspacePath = null`，无 workDir。
+  runBranch}`，ID 校验 `/^wr[-_A-Za-z0-9]+$/`）。不存在 `git worktree add` 形式的 child 工作空间
+  物化，也没有 agent worktree 注册表或 storage budget 共享逻辑。
 - Server→Runner 既有命令通道（`SessionCommand`、workspace 查询、follow-up 投递）可承载新的
   物化/释放原语，但当前不存在该原语。
+- AgentSession activity 只有 `idle`/`active`/`unknown`，无 durable `IdleSince`。
 
-本篇为 spec（目标设计）；以上差距由上述交付拆分的 issue 推进落地，落地后无需改本文。增量 1–3、5
-的契约不受本篇影响，仍以 [`subagents.md`](subagents.md) 为权威。
+本篇为 spec（目标设计）；`WorkspaceRepository`、`IdleSince`、launch plan 物化状态字段、Runner
+agent-worktree 注册表与物化/释放原语均为新增。以上差距由上述交付拆分的 issue 推进落地，落地后
+无需改本文。增量 1–3、5 的契约不受本篇影响，仍以 [`subagents.md`](subagents.md) 为权威。

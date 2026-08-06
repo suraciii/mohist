@@ -267,8 +267,11 @@ workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
 `workspace` mode 只决定 child workDir 的来源，不放松上述任何条件：
 
 - `inherit`（默认）：child workDir = parent authoritative workDir（第 5 条），不物化。
-- `worktree`：在第 5、6 条之上，额外要求向被 pin 的 Runner 物化隔离工作空间，并把物化路径
-  固定为 child workDir。物化的请求身份、opaque identity、fail-closed 语义与生命周期以
+- `worktree`：在第 5、6 条之上，额外要求（a）parent 的 authoritative 工作空间是 Project-backed
+  （其 `WorkspaceRepository` 可解析为 Project Repository），以及（b）向被 pin 的 Runner 物化隔离
+  工作空间并把物化路径固定为 child workDir。parent 非 Project-backed 或 Repository 不可解析为
+  terminal pre-plan rejection（`parent_workspace_not_project_backed` / `workspace_repository_unresolved`）。
+  物化状态机、opaque identity、fail-closed 语义、来源快照校验与生命周期以
   [`agent-workspace.md`](agent-workspace.md) 为唯一权威。两种 mode 都把 child AgentJob pin 到
   parent binding 的 Runner；`worktree` 不换 Runner。
 
@@ -324,24 +327,42 @@ plan。plan 额外持久化：
 - SpawnOrigin：parentSessionId、parent Agent ID、edgeId 和 caller key；
 - parent workDir、pinned RunnerId 与完整 expected parent binding；
 - target 的稳定 ID、展示 snapshot 和 child execution definition；
-- 正常 launch 已有的 Job、Session、Input、Turn identity。
+- 正常 launch 已有的 Job、Session、Input、Turn identity；
+- worktree-mode 扩展：`WorkspaceMode`、`MaterializeState`（none/requested/materialized/rejected）、
+  `WorkspaceIdentity`、`MaterializedWorkDir`、`MaterializeRejectionReason`、`ReleaseState`
+  （none/pending/released）。这些 durable 字段在 child Session 创建前就可被 recovery/abort
+  读取；完整语义与恢复窗口见 [`agent-workspace.md`](agent-workspace.md)。
 
 plan 写入后不重新读取 mutable target Agent 或 parent capability snapshot。它用既有的
 `PrepareJob -> EnsureInitialLaunch -> SubmitJob` fences，并扩展为带 reservation、final check
 和 abort 的单一 launch pipeline：
 
 ```text
-persist request fence with fingerprint
+persist request fence with fingerprint (incl. workspace mode)
   -> pre-plan validation
+       (worktree mode 额外要求 parent WorkspaceRepository 可解析为 Project Repository)
   -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
        or persist launch plan and reserve EdgeId
        at SessionTreeMutationFence
-  -> prepare child AgentJob with pinned RunnerId and inherited workDir
-  -> create child AgentSession + initial SessionInput + initial AgentTurn
-  -> final check reservation, parent workDir, binding and stop admission
+  -> [worktree mode] materialize on pinned Runner:
+       MaterializeState none -> requested -> materialized (record identity + workDir) | rejected (durable);
+       inherit mode skips（child workDir = parent authoritative workDir）。
+       Unknown 保持 MaterializeState=requested；同 key replay 重发同一 stable command 并收敛
+       （不回 validation-pending、不猜 path、不回退 inherit）。
+  -> prepare child AgentJob with pinned RunnerId and child workDir (inherited or materialized)
+  -> create child AgentSession(workDir immutable) + initial SessionInput + initial AgentTurn
+  -> final check reservation, parent workDir, binding, stop admission, and
+       (worktree) MaterializeState terminal
   -> finalize the child-owned SessionParentLink through the fence mutation protocol
   -> submit the same prepared AgentJob to its pinned Runner
 ```
+
+worktree mode 的物化步骤、`MaterializeState`/`ReleaseState` 转移、Unknown 可恢复语义、
+abort/release 重放分支、Project 来源校验与生命周期以 [`agent-workspace.md`](agent-workspace.md)
+为唯一权威。`inherit` mode 不执行物化步骤，child workDir 直接取自 parent authoritative workDir，
+与增量 1 一致。物化状态机是 admitted plan 内的 durable 瞬态/终态：coordinator activation loss
+从 plan 的 `MaterializeState` 重放——`none`(worktree) 发 command、`requested` 重发同一 command、
+`materialized` 用记录 workDir 继续、`rejected` 重放 durable 拒绝。
 
 pre-plan validation 观察到暂时不可用时，`SpawnRequestFence` 保持 `validation-pending`，不持久化
 launch plan、reservation 或 child identity，也不创建 Job、Session、Input、Turn 或 link。同一 key
@@ -377,6 +398,12 @@ abort command 收敛 provisional artifacts：reservation 记为 `rejected`，pre
 AgentSession 仍非终态。已写的 initial Input 只保留作该 rejected plan 的审计，不对普通
 Session 输入、tree 或 launch success 可见。没有 `SessionParentLink`，所以这个取消不是一次
 已接受 delegation 的 terminal report，也绝不向 parent 追加 Input。
+
+worktree mode 的 abort 还须收敛物化（见 [`agent-workspace.md`](agent-workspace.md) 的 Release）：
+abort command 先把 `MaterializeState` 收敛到 terminal（`requested` 则重发 MaterializeCommand 取
+`materialized`/`rejected`），若 `materialized` 则以同时携带 `ChildSessionId` 与
+`WorkspaceIdentity` 的 `ReleaseAgentWorkspace` 释放并把 `ReleaseState` 推进到 `released`；release
+未知则保持 `pending`，由 Runner 回收周期兜底。`inherit` mode 无物化，abort 不涉及 release。
 
 abort 本身可在任一 participant 调用后中断；重放同一 abort command 必须完成其余 participant
 并保留相同 cancelled/rejected 结果。若 rejection 发生在某个 provisional artifact 之前，该
