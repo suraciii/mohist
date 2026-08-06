@@ -319,6 +319,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("LaunchVisibility")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ProjectId")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -329,6 +333,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<long>("Revision")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("PinnedRunnerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("RunningSince")
                         .HasColumnType("TEXT");
@@ -381,6 +389,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("AssignedRunnerId", "Status", "ReadySince")
                         .HasDatabaseName("IX_AgentJobs_AssignedRunnerId_Status_ReadySince");
+
+                    b.HasIndex("PinnedRunnerId", "Status", "ReadySince")
+                        .HasDatabaseName("IX_AgentJobs_PinnedRunner_Status_ReadySince");
+
+                    b.HasIndex("LaunchVisibility", "Status", "ReadySince")
+                        .HasDatabaseName("IX_AgentJobs_LaunchVisibility_Status_ReadySince");
 
                     b.ToTable("AgentJobs", (string)null);
                 });
@@ -1623,6 +1637,37 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/work-type\"')", true);
 
+                    b.Property<string>("ChildLaunchJobId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LaunchVisibility")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentAgentId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentLinkAttachedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ParentLinkAttachedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ParentLinkDetachedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("ParentLinkDetachedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ParentLinkEdgeId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentLinkState")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ParentSessionId")
+                        .HasColumnType("TEXT");
+
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("TEXT");
 
@@ -1692,6 +1737,12 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelProjectId", "LabelSourceKind", "Activity", "CreatedAt")
                         .HasDatabaseName("IX_AgentSessions_StatusProject_SourceKind_Activity_CreatedAt");
+
+                    b.HasIndex("LabelProjectId", "ParentSessionId", "ParentLinkState", "ParentLinkAttachedRevision", "ParentLinkEdgeId")
+                        .HasDatabaseName("IX_AgentSessions_TreeParent_AttachedRevision_Edge");
+
+                    b.HasIndex("LabelProjectId", "LaunchVisibility", "ParentSessionId", "ParentLinkAttachedRevision", "ParentLinkEdgeId")
+                        .HasDatabaseName("IX_AgentSessions_TreeVisibleParent_AttachedRevision_Edge");
 
                     b.ToTable("AgentSessions", (string)null);
                 });
@@ -3671,6 +3722,24 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.SessionTreeGraphRevisionRow", b =>
+                {
+                    b.Property<string>("ProjectId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("PublishedRevision")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PublishedAt")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId");
+
+                    b.ToTable("SessionTreeGraphRevisions");
+                });
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.GitHub.GitHubConnectionRow", b =>
                 {
                     b.Property<string>("Id")
@@ -3776,24 +3845,6 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("GitHubIssueLinks", (string)null);
-                });
-
-            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Sessions.SessionTreeGraphRevisionRow", b =>
-                {
-                    b.Property<string>("ProjectId")
-                        .HasMaxLength(256)
-                        .HasColumnType("TEXT");
-
-                    b.Property<long>("PublishedRevision")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<string>("PublishedAt")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.HasKey("ProjectId");
-
-                    b.ToTable("SessionTreeGraphRevisions");
                 });
 #pragma warning restore 612, 618
         }
