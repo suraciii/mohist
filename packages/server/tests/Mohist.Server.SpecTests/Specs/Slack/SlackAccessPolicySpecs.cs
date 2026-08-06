@@ -30,12 +30,15 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 /// (allowlist, anyone) cannot silently regress the Owner path.
 /// </summary>
 [Collection("MohistIntegration")]
-public sealed class SlackAccessPolicySpecs
+public sealed partial class SlackAccessPolicySpecs
 {
     private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
 
     public SlackAccessPolicySpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+
+    private SlackApiTestScript SlackApi =>
+        _fixture.Services.GetRequiredService<SlackApiTestScript>();
 
     [Fact]
     public async Task New_connection_defaults_to_owner_only_policy()
@@ -280,7 +283,9 @@ public sealed class SlackAccessPolicySpecs
     private static string IngressPath(AgentConnection connection) =>
         $"/api/projects/{connection.ProjectId}/slack-connections/{connection.Id}/ingress";
 
-    private async Task<AgentConnection> CreateConnectionAsync()
+    private async Task<AgentConnection> CreateConnectionAsync(
+        string? accessPolicy = null,
+        IReadOnlyList<string>? allowMembers = null)
     {
         var id = $"connection_{Guid.NewGuid():N}";
         var projectId = $"project_{Guid.NewGuid():N}";
@@ -325,11 +330,30 @@ public sealed class SlackAccessPolicySpecs
             ConnectionHealth = ConnectionHealthKind.Healthy,
             AgentReadiness = AgentReadinessKind.Ready,
             OwnerSlackUserId = "U_OWNER",
+            AccessPolicy = accessPolicy ?? AccessPolicyKind.OwnerOnly,
             LastHeartbeatAt = now,
             CreatedAt = now,
             UpdatedAt = now,
         });
         await db.SaveChangesAsync();
+
+        if (allowMembers is { Count: > 0 })
+        {
+            foreach (var member in allowMembers)
+            {
+                db.SlackConnectionAllowedMembers.Add(new SlackConnectionAllowedMemberRow
+                {
+                    Id = $"slkalm_{Guid.NewGuid():N}",
+                    ProjectId = projectId,
+                    ConnectionId = id,
+                    SlackUserId = member,
+                    WorkspaceTeamId = "T123",
+                    CreatedAt = now,
+                });
+            }
+
+            await db.SaveChangesAsync();
+        }
 
         var agentAppId = $"agent_app_{Guid.NewGuid():N}";
         var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
@@ -358,10 +382,14 @@ public sealed class SlackAccessPolicySpecs
         await db.SaveChangesAsync();
 
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        // The legacy connection-scoped addresses are dead seams: the lease
+        // core and the access decider resolve the AgentApp addresses only.
+        // Distinct values prove the live identity gate uses the verified
+        // Agent App Bot token, never the old project/connection secret.
+        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp-legacy"));
+        await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-legacy"));
         await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
-        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb-verified"));
         var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
         _connectionLeases[id] = leaseId;
         return new AgentConnection

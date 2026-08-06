@@ -225,6 +225,30 @@ public sealed class SlackAdapterLeaseService(
     }
 
     /// <summary>
+    /// Proves the caller still holds the current runtime lease (the same
+    /// fail-closed checks as <see cref="ValidateRuntimeLeaseAsync"/>) and,
+    /// only then, resolves the verified Bot token the lease pins from the
+    /// target's AgentApp secret address. Used by the access decider so the
+    /// live identity gate runs under the same lease fence as every
+    /// adapter-facing route and never falls back to a legacy
+    /// connection-scoped secret address. Returns null on any failure; the
+    /// token never leaves the call chain.
+    /// </summary>
+    public async Task<string?> ResolveRuntimeLeaseBotTokenAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(adapterId))
+            return null;
+
+        if (!await ValidateRuntimeLeaseAsync(operatorId, targetRef, leaseId, adapterId, ct))
+            return null;
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        return target is null ? null : await secretResolver.LoadAsync(target.BotTokenAddress, ct);
+    }
+
+    /// <summary>
     /// Route-level gate for a Manager target addressed by enrollment id (the
     /// manager adapter delivery routes). Resolves the stored workspace team
     /// inside the target provider so the caller never touches storage, then

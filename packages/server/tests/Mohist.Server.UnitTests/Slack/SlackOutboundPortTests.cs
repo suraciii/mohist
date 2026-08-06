@@ -21,6 +21,7 @@ public sealed class SlackOutboundPortTests
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackConfigurationCredentialPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackAppManagementPort).FullName!));
         Assert.NotNull(serverAssembly.GetType(typeof(ISlackBotIdentityVerificationPort).FullName!));
+        Assert.NotNull(serverAssembly.GetType(typeof(ISlackMemberIdentityPort).FullName!));
     }
 
     [Fact]
@@ -47,7 +48,7 @@ public sealed class SlackOutboundPortTests
     }
 
     [Fact]
-    public void Production_adapters_wire_the_three_ports_through_the_transport_only()
+    public void Production_adapters_wire_the_ports_through_the_transport_only()
     {
         var serverAssembly = typeof(ISlackAppManagementPort).Assembly;
         var adapterTypes = new[]
@@ -55,11 +56,13 @@ public sealed class SlackOutboundPortTests
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackAppManagementPortAdapter")!,
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackConfigurationCredentialPortAdapter")!,
             serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackBotIdentityVerificationPortAdapter")!,
+            serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackMemberIdentityPortAdapter")!,
         };
         Assert.Contains(typeof(ISlackAppManagementPort), adapterTypes[0].GetInterfaces());
         Assert.Contains(typeof(ISlackAppManagementFactPort), adapterTypes[0].GetInterfaces());
         Assert.Contains(typeof(ISlackConfigurationCredentialPort), adapterTypes[1].GetInterfaces());
         Assert.Contains(typeof(ISlackBotIdentityVerificationPort), adapterTypes[2].GetInterfaces());
+        Assert.Contains(typeof(ISlackMemberIdentityPort), adapterTypes[3].GetInterfaces());
 
         var transport = serverAssembly.GetType("Mohist.Server.Infrastructure.Slack.Ports.SlackApiTransport")!;
         Assert.Contains(typeof(HttpClient), transport.GetConstructors().SelectMany(ctor => ctor.GetParameters()).Select(parameter => parameter.ParameterType));

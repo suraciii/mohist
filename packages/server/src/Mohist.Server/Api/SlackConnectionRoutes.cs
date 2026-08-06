@@ -401,7 +401,6 @@ public static class SlackConnectionRoutes
             IGrainFactory grains,
             AgentSessionFollowupDispatcher followupDispatcher,
             AgentSessionQuerier sessions,
-            ISecretStore secrets,
             SlackThreadHistoryReader threadHistory,
             IOptions<SlackProviderOptions> slackProviderOptions,
             SlackAdapterLeaseService leases,
@@ -472,7 +471,11 @@ public static class SlackConnectionRoutes
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, attachmentBinder, grains, followupDispatcher,
-                        secrets, threadHistory, slackProviderOptions,
+                        new SlackLeaseContext(
+                            operatorId, body.LeaseId, body.AdapterId,
+                            (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
+                                operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
+                        threadHistory, slackProviderOptions,
                         http.RequestServices),
                     ct);
 
@@ -1405,7 +1408,7 @@ public static class SlackConnectionRoutes
         // no-cache contract.
         var decision = await req.AccessDecider.EvaluateAsync(
             connection, req.SenderSlackUserId, body.TeamId, body.ConversationId,
-            isDirectMessage: false, ct);
+            isDirectMessage: false, req.LeaseContext, ct);
 
         if (mentionedWorkspaceBots.Count >= 2)
         {
@@ -2164,7 +2167,7 @@ internal sealed record HandleChannelIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
-    ISecretStore Secrets,
+    SlackLeaseContext LeaseContext,
     SlackThreadHistoryReader ThreadHistory,
     IOptions<SlackProviderOptions> SlackProviderOptions,
     IServiceProvider Services)
@@ -2189,7 +2192,7 @@ internal sealed record HandleChannelIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
-        ISecretStore secrets,
+        SlackLeaseContext leaseContext,
         SlackThreadHistoryReader threadHistory,
         IOptions<SlackProviderOptions> slackProviderOptions,
         IServiceProvider services) =>
@@ -2197,7 +2200,7 @@ internal sealed record HandleChannelIngressRequest(
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, accessDecider, inbox, outbox,
             launcher, attachmentBinder, grains, followupDispatcher,
-            secrets, threadHistory, slackProviderOptions, services);
+            leaseContext, threadHistory, slackProviderOptions, services);
 }
 
 public sealed class SlackConnectionCreateBody
