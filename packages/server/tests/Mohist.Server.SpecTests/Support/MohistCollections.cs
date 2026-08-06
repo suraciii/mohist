@@ -35,6 +35,9 @@ public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationF
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("IntegrationIssue")]
+public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("IssueLifecycle")]
 public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
 
@@ -53,6 +56,9 @@ public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegratio
 
 [CollectionDefinition("IntegrationRunner")]
 public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("IntegrationMisc")]
+public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + silo, TestClusterPortAllocator-assigned ports). Tests reset the otel
@@ -103,13 +109,11 @@ public class EventPublishingCollection : ICollectionFixture<EventPublishingInteg
 /// <see cref="OtelTestHost"/>'s recorder sees only its own requests.
 /// </para>
 /// <para>
-/// The per-test <see cref="OtelTestHost"/> specs create their own
-/// host, but the full-stack OTel specs need a real silo + web host
-/// and share one <see cref="OtelIntegrationFixture"/> here instead
-/// of each starting its own <c>IClassFixture</c> host: the collection
-/// fixture is created once for the whole collection and reused by
-/// both classes.
+/// No collection-level fixture: each full-stack OTel class owns its
+/// <see cref="OtelIntegrationFixture"/> via
+/// <c>IClassFixture&lt;OtelIntegrationFixture&gt;</c>, and the
+/// per-test <see cref="OtelTestHost"/> specs create their own host.
 /// </para>
 /// </summary>
 [CollectionDefinition("OtelTracing", DisableParallelization = true)]
-public class OtelTracingCollection : ICollectionFixture<OtelIntegrationFixture>;
+public class OtelTracingCollection;

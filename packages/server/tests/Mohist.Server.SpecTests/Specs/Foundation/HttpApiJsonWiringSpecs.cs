@@ -12,7 +12,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Foundation;
 
-[Collection("IntegrationApi")]
+[Collection("IntegrationMisc")]
 public class HttpApiJsonWiringSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

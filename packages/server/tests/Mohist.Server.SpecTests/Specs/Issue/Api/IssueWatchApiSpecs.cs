@@ -18,7 +18,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 ///
 /// Spec: <c>openspec/changes/issue-489/specs/issue-watch/spec.md</c>.
 /// </summary>
-[Collection("IssueLifecycle")]
+[Collection("IntegrationIssue")]
 public class IssueWatchApiSpecs
 {
     private readonly HttpClient _client;

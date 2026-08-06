@@ -19,7 +19,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 /// before start, post-start lock rejection, list filtering by stored
 /// name (case-insensitive), and detail output identity.
 /// </summary>
-[Collection("IssueLifecycle")]
+[Collection("IntegrationIssue")]
 public class IssueRepositoryBindingApiSpecs
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)

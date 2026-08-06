@@ -26,7 +26,7 @@ namespace Mohist.Server.SpecTests.Specs.SystemSpecs.Otel;
 /// across all segments" requirement.
 /// </summary>
 [Collection("OtelTracing")]
-public class OtelExecutionChainTracingSpecs
+public class OtelExecutionChainTracingSpecs : IClassFixture<OtelIntegrationFixture>
 {
     private readonly OtelIntegrationFixture _fixture;
 
