@@ -398,6 +398,128 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
         Assert.Equal(firstInputId, Assert.Single(turnAfterReplay.InputIds));
     }
 
+    [Fact]
+    public async Task AcceptedChildCancelledWhileProvisional_StagesExactlyOneTerminalEvent_AndPromotionOrReplayNeverDuplicates()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var projectId = $"project-terminal-provisional-{suffix}";
+        var childSessionId = $"child-session-provisional-{suffix}";
+        var childLaunchJobId = $"child-launch-job-provisional-{suffix}";
+        var parentSessionId = $"parent-session-provisional-{suffix}";
+        var edgeId = $"edge-provisional-{suffix}";
+        var initialInputId = $"child-input-provisional-{suffix}";
+        var initialTurnId = $"child-turn-provisional-{suffix}";
+
+        var child = await OpenSessionAsync(projectId, childSessionId, "child-agent");
+        var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+            $"attach-provisional-{suffix}",
+            edgeId,
+            parentSessionId,
+            "parent-agent",
+            childLaunchJobId,
+            1,
+            "/workspace",
+            "runner-1",
+            "opencode",
+            "runtime-session",
+            projectId,
+            1,
+            "standalone-receipt",
+            SessionTreeExpectedLinkState.Absent));
+        Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
+        await child.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            initialInputId,
+            initialTurnId,
+            "child work",
+            "agent-launch",
+            childLaunchJobId,
+            Runtime: "opencode",
+            WorkDir: "/workspace",
+            AgentSessionStartup: new AgentSessionStartup(
+                projectId,
+                childSessionId,
+                parentSessionId,
+                [],
+                "spawn-agent",
+                "/workspace",
+                "runner-1",
+                "child-agent",
+                "Child Agent")));
+
+        var job = JobGrain(childLaunchJobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            SessionId: childSessionId,
+            InputId: initialInputId,
+            TurnId: initialTurnId,
+            Prompt: "child work",
+            ProjectId: projectId,
+            AgentId: "child-agent",
+            AgentSessionStartup: new AgentSessionStartup(
+                projectId,
+                childSessionId,
+                parentSessionId,
+                [],
+                "spawn-agent",
+                "/workspace",
+                "runner-1",
+                "child-agent",
+                "Child Agent"),
+            SpawnOrigin: new AgentJobSpawnOrigin(
+                parentSessionId,
+                "parent-agent",
+                edgeId,
+                childSessionId,
+                childLaunchJobId,
+                initialTurnId)));
+
+        // The stop sub-operation cancels the queued initial job while the
+        // accepted launch is still provisional (link committed, promotion
+        // pending). The accepted child must still owe its terminal callback.
+        var cancelled = await job.CancelAsync();
+        Assert.Equal(AgentJobCancelDisposition.Cancelled, cancelled.Disposition);
+        Assert.Equal(AgentJobStatus.Cancelled, await job.GetStatusAsync());
+
+        var terminal = Assert.Single(_fixture.EventStore.Appended, evt =>
+            evt.Envelope.Type == ChildTerminalEventType
+            && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{childLaunchJobId}");
+        Assert.Equal("cancelled", terminal.Envelope.Data!.Value.GetProperty("status").GetString());
+
+        // Coordinator recovery promotes the accepted launch after the stop;
+        // the promotion must not stage or emit a second terminal event.
+        await job.PromotePreparedLaunchAsync();
+        Assert.Equal(AgentJobStatus.Cancelled, await job.GetStatusAsync());
+        Assert.Single(_fixture.EventStore.Appended, evt =>
+            evt.Envelope.Type == ChildTerminalEventType
+            && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{childLaunchJobId}");
+
+        // Replays of the stop's cancel and a submit retry keep the durable
+        // terminal result: the job is the must-not-submit gate and never
+        // dispatches to a runner.
+        var replayCancel = await job.CancelAsync();
+        Assert.Equal(AgentJobCancelDisposition.AlreadyEnded, replayCancel.Disposition);
+        await job.SubmitPreparedLaunchAsync();
+        var snapshot = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(AgentJobStatus.Cancelled, snapshot.Status);
+        Assert.Null(snapshot.RunnerId);
+        Assert.Null(snapshot.CurrentWorkId);
+        Assert.Single(_fixture.EventStore.Appended, evt =>
+            evt.Envelope.Type == ChildTerminalEventType
+            && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{childLaunchJobId}");
+
+        var parent = await OpenSessionAsync(projectId, parentSessionId, "parent-agent");
+        var handler = BuildTerminalHandler();
+        await handler.HandleAsync(terminal.Envelope, CancellationToken.None);
+        var turns = await parent.ListTurnsAsync();
+        var turn = Assert.Single(turns);
+        var inputId = Assert.Single(turn.InputIds);
+
+        await handler.HandleAsync(terminal.Envelope, CancellationToken.None);
+        var turnsAfterReplay = await parent.ListTurnsAsync();
+        var turnAfterReplay = Assert.Single(turnsAfterReplay);
+        Assert.Equal(turn.Id, turnAfterReplay.Id);
+        Assert.Equal(inputId, Assert.Single(turnAfterReplay.InputIds));
+    }
+
     private AgentJobSubagentTerminalHandler BuildTerminalHandler() =>
         new(_fixture.Grains, NullLogger<AgentJobSubagentTerminalHandler>.Instance);
 

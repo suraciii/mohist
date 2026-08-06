@@ -1,4 +1,8 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Subscriptions;
+using Mohist.Server.Api;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -108,6 +112,121 @@ public sealed class SessionTreeLifecycleTerminalSpecs
                 13));
         Assert.Equal(SessionTreeDetachMutationState.Rejected, reparent.State);
         Assert.Equal("parent_link_identity_mismatch", reparent.RejectionReason);
+    }
+
+    [Fact]
+    public async Task StopCancelledAcceptedChildBeforePromotion_StillDeliversExactlyOneTerminalReport()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var projectId = $"project-stop-provisional-{suffix}";
+        var parentSessionId = $"parent-stop-provisional-{suffix}";
+        var childSessionId = $"child-stop-provisional-{suffix}";
+        var edgeId = $"edge-stop-provisional-{suffix}";
+        var childLaunchJobId = $"job-stop-provisional-{suffix}";
+        var initialInputId = $"input-stop-provisional-{suffix}";
+        var initialTurnId = $"turn-stop-provisional-{suffix}";
+
+        var parent = await OpenSessionAsync(projectId, parentSessionId, "parent-agent");
+        var child = await OpenSessionAsync(projectId, childSessionId, "child-agent");
+        var attached = await child.ApplyParentLinkAttachAsync(new ApplyParentLinkAttachCommand(
+            $"attach-stop-provisional-{suffix}",
+            edgeId,
+            parentSessionId,
+            "parent-agent",
+            childLaunchJobId,
+            1,
+            "/workspace",
+            "runner-1",
+            "opencode",
+            "runtime-session",
+            projectId,
+            1,
+            "standalone-receipt",
+            SessionTreeExpectedLinkState.Absent));
+        Assert.Equal(SessionTreeAttachMutationState.Attached, attached.State);
+        await child.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            initialInputId,
+            initialTurnId,
+            "child work",
+            "agent-launch",
+            childLaunchJobId,
+            Runtime: "opencode",
+            WorkDir: "/workspace",
+            AgentSessionStartup: new AgentSessionStartup(
+                projectId,
+                childSessionId,
+                parentSessionId,
+                [],
+                "spawn-agent",
+                "/workspace",
+                "runner-1",
+                "child-agent",
+                "Child Agent")));
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(childLaunchJobId);
+        await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
+            SessionId: childSessionId,
+            InputId: initialInputId,
+            TurnId: initialTurnId,
+            Prompt: "child work",
+            ProjectId: projectId,
+            AgentId: "child-agent",
+            AgentSessionStartup: new AgentSessionStartup(
+                projectId,
+                childSessionId,
+                parentSessionId,
+                [],
+                "spawn-agent",
+                "/workspace",
+                "runner-1",
+                "child-agent",
+                "Child Agent"),
+            SpawnOrigin: new AgentJobSpawnOrigin(
+                parentSessionId,
+                "parent-agent",
+                edgeId,
+                childSessionId,
+                childLaunchJobId,
+                initialTurnId)));
+
+        // The stop sub-operation runs the same queued-turn control the
+        // SessionTreeStopTargetAdapter uses for an attached-but-unsubmitted
+        // child: the session refuses to cancel the launch turn itself, and
+        // the durable AgentJob is cancelled instead.
+        var cancelled = await AgentSessionTurnControlOperations.CancelAsync(
+            _fixture.Grains, childSessionId, initialTurnId);
+        Assert.Equal(TurnControlResultKind.Cancelled, cancelled.Kind);
+        Assert.Equal(AgentJobStatus.Cancelled, await job.GetStatusAsync());
+        var turn = await child.ResolveTurnControlAsync(initialTurnId);
+        Assert.Equal(AgentTurnStatus.Cancelled, turn!.Status);
+
+        // Coordinator recovery promotes the accepted launch; the terminal
+        // report still resolves exactly once on the child-owned link.
+        await job.PromotePreparedLaunchAsync();
+        var envelope = Assert.Single(_fixture.EventStore.Appended, evt =>
+            evt.Envelope.Type == "com.mohist.agent.job.subagent-terminal"
+            && evt.Envelope.Source.ToString() == $"/mohist/agent-job/{childLaunchJobId}").Envelope;
+        var handler = new AgentJobSubagentTerminalHandler(
+            _fixture.Grains, NullLogger<AgentJobSubagentTerminalHandler>.Instance);
+
+        await handler.HandleAsync(envelope, CancellationToken.None);
+        var delivered = await child.ClaimSubagentTerminalReportAsync(
+            new ClaimSubagentTerminalReportCommand(edgeId, childLaunchJobId));
+        Assert.Equal(SubagentTerminalReportClaimDisposition.Delivered, delivered.Disposition);
+        Assert.NotNull(delivered.DeliveredInputId);
+        Assert.Equal(
+            delivered.DeliveredInputId,
+            Assert.Single(Assert.Single(await parent.ListTurnsAsync()).InputIds));
+
+        // Handler replay and report replay converge to the same delivered
+        // input: exactly one callback for the stop-cancelled accepted child.
+        await handler.HandleAsync(envelope, CancellationToken.None);
+        Assert.Equal(
+            delivered.DeliveredInputId,
+            Assert.Single(Assert.Single(await parent.ListTurnsAsync()).InputIds));
+        var deliveredReplay = await child.RecordSubagentTerminalReportDeliveredAsync(
+            new RecordSubagentTerminalReportDeliveredCommand(
+                edgeId, childLaunchJobId, delivered.DeliveredInputId!));
+        Assert.Equal(SubagentTerminalReportDeliveryDisposition.AlreadyDelivered, deliveredReplay.Disposition);
     }
 
     private async Task<IAgentSessionGrain> OpenChildAsync(string suffix)

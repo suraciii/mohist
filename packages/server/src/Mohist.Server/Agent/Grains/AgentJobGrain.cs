@@ -1665,13 +1665,17 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         if (status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
             || State.Input?.SpawnOrigin is null
-            || State.LaunchVisibility != AgentLaunchVisibility.Visible
+            || State.LaunchVisibility == AgentLaunchVisibility.Rejected
             || State.PendingSubagentTerminalEvent is not null)
             return;
 
-        // Only an accepted (visible) delegation owes a terminal callback;
-        // a provisional or rejected launch was never attached to a parent
-        // SessionParentLink, so a cancelled job here must stay silent.
+        // Rejected marks a pre-acceptance abort: the child launch was never
+        // attached to a parent SessionParentLink, so a cancelled job there
+        // stays silent. Any other visibility owes the parent a callback once
+        // the delegation is accepted: a cascade stop can cancel the queued
+        // initial turn/job of an accepted child while the coordinator still
+        // recovers between link commit and promotion (Provisional), and that
+        // cancelled result must still follow normal terminal-report rules.
         State.PendingSubagentTerminalEvent = new PendingSubagentTerminalEvent(
             AgentJobSessionDeliveryIds.SubagentTerminalEventId(Key),
             State.Input.SpawnOrigin,
