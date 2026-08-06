@@ -8,6 +8,7 @@ import { WorkspaceRegistry } from "./workspace-registry.js"
 import { AgentWorkspaceRegistry, type AgentWorkspaceRegistryEntry } from "./agent-workspace-registry.js"
 import { AgentWorkspaceManager } from "./agent-workspace.js"
 import { AgentCleanupRunner } from "./agent-workspace-cleanup.js"
+import { AgentWorkspaceIdleProbe } from "./agent-workspace-idle.js"
 import { WorkspaceSourceConfirmer, createServerConnectionWorkspaceSourceReporter } from "./workspace-source.js"
 import {
   createAgentSessionRuntimeEventOutbox,
@@ -127,6 +128,7 @@ export class RunnerHost {
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
   private readonly agentCleanupLoop: CleanupLoop<AgentWorkspaceRegistryEntry>
+  private readonly agentWorkspaceIdleProbe: AgentWorkspaceIdleProbe
   private readonly cleanupConvergenceIntervalMs: number
   private readonly cleanupLoopIntervalMs: number
   private cleanupInFlight: Promise<void> | null = null
@@ -232,6 +234,10 @@ export class RunnerHost {
       options.runnerRoot,
       () => this.openCodeRuntime,
     )
+    this.agentWorkspaceIdleProbe = new AgentWorkspaceIdleProbe({
+      registry: this.agentWorkspaceRegistry,
+      connection: this.connection,
+    })
     this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
@@ -425,6 +431,19 @@ export class RunnerHost {
       }
       const policy = await this.connection.fetchConfig(signal)
       this.lastCleanupPolicy = policy
+      // Server-authoritative idle probe: transition active managed
+      // worktrees to eligible when the session is confirmed idle past
+      // the retention window, before the agent cleanup pass consumes
+      // the newly-eligible set. Best-effort: a probe failure must not
+      // abort the existing retention / budget passes.
+      try {
+        const idle = await this.agentWorkspaceIdleProbe.runOnce(policy, signal)
+        if (idle.markedEligible > 0) {
+          cleanupLog.info("agent workspace idle probe marked eligible", { count: idle.markedEligible })
+        }
+      } catch (error) {
+        cleanupLog.warn("agent workspace idle probe failed", { exception: error })
+      }
       // Agent worktrees first: an eligible child worktree must be
       // removed before its parent can be (the parent's removal is
       // deferred while an active child depends on it). The agent loop
