@@ -57,7 +57,8 @@ public sealed class AgentSpawnAdmissionService(
     AgentQuerier agents,
     AgentReadinessService readiness,
     AgentExecutionSnapshotResolver snapshots,
-    IGrainFactory grains) : IScopedService
+    IGrainFactory grains,
+    ISessionTreeMutationFenceReadPort fenceReadPort) : IScopedService
 {
     public async Task<SpawnRequestFence> StartOrValidateFenceAsync(
         string projectId,
@@ -145,6 +146,12 @@ public sealed class AgentSpawnAdmissionService(
         if (runnerInfo is null || runnerState.Status != RunnerStatus.Online)
             throw new AgentSpawnValidationPendingException("parent_runner_binding_unavailable");
 
+        var mutationFence = await fenceReadPort.GetAsync(projectId);
+        if (mutationFence.ReconciliationRequired)
+            return await RejectAsync(fence, "session_tree_reconciliation_required");
+        if (HasNonTerminalStopBlockingSpawn(mutationFence, parentSessionId))
+            throw new AgentSpawnValidationPendingException("parent_tree_stop_in_progress");
+
         var allowed = definition.AllowedSubagents ?? [];
         if (!allowed.Any(item => string.Equals(item.AgentId, targetAgentRef, StringComparison.Ordinal)))
         {
@@ -180,6 +187,21 @@ public sealed class AgentSpawnAdmissionService(
             runtime,
             runtimeSessionId,
             parent.Session.BindingEpoch);
+    }
+
+    private static bool HasNonTerminalStopBlockingSpawn(
+        SessionTreeMutationFence fence,
+        string parentSessionId)
+    {
+        if (fence.StopSnapshots is not { Count: > 0 } snapshots)
+            return false;
+        if (snapshots.Any(item => item.Phase == SessionTreeStopSnapshotPhase.Materializing))
+            return true;
+        return snapshots.Any(item =>
+            item.Phase == SessionTreeStopSnapshotPhase.Frozen
+            && item.AdmissionOutcome is SessionTreeStopAdmissionOutcome.Running
+                or SessionTreeStopAdmissionOutcome.Unknown
+            && item.Membership.Any(member => member.SessionId == parentSessionId));
     }
 
     private static async Task<AgentSpawnAdmission> RejectAsync(
