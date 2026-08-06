@@ -616,8 +616,8 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 
 ## 状态
 
-本设计尚未实装。当前 Agent launch coordinator 已有 idempotent prepare / initial launch /
-submit recovery，AgentJob 已是 launch work 的 terminal authority，AgentSession 已有
-SessionInput、AgentTurn 与 turn-control 基础；它们是上述增量应扩展的既有边界。当前并无
-SessionParentLink、spawn API、tree index、terminal callback、cascade operation、detach 或
-managed worktree materialization。
+交付增量 1–3 已实装：capability declaration 与 launch snapshot、`mo agent spawn`、
+startup-known context、`mo session tree`、terminal callback、cascade stop 与 detach
+均已落地。交付增量 4（Managed worktree）尚未实装：child 仍只继承 parent 的 workDir，
+不接受 `--worktree`/`--work-dir`/`workspacePath` 或任意路径输入；它依赖 Project
+Space/Runner materialization contract，由后续 issue 推进。
