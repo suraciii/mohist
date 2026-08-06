@@ -372,6 +372,15 @@ operator-authenticated loopback transport 发现目标和续租；lease response
 新的 adapter 可以在旧 lease 失效后接管。Mohist App 的 runtime ingress 路由到受限管理 actor，
 而不是普通 Agent Connection 访问策略。
 
+lease 记录在签发时钉住它签发的凭据代际（凭据的 SHA-256 指纹，不是明文也不是可逆派生值）：
+validation lease 钉住候选 App-level token，runtime lease 钉住 verified pair。候选被重供或
+verified pair 被轮换后，旧 lease 的 renew 与 hello 一律 fail closed（renew 拒绝、hello 返回 stale，
+且旧 token 的 hello 不得触发对新 candidate 的 reject/删除），holder 必须重新 acquire 拿新凭据。
+acquire 在写入 lease store 之前完成 secret 解析与目标状态复检：解析失败、candidate 缺失或目标已
+离开 leasable 状态时，不签发 lease，也不挤掉现有 holder（失败路径不留下 inert active lease）。
+promote 崩溃窗口（candidate 已清理但未标 Verified）下目标停留在 AwaitingSocket，validation
+acquire 干净失败，operator 重供候选后同一 hello 流程可收敛。
+
 Socket envelope 必须携带并校验 `api_app_id + team_id`，再反查 enrollment 或 Connection；未知
 App/team 只确认并拒绝，不按 Bot 名称路由。ack 仍只表示 Server durable accept，不能等待 Agent
 执行完成。

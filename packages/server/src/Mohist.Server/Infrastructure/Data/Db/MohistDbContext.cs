@@ -1740,6 +1740,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.LeaseId).HasMaxLength(64);
             entity.Property(e => e.LeaseKind).HasMaxLength(32);
             entity.Property(e => e.AdapterId).HasMaxLength(256);
+            entity.Property(e => e.CredentialFingerprint).HasMaxLength(64);
             entity.Property(e => e.UpdatedAt).IsRequired();
         });
     }

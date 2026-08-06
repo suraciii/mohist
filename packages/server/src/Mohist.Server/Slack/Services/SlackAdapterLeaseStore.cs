@@ -7,6 +7,9 @@ namespace Mohist.Server.Slack.Services;
 /// The active lease as the durable authority records it. Carries no target
 /// and no secrets; the caller already knows the target, and secrets are
 /// resolved separately into lease <em>response</em> DTOs only.
+/// <see cref="CredentialFingerprint"/> is the one-way fingerprint of the
+/// credential generation this lease was issued against; it is fencing
+/// metadata, never the secret itself.
 /// </summary>
 public sealed record SlackLeaseRecord(
     string LeaseId,
@@ -14,7 +17,8 @@ public sealed record SlackLeaseRecord(
     int Generation,
     string AdapterId,
     DateTimeOffset IssuedAt,
-    DateTimeOffset ExpiresAt);
+    DateTimeOffset ExpiresAt,
+    string? CredentialFingerprint);
 
 /// <summary>
 /// Durable, per-target authority for Socket lease generation fencing. Every
@@ -26,6 +30,9 @@ public interface ISlackLeaseStore
     /// <summary>
     /// Issues a new lease, bumping the target generation. Any prior lease is
     /// superseded; its lease id becomes stale and cannot renew.
+    /// <paramref name="credentialFingerprint"/> pins the credential
+    /// generation the lease was issued against so renewal and hello can fail
+    /// closed once the credential is resupplied.
     /// </summary>
     Task<SlackLeaseRecord> IssueAsync(
         string targetKey,
@@ -33,6 +40,7 @@ public interface ISlackLeaseStore
         string adapterId,
         DateTimeOffset expiresAt,
         DateTimeOffset now,
+        string? credentialFingerprint,
         CancellationToken ct = default);
 
     /// <summary>
@@ -77,7 +85,8 @@ public sealed class InMemorySlackLeaseStore : ISlackLeaseStore
     private int _counter;
 
     public Task<SlackLeaseRecord> IssueAsync(
-        string targetKey, string kind, string adapterId, DateTimeOffset expiresAt, DateTimeOffset now, CancellationToken ct = default)
+        string targetKey, string kind, string adapterId, DateTimeOffset expiresAt, DateTimeOffset now,
+        string? credentialFingerprint, CancellationToken ct = default)
     {
         lock (_gate)
         {
@@ -88,7 +97,7 @@ public sealed class InMemorySlackLeaseStore : ISlackLeaseStore
                 _entries[targetKey] = entry;
             }
             entry.Generation++;
-            entry.Lease = new ActiveLease(leaseId, kind, entry.Generation, adapterId, now, expiresAt);
+            entry.Lease = new ActiveLease(leaseId, kind, entry.Generation, adapterId, now, expiresAt, credentialFingerprint);
             return Task.FromResult(ToRecord(entry.Lease));
         }
     }
@@ -147,7 +156,8 @@ public sealed class InMemorySlackLeaseStore : ISlackLeaseStore
         && string.Equals(lease.AdapterId, adapterId, StringComparison.Ordinal);
 
     private static SlackLeaseRecord ToRecord(ActiveLease lease) =>
-        new(lease.LeaseId, lease.Kind, lease.Generation, lease.AdapterId, lease.IssuedAt, lease.ExpiresAt);
+        new(lease.LeaseId, lease.Kind, lease.Generation, lease.AdapterId, lease.IssuedAt, lease.ExpiresAt,
+            lease.CredentialFingerprint);
 
     private string NewLeaseId() => $"lease_{++_counter}";
 
@@ -158,5 +168,6 @@ public sealed class InMemorySlackLeaseStore : ISlackLeaseStore
     }
 
     private sealed record ActiveLease(
-        string LeaseId, string Kind, int Generation, string AdapterId, DateTimeOffset IssuedAt, DateTimeOffset ExpiresAt);
+        string LeaseId, string Kind, int Generation, string AdapterId, DateTimeOffset IssuedAt, DateTimeOffset ExpiresAt,
+        string? CredentialFingerprint);
 }

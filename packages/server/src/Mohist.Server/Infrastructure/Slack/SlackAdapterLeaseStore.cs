@@ -17,7 +17,8 @@ public sealed class SlackAdapterLeaseStore(
     IDbContextFactory<MohistDbContext> dbFactory) : ISlackLeaseStore, IScopedService
 {
     public async Task<SlackLeaseRecord> IssueAsync(
-        string targetKey, string kind, string adapterId, DateTimeOffset expiresAt, DateTimeOffset now, CancellationToken ct = default)
+        string targetKey, string kind, string adapterId, DateTimeOffset expiresAt, DateTimeOffset now,
+        string? credentialFingerprint, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetKey);
         ValidateKind(kind);
@@ -26,9 +27,9 @@ public sealed class SlackAdapterLeaseStore(
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         await db.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "SlackAdapterLeases" (
-                "TargetKey", "Generation", "LeaseId", "LeaseKind", "AdapterId", "IssuedAt", "ExpiresAt", "UpdatedAt")
+                "TargetKey", "Generation", "LeaseId", "LeaseKind", "AdapterId", "IssuedAt", "ExpiresAt", "UpdatedAt", "CredentialFingerprint")
             VALUES (
-                {targetKey}, 1, {NewLeaseId()}, {kind}, {adapterId}, {now}, {expiresAt}, {now})
+                {targetKey}, 1, {NewLeaseId()}, {kind}, {adapterId}, {now}, {expiresAt}, {now}, {credentialFingerprint})
             ON CONFLICT("TargetKey") DO UPDATE SET
                 "Generation" = "SlackAdapterLeases"."Generation" + 1,
                 "LeaseId" = excluded."LeaseId",
@@ -36,7 +37,8 @@ public sealed class SlackAdapterLeaseStore(
                 "AdapterId" = excluded."AdapterId",
                 "IssuedAt" = excluded."IssuedAt",
                 "ExpiresAt" = excluded."ExpiresAt",
-                "UpdatedAt" = excluded."UpdatedAt";
+                "UpdatedAt" = excluded."UpdatedAt",
+                "CredentialFingerprint" = excluded."CredentialFingerprint";
             """, ct);
 
         return await ReadRecordAsync(db, targetKey, ct);
@@ -76,6 +78,7 @@ public sealed class SlackAdapterLeaseStore(
                 "AdapterId" = NULL,
                 "IssuedAt" = NULL,
                 "ExpiresAt" = NULL,
+                "CredentialFingerprint" = NULL,
                 "UpdatedAt" = {now}
             WHERE "TargetKey" = {targetKey}
               AND "LeaseId" = {leaseId}
@@ -95,7 +98,8 @@ public sealed class SlackAdapterLeaseStore(
         if (row is null)
             return null;
         return new SlackLeaseRecord(
-            row.LeaseId!, row.LeaseKind!, row.Generation, row.AdapterId!, row.IssuedAt!.Value, row.ExpiresAt!.Value);
+            row.LeaseId!, row.LeaseKind!, row.Generation, row.AdapterId!, row.IssuedAt!.Value, row.ExpiresAt!.Value,
+            row.CredentialFingerprint);
     }
 
     public async Task<int> GetGenerationAsync(string targetKey, CancellationToken ct = default)
@@ -119,7 +123,8 @@ public sealed class SlackAdapterLeaseStore(
                 $"Slack adapter lease '{targetKey}' has no active lease to read.");
         }
         return new SlackLeaseRecord(
-            row.LeaseId, row.LeaseKind, row.Generation, row.AdapterId, row.IssuedAt.Value, row.ExpiresAt.Value);
+            row.LeaseId, row.LeaseKind, row.Generation, row.AdapterId, row.IssuedAt.Value, row.ExpiresAt.Value,
+            row.CredentialFingerprint);
     }
 
     private static string NewLeaseId() => $"slklease_{Guid.NewGuid():N}";

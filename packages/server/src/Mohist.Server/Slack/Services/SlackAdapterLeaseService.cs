@@ -98,10 +98,16 @@ public sealed class SlackAdapterLeaseService(
         if (target.CandidateAppLevelTokenAddress is not { } candidateAddress)
             return null;
 
+        // Resolve before issue: a missing candidate (crash between candidate
+        // cleanup and Verified) must fail cleanly, never leaving an inert
+        // active lease behind.
+        var appToken = await secretResolver.LoadAsync(candidateAddress, ct);
+        if (string.IsNullOrWhiteSpace(appToken))
+            return null;
         var now = timeProvider.GetUtcNow();
         var lease = await store.IssueAsync(
-            target.Ref.TargetKey, SlackLeaseKind.Validation, adapterId, now + ValidationLeaseTtl, now, ct);
-        var appToken = await RequireSecretAsync(candidateAddress, ct);
+            target.Ref.TargetKey, SlackLeaseKind.Validation, adapterId, now + ValidationLeaseTtl, now,
+            Fingerprint(appToken), ct);
         return new SlackValidationLeaseResult(
             lease.LeaseId, lease.Generation, lease.ExpiresAt, target.ExpectedAppId, appToken);
     }
@@ -117,24 +123,29 @@ public sealed class SlackAdapterLeaseService(
         var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
         if (target is null)
             return SlackHelloOutcome.NoLease;
+
+        var active = await store.GetActiveAsync(target.Ref.TargetKey, ct);
+        if (active is null
+            || active.Kind != SlackLeaseKind.Validation
+            || !string.Equals(active.LeaseId, leaseId, StringComparison.Ordinal))
+            return SlackHelloOutcome.NoLease;
+
+        // Credential-generation fence: the lease only proves the candidate it
+        // was issued against. A resupplied candidate (new token, same App)
+        // makes this lease stale, so its hello fails closed without touching
+        // the new candidate — an old token must neither verify nor reject it.
+        if (!await CredentialGenerationMatchesAsync(target, active, ct))
+            return SlackHelloOutcome.NoLease;
+
         if (!string.Equals(appId, target.ExpectedAppId, StringComparison.Ordinal))
         {
-            // A mismatched hello only rejects when it arrives under the current
-            // active validation lease; a stale or unknown lease id must not
-            // trigger rejection side effects (candidate deletion / previous
-            // restore) for a hello that could not have opened the Socket.
-            var active = await store.GetActiveAsync(target.Ref.TargetKey, ct);
-            if (active is null
-                || active.Kind != SlackLeaseKind.Validation
-                || !string.Equals(active.LeaseId, leaseId, StringComparison.Ordinal))
-                return SlackHelloOutcome.NoLease;
-
-            // A mismatched hello means the candidate App-level token does not
-            // prove the expected App. Reject exactly like the control-plane
-            // route would: delete the candidate (or, during a rotation, restore
-            // the parked previous verified pair) and keep the target
-            // unverified / unbound. The validation lease itself is not consumed,
-            // so a corrected attempt can re-acquire. This is idempotent.
+            // A mismatched hello means the current candidate App-level token
+            // does not prove the expected App. Reject exactly like the
+            // control-plane route would: delete the candidate (or, during a
+            // rotation, restore the parked previous verified pair) and keep
+            // the target unverified / unbound. The validation lease itself is
+            // not consumed, so a corrected attempt can re-acquire. This is
+            // idempotent.
             await targetProvider.RejectAsync(operatorId, target.Ref, timeProvider.GetUtcNow(), ct);
             return SlackHelloOutcome.AppIdMismatch;
         }
@@ -158,9 +169,6 @@ public sealed class SlackAdapterLeaseService(
         if (target is null || !target.CredentialVerified || !target.Active || !target.BotTokenProvisioned)
             return null;
 
-        var now = timeProvider.GetUtcNow();
-        var lease = await store.IssueAsync(
-            target.Ref.TargetKey, SlackLeaseKind.Runtime, adapterId, now + RuntimeLeaseTtl, now, ct);
         var appToken = await RequireSecretAsync(target.AppLevelTokenAddress, ct);
         var botToken = await RequireSecretAsync(target.BotTokenAddress, ct);
         // The runtime lease carries the verified pair, so the target must still
@@ -169,6 +177,10 @@ public sealed class SlackAdapterLeaseService(
         var fresh = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
         if (fresh is null || !fresh.Active || !fresh.CredentialVerified)
             return null;
+        var now = timeProvider.GetUtcNow();
+        var lease = await store.IssueAsync(
+            target.Ref.TargetKey, SlackLeaseKind.Runtime, adapterId, now + RuntimeLeaseTtl, now,
+            Fingerprint(appToken, botToken), ct);
         return new SlackRuntimeLeaseResult(
             lease.LeaseId, lease.Generation, lease.ExpiresAt, appToken, botToken);
     }
@@ -199,12 +211,36 @@ public sealed class SlackAdapterLeaseService(
             return null;
         if (active.Kind == SlackLeaseKind.Validation && target.CredentialVerified)
             return null;
+        // The credential generation the lease was issued against must still be
+        // current; a resupplied candidate or a rotated verified pair makes the
+        // lease stale, and its holder must re-acquire.
+        if (!await CredentialGenerationMatchesAsync(target, active, ct))
+            return null;
 
         var ttl = active.Kind == SlackLeaseKind.Runtime ? RuntimeLeaseTtl : ValidationLeaseTtl;
         var renewed = await store.RenewAsync(targetRef.TargetKey, leaseId, adapterId, now + ttl, now, ct);
         return renewed is null
             ? null
             : new SlackLeaseRenewalResult(renewed.LeaseId, renewed.Kind, renewed.Generation, renewed.ExpiresAt);
+    }
+
+    private async Task<bool> CredentialGenerationMatchesAsync(
+        SlackLeaseTarget target, SlackLeaseRecord active, CancellationToken ct)
+    {
+        if (active.Kind == SlackLeaseKind.Validation)
+        {
+            if (target.CandidateAppLevelTokenAddress is not { } candidateAddress)
+                return false;
+            var candidate = await secretResolver.LoadAsync(candidateAddress, ct);
+            return !string.IsNullOrWhiteSpace(candidate)
+                && string.Equals(active.CredentialFingerprint, Fingerprint(candidate), StringComparison.Ordinal);
+        }
+
+        var app = await secretResolver.LoadAsync(target.AppLevelTokenAddress, ct);
+        var bot = await secretResolver.LoadAsync(target.BotTokenAddress, ct);
+        return !string.IsNullOrWhiteSpace(app)
+            && !string.IsNullOrWhiteSpace(bot)
+            && string.Equals(active.CredentialFingerprint, Fingerprint(app, bot), StringComparison.Ordinal);
     }
 
     private async Task<string> RequireSecretAsync(SecretStoreAddress address, CancellationToken ct)
@@ -215,6 +251,10 @@ public sealed class SlackAdapterLeaseService(
                 "The lease target is marked provisioned but its secret could not be resolved.");
         return token;
     }
+
+    private static string Fingerprint(params string[] tokens) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(string.Concat(tokens))));
 
     private static SlackLeaseTargetView ToView(SlackLeaseTarget target) => new(
         Kind: target.Ref.Kind,

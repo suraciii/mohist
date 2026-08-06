@@ -19,8 +19,8 @@ public sealed class SlackAdapterLeaseStoreSpecs
         await using var database = TestSqliteDatabase.CreateMigrated();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
-        var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0);
-        var second = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-B", T0 + RuntimeTtl, T0);
+        var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
+        var second = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-B", T0 + RuntimeTtl, T0, credentialFingerprint: null);
 
         Assert.Equal(1, first.Generation);
         Assert.Equal(2, second.Generation);
@@ -34,7 +34,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackAdapterLeaseStore(factory);
 
-        var issued = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0);
+        var issued = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
         var renewed = await store.RenewAsync(Target, issued.LeaseId, "adapter-A", T0 + RuntimeTtl + Renewal, T0);
 
         Assert.NotNull(renewed);
@@ -52,10 +52,10 @@ public sealed class SlackAdapterLeaseStoreSpecs
         await using var database = TestSqliteDatabase.CreateMigrated();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
-        var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0);
+        var first = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
         Assert.Null(await store.RenewAsync(Target, first.LeaseId, "adapter-wrong", T0 + RuntimeTtl + Renewal, T0));
 
-        await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-B", T0 + RuntimeTtl, T0);
+        await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-B", T0 + RuntimeTtl, T0, credentialFingerprint: null);
         Assert.Null(await store.RenewAsync(Target, first.LeaseId, "adapter-A", T0 + RuntimeTtl + Renewal, T0));
 
         var live = await store.GetActiveAsync(Target);
@@ -68,7 +68,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
         await using var database = TestSqliteDatabase.CreateMigrated();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
-        var validation = await store.IssueAsync(Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0);
+        var validation = await store.IssueAsync(Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0, credentialFingerprint: null);
         Assert.True(await store.ConfirmHelloAsync(Target, validation.LeaseId, T0));
         Assert.Null(await store.GetActiveAsync(Target));
         Assert.Equal(2, await store.GetGenerationAsync(Target));
@@ -83,9 +83,32 @@ public sealed class SlackAdapterLeaseStoreSpecs
         await using var database = TestSqliteDatabase.CreateMigrated();
         var store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
 
-        var runtime = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0);
+        var runtime = await store.IssueAsync(Target, SlackLeaseKind.Runtime, "adapter-A", T0 + RuntimeTtl, T0, credentialFingerprint: null);
         Assert.False(await store.ConfirmHelloAsync(Target, runtime.LeaseId, T0));
         Assert.False(await store.ConfirmHelloAsync(Target, "unknown-lease", T0));
+    }
+
+    [Fact]
+    public async Task Issue_pins_and_confirm_clears_the_credential_fingerprint()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var factory = new TestDbContextFactory(database.Options);
+        var store = new SlackAdapterLeaseStore(factory);
+
+        var issued = await store.IssueAsync(
+            Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0, "fp-candidate");
+        Assert.Equal("fp-candidate", issued.CredentialFingerprint);
+        Assert.Equal("fp-candidate", (await store.GetActiveAsync(Target))!.CredentialFingerprint);
+
+        var renewed = await store.RenewAsync(Target, issued.LeaseId, "adapter-A", T0 + ValidationTtl + Renewal, T0);
+        Assert.Equal("fp-candidate", renewed!.CredentialFingerprint);
+
+        Assert.True(await store.ConfirmHelloAsync(Target, issued.LeaseId, T0));
+        Assert.Null(await store.GetActiveAsync(Target));
+
+        await using var db = factory.CreateDbContext();
+        var row = await db.SlackAdapterLeases.AsNoTracking().SingleAsync();
+        Assert.Null(row.CredentialFingerprint);
     }
 
     [Fact]
@@ -105,7 +128,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
         var factory = new TestDbContextFactory(database.Options);
         var store = new SlackAdapterLeaseStore(factory);
 
-        await store.IssueAsync(Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0);
+        await store.IssueAsync(Target, SlackLeaseKind.Validation, "adapter-A", T0 + ValidationTtl, T0, credentialFingerprint: null);
         await store.ConfirmHelloAsync(Target, (await store.GetActiveAsync(Target))!.LeaseId, T0);
 
         await using var db = factory.CreateDbContext();
@@ -113,6 +136,7 @@ public sealed class SlackAdapterLeaseStoreSpecs
         Assert.True((row.LeaseId is null) == (row.LeaseKind is null));
         Assert.True((row.LeaseId is null) == (row.AdapterId is null));
         Assert.True((row.LeaseId is null) == (row.ExpiresAt is null));
+        Assert.True((row.LeaseId is null) == (row.CredentialFingerprint is null));
     }
 
     private static readonly TimeSpan ValidationTtl = SlackAdapterLeaseService.ValidationLeaseTtl;

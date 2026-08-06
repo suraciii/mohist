@@ -23,8 +23,7 @@ public sealed class SlackAdapterLeaseServiceSpecs
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
         secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
         secrets.Put(manager, SecretKind.BotToken, "xoxb-runtime");
-        var service = new SlackAdapterLeaseService(
-            new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
+        var service = NewService(database, provider, secrets, clock, out _);
 
         Assert.True(Assert.Single(await service.DiscoverAsync("operator-1")).CanAcquireValidation);
 
@@ -63,8 +62,7 @@ public sealed class SlackAdapterLeaseServiceSpecs
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
         secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
-        var service = new SlackAdapterLeaseService(
-            new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
+        var service = NewService(database, provider, secrets, clock, out _);
 
         var validation = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
@@ -87,8 +85,7 @@ public sealed class SlackAdapterLeaseServiceSpecs
         var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
         provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
         secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate");
-        var service = new SlackAdapterLeaseService(
-            new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options)), provider, secrets, clock);
+        var service = NewService(database, provider, secrets, clock, out _);
 
         var first = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
         var second = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
@@ -102,6 +99,161 @@ public sealed class SlackAdapterLeaseServiceSpecs
         Assert.Equal(SlackHelloOutcome.AppIdMismatch,
             await service.ReportHelloAsync("operator-1", manager, second!.LeaseId, "WRONG"));
         Assert.Contains(manager.TargetKey, provider.RejectedTargets);
+    }
+
+    [Fact]
+    public async Task Candidate_resupply_fences_validation_renew_and_hello_without_rejecting_the_new_candidate()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate-v1");
+        var service = NewService(database, provider, secrets, clock, out _);
+
+        var validation = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(validation);
+
+        // A resupply stages a new candidate token for the same App. The old
+        // lease was issued against the previous generation: renewal and hello
+        // must fail closed, and the old token's hello must neither verify nor
+        // reject the new candidate.
+        secrets.Put(manager, SecretKind.CandidateAppToken, "xapp-candidate-v2");
+
+        Assert.Null(await service.RenewLeaseAsync("operator-1", manager, validation!.LeaseId, "adapter-A"));
+        Assert.Equal(SlackHelloOutcome.NoLease,
+            await service.ReportHelloAsync("operator-1", manager, validation.LeaseId, "A123"));
+        Assert.Equal(SlackHelloOutcome.NoLease,
+            await service.ReportHelloAsync("operator-1", manager, validation.LeaseId, "WRONG"));
+        Assert.Empty(provider.RejectedTargets);
+
+        // A fresh validation lease resolves the new candidate and verifies it.
+        var resupplied = await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(resupplied);
+        Assert.Equal("xapp-candidate-v2", resupplied!.AppToken);
+        Assert.Equal(SlackHelloOutcome.Verified,
+            await service.ReportHelloAsync("operator-1", manager, resupplied.LeaseId, "A123"));
+    }
+
+    [Fact]
+    public async Task Validation_acquire_without_a_staged_candidate_issues_no_lease()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        // The state still exposes a candidate address, but the staged secret is
+        // gone (crash between candidate cleanup and Verified). Acquire must
+        // fail cleanly without leaving an inert active lease behind.
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        var service = NewService(database, provider, secrets, clock, out var store);
+
+        Assert.Null(await service.AcquireValidationLeaseAsync("operator-1", manager, "adapter-A"));
+        Assert.Null(await store.GetActiveAsync(manager.TargetKey));
+        Assert.Equal(0, await store.GetGenerationAsync(manager.TargetKey));
+    }
+
+    [Fact]
+    public async Task Failed_runtime_acquire_keeps_the_previous_lease_holder_untouched()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(manager, SecretKind.AppToken, "xapp-live");
+        secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
+        var service = NewService(database, provider, secrets, clock, out var store);
+
+        var incumbent = await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(incumbent);
+
+        // A rotation closes Verified while a competing acquire races it: the
+        // acquire must fail without superseding the incumbent's lease.
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: false, secrets));
+        Assert.Null(await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-B"));
+
+        var active = await store.GetActiveAsync(manager.TargetKey);
+        Assert.NotNull(active);
+        Assert.Equal(incumbent!.LeaseId, active!.LeaseId);
+        Assert.Equal("adapter-A", active.AdapterId);
+
+        // The rotation is restored: the incumbent can still renew its lease.
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        Assert.NotNull(await service.RenewLeaseAsync("operator-1", manager, incumbent.LeaseId, "adapter-A"));
+    }
+
+    [Fact]
+    public async Task Runtime_acquire_with_unresolvable_secrets_issues_no_lease()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(manager, SecretKind.AppToken, "xapp-live");
+        secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
+        var service = NewService(database, provider, secrets, clock, out var store);
+
+        var incumbent = await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(incumbent);
+
+        // The verified pair vanishes from the secret store: a competing
+        // acquire fails loudly, but no lease was issued and the incumbent
+        // keeps its lease.
+        var emptySecrets = new FakeSecretResolver();
+        var competing = new SlackAdapterLeaseService(store, provider, emptySecrets, clock);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            competing.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-B"));
+
+        var active = await store.GetActiveAsync(manager.TargetKey);
+        Assert.Equal(incumbent!.LeaseId, active!.LeaseId);
+        Assert.NotNull(await service.RenewLeaseAsync("operator-1", manager, incumbent.LeaseId, "adapter-A"));
+    }
+
+    [Fact]
+    public async Task Runtime_renew_fails_closed_once_the_verified_pair_rotates()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var manager = new SlackLeaseTargetRef.Manager("enr_1", "T1");
+        provider.Add(Target(manager, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(manager, SecretKind.AppToken, "xapp-live");
+        secrets.Put(manager, SecretKind.BotToken, "xoxb-live");
+        var service = NewService(database, provider, secrets, clock, out _);
+
+        var runtime = await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(runtime);
+
+        // A completed rotation promoted a new verified pair to the runtime
+        // addresses. The old lease pinned the previous pair, so the holder
+        // can no longer renew with its stale tokens; it must re-acquire.
+        secrets.Put(manager, SecretKind.AppToken, "xapp-live-v2");
+        secrets.Put(manager, SecretKind.BotToken, "xoxb-live-v2");
+        Assert.Null(await service.RenewLeaseAsync("operator-1", manager, runtime!.LeaseId, "adapter-A"));
+
+        var reacquired = await service.AcquireRuntimeLeaseAsync("operator-1", manager, "adapter-A");
+        Assert.NotNull(reacquired);
+        Assert.Equal("xapp-live-v2", reacquired!.AppToken);
+        Assert.Equal("xoxb-live-v2", reacquired.BotToken);
+    }
+
+    private static SlackAdapterLeaseService NewService(
+        TestSqliteDatabase database,
+        InMemorySlackLeaseTargetProvider provider,
+        FakeSecretResolver secrets,
+        FakeTimeProvider clock,
+        out SlackAdapterLeaseStore store)
+    {
+        store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
+        return new SlackAdapterLeaseService(store, provider, secrets, clock);
     }
 
     private static SlackLeaseTarget Target(
