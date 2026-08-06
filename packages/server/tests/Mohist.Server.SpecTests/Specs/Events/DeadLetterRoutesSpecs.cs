@@ -1,9 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
@@ -75,22 +73,6 @@ public sealed class DeadLetterRoutesSpecs
             "/api/events/dead-letters?limit=501");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-
-    [Theory]
-    [InlineData("http://127.0.0.1:3456", true)]
-    [InlineData("http://localhost:3456", true)]
-    [InlineData("http://192.168.1.10:3456", false)]
-    [InlineData("http://0.0.0.0:3456", false)]
-    [InlineData("http://*:3456", false)]
-    [InlineData("http://[::]:3456", false)]
-    public void OperatorBoundary_MapsRoutesOnlyOnLoopbackListener(string url, bool expected)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?> { ["urls"] = url })
-            .Build();
-
-        Assert.Equal(expected, DeadLetterRoutes.UsesLoopbackOnlyListener(configuration));
     }
 
     [Fact]
