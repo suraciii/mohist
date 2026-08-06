@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.Sessions.Domain;
@@ -20,18 +21,18 @@ namespace Mohist.Server.SpecTests.Specs.AgentOps;
 /// <see cref="AgentUsageReporter.GetCostRollupAsync"/>, and
 /// <see cref="AgentUsageReporter.GetUsageTimeseriesAsync"/>. Mirrors the
 /// <see cref="IssueQuerierSpecs"/> adjacency/length/empty-result pattern,
-/// driven by the integration fixture's pinned
+/// driven by the <see cref="MohistDbFixture"/>'s pinned
 /// <see cref="FakeTimeProvider"/> (2026-06-30 00:00 UTC). API-level coverage
 /// lives in <c>AgentCostRollupApiSpecs</c> and <c>AgentUsageTimeseriesApiSpecs</c>;
 /// these specs assert the reporter-level contract directly so reporting
 /// regressions are caught without spinning a full route.
 /// </summary>
-[Collection("IntegrationSessions")]
+[Collection("MohistDb")]
 public class AgentUsageReporterSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly MohistDbFixture _fixture;
 
-    public AgentUsageReporterSpecs(MohistIntegrationFixture fixture)
+    public AgentUsageReporterSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
@@ -652,16 +653,21 @@ public class AgentUsageReporterSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
+        var id = $"proj-{Guid.NewGuid():N}";
         var name = $"cost-querier-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.Projects.Add(new ProjectRow
         {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
+            Id = id,
+            Name = name,
+            RepositoriesJson = """[{"name":"main","gitUrl":"git@example.com:test-repo.git","baseBranch":"main","isDefault":true}]""",
+            CreatedAt = now,
+            UpdatedAt = now,
         });
-        return project;
+        await db.SaveChangesAsync();
+        return new ProjectDto(id, name);
     }
 
     private async Task InsertSessionAsync(

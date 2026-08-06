@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.AgentOps.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
+using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Issue.Domain;
@@ -30,14 +31,14 @@ namespace Mohist.Server.SpecTests.Specs.AgentOps;
 /// passthrough, and reconciler-driven session filtering are caught without
 /// a full HTTP round-trip.
 /// </summary>
-[Collection("IntegrationSessions")]
+[Collection("MohistDb")]
 public class AgentActivityFeedAssemblerSpecs
 {
     private static readonly DateTime PinnedNow = new(2026, 6, 30, 12, 0, 0, DateTimeKind.Utc);
 
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly MohistDbFixture _fixture;
 
-    public AgentActivityFeedAssemblerSpecs(MohistIntegrationFixture fixture)
+    public AgentActivityFeedAssemblerSpecs(MohistDbFixture fixture)
     {
         _fixture = fixture;
     }
@@ -299,16 +300,21 @@ public class AgentActivityFeedAssemblerSpecs
 
     private async Task<ProjectDto> CreateProjectAsync()
     {
+        var id = $"proj-{Guid.NewGuid():N}";
         var name = $"activity-spec-{Guid.NewGuid():N}";
-        var project = await _fixture.Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", name);
-        await _fixture.Client.PostOkAsync($"/api/projects/{project.Id}/repositories", new
+        var now = _fixture.TimeProvider.GetUtcNow();
+        await using var db = await _fixture.Services
+            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
+        db.Projects.Add(new ProjectRow
         {
-            name = "main",
-            gitUrl = $"file://{Guid.NewGuid():N}",
-            baseBranch = "main",
-            setDefault = true,
+            Id = id,
+            Name = name,
+            RepositoriesJson = """[{"name":"main","gitUrl":"git@example.com:test-repo.git","baseBranch":"main","isDefault":true}]""",
+            CreatedAt = now,
+            UpdatedAt = now,
         });
-        return project;
+        await db.SaveChangesAsync();
+        return new ProjectDto(id, name);
     }
 
     private async Task InsertGenericSessionAsync(
