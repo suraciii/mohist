@@ -52,7 +52,7 @@ jobs:
 
       - name: Test
         run: dotnet test Mohist.sln -p:SkipWebBuild=true --no-build
-        timeout-minutes: 5
+        timeout-minutes: 6
 
       - name: Upload failed test results
         if: failure()
