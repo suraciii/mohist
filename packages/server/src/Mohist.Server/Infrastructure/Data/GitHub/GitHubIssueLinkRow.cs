@@ -18,6 +18,7 @@ public sealed class GitHubIssueLinkRow
     public int GithubIssueNumber { get; set; }
     public int IssueNumber { get; set; }
     public string PostedCommentsJson { get; set; } = "[]";
+    public string? StateLabel { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 }

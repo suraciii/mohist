@@ -41,6 +41,27 @@ public sealed class GitHubIssueLinkStore : IScopedService
     }
 
     /// <summary>
+    /// Finds the link for a Mohist issue. The write-back writer projects
+    /// progress from Mohist events and needs the reverse lookup; the feed
+    /// guarantees at most one link per Mohist issue (an issue is created
+    /// exactly once), so the first match is the one.
+    /// </summary>
+    public async Task<GitHubIssueLink?> GetByIssueAsync(
+        string projectId,
+        int issueNumber,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        if (issueNumber <= 0)
+            throw new ArgumentOutOfRangeException(nameof(issueNumber));
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.ProjectId == projectId && r.IssueNumber == issueNumber, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    /// <summary>
     /// First-writer-wins insert: the unique index on
     /// <c>(ProjectId, RepositoryName, GithubIssueNumber)</c> makes a
     /// concurrent or redelivered feed deterministically lose to the
@@ -119,6 +140,24 @@ public sealed class GitHubIssueLinkStore : IScopedService
         await db.SaveChangesAsync(ct);
     }
 
+    /// <summary>
+    /// Persists the state label projected onto the GitHub issue. No-op
+    /// when the label is already recorded, so redelivery never re-runs the
+    /// label write-back.
+    /// </summary>
+    public async Task SetStateLabelAsync(string id, string stateLabel, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stateLabel);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubIssueLinks.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (row is null || string.Equals(row.StateLabel, stateLabel, StringComparison.Ordinal))
+            return;
+        row.StateLabel = stateLabel;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+    }
+
     private static GitHubIssueLink ToDomain(GitHubIssueLinkRow row) => new()
     {
         Id = row.Id,
@@ -127,6 +166,7 @@ public sealed class GitHubIssueLinkStore : IScopedService
         GithubIssueNumber = row.GithubIssueNumber,
         IssueNumber = row.IssueNumber,
         PostedComments = DeserializePosted(row.PostedCommentsJson),
+        StateLabel = row.StateLabel,
         CreatedAt = row.CreatedAt,
         UpdatedAt = row.UpdatedAt,
     };
