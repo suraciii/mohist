@@ -112,6 +112,17 @@ public sealed class GitHubConnectionStore : IScopedService
         return ToDomain(row);
     }
 
+    public async Task<GitHubConnection?> UpdateApproversAsync(string projectId, string id, IReadOnlyList<string>? approvers, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.GitHubConnections.FirstOrDefaultAsync(r => r.ProjectId == projectId && r.Id == id, ct);
+        if (row is null) return null;
+        row.ApproversJson = SerializeApprovers(NormalizeApprovers(approvers));
+        row.UpdatedAt = _timeProvider.GetUtcNow();
+        await db.SaveChangesAsync(ct);
+        return ToDomain(row);
+    }
+
     public async Task<byte[]?> LoadWebhookSecretAsync(string projectId, string id, CancellationToken ct = default) =>
         await _secretStore.LoadAsync(WebhookSecretAddress(projectId, id), ct);
 
@@ -183,6 +194,13 @@ public sealed class GitHubConnectionStore : IScopedService
         CreatedAt = connection.CreatedAt,
         UpdatedAt = connection.UpdatedAt,
     };
+
+    private static IReadOnlyList<string> NormalizeApprovers(IReadOnlyList<string>? approvers) =>
+        (approvers ?? [])
+        .Select(a => a.Trim())
+        .Where(a => a.Length > 0)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToList();
 
     private static string SerializeApprovers(IReadOnlyList<string> approvers) =>
         JsonSerializer.Serialize(approvers.OrderBy(a => a, StringComparer.Ordinal).Distinct(StringComparer.Ordinal), JSON.Options);

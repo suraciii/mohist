@@ -59,6 +59,23 @@ public static class GitHubConnectionRoutes
         group.MapPost("/{connectionId}/disable", (HttpContext context, string connectionId, GitHubConnectionStore store, CancellationToken ct) =>
             SetStatusAsync(context, store, connectionId, GitHubConnectionStatus.Disabled, ct));
 
+        group.MapPatch("/{connectionId}", async (HttpContext context, string connectionId, GitHubConnectionUpdateRequest? request, GitHubConnectionStore store, CancellationToken ct) =>
+        {
+            if (request is null) return ApiResults.BadRequest("request body required");
+            var project = context.GetResolvedProject();
+            try
+            {
+                var updated = await store.UpdateApproversAsync(project.Id, connectionId, request.Approvers, ct);
+                return updated is null
+                    ? ApiResults.NotFound($"GitHub connection '{connectionId}' not found")
+                    : ApiResults.Ok(ToDto(updated));
+            }
+            catch (Exception ex)
+            {
+                return MapError(ex);
+            }
+        });
+
         return app;
     }
 
@@ -103,3 +120,5 @@ public sealed record GitHubConnectionCreateRequest(
     string? FeedMode,
     string? IntakeLabel,
     string[]? Approvers);
+
+public sealed record GitHubConnectionUpdateRequest(string[]? Approvers);
