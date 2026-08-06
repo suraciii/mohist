@@ -134,6 +134,7 @@
 - [repositories.md](repositories.md) — Repository 执行：Project 资源权威、Issue 绑定、dispatch 实时解析与最小 workspace identity（**WIP**）。
 - [hermes-webhook.md](hermes-webhook.md) — Hermes 通知网关：事件类型、payload、签名与投递可靠性。
 - [outbound-webhook.md](outbound-webhook.md) — 出站 Webhook（**WIP**）：OHS + PL，CloudEvent 即发布语言，表达式订阅 + HMAC 签名 + best-effort 投递。
+- [github-integration.md](github-integration.md) — GitHub 集成（**WIP**）：入站事件接收与验签、供料/关闭/审批翻译器、回写器与凭据边界；产品行为见 [`docs/github.md`](../docs/github.md)。
 - [issue-breakdown.md](issue-breakdown.md) — 复合 Issue / 子 Issue 设计（**已定稿，待实装**）：父子模型、状态汇总、复合推进、与 Epic 的隔离约束；多仓库资源见 `docs/repositories.md`。
 - [issue-templates.md](issue-templates.md) — 三类 issue 模板（Feature / Bug / Refactor）的 body 结构与设计依据。
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt（**WIP**）、builtin fallback 和 Workflow key reference。
