@@ -655,7 +655,7 @@ Mohist App 身份后写入 enrollment secret address；`mo slack install-agent` 
 
 ### 仍未实装
 
-`setup` / `install-agent` 的本机安装向导、三个 outbound port 的生产 adapter、adapter lease
+`setup` / `install-agent` 的本机安装向导、四个 outbound port 的生产 adapter、adapter lease
 routes 与 Mohist App / Agent App 的 Socket Mode ingress 均已接入：CLI 从持久进度幂等续跑，
 完成 Configuration token 轮换、manifest create、安装引导、运行凭据验证与 Socket hello 确认；
 manifest 只输出 Socket Mode（无 HTTPS transport / `PublicIngressBaseUrl`），Agent App scopes 已
