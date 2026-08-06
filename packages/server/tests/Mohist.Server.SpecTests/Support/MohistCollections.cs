@@ -109,10 +109,13 @@ public class EventPublishingCollection : ICollectionFixture<EventPublishingInteg
 /// <see cref="OtelTestHost"/>'s recorder sees only its own requests.
 /// </para>
 /// <para>
-/// No shared fixture is needed (each test creates its own host), so
-/// <see cref="ICollectionFixture{TFixture}"/> is intentionally not
-/// applied.
+/// The per-test <see cref="OtelTestHost"/> specs create their own
+/// host, but the full-stack OTel specs need a real silo + web host
+/// and share one <see cref="OtelIntegrationFixture"/> here instead
+/// of each starting its own <c>IClassFixture</c> host: the collection
+/// fixture is created once for the whole collection and reused by
+/// both classes.
 /// </para>
 /// </summary>
 [CollectionDefinition("OtelTracing", DisableParallelization = true)]
-public class OtelTracingCollection;
+public class OtelTracingCollection : ICollectionFixture<OtelIntegrationFixture>;
