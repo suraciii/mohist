@@ -3,9 +3,9 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.Grain;
 
-public class TaskOutputCaptureSpecs
+public class TaskOutputCaptureTests
 {
     [Fact]
     public void TaskRun_Output_StoresActionOutputAsJsonElement()

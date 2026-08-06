@@ -2,9 +2,9 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
+namespace Mohist.Server.UnitTests.Issue.Profile;
 
-public class WorkflowProfileCatalogSpecs
+public class WorkflowProfileCatalogTests
 {
     [Fact]
     public void Registry_ListsImplementedBuiltInsAndMarksLocalDefault()
