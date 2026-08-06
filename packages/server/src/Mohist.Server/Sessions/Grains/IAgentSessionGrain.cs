@@ -68,6 +68,16 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentTurnControlState?> ResolveCurrentTurnControlAsync();
 
     Task<AgentSessionInfo?> GetAsync();
+
+    /// <summary>
+    /// Lean read for the runner-owned activity query. Returns
+    /// <c>null</c> when the session does not exist so the caller can
+    /// report <c>not-found</c>. Carries the durable idle timestamp, the
+    /// launch visibility (to classify a not-yet-promoted launch as
+    /// <c>pending</c>), and the bound runner / project so the route can
+    /// authorize the caller in a single grain read.
+    /// </summary>
+    Task<AgentSessionActivityState?> GetActivityStateAsync();
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
 
@@ -337,6 +347,23 @@ public sealed record AgentSessionInfo(
     /// Orleans field id.
     /// </summary>
     [property: Id(25)] WorkspaceRepository? WorkspaceRepository = null);
+
+/// <summary>
+/// Lean activity projection of an <see cref="AgentSession"/> for the
+/// runner-owned activity query. Carries the current activity, the
+/// durable idle timestamp, the launch visibility, and the bound
+/// runner / project label so the route can both classify the session
+/// (active / idle+idleSince / pending / unknown) and authorize the
+/// caller in a single grain read. <c>null</c> from the grain means the
+/// session does not exist (not-found). Append-only Orleans field ids.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentSessionActivityState(
+    [property: Id(0)] AgentSessionActivity Activity,
+    [property: Id(1)] DateTime? IdleSince,
+    [property: Id(2)] AgentLaunchVisibility LaunchVisibility,
+    [property: Id(3)] string? RunnerId,
+    [property: Id(4)] string? ProjectId);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(

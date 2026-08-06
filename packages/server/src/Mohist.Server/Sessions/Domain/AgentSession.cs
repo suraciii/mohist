@@ -432,10 +432,19 @@ public sealed record AgentSessionStatusSnapshot(
     /// Creation, cancellation and due delivery are serialized on the
     /// owning Session grain; list order is by <see cref="SessionScheduleRecord.DueAt"/>.
     /// </summary>
-    IReadOnlyList<SessionScheduleRecord>? Schedules = null)
+    IReadOnlyList<SessionScheduleRecord>? Schedules = null,
+    /// <summary>
+    /// Wall-clock instant the session last entered <c>idle</c>, stamped
+    /// by the injected <see cref="TimeProvider"/> through the activity
+    /// transitions. Non-null only while <see cref="Activity"/> is
+    /// <c>idle</c>: cleared on <c>active</c> and on <c>unknown</c> so an
+    /// unconfirmable activity can never retain a stale idle time. A
+    /// <c>null</c> value is fail-closed (never confirmed idle).
+    /// </summary>
+    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
 }
 
 public sealed record AgentUsageSummary(

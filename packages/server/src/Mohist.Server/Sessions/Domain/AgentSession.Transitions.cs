@@ -144,9 +144,16 @@ public static partial class AgentSessionExtensions
                 Activity = activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = activity == AgentSessionActivity.Idle ? now : session.Status.CurrentTurnEndedAt,
+                IdleSince = IdleSinceFor(activity, now),
             };
             return [];
         }
+
+        // Single derivation so every activity transition keeps IdleSince
+        // consistent: set on idle, cleared on active and on unknown so an
+        // unconfirmable activity can never retain a stale idle time.
+        private static DateTime? IdleSinceFor(AgentSessionActivity activity, DateTime now) =>
+            activity == AgentSessionActivity.Idle ? now : null;
 
         public IReadOnlyList<AgentSessionEvent> ApplyUsage(
             long? inputTokens,
@@ -498,6 +505,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = null,
             };
 
             return [];
@@ -607,6 +615,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = null,
             };
 
             return [];
@@ -654,6 +663,7 @@ public static partial class AgentSessionExtensions
                 Activity = wasUnknown ? AgentSessionActivity.Active : session.Status.Activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = wasUnknown ? null : session.Status.CurrentTurnEndedAt,
+                IdleSince = wasUnknown ? null : session.Status.IdleSince,
             };
             return [];
         }
@@ -722,6 +732,7 @@ public static partial class AgentSessionExtensions
                     ? AgentSessionActivity.Unknown
                     : AgentSessionActivity.Idle,
                 CurrentTurnEndedAt = now,
+                IdleSince = status == AgentTurnStatus.Unknown ? null : now,
             };
             return [];
         }
@@ -752,6 +763,7 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 Activity = AgentSessionActivity.Idle,
                 CurrentTurnEndedAt = now,
+                IdleSince = now,
             };
             return [];
         }
@@ -846,6 +858,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Idle,
                 LastDataAt = now,
                 CurrentTurnEndedAt = now,
+                IdleSince = now,
             };
             return [];
         }
@@ -1279,6 +1292,9 @@ public static partial class AgentSessionExtensions
                     : session.Status.Activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = session.Status.Activity == AgentSessionActivity.Unknown
+                    ? null
+                    : session.Status.IdleSince,
             };
             return [];
         }
@@ -1343,6 +1359,11 @@ public static partial class AgentSessionExtensions
                         ? AgentSessionActivity.Idle
                         : session.Status.Activity,
                 },
+                IdleSince = status == AgentTurnStatus.Unknown
+                    ? null
+                    : remainingFollowupTurns == 0
+                        ? now
+                        : session.Status.IdleSince,
                 CurrentTurnEndedAt = status is AgentTurnStatus.Completed
                     or AgentTurnStatus.Failed
                     or AgentTurnStatus.Cancelled

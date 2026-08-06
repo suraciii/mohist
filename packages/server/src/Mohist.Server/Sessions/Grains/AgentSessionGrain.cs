@@ -2010,6 +2010,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         return _session is null ? null : await ToInfoAsync(_session);
     }
 
+    public async Task<AgentSessionActivityState?> GetActivityStateAsync()
+    {
+        RejectIfReloadRequired();
+        var session = _session ?? await _stateStore.LoadAsync(SessionId);
+        if (session is null)
+            return null;
+        _session ??= session;
+        return new AgentSessionActivityState(
+            session.Status.Activity,
+            session.Status.IdleSince,
+            session.LaunchVisibility,
+            session.Runtime.RunnerId,
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+    }
+
     public async Task EnsureRuntimeSessionPresentAsync()
     {
         var session = await GetRequiredAsync();
