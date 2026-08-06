@@ -115,6 +115,8 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
     [Fact]
     public async Task UnknownJobAndTurnTerminal_DoNotPersistSubagentTerminalEvent()
     {
+        await ClearGlobalRunnerRegistryAsync();
+
         var suffix = Guid.NewGuid().ToString("N");
         var projectId = $"project-terminal-nontrigger-{suffix}";
         var childSessionId = $"child-session-terminal-nontrigger-{suffix}";
