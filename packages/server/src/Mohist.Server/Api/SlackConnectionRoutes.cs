@@ -1159,6 +1159,17 @@ public static class SlackConnectionRoutes
         return "Starting a new task. " + detail;
     }
 
+    /// <summary>
+    /// Crafts the Bot's reply for a successful first-time owner claim: the
+    /// confirmation plus a self-contained first-use guide (DM tasks, channel
+    /// mention, thread follow-ups) so the user can start without reading docs.
+    /// </summary>
+    internal static string BuildOwnerClaimedReply() =>
+        "Owner claimed successfully. Here's how to get started:\n" +
+        "• Send me a task right here in this DM.\n" +
+        "• Invite me to a channel and @ me there to assign work.\n" +
+        "• Reply in the thread of my message to follow up on a task.";
+
     private static async Task<SlackProviderInboxRouteDraft> ResolveInboxRouteDraftAsync(
         string projectId,
         string connectionId,
@@ -1207,7 +1218,7 @@ public static class SlackConnectionRoutes
             ct);
         if (decision.Kind == SlackInboundDecisionKind.Claimed)
         {
-            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, "Owner claimed successfully.", null, ct, body.ThreadTs);
+            await EnqueueReplyAsync(req.Outbox, projectId, connection, body.ConversationId, BuildOwnerClaimedReply(), null, ct, body.ThreadTs);
             return ApiResults.Ok(new { kind = "claimed" });
         }
         if (decision.Kind == SlackInboundDecisionKind.Transferred)
