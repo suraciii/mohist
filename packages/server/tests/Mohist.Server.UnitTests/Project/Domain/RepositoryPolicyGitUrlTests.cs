@@ -1,9 +1,9 @@
 using Mohist.Server.Project.Domain;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Project.Domain;
+namespace Mohist.Server.UnitTests.Project.Domain;
 
-public class RepositoryPolicySpecs
+public class RepositoryPolicyGitUrlTests
 {
     [Theory]
     [InlineData("https://user:token@example.com/repo.git", false)]

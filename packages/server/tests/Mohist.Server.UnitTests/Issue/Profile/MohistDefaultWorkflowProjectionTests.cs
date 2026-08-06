@@ -3,7 +3,7 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
+namespace Mohist.Server.UnitTests.Issue.Profile;
 
 /// <summary>
 /// T-005 contract: the workflow-state projection is reached through
@@ -14,7 +14,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 /// members. These specs anchor both guarantees in one place so future
 /// regressions are caught.
 /// </summary>
-public class MohistDefaultWorkflowProjectionSpecs
+public class MohistDefaultWorkflowProjectionTests
 {
     private static WorkflowStatusView BuildRunningView(string workflowRunId, string? assignedTo = null) =>
         new(

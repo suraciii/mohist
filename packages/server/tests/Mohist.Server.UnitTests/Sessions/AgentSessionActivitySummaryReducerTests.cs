@@ -4,9 +4,9 @@ using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Sessions;
+namespace Mohist.Server.UnitTests.Sessions;
 
-public sealed class AgentSessionActivitySummaryReducerSpecs
+public sealed class AgentSessionActivitySummaryReducerTests
 {
     private static readonly DateTime ObservedAt = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 

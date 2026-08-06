@@ -4,9 +4,9 @@ using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
+namespace Mohist.Server.UnitTests.Workflow.Grain;
 
-public class RuntimeVariableMergeSpecs
+public class RuntimeVariableMergeTests
 {
     [Fact]
     public void MergeTaskOutputsIntoPayload_IncludesNestedTasksOutputs()

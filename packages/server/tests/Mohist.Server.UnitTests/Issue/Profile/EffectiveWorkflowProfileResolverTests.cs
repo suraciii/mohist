@@ -2,9 +2,8 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
-using Mohist.Server.SpecTests.Support;
 
-namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
+namespace Mohist.Server.UnitTests.Issue.Profile;
 
 /// <summary>
 /// Covers <see cref="EffectiveWorkflowProfileResolver"/> — the single
@@ -12,7 +11,7 @@ namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 /// every read surface (issue detail, list, workflow-profile endpoint,
 /// <c>mo issue show</c>).
 /// </summary>
-public class EffectiveWorkflowProfileResolverSpecs
+public class EffectiveWorkflowProfileResolverTests
 {
     private static EffectiveWorkflowProfileResolver BuildResolver() =>
         new(BuildRegistry());

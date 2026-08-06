@@ -6,9 +6,9 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Runner.Api;
+namespace Mohist.Server.UnitTests.Runner.Api;
 
-public sealed class RunnerPollParentContextMapperSpecs
+public sealed class RunnerPollParentContextMapperTests
 {
     [Fact]
     public async Task WorkflowTaskMapsParentTitleAndBodyAtTheHttpBoundary()
