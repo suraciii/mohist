@@ -66,6 +66,7 @@ public class MohistDbContext : DbContext
     public DbSet<AgentJobEventRow> AgentJobEvents { get; set; } = null!;
     public DbSet<IngressEventRow> IngressEvents { get; set; } = null!;
     public DbSet<GitHubConnectionRow> GitHubConnections { get; set; } = null!;
+    public DbSet<GitHubIssueLinkRow> GitHubIssueLinks { get; set; } = null!;
     public DbSet<DeadLetterRow> DeadLetters { get; set; } = null!;
     public DbSet<IssueWorkflowProfile> IssueWorkflowProfiles { get; set; } = null!;
     public DbSet<WorkflowRunRow> WorkflowRuns { get; set; } = null!;
@@ -1144,6 +1145,34 @@ public class MohistDbContext : DbContext
                 .IsRequired();
             entity.Property(e => e.InstallationId)
                 .HasMaxLength(256);
+            entity.Property(e => e.CreatedAt)
+                .IsRequired();
+            entity.Property(e => e.UpdatedAt)
+                .IsRequired();
+        });
+
+        modelBuilder.Entity<GitHubIssueLinkRow>(entity =>
+        {
+            entity.ToTable("GitHubIssueLinks");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.ProjectId)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.RepositoryName)
+                .HasMaxLength(256)
+                .IsRequired();
+            entity.Property(e => e.GithubIssueNumber)
+                .IsRequired();
+            entity.Property(e => e.IssueNumber)
+                .IsRequired();
+            entity.HasIndex(e => new { e.ProjectId, e.RepositoryName, e.GithubIssueNumber })
+                .IsUnique();
+            entity.Property(e => e.PostedCommentsJson)
+                .HasColumnType("JSON")
+                .IsRequired();
             entity.Property(e => e.CreatedAt)
                 .IsRequired();
             entity.Property(e => e.UpdatedAt)
