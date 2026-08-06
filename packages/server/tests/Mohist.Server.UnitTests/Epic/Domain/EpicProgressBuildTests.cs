@@ -2,9 +2,9 @@ using Mohist.Server.Epic.Services;
 using Mohist.Server.Issue.Services;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Epic.Domain;
+namespace Mohist.Server.UnitTests.Epic.Domain;
 
-public class EpicProgressBuildSpecs
+public class EpicProgressBuildTests
 {
     [Fact]
     public void ActiveAndBlockedIssues_AreDerivedFromHealthNotStatus()
