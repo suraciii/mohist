@@ -146,17 +146,15 @@ provider 字段。
 - 禁止半绑定（只写其中一个）、禁止 team 改绑、禁止二次 app/bot 改绑。
 - 同一 Project/Agent/team 仍最多一个未删除 Connection。
 
-当前代码与此冲突的具体点（实现者须修改）：
+当前实现已按此模型落地（`Agent/Services/AgentConnectionStore.cs`）：
 
-- `HasBoundIdentity`（`Agent/Services/AgentConnectionStore.cs`）只要 workspace/app/bot
-  任一非空就视为「已绑定」，于是 `install-agent` 路径先固定 team 后补 app/bot 会被当作 immutable binding
-  拒绝。需改成：只有 team 固定、app/bot 仍空时，允许一次原子补齐。
-- `ImmutableBindingFields`（同文件）把 `appId`/`botUserId` 与 `workspaceTeamId` 一起列为
-  不可变；需区分「创建即固定」与「一次性补齐」。
-- `CreateAsync` 以 `WorkspaceTeamId` 判重。`install-agent` 路径不得用空 team 创建多个无法
-  区分目标 workspace 的 pending Connection：team 必须在创建时即由 enrollment 确定为真实值。
-- `BindSlackIdentityAsync` 是当前「一次性绑定全部身份」的路径；新模型把它收敛为
-  「补齐 app+bot」的窄命令，并在补齐前由 Connection 重新校验 team 一致与唯一性。
+- `CreateStagedAsync` 创建时要求真实 `WorkspaceTeamId`（由 enrollment 确定）且 app/bot 都为空，
+  `CreateAsync` 拒绝带 app/bot 的创建。
+- `BindSlackIdentityAsync` 已收敛为「补齐 app+bot」的窄命令：补齐前重新校验半绑定、team 一致
+  与唯一性，原子地把 `AppId + BotUserId` 从「都空」补成「都非空」一次；同一身份重投幂等，
+  改绑被拒。
+- `HasBoundIdentity` 要求 app/bot 都非空才算已绑定；`UpdateAsync` 的 `ImmutableBindingFields`
+  仍把绑定字段排除在通用更新之外，「创建即固定」与「一次性补齐」由窄命令与通用更新分离。
 
 一个 Connection 同时表达四类互不替代的事实：外部安装是否完成（安装进度）、操作者希望它
 Enabled 还是 Disabled（Desired state）、Slack 侧当前是否健康（Connection health）、被绑定的 Agent
@@ -286,11 +284,11 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
   Slack CLI 凭据或浏览器自动化绕过该边界。
 - **Socket token 边界**：App-level token 由用户在 App 设置页生成，scope 只能是
   `connections:write`。Mohist 验证它能为预期 App 建立 Socket 后才保存 readiness 事实。
-- **当前差距**：三个 outbound port 已接生产 adapter（`SlackApiTransport` + App
+- **当前状态**：三个 outbound port 已接生产 adapter（`SlackApiTransport` + App
   management / Configuration credential rotation / Bot identity verification），`setup` /
-  `install-agent` 已接入真实 port。`ISlackOAuthCredentialSink` 生产注册仍指向
-  `UnavailableSlackOAuthCredentialSink`：OAuth redirect 回填路径不可用，目标流程本来就不经
-  OAuth callback，token 由 CLI 受保护输入进入。
+  `install-agent` 已接入真实 port。OAuth redirect 回填路径与 `ISlackOAuthCredentialSink`
+  的 Unavailable 占位已随旧路由退役；目标流程不经 OAuth callback，token 由 CLI 受保护输入
+  进入。
 
 Server 的 Slack control plane 只经三个窄 outbound port 访问 Slack HTTPS API：
 
@@ -524,7 +522,7 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
 ## 已交付 correctness kernel
 
 本节记录 correctness kernel 已交付的纯模型部分。三个 outbound port 的生产 adapter 已接线
-（见「凭据所有权」差距注），但默认测试仍全部使用 fake port 与 fixed `TimeProvider`，不触
+（见「App 供给凭据」当前状态注），但默认测试仍全部使用 fake port 与 fixed `TimeProvider`，不触
 真实网络。
 
 ### 模型不变量
@@ -656,11 +654,12 @@ manifest 只输出 Socket Mode（无 HTTPS transport / `PublicIngressBaseUrl`）
 走 fake port 与 fixed `TimeProvider`，发布前仍需在隔离工作区人工跑通 `setup`、
 `install-agent`、Bot mention、thread 锚点回复与 Stop，并核对两条 Socket lease。
 
-Server 仍保留未清理的旧面：`SlackOAuthStateService` / `SlackOAuthAuthorizationService` 的
-OAuth redirect 路径（`begin-authorization` / `authorization-progress` / `authorize` 路由与
-`ISlackOAuthCredentialSink` 的 Unavailable 占位）、旧 `slack-manager/credentials` 登记路由与
-数据面 `rotate-credentials` 路由仍映射，新 CLI 与 Manager 对话均不调用；目标流程不依赖 OAuth
-callback。
+Server 的旧面已退役：OAuth redirect 路径（`begin-authorization` / `authorization-progress` /
+`authorize`，连同 `SlackOAuthStateService` / `SlackOAuthAuthorizationService` 与
+`ISlackOAuthCredentialSink` 的 Unavailable 占位）、旧 `slack-manager/credentials` 登记路由、
+数据面 `rotate-credentials` 与明文 token 的 `adapter-session` 路由均不再映射，
+`SlackLegacyRouteRetirementSpecs` 以路由表与 HTTP 404 双重锁定缺席；新 CLI 与 Manager 对话
+不依赖 OAuth callback。
 
 公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口、App Home 以及完整的
 规模化和运维体验仍属于后续阶段。后续能力仍必须经 Agent API 与既有 Connection boundary 进入，
