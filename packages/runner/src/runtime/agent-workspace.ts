@@ -241,15 +241,17 @@ export class AgentWorkspaceManager {
       return rejected(parent.reason === "origin-mismatch" ? "repository-mismatch" : "parent-workspace-unavailable", parent.message)
     }
 
-    if (!(await this.hasStorageHeadroom(signal))) {
-      return rejected("capacity", "runner workspace storage budget is exhausted")
-    }
-
     if (exists(worktreePath)) {
+      // Adoption re-uses the existing worktree and adds no storage, so
+      // it is not gated on the budget.
       const verdict = await validateAgentWorktree(this.runnerRoot, worktreePath, childSessionId, this.ownershipDeps(), signal)
       if (!verdict.ok) return rejected("invalid", verdict.message)
       await this.register({ request, branch, worktreePath, parentWorkDir: verdict.parentWorkDir })
       return { kind: "materialized", workspaceIdentity: agentWorkspaceIdentity(childSessionId), workDir: worktreePath }
+    }
+
+    if (!(await this.hasStorageHeadroom(signal))) {
+      return rejected("capacity", "runner workspace storage budget is exhausted")
     }
 
     const created = await this.createWorktree(worktreePath, branch, parent.path, signal)

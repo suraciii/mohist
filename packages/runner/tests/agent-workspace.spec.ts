@@ -230,6 +230,30 @@ describe("MaterializeAgentWorkspace", () => {
     expect(registry.list()).toHaveLength(0)
   })
 
+  it("RegistryLossWithFullBudget_AdoptsExistingWorktreeInsteadOfCapacity", async () => {
+    const first = expectMaterialized(await manager.materialize(request(), new AbortController().signal))
+    await processModule.deleteFile(registry.getFilePath())
+    const rebuiltRegistry = new AgentWorkspaceRegistry(root, { now: () => new Date("2026-01-01T00:00:00.000Z") })
+    await rebuiltRegistry.load()
+    const rebuiltManager = createAgentManager(root, rebuiltRegistry, fake, { workflowRegistry, budgetBytes: 500 })
+    fake.sizes.set(root, 1000)
+    fake.calls.length = 0
+
+    const adopted = await rebuiltManager.materialize(request(), new AbortController().signal)
+
+    // Adoption re-uses the existing worktree and adds no storage, so a
+    // full budget must not block it.
+    expect(adopted.kind).toBe("materialized")
+    expect(adopted).toEqual(first)
+    expect(rebuiltRegistry.get(ID)).toMatchObject({
+      childSessionId: ID,
+      workspacePath: first.workDir,
+      parentWorkDir: parentPath,
+      phase: "active",
+    })
+    expect(fake.commandArgs().filter((args) => args.includes("worktree") && args.includes("add"))).toHaveLength(0)
+  })
+
   it("UnknownUsageWithBudgetEnabled_IsRejectedCapacityFailClosed", async () => {
     manager = createAgentManager(root, registry, fake, { workflowRegistry, budgetBytes: 500 })
     fake.sizes.clear()
