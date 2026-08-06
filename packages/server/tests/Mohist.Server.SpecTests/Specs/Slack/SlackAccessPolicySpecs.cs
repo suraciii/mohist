@@ -16,6 +16,7 @@ using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -31,6 +32,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 [Collection("MohistIntegration")]
 public sealed class SlackAccessPolicySpecs
 {
+    private readonly Dictionary<string, string> _connectionLeases = new(StringComparer.Ordinal);
     private readonly MohistIntegrationFixture _fixture;
 
     public SlackAccessPolicySpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
@@ -239,6 +241,8 @@ public sealed class SlackAccessPolicySpecs
             senderSlackUserId,
             senderKind = "human",
             text,
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -264,6 +268,8 @@ public sealed class SlackAccessPolicySpecs
             senderSlackUserId,
             senderKind = "human",
             text,
+            leaseId = _connectionLeases[connection.Id],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var response = await _fixture.Client.PostAsJsonAsync(IngressPath(connection), body);
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -325,9 +331,39 @@ public sealed class SlackAccessPolicySpecs
         });
         await db.SaveChangesAsync();
 
+        var agentAppId = $"agent_app_{Guid.NewGuid():N}";
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.EnsureEnrollmentAsync(_fixture, "T123");
+        db.ManagedSlackAgentApps.Add(new ManagedSlackAgentAppRow
+        {
+            Id = agentAppId,
+            EnrollmentId = enrollmentId,
+            WorkspaceTeamId = "T123",
+            AgentConnectionId = id,
+            AppId = $"A_SPEC_{Guid.NewGuid():N}",
+            BotUserId = "U123",
+            AppLifecycle = SlackAppLifecycle.Created,
+            Authorization = SlackAuthorizationState.Authorized,
+            RuntimeCredentialValidationState = SlackRuntimeCredentialValidationState.Verified,
+            DesiredManifestVersion = 1,
+            DesiredManifestHash = "desired",
+            VerifiedScopesJson = "[]",
+            OperationFence = 0,
+            AppLevelTokenRef = agentAppId,
+            BotTokenRef = agentAppId,
+            BindingState = SlackAgentAppBindingState.Bound,
+            AuditJson = "[]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+        await db.SaveChangesAsync();
+
         var secrets = scope.ServiceProvider.GetRequiredService<ISecretStore>();
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
         await secrets.StoreAsync(new SecretStoreAddress(projectId, id, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.AppToken), Encoding.UTF8.GetBytes("xapp"));
+        await secrets.StoreAsync(SecretStoreAddress.ForManagedSlackAgentApp(agentAppId, SecretKind.BotToken), Encoding.UTF8.GetBytes("xoxb"));
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireConnectionLeaseAsync(_fixture, projectId, id);
+        _connectionLeases[id] = leaseId;
         return new AgentConnection
         {
             Id = id,

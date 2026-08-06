@@ -23,6 +23,7 @@ namespace Mohist.Server.SpecTests.Specs.Slack;
 public sealed class SlackManagerConversationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;
+    private readonly Dictionary<string, string> _managerLeases = new(StringComparer.Ordinal);
 
     public SlackManagerConversationSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
 
@@ -43,6 +44,10 @@ public sealed class SlackManagerConversationSpecs
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-conversation", "xoxb-manager-conversation");
+        _managerLeases[team] = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
+            _fixture, enrollmentId, team);
 
         var unclaimed = await SendManagerMessageAsync(
             appId, team, owner, "1710000000.000001", "list");
@@ -231,6 +236,10 @@ public sealed class SlackManagerConversationSpecs
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-recovery", "xoxb-manager-recovery");
+        _managerLeases[team] = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(
+            _fixture, enrollmentId, team);
         var claimed = await SendManagerMessageAsync(
             appId, team, owner, "1710000001.000001", $"claim {claimCode}");
         Assert.Equal("accepted", claimed.GetProperty("decision").GetString());
@@ -306,6 +315,8 @@ public sealed class SlackManagerConversationSpecs
             senderSlackUserId = sender,
             text,
             isDirectMessage = true,
+            leaseId = _managerLeases[team],
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         response.EnsureSuccessStatusCode();
         return await ReadDataAsync(response);

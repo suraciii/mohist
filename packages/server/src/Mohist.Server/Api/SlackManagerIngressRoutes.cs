@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
@@ -180,10 +181,13 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             SlackManagerIngressBody body,
             SlackManagerIngressService ingress,
-            OperatorCredential credential,
+            SlackWorkspaceEnrollmentStore enrollments,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(context.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Manager ingress requires an operator credential.", 403, "operator_credential_required");
             if (body is null
                 || string.IsNullOrWhiteSpace(body.AppId)
@@ -197,6 +201,20 @@ public static class SlackManagerIngressRoutes
                 return ApiResults.BadRequest(
                     "Client identity fields are not supported by the Manager API.",
                     "client_identity_not_supported");
+
+            var enrollment = await enrollments.GetActiveByTeamAsync(body.WorkspaceTeamId, ct);
+            if (enrollment is null
+                || !await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Manager(enrollment.Id, body.WorkspaceTeamId),
+                    body.LeaseId,
+                    body.AdapterId,
+                    ct))
+            {
+                return ApiResults.Conflict(
+                    "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",
+                    "lease_stale_or_expired");
+            }
 
             var result = await ingress.AcceptAsync(new SlackManagerIngressMessage(
                 body.AppId,
@@ -281,6 +299,8 @@ public sealed class SlackManagerIngressBody
     public string? Text { get; init; }
     public bool IsDirectMessage { get; init; }
     public string? ThreadTs { get; init; }
+    public string LeaseId { get; init; } = string.Empty;
+    public string AdapterId { get; init; } = string.Empty;
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? ExtensionData { get; init; }

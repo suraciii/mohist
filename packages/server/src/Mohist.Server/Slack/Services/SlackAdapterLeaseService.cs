@@ -185,6 +185,45 @@ public sealed class SlackAdapterLeaseService(
             lease.LeaseId, lease.Generation, lease.ExpiresAt, appToken, botToken);
     }
 
+    /// <summary>
+    /// Route-level gate: proves the caller still holds the current, unexpired
+    /// runtime lease for the target <em>before</em> any inbox/outbox side
+    /// effect. Fails closed when the lease was superseded or expired, when
+    /// adapter / lease / target do not match, when the target is no longer
+    /// active or verified, or when the pinned credential generation no longer
+    /// matches (resupplied candidate / rotated verified pair).
+    /// </summary>
+    public async Task<bool> ValidateRuntimeLeaseAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        // A request without lease proof must fail closed like any stale lease:
+        // it is not a caller contract violation, so it never throws.
+        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(adapterId))
+            return false;
+
+        var now = timeProvider.GetUtcNow();
+        var active = await store.GetActiveAsync(targetRef.TargetKey, ct);
+        if (active is null
+            || active.Kind != SlackLeaseKind.Runtime
+            || !string.Equals(active.LeaseId, leaseId, StringComparison.Ordinal)
+            || !string.Equals(active.AdapterId, adapterId, StringComparison.Ordinal)
+            || active.ExpiresAt <= now)
+            return false;
+
+        // A runtime lease was issued only while the target was Active,
+        // CredentialVerified and Bot-token provisioned; it stays valid only
+        // while all three still hold.
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        if (target is null || !target.Active || !target.CredentialVerified || !target.BotTokenProvisioned)
+            return false;
+
+        // The lease pins the credential generation it was issued against; a
+        // resupplied candidate or a rotated verified pair makes it stale.
+        return await CredentialGenerationMatchesAsync(target, active, ct);
+    }
+
     public async Task<SlackLeaseRenewalResult?> RenewLeaseAsync(
         string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
     {
