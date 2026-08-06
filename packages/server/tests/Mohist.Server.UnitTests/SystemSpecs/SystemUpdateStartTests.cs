@@ -3,9 +3,9 @@ using Mohist.Server.SystemInfo;
 using Xunit;
 using static Mohist.Server.TestSupport.SystemSpecs.SystemUpdateTestFactory;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class SystemUpdateStartSpecs
+public class SystemUpdateStartTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
 

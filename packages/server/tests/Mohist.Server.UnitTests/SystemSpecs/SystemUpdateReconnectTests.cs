@@ -3,9 +3,9 @@ using Mohist.Server.SystemInfo;
 using Xunit;
 using static Mohist.Server.TestSupport.SystemSpecs.SystemUpdateTestFactory;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class SystemUpdateReconnectSpecs
+public class SystemUpdateReconnectTests
 {
     [Fact]
     public async Task AdvanceActiveJobAsync_WhenReady_RestartsRunnerBeforeReadyCompletion()
