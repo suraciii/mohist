@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Grains.Coordinator;
 using Mohist.Server.Issue.Services;
@@ -129,7 +130,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         await issueGrain.CancelAsync();
         await projectGrain.RemoveRepositoryAsync("secondary");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        var ex = await Assert.ThrowsAsync<IssueStartRepositoryUnavailableException>(() => issueGrain.StartWorkAsync());
         Assert.Contains("secondary", ex.Message);
         Assert.Contains("RepositoryNotFound", ex.Message);
 
@@ -156,7 +157,7 @@ public class IssueWorkflowRepositoryResolutionSpecs
         var issueGrain = _grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
         await issueGrain.CreateAsync(projectId, number, "Ghost repo", body: null, labels: null, priority: null, "ghost");
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => issueGrain.StartWorkAsync());
+        var ex = await Assert.ThrowsAsync<IssueStartRepositoryUnavailableException>(() => issueGrain.StartWorkAsync());
         Assert.Contains("RepositoryNotFound", ex.Message);
 
         using var scope = _services.CreateScope();

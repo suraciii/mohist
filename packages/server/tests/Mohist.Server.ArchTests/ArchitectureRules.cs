@@ -236,6 +236,7 @@ public class ArchitectureRules
             ["Inbox"] = ["InboxProjectionHandler.cs"],
             ["Notifications"] = ["HermesIssueNotificationHandler.cs"],
             ["Webhooks"] = ["WebhookDispatchHandler.cs"],
+            ["GitHub"] = ["GitHubIssueFeedHandler.cs", "GitHubIssueCloseHandler.cs"],
         };
 
         var inventory = assigned.SelectMany(pair => pair.Value.Select(file => (file, pair.Key)))

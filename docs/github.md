@@ -96,10 +96,14 @@ mo github connect owner/repo
 
 > **当前实装差距：** 连接仓库与事件入站已实装：`mo github connect` 建立连接并打印
 > GitHub 侧配置清单，打标签、关闭 issue、PR review、check suite 完成等事件验签后实时
-> 进入事件路由，可被订阅。供料翻译器、进度回写器与 PR review 审批仍未实装；GitHub
-> 身份（App / PAT）的配置与使用也未交付。
+> 进入事件路由，可被订阅。供料与撤销已实装：打供料标签创建并启动 Mohist issue
+> （标题/正文快照、p0–p4 优先级映射、来源可追、`--feed-mode backlog` 仅入 backlog），
+> 同一 GitHub issue 重复供料只建一次；关闭 GitHub issue 会取消对应 Mohist issue，
+> 已终态时无动作。启动被拒（前置未满足 / 仓库不可用）时留在 backlog，并通过最小评论
+> 回写通道（PAT 身份）在 GitHub 上留说明。进度回写器与 PR review 审批仍未实装；
+> GitHub 身份（App / PAT）的配置与使用也未交付。
 
-当前 GitHub 仅是交付目标（`mohist/github-pr` profile），供料 / 回写 / 审批各能力由
+当前 GitHub 仅是交付目标（`mohist/github-pr` profile），完整回写 / 审批各能力由
 后续 issue 推进落地。
 
 ---
