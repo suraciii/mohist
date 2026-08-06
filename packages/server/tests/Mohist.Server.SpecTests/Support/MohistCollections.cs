@@ -35,9 +35,6 @@ public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationF
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
-[CollectionDefinition("IntegrationIssue")]
-public class IntegrationIssueCollection : ICollectionFixture<MohistIntegrationFixture>;
-
 [CollectionDefinition("IssueLifecycle")]
 public class IssueLifecycleCollection : ICollectionFixture<MohistIntegrationFixture>;
 
@@ -56,9 +53,6 @@ public class IntegrationWorkflowCollection : ICollectionFixture<MohistIntegratio
 
 [CollectionDefinition("IntegrationRunner")]
 public class IntegrationRunnerCollection : ICollectionFixture<MohistIntegrationFixture>;
-
-[CollectionDefinition("IntegrationMisc")]
-public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + silo, TestClusterPortAllocator-assigned ports). Tests reset the otel
