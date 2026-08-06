@@ -478,10 +478,13 @@ Slack 呈现与过程透明是两个分开的信号。Slack 里只有 liveness�
 它的频道策略设成 Anyone。
 
 这沿用 Buzz 的 DM hardening：即使频道策略是 Allowlist 或 Anyone，也不会让偶然进入 Bot
-私聊的成员获得调用权。频道成员关系只决定 Bot 能否收到消息，不代替 Access policy。Slack
-Connect 中的外部参与者和归属无法确认的身份在第一版均不触发 Agent；Anyone 不是“任何能
-看见消息的人”。Bot 被邀请进私有频道后，仍按接入策略检查发送者。无权调用的用户会收到简短
-且明确的拒绝，不会创建 AgentJob 或 AgentSession。
+私聊的成员获得调用权。Allowlist 与 Anyone 都会在每次调用时实时核对发送者仍是当前工作区
+的正式成员——已停用、受限、外部协作成员、Bot 和其他无法确认的身份都会被拒绝；Anyone
+还会实时核对 Bot 就在发送者所在的频道中，核对失败同样按拒绝处理。私聊的 Owner 判定不
+依赖这些查询，Owner 在任何策略下都可调用。频道成员关系只决定 Bot 能否收到消息，不代替
+Access policy。Slack Connect 中的外部参与者和归属无法确认的身份在第一版均不触发 Agent；
+Anyone 不是“任何能看见消息的人”。Bot 被邀请进私有频道后，仍按接入策略检查发送者。无权
+调用的用户会收到简短且明确的拒绝，不会创建 AgentJob 或 AgentSession。
 
 停止或取消某个 AgentTurn 只能由 Connection Owner 或发起该 AgentSession 的 Slack 成员
 执行。其他被允许的成员可以继续对话，但不能停止别人的执行；过期按钮也不能误停后来
@@ -582,7 +585,7 @@ Mohist App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、�
 明确的生命周期操作。`configure-manager`、`create`、`configure`、`create-child-app` 等底层
 命令已从命令面移除。
 
-仍未交付的是与真实 Slack 的端到端验收：安装授权、Socket 连接与消息收发目前只在本地模拟
-环境中验证过，真实 Slack 工作区上的 `setup`、`install-agent`、Bot 提及与 thread 回复尚未
-完整跑通。公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口及完整
+仍未交付的是与真实 Slack 的端到端验收：安装授权、Socket 连接、消息收发与 Allowlist/Anyone
+的实时成员、Bot 频道资格校验目前只在本地模拟环境中验证过，真实 Slack 工作区上的 `setup`、
+`install-agent`、Bot 提及与 thread 回复尚未完整跑通。公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口及完整
 诊断工作台也仍未交付。

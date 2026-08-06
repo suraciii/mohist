@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { HttpAdapterTransport } from "./transport.js"
+import { HttpAdapterTransport, LeaseStaleError } from "./transport.js"
 import type { SlackEnvelope, SlackInteractionEnvelope } from "./types.js"
 
 const envelope: SlackEnvelope = {
@@ -100,26 +100,26 @@ describe("HttpAdapterTransport", () => {
       expiresAt: "2026-01-01T00:10:00Z",
     })
     await expect(transport.reportHello(ref, "lease", "A1", signal)).resolves.toBe("verified")
-    await expect(transport.ingress(ref, envelope, signal)).resolves.toEqual({ kind: "accepted" })
-    await expect(transport.ingress(manager, envelope, signal)).resolves.toEqual({ kind: "accepted" })
-    await expect(transport.interaction(ref, interaction, signal)).resolves.toEqual({ state: "stop_requested" })
-    await expect(transport.claimDelivery(ref, "a", signal)).resolves.toEqual({
+    await expect(transport.ingress(ref, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
+    await expect(transport.ingress(manager, envelope, "lease", "a", signal)).resolves.toEqual({ kind: "accepted" })
+    await expect(transport.interaction(ref, interaction, "lease", "a", signal)).resolves.toEqual({ state: "stop_requested" })
+    await expect(transport.claimDelivery(ref, "lease", "a", signal)).resolves.toEqual({
       id: "delivery-1",
       ownerKind: "connection",
       conversationId: "D1",
       threadTs: null,
       payloadJson: '{"text":"reply"}',
     })
-    await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered", adapterId: "a" }, signal)
-    await expect(transport.claimDelivery(manager, "a", signal)).resolves.toEqual({
+    await transport.ackDelivery(ref, { id: "delivery-1", outcome: "delivered", adapterId: "a" }, "lease", signal)
+    await expect(transport.claimDelivery(manager, "lease", "a", signal)).resolves.toEqual({
       id: "manager-delivery",
       ownerKind: "manager",
       conversationId: "D1",
       threadTs: null,
       payloadJson: '{"text":"reply"}',
     })
-    await expect(transport.claimUncertainDelivery(manager, "a", signal)).resolves.toMatchObject({ id: "manager-uncertain", ownerKind: "manager" })
-    await transport.ackDelivery(manager, { id: "manager-uncertain", outcome: "uncertain", adapterId: "a" }, signal)
+    await expect(transport.claimUncertainDelivery(manager, "lease", "a", signal)).resolves.toMatchObject({ id: "manager-uncertain", ownerKind: "manager" })
+    await transport.ackDelivery(manager, { id: "manager-uncertain", outcome: "uncertain", adapterId: "a" }, "lease", signal)
 
     expect(calls.map((call) => call.url)).toEqual([
       "http://localhost/api/slack-adapter/leases/targets",
@@ -168,7 +168,7 @@ describe("HttpAdapterTransport", () => {
       leaseId: "lease",
       appId: "A1",
     })
-    expect(JSON.parse(calls[6]!.body)).toEqual(envelope)
+    expect(JSON.parse(calls[6]!.body)).toEqual({ ...envelope, leaseId: "lease", adapterId: "a" })
     expect(JSON.parse(calls[7]!.body)).toEqual({
       appId: "A1",
       workspaceTeamId: "T_MANAGER",
@@ -178,13 +178,15 @@ describe("HttpAdapterTransport", () => {
       text: "task",
       isDirectMessage: true,
       threadTs: null,
+      leaseId: "lease",
+      adapterId: "a",
     })
-    expect(JSON.parse(calls[8]!.body)).toEqual(interaction)
-    expect(JSON.parse(calls[9]!.body)).toEqual({ adapterId: "a" })
-    expect(JSON.parse(calls[10]!.body)).toEqual({ id: "delivery-1", outcome: "delivered", adapterId: "a" })
-    expect(JSON.parse(calls[11]!.body)).toEqual({ adapterId: "a" })
-    expect(JSON.parse(calls[12]!.body)).toEqual({ adapterId: "a" })
-    expect(JSON.parse(calls[13]!.body)).toEqual({ id: "manager-uncertain", outcome: "uncertain", adapterId: "a" })
+    expect(JSON.parse(calls[8]!.body)).toEqual({ ...interaction, leaseId: "lease", adapterId: "a" })
+    expect(JSON.parse(calls[9]!.body)).toEqual({ leaseId: "lease", adapterId: "a" })
+    expect(JSON.parse(calls[10]!.body)).toEqual({ id: "delivery-1", outcome: "delivered", adapterId: "a", leaseId: "lease" })
+    expect(JSON.parse(calls[11]!.body)).toEqual({ leaseId: "lease", adapterId: "a" })
+    expect(JSON.parse(calls[12]!.body)).toEqual({ leaseId: "lease", adapterId: "a" })
+    expect(JSON.parse(calls[13]!.body)).toEqual({ id: "manager-uncertain", outcome: "uncertain", adapterId: "a", leaseId: "lease" })
   })
 
   it("maps lease conflicts to null and hello outcomes to typed results", async () => {
@@ -214,10 +216,16 @@ describe("HttpAdapterTransport", () => {
     await expect(transport.reportHello(ref, "lease", "A1", signal)).resolves.toBe("lease_stale_or_expired")
 
     responses.push({ status: 200, body: { success: true, data: null } })
-    await expect(transport.claimDelivery(ref, "a", signal)).resolves.toBeNull()
+    await expect(transport.claimDelivery(ref, "lease", "a", signal)).resolves.toBeNull()
 
     responses.push({ status: 409, body: { success: false, error: "other conflict", code: "delivery_claimed_by_another" } })
-    await expect(transport.claimDelivery(ref, "a", signal)).rejects.toThrow("delivery_claimed_by_another")
+    await expect(transport.claimDelivery(ref, "lease", "a", signal)).rejects.toThrow("delivery_claimed_by_another")
+
+    responses.push({ status: 409, body: { success: false, error: "lease is stale", code: "lease_stale_or_expired" } })
+    await expect(transport.claimDelivery(ref, "lease", "a", signal)).rejects.toBeInstanceOf(LeaseStaleError)
+
+    responses.push({ status: 409, body: { success: false, error: "lease is stale", code: "lease_stale_or_expired" } })
+    await expect(transport.ingress(ref, envelope, "lease", "a", signal)).rejects.toBeInstanceOf(LeaseStaleError)
   })
 
   it("rejects malformed discovery targets and lease responses without leaking payloads", async () => {
@@ -244,7 +252,7 @@ describe("HttpAdapterTransport", () => {
       operatorId: "operator-id",
       fetch: async () => new Response(JSON.stringify({ success: true, data: { id: "x" } }), { status: 200 }),
     })
-    await expect(transport3.claimDelivery({ projectId: "p", connectionId: "c" }, "a", new AbortController().signal))
+    await expect(transport3.claimDelivery({ projectId: "p", connectionId: "c" }, "lease", "a", new AbortController().signal))
       .rejects.toThrow("invalid delivery")
   })
 

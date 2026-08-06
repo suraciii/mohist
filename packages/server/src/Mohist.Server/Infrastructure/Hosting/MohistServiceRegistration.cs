@@ -119,6 +119,7 @@ public static class MohistServiceRegistration
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackThreadLaunchReservationStore>());
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackOwnerClaimService>());
         services.AddScoped<IAgentConnectionProviderCleanup>(sp => sp.GetRequiredService<SlackConnectionAllowedMemberStore>());
+        services.AddScoped<ISlackConnectionAllowedMemberStore>(sp => sp.GetRequiredService<SlackConnectionAllowedMemberStore>());
 
         var connectionString = ResolveSqliteConnectionString(configuration);
 
@@ -165,6 +166,7 @@ public static class MohistServiceRegistration
         services.AddScoped<ISlackConfigurationCredentialPort, SlackConfigurationCredentialPortAdapter>();
         services.AddScoped<ISlackConfigurationCredentialStore>(sp => sp.GetRequiredService<ProtectedSlackConfigurationCredentialStore>());
         services.AddScoped<ISlackBotIdentityVerificationPort, SlackBotIdentityVerificationPortAdapter>();
+        services.AddScoped<ISlackMemberIdentityPort, SlackMemberIdentityPortAdapter>();
         services.AddScoped<ISlackAgentAppBindingPort>(sp => sp.GetRequiredService<AgentConnectionStore>());
         var slackApiOptions = configuration.GetSection(SlackProviderOptions.SectionName).Get<SlackProviderOptions>()
             ?? new SlackProviderOptions();

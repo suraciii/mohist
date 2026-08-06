@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SlackAdapter, normalizeSlackInteraction, normalizeSocketEvent } from "./adapter.js"
+import { LeaseStaleError } from "./transport.js"
 import { setSlackLoggerForTest, type SlackLogFields, type SlackLogger } from "./logger.js"
 import type { AdapterLease, AdapterTransport, Delivery, IngressResult, LeaseRenewal, RuntimeLease, SlackAdapterTarget, SlackConnectionRef, SlackEnvelope, SlackHelloOutcome, SlackInteractionEnvelope, SlackLeaseKind, SlackManagerRef, SlackWebClient, SocketClient, SocketEvent } from "./types.js"
 
@@ -655,6 +656,58 @@ describe("mohist-slack adapter", () => {
 
     expect(transport.envelopes.map((envelope) => envelope.messageTs)).toEqual(["1"])
     expect(sockets).toHaveLength(1)
+    controller.abort()
+    await adapter.stop()
+  })
+
+  it("a stale error from a superseded runtime never evicts its replacement", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    transport.deliveries.length = 0
+    let releaseIngress!: () => void
+    let markIngressStarted!: () => void
+    transport.ingressGate = new Promise<void>((resolve) => { releaseIngress = resolve })
+    const ingressStarted = new Promise<void>((resolve) => { markIngressStarted = resolve })
+    transport.ingressStarted = markIngressStarted
+    const sockets: FakeSocket[] = []
+    const adapter = new SlackAdapter({
+      adapterId: "a",
+      transport,
+      socketFactory: () => {
+        const socket = new FakeSocket()
+        sockets.push(socket)
+        return socket
+      },
+      webFactory: () => new FakeWeb(),
+      discoveryIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+    await adapter.start(controller.signal)
+    expect(sockets).toHaveLength(1)
+
+    // Runtime A stalls inside ingress with an open event.
+    const pending = sockets[0]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "1", user: "U", text: "first" } })
+    await ingressStarted
+
+    // Discovery evicts A, then re-acquires the same target as runtime B.
+    transport.connections = []
+    await adapter.refreshConnections(controller.signal)
+    transport.connections = [{ projectId: "p", connectionId: "c" }]
+    await adapter.refreshConnections(controller.signal)
+    expect(sockets).toHaveLength(2)
+    expect(sockets[1]!.started).toBe(true)
+
+    // A's stalled ingress fails stale: its removal must evict A but never B.
+    transport.ingressError = new LeaseStaleError()
+    releaseIngress()
+    await pending
+    transport.ingressError = undefined
+
+    expect(sockets[0]!.disconnected).toBe(true)
+    expect(sockets[1]!.disconnected).toBe(false)
+    // B still owns the runtime: its socket events keep being forwarded.
+    await sockets[1]!.emit({ team_id: "T", api_app_id: "A1", event: { type: "message", channel: "D", ts: "2", user: "U", text: "second" } })
+    expect(transport.envelopes.map((envelope) => envelope.messageTs)).toEqual(["1", "2"])
     controller.abort()
     await adapter.stop()
   })

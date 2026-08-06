@@ -44,6 +44,29 @@ public sealed class EnrollmentSlackLeaseTargetProvider(
         };
     }
 
+    public async Task<SlackLeaseTargetRef.Manager?> ResolveManagerByTeamAsync(
+        string workspaceTeamId, CancellationToken ct = default)
+    {
+        var enrollment = await enrollments.GetActiveByTeamAsync(workspaceTeamId, ct);
+        return ToManagerRef(enrollment);
+    }
+
+    public async Task<SlackLeaseTargetRef.Manager?> ResolveManagerByEnrollmentAsync(
+        string enrollmentId, CancellationToken ct = default)
+    {
+        var enrollment = await enrollments.GetAsync(enrollmentId, ct);
+        return ToManagerRef(enrollment);
+    }
+
+    private static SlackLeaseTargetRef.Manager? ToManagerRef(SlackWorkspaceEnrollment? enrollment)
+    {
+        if (enrollment is null
+            || enrollment.Lifecycle != SlackEnrollmentLifecycle.Active
+            || string.IsNullOrWhiteSpace(enrollment.ManagerAppId))
+            return null;
+        return new SlackLeaseTargetRef.Manager(enrollment.Id, enrollment.WorkspaceTeamId);
+    }
+
     public async Task MarkVerifiedAsync(
         string operatorId,
         SlackLeaseTargetRef targetRef,

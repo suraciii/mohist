@@ -21,7 +21,7 @@ public sealed class SlackManifestGeneratorTests
         Assert.False(mohistJson.RootElement.GetProperty("settings").GetProperty("event_subscriptions").TryGetProperty("request_url", out _));
         Assert.Equal(["chat:write", "im:history", "users:read"], Scopes(mohistJson));
         Assert.Equal(["message.im"], Events(mohistJson));
-        Assert.Equal(["app_mentions:read", "channels:history", "chat:write", "groups:history", "im:history", "reactions:read", "reactions:write", "users:read"], Scopes(agentJson));
+        Assert.Equal(["app_mentions:read", "channels:history", "channels:read", "chat:write", "groups:history", "groups:read", "im:history", "reactions:read", "reactions:write", "users:read"], Scopes(agentJson));
         Assert.Equal(["app_mention", "message.im"], Events(agentJson));
         Assert.DoesNotContain("mpim:history", agent.CanonicalJson, StringComparison.Ordinal);
         Assert.DoesNotContain("PublicIngressBaseUrl", agent.CanonicalJson, StringComparison.Ordinal);
@@ -105,7 +105,7 @@ public sealed class SlackManifestGeneratorTests
                 "app_home": { "messages_tab_enabled": true, "home_tab_enabled": false, "messages_tab_read_only_enabled": false },
                 "bot_user": { "always_online": false, "display_name": "Agent" }
               },
-              "oauth_config": { "scopes": { "bot": ["users:read", "reactions:write", "reactions:read", "im:history", "groups:history", "chat:write", "channels:history", "app_mentions:read"] } },
+              "oauth_config": { "scopes": { "bot": ["users:read", "reactions:write", "reactions:read", "im:history", "groups:read", "groups:history", "chat:write", "channels:read", "channels:history", "app_mentions:read"] } },
               "settings": {
                 "socket_mode_enabled": true,
                 "token_rotation_enabled": false,

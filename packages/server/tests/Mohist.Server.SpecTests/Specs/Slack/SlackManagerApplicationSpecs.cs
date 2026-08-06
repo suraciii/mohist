@@ -118,6 +118,9 @@ public sealed class SlackManagerApplicationSpecs
         });
         setupResponse.EnsureSuccessStatusCode();
         var claimCode = (await ReadDataAsync(setupResponse)).GetProperty("claimCode").GetString()!;
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-default-agent", "xoxb-manager-default-agent");
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(_fixture, enrollmentId, team);
 
         using var claimResponse = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
@@ -128,6 +131,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = owner,
             text = $"claim {claimCode}",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         claimResponse.EnsureSuccessStatusCode();
 
@@ -253,6 +258,38 @@ public sealed class SlackManagerApplicationSpecs
         Assert.Equal("configure_manager_credentials", status.GetProperty("nextAction").GetString());
 
         var claimCode = setup.GetProperty("claimCode").GetString()!;
+
+        // While credentials are not provisioned the manager cannot hold a
+        // runtime lease: ingress fails closed with no inbox/outbox side effect.
+        using var notReady = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
+        {
+            appId = "A_MANAGER_S0_INGRESS",
+            workspaceTeamId = team,
+            conversationId = "D_MANAGER_S0",
+            messageTs = "1710000000.000001",
+            senderSlackUserId = "U_MANAGER_OWNER",
+            text = $"claim {claimCode}",
+            isDirectMessage = true,
+            leaseId = "lease-before-provisioning",
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
+        });
+        Assert.Equal(HttpStatusCode.Conflict, notReady.StatusCode);
+        using (var notReadyError = JsonDocument.Parse(await notReady.Content.ReadAsStringAsync()))
+            Assert.Equal("lease_stale_or_expired", notReadyError.RootElement.GetProperty("code").GetString());
+        await using (var noSideEffectScope = _fixture.Services.CreateAsyncScope())
+        {
+            var noSideEffectDb = noSideEffectScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var enrollmentRow = await noSideEffectDb.SlackWorkspaceEnrollments
+                .SingleAsync(row => row.WorkspaceTeamId == team);
+            Assert.Empty(await noSideEffectDb.SlackProviderInboxRows
+                .Where(row => row.ConnectionId == enrollmentRow.Id)
+                .ToListAsync());
+        }
+
+        var enrollmentId = await SlackRuntimeLeaseTestSupport.ProvisionVerifiedManagerAsync(
+            _fixture, team, "xapp-manager-s0-ingress", "xoxb-manager-s0-ingress");
+        var leaseId = await SlackRuntimeLeaseTestSupport.AcquireManagerLeaseAsync(_fixture, enrollmentId, team);
+
         using var deniedIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", new
         {
             appId = "A_MANAGER_S0_INGRESS",
@@ -263,6 +300,8 @@ public sealed class SlackManagerApplicationSpecs
             text = "list agents",
             isDirectMessage = true,
             actor = "forged-actor",
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         Assert.Equal(HttpStatusCode.BadRequest, deniedIngress.StatusCode);
         using (var deniedError = JsonDocument.Parse(await deniedIngress.Content.ReadAsStringAsync()))
@@ -277,6 +316,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = "U_MANAGER_UNCLAIMED",
             text = "list agents",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         });
         unclaimedIngress.EnsureSuccessStatusCode();
         var unclaimed = await ReadDataAsync(unclaimedIngress);
@@ -292,6 +333,8 @@ public sealed class SlackManagerApplicationSpecs
             senderSlackUserId = "U_MANAGER_OWNER",
             text = $"claim {claimCode}",
             isDirectMessage = true,
+            leaseId,
+            adapterId = SlackRuntimeLeaseTestSupport.AdapterId,
         };
         using var firstIngress = await _fixture.Client.PostAsJsonAsync("/api/slack-manager/ingress", message);
         firstIngress.EnsureSuccessStatusCode();

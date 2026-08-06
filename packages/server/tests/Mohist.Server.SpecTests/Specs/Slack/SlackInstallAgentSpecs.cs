@@ -416,7 +416,7 @@ public sealed class SlackInstallAgentSpecs
         await SeedEnrollmentAsync("enrollment-1");
         var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
         var agentAppId = installed.AgentApp.Id;
-        var superset = new HashSet<string>(AgentAppBotScopes) { "channels:read" };
+        var superset = new HashSet<string>(AgentAppBotScopes) { "files:read" };
 
         _botIdentity.Result = new SlackBotIdentityVerificationResult(
             true,

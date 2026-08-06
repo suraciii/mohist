@@ -11,6 +11,18 @@ const LEASE_ROUTES = "/api/slack-adapter/leases"
 const OPERATOR_TOKEN_HEADER = "x-mohist-operator-token"
 const OPERATOR_ID_HEADER = "x-mohist-operator-id"
 
+/**
+ * Thrown when a runtime-lease-gated request (ingress, interaction, claim,
+ * ack) is rejected because the presented lease is stale, superseded or
+ * expired. The adapter reacts by dropping the runtime so the next discovery
+ * cycle re-acquires a fresh lease.
+ */
+export class LeaseStaleError extends Error {
+  constructor() {
+    super("Slack adapter runtime lease is stale or expired")
+  }
+}
+
 export class HttpAdapterTransport implements AdapterTransport {
   private readonly request: typeof fetch
   private readonly baseUrl: string
@@ -57,30 +69,30 @@ export class HttpAdapterTransport implements AdapterTransport {
     throw this.failure(payload)
   }
 
-  async ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, signal: AbortSignal): Promise<IngressResult> {
+  async ingress(ref: SlackAdapterTarget, envelope: SlackEnvelope, leaseId: string, adapterId: string, signal: AbortSignal): Promise<IngressResult> {
     if (isManagerTarget(ref))
-      return await this.post<IngressResult>("/api/slack-manager/ingress", managerIngressBody(ref, envelope), signal)
-    return await this.post<IngressResult>(`${connectionRoute(ref)}/ingress`, envelope, signal)
+      return await this.post<IngressResult>("/api/slack-manager/ingress", { ...managerIngressBody(ref, envelope), leaseId, adapterId }, signal)
+    return await this.post<IngressResult>(`${connectionRoute(ref)}/ingress`, { ...envelope, leaseId, adapterId }, signal)
   }
 
-  async interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, signal: AbortSignal): Promise<InteractionResult> {
+  async interaction(ref: SlackAdapterTarget, envelope: SlackInteractionEnvelope, leaseId: string, adapterId: string, signal: AbortSignal): Promise<InteractionResult> {
     if (isManagerTarget(ref))
       throw new Error("Slack Manager targets do not expose interactions")
-    return await this.post<InteractionResult>(`${connectionRoute(ref)}/interactions`, envelope, signal)
+    return await this.post<InteractionResult>(`${connectionRoute(ref)}/interactions`, { ...envelope, leaseId, adapterId }, signal)
   }
 
-  async claimDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null> {
-    const data = await this.postOrNull<unknown>(deliveryRoute(ref, "claim"), { adapterId }, undefined, signal)
+  async claimDelivery(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<Delivery | null> {
+    const data = await this.postOrNull<unknown>(deliveryRoute(ref, "claim"), { leaseId, adapterId }, undefined, signal)
     return deliveryFromData(data)
   }
 
-  async claimUncertainDelivery(ref: SlackAdapterTarget, adapterId: string, signal: AbortSignal): Promise<Delivery | null> {
-    const data = await this.postOrNull<unknown>(deliveryRoute(ref, "claim-uncertain"), { adapterId }, undefined, signal)
+  async claimUncertainDelivery(ref: SlackAdapterTarget, leaseId: string, adapterId: string, signal: AbortSignal): Promise<Delivery | null> {
+    const data = await this.postOrNull<unknown>(deliveryRoute(ref, "claim-uncertain"), { leaseId, adapterId }, undefined, signal)
     return deliveryFromData(data)
   }
 
-  async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, signal: AbortSignal): Promise<void> {
-    await this.post<unknown>(deliveryRoute(ref, "ack"), ack, signal)
+  async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck, leaseId: string, signal: AbortSignal): Promise<void> {
+    await this.post<unknown>(deliveryRoute(ref, "ack"), { ...ack, leaseId }, signal)
   }
 
   private operatorHeaders(): Record<string, string> {
@@ -148,6 +160,7 @@ export class HttpAdapterTransport implements AdapterTransport {
   }
 
   private failure(payload: { status: number; code?: string }): Error {
+    if (payload.code === "lease_stale_or_expired") return new LeaseStaleError()
     return new Error(`Slack adapter request failed: ${payload.status}${payload.code ? ` (${payload.code})` : ""}`)
   }
 }

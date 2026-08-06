@@ -7,6 +7,7 @@ using Microsoft.Extensions.Options;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
@@ -15,6 +16,7 @@ using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Slack;
+using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Agent.Domain;
 
@@ -399,15 +401,25 @@ public static class SlackConnectionRoutes
             IGrainFactory grains,
             AgentSessionFollowupDispatcher followupDispatcher,
             AgentSessionQuerier sessions,
-            ISecretStore secrets,
             SlackThreadHistoryReader threadHistory,
             IOptions<SlackProviderOptions> slackProviderOptions,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    body?.LeaseId ?? string.Empty,
+                    body?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return LeaseStaleOrExpired();
+            }
             var connection = await connections.GetAsync(projectId, connectionId, ct);
             if (connection is null)
                 return ApiResults.NotFound("Slack Connection was not found.");
@@ -459,7 +471,11 @@ public static class SlackConnectionRoutes
                         connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
                         sessions, agents, claims, accessDecider, inbox, outbox,
                         launcher, attachmentBinder, grains, followupDispatcher,
-                        secrets, threadHistory, slackProviderOptions,
+                        new SlackLeaseContext(
+                            operatorId, body.LeaseId, body.AdapterId,
+                            (targetRef, leaseCt) => leases.ResolveRuntimeLeaseBotTokenAsync(
+                                operatorId, targetRef, body.LeaseId, body.AdapterId, leaseCt)),
+                        threadHistory, slackProviderOptions,
                         http.RequestServices),
                     ct);
 
@@ -477,12 +493,23 @@ public static class SlackConnectionRoutes
             string connectionId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    body?.LeaseId ?? string.Empty,
+                    body?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return LeaseStaleOrExpired();
+            }
             var entry = await outbox.ClaimAsync(projectId, connectionId, body?.AdapterId ?? string.Empty, ct);
             return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
         });
@@ -492,26 +519,49 @@ public static class SlackConnectionRoutes
             string connectionId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    body?.LeaseId ?? string.Empty,
+                    body?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return LeaseStaleOrExpired();
+            }
             var entry = await outbox.ClaimUncertainAsync(projectId, connectionId, body?.AdapterId ?? string.Empty, ct);
             return entry is null ? ApiResults.Ok<object?>(null) : ApiResults.Ok(entry);
         });
 
         group.MapPost("/deliveries/ack", async (
             HttpContext http,
+            string connectionId,
             DeliveryAckBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId ?? string.Empty),
+                    body?.LeaseId ?? string.Empty,
+                    body?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return LeaseStaleOrExpired();
+            }
             if (body is null || string.IsNullOrWhiteSpace(body.Id))
                 return ApiResults.BadRequest("id is required.");
             if (string.IsNullOrWhiteSpace(body.AdapterId))
@@ -527,6 +577,11 @@ public static class SlackConnectionRoutes
 
         return app;
     }
+
+    private static IResult LeaseStaleOrExpired() =>
+        ApiResults.Conflict(
+            "The runtime Socket lease is stale, expired, or unknown; acquire a new lease.",
+            "lease_stale_or_expired");
 
     private static void MapSlackManagerAdapterRoutes(WebApplication app)
     {
@@ -553,11 +608,15 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+                return LeaseStaleOrExpired();
             var entry = await outbox.ClaimAsync(
                 SlackDeliveryOwnerIds.ManagerProjectId,
                 enrollmentId,
@@ -572,11 +631,15 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryClaimBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+                return LeaseStaleOrExpired();
             var entry = await outbox.ClaimUncertainAsync(
                 SlackDeliveryOwnerIds.ManagerProjectId,
                 enrollmentId,
@@ -591,11 +654,15 @@ public static class SlackConnectionRoutes
             string enrollmentId,
             DeliveryAckBody body,
             SlackOutboxStore outbox,
-            OperatorCredential credential,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
+            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
+                return LeaseStaleOrExpired();
             if (body is null || string.IsNullOrWhiteSpace(body.Id))
                 return ApiResults.BadRequest("id is required.");
             if (string.IsNullOrWhiteSpace(body.AdapterId))
@@ -1341,7 +1408,7 @@ public static class SlackConnectionRoutes
         // no-cache contract.
         var decision = await req.AccessDecider.EvaluateAsync(
             connection, req.SenderSlackUserId, body.TeamId, body.ConversationId,
-            isDirectMessage: false, ct);
+            isDirectMessage: false, req.LeaseContext, ct);
 
         if (mentionedWorkspaceBots.Count >= 2)
         {
@@ -2100,7 +2167,7 @@ internal sealed record HandleChannelIngressRequest(
     SlackAttachmentInputBinder AttachmentBinder,
     IGrainFactory Grains,
     AgentSessionFollowupDispatcher FollowupDispatcher,
-    ISecretStore Secrets,
+    SlackLeaseContext LeaseContext,
     SlackThreadHistoryReader ThreadHistory,
     IOptions<SlackProviderOptions> SlackProviderOptions,
     IServiceProvider Services)
@@ -2125,7 +2192,7 @@ internal sealed record HandleChannelIngressRequest(
         SlackAttachmentInputBinder attachmentBinder,
         IGrainFactory grains,
         AgentSessionFollowupDispatcher followupDispatcher,
-        ISecretStore secrets,
+        SlackLeaseContext leaseContext,
         SlackThreadHistoryReader threadHistory,
         IOptions<SlackProviderOptions> slackProviderOptions,
         IServiceProvider services) =>
@@ -2133,7 +2200,7 @@ internal sealed record HandleChannelIngressRequest(
             connections, threadMapping, threadLaunchReservations, ambiguousPrompts,
             sessions, agents, claims, accessDecider, inbox, outbox,
             launcher, attachmentBinder, grains, followupDispatcher,
-            secrets, threadHistory, slackProviderOptions, services);
+            leaseContext, threadHistory, slackProviderOptions, services);
 }
 
 public sealed class SlackConnectionCreateBody
@@ -2177,17 +2244,21 @@ public sealed class SlackIngressBody
     public string? SenderKind { get; init; }
     public string? Text { get; init; }
     public IReadOnlyList<SlackIngressFile> Files { get; init; } = Array.Empty<SlackIngressFile>();
+    public string LeaseId { get; init; } = string.Empty;
+    public string AdapterId { get; init; } = string.Empty;
 }
 
 
 public sealed class DeliveryClaimBody
 {
+    public string LeaseId { get; init; } = string.Empty;
     public string AdapterId { get; init; } = string.Empty;
 }
 
 public sealed class DeliveryAckBody
 {
     public string Id { get; init; } = string.Empty;
+    public string LeaseId { get; init; } = string.Empty;
     public string AdapterId { get; init; } = string.Empty;
     public string Outcome { get; init; } = string.Empty;
     public string? Reason { get; init; }

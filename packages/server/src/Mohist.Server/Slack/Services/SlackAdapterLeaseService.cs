@@ -185,6 +185,106 @@ public sealed class SlackAdapterLeaseService(
             lease.LeaseId, lease.Generation, lease.ExpiresAt, appToken, botToken);
     }
 
+    /// <summary>
+    /// Route-level gate: proves the caller still holds the current, unexpired
+    /// runtime lease for the target <em>before</em> any inbox/outbox side
+    /// effect. Fails closed when the lease was superseded or expired, when
+    /// adapter / lease / target do not match, when the target is no longer
+    /// active or verified, or when the pinned credential generation no longer
+    /// matches (resupplied candidate / rotated verified pair).
+    /// </summary>
+    public async Task<bool> ValidateRuntimeLeaseAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        // A request without lease proof must fail closed like any stale lease:
+        // it is not a caller contract violation, so it never throws.
+        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(adapterId))
+            return false;
+
+        var now = timeProvider.GetUtcNow();
+        var active = await store.GetActiveAsync(targetRef.TargetKey, ct);
+        if (active is null
+            || active.Kind != SlackLeaseKind.Runtime
+            || !string.Equals(active.LeaseId, leaseId, StringComparison.Ordinal)
+            || !string.Equals(active.AdapterId, adapterId, StringComparison.Ordinal)
+            || active.ExpiresAt <= now)
+            return false;
+
+        // A runtime lease was issued only while the target was Active,
+        // CredentialVerified and Bot-token provisioned; it stays valid only
+        // while all three still hold.
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        if (target is null || !target.Active || !target.CredentialVerified || !target.BotTokenProvisioned)
+            return false;
+
+        // The lease pins the credential generation it was issued against; a
+        // resupplied candidate or a rotated verified pair makes it stale.
+        return await CredentialGenerationMatchesAsync(target, active, ct);
+    }
+
+    /// <summary>
+    /// Proves the caller still holds the current runtime lease (the same
+    /// fail-closed checks as <see cref="ValidateRuntimeLeaseAsync"/>) and,
+    /// only then, resolves the verified Bot token the lease pins from the
+    /// target's AgentApp secret address. Used by the access decider so the
+    /// live identity gate runs under the same lease fence as every
+    /// adapter-facing route and never falls back to a legacy
+    /// connection-scoped secret address. Returns null on any failure; the
+    /// token never leaves the call chain.
+    /// </summary>
+    public async Task<string?> ResolveRuntimeLeaseBotTokenAsync(
+        string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        RequireTarget(targetRef);
+        if (string.IsNullOrWhiteSpace(leaseId) || string.IsNullOrWhiteSpace(adapterId))
+            return null;
+
+        if (!await ValidateRuntimeLeaseAsync(operatorId, targetRef, leaseId, adapterId, ct))
+            return null;
+        var target = await targetProvider.GetTargetAsync(operatorId, targetRef, ct);
+        return target is null ? null : await secretResolver.LoadAsync(target.BotTokenAddress, ct);
+    }
+
+    /// <summary>
+    /// Route-level gate for a Manager target addressed by enrollment id (the
+    /// manager adapter delivery routes). Resolves the stored workspace team
+    /// inside the target provider so the caller never touches storage, then
+    /// delegates to <see cref="ValidateRuntimeLeaseAsync"/>. Fail-closed
+    /// (false) when the enrollment is gone or the lease is stale / expired /
+    /// mismatched.
+    /// </summary>
+    public async Task<bool> ValidateManagerRuntimeLeaseByEnrollmentAsync(
+        string operatorId, string enrollmentId, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(enrollmentId);
+        var manager = await targetProvider.ResolveManagerByEnrollmentAsync(enrollmentId, ct);
+        return manager is null
+            ? false
+            : await ValidateRuntimeLeaseAsync(operatorId, manager, leaseId, adapterId, ct);
+    }
+
+    /// <summary>
+    /// Route-level gate for a Manager target addressed by workspace team (the
+    /// manager ingress route). Resolves the active enrollment inside the
+    /// target provider so the caller never touches storage, then delegates to
+    /// <see cref="ValidateRuntimeLeaseAsync"/>. Fail-closed (false) when no
+    /// active enrollment exists or the lease is stale / expired / mismatched.
+    /// </summary>
+    public async Task<bool> ValidateManagerRuntimeLeaseByTeamAsync(
+        string operatorId, string workspaceTeamId, string leaseId, string adapterId, CancellationToken ct = default)
+    {
+        RequireOperator(operatorId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(workspaceTeamId);
+        var manager = await targetProvider.ResolveManagerByTeamAsync(workspaceTeamId, ct);
+        return manager is null
+            ? false
+            : await ValidateRuntimeLeaseAsync(operatorId, manager, leaseId, adapterId, ct);
+    }
+
     public async Task<SlackLeaseRenewalResult?> RenewLeaseAsync(
         string operatorId, SlackLeaseTargetRef targetRef, string leaseId, string adapterId, CancellationToken ct = default)
     {

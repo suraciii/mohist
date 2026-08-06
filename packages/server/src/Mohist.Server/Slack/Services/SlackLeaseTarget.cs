@@ -41,6 +41,20 @@ public interface ISlackLeaseTargetProvider
 
     Task<SlackLeaseTarget?> GetTargetAsync(string operatorId, SlackLeaseTargetRef targetRef, CancellationToken ct = default);
 
+    /// <summary>
+    /// Resolves the active Manager lease target ref for a workspace team, or
+    /// null when no active enrollment with a Manager App exists. Keeps
+    /// team → enrollment resolution inside the Services layer so API routes
+    /// never touch the enrollment store.
+    /// </summary>
+    Task<SlackLeaseTargetRef.Manager?> ResolveManagerByTeamAsync(string workspaceTeamId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Resolves the Manager lease target ref for an enrollment id, or null
+    /// when the enrollment is not active / has no Manager App.
+    /// </summary>
+    Task<SlackLeaseTargetRef.Manager?> ResolveManagerByEnrollmentAsync(string enrollmentId, CancellationToken ct = default);
+
     Task MarkVerifiedAsync(
         string operatorId,
         SlackLeaseTargetRef targetRef,
@@ -98,6 +112,15 @@ public sealed class InMemorySlackLeaseTargetProvider : ISlackLeaseTargetProvider
             ? Task.FromResult<SlackLeaseTarget?>(WithVerified(target))
             : Task.FromResult<SlackLeaseTarget?>(null);
     }
+
+    public Task<SlackLeaseTargetRef.Manager?> ResolveManagerByTeamAsync(string workspaceTeamId, CancellationToken ct = default)
+        => Task.FromResult(ActiveManagers().FirstOrDefault(candidate => candidate.WorkspaceTeamId == workspaceTeamId));
+
+    public Task<SlackLeaseTargetRef.Manager?> ResolveManagerByEnrollmentAsync(string enrollmentId, CancellationToken ct = default)
+        => Task.FromResult(ActiveManagers().FirstOrDefault(candidate => candidate.EnrollmentId == enrollmentId));
+
+    private IEnumerable<SlackLeaseTargetRef.Manager> ActiveManagers()
+        => _targets.Values.Where(target => target.Active).Select(target => target.Ref).OfType<SlackLeaseTargetRef.Manager>();
 
     public Task MarkVerifiedAsync(
         string operatorId,

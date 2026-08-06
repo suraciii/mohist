@@ -310,6 +310,7 @@ describe("mohist-slack CLI composition", () => {
       id: delivery.id,
       outcome: "delivered",
       adapterId: "adapter-manager",
+      leaseId: "lease-manager",
       providerMessageIdentity: { conversationId: "D_MANAGER", messageTs: "1700000000.001" },
     }])
     expect(serverCalls.some((call) => call.url.endsWith("/api/slack-manager/adapter/manager-enrollment/deliveries/ack"))).toBe(true)
