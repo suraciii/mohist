@@ -1,11 +1,12 @@
 using Mohist.Cli;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport.SystemSpecs;
 using Xunit;
-using static Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallTestSupport;
+using static Mohist.Server.TestSupport.SystemSpecs.WindowsInstallTestSupport;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.UnitTests.SystemSpecs;
 
-public class WindowsInstallRegistrationSpecs
+public class WindowsInstallRegistrationTests
 {
     [Theory]
     [InlineData(WindowsServiceTarget.Server)]

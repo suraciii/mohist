@@ -3,7 +3,7 @@ using System.Threading.Channels;
 using Mohist.Cli;
 using Mohist.Server.SpecTests.Support;
 
-namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
+namespace Mohist.Server.TestSupport.SystemSpecs;
 
 public enum WindowsServiceTarget
 {
