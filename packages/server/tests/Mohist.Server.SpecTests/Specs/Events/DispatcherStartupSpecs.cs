@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Collection("IntegrationMisc")]
+[Collection("IntegrationApi")]
 public sealed class DispatcherStartupSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

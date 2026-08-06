@@ -7,7 +7,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 
-[Collection("IntegrationMisc")]
+[Collection("IntegrationApi")]
 public sealed class EventPushRegistrationSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

@@ -4,7 +4,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 
-[Collection("IntegrationMisc")]
+[Collection("IntegrationApi")]
 public class RuntimeSettingsSpecs
 {
     private readonly HttpClient _client;
