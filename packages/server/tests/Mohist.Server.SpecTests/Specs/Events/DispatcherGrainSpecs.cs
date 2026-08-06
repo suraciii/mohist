@@ -193,11 +193,11 @@ public class DispatcherGrainSpecs
 
         var hostingSilo = _fixture.Cluster.GetSiloForAddress(initialSilo);
         Assert.NotNull(hostingSilo);
-        var reminderReloaded = _fixture.ReminderTable.PrepareRangeReadSignal();
         await _fixture.Cluster.KillSiloAsync(hostingSilo);
         try
         {
             await _fixture.Cluster.WaitForLivenessToStabilizeAsync(didKill: true);
+            var reminderReloaded = _fixture.ReminderTable.PrepareRangeReadSignal();
             await AwaitSignalAsync(reminderReloaded, "persisted reminder reload after silo loss");
 
             var afterTick = _fixture.WaitForSpecificInvocationAsync("evt_reminder_after");
