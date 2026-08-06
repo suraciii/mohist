@@ -100,7 +100,11 @@ mo github connect owner/repo
 > （标题/正文快照、p0–p4 优先级映射、来源可追、`--feed-mode backlog` 仅入 backlog），
 > 同一 GitHub issue 重复供料只建一次；关闭 GitHub issue 会取消对应 Mohist issue，
 > 已终态时无动作。启动被拒（前置未满足 / 仓库不可用）时留在 backlog，并通过最小评论
-> 回写通道（PAT 身份）在 GitHub 上留说明。进度回写器与 PR review 审批仍未实装；
+> 回写通道（PAT 身份）在 GitHub 上留说明。PR review 审批已实装：连接创建/更新
+> （`mo github connect --approver` / `mo github update`）可配置审批者名单，名单内用户
+> 在 PR 上的 Approve / Request changes 分别通过 / 打回 Check 审批门（署名
+> `github:<login>`，打回理由为 review 正文），Comment 与名单外用户无动作；按事件到达时
+> 状态决策，不追溯 dismiss 或过期 review。进度回写器仍未实装；
 > GitHub 身份（App / PAT）的配置与使用也未交付。
 
 当前 GitHub 仅是交付目标（`mohist/github-pr` profile），完整回写 / 审批各能力由
