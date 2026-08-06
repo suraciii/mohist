@@ -198,12 +198,13 @@ structural count 拒绝 spawn。
 CLI 的规范命令是：
 
 ```bash
-mo agent spawn <agent-ref> --project <project-id> --parent-session <session-id> --prompt "<brief>" --idempotency-key <key>
+mo agent spawn <agent-ref> --project <project-id> --parent-session <session-id> \
+  --prompt "<brief>" --idempotency-key <key> [--workspace inherit|worktree]
 ```
 
 `--parent-session` 是显式 caller identity。CLI 不得从当前工作目录、Runtime Session、
 进程环境或最近一次 launch 猜 parent。`--idempotency-key` 是必填调用身份；CLI 在网络
-失败后必须用同一个 key 重试。
+失败后必须用同一个 key 重试。`--workspace` 省略时为 `inherit`。
 
 Server 的规范调用面是：
 
@@ -211,13 +212,19 @@ Server 的规范调用面是：
 POST /api/projects/{projectRef}/agent-sessions/{parentSessionId}/spawns
 Idempotency-Key: {key}
 
-{ "targetAgentRef": "reviewer", "prompt": "..." }
+{ "targetAgentRef": "reviewer", "prompt": "...", "workspace": "worktree" }
 ```
 
 path 中的 `parentSessionId` 与 idempotency header 共同构成一次 spawn 的 caller 和重放
 边界。body 不接受 `workDir`、`workspacePath`、Runner、Runtime、Instructions、Model、
 Skills 或任意 filesystem path。一个 key 在 `(ProjectId, ParentSessionId)` 内只能表达一种
-canonical request；prompt、target 或 caller 不同的重放返回 HTTP 409 idempotency conflict。
+canonical request；prompt、target、caller 或 workspace mode 不同的重放返回 HTTP 409
+idempotency conflict。
+
+`workspace` 是唯一的工作空间意图字段，取值只能是 `inherit`（默认，增量 1：复用 parent
+authoritative workDir）或 `worktree`（增量 4：请求隔离工作空间）。它是受约束的 mode，不是
+路径、仓库名或版本；隔离工作空间的物化契约与生命周期以 [`agent-workspace.md`](agent-workspace.md)
+为唯一权威。
 
 `parentSessionId` 是委托 authority 的显式身份，不是新的 bearer credential。现有调用方
 认证先决定它能否操作 Project；Server 再从该 Session 持久化的 launch snapshot 验证它能否
@@ -256,6 +263,14 @@ workDir 或 parent Runner binding。因此它在第 5 或第 6 条被拒绝为
 `parent_workdir_unavailable` 或 `parent_runner_binding_unavailable`；不得以 Slack 对话、调用方
 路径或某个其它 Session 的目录补齐。后续若 Agent Connection launch 自身取得这两项既有事实，
 它即可按同一接受条件成为 parent，不另建 Connection 专用通道。
+
+`workspace` mode 只决定 child workDir 的来源，不放松上述任何条件：
+
+- `inherit`（默认）：child workDir = parent authoritative workDir（第 5 条），不物化。
+- `worktree`：在第 5、6 条之上，额外要求向被 pin 的 Runner 物化隔离工作空间，并把物化路径
+  固定为 child workDir。物化的请求身份、opaque identity、fail-closed 语义与生命周期以
+  [`agent-workspace.md`](agent-workspace.md) 为唯一权威。两种 mode 都把 child AgentJob pin 到
+  parent binding 的 Runner；`worktree` 不换 Runner。
 
 不能确认上述事实时拒绝而不是回退：
 
@@ -681,7 +696,7 @@ follow-up envelope。
 | 1. Spawn and inspect | 具备 authoritative workDir 与当前 Runner binding 的已授权 Mohist Agent parent 能 spawn 一个已声明的 child，并从 `mo session tree` 看见 child、Job 与 Session。当前 Agent Connection parent 因缺少这些事实被拒绝。 | capability stable IDs and launch snapshot、explicit caller/key、parent workDir plus pinned Runner binding、existing launch coordinator extension、reservation/finalization/abort gate、link/index/revision-pinned paged tree query。没有 terminal callback、cascade 或 detach。 |
 | 2. Terminal callback | parent 会收到 child launch job 的一次终态 Input，并可按引用检查结果。 | 依赖 1 的 edge 与 Job identity；实现 pending/delivered/suppressed report recovery。 |
 | 3. Cascade and detach | parent 能停止当前 attached subtree 的工作；需要留下 child 时可 detach。 | 依赖 1 的 link index；实现 `SessionTreeStopOperation`、fence、partial/unknown/retry 与 detach race rules。 |
-| 4. Managed worktree | child 可以请求由 Project Space 定义且由 Runner 物化的隔离工作空间。 | 依赖 1 的 link/launch model 与 Project Space/Runner materialization contract；不接受任意 Server path。 |
+| 4. Managed worktree | child 可以请求由 Project Space 定义且由 Runner 物化的隔离工作空间。 | 依赖 1 的 link/launch model 与 Runner pinning；spawn 携带受约束的 `workspace` mode（`inherit`/`worktree`），不接受任意 Server path。完整物化/释放/回收契约与生命周期见 [`agent-workspace.md`](agent-workspace.md)。 |
 | 5. Scheduled input | 调用方能为一段会话安排一个到点输入：卡住的子会话被明确唤醒，不用人盯会话树。 | 依赖 1–3 的 SessionInput / AcceptFollowup 与既有 follow-up dispatch、Orleans reminder 基础设施；不依赖增量 4。第一版只支持一次性绝对时间 + 文本；无重复调度、附件、scheduled spawn 或 Web 管理面。 |
 
 Increment 1 不需要等待后续生命周期能力即可交付。它必须用 coordinator recovery 证明：在
@@ -696,7 +711,9 @@ reserve、prepare、initial Session creation、final link check、abort 和 subm
 - 不把 Session 当成 completed、failed、stopped 或 closed 的对象。
 - 不创建 fork-join、自动 retry、自动汇总、Agent 推荐、任务规划、验收或父代理巡逻机制。
 - 不复制 transcript、output、tool calls 或 Runtime context 到 parent；terminal report 只传引用。
-- 不允许 first release 的 `--worktree`、`--work-dir`、`workspacePath` 或任意路径输入。
+- 不接受 `--work-dir`、`workspacePath` 或任意文件系统路径输入；隔离工作空间只能通过受约束的
+  `workspace` mode（`inherit` / `worktree`）请求，物化由 Runner 完成，见
+  [`agent-workspace.md`](agent-workspace.md)。
 - 不让 Runner 通过扫描工作目录、环境变量或 Runtime Session 猜 parent/child 身份，也不让它
   为 child 选择不同于 parent binding 的 Runner。
 - 不承诺 tree relation 替代 Issue、Workflow 或 Project Space 的工作所有权和隔离模型。
@@ -771,13 +788,22 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
   继续；detached 会话的调度照常到期投递；
 - 成本：recovery 扫描只随该会话自己的未终态 schedule（`scheduled` 或 `pending-delivery`）增长，
   无关历史调度不增加成本；
-- Runner 不变更：投递复用普通 follow-up dispatch envelope，Runner 观察不到调度语义。
+- Runner 不变更：投递复用普通 follow-up dispatch envelope，Runner 观察不到调度语义；
+- workspace mode 白名单（仅 `inherit`/`worktree`）、同 key 同 mode 重放与同 key 异 mode 409、
+  `inherit` 不物化而 `worktree` 向被 pin Runner 物化且 child pin 到同一 Runner、物化
+  idempotency / `Rejected` 的 post-plan rejection / `Unknown` 的不猜 path 重试、物化后
+  abort 的 release、Server 不碰文件系统与 Runner 不猜身份/不换 Runner、以及 detach/stop/
+  Job 终态与 worktree 生命周期的交互，均以 [`agent-workspace.md`](agent-workspace.md)
+  的验证清单为准；
 
 ## 状态
 
 交付增量 1–3 与 5 已实装：capability declaration 与 launch snapshot、`mo agent spawn`、
 startup-known context、`mo session tree`、terminal callback、cascade stop、detach 与
 定时输入（SessionSchedule 子记录、API/CLI 命令面、一次性与 recovery reminder 投递）
-均已落地。交付增量 4（Managed worktree）尚未实装：child 仍只继承 parent 的 workDir，
-不接受 `--worktree`/`--work-dir`/`workspacePath` 或任意路径输入；它依赖 Project
-Space/Runner materialization contract，由后续 issue 推进。
+均已落地。交付增量 4（Managed worktree）的执行契约已在 [`agent-workspace.md`](agent-workspace.md)
+定稿（spawn 携带受约束的 `workspace` mode、Server→被 pin Runner 的物化/释放/回收契约、
+fail-closed 语义与生命周期），但**尚未实装**：child 仍只继承 parent 的 workDir，
+spawn 不接受 `workspace` mode，Runner 也不物化 child worktree；不接受 `--work-dir`、
+`workspacePath` 或任意路径输入。由 [`agent-workspace.md`](agent-workspace.md) 的交付拆分 issue
+推进。
