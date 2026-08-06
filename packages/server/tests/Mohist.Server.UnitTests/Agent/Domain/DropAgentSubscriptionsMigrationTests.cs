@@ -3,9 +3,9 @@ using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Mohist.Server.Infrastructure.Data.Migrations;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Agent.Domain;
+namespace Mohist.Server.UnitTests.Agent.Domain;
 
-public sealed class DropAgentSubscriptionsMigrationSpecs
+public sealed class DropAgentSubscriptionsMigrationTests
 {
     [Fact]
     public void Up_DropsAgentSubscriptionsTable()
