@@ -4,9 +4,9 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support.TestData;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Sessions;
+namespace Mohist.Server.UnitTests.Sessions;
 
-public class TranscriptAccumulatorSpecs
+public class TranscriptAccumulatorTests
 {
     private static AgentSession CreateSession() => AgentSessionTestData.CreateRunning().Session;
 

@@ -2,9 +2,9 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.Workflow.Storage;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Storage;
+namespace Mohist.Server.UnitTests.Workflow.Storage;
 
-public class WorkflowArtifactStorageContractSpecs
+public class WorkflowArtifactStorageContractTests
 {
     private readonly InMemoryWorkflowArtifactStorage _storage = new();
 

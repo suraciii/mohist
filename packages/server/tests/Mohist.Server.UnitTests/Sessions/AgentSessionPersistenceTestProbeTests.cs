@@ -2,9 +2,9 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Sessions;
+namespace Mohist.Server.UnitTests.Sessions;
 
-public class AgentSessionPersistenceTestProbeSpecs
+public class AgentSessionPersistenceTestProbeTests
 {
     [Fact]
     public async Task WaitAsync_ReturnsCycleCompletedAfterCheckpointBeforeWaitStarted()
