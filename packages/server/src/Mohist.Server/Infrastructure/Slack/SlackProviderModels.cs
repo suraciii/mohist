@@ -62,6 +62,7 @@ public static class SlackDeliveryOperations
     public const string ChatUpdate = "chat_update";
     public const string ReactionAdd = "reaction_add";
     public const string ReactionRemove = "reaction_remove";
+    public const string UploadFile = "upload_file";
 }
 
 public static class SlackOutboxKinds

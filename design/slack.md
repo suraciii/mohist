@@ -487,6 +487,12 @@ terminal delivery key，故重试、重连和重复入站不会再追加第二�
   计数、Job/Session 标识）只作为次要元数据或稳定链接，不参与正文模板。Agent 无回复时才退化为
   状态摘要：成功无回复给简短结论，失败/阻塞必须给出原因与可操作的下一步，不用模板官话代替原因。
   Manager 与 Agent connection 遵循同一渲染规则，不再区分两套模板。
+- **回复正文渲染**：Agent 回复的正文先脱敏、再经 markdown → mrkdwn 转换（粗体 `**x**`→`*x*`、
+  行内代码、代码块、列表 `-`→`•`、引用；表格与标题降级为可读纯文本；代码跨度内不转换），
+  之后才进 outbox。回复可附带图片：公网 URL 由 Server 组装 image block（带正文时置于 section
+  block）随 post_message/chat_update 投递；本地文件以 `upload_file` operation 投递，adapter 用
+  filesUploadV2 上传为文件分享（`--text` 作为 initial comment），两者各有独立 dispatch ref，
+  不与正文 terminal 行合并，也不做原位提升（chat.update 无法附加文件）。
 - **P0-I** 负责 ingress 到 Agent API、Session/Turn、状态投影和最终结果之间的 orchestration，并
   验证 DM/@mention、thread follow-up、失败、取消、重复投递、update failure fallback、Agent 未就绪
   和 Connection Disabled。I 不绕过 B 的 provider mutation contract。

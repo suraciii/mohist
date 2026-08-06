@@ -144,18 +144,35 @@ export interface SocketClient {
   disconnect?(): Promise<void>
 }
 
+export interface SlackFileUploadResponse {
+  ok?: boolean
+  error?: string
+  files?: readonly {
+    ok?: boolean
+    error?: string
+    files?: readonly {
+      id?: string
+      shares?: {
+        public?: Record<string, readonly { ts?: string }[]>
+        private?: Record<string, readonly { ts?: string }[]>
+      }
+    }[]
+  }[]
+}
+
 export interface SlackWebClient {
   chat: {
     postMessage(input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
     update?(input: { channel: string; ts: string; text: string; blocks?: readonly SlackBlock[] }): Promise<{ ok?: boolean; error?: string; ts?: string }>
   }
+  filesUploadV2?(input: { channel_id: string; filename?: string; file: Buffer; initial_comment?: string; alt_text?: string } | { channels: string; thread_ts: string; filename?: string; file: Buffer; initial_comment?: string; alt_text?: string }): Promise<SlackFileUploadResponse>
   reactions?: {
     add(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
     remove(input: { channel: string; name: string; timestamp: string }): Promise<{ ok?: boolean; error?: string }>
     get?(input: { channel: string; timestamp: string; full?: boolean }): Promise<{ ok?: boolean; error?: string; message?: { reactions?: readonly { name?: string; users?: readonly string[] }[] } }>
   }
   conversations?: {
-    history(input: { channel: string; latest?: string; oldest?: string; inclusive?: boolean; limit?: number }): Promise<{ ok?: boolean; error?: string; messages?: readonly { ts?: string; client_msg_id?: string; text?: string; thread_ts?: string }[] }>
+    history(input: { channel: string; latest?: string; oldest?: string; inclusive?: boolean; limit?: number }): Promise<{ ok?: boolean; error?: string; messages?: readonly { ts?: string; client_msg_id?: string; text?: string; thread_ts?: string; files?: readonly { id?: string }[] }[] }>
   }
 }
 

@@ -42,7 +42,9 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
     [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
     [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
-    [property: JsonPropertyName("blocks")] JsonElement? Blocks = null)
+    [property: JsonPropertyName("blocks")] JsonElement? Blocks = null,
+    [property: JsonPropertyName("fileName")] string? FileName = null,
+    [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {

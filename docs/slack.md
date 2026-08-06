@@ -236,6 +236,11 @@ Setup required。
   Owner 认领，直到就绪或返回唯一下一步。只接入一个工作区时不需要 `--workspace-team`；
   同一 Agent 在同一工作区已有安装记录时，返回并接着它继续。
 - `mo slack status` 查看工作区、Mohist App、Agent App 和本机连接的整体状态与唯一下一步。
+- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] --text <body> [--image <url> | --file <path>]`
+  让 Agent 作为说话者把回复发送到 Slack：正文按 markdown 渲染为 Slack 原生格式
+  （粗体 / 代码 / 列表 / 引用，表格与标题降级为纯文本）；`--image` 内嵌公网图片 URL，
+  `--file` 上传本地图片文件（上限 10 MB）。`--text -` 从标准输入读取正文并保留换行；
+  附带图片时 `--text` 可省略。
 - 接入资源的管理：
 
 ```text
@@ -424,6 +429,11 @@ Slack 呈现与过程透明是两个分开的信号。Slack 里只有 liveness�
 - Agent 回复按文本渲染，不把其中看起来像 Slack mention、按钮或消息配置的内容当作控制指令；
   它不能意外触发 `@channel` / `@here`、伪造 Stop 操作或要求 Slack 自动展开外部链接。真正的
   操作按钮只由 Mohist 根据当前 Job、Session 和 Turn 状态生成。
+- **回复正文支持 markdown 渲染与图片**：粗体（`**bold**`）、行内代码、代码块、列表与引用
+  会转换为 Slack 原生格式；表格、标题等不支持的 markdown 降级为可读纯文本，不报错也不乱码。
+  回复可附带一张图片——`--image <url>` 把公网图片 URL 以内嵌图片块显示，`--file <path>` 把
+  本地图片文件上传为 Slack 文件分享（上限 10 MB）；图片与正文在同一条回复中呈现，`--text`
+  在附带图片时可省略。
 - Slack 回复必须包含足够完成当前决策的结论、证据摘要和下一步，不能要求用户进入 Mohist
   Web 才知道结果。长结果可以在同一 Slack 对话中分段呈现。
 - 只有管理员配置了 Slack 用户可访问的 Mohist Web 地址时，消息才显示 **Open in Mohist**；
