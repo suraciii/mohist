@@ -480,6 +480,11 @@ terminal delivery key，故重试、重连和重复入站不会再追加第二�
 - **P0-C** 只接收 Server 已确认的成功、部分完成、取消、阻塞或失败结果，渲染结果优先的文本。
   C 不创建或更新 Slack 消息，不操作 reaction，不重试 provider，也不把 raw tool stream、JSON 或
   隐藏推理交给用户。
+- **终态渲染优先级**：Agent 成功且给出了可消费回复（terminal delivery 的 assistant 文本非空）时，
+  Slack 正文直接使用该文本（沿用脱敏、Slack 控制语法转义与分段）；状态字段（exit code、artifact
+  计数、Job/Session 标识）只作为次要元数据或稳定链接，不参与正文模板。Agent 无回复时才退化为
+  状态摘要：成功无回复给简短结论，失败/阻塞必须给出原因与可操作的下一步，不用模板官话代替原因。
+  Manager 与 Agent connection 遵循同一渲染规则，不再区分两套模板。
 - **P0-I** 负责 ingress 到 Agent API、Session/Turn、状态投影和最终结果之间的 orchestration，并
   验证 DM/@mention、thread follow-up、失败、取消、重复投递、update failure fallback、Agent 未就绪
   和 Connection Disabled。I 不绕过 B 的 provider mutation contract。
