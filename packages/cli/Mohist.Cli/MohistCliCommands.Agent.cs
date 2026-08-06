@@ -908,7 +908,7 @@ internal static class AgentCommands
 
     private static Option<string[]?> AllowedSubagentOption() => new("--allowed-subagent")
     {
-        Description = "Allowed subagent stable agent id/ref. Repeat for multiple subagents.",
+        Description = "Allowed subagent stable agent id. Repeat for multiple subagents.",
         AllowMultipleArgumentsPerToken = true,
     };
 

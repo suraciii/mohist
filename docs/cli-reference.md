@@ -112,8 +112,8 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
-| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`spawn`、`install`；`job list/view`；只读 `model list --runtime` |
+| `session` | `list`、`view`、`tree`、`transcript`、`followup`、`compact`、`reset`、`cancel`、`stop`、`detach` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
 
@@ -210,8 +210,12 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
   并返回四个稳定 ID、transcript URL 和 composite observation URL。命令接受
   `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
+- `mo agent spawn <agent-ref> --parent-session <session-id> --prompt <brief> --idempotency-key <key>`
+  从父会话委托一个已声明的 Subagent；父会话与目标必须在同一 Project，Server 在首次接受时
+  解析目标并核对父会话的能力声明，`--idempotency-key` 必填，网络失败后用同一个 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
-  `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
+  `--max-concurrent-runs` 配置 Agent；可用 Subagent 用可重复的 `--allowed-subagent <agent-id>`
+  按稳定 Agent ID 声明；头像使用 `--avatar-file`，Instructions 使用互斥的
   `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON，
   `--agent-config` 透传入口退役。
   `mo agent view` 显示统一 Readiness、配置缺口与当前执行可用性；并发限制实时约束 launch
@@ -224,15 +228,19 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
-- 后续读取、follow-up、compact、reset、cancel 和 stop 都使用稳定的 Session ID；cancel 与 stop
-  还必须通过 `--turn-id` 指定目标 Turn。cancel 确定性取消排队中的 Turn，stop 请求 Runtime
-  停止执行中的 Turn。follow-up 返回新的
+- 后续读取、follow-up、compact、reset、cancel 和 stop 都使用稳定的 Session ID；cancel 通过
+  `--turn-id` 指定目标 Turn。follow-up 返回新的
   Input ID；已经归入当前 Turn 或新 Turn 时同时返回 Turn ID，否则稍后从 Session 读取归属。
+- `mo session tree <session-id>` 展示以该会话为根的整棵会话树和每个节点的状态；树很大时
+  按页返回，一次连续翻页固定观察第一次查看时的树形。
+- `mo session stop <session-id> --idempotency-key <key>` 级联停止该会话当时挂着的整棵子树
+  正在进行的工作；`--idempotency-key` 必填，同 key 重试同一操作。会话本身保留，可以之后
+  明确继续。
+- `mo session detach <session-id>` 把子会话从树上摘下，之后停止父不再影响它。
 
 来源只是筛选和便捷查找条件，不创造 `mo issue session` 与 `mo agent session` 两套重复能力。
-`session cancel` 确定性取消一个排队中的 Turn；它不接触 Runtime。`session stop` 请求 Runtime
-停止一个执行中的 Turn，结果可能是 `stop-requested`、`stopped` 或 `unknown`。未知结果应在
-Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn。
+`session cancel` 确定性取消一个排队中的 Turn；它不接触 Runtime，只作用于 `--turn-id`
+指定的 Turn。
 
 ## Slack
 
@@ -440,6 +448,8 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `issue workflow status/timeline` 已随 issue #498 退役，Run 读取收敛到 `run`。
 
 - `runner` / `server` / `service` 三层职责：`runner` 只表示 Server 已注册的远程执行资源（`list`/`view`/`status`），`server` 只表示当前连接的 Mohist Server 应用（`status`/`health`/`info`/`logs`，其中 `logs` 是应用日志）；已实装的本机受管进程统一为 `mo service <verb> server|runner`，目标命令面再增加可选 `slack` service。`project status` 已迁移到 `server status`；`system logs` 已合并到 `server logs`，`system` 命令组整体退役。
+- Subagent 会话树命令面已交付：`agent spawn`（`--parent-session` + 必填 `--idempotency-key`，Server 按能力声明授权）、`session tree`（`--limit`/`--continuation` 分页）、`session stop`（级联停止，必填 `--idempotency-key`）、`session detach`。`session stop` 不再以 `--turn-id` 停止单个 Turn，Turn 级控制只保留 `session cancel --turn-id`。
+- `agent create/edit` 增加 `--allowed-subagent <agent-id>` 能力声明，按稳定 Agent ID 保存，不按名字或 ref。
 - Agent launch 同时暴露 Job 与 Session 的稳定身份：`mo agent launch <agent>` 直接挂在 `agent` 下（不再经过 `agent session launch`），打印 Job 与 Session 的稳定 ID 及各自读取入口；Job ID 可被 `agent job view` 直接使用，无需换算。
 - AgentSession 对话统一到顶层 `mo session`：`mo session` 直接挂在根下，`view` / `transcript` / `followup` / `compact` / `reset` / `cancel` 都以稳定 Session ID 寻址，不论该 Session 来自 Agent launch 还是 Workflow run；`list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，不创建 `mo issue session` 与 `mo agent session` 两套重复能力。`mo issue sessions <number>` 与 `mo agent session …` 已退役，运行返回 command-not-found。
 - `workflow` / `run` 分工：`workflow` 管理 Project 范围的 Workflow Profile，`run` 管理 WorkflowRun 的执行与控制；两组帮助互相链接，Run 控制动词只保留 `run` 入口，Issue 号作为 `--issue` 选择器。
