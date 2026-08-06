@@ -1,9 +1,9 @@
 using Mohist.Server.Api;
 using Xunit;
 
-namespace Mohist.Server.SpecTests.Specs.Workflow.Api;
+namespace Mohist.Server.UnitTests.Workflow.Api;
 
-public class WorkflowControlGuardSpecs
+public class WorkflowControlGuardTests
 {
     public static TheoryData<string> ActiveStatuses => new()
     {
