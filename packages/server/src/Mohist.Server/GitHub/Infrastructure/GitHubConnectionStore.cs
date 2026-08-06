@@ -118,6 +118,14 @@ public sealed class GitHubConnectionStore : IScopedService
     public static SecretStoreAddress WebhookSecretAddress(string projectId, string connectionId) =>
         new(projectId, $"{connectionId}:webhook", SecretKind.WebhookSecret);
 
+    /// <summary>
+    /// Degraded-identity write-back PAT (Issues read/write only). Stored per
+    /// connection; consumed by the comment port and the future write-back
+    /// writer.
+    /// </summary>
+    public static SecretStoreAddress ApiSecretAddress(string projectId, string connectionId) =>
+        new(new SecretOwnerAddress.GitHubConnection(projectId, connectionId), SecretKind.AppToken);
+
     private static string ResolveRepository(string repositoriesJson, string owner, string repo)
     {
         var repositories = JSON.Deserialize<List<RepositoryInfo>>(repositoriesJson) ?? [];

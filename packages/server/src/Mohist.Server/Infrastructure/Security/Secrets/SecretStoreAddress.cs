@@ -33,6 +33,13 @@ public abstract record SecretOwnerAddress
         internal override string OwnerScope => string.Empty;
         internal override string OwnerId => AgentAppId;
     }
+
+    public sealed record GitHubConnection(string ProjectId, string ConnectionId) : SecretOwnerAddress
+    {
+        internal override string OwnerKind => SecretOwnerKinds.GitHubConnection;
+        internal override string OwnerScope => ProjectId;
+        internal override string OwnerId => ConnectionId;
+    }
 }
 
 public static class SecretOwnerKinds
@@ -41,6 +48,7 @@ public static class SecretOwnerKinds
     public const string WebhookSubscription = "webhook_subscription";
     public const string SlackWorkspaceEnrollment = "slack_workspace_enrollment";
     public const string ManagedSlackAgentApp = "managed_slack_agent_app";
+    public const string GitHubConnection = "github_connection";
 }
 
 public readonly record struct SecretStoreAddress
@@ -92,6 +100,7 @@ public readonly record struct SecretStoreAddress
         {
             SecretOwnerAddress.AgentConnection => kind is SecretKind.AppToken or SecretKind.BotToken,
             SecretOwnerAddress.WebhookSubscription => kind is SecretKind.WebhookSecret,
+            SecretOwnerAddress.GitHubConnection => kind is SecretKind.WebhookSecret or SecretKind.AppToken,
             SecretOwnerAddress.SlackWorkspaceEnrollment => kind is SecretKind.ConfigurationAccessToken
                 or SecretKind.ConfigurationRefreshToken
                 or SecretKind.AppToken
