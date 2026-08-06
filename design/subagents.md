@@ -571,15 +571,16 @@ SessionSchedule
 
 ```text
 scheduled -> pending-delivery   到期，投递尝试开始
-scheduled -> cancelled          到期前取消
+scheduled -> cancelled          调用方显式 cancel
 pending-delivery -> delivered   SessionInput 已受理，记录 InputId
-pending-delivery -> cancelled   投递被阻塞时取消
+pending-delivery -> cancelled   调用方显式 cancel
 ```
 
 `delivered` / `cancelled` 是终态；`scheduled` 表示「尚未到期或尚未开始投递」。
 `pending-delivery` 是持久「欠投递」状态：投递被暂时阻塞时保持，恢复后由
 recovery reminder 重试；它不因时间流逝自动过期，取消是唯一退出。「已到期但
-尚未开始投递」只是 reminder 到期与触发之间的瞬时窗口，不是可观察的持久状态。
+尚未开始投递」只是到期与投递尝试之间的瞬时窗口，由一次性 reminder 或 recovery
+reminder 闭合，不是可观察的持久状态。
 
 ### 调用面
 
@@ -600,8 +601,11 @@ POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules/{scheduleId
   必须属于该 Project。调度不授予投递输入任何额外权限。
 - 创建不要求当前 binding 或 activity：只校验 session 存在、text 与 `dueAt`
   有效；投递条件在到期时判定。
-- 创建幂等：`(ProjectId, SessionId, IdempotencyKey)` 唯一。同 key 同 body 重放
-  返回原 schedule（含当前状态）；同 key 异 body 返回 HTTP 409。
+- 创建幂等：`(ProjectId, SessionId, IdempotencyKey)` 唯一。调用方省略
+  Idempotency-Key 时按既有 follow-up 约定生成新 key（CLI 在请求前打印，API 自行
+  生成）；省略 key 的重试不跨请求去重，会创建新 schedule，需要幂等重试必须显式
+  复用同一个 key。同 key 重放时 body 比较基于规范化后的 text（去除首尾空白）与
+  UTC `dueAt`：相同返回原 schedule（含当前状态），不同返回 HTTP 409。
 - `cancel` 不需要幂等键，按目标状态幂等：`scheduled` / `pending-delivery`
   推进为 `cancelled`；`delivered` / `cancelled` 返回当前状态；未知 scheduleId
   返回 not found。已投递的 Input 不因取消删除。取消与投递在 Session grain 内
@@ -618,13 +622,16 @@ mo session schedule cancel <session-id> <schedule-id>
 
 ### 触发与投递
 
-Server 是唯一触发方；Runner 不参与触发。Session grain 在 schedule 创建时（或
-激活后补齐）为该 schedule 注册一次性 reminder（`schedule:{scheduleId}`，
-due = `DueAt`）；reminder 表是持久事实，activation loss / silo 重启后由
-Orleans 重投，投递时刻不早于 `DueAt`。grain 另持有一个固定周期的 recovery
-reminder：存在 `pending-delivery` schedule 时保持注册，逐条重试投递；全部终态
-后注销。挂起调度受正常 Session 存储与 reminder 容量约束，不另建调度器；超过
-一次性 reminder 容量时由 recovery reminder 周期性兜底。
+Server 是唯一触发方；Runner 不参与触发。每个 schedule 创建时（或激活后补齐）
+都由 Session grain 注册一次性 reminder（`schedule:{scheduleId}`，due = `DueAt`），
+不设容量分支；reminder 表是持久事实，activation loss / silo 重启后由 Orleans
+重投，投递时刻不早于 `DueAt`。grain 另持有一个固定周期的 recovery reminder：
+会话存在任何未终态 schedule（`scheduled` 或 `pending-delivery`）时保持注册，
+全部终态后注销。recovery reminder 每次 tick 处理两类记录——`DueAt` 已到但仍
+为 `scheduled` 的记录（补上「到期 → 开始投递」的转移，兜底一次性 reminder 的
+activation loss 或注册失败，避免 `scheduled` 永久卡住），以及 `pending-delivery`
+的记录（阻塞恢复后重试投递）。两类处理共用同一条投递路径与同一幂等键，重放
+收敛为同一结果。
 
 reminder 触发时，grain 以既有 `AcceptFollowup` 语义投递：
 
@@ -632,8 +639,11 @@ reminder 触发时，grain 以既有 `AcceptFollowup` 语义投递：
 IdempotencyKey: session-schedule:{scheduleId}
 Source:         session-schedule
 Text:           schedule.Text
-Provenance:     携带 scheduleId
 ```
+
+投递不附加通用 Provenance：scheduleId 由 schedule 记录（`InputId`）与
+`session-schedule:{scheduleId}` 幂等键 / Source 关联，Runner 看到的仍只是普通
+follow-up envelope。
 
 - 受理成功 → schedule 标记 `delivered` 并记录 InputId；输入走既有 follow-up
   dispatch（`AgentSessionFollowupDispatcher` → `IFollowupDeliveryDispatcher` →
@@ -648,7 +658,8 @@ Provenance:     携带 scheduleId
 | `idle` | 按普通 follow-up 开始新 Turn，唤醒会话 |
 | `active` | 按普通输入顺序加入当前或后续 Turn |
 | `unknown` | 不投递，保持 `pending-delivery`；活动证据恢复后重试 |
-| binding 缺失 / Runtime Session 缺失 / Runner 不可用 | 同 follow-up 的 blocked 语义；空闲且确认缺失时按 [`agent-execution.md`](agent-execution.md) 的自动恢复规则建立新 binding 后投递 |
+| 确定性确认 `runtimeSessionId` 已不存在且 Session `idle` | 按 [`agent-execution.md`](agent-execution.md) 的自动恢复规则建立新 binding 后投递 |
+| Runner 不可用、超时、权限失败、binding 变更，或无法区分「暂时不可读」与「确定不存在」 | 不自动建 binding；保持 `pending-delivery`，恢复后重试 |
 | follow-up 容量或 Agent 并发上限 | 保持 `pending-delivery`，恢复后重试 |
 | 停止进行中 | 保持 `pending-delivery`，停止结束后重试 |
 
@@ -743,17 +754,23 @@ Server spec 必须以 fake Runner、fake clock 和 in-memory stores 覆盖至少
 - startup context 在第一轮前包含 own Session ID、parent ID（若有）、snapshot 和规范 CLI
   command，且 dispatch 不依赖 per-session environment variable；
 - scheduled input 的创建校验与幂等：body 字段白名单、`dueAt` 必须为带偏移的 RFC 3339
-  且严格晚于当前 fake 时间、text 必填、同 key 同 body 重放返回原 schedule、同 key 异
-  body 409、cancel 的 `scheduled`/`pending-delivery` → `cancelled` 与 `delivered`/
-  `cancelled` 幂等、未知 scheduleId not found；
+  且严格晚于当前 fake 时间、text 必填、同 key 同 body（规范化 text + UTC `dueAt`）
+  重放返回原 schedule、同 key 异 body 409、省略 key 的重复创建不跨请求去重、cancel
+  的 `scheduled`/`pending-delivery` → `cancelled` 与 `delivered`/`cancelled` 幂等、
+  未知 scheduleId not found；
 - 到点投递：advance fake clock 到 `DueAt` 后 reminder 触发，idle 会话以 `session-schedule`
   Source 与确定性 key 产生唯一 SessionInput 并开始新 Turn；active 会话按普通输入顺序加入；
   reminder 重投 / activation loss 重放不产生第二条输入；
-- `unknown` / binding 缺失 / 容量 / stop-in-progress 阻塞投递时 schedule 保持
-  `pending-delivery`，recovery reminder 在条件恢复后投递，cancel 是唯一退出；
+- `unknown` / Runner 不可用 / 超时 / 权限失败 / binding 变更 / 容量 / stop-in-progress
+  阻塞投递时 schedule 保持 `pending-delivery`，不自动建 binding，recovery reminder
+  在条件恢复后投递，cancel 是唯一退出；只有确定性确认 `runtimeSessionId` 不存在且
+  Session `idle` 才走自动恢复；
+- 一次性 reminder 丢失（activation loss / 注册失败）时，recovery reminder 把已到期
+  仍为 `scheduled` 的记录转入投递，不产生 `scheduled` 永久卡住；
 - 生命周期交互：cascade stop、detach、reset、compact 都不删除 schedule；停止结束后投递
   继续；detached 会话的调度照常到期投递；
-- 成本：pending-delivery 恢复扫描只随该会话自己的挂起调度增长，无关历史调度不增加成本；
+- 成本：recovery 扫描只随该会话自己的未终态 schedule（`scheduled` 或 `pending-delivery`）增长，
+  无关历史调度不增加成本；
 - Runner 不变更：投递复用普通 follow-up dispatch envelope，Runner 观察不到调度语义。
 
 ## 状态
