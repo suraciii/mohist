@@ -104,6 +104,9 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.SessionCancel] = D<AgentSessionCancelReply>(),
             [MohistCliApi.TableShape.SessionStop] = D<SessionTreeStopResponse>(),
             [MohistCliApi.TableShape.SessionDetach] = D<SessionTreeDetachResult>(),
+            [MohistCliApi.TableShape.SessionScheduleCreate] = D<AgentSessionScheduleDto>(),
+            [MohistCliApi.TableShape.SessionScheduleList] = D<AgentSessionScheduleDto>(),
+            [MohistCliApi.TableShape.SessionScheduleCancel] = D<AgentSessionScheduleDto>(),
         };
 
     private static readonly IReadOnlyList<FieldDeviation> Deviations =
@@ -119,6 +122,9 @@ public sealed class CliFieldContractTests
         new(MohistCliApi.TableShape.AgentSessionSpawn, "transcriptUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
         new(MohistCliApi.TableShape.AgentSessionSpawn, "jobUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
         new(MohistCliApi.TableShape.AgentSessionSpawn, "observationUrl", DeviationKind.Omit, "spawn table exposes stable identities and parent linkage"),
+        new(MohistCliApi.TableShape.SessionScheduleCreate, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
+        new(MohistCliApi.TableShape.SessionScheduleList, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
+        new(MohistCliApi.TableShape.SessionScheduleCancel, "alreadyExists", DeviationKind.Omit, "schedule CLI output omits idempotency replay metadata"),
     ];
 
     [Fact]
