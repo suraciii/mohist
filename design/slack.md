@@ -28,7 +28,7 @@ Slack 集成把一个已经配置好的 Mohist Agent 作为独立身份接入一
 | 出站投递通道 | 同一份 outbox，只由持有有效 Socket lease 的 adapter executor 领取 | 一个 App 同时只有一个发送者，避免重复投递 |
 | Agent 配置 | Connection 不保存另一份 Instructions、Runtime、Model 或 Skills | 执行定义只有一份 |
 | 访问控制 | Connection 只决定谁能调用，不削减或扩张 Agent 已配置的执行权限 | 调用范围与执行能力是两件事 |
-| 对话映射 | 频道根提及建立 Session、thread 回复继续；DM 普通消息继续 current Session，New task 才切换 | 遵循两个 Slack 场景各自的对话习惯 |
+| 对话映射 | 频道根提及建立 Session、thread 回复继续；DM 普通消息始终继续同一个 Session（连续对话），不拆并行 Session | 遵循两个 Slack 场景各自的对话习惯 |
 | 可靠性 | Slack 允许重复投递；Mohist 去重并保留已接受输入 | 不能靠丢旧消息腾容量 |
 | 运行模式 | 仅本机 Socket Mode；Mohist App 与每个 Agent App 都有独立 Bot/App-level token | self-hosted 不要求公共入站地址，也不引入 Mohist 托管控制面 |
 | Agent App 凭据来源 | 纯本机部署由 CLI 受保护地接收安装后的 Bot token 与手工生成的 App-level token | Slack OAuth callback 要求 HTTPS，公开 App 管理响应也不返回可用的 App-level token；不得索取登录 session |
@@ -268,10 +268,12 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
 - **供给路径只有一条**：setup 引导用户在 Slack App 管理页生成 Configuration access token 与
   refresh token，并以受保护输入提交一次（不回显、可撤销、可重供）。不假设用户环境存在 Slack 官方
   CLI 或任何其他工具；产品文档与 CLI 引导均不出现它们。
-- **轮换**：access token 到期前由 Server 用 refresh token 调用 tooling token rotation；响应中的
-  新 access/refresh pair 与 provider 返回的 `team_id` 必须原子替换旧 pair。该 API 的结果携带下一枚
-  一次性 refresh token，网络结果未知时不得盲目重试；标记 `credential-rotation-unknown`，要求用户
-  重新提供一组 pair。轮换失败只降低 App 管理能力，不中断已经安装 App 的 Socket 数据面。
+- **轮换**：access token 过期时由 Server 用 refresh token 自动调用 tooling token rotation 并重试
+  原请求；响应中的新 access/refresh pair 与 provider 返回的 `team_id` 必须原子替换旧 pair。该
+  reactive 轮换对用户透明，不依赖后台定时任务。该 API 的结果携带下一枚一次性 refresh token，
+  网络结果未知时不得盲目重试；标记 `credential-rotation-unknown`，要求用户重新提供一组 pair。
+  只有 refresh token 也失效时才进入 Degraded。轮换失败只降低 App 管理能力，不中断已安装 App
+  的 Socket 数据面。
 - **失效语义**：Slack 侧撤销或过期表现为 App 管理调用鉴权失败；Enrollment 的 Mohist App
   能力进入 Degraded，next action 为「重新运行 `mo slack setup` 供给 App 供给凭据」。已有 AgentApp 与
   Connection 的数据面（bot token）不受影响，但新建、续装与 manifest 修复全部阻塞，
@@ -405,9 +407,9 @@ Buzz 以 channel 复用 Agent Session，因为 channel 是它自身的持续协�
   目标，都要求用户明确选择，而不是猜。
 
 DM 是这条规则的例外场景：Slack 私聊里没人用 thread，把每条消息都当作新工作会把连续两句话拆成两
-项工作。Server 因此为每个 Connection 的 DM conversation 记录一个 current AgentSession；普通消息
-继续它，明确的 **New task** 操作才建立并切换到新 Session。切换不取消旧工作，旧工作迟到的回复必须
-带上可辨认的 Job / Session 身份，不能被误认成 current Session 的结果。
+项工作。Server 因此为每个 Connection 的 DM conversation 记录一个 current AgentSession，所有
+普通消息都继续它——这是一条连续对话，第一版不提供「开新任务」入口。需要并行多任务时在
+频道里用不同 thread，每个 thread 各有一个独立 Session。
 
 不同 Mohist Server 之间不共享 thread 路由，因此第一版不承诺协调同一 workspace 中由不同 Server
 管理的多个 Bot。
@@ -664,9 +666,10 @@ Mohist App 身份后写入 enrollment secret address；`mo slack install-agent` 
 routes 与 Mohist App / Agent App 的 Socket Mode ingress 均已接入：CLI 从持久进度幂等续跑，
 完成 Configuration token 轮换、manifest create、安装引导、运行凭据验证与 Socket hello 确认；
 manifest 只输出 Socket Mode（无 HTTPS transport / `PublicIngressBaseUrl`），Agent App scopes 已
-固定为不含 `mpim:history` 的目标 contract。与真实 Slack 的端到端验收尚未进行：默认测试全部
-走 fake port 与 fixed `TimeProvider`，发布前仍需在隔离工作区人工跑通 `setup`、
-`install-agent`、Bot mention、thread 锚点回复与 Stop，并核对两条 Socket lease。
+固定为不含 `mpim:history` 的目标 contract。与真实 Slack 的端到端验收已在隔离工作区跑通：
+`setup`、`install-agent`、owner 认领、DM 任务执行与回复投递的全链路通过真实 Socket Mode 与
+Slack 工作区验证。Configuration token 的过期 reactive 轮换尚未接入生产调用点（当前只在
+setup 时验证性轮换）。
 
 Server 的旧面已退役：OAuth redirect 路径（`begin-authorization` / `authorization-progress` /
 `authorize`，连同 `SlackOAuthStateService` / `SlackOAuthAuthorizationService` 与
