@@ -99,8 +99,8 @@ public sealed class SlackInstallAgentService : IScopedService
         if (agentApp is null)
             agentApp = await CreateAgentAppAsync(connection, agent, enrollment, ct);
 
-        agentApp = await EnsureDesiredManifestAsync(agentApp, connection, ct);
-        return await AdvanceAsync(connection, agentApp, ct);
+        agentApp = await EnsureDesiredManifestAsync(agentApp, connection, agent, ct);
+        return await AdvanceAsync(connection, agentApp, agent, ct);
     }
 
     public async Task<SlackInstallAgentCredentialResult> ProvisionCredentialsAsync(
@@ -235,11 +235,12 @@ public sealed class SlackInstallAgentService : IScopedService
     private async Task<SlackInstallAgentProgress> AdvanceAsync(
         AgentConnection connection,
         ManagedSlackAgentApp agentApp,
+        AgentInfo agent,
         CancellationToken ct)
     {
         if (agentApp.AppLifecycle == SlackAppLifecycle.NotCreated)
         {
-            var manifest = RegenerateManifest(connection, agentApp, ct);
+            var manifest = RegenerateManifest(connection, agent);
             var validation = await _appManagement.ValidateManifestAsync(new SlackAppManifestRequest(
                 new SlackAppManagementRequest(agentApp.EnrollmentId, agentApp.Id, agentApp.WorkspaceTeamId, agentApp.AppId),
                 manifest), ct);
@@ -284,9 +285,10 @@ public sealed class SlackInstallAgentService : IScopedService
     private async Task<ManagedSlackAgentApp> EnsureDesiredManifestAsync(
         ManagedSlackAgentApp agentApp,
         AgentConnection connection,
+        AgentInfo agent,
         CancellationToken ct)
     {
-        var manifest = RegenerateManifest(connection, agentApp, ct);
+        var manifest = RegenerateManifest(connection, agent);
         if (agentApp.DesiredManifestVersion == manifest.Version
             && string.Equals(agentApp.DesiredManifestHash, manifest.Hash, StringComparison.Ordinal))
             return agentApp;
@@ -294,17 +296,17 @@ public sealed class SlackInstallAgentService : IScopedService
             ?? throw new InvalidOperationException("The Agent App disappeared while updating its desired manifest.");
     }
 
-    private SlackManifest RegenerateManifest(
-        AgentConnection connection,
-        ManagedSlackAgentApp agentApp,
-        CancellationToken ct) =>
-        _manifests.Generate(new SlackManifestInput(
-            connection.BotName is { Length: > 0 } ? connection.BotName : "agent-app",
-            string.Empty,
+    private SlackManifest RegenerateManifest(AgentConnection connection, AgentInfo agent)
+    {
+        var preview = SlackBotIdentityDeriver.Derive(agent);
+        return _manifests.Generate(new SlackManifestInput(
+            preview.BotName,
+            preview.AppDescription,
             ProductCapabilityVersion,
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
             SlackManifestKind.AgentApp,
             ManifestVersion));
+    }
 
     private async Task<AgentConnection> CreateStagedConnectionAsync(
         SlackWorkspaceEnrollment enrollment,
@@ -319,6 +321,7 @@ public sealed class SlackInstallAgentService : IScopedService
             AgentId = agent.Id,
             ProviderKind = ConnectionProviderKind.Slack,
             WorkspaceTeamId = enrollment.WorkspaceTeamId,
+            BotName = SlackBotIdentityDeriver.Derive(agent).BotName,
             SetupProgress = SetupProgressKind.CreateAppCredentials,
             DesiredState = DesiredStateKind.Enabled,
             ConnectionHealth = ConnectionHealthKind.Unhealthy,
@@ -345,9 +348,10 @@ public sealed class SlackInstallAgentService : IScopedService
         SlackWorkspaceEnrollment enrollment,
         CancellationToken ct)
     {
+        var preview = SlackBotIdentityDeriver.Derive(agent);
         var manifest = _manifests.Generate(new SlackManifestInput(
-            agent.Name,
-            agent.Description ?? string.Empty,
+            preview.BotName,
+            preview.AppDescription,
             ProductCapabilityVersion,
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
             SlackManifestKind.AgentApp,

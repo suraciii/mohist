@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Domain;
@@ -42,7 +43,7 @@ public sealed class SlackInstallAgentSpecs
         var connections = new AgentConnectionStore(_factory, agents, _secrets, [], _time);
         var enrollments = new SlackWorkspaceEnrollmentStore(_factory, _time);
         var agentApps = new ManagedSlackAgentAppStore(_factory, _time);
-        var operations = new ManagedSlackAgentAppApplicationService(_factory, _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
+        var operations = new ManagedSlackAgentAppApplicationService(_factory, agents, _apps, _apps, new SlackManifestGenerator(), _secrets, _time);
         var binding = new SlackAgentAppBindingService(_factory, connections, _time);
         return new SlackInstallAgentService(
             agents, connections, enrollments, agentApps,
@@ -79,6 +80,55 @@ public sealed class SlackInstallAgentSpecs
         Assert.Equal(first.InstallUrl, rerun.InstallUrl);
         Assert.Equal(1, _apps.CreateCalls);
         Assert.Equal(SlackAgentAppNextAction.ProvideCredentials, rerun.NextAction);
+    }
+
+    [Fact]
+    public async Task Created_agent_app_manifest_carries_the_sanitized_bot_name_and_a_non_empty_description()
+    {
+        await SeedAgentAsync(AgentStatus.Active, name: "reviewbot");
+        await SeedEnrollmentAsync("enrollment-1");
+
+        var installed = await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+
+        Assert.NotNull(_apps.LastCreateManifestJson);
+        using var document = JsonDocument.Parse(_apps.LastCreateManifestJson!);
+        var display = document.RootElement.GetProperty("display_information");
+        Assert.Equal("reviewbot", display.GetProperty("name").GetString());
+        Assert.Equal("A Mohist Agent available in Slack.", display.GetProperty("description").GetString());
+        Assert.NotEqual("agent-app", display.GetProperty("name").GetString());
+        Assert.Equal("reviewbot",
+            document.RootElement.GetProperty("features").GetProperty("bot_user").GetProperty("display_name").GetString());
+
+        string hashBefore;
+        await using (var db = _factory.CreateDbContext())
+        {
+            hashBefore = (await db.ManagedSlackAgentApps.SingleAsync(item => item.Id == installed.AgentApp.Id)).DesiredManifestHash;
+        }
+
+        await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+
+        await using (var db = _factory.CreateDbContext())
+        {
+            var rerun = await db.ManagedSlackAgentApps.AsNoTracking()
+                .SingleAsync(item => item.Id == installed.AgentApp.Id);
+            Assert.Equal(hashBefore, rerun.DesiredManifestHash);
+        }
+    }
+
+    [Fact]
+    public async Task Created_agent_app_manifest_uses_the_agent_description_when_present()
+    {
+        await SeedAgentAsync(AgentStatus.Active, "Reviews release pull requests.", "reviewbot");
+        await SeedEnrollmentAsync("enrollment-1");
+
+        await _service.InstallAsync(ProjectId, AgentId, "enrollment-1");
+
+        Assert.NotNull(_apps.LastCreateManifestJson);
+        using var document = JsonDocument.Parse(_apps.LastCreateManifestJson!);
+        Assert.Equal("Reviews release pull requests.",
+            document.RootElement.GetProperty("display_information").GetProperty("description").GetString());
+        Assert.Equal("reviewbot",
+            document.RootElement.GetProperty("display_information").GetProperty("name").GetString());
     }
 
     [Fact]
@@ -518,7 +568,7 @@ public sealed class SlackInstallAgentSpecs
             new SlackAdapterLeaseStore(_factory), provider, new SlackLeaseSecretResolver(_secrets), _time);
     }
 
-    private async Task SeedAgentAsync(string status)
+    private async Task SeedAgentAsync(string status, string? description = null, string name = "Review Bot")
     {
         await using var db = _factory.CreateDbContext();
         db.Agents.Add(new AgentRow
@@ -528,8 +578,9 @@ public sealed class SlackInstallAgentSpecs
             {
                 Id = AgentId,
                 ProjectId = ProjectId,
-                Name = "Review Bot",
+                Name = name,
                 Status = status,
+                Description = description ?? string.Empty,
             }),
         });
         await db.SaveChangesAsync();

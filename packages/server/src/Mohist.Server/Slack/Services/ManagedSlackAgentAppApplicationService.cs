@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Hosting;
@@ -15,6 +16,7 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
     private const int ManifestVersion = 2;
 
     private readonly IDbContextFactory<MohistDbContext> _dbFactory;
+    private readonly AgentQuerier _agents;
     private readonly ISlackAppManagementPort _appManagement;
     private readonly ISlackAppManagementFactPort _appManagementFacts;
     private readonly SlackManifestGenerator _manifests;
@@ -23,6 +25,7 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
 
     public ManagedSlackAgentAppApplicationService(
         IDbContextFactory<MohistDbContext> dbFactory,
+        AgentQuerier agents,
         ISlackAppManagementPort appManagement,
         ISlackAppManagementFactPort appManagementFacts,
         SlackManifestGenerator manifests,
@@ -30,6 +33,7 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
         TimeProvider timeProvider)
     {
         _dbFactory = dbFactory;
+        _agents = agents;
         _appManagement = appManagement;
         _appManagementFacts = appManagementFacts;
         _manifests = manifests;
@@ -309,9 +313,17 @@ public sealed class ManagedSlackAgentAppApplicationService : IScopedService
             .ConfigureAwait(false);
         if (connection is null)
             throw new InvalidOperationException("The Agent App's staged Connection was not found.");
+        var agent = await _agents.GetByIdAsync(connection.ProjectId, connection.AgentId, ct)
+            .ConfigureAwait(false);
+        var preview = agent is null
+            ? SlackBotIdentityDeriver.Derive(
+                connection.AgentId,
+                connection.BotName is { Length: > 0 } ? connection.BotName : "agent-app",
+                string.Empty)
+            : SlackBotIdentityDeriver.Derive(agent);
         var manifest = _manifests.Generate(new SlackManifestInput(
-            connection.BotName is { Length: > 0 } ? connection.BotName : "agent-app",
-            string.Empty,
+            preview.BotName,
+            preview.AppDescription,
             ProductCapabilityVersion,
             new SlackManifestIdentitySnapshot(connection.Id, connection.AgentId, connection.WorkspaceTeamId),
             SlackManifestKind.AgentApp,

@@ -66,10 +66,12 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
     private int _createCalls;
     private int _deleteCalls;
     private int _manifestCalls;
+    private string? _lastCreateManifestJson;
 
     public int CreateCalls => Volatile.Read(ref _createCalls);
     public int DeleteCalls => Volatile.Read(ref _deleteCalls);
     public int ManifestCalls => Volatile.Read(ref _manifestCalls);
+    public string? LastCreateManifestJson => Volatile.Read(ref _lastCreateManifestJson);
 
     public void SetResponse(string agentAppId, FakeSlackAppResponse response)
     {
@@ -88,6 +90,7 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
     public Task<SlackAppManagementResult> CreateAsync(SlackAppManagementRequest request, CancellationToken ct = default)
     {
         Interlocked.Increment(ref _createCalls);
+        Volatile.Write(ref _lastCreateManifestJson, request.ManifestJson);
         lock (_gate)
         {
             if (_responses.TryGetValue(request.AgentAppId, out var configured) && configured.Create is not null)
