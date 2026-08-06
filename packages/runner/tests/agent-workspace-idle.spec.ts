@@ -158,6 +158,90 @@ describe("AgentWorkspaceIdleProbe eligibility", () => {
     expect(registry.get(healthy)?.phase).toBe("eligible")
   })
 
+  it("records an orphan candidate on the first not-found and stays active", async () => {
+    const id = validChildSessionId(1)
+    const { registry, probe } = await fixture([{ id }])
+    const { probe: idleProbe } = probe(new Map([[id, { state: "not-found", idleSince: null }]]))
+
+    const result = await idleProbe.runOnce(RETENTION_7, new AbortController().signal)
+
+    expect(result.markedEligible).toBe(0)
+    expect(registry.get(id)?.phase).toBe("active")
+    expect(registry.orphanCandidate(id)).toBe(1)
+  })
+
+  it("counts the registry transition on the second consecutive not-found without re-marking", async () => {
+    const id = validChildSessionId(1)
+    const { registry, probe } = await fixture([{ id }])
+    // Prime the orphan candidate from a prior observation cycle so this
+    // runOnce is the confirming observation.
+    await registry.recordActivity(id, "not-found")
+    expect(registry.orphanCandidate(id)).toBe(1)
+    const { probe: idleProbe, connection } = probe(new Map([[id, { state: "not-found", idleSince: null }]]))
+
+    const result = await idleProbe.runOnce(RETENTION_7, new AbortController().signal)
+
+    // A not-found response can never satisfy isIdleEligible, so the
+    // eligible phase can only come from recordActivity — proving the
+    // probe counts that transition instead of calling markEligible.
+    expect(result.markedEligible).toBe(1)
+    expect(registry.get(id)?.phase).toBe("eligible")
+    expect(registry.orphanCandidate(id)).toBe(0)
+    expect(connection.calls).toHaveLength(1)
+  })
+
+  it.each([
+    ["active", { state: "active", idleSince: null }],
+    ["pending", { state: "pending", idleSince: null }],
+    ["unknown", { state: "unknown", idleSince: null }],
+    ["idle without idleSince", { state: "idle", idleSince: null }],
+  ])("a %s observation cancels a primed orphan candidate", async (_label, activity) => {
+    const id = validChildSessionId(1)
+    const { registry, probe } = await fixture([{ id }])
+    await registry.recordActivity(id, "not-found")
+    expect(registry.orphanCandidate(id)).toBe(1)
+    const { probe: idleProbe } = probe(new Map([[id, activity]]))
+
+    const result = await idleProbe.runOnce(RETENTION_7, new AbortController().signal)
+
+    expect(result.markedEligible).toBe(0)
+    expect(registry.get(id)?.phase).toBe("active")
+    expect(registry.orphanCandidate(id)).toBe(0)
+  })
+
+  it("observes a failed query as unknown and cancels a primed orphan candidate", async () => {
+    const id = validChildSessionId(1)
+    const { registry, probe } = await fixture([{ id }])
+    await registry.recordActivity(id, "not-found")
+    expect(registry.orphanCandidate(id)).toBe(1)
+    const { probe: idleProbe, connection } = probe(new Map([[id, new Error("network")]]))
+
+    const result = await idleProbe.runOnce(RETENTION_7, new AbortController().signal)
+
+    expect(result.markedEligible).toBe(0)
+    expect(registry.get(id)?.phase).toBe("active")
+    expect(registry.orphanCandidate(id)).toBe(0)
+    expect(connection.calls).toHaveLength(1)
+  })
+
+  it("observes a project-less entry as unknown and cancels a primed orphan candidate", async () => {
+    const id = validChildSessionId(1)
+    const { registry, probe } = await fixture([{ id, projectId: null }])
+    // A candidate could only persist from a prior cycle where the
+    // entry still had a project binding; the probe must clear it via
+    // unknown rather than silently skipping a project-less entry.
+    await registry.recordActivity(id, "not-found")
+    expect(registry.orphanCandidate(id)).toBe(1)
+    const { probe: idleProbe, connection } = probe(new Map())
+
+    const result = await idleProbe.runOnce(RETENTION_7, new AbortController().signal)
+
+    expect(result.markedEligible).toBe(0)
+    expect(registry.get(id)?.phase).toBe("active")
+    expect(registry.orphanCandidate(id)).toBe(0)
+    expect(connection.calls).toHaveLength(0)
+  })
+
   it("is a no-op when there are no active entries", async () => {
     const { probe } = await fixture([])
     const { probe: idleProbe, connection } = probe(new Map())

@@ -23,16 +23,25 @@ export interface AgentWorkspaceIdleProbeResult {
 
 /**
  * Transitions runner-tracked managed-worktree entries from `active` to
- * `eligible` based on the server-authoritative session activity. The
- * server is the sole arbiter of "idle": only a confirmed `idle` answer
- * with a durable `idleSince` older than the maintenance cycle's
- * retention threshold is eligible. `active` / `pending` / `unknown` /
- * `not-found` are never eligible (fail-closed) — the runner never
- * recycles a workspace whose session it cannot prove is idle.
+ * `eligible` from two server-authoritative signals, both fail-closed.
+ *
+ * Every activity response is first fed to the registry's orphan grace
+ * (`recordActivity`): consecutive `not-found` reclaims an orphaned
+ * session's workspace, while any `active` / `idle` / `pending` /
+ * `unknown` clears the orphan candidate. When `recordActivity` itself
+ * flips an entry to `eligible`, that transition is counted and not
+ * repeated.
+ *
+ * The server is the sole arbiter of "idle": only a confirmed `idle`
+ * answer with a durable `idleSince` older than the maintenance cycle's
+ * retention threshold is eligible (the second path, via `markEligible`).
+ *
+ * An unusable answer — a network / 403 / malformed error, or an entry
+ * with no project binding to query — is observed as `unknown` so a
+ * stale orphan candidate is cleared; it never confers eligibility.
  *
  * Eligibility is additive: explicit release, the parent-dependency
- * fence and the removal fence are untouched. `not-found` is a no-op in
- * this scope; orphan reclamation belongs to the registry pass.
+ * fence and the removal fence are untouched.
  */
 export class AgentWorkspaceIdleProbe {
   private readonly now: () => Date
@@ -52,15 +61,33 @@ export class AgentWorkspaceIdleProbe {
     for (const entry of active) {
       if (signal.aborted) break
       // The activity route is keyed by (projectId, childSessionId); an
-      // entry without a project binding cannot be queried and is left
-      // to explicit release.
-      if (entry.projectId === null) continue
+      // entry without a project binding cannot be queried. Observe it
+      // as `unknown` so a stale orphan candidate is cleared, then stay
+      // fail-closed — leave it to explicit release.
+      if (entry.projectId === null) {
+        await this.options.registry.recordActivity(entry.childSessionId, "unknown")
+        continue
+      }
       try {
         const activity = await this.options.connection.getAgentWorkspaceActivity(entry.projectId, entry.childSessionId, signal)
-        if (!this.isIdleEligible(activity, cutoff)) continue
-        await this.options.registry.markEligible(entry.childSessionId)
-        markedEligible++
+        // Every observation feeds the orphan grace state machine first.
+        // `recordActivity` flipping an entry to `eligible` (consecutive
+        // `not-found`) is the authoritative transition — count it and
+        // do not repeat it. A still-active entry then falls through to
+        // the server-confirmed-idle path.
+        const observed = await this.options.registry.recordActivity(entry.childSessionId, activity.state)
+        if (observed?.phase === "eligible") {
+          markedEligible++
+          continue
+        }
+        if (this.isIdleEligible(activity, cutoff)) {
+          await this.options.registry.markEligible(entry.childSessionId)
+          markedEligible++
+        }
       } catch (error) {
+        // network / 403 / malformed: the answer is unusable. Observe
+        // `unknown` to clear any orphan candidate and stay fail-closed.
+        await this.options.registry.recordActivity(entry.childSessionId, "unknown")
         log.warn("agent workspace idle probe failed", { session: entry.childSessionId, exception: error })
       }
     }
