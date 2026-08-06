@@ -274,6 +274,94 @@ public sealed class AgentSpawnAdmissionLifecycleSpecs
     }
 
     [Fact]
+    public async Task MaterializingStopSnapshot_AdmittedPlanReserveStaysPending_RetryAdvancesAfterFrozen()
+    {
+        var projectId = await CreateProjectAsync("spawn-admission-materializing-reserve");
+        var target = await CreateAgentAsync(projectId, "spawn-admission-materializing-reserve-target");
+        await SeedCompletedTargetExecutionAsync(projectId, target);
+        var runnerId = $"spawn-admission-materializing-reserve-runner-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "spawn-admission-materializing-reserve-host",
+            projectId));
+
+        var idempotencyKey = $"materializing-reserve-key-{Guid.NewGuid():N}";
+        const string prompt = "admitted plan hitting the materializing fence";
+        try
+        {
+            var parentId = $"spawn-admission-materializing-reserve-parent-{Guid.NewGuid():N}";
+            await OpenParentAsync(projectId, parentId, runnerId, target);
+
+            // Hold the plan at PrepareJob so the reserve step only runs after
+            // the stop snapshot has been left materializing on the fence.
+            _fixture.LaunchFaults.FailNext(LaunchParticipantGate.PrepareJob);
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                await Assert.ThrowsAsync<LaunchSetupPendingException>(() =>
+                    launcher.LaunchSubagentAsync(projectId, parentId, target.Id, prompt, idempotencyKey));
+            }
+
+            var fence = _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId);
+            var command = new BeginSessionTreeStopSnapshotCommand(
+                projectId,
+                $"spawn-admission-materializing-reserve-missing-root-{Guid.NewGuid():N}",
+                $"stop-operation-{Guid.NewGuid():N}",
+                $"stop-input-{Guid.NewGuid():N}",
+                "stop-fingerprint");
+            await Assert.ThrowsAsync<InvalidOperationException>(() => fence.BeginStopSnapshotAsync(command));
+            Assert.Equal(
+                SessionTreeStopSnapshotPhase.Materializing,
+                Assert.Single((await fence.GetAsync()).StopSnapshots!).Phase);
+
+            // The admitted plan's ReserveLink replay hits the materializing
+            // snapshot: it must stay retryable instead of terminally rejecting.
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                await Assert.ThrowsAsync<LaunchSetupPendingException>(() =>
+                    launcher.LaunchSubagentAsync(projectId, parentId, target.Id, prompt, idempotencyKey));
+            }
+            await AssertPendingReserveReplayAsync(projectId, parentId, idempotencyKey);
+
+            // Materializing completes with the parent outside the frozen
+            // membership, so the same key retry re-validates and advances.
+            await OpenParentAsync(projectId, command.RootSessionId, runnerId, target);
+            var recovered = await fence.BeginStopSnapshotAsync(command);
+            Assert.Equal(SessionTreeStopSnapshotDisposition.Started, recovered.Disposition);
+            Assert.Equal(SessionTreeStopSnapshotPhase.Frozen, recovered.Snapshot!.Phase);
+
+            AgentLaunchResult result;
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                result = await launcher.LaunchSubagentAsync(
+                    projectId,
+                    parentId,
+                    target.Id,
+                    prompt,
+                    idempotencyKey);
+            }
+            Assert.Equal(target.Id, result.AgentId);
+            Assert.Equal(
+                LinkReservationState.Attached,
+                (await fence.GetAsync()).Reservations!
+                    .Single(item => item.ChildSessionId == result.SessionId).State);
+            var requestFence = await _fixture.Grains.GetGrain<ISpawnRequestFenceGrain>(
+                    AgentLaunchCoordinatorCodec.KeyFor(projectId, parentId, idempotencyKey))
+                .GetAsync();
+            Assert.Equal(SpawnRequestFenceOutcome.Admitted, requestFence!.Outcome);
+        }
+        finally
+        {
+            _fixture.LaunchFaults.StopFailing(LaunchParticipantGate.PrepareJob);
+            await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
+                .UnregisterAsync(runnerId);
+        }
+    }
+
+    [Fact]
     public async Task AdmittedPlanBeforeStopPublish_RejectedReservation_ConvergesToDurablePostPlanRejection()
     {
         var projectId = await CreateProjectAsync("spawn-admission-postplan-stop");
@@ -414,6 +502,31 @@ public sealed class AgentSpawnAdmissionLifecycleSpecs
             await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global)
                 .UnregisterAsync(runnerId);
         }
+    }
+
+    private async Task AssertPendingReserveReplayAsync(
+        string projectId,
+        string parentSessionId,
+        string idempotencyKey)
+    {
+        var requestFence = await _fixture.Grains.GetGrain<ISpawnRequestFenceGrain>(
+                AgentLaunchCoordinatorCodec.KeyFor(projectId, parentSessionId, idempotencyKey))
+            .GetAsync();
+        Assert.NotNull(requestFence);
+        Assert.Equal(SpawnRequestFenceOutcome.ValidationPending, requestFence!.Outcome);
+
+        var mutationFence = await _fixture.Grains.GetGrain<ISessionTreeMutationFenceGrain>(projectId).GetAsync();
+        Assert.DoesNotContain(
+            mutationFence.Reservations ?? [],
+            item => item.ParentSessionId == parentSessionId);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        var childJob = Assert.Single(
+            await db.AgentJobs.Where(job => job.ProjectId == projectId).ToListAsync(),
+            job => job.JobKey.StartsWith("agent-job-launch-", StringComparison.Ordinal));
+        Assert.Equal("pending", childJob.Status);
     }
 
     private async Task AssertNoSpawnArtifactsAsync(

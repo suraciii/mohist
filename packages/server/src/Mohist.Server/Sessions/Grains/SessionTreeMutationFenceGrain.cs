@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -96,7 +97,14 @@ public sealed class SessionTreeMutationFenceGrain(
                 : await ReconciliationAsync(current, command.EdgeId, existing.State);
         }
         if (HasMaterializingSnapshot(current))
-            return MutationRejected(command.EdgeId, current.GraphRevision, "stop_snapshot_materializing");
+        {
+            // Materializing is transient and its membership is not published yet:
+            // a Rejected result would durably abort the admitted coordinator plan.
+            // The validation-pending exception keeps plan and request fence pending
+            // so the same key re-runs reserve once the snapshot freezes (rejected
+            // then only if the parent lands inside the stop membership).
+            throw new AgentSpawnValidationPendingException("stop_snapshot_materializing");
+        }
         if (IsParentBlockedByPublishedStop(current, command.ParentSessionId))
             return MutationRejected(command.EdgeId, current.GraphRevision, "parent_tree_stop_in_progress");
 

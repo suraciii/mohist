@@ -4,7 +4,7 @@
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobGrainSpecs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentTurnLifecycleT001Specs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/SessionTreeMutationFenceSpecs.cs": 25000,
-  "Mohist.Server.SpecTests/Specs/Agent/Services/AgentSpawnAdmissionLifecycleSpecs.cs": 26000,
+  "Mohist.Server.SpecTests/Specs/Agent/Services/AgentSpawnAdmissionLifecycleSpecs.cs": 32000,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 34000,
   "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 29000,
   "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicLifecycleSpecs.cs": 32000,

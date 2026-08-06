@@ -1,4 +1,5 @@
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -271,19 +272,19 @@ public sealed class SessionTreeLifecycleSpecs
         var materializing = await fence.GetAsync();
         Assert.Equal(SessionTreeStopSnapshotPhase.Materializing, Assert.Single(materializing.StopSnapshots!).Phase);
 
-        var rejected = await fence.ReserveAsync(new ReserveSessionTreeLinkCommand(
-            projectId,
-            "edge-materializing",
-            "other-parent",
-            "child-materializing",
-            "/workspace",
-            "runner-1",
-            "opencode",
-            null,
-            "command-materializing",
-            "job-materializing"));
-        Assert.Equal(LinkReservationState.Rejected, rejected.State);
-        Assert.Equal("stop_snapshot_materializing", rejected.RejectionReason);
+        var exception = await Assert.ThrowsAsync<AgentSpawnValidationPendingException>(() =>
+            fence.ReserveAsync(new ReserveSessionTreeLinkCommand(
+                projectId,
+                "edge-materializing",
+                "other-parent",
+                "child-materializing",
+                "/workspace",
+                "runner-1",
+                "opencode",
+                null,
+                "command-materializing",
+                "job-materializing")));
+        Assert.Equal("stop_snapshot_materializing", exception.Reason);
 
         await OpenSessionAsync(projectId, rootId, "root-agent");
         var recovered = await fence.BeginStopSnapshotAsync(command);
