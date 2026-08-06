@@ -37,6 +37,7 @@
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/DispatchAndLoadingSpecs.cs": 25000,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 28000,
   "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 35000,
+  "Mohist.Server.SpecTests/Support/MohistIntegrationFixture.cs": 25000,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 28000,
   "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 44000,
   "Mohist.Server.UnitTests/Workflow/Services/ActionContractValidatorTests.cs": 29000

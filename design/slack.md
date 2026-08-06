@@ -284,13 +284,16 @@ App」，后者授予「以 Bot 身份收发消息」；寻址、轮换、失效
   Slack CLI 凭据或浏览器自动化绕过该边界。
 - **Socket token 边界**：App-level token 由用户在 App 设置页生成，scope 只能是
   `connections:write`。Mohist 验证它能为预期 App 建立 Socket 后才保存 readiness 事实。
-- **当前状态**：三个 outbound port 已接生产 adapter（`SlackApiTransport` + App
-  management / Configuration credential rotation / Bot identity verification），`setup` /
-  `install-agent` 已接入真实 port。OAuth redirect 回填路径与 `ISlackOAuthCredentialSink`
+- **当前状态**：四个 outbound port 已接生产 adapter（`SlackApiTransport` + App
+  management / Configuration credential rotation / Bot identity verification / member
+  identity），`setup` / `install-agent` 已接入真实 port。Allowlist/Anyone 门禁经生产
+  `SlackMemberIdentityPortAdapter` 调 `users.info` / `conversations.info` 做活体成员与 Bot
+  频道成员资格校验，owner/DM 快路径不触 Slack API，校验失败按 deny 处理。OAuth redirect
+  回填路径与 `ISlackOAuthCredentialSink`
   的 Unavailable 占位已随旧路由退役；目标流程不经 OAuth callback，token 由 CLI 受保护输入
   进入。
 
-Server 的 Slack control plane 只经三个窄 outbound port 访问 Slack HTTPS API：
+Server 的 Slack control plane 只经四个窄 outbound port 访问 Slack HTTPS API：
 
 - `SlackConfigurationCredentialPort`：rotate Configuration token pair，返回新的 pair、`team_id` 与
   expiry；不承担 App 管理。
@@ -298,6 +301,8 @@ Server 的 Slack control plane 只经三个窄 outbound port 访问 Slack HTTPS 
   credentials、安装链接和确定/未知结果；不安装 App，也不建立 Socket。
 - `SlackBotIdentityVerificationPort`：用候选 Bot token 返回 team/Bot/scopes 的已验证事实；不发送
   用户消息。
+- `SlackMemberIdentityPort`：用已验证 Bot token 经 `users.info` / `conversations.info` 返回发送者
+  成员资格与 Bot 频道成员资格；仅 Allowlist/Anyone 门禁调用，owner/DM 快路径不触 Slack API。
 
 这些 port 的 production adapter 位于 Server infrastructure，domain/application service 不依赖 Slack
 SDK 或 HTTP shape。Socket `apps.connections.open`、hello、event、interaction 和消息投递只属于
@@ -351,9 +356,12 @@ secret input channel。
 Mohist App manifest 启用 Socket Mode、App Home message tab、`message.im` 事件与 interactivity；
 Bot scopes 只包含管理私聊所需的 `chat:write`、`im:history`、`users:read`。Agent App manifest
 启用 Socket Mode、App Home message tab、`app_mention` / `message.im` 事件与 interactivity；Bot
-scopes 固定为 `app_mentions:read`、`channels:history`、`chat:write`、`groups:history`、`im:history`、
-`reactions:read`、`reactions:write`、`users:read`。第一版不支持 group DM，因此不请求
-`mpim:history`。interactivity 使用 Socket Mode
+scopes 固定为 `app_mentions:read`、`channels:history`、`channels:read`、`chat:write`、
+`groups:history`、`groups:read`、`im:history`、`reactions:read`、`reactions:write`、`users:read`。
+`channels:read` 与 `groups:read` 支撑 Allowlist/Anyone 门禁经 `conversations.info` 核对 Bot 的
+频道成员资格，发送者成员校验经 `users.info`，由既有 `users:read` 覆盖；DM 快路径与 owner
+校验不调 `conversations.info`，因此不请求 `im:read` / `mpim:read`。第一版不支持 group DM，
+因此不请求 `mpim:history`。interactivity 使用 Socket Mode
 回传，不配置 Request URL。
 
 manifest 先 canonical serialize，再以 manifest version、产品 capability version 和 identity snapshot
@@ -521,7 +529,7 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
 
 ## 已交付 correctness kernel
 
-本节记录 correctness kernel 已交付的纯模型部分。三个 outbound port 的生产 adapter 已接线
+本节记录 correctness kernel 已交付的纯模型部分。四个 outbound port 的生产 adapter 已接线
 （见「App 供给凭据」当前状态注），但默认测试仍全部使用 fake port 与 fixed `TimeProvider`，不触
 真实网络。
 
@@ -548,7 +556,8 @@ Connection Disabled 时，adapter/Server 仍必须在传输层确认 Slack event
 ### fake app-management port
 
 生产代码只能经一个窄 port 调 Slack create/delete（ArchTest 兜底）。目标态按上文拆为 Configuration
-credential、app-management 与 Bot identity verification 三个窄 port；生产 adapter 已接线，
+credential、app-management、Bot identity verification 与 member identity 四个窄 port；生产
+adapter 已接线，
 默认测试仍使用 fake 实现，覆盖：
 
 - create 成功 / definite 失败 / **unknown**（超时或 internal_error）；
