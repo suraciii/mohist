@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "id": "f7e2ce4a-0a00-4dd4-82f2-e28069516fa4",
+  "title": "CI 测试策略调整：降低集成度提速 GitHub CI",
+  "goal": "在 GitHub CI 4 vCPU 目标环境下，通过降低 Spec 套件测试集成度，把 CI 关键路径 .NET job 从 ~332s 降到 ~280s 以下；推进 mo #553（轻量化）、#546 父 + #550/#551/#552 子（矩阵下沉）；thinker 出方案、worker 实施、你验收；集成点 = 本 worktree，全部验收后由 operator 开 PR 集成 master。",
+  "status": "cancelled",
+  "createdAt": "2026-08-06T09:12:32.681Z",
+  "updatedAt": "2026-08-06T09:14:34.582Z",
+  "runs": [
+    {
+      "runId": "10129d2f-ffe9-4416-b59d-b629e085a0f7",
+      "mode": "single",
+      "asyncDir": "/tmp/pi-subagents-uid-1000/async-subagent-runs/10129d2f-ffe9-4416-b59d-b629e085a0f7",
+      "status": "stopped",
+      "startedAt": "2026-08-06T09:12:32.695Z",
+      "completedAt": "2026-08-06T09:14:34.582Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "/tmp/pi-subagents-uid-1000/async-subagent-runs/10129d2f-ffe9-4416-b59d-b629e085a0f7/status.json"
+    },
+    {
+      "kind": "other",
+      "path": "/tmp/pi-subagents-uid-1000/async-subagent-runs/10129d2f-ffe9-4416-b59d-b629e085a0f7/events.jsonl",
+      "description": "Lifecycle events"
+    },
+    {
+      "kind": "output",
+      "path": "/home/szf/.herdr/worktrees/mohist/test-ci-test-strategy-20260806/.pi-subagents/artifacts/10129d2f-ffe9-4416-b59d-b629e085a0f7_orchestrator_output.md"
+    }
+  ],
+  "receipts": [],
+  "cwd": "/home/szf/.herdr/worktrees/mohist/test-ci-test-strategy-20260806",
+  "ownerSessionId": "/home/szf/.pi/agent/sessions/--home-szf-repos-mohist--/2026-08-06T07-32-18-782Z_019fd5fc-bede-7ea2-8fa5-70b4e3e11cf3.jsonl",
+  "summary": "Subagent stopped by user.",
+  "labels": [
+    "test-strategy",
+    "ci"
+  ]
+}

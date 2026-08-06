@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "c421a1e4-9356-49e1-b60d-0d74a41e71f6",
+  "title": "你负责 mo #553 的只读方案与审计，不改文件、不跑测试。阅读 plans/ci-test-strategy-goal-20260806.md、issue #553 body、测试项目结构和...",
+  "goal": "你负责 mo #553 的只读方案与审计，不改文件、不跑测试。阅读 plans/ci-test-strategy-goal-20260806.md、issue #553 body、测试项目结构和既有 testing.md/测试轨约定。给出：1) AgentJobGrain 去串行化和 diagnosticMessages 关闭的精确文件/配置定位；2) 168 个纯逻辑文件/1407 测试的机械判定与迁移边界，列出潜在风险；3) worker 可直接执行的步骤与验收命令（但你不要执行测试）；4) 如何证明不动测试逻辑、Spec 零集成机械核查、3 次并行稳定性。输出要具体到路径/模式，供后续 worker 实施。",
+  "status": "active",
+  "createdAt": "2026-08-06T09:13:46.007Z",
+  "updatedAt": "2026-08-06T09:13:46.025Z",
+  "runs": [
+    {
+      "runId": "90ea8cb5-0b83-4189-b0ef-384edf2aa23a",
+      "mode": "parallel",
+      "asyncDir": "/tmp/pi-subagents-uid-1000/nested-subagent-runs/37ad5563/90ea8cb5-0b83-4189-b0ef-384edf2aa23a",
+      "status": "active",
+      "startedAt": "2026-08-06T09:13:46.025Z"
+    }
+  ],
+  "decisions": [],
+  "artifacts": [
+    {
+      "kind": "status",
+      "path": "/tmp/pi-subagents-uid-1000/nested-subagent-runs/37ad5563/90ea8cb5-0b83-4189-b0ef-384edf2aa23a/status.json"
+    },
+    {
+      "kind": "other",
+      "path": "/tmp/pi-subagents-uid-1000/nested-subagent-runs/37ad5563/90ea8cb5-0b83-4189-b0ef-384edf2aa23a/events.jsonl",
+      "description": "Lifecycle events"
+    }
+  ],
+  "receipts": [],
+  "cwd": "/home/szf/.herdr/worktrees/mohist/test-ci-test-strategy-20260806",
+  "ownerSessionId": "/home/szf/.pi/agent/sessions/--home-szf-repos-mohist--/2026-08-06T07-32-18-782Z_019fd5fc-bede-7ea2-8fa5-70b4e3e11cf3/37ad5563/run-0/session.jsonl"
+}

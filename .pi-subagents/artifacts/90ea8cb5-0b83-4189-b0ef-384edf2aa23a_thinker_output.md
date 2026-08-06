@@ -1,0 +1,1 @@
+Let me read the AgentJobGrainFixture to verify the shared-state basis for serialization, and check the 14 collection-member files' scope.
