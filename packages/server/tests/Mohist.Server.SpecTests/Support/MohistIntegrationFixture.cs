@@ -30,6 +30,7 @@ using Orleans.Configuration;
 using Orleans.TestingHost;
 using Xunit;
 using EnvironmentAbstractions.TestHelpers;
+using OpenTelemetry.Exporter;
 
 namespace Mohist.Server.SpecTests.Support;
 
@@ -127,6 +128,10 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
     public AgentSessionPersistenceTestProbe Persistence { get; }
     // Keeper for the in-memory OtelDb override; disposed with the factory.
     private SqliteConnection? _otelKeeper;
+    // Single in-process OTLP exporter handler shared by the tracing and
+    // metrics named options when OTel is enabled; the option pipeline keeps
+    // it alive for the lifetime of the TracerProvider/MeterProvider.
+    private RecordingHttpMessageHandler? _otelExporterHandler;
 
     public string ArtifactStorageRoot => "/mohist-tests/artifacts";
     public string LogsPath => _logsPath;
@@ -306,6 +311,20 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             _otelKeeper = otelKeeper;
             services.RemoveAll<OtelDb>();
             services.AddSingleton(otelDb);
+            if (_otelEnabled)
+            {
+                // Override the OTLP HttpClientFactory for both named options
+                // so the OTelIntegrationFixture host never dials
+                // localhost:4318. AddMohistOpenTelemetry uses PostConfigure
+                // (not Configure) for Protocol/Endpoint, so the override
+                // survives the options pipeline; TryEnableIHttpClientFactory
+                // Integration also leaves any non-default factory alone.
+                _otelExporterHandler = new RecordingHttpMessageHandler(failRequests: false);
+                Func<HttpClient> exporterHttpClientFactory =
+                    () => new HttpClient(_otelExporterHandler, disposeHandler: false);
+                services.Configure<OtlpExporterOptions>("tracing", o => o.HttpClientFactory = exporterHttpClientFactory);
+                services.Configure<OtlpExporterOptions>("metrics", o => o.HttpClientFactory = exporterHttpClientFactory);
+            }
         });
     }
 
