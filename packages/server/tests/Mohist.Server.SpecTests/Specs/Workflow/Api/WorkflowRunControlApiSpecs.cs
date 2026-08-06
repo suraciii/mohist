@@ -551,6 +551,21 @@ public partial class WorkflowRunControlApiSpecs
         Assert.Equal(HttpStatusCode.Conflict, resumeResponse.StatusCode);
     }
 
+    [Fact]
+    public async Task IssueScoped_RerunOnFailedRun_IsAdmitted()
+    {
+        var (projectId, issueNumber, _, wrId) = await SeedActiveWorkflowAsync();
+        await ForceFailedStatusAsync(wrId);
+
+        var response = await _client.PostAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/rerun", content: null);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var run = await LoadRunAsync(wrId);
+        Assert.NotEqual(WorkflowRunStatus.Failed, run!.Status);
+        Assert.Null(run.Failure);
+    }
+
     private async Task<(string projectId, int issueNumber, string issueKey, string wrId)> SeedActiveWorkflowAsync()
     {
         var (projectId, _) = await SeedProjectAsync();

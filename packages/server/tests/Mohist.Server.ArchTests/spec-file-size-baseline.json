@@ -31,7 +31,7 @@
   "Mohist.Server.SpecTests/Specs/Slack/SlackInstallAgentSpecs.cs": 32000,
   "Mohist.Server.SpecTests/Specs/Slack/SlackManagerSetupOrchestratorSpecs.cs": 38000,
   "Mohist.Server.SpecTests/Specs/Telemetry/OtelQueryRoutesIntegrationSpecs.cs": 32000,
-  "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 34000,
+  "Mohist.Server.SpecTests/Specs/Workflow/Api/WorkflowRunControlApiSpecs.cs": 35000,
   "Mohist.Server.SpecTests/Specs/Workflow/Artifacts/WorkflowArtifactUploadServiceSpecs.cs": 34000,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/DispatchAndLoadingSpecs.cs": 25000,
   "Mohist.Server.SpecTests/Specs/Workflow/Grain/WorkflowRetrySpecs.cs": 28000,
