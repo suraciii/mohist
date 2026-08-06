@@ -134,7 +134,92 @@ public sealed class SlackTerminalDeliveryHandlerSpecs
     }
 
     [Fact]
-    public async Task HandleAsync_Neutralizes_control_syntax_in_a_completed_Manager_reply()
+    public async Task HandleAsync_UsesTheAssistantReportAsTheTerminalReply_WhenTheAgentHasOne()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));
+        await using (var db = database.CreateContext())
+        {
+            db.Projects.Add(new ProjectRow
+            {
+                Id = "proj-1",
+                Name = "demo",
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
+            db.AgentConnections.Add(new AgentConnectionRow
+            {
+                Id = "conn-1",
+                ProjectId = "proj-1",
+                AgentId = "agent-1",
+                ProviderKind = ConnectionProviderKind.Slack,
+                WorkspaceTeamId = "team-1",
+                AppId = "app-1",
+                BotUserId = "bot-1",
+                BotName = "Mohist",
+                SetupProgress = SetupProgressKind.Complete,
+                DesiredState = DesiredStateKind.Enabled,
+                ConnectionHealth = ConnectionHealthKind.Healthy,
+                AgentReadiness = AgentReadinessKind.Ready,
+                CreatedAt = time.GetUtcNow(),
+                UpdatedAt = time.GetUtcNow(),
+            });
+            db.AgentJobs.Add(new AgentJobRow { JobKey = "job-1", AgentSessionId = "session-1" });
+            await db.SaveChangesAsync();
+        }
+        var services = new ServiceCollection();
+        services.AddScoped<SlackOutboxStore>(_ => new SlackOutboxStore(
+            new TestDbContextFactory(database.Options),
+            new NoopHealthBackpressurer(),
+            time,
+            Options.Create(new SlackProviderOptions { OutboxCapacityPerConnection = 1 })));
+        services.AddScoped<IAgentJobStore>(_ => new AgentJobStore(
+            new TestDbContextFactory(database.Options),
+            NullLogger<AgentJobStore>.Instance,
+            time));
+        await using var provider = services.BuildServiceProvider();
+        var handler = new SlackTerminalDeliveryHandler(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SlackTerminalDeliveryHandler>.Instance);
+        var delivery = new
+        {
+            jobKey = "job-1",
+            workLabel = "ship the release",
+            connectionId = "conn-1",
+            workspaceTeamId = "team-1",
+            conversationId = "D1",
+            threadTs = "1710000000.000001",
+            status = "completed",
+            message = "completed",
+            assistantText = "磁盘占用 62%，CPU 平均 18%，内存剩余 3.2G。无需处理。",
+            artifactCount = 0,
+            exitCode = 0,
+        };
+        var evt = new CloudEvent(
+            "delivery-2",
+            new Uri("/mohist/agent-job/job-1", UriKind.Relative),
+            EventCatalog.ReverseDns.AgentJobTerminalDelivery,
+            time.GetUtcNow(),
+            JsonSerializer.SerializeToElement(delivery),
+            subject: "job-1",
+            extensions: new Dictionary<string, string> { [EventCatalog.Lineage.ProjectId] = "proj-1" });
+
+        await handler.HandleAsync(evt, CancellationToken.None);
+
+        await using var scope = provider.CreateAsyncScope();
+        var rows = (await scope.ServiceProvider.GetRequiredService<SlackOutboxStore>().ListAsync("proj-1", "conn-1")).Entries;
+        var row = Assert.Single(rows);
+        var payload = SlackDeliveryPayload.Parse(row.PayloadJson);
+        Assert.Equal(
+            "磁盘占用 62%，CPU 平均 18%，内存剩余 3.2G。无需处理。\nSession: session-1",
+            payload.Text);
+        Assert.DoesNotContain("Task: ship the release", payload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Conclusion:", payload.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Next step:", payload.Text, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task HandleAsync_Neutralizes_control_syntax_in_a_completed_reply()
     {
         await using var database = TestSqliteDatabase.CreateMigrated();
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 7, 29, 12, 0, 0, TimeSpan.Zero));

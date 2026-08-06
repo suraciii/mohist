@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Mohist.Server.Slack.Services;
 
 namespace Mohist.Server.Infrastructure.Slack.Ports;
@@ -10,11 +11,16 @@ namespace Mohist.Server.Infrastructure.Slack.Ports;
 /// <see cref="SlackBotIdentityVerificationResult.GrantedScopes"/> stays null
 /// (unverifiable), so the adapter never substitutes the canonical desired
 /// scopes for an unconfirmed grant.
+///
+/// <c>auth.test</c> does not return <c>app_id</c>; when it is missing the
+/// adapter resolves it via <c>bots.info</c> using the confirmed <c>bot_id</c>.
+/// An app identity that cannot be resolved fails closed.
 /// </summary>
 public sealed class SlackBotIdentityVerificationPortAdapter(
     SlackApiTransport transport) : ISlackBotIdentityVerificationPort
 {
     public const string AuthTestEndpoint = "auth.test";
+    public const string BotsInfoEndpoint = "bots.info";
 
     public async Task<SlackBotIdentityVerificationResult> VerifyAsync(
         SlackBotIdentityVerificationRequest request,
@@ -32,7 +38,7 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
         switch (response.Outcome)
         {
             case SlackApiCallOutcome.Ok:
-                return ParseVerified(response.Body, response.GrantedScopesHeader);
+                return await ParseVerifiedAsync(response.Body, response.GrantedScopesHeader, request.BotToken, ct).ConfigureAwait(false);
             case SlackApiCallOutcome.Rejected:
                 return new(false, ErrorClass: response.Error ?? "auth_rejected");
             case SlackApiCallOutcome.Unparseable:
@@ -42,7 +48,11 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
         }
     }
 
-    private static SlackBotIdentityVerificationResult ParseVerified(System.Text.Json.JsonDocument? body, string? grantedScopesHeader)
+    private async Task<SlackBotIdentityVerificationResult> ParseVerifiedAsync(
+        JsonDocument? body,
+        string? grantedScopesHeader,
+        string botToken,
+        CancellationToken ct)
     {
         if (body is null)
             return new(false, ErrorClass: "unparseable_response");
@@ -52,9 +62,36 @@ public sealed class SlackBotIdentityVerificationPortAdapter(
             var teamId = ReadString(root, "team_id");
             var botUserId = ReadString(root, "user_id");
             var appId = ReadString(root, "app_id");
+            var botId = ReadString(root, "bot_id");
             if (teamId is null || botUserId is null)
                 return new(false, ErrorClass: "invalid_identity_response");
+            if (appId is null)
+            {
+                if (string.IsNullOrWhiteSpace(botId))
+                    return new(false, ErrorClass: "invalid_identity_response");
+                appId = await ResolveAppIdAsync(botId, botToken, ct).ConfigureAwait(false);
+                if (appId is null)
+                    return new(false, ErrorClass: "app_id_unresolved");
+            }
             return new(true, teamId, botUserId, appId, GrantedScopes: ParseGrantedScopes(grantedScopesHeader));
+        }
+    }
+
+    private async Task<string?> ResolveAppIdAsync(string botId, string botToken, CancellationToken ct)
+    {
+        var response = await transport.PostFormAsync(
+            BotsInfoEndpoint,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["bot"] = botId },
+            botToken,
+            ct).ConfigureAwait(false);
+        if (response.Outcome != SlackApiCallOutcome.Ok || response.Body is null)
+            return null;
+        using (response.Body)
+        {
+            var root = response.Body.RootElement;
+            if (!root.TryGetProperty("bot", out var bot) || bot.ValueKind != JsonValueKind.Object)
+                return null;
+            return ReadString(bot, "app_id");
         }
     }
 

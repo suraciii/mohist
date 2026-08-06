@@ -80,6 +80,49 @@ public sealed class SlackBotIdentityVerificationPortAdapterTests
     }
 
     [Fact]
+    public async Task Verify_missing_app_id_resolves_it_via_bots_info()
+    {
+        // auth.test does not return app_id; the adapter must resolve it
+        // through bots.info using the confirmed bot_id.
+        var responses = new Queue<HttpResponseMessage>();
+        responses.Enqueue(JsonResponse(
+            """{"ok":true,"team_id":"T123","user_id":"U_BOT","bot_id":"B1"}"""));
+        responses.Enqueue(JsonResponse(
+            """{"ok":true,"bot":{"id":"B1","app_id":"A9","name":"Mohist"}}"""));
+        var handler = new StubHttpMessageHandler(_ => responses.Dequeue());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.True(result.Verified);
+        Assert.Equal("T123", result.WorkspaceTeamId);
+        Assert.Equal("U_BOT", result.BotUserId);
+        Assert.Equal("A9", result.AppId);
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Equal("https://slack.test/api/auth.test", handler.Requests[0].Uri);
+        Assert.Equal("https://slack.test/api/bots.info", handler.Requests[1].Uri);
+        Assert.Equal("bot=B1", handler.Requests[1].Body);
+    }
+
+    [Fact]
+    public async Task Verify_unresolvable_app_id_fails_closed()
+    {
+        var responses = new Queue<HttpResponseMessage>();
+        responses.Enqueue(JsonResponse(
+            """{"ok":true,"team_id":"T123","user_id":"U_BOT","bot_id":"B1"}"""));
+        responses.Enqueue(JsonResponse("""{"ok":true,"bot":{"id":"B1"}}"""));
+        var handler = new StubHttpMessageHandler(_ => responses.Dequeue());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
+        var adapter = new SlackBotIdentityVerificationPortAdapter(new SlackApiTransport(http));
+
+        var result = await adapter.VerifyAsync(new("xoxb-candidate"));
+
+        Assert.False(result.Verified);
+        Assert.Equal("app_id_unresolved", result.ErrorClass);
+    }
+
+    [Fact]
     public async Task Verify_ok_false_is_not_verified_and_carries_no_granted_scopes_even_with_header()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponseWithScopes(

@@ -1,6 +1,5 @@
 using System.Net;
 using System.Text;
-using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Slack.Ports;
 using Mohist.Server.Slack.Services;
 using Xunit;
@@ -9,23 +8,26 @@ namespace Mohist.Server.UnitTests.Slack;
 
 public sealed class SlackConfigurationCredentialPortAdapterTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 8, 6, 12, 0, 0, TimeSpan.Zero);
+    // Slack tooling.tokens.rotate returns token/exp (epoch seconds), not
+    // access_token/expires_in; tests must mock the real response shape.
+    private const long ExpEpochSeconds = 1786060800;
+    private static readonly DateTimeOffset ExpiresAt = DateTimeOffset.FromUnixTimeSeconds(ExpEpochSeconds);
 
     [Fact]
     public async Task Rotate_posts_refresh_token_and_returns_rotated_pair_with_team_and_expiry()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse(
-            """{"ok":true,"access_token":"next-access","refresh_token":"next-refresh","expires_in":3600,"team_id":"T123"}"""));
+            $$"""{"ok":true,"token":"next-access","refresh_token":"next-refresh","exp":{{ExpEpochSeconds}},"team_id":"T123"}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         var result = await adapter.RotateAsync(new("access", "refresh"));
 
         Assert.Equal(SlackConfigurationCredentialRotationOutcome.Succeeded, result.Outcome);
         Assert.Equal(new SlackConfigurationCredentialPair("next-access", "next-refresh"), result.Credentials);
         Assert.Equal("T123", result.WorkspaceTeamId);
-        Assert.Equal(Now.AddSeconds(3600), result.ExpiresAt);
+        Assert.Equal(ExpiresAt, result.ExpiresAt);
         var recorded = Assert.Single(handler.Requests);
         Assert.Equal("https://slack.test/api/tooling.tokens.rotate", recorded.Uri);
         Assert.Equal("refresh_token=refresh", recorded.Body);
@@ -35,10 +37,10 @@ public sealed class SlackConfigurationCredentialPortAdapterTests
     public async Task Rotate_missing_team_id_is_definite_failure()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse(
-            """{"ok":true,"access_token":"a","refresh_token":"r","expires_in":3600}"""));
+            $$"""{"ok":true,"token":"a","refresh_token":"r","exp":{{ExpEpochSeconds}}}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         var result = await adapter.RotateAsync(new("access", "refresh"));
 
@@ -47,13 +49,13 @@ public sealed class SlackConfigurationCredentialPortAdapterTests
     }
 
     [Fact]
-    public async Task Rotate_missing_expires_in_is_definite_failure()
+    public async Task Rotate_missing_exp_is_definite_failure()
     {
         var handler = new StubHttpMessageHandler(_ => JsonResponse(
-            """{"ok":true,"access_token":"a","refresh_token":"r","team_id":"T123"}"""));
+            """{"ok":true,"token":"a","refresh_token":"r","team_id":"T123"}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         var result = await adapter.RotateAsync(new("access", "refresh"));
 
@@ -67,7 +69,7 @@ public sealed class SlackConfigurationCredentialPortAdapterTests
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""{"ok":false,"error":"invalid_refresh_token"}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         var result = await adapter.RotateAsync(new("access", "refresh"));
 
@@ -81,7 +83,7 @@ public sealed class SlackConfigurationCredentialPortAdapterTests
         var handler = new StubHttpMessageHandler(_ => throw new TaskCanceledException());
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         var result = await adapter.RotateAsync(new("access", "refresh"));
 
@@ -95,7 +97,7 @@ public sealed class SlackConfigurationCredentialPortAdapterTests
         var handler = new StubHttpMessageHandler(_ => JsonResponse("""{"ok":true}"""));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://slack.test/api/") };
         var adapter = new SlackConfigurationCredentialPortAdapter(
-            new SlackApiTransport(http), new FakeTimeProvider(Now));
+            new SlackApiTransport(http));
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => adapter.RotateAsync(new(string.Empty, "refresh")));
