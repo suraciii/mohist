@@ -104,7 +104,7 @@ public sealed class FakeSlackAppManagementPort : ISlackAppManagementPort, ISlack
             return Task.FromResult(new SlackAppManagementResult(
                 SlackAppManagementOutcome.Succeeded,
                 appId,
-                InstallUrl: $"https://slack.com/oauth/v2/authorize?client_id={appId}&scope=",
+                InstallUrl: $"https://api.slack.com/apps/{appId}/oauth",
                 ClientSecret: $"xoxc-fake-{appId}",
                 SigningSecret: $"sig-fake-{appId}"));
         }

@@ -186,7 +186,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (resolution.HasProblem)
         {
             var problem = resolution.Problem!;
-            throw new InvalidOperationException(
+            throw new IssueStartRepositoryUnavailableException(
                 $"Cannot start workflow: {problem.Message} (code={problem.Code}, repositoryRef={problem.RepositoryRef ?? "<none>"})");
         }
         return resolution;

@@ -61,7 +61,7 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
                 $"agent-job:{delivery.JobKey}:terminal-delivery",
                 JsonSerializer.Serialize(new SlackDeliveryPayload(
                     SlackDeliveryOperations.PostMessage,
-                    RenderManagerReply(delivery),
+                    Render(delivery),
                     ClientMessageId: $"agent-job:{delivery.JobKey}:terminal-delivery")),
                 delivery.ThreadTs ?? delivery.MessageTs,
                 SlackDeliveryOwnerKinds.Manager), ct);
@@ -103,6 +103,12 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
 
     public static string Render(SlackTerminalDelivery delivery)
     {
+        if (string.Equals(delivery.Status, "completed", StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(delivery.AssistantText))
+        {
+            return SlackFinalReplyRenderer.NeutralizeSlackControlSyntax(delivery.AssistantText.Trim());
+        }
+
         var conclusion = delivery.Status switch
         {
             "completed" => "The task completed.",
@@ -120,12 +126,6 @@ public sealed class SlackTerminalDeliveryHandler : ICloudEventHandler
         };
         return $"Task: {delivery.WorkLabel}\nConclusion: {conclusion}\nEvidence: {evidence}\nNext step: {nextStep}";
     }
-
-    private static string RenderManagerReply(SlackTerminalDelivery delivery) =>
-        string.Equals(delivery.Status, "completed", StringComparison.Ordinal)
-        && !string.IsNullOrWhiteSpace(delivery.AssistantText)
-            ? SlackFinalReplyRenderer.NeutralizeSlackControlSyntax(delivery.AssistantText.Trim())
-            : Render(delivery);
 
     private async Task<string?> ResolveSessionIdAsync(
         IServiceProvider services,

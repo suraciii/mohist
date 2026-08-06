@@ -137,8 +137,11 @@ class AdapterSocketClient implements SocketClient {
 function helloAppId(value: string | ArrayBuffer): string | undefined {
   try {
     const payload: unknown = JSON.parse(typeof value === "string" ? value : new TextDecoder().decode(value))
-    return isRecord(payload) && payload.type === "hello" && typeof payload.app_id === "string"
-      ? payload.app_id
+    if (!isRecord(payload) || payload.type !== "hello") return undefined
+    if (typeof payload.app_id === "string") return payload.app_id
+    const connectionInfo = payload.connection_info
+    return isRecord(connectionInfo) && typeof connectionInfo.app_id === "string"
+      ? connectionInfo.app_id
       : undefined
   } catch {
     return undefined

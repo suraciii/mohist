@@ -239,12 +239,16 @@ public static class SlackConnectionRoutes
             return ApiResults.Ok(updated);
         });
 
-        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/claim-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
         {
             try
             {
-                var code = await claims.GenerateAsync(context.GetResolvedProject().Id, connectionId, ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
+                var projectId = context.GetResolvedProject().Id;
+                var connection = await connections.GetAsync(projectId, connectionId, ct);
+                if (connection is null)
+                    return ApiResults.NotFound("Slack Connection was not found.");
+                var code = await claims.GenerateAsync(projectId, connectionId, ct: ct);
+                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
             }
             catch (InvalidOperationException ex)
             {
@@ -252,16 +256,20 @@ public static class SlackConnectionRoutes
             }
         });
 
-        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, CancellationToken ct) =>
+        management.MapPost("/{connectionId}/transfer-owner", async (HttpContext context, string connectionId, SlackOwnerClaimService claims, AgentConnectionStore connections, CancellationToken ct) =>
         {
             try
             {
+                var projectId = context.GetResolvedProject().Id;
+                var connection = await connections.GetAsync(projectId, connectionId, ct);
+                if (connection is null)
+                    return ApiResults.NotFound("Slack Connection was not found.");
                 var code = await claims.GenerateAsync(
-                    context.GetResolvedProject().Id,
+                    projectId,
                     connectionId,
                     Mohist.Server.Infrastructure.Data.Slack.SlackOwnerClaimCodeKinds.Transfer,
                     ct: ct);
-                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt });
+                return ApiResults.Ok(new { code = code.Value, expiresAt = code.ExpiresAt, botName = ClaimCodeBotName(connection) });
             }
             catch (InvalidOperationException ex)
             {
@@ -1990,6 +1998,9 @@ public static class SlackConnectionRoutes
             : "Prior thread discussion is being used as background.";
         return "Task accepted and queued for execution. " + detail;
     }
+
+    private static string? ClaimCodeBotName(AgentConnection connection) =>
+        string.IsNullOrWhiteSpace(connection.BotName) ? connection.VerifiedBotName : connection.BotName;
 
     private static async Task<IResult> DispatchChannelFollowupAsync(
         HandleChannelIngressRequest req,

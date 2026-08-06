@@ -60,10 +60,11 @@ Mohist 要为工作区创建并持续维护 Mohist App 与各 Agent App，需要
 
 - **每个工作区提供一次**：首次连接工作区时提供。`mo slack setup` 引导用户打开 Slack 的
   App 管理页生成 access/refresh token pair，并以受保护输入提交（不回显、可随时撤销重供）。
-- **自动轮换、可撤销**：Configuration access token 有短有效期；Server 在到期前使用 refresh
-  token 换取并原子保存新 pair，用户不需要周期性回填。供给凭据不出现在消息、日志、CLI 回显
-  或 Agent 可见文本中。refresh 失效或被撤销时，该工作区的 App 维护动作进入降级并给出唯一
-  下一步（重新运行 `mo slack setup`）；已安装 Bot 的收发不受影响，但新建与修复会阻塞。
+- **失效自愈、可撤销**：Configuration access token 有效期短，过期时由 Server 用 refresh
+  token 自动轮换并原子保存新 pair，用户无需周期性回填——这对用户透明，只有 refresh token 也
+  失效时才需要重新提供。供给凭据不出现在消息、日志、CLI 回显或 Agent 可见文本中。refresh 也
+  失效或被撤销时，该工作区的 App 维护动作进入降级并给出唯一下一步（重新运行 `mo slack
+  setup`）；已安装 Bot 的收发不受影响，但新建与修复会阻塞。
 - **运行凭据按 App 提供**：有了供给凭据，Mohist App 与 Agent App 的创建、manifest 配置和
   安装链接都由 Mohist 自动完成。用户仍需确认 Slack 安装，并通过 CLI 的受保护输入提供
   Slack 安装后显示的 Bot Token，以及为 Socket Mode 生成的 App-level token。纯本机部署没有
@@ -310,11 +311,13 @@ Socket Mode 不要求 Mohist 暴露公共入站地址，但 Slack 对未确认�
 
 ### 发起新工作
 
-下面三种情况会发起一项新工作：
+下面两种情况会发起一项新工作：
 
 - 在与 Bot 的私聊中尚无 current Session 时发送第一条任务消息；
-- 在私聊中使用 **New task**，填写并提交一项新任务；
 - 在频道中发送一条新的根消息并 `@` Bot。
+
+私聊是连续对话，一旦有了 current Session，后续消息都继续它，不再「发起新工作」（见「继续
+同一会话」）；需要并行多任务时在频道里用不同 thread。
 
 当前消息必须包含去掉 Bot mention 后的任务文本或至少一个可用附件。只发送 `@Bot` 不创建
 AgentJob，Bot 会请用户补充任务；只发送附件可以作为明确输入，Mohist 不为它暗中编造提示词。
@@ -329,11 +332,11 @@ Bot 先确认已经接受，显示当前是执行中还是排队中；排队时�
 **频道**中，对 Bot 回复所在的 thread 继续发消息，会向已经绑定的 AgentSession 发送
 follow-up。
 
-**私聊**里没有 thread 的使用习惯，所以每个 DM conversation 有一个 current Session。普通消息
-始终继续它，即使上一轮已经结束；AgentJob 完成也不会自动清空这个归属。要开始一件互不相关的
-工作，使用 Bot 提供的 **New task** 打开任务输入，提交后同时创建新的 AgentJob、AgentSession、
-SessionInput 和 AgentTurn，并把新 Session 设为 current。New task 不取消仍在执行的旧工作；旧工作
-之后返回结果时，消息必须标出对应任务和稳定 Job / Session 身份，不能混成新会话的回复。
+**私聊**里没有 thread 的使用习惯，所以每个 DM conversation 是一条连续对话：所有普通消息
+都继续同一个 Session，即使上一轮已经结束；AgentJob 完成也不清空这个归属，下一句直接进入
+下一 Turn。第一版私聊不提供「开新任务」入口——切换话题由 Agent 在同一上下文里处理，而不是
+靠拆成多个并行 Session。需要并行多任务时使用频道里的不同 thread，每个 thread 各有一个独立
+Session。
 
 follow-up 的行为在两种场景下一致：
 
@@ -412,6 +415,12 @@ Slack 呈现与过程透明是两个分开的信号。Slack 里只有 liveness�
 
 - Slack 只展示适合用户消费的 Agent 回复、排队/执行/失败状态和必要的操作，不转发隐藏
   推理、原始工具输出或凭据。
+- **最终答案就是 Agent 对这条输入的报告**：Agent 给出了可消费的回复时，Slack 展示的正文
+  必须是这段回复本身（按文本渲染、脱敏），而不是执行状态的摘要。状态字段（exit code、
+  artifact 计数、Job/Session 标识）不是答案，只作为次要元数据附在正文之后或以稳定链接
+  呈现；不得用状态摘要替代 Agent 没有说的内容。
+- 仅当 Agent 没有给出可消费的回复时才退化为状态摘要：成功但无回复时给出简短结论，失败或
+  需要人工介入时必须给出失败原因与可操作的下一步，不用模板官话代替原因。
 - Agent 回复按文本渲染，不把其中看起来像 Slack mention、按钮或消息配置的内容当作控制指令；
   它不能意外触发 `@channel` / `@here`、伪造 Stop 操作或要求 Slack 自动展开外部链接。真正的
   操作按钮只由 Mohist 根据当前 Job、Session 和 Turn 状态生成。
@@ -585,7 +594,7 @@ Mohist App 对话使用内置 `mohist-slack` 管理 Agent，可查看状态、�
 明确的生命周期操作。`configure-manager`、`create`、`configure`、`create-child-app` 等底层
 命令已从命令面移除。
 
-仍未交付的是与真实 Slack 的端到端验收：安装授权、Socket 连接、消息收发与 Allowlist/Anyone
-的实时成员、Bot 频道资格校验目前只在本地模拟环境中验证过，真实 Slack 工作区上的 `setup`、
-`install-agent`、Bot 提及与 thread 回复尚未完整跑通。公开应用市场、多租户托管、跨 Mohist Server 协调、Slack 原生 Agent 入口及完整
-诊断工作台也仍未交付。
+真实 Slack 的端到端验收已在隔离工作区跑通：`setup`、`install-agent`、owner 认领、DM 任务
+执行与回复投递的全链路经过真实 Socket Mode 与 Slack 工作区验证。Configuration token 的过期
+自动轮换（reactive）尚未接入生产调用点。公开应用市场、多租户托管、跨 Mohist Server 协调、
+Slack 原生 Agent 入口及完整诊断工作台也仍未交付。

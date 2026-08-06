@@ -1,4 +1,6 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
@@ -245,6 +247,72 @@ public sealed class SlackAdapterLeaseServiceSpecs
         Assert.Equal("xoxb-live-v2", reacquired.BotToken);
     }
 
+    [Fact]
+    public async Task Runtime_renew_touches_the_connection_heartbeat_only_for_connection_targets()
+    {
+        await using var database = TestSqliteDatabase.CreateMigrated();
+        var clock = new FakeTimeProvider(T0);
+        var provider = new InMemorySlackLeaseTargetProvider();
+        var secrets = new FakeSecretResolver();
+        var factory = new TestDbContextFactory(database.Options);
+
+        var connection = new SlackLeaseTargetRef.Connection("project_1", "connection_1");
+        provider.Add(Target(connection, "A123", active: true, appToken: true, botToken: true, verified: true, secrets));
+        secrets.Put(connection, SecretKind.AppToken, "xapp-candidate");
+        secrets.Put(connection, SecretKind.BotToken, "xoxb-runtime");
+        await using (var db = factory.CreateDbContext())
+        {
+            db.AgentConnections.Add(new Mohist.Server.Infrastructure.Data.Agent.AgentConnectionRow
+            {
+                Id = "connection_1",
+                ProjectId = "project_1",
+                AgentId = "agent_1",
+                ProviderKind = Mohist.Server.Agent.Domain.ConnectionProviderKind.Slack,
+                WorkspaceTeamId = "T_WORKSPACE",
+                AppId = "A123",
+                BotUserId = "U123",
+                SetupProgress = Mohist.Server.Agent.Domain.SetupProgressKind.Complete,
+                DesiredState = Mohist.Server.Agent.Domain.DesiredStateKind.Enabled,
+                ConnectionHealth = Mohist.Server.Agent.Domain.ConnectionHealthKind.Healthy,
+                AgentReadiness = Mohist.Server.Agent.Domain.AgentReadinessKind.Ready,
+                CreatedAt = T0,
+                UpdatedAt = T0,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = NewService(database, provider, secrets, clock, out _);
+        var runtime = await service.AcquireRuntimeLeaseAsync("operator-1", connection, "adapter-A");
+        Assert.NotNull(runtime);
+        Assert.Null(await ReadHeartbeatAsync(factory, "connection_1"));
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        var renewed = await service.RenewLeaseAsync("operator-1", connection, runtime!.LeaseId, "adapter-A");
+        Assert.NotNull(renewed);
+        Assert.Equal(T0 + TimeSpan.FromMinutes(1), await ReadHeartbeatAsync(factory, "connection_1"));
+    }
+
+    private static async Task<DateTimeOffset?> ReadHeartbeatAsync(TestDbContextFactory factory, string connectionId)
+    {
+        await using var db = factory.CreateDbContext();
+        var row = await db.AgentConnections.SingleAsync(row => row.Id == connectionId);
+        return row.LastHeartbeatAt;
+    }
+
+    private sealed class NoopSecretStore : ISecretStore
+    {
+        public Task StoreAsync(SecretStoreAddress address, byte[] plaintext, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
+        public Task<byte[]?> LoadAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            Task.FromResult<byte[]?>(null);
+
+        public Task<bool> DeleteAsync(SecretStoreAddress address, CancellationToken ct = default) =>
+            Task.FromResult(true);
+
+        public IReadOnlyDictionary<string, string> Redact(IReadOnlyDictionary<string, string> values) => values;
+    }
+
     private static SlackAdapterLeaseService NewService(
         TestSqliteDatabase database,
         InMemorySlackLeaseTargetProvider provider,
@@ -253,7 +321,13 @@ public sealed class SlackAdapterLeaseServiceSpecs
         out SlackAdapterLeaseStore store)
     {
         store = new SlackAdapterLeaseStore(new TestDbContextFactory(database.Options));
-        return new SlackAdapterLeaseService(store, provider, secrets, clock);
+        var connections = new AgentConnectionStore(
+            new TestDbContextFactory(database.Options),
+            new AgentQuerier(new TestDbContextFactory(database.Options)),
+            new NoopSecretStore(),
+            [],
+            clock);
+        return new SlackAdapterLeaseService(store, provider, secrets, clock, connections);
     }
 
     private static SlackLeaseTarget Target(

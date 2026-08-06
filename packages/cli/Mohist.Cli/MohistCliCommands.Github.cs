@@ -13,6 +13,7 @@ internal static class GithubCommands
     {
         var github = new Command("github", "Connect GitHub repositories to projects.");
         github.Subcommands.Add(BuildConnect(api));
+        github.Subcommands.Add(BuildUpdate(api));
         return github;
     }
 
@@ -53,6 +54,53 @@ internal static class GithubCommands
                     selection.Project(data, ConnectDescriptor.Cardinality)).ConfigureAwait(false);
 
             await PrintChecklistAsync(api, data).ConfigureAwait(false);
+            return 0;
+        });
+        return command;
+    }
+
+    private static Command BuildUpdate(MohistCliApi api)
+    {
+        var command = new Command("update", "Update a GitHub connection's approver list.");
+        var id = new Argument<string>("connection-id") { Description = "GitHub connection id (see 'mo github connect --json id')." };
+        var approver = new Option<string[]?>("--approver") { Description = "GitHub login whose PR review counts as approval (repeatable; replaces the list)." };
+        var noApprovers = new Option<bool>("--no-approvers") { Description = "Clear the approver list (disables PR-review approval)." };
+        var project = MohistCliCommands.ProjectRefOption();
+        var output = MohistCliCommands.OutputOption(ConnectDescriptor);
+        command.Arguments.Add(id);
+        command.Options.Add(approver);
+        command.Options.Add(noApprovers);
+        command.Options.Add(project);
+        command.Options.Add(output);
+        command.SetAction(async ctx =>
+        {
+            var selection = ResolveSelection(ctx, output, ConnectDescriptor);
+            if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
+                return api.WriteJsonSelectionResult(ConnectDescriptor, selection);
+
+            var approvers = ctx.GetValue(approver);
+            var clear = ctx.GetValue(noApprovers);
+            if (clear && approvers is { Length: > 0 })
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--no-approvers cannot be combined with --approver.");
+            if (!clear && approvers is not { Length: > 0 })
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "Specify --approver or --no-approvers.");
+
+            var resolution = await api.ResolveProject(ctx.GetValue(project));
+            if (resolution.Exit != 0) return resolution.Exit;
+
+            var connectionId = ctx.GetValue(id) ?? string.Empty;
+            var (data, exit) = await api.UpdateGitHubConnectionApproversAsync(
+                resolution.ProjectId, connectionId, approvers, clear).ConfigureAwait(false);
+            if (exit != 0 || data is null) return exit;
+            if (selection.Kind == JsonSelectionKind.Selected)
+                return await new CliResultWriter(api.Invocation).WriteSuccessAsync(
+                    selection.Project(data, ConnectDescriptor.Cardinality)).ConfigureAwait(false);
+
+            var owner = data["owner"]?.GetValue<string>() ?? string.Empty;
+            var repo = data["repo"]?.GetValue<string>() ?? string.Empty;
+            var stored = data["approvers"]?.AsArray().Select(a => a?.GetValue<string>()).Where(a => a is not null).ToArray() ?? [];
+            await api.Output.WriteLineAsync(
+                $"GitHub connection {connectionId} updated: {owner}/{repo} approvers = {(stored.Length == 0 ? "(none)" : string.Join(", ", stored))}").ConfigureAwait(false);
             return 0;
         });
         return command;
