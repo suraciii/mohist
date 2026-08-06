@@ -27,12 +27,14 @@ public sealed record SlackAppManifestRequest(SlackAppManagementRequest App, Slac
 public sealed record SlackAppManifestExport(
     SlackAppManagementFactOutcome Outcome,
     string? ManifestJson = null,
-    string? ErrorClass = null);
+    string? ErrorClass = null,
+    string? ErrorMessage = null);
 
 public sealed record SlackAppManagementFact(
     SlackAppManagementFactOutcome Outcome,
     string? AppId = null,
-    string? ErrorClass = null);
+    string? ErrorClass = null,
+    string? ErrorMessage = null);
 
 public enum SlackAppManagementFactOutcome
 {

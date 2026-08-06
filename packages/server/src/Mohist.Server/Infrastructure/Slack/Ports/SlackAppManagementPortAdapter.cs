@@ -11,10 +11,18 @@ namespace Mohist.Server.Infrastructure.Slack.Ports;
 /// port contract never carries tokens. Outcomes map Slack's ok/error envelope
 /// onto Succeeded / DefiniteFailure / Unknown; transport failures and unparseable
 /// responses are Unknown because the external side effect is uncertain.
+///
+/// An auth-failure rejection (expired or revoked Configuration access token) is
+/// retried once after rotating the pair through the rotation service, which
+/// atomically persists the new pair; the retry stays invisible to callers. If
+/// rotation also fails, the call degrades with the unique next action instead of
+/// surfacing a bare Slack error — a fresh pair can only come from `mo slack setup`.
 /// </summary>
 public sealed class SlackAppManagementPortAdapter(
     SlackApiTransport transport,
-    ISecretStore secrets) : ISlackAppManagementPort, ISlackAppManagementFactPort
+    ISecretStore secrets,
+    SlackConfigurationCredentialRotationService? rotations = null)
+    : ISlackAppManagementPort, ISlackAppManagementFactPort
 {
     public const string ValidateEndpoint = "apps.manifest.validate";
     public const string CreateEndpoint = "apps.manifest.create";
@@ -23,8 +31,16 @@ public sealed class SlackAppManagementPortAdapter(
     public const string DeleteEndpoint = "apps.manifest.delete";
 
     public const string ConfigurationCredentialMissingError = "configuration_credential_missing";
+    public const string ConfigurationCredentialDegradedError = "configuration_credential_degraded";
+    public const string ConfigurationCredentialRotationUnknownError = "credential-rotation-unknown";
     public const string ManifestRequiredError = "manifest_required";
     public const string AppIdRequiredError = "app_id_required";
+
+    private const string ConfigurationCredentialNextAction =
+        "The Slack Configuration access token could not be rotated; re-run `mo slack setup` to re-supply the Configuration access token pair.";
+
+    private static readonly string[] ConfigurationCredentialFailureErrors =
+        ["invalid_auth", "invalid_config_token"];
 
     public Task<SlackAppManagementResult> ValidateManifestAsync(SlackAppManifestRequest request, CancellationToken ct = default) =>
         SendManifestCallAsync(ValidateEndpoint, request, withAppId: false, ct);
@@ -42,14 +58,18 @@ public sealed class SlackAppManagementPortAdapter(
         if (token is null)
             return new SlackAppManagementResult(SlackAppManagementOutcome.DefiniteFailure, ErrorClass: ConfigurationCredentialMissingError);
 
-        var response = await transport.PostFormAsync(
+        var call = await SendWithReactiveRotationAsync(
             CreateEndpoint,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["manifest"] = request.ManifestJson,
             },
+            request,
             token,
             ct).ConfigureAwait(false);
+        if (call.Degradation is { } degradation)
+            return degradation.ToManagementResult();
+        var response = call.Response!;
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => ParseCreated(response.Body),
@@ -71,14 +91,18 @@ public sealed class SlackAppManagementPortAdapter(
         if (token is null)
             return new SlackAppManagementResult(SlackAppManagementOutcome.DefiniteFailure, ErrorClass: ConfigurationCredentialMissingError);
 
-        var response = await transport.PostFormAsync(
+        var call = await SendWithReactiveRotationAsync(
             DeleteEndpoint,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["app_id"] = request.AppId,
             },
+            request,
             token,
             ct).ConfigureAwait(false);
+        if (call.Degradation is { } degradation)
+            return degradation.ToManagementResult();
+        var response = call.Response!;
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => new SlackAppManagementResult(SlackAppManagementOutcome.Succeeded, request.AppId),
@@ -100,14 +124,18 @@ public sealed class SlackAppManagementPortAdapter(
         if (token is null)
             return new SlackAppManagementFact(SlackAppManagementFactOutcome.Unknown, ErrorClass: ConfigurationCredentialMissingError);
 
-        var response = await transport.PostFormAsync(
+        var call = await SendWithReactiveRotationAsync(
             ExportEndpoint,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["app_id"] = request.AppId,
             },
+            request,
             token,
             ct).ConfigureAwait(false);
+        if (call.Degradation is { } degradation)
+            return degradation.ToFactResult();
+        var response = call.Response!;
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => new SlackAppManagementFact(SlackAppManagementFactOutcome.Present, request.AppId),
@@ -129,14 +157,18 @@ public sealed class SlackAppManagementPortAdapter(
         if (token is null)
             return new SlackAppManifestExport(SlackAppManagementFactOutcome.Unknown, ErrorClass: ConfigurationCredentialMissingError);
 
-        var response = await transport.PostFormAsync(
+        var call = await SendWithReactiveRotationAsync(
             ExportEndpoint,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["app_id"] = request.AppId,
             },
+            request,
             token,
             ct).ConfigureAwait(false);
+        if (call.Degradation is { } degradation)
+            return degradation.ToExportResult();
+        var response = call.Response!;
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => ParseExportedManifest(response.Body),
@@ -169,7 +201,10 @@ public sealed class SlackAppManagementPortAdapter(
         if (withAppId)
             form["app_id"] = request.App.AppId!;
 
-        var response = await transport.PostFormAsync(endpoint, form, token, ct).ConfigureAwait(false);
+        var call = await SendWithReactiveRotationAsync(endpoint, form, request.App, token, ct).ConfigureAwait(false);
+        if (call.Degradation is { } degradation)
+            return degradation.ToManagementResult();
+        var response = call.Response!;
         return response.Outcome switch
         {
             SlackApiCallOutcome.Ok => new SlackAppManagementResult(
@@ -181,6 +216,66 @@ public sealed class SlackAppManagementPortAdapter(
             _ => new SlackAppManagementResult(SlackAppManagementOutcome.Unknown, ErrorClass: "transport_error"),
         };
     }
+
+    private async Task<ReactiveCall> SendWithReactiveRotationAsync(
+        string endpoint,
+        IReadOnlyDictionary<string, string> form,
+        SlackAppManagementRequest request,
+        string token,
+        CancellationToken ct)
+    {
+        var response = await transport.PostFormAsync(endpoint, form, token, ct).ConfigureAwait(false);
+        if (rotations is null
+            || response.Outcome != SlackApiCallOutcome.Rejected
+            || !IsConfigurationCredentialFailure(response.Error))
+            return new ReactiveCall(response);
+
+        var degradation = await RotateConfigurationCredentialsAsync(request, ct).ConfigureAwait(false);
+        if (degradation is not null)
+            return ReactiveCall.Degraded(degradation);
+
+        // The rotation service persisted the new pair atomically; re-resolve it
+        // from the store so the retry can never carry a token that was not saved.
+        var rotatedToken = await ResolveConfigurationTokenAsync(request, ct).ConfigureAwait(false);
+        if (rotatedToken is null || string.Equals(rotatedToken, token, StringComparison.Ordinal))
+            return ReactiveCall.Degraded(SlackConfigurationCredentialDegradation.RefreshInvalid);
+
+        response = await transport.PostFormAsync(endpoint, form, rotatedToken, ct).ConfigureAwait(false);
+        if (response.Outcome == SlackApiCallOutcome.Rejected
+            && IsConfigurationCredentialFailure(response.Error))
+            return ReactiveCall.Degraded(SlackConfigurationCredentialDegradation.RefreshInvalid);
+        return new ReactiveCall(response);
+    }
+
+    private async Task<SlackConfigurationCredentialDegradation?> RotateConfigurationCredentialsAsync(
+        SlackAppManagementRequest request,
+        CancellationToken ct)
+    {
+        var access = await secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(request.EnrollmentId, SecretKind.ConfigurationAccessToken),
+            ct).ConfigureAwait(false);
+        var refresh = await secrets.LoadAsync(
+            SecretStoreAddress.ForSlackWorkspaceEnrollment(request.EnrollmentId, SecretKind.ConfigurationRefreshToken),
+            ct).ConfigureAwait(false);
+        if (access is not { Length: > 0 } || refresh is not { Length: > 0 })
+            return SlackConfigurationCredentialDegradation.RefreshInvalid;
+
+        var rotation = await rotations!.RotateAsync(
+            request.EnrollmentId,
+            new SlackConfigurationCredentialPair(
+                System.Text.Encoding.UTF8.GetString(access),
+                System.Text.Encoding.UTF8.GetString(refresh)),
+            ct).ConfigureAwait(false);
+        return rotation.Outcome switch
+        {
+            SlackConfigurationCredentialRotationOutcome.Succeeded => null,
+            SlackConfigurationCredentialRotationOutcome.Unknown => SlackConfigurationCredentialDegradation.RotationUnknown,
+            _ => SlackConfigurationCredentialDegradation.RefreshInvalid,
+        };
+    }
+
+    private static bool IsConfigurationCredentialFailure(string? error) =>
+        error is not null && ConfigurationCredentialFailureErrors.Contains(error, StringComparer.Ordinal);
 
     private async Task<string?> ResolveConfigurationTokenAsync(SlackAppManagementRequest request, CancellationToken ct)
     {
@@ -261,4 +356,35 @@ public sealed class SlackAppManagementPortAdapter(
         root.TryGetProperty(propertyName, out var element) && element.ValueKind == JsonValueKind.String
             ? element.GetString()
             : null;
+
+    private sealed record ReactiveCall(SlackApiResponse? Response = null, SlackConfigurationCredentialDegradation? Degradation = null)
+    {
+        public static ReactiveCall Degraded(SlackConfigurationCredentialDegradation degradation) =>
+            new(Degradation: degradation);
+    }
+
+    private sealed record SlackConfigurationCredentialDegradation(
+        SlackAppManagementOutcome ManagementOutcome,
+        string ErrorClass,
+        string NextAction)
+    {
+        public static SlackConfigurationCredentialDegradation RefreshInvalid { get; } = new(
+            SlackAppManagementOutcome.DefiniteFailure,
+            ConfigurationCredentialDegradedError,
+            ConfigurationCredentialNextAction);
+
+        public static SlackConfigurationCredentialDegradation RotationUnknown { get; } = new(
+            SlackAppManagementOutcome.Unknown,
+            ConfigurationCredentialRotationUnknownError,
+            ConfigurationCredentialNextAction);
+
+        public SlackAppManagementResult ToManagementResult() =>
+            new(ManagementOutcome, ErrorClass: ErrorClass, ErrorMessage: NextAction);
+
+        public SlackAppManagementFact ToFactResult() =>
+            new(SlackAppManagementFactOutcome.Unknown, ErrorClass: ErrorClass, ErrorMessage: NextAction);
+
+        public SlackAppManifestExport ToExportResult() =>
+            new(SlackAppManagementFactOutcome.Unknown, ErrorClass: ErrorClass, ErrorMessage: NextAction);
+    }
 }
