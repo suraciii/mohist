@@ -353,7 +353,13 @@ public sealed record AgentSessionStatusSnapshot(
     /// turn status, not for the AgentJob's terminal result.
     /// </summary>
     IReadOnlyList<AgentTurnRecord>? Turns = null,
-    AgentSessionStopClaim? PendingStop = null)
+    AgentSessionStopClaim? PendingStop = null,
+    /// <summary>
+    /// Durable child records of this session's scheduled inputs.
+    /// Creation, cancellation and due delivery are serialized on the
+    /// owning Session grain; list order is by <see cref="SessionScheduleRecord.DueAt"/>.
+    /// </summary>
+    IReadOnlyList<SessionScheduleRecord>? Schedules = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
         new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);

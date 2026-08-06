@@ -13,10 +13,14 @@ using Orleans;
 
 namespace Mohist.Server.Sessions.Grains;
 
-public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
+public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 {
     private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
+    internal const string ScheduleReminderPrefix = "schedule:";
+    internal const string ScheduleRecoveryReminderName = "schedule-recovery";
+    internal static readonly TimeSpan ScheduleRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan OneShotReminderPeriod = TimeSpan.FromMinutes(1);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
 
@@ -85,6 +89,35 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
             EnsurePersistenceTimer();
+        await EnsureScheduleRemindersAsync();
+    }
+
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (reminderName.StartsWith(ScheduleReminderPrefix, StringComparison.Ordinal))
+        {
+            // One-shot delivery reminder: unregister explicitly so the
+            // reminder never re-fires; activation loss / registration
+            // failure is covered by the recovery reminder tick and by
+            // re-registration on activation.
+            try
+            {
+                var reminder = await this.GetReminder(reminderName);
+                if (reminder is not null)
+                    await this.UnregisterReminder(reminder);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+            var scheduleId = reminderName[ScheduleReminderPrefix.Length..];
+            var schedule = _session?.Status.Schedules?.FirstOrDefault(candidate =>
+                string.Equals(candidate.ScheduleId, scheduleId, StringComparison.Ordinal));
+            if (schedule is not null)
+                await DeliverScheduledInputAsync(schedule);
+            return;
+        }
+        if (string.Equals(reminderName, ScheduleRecoveryReminderName, StringComparison.Ordinal))
+            await RunScheduledInputRecoveryAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -640,6 +673,168 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         return true;
     }
+
+    public async Task<CreateSessionScheduleResult> CreateScheduleAsync(CreateSessionScheduleCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        if (string.IsNullOrWhiteSpace(command.Text))
+            throw new ArgumentException("Schedule text is required.", nameof(command));
+
+        var dueAt = command.DueAt.UtcDateTime;
+        var now = Now();
+        if (dueAt <= now)
+            throw new ScheduleDueInPastException(session.Id, dueAt);
+
+        var idempotencyKey = string.IsNullOrWhiteSpace(command.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : command.IdempotencyKey!;
+        var existing = session.FindScheduleByIdempotencyKey(idempotencyKey);
+        if (existing is not null)
+        {
+            var normalizedText = command.Text.Trim();
+            if (!string.Equals(existing.Text.Trim(), normalizedText, StringComparison.Ordinal)
+                || existing.DueAt != dueAt)
+            {
+                throw new ScheduleIdempotencyConflictException(session.Id, idempotencyKey);
+            }
+            return new CreateSessionScheduleResult(existing, AlreadyExists: true);
+        }
+
+        var scheduleId = Guid.NewGuid().ToString("N");
+        var schedule = session.CreateSchedule(scheduleId, command.Text, dueAt, idempotencyKey, now);
+        await CommitAsync(session, []);
+        await EnsureScheduleRemindersAsync();
+        return new CreateSessionScheduleResult(schedule, AlreadyExists: false);
+    }
+
+    public async Task<IReadOnlyList<SessionScheduleRecord>> ListSchedulesAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.SortedSchedules();
+    }
+
+    public async Task<CancelSessionScheduleResult> CancelScheduleAsync(CancelSessionScheduleCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.ScheduleId))
+            throw new ArgumentException("Schedule id is required.", nameof(command));
+        var session = await GetRequiredAsync();
+        var before = session.FindSchedule(command.ScheduleId)
+            ?? throw new ScheduleNotFoundException(session.Id, command.ScheduleId);
+        var alreadyTerminal = before.IsTerminal;
+        var schedule = session.CancelSchedule(command.ScheduleId, Now());
+        if (!alreadyTerminal)
+        {
+            await CommitAsync(session, []);
+            await EnsureScheduleRemindersAsync();
+        }
+        return new CancelSessionScheduleResult(schedule, AlreadyTerminal: alreadyTerminal);
+    }
+
+    public async Task RunScheduledInputRecoveryAsync()
+    {
+        var session = await GetRequiredAsync();
+        var now = Now();
+        foreach (var schedule in session.SortedSchedules())
+        {
+            if (schedule.IsTerminal)
+                continue;
+            if (schedule.Status == SessionScheduleStatus.Scheduled && schedule.DueAt > now)
+                continue;
+            await DeliverScheduledInputAsync(schedule);
+        }
+        await EnsureScheduleRemindersAsync();
+    }
+
+    private async Task DeliverScheduledInputAsync(SessionScheduleRecord schedule)
+    {
+        var session = await GetRequiredAsync();
+        var current = session.FindSchedule(schedule.ScheduleId);
+        if (current is null || current.IsTerminal)
+            return;
+        var now = Now();
+        if (current.Status == SessionScheduleStatus.Scheduled)
+        {
+            if (current.DueAt > now)
+                return;
+            current = session.BeginScheduleDelivery(current.ScheduleId, now);
+            await CommitAsync(session, []);
+        }
+        if (current.Status != SessionScheduleStatus.PendingDelivery)
+            return;
+
+        AgentSessionFollowupAcceptResult accept;
+        try
+        {
+            accept = await AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: current.Text,
+                Source: "session-schedule",
+                IdempotencyKey: $"{ScheduleReminderPrefix}{current.ScheduleId}"));
+        }
+        catch (Exception ex) when (ex is RuntimeSessionMissingException
+            or SessionActivityUnknownException
+            or StopOperationInProgressException
+            or AgentSessionFollowupCapacityExceededException
+            or FollowupOperationInProgressException
+            or FollowupConcurrencyLimitException
+            or InvalidOperationException)
+        {
+            // Blocked delivery: stay pending-delivery and retry on the
+            // next recovery tick. Runtime-session-missing is NOT treated
+            // as deterministic confirmation of a gone runtime session —
+            // only the Runner can prove that, and it replaces the binding
+            // via its own recovery endpoint; until then we never invent a
+            // binding or drop the schedule.
+            return;
+        }
+
+        session = await GetRequiredAsync();
+        var delivered = session.MarkScheduleDelivered(current.ScheduleId, accept.InputId);
+        if (delivered.Status == SessionScheduleStatus.Delivered)
+        {
+            await CommitAsync(session, []);
+            await EnsureScheduleRemindersAsync();
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
+        }
+    }
+
+    private async Task EnsureScheduleRemindersAsync()
+    {
+        var schedules = _session?.Status.Schedules ?? [];
+        var nonTerminal = schedules.Where(candidate => !candidate.IsTerminal).ToList();
+        var now = Now();
+        foreach (var schedule in nonTerminal)
+        {
+            var due = schedule.DueAt - now;
+            await this.RegisterOrUpdateReminder(
+                $"{ScheduleReminderPrefix}{schedule.ScheduleId}",
+                due <= TimeSpan.Zero ? TimeSpan.Zero : due,
+                OneShotReminderPeriod);
+        }
+        if (nonTerminal.Count > 0)
+        {
+            await this.RegisterOrUpdateReminder(
+                ScheduleRecoveryReminderName,
+                ScheduleRecoveryReminderPeriod,
+                ScheduleRecoveryReminderPeriod);
+        }
+        else
+        {
+            try
+            {
+                var reminder = await this.GetReminder(ScheduleRecoveryReminderName);
+                if (reminder is not null)
+                    await this.UnregisterReminder(reminder);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+        }
+    }
+
 
     public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
     {

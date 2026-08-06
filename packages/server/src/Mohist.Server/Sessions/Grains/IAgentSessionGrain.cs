@@ -114,6 +114,39 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
 
+    /// <summary>
+    /// Create a scheduled input (or replay an existing schedule for the
+    /// same idempotency key). Idempotent by
+    /// <c>(ProjectId, SessionId, IdempotencyKey)</c>: same normalized body
+    /// returns the original schedule, different body throws
+    /// <see cref="ScheduleIdempotencyConflictException"/>. A due time not
+    /// strictly after the injected clock throws
+    /// <see cref="ScheduleDueInPastException"/>.
+    /// </summary>
+    Task<CreateSessionScheduleResult> CreateScheduleAsync(CreateSessionScheduleCommand command);
+
+    /// <summary>
+    /// All schedules of this session ordered by <see cref="SessionScheduleRecord.DueAt"/> ascending.
+    /// </summary>
+    Task<IReadOnlyList<SessionScheduleRecord>> ListSchedulesAsync();
+
+    /// <summary>
+    /// Cancel a schedule by target state: <c>scheduled</c> / <c>pending-delivery</c>
+    /// advance to <c>cancelled</c>; <c>delivered</c> / <c>cancelled</c> return the
+    /// current record unchanged. Unknown schedule id throws
+    /// <see cref="ScheduleNotFoundException"/>.
+    /// </summary>
+    Task<CancelSessionScheduleResult> CancelScheduleAsync(CancelSessionScheduleCommand command);
+
+    /// <summary>
+    /// Deterministic recovery seam for scheduled-input delivery: scans this
+    /// session's non-terminal schedules, delivers everything due (or still
+    /// pending delivery) through the same idempotent follow-up path, and
+    /// re-registers reminders. Driven by the recovery reminder; tests call it
+    /// directly with a fake clock instead of waiting on real reminder timers.
+    /// </summary>
+    Task RunScheduledInputRecoveryAsync();
+
 }
 
 [GenerateSerializer]
@@ -415,3 +448,30 @@ public sealed record RecordFollowupTurnCommand(
     /// </summary>
     [property: Id(4)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
     [property: Id(5)] AgentSessionInputProvenance? Provenance = null);
+
+/// <summary>
+/// Command body for <see cref="IAgentSessionGrain.CreateScheduleAsync"/>.
+/// <see cref="DueAt"/> must be an offset RFC 3339 instant strictly after
+/// the injected clock; the grain stores its UTC instant. An omitted
+/// <see cref="IdempotencyKey"/> mints a fresh key (no cross-request
+/// dedup); an explicit key makes creation replayable per the contract.
+/// </summary>
+[GenerateSerializer]
+public sealed record CreateSessionScheduleCommand(
+    [property: Id(0)] string Text,
+    [property: Id(1)] DateTimeOffset DueAt,
+    [property: Id(2)] string? IdempotencyKey = null);
+
+[GenerateSerializer]
+public sealed record CreateSessionScheduleResult(
+    [property: Id(0)] SessionScheduleRecord Schedule,
+    [property: Id(1)] bool AlreadyExists);
+
+[GenerateSerializer]
+public sealed record CancelSessionScheduleCommand(
+    [property: Id(0)] string ScheduleId);
+
+[GenerateSerializer]
+public sealed record CancelSessionScheduleResult(
+    [property: Id(0)] SessionScheduleRecord Schedule,
+    [property: Id(1)] bool AlreadyTerminal);

@@ -54,6 +54,7 @@ public static class MohistApiRegistration
         app.MapAgentSessionListRoutes();
         app.MapAgentSessionContextAssociationRoutes();
         app.MapAgentSessionFollowupRoutes();
+        app.MapAgentSessionScheduleRoutes();
         app.MapAgentSessionCancelRoutes();
         app.MapAgentSessionStopRoutes();
         app.MapAgentSessionStopOperationReadRoute();
