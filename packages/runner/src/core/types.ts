@@ -315,6 +315,14 @@ export interface RunnerOptions {
   pollIntervalMs: number
   heartbeatIntervalMs: number
   dispatchLivenessProbeIntervalMs: number
+  /**
+   * The runner's machine credential (Bearer token) issued by the server
+   * during install registration. Resolved by the CLI bootstrap from
+   * <c>$RUNNER_ROOT/credential</c> or a fresh enrollment-token
+   * registration; every server call and the SignalR hub connection
+   * present it as <c>Authorization: Bearer</c>.
+   */
+  credential?: string
   // Optional override for the convergence backstop cadence.
   // Defaults to 5 minutes inside RunnerHost. Set to a very large value
   // to effectively disable the periodic tick while keeping startup /

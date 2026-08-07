@@ -7,11 +7,21 @@ import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private readonly credential: string | null
   readonly runnerId: string
 
   constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
     this.buildGitHash = buildGitHash
+    this.credential = options.credential ?? null
     this.runnerId = options.runnerId
+  }
+
+  private async fetchWithAuth(input: string, init: RequestInit): Promise<Response> {
+    const headers = new Headers(init.headers)
+    if (this.credential) {
+      headers.set("authorization", `Bearer ${this.credential}`)
+    }
+    return fetch(input, { ...init, headers })
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
@@ -38,7 +48,7 @@ export class ServerConnection {
     signal: AbortSignal,
     report: { inFlight: string[]; awaitingAck: string[] } = { inFlight: [], awaitingAck: [] },
   ): Promise<DispatchWorkItem[]> {
-    const response = await fetch(this.url("poll"), {
+    const response = await this.fetchWithAuth(this.url("poll"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(report),
@@ -51,7 +61,7 @@ export class ServerConnection {
   }
 
   async fetchConfig(signal: AbortSignal): Promise<CleanupPolicy | null> {
-    const response = await fetch(this.url("config"), { method: "GET", signal })
+    const response = await this.fetchWithAuth(this.url("config"), { method: "GET", signal })
     if (!response.ok) throw new Error(`fetchConfig failed: ${response.status} ${await response.text()}`)
     const payload = (await response.json()) as RunnerConfigResponse
     return payload.cleanupPolicy ?? null
@@ -59,7 +69,7 @@ export class ServerConnection {
 
   async workflowRunsStatus(workflowRunIds: string[], signal: AbortSignal): Promise<Record<string, string>> {
     if (workflowRunIds.length === 0) return {}
-    const response = await fetch(this.url("workflow-runs/status"), {
+    const response = await this.fetchWithAuth(this.url("workflow-runs/status"), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ workflowRunIds }),
@@ -99,7 +109,7 @@ export class ServerConnection {
     if (ownerKind !== "agent-job") {
       body.workflowRunId = work.workflowRunId
     }
-    const response = await fetch(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url("report"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`report failed: ${response.status} ${await response.text()}`)
     try {
       return await response.json() as Record<string, unknown>
@@ -135,7 +145,7 @@ export class ServerConnection {
     view.set(upload.content)
     const blob = new Blob([view], { type: upload.contentType ?? "application/octet-stream" })
     form.set("content", blob, upload.filename ?? "artifact")
-    const response = await fetch(this.artifactUrl(ownerId, workId, ownerKind), {
+    const response = await this.fetchWithAuth(this.artifactUrl(ownerId, workId, ownerKind), {
       method: "POST",
       body: form,
       signal,
@@ -216,7 +226,7 @@ export class ServerConnection {
       truncated: batch.truncated,
       terminal,
     }
-    const response = await fetch(this.taskLogUrl(ownerId, workId, ownerKind), {
+    const response = await this.fetchWithAuth(this.taskLogUrl(ownerId, workId, ownerKind), {
       method: "POST",
       headers: { "content-type": "application/json", "x-mohist-runner-id": this.options.runnerId },
       body: JSON.stringify(body),
@@ -255,20 +265,20 @@ export class ServerConnection {
   }
 
   async getWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, signal: AbortSignal): Promise<WorkflowAgentSession | null> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { method: "GET", signal })
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}`), { method: "GET", signal })
     if (response.status === 404) return null
     if (!response.ok) throw new Error(`session lookup failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
   }
 
   async openWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session open failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
   }
 
   async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string | null; with?: JsonObject | null; expect?: JsonObject | null }>) {
-    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
+    const response = await this.fetchWithAuth(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ tasks }),
@@ -277,7 +287,7 @@ export class ServerConnection {
   }
 
   async patchRunVars(workflowRunId: string, vars: JsonObject, signal: AbortSignal) {
-    const response = await fetch(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/variables`, {
+    const response = await this.fetchWithAuth(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/variables`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ vars }),
@@ -287,19 +297,19 @@ export class ServerConnection {
   }
 
   async attachWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/attach`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session attach failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
   }
 
   async recoverMissingWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/recover-missing`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session missing recovery failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<WorkflowAgentSession>
   }
 
   async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventAcceptance[]> {
-    const response = await fetch(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session runtime events failed: ${response.status} ${await response.text()}`)
     let payload: unknown
     try {
@@ -314,7 +324,7 @@ export class ServerConnection {
   }
 
   async listAgentSessionsForReconcile(signal: AbortSignal): Promise<AgentSessionReconcileBinding[]> {
-    const response = await fetch(this.url("agent-sessions/reconcile"), { method: "GET", signal })
+    const response = await this.fetchWithAuth(this.url("agent-sessions/reconcile"), { method: "GET", signal })
     if (!response.ok) throw new Error(`agent session reconcile list failed: ${response.status} ${await response.text()}`)
     const payload = await response.json() as unknown
     if (!Array.isArray(payload)) throw new Error("agent session reconcile list returned a malformed response")
@@ -336,7 +346,7 @@ export class ServerConnection {
   }
 
   async reconcileMissingAgentSession(sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionReconcileBinding> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`), {
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/reconcile-missing`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -347,7 +357,7 @@ export class ServerConnection {
   }
 
   async reconcileAgentSessionRuntimeEvents(sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/runtime-events`), {
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(sessionId)}/runtime-events`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -358,7 +368,7 @@ export class ServerConnection {
   }
 
   async getAgentSession(projectId: string, sessionId: string, signal: AbortSignal): Promise<AgentSession | null> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`), { method: "GET", signal })
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}`), { method: "GET", signal })
     if (response.status === 404) return null
     if (!response.ok) throw new Error(`agent session lookup failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<AgentSession>
@@ -378,7 +388,7 @@ export class ServerConnection {
     path: string,
     signal: AbortSignal,
   ): Promise<WorkspaceMaterializedReport> {
-    const response = await fetch(
+    const response = await this.fetchWithAuth(
       this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }), signal },
     )
@@ -416,7 +426,7 @@ export class ServerConnection {
     workspaceName: string,
     signal: AbortSignal,
   ): Promise<WorkspaceReclaimability> {
-    const response = await fetch(
+    const response = await this.fetchWithAuth(
       this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/reclaimable`),
       { method: "GET", signal },
     )
@@ -431,13 +441,13 @@ export class ServerConnection {
   }
 
   async openAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
     return response.json() as Promise<AgentSession>
   }
 
   async attachAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession | null> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`), {
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/attach`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -449,7 +459,7 @@ export class ServerConnection {
   }
 
   async recoverMissingAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/recover-missing`), {
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/recover-missing`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -460,7 +470,7 @@ export class ServerConnection {
   }
 
   async agentSessionRuntimeEvents(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventReceipt[]> {
-    const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`), {
+    const response = await this.fetchWithAuth(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/runtime-events`), {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -492,7 +502,7 @@ export class ServerConnection {
     attachmentId: string,
     signal: AbortSignal,
   ): Promise<AgentInputAttachmentContent | null> {
-    const response = await fetch(this.agentInputAttachmentContentUrl(projectId, agentSessionId, inputId, attachmentId), {
+    const response = await this.fetchWithAuth(this.agentInputAttachmentContentUrl(projectId, agentSessionId, inputId, attachmentId), {
       method: "GET",
       signal,
     })
@@ -518,7 +528,7 @@ export class ServerConnection {
   }
 
   private async post(path: string, body: unknown, signal: AbortSignal) {
-    const response = await fetch(this.url(path), { method: "POST", headers: body === undefined ? undefined : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal })
+    const response = await this.fetchWithAuth(this.url(path), { method: "POST", headers: body === undefined ? undefined : { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`)
   }
 

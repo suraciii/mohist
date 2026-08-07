@@ -13,6 +13,41 @@ const options = {
 
 const signal = new AbortController().signal
 
+describe("ServerConnection machine credential", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("attaches the credential as a Bearer header on every request", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ dispatches: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    const connection = new ServerConnection({ ...options, credential: "moh_runner_abc" })
+    await connection.poll(signal)
+
+    const [, init] = fetchSpy.mock.calls[0]!
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBe("Bearer moh_runner_abc")
+  })
+
+  it("leaves requests headerless without a credential", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ dispatches: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    )
+
+    await new ServerConnection(options).poll(signal)
+
+    const [, init] = fetchSpy.mock.calls[0]!
+    const headers = new Headers(init?.headers)
+    expect(headers.get("authorization")).toBeNull()
+  })
+})
+
 describe("ServerConnection AgentSession reconciliation", () => {
   afterEach(() => vi.restoreAllMocks())
 

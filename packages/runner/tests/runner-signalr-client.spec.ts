@@ -7,6 +7,7 @@ import type { AgentSessionRuntimeEventOutbox } from "../src/server/runtime-event
 
 interface CapturedBuilder {
   url?: string
+  accessTokenFactory?: () => string
   reconnectPolicy?: number[]
   handlers: Map<string, (...args: unknown[]) => unknown>
   connection: FakeConnection
@@ -80,9 +81,9 @@ vi.mock("@microsoft/signalr", () => {
       private _url?: string
       private _handlers: Map<string, (...args: unknown[]) => unknown> = new Map()
       private _connection: FakeConnection = makeFakeConnection()
-      withUrl(url: string) {
+      withUrl(url: string, options?: { accessTokenFactory?: () => string }) {
         this._url = url
-        builders.push({ url, handlers: this._handlers, connection: this._connection })
+        builders.push({ url, accessTokenFactory: options?.accessTokenFactory, handlers: this._handlers, connection: this._connection })
         return this
       }
       withAutomaticReconnect(reconnectPolicy: number[]) {
@@ -270,6 +271,22 @@ describe("RunnerSignalRClient handshake", () => {
     new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
     const last = builders.at(-1)
     expect(last?.reconnectPolicy).toEqual([0, 2000, 5000, 10000, 30000])
+  })
+
+  it("PresentsTheMachineCredentialAsTheAccessToken", () => {
+    builders.length = 0
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null, {
+      credential: "moh_runner_abc",
+    })
+    const last = builders.at(-1)
+    expect(last?.accessTokenFactory?.()).toBe("moh_runner_abc")
+  })
+
+  it("OmitsTheAccessTokenWithoutACredential", () => {
+    builders.length = 0
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)
+    const last = builders.at(-1)
+    expect(last?.accessTokenFactory?.()).toBe("")
   })
 })
 
