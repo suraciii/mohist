@@ -4,7 +4,6 @@
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobGrainSpecs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentTurnLifecycleT001Specs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/AgentOps/AgentUsageReporterSpecs.cs": 34000,
-  "Mohist.Server.SpecTests/Specs/Api/ProjectEventsApiSpecs.cs": 29000,
   "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicLifecycleSpecs.cs": 32000,
   "Mohist.Server.SpecTests/Specs/Epic/Grain/EpicEventPublishTestSupport.cs": 25000,
   "Mohist.Server.SpecTests/Specs/Events/Inbox/InboxProjectionHandlerSpecs.cs": 43000,
