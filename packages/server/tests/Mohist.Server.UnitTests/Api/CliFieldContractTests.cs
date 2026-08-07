@@ -21,6 +21,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Prompts;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Services;
 using Mohist.Server.Webhooks.Domain;
 using Mohist.Server.Webhooks.Services;
 using Xunit;
@@ -107,6 +108,8 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.SessionScheduleCreate] = D<AgentSessionScheduleDto>(),
             [MohistCliApi.TableShape.SessionScheduleList] = D<AgentSessionScheduleDto>(),
             [MohistCliApi.TableShape.SessionScheduleCancel] = D<AgentSessionScheduleDto>(),
+            [MohistCliApi.TableShape.WorkspaceList] = D<WorkspaceDto>(),
+            [MohistCliApi.TableShape.WorkspaceShow] = D<WorkspaceDto>(),
         };
 
     private static readonly IReadOnlyList<FieldDeviation> Deviations =

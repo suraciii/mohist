@@ -197,6 +197,7 @@ public class AgentSessionQuery : IScopedService
                 GenericAgentSessionMetadata.EpicNumber => query.Where(s => s.LabelAgentLaunchEpicNumber == value),
                 GenericAgentSessionMetadata.Repository => query.Where(s => s.LabelAgentLaunchRepository == value),
                 GenericAgentSessionMetadata.WorkspacePath => query.Where(s => s.LabelAgentLaunchWorkspacePath == value),
+                AgentSessionQueryMetadataKeys.WorkspaceName => query.Where(s => s.LabelWorkspaceName == value),
 
                 // subscription trigger correlation labels.
                 GenericAgentSessionMetadata.TriggerEventId => query.Where(s => s.LabelTriggerEventId == value),

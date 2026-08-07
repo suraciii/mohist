@@ -33,6 +33,7 @@ public static class MohistApiRegistration
         app.MapLogsRoutes();
         app.MapFsRoutes();
         app.MapWorkspaceRoutes();
+        app.MapWorkspaceEntityRoutes();
         app.MapEpicRoutes();
         app.MapInboxRoutes();
         app.MapAgentDefinitionRoutes();

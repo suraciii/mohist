@@ -26,6 +26,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(WebhookCommands.Build(api));
         root.Subcommands.Add(ProjectCommands.Build(api));
         root.Subcommands.Add(RepositoryCommands.Build(api));
+        root.Subcommands.Add(WorkspaceCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(AgentCommands.Build(api));
         root.Subcommands.Add(SlackCommands.Build(api));

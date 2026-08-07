@@ -9,6 +9,7 @@ public static class GrainKey
         ScopedGrainKeyCodec.Format(key.ProjectId, key.EpicNumber);
 
     public static string Agent(string projectId, string agentId) => $"{projectId}:{agentId}";
+    public static string Workspace(string projectId, string name) => $"{projectId}:{name}";
     public static string IssueCounter(string projectId) => projectId;
     public static string EpicCounter(string projectId) => projectId;
     public static string WorkflowBacklog(string projectId) => projectId;

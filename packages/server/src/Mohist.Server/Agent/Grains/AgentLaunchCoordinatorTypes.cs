@@ -66,7 +66,7 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(12)] string? Variant,
     [property: Id(13)] string? Runtime,
     [property: Id(14)] string Prompt,
-    [property: Id(15)] string? WorkspacePath,
+    [property: Id(15)] string? WorkspaceName,
     [property: Id(16)] int? IssueNumber,
     [property: Id(17)] int? EpicNumber,
     [property: Id(18)] string? Repository,
@@ -130,7 +130,9 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(50)] string? MaterializedWorkDir = null,
     [property: Id(51)] MaterializeRejectionReason? MaterializeRejectionReason = null,
     [property: Id(52)] WorkspaceReleaseState ReleaseState = WorkspaceReleaseState.None,
-    [property: Id(53)] WorkspaceRepositorySnapshot? WorkspaceRepository = null);
+    [property: Id(53)] WorkspaceRepositorySnapshot? WorkspaceRepository = null,
+    [property: Id(54)] string? WorkspacePath = null,
+    [property: Id(55)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -174,7 +176,20 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// <see cref="AttachmentIds"/>).
     /// </summary>
     [property: Id(9)] AgentStartupContext? StartupContext = null,
-    [property: Id(10)] bool ExactPromptFingerprint = false);
+    [property: Id(10)] bool ExactPromptFingerprint = false,
+    [property: Id(11)] string? WorkspaceName = null,
+    /// <summary>
+    /// Pre-resolved workspace repository list. When set (because
+    /// <see cref="WorkspaceName"/> was supplied), this snapshot
+    /// carries the repository name and GitUrl for every repository
+    /// member of the named workspace at launch time. The AgentJob
+    /// grain reads this instead of calling IProjectGrain so the
+    /// Agent domain does not depend on Project. Null when the
+    /// launch did not bind a workspace or the workspace has no
+    /// repositories. Append-only Orleans field id (next free after
+    /// <see cref="WorkspaceName"/>).
+    /// </summary>
+    [property: Id(12)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -291,6 +306,7 @@ public static class AgentLaunchCoordinatorCodec
                 : request.Prompt?.Trim() ?? string.Empty,
             request.AgentRef?.Trim() ?? string.Empty,
             request.Runtime?.Trim() ?? string.Empty,
+            request.WorkspaceName?.Trim() ?? string.Empty,
             request.WorkspacePath?.Trim() ?? string.Empty,
             request.IssueNumber?.ToString() ?? string.Empty,
             request.EpicNumber?.ToString() ?? string.Empty,

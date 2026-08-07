@@ -38,6 +38,11 @@ import {
   type AttachmentDescriptor,
   type DeliveredAttachment,
 } from "./attachment-delivery.js"
+import {
+  type NamedWorkspaceManager,
+  type NamedWorkspaceRepository,
+  WorkspaceHomeClaimedError,
+} from "./workspace-entity.js"
 
 const log = runnerLogger.child("job")
 
@@ -80,6 +85,7 @@ export class AgentJobExecutor {
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
     private readonly workspaceSourceConfirmer: WorkspaceSourceConfirmer | null = null,
+    private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -108,11 +114,22 @@ export class AgentJobExecutor {
       return failureResult("invalid-input", `AgentJob ${model.message}`)
     }
 
-    const workspacePath = readWorkspacePath(work)
-    if (workspacePath.kind === "invalid") {
-      return failureResult("invalid-input", "AgentJob requires 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables")
+    let workspaceBinding: WorkspaceBindingResolution
+    try {
+      workspaceBinding = await resolveWorkspaceBinding(work, signal, this.namedWorkspaceManager)
+    } catch (error) {
+      if (error instanceof WorkspaceHomeClaimedError) {
+        return failureResult("workspace-home-claimed", "AgentJob yielded: the workspace is materialized on another runner; the job retries against the home runner")
+      }
+      throw error
     }
-    const workDir = workspacePath.kind === "resolved" ? workspacePath.path : this.defaultWorkDir
+    if (workspaceBinding.kind === "invalid") {
+      return failureResult("invalid-input", "AgentJob requires 'workspace.name' or 'workspace.path' to be a non-empty string when 'workspace' is provided in dispatch variables")
+    }
+    if (workspaceBinding.kind === "materialization-failed") {
+      return failureResult("workspace-materialization-failed", `AgentJob failed to materialize the named workspace: ${workspaceBinding.message}`)
+    }
+    const workDir = workspaceBinding.kind === "default" ? this.defaultWorkDir : workspaceBinding.workDir
 
     const resolvedSkills = await this.skillResolver.resolve(skillNames, workDir)
     if (!resolvedSkills.ok) return failureResult(resolvedSkills.code, resolvedSkills.message)
@@ -133,7 +150,9 @@ export class AgentJobExecutor {
         instructions,
         skills,
         slackContext.kind === "resolved" ? slackContext.value : null,
-        work.agentSessionStartup),
+        work.agentSessionStartup,
+        workspaceBinding.kind === "named" ? buildWorkspaceAnchor(workspaceBinding.workDir) : null,
+      ),
       attachmentDelivery)
 
     let binding: BindingResolution
@@ -414,19 +433,81 @@ async function resolveBinding(
   }
 }
 
-type WorkspacePathResolution =
-  | { kind: "absent" }
+type WorkspaceBindingResolution =
+  | { kind: "default" }
   | { kind: "invalid" }
-  | { kind: "resolved"; path: string }
+  | { kind: "path"; workDir: string }
+  | { kind: "named"; workDir: string; projectId: string; workspaceName: string }
+  | { kind: "materialization-failed"; message: string }
 
-function readWorkspacePath(work: DispatchWorkItem): WorkspacePathResolution {
+// Resolve the execution working directory from the dispatch's
+// `variables.workspace`:
+//   - `name` (Workspace entity binding): materialize the named
+//     workspace's persistent directory and report the home to the
+//     server (first writer wins — a claimed home fails the dispatch
+//     so the job retries against the home runner);
+//   - `path` (legacy free-path binding, routed/workflow dimension):
+//     use the path verbatim;
+//   - absent: the runner's default working directory.
+async function resolveWorkspaceBinding(
+  work: DispatchWorkItem,
+  signal: AbortSignal,
+  namedWorkspaceManager: NamedWorkspaceManager | null,
+): Promise<WorkspaceBindingResolution> {
   const ws = work.variables?.["workspace"]
-  if (ws === undefined) return { kind: "absent" }
+  if (ws === undefined) return { kind: "default" }
   if (!isObject(ws)) return { kind: "invalid" }
+
+  const name = ws["name"]
+  if (typeof name === "string" && name.trim().length > 0) {
+    if (!namedWorkspaceManager) return { kind: "invalid" }
+    try {
+      const materialized = await namedWorkspaceManager.materialize(
+        work.projectId ?? "",
+        name,
+        readWorkspaceRepositories(ws),
+        signal,
+      )
+      return {
+        kind: "named",
+        workDir: materialized.path,
+        projectId: work.projectId ?? "",
+        workspaceName: name,
+      }
+    } catch (error) {
+      if (error instanceof WorkspaceHomeClaimedError) throw error
+      return { kind: "materialization-failed", message: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   const path = ws["path"]
   return typeof path === "string" && path.trim().length > 0
-    ? { kind: "resolved", path }
+    ? { kind: "path", workDir: path }
     : { kind: "invalid" }
+}
+
+// The prompt anchor injected when the execution is bound to a named
+// workspace: the working directory is the workspace (all workspace
+// files live there, $HOME is off-limits), checkouts belong under
+// `repos/`, and work products belong at the workspace root. The layout
+// convention is prompt, not platform schema.
+function buildWorkspaceAnchor(workDir: string): string {
+  return `Working directory: ${workDir}. All workspace files live here — do not search $HOME. Repository checkouts belong under repos/ in this directory; plans, research, and other work products belong at the workspace root.`
+}
+
+function readWorkspaceRepositories(ws: Record<string, unknown>): readonly NamedWorkspaceRepository[] {
+  const value = ws["repositories"]
+  if (!Array.isArray(value)) return []
+  const repositories: NamedWorkspaceRepository[] = []
+  for (const item of value) {
+    if (!isObject(item)) continue
+    const name = item["name"]
+    const gitUrl = item["gitUrl"]
+    if (typeof name === "string" && name.length > 0 && typeof gitUrl === "string" && gitUrl.length > 0) {
+      repositories.push({ name, gitUrl })
+    }
+  }
+  return repositories
 }
 
 function readPrompt(payload: JsonObject | null): string | null {

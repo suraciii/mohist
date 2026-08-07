@@ -70,6 +70,12 @@ vi.mock("../src/runtime/workspace-registry.js", () => ({
   WorkspaceRegistry: class {
     async load() {}
   },
+  NamedWorkspaceRegistry: class {
+    async load() {}
+    list() {
+      return []
+    }
+  },
 }))
 
 vi.mock("../src/runtime/cleanup-convergence.js", () => ({

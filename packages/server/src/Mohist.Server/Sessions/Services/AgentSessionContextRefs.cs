@@ -8,7 +8,7 @@ namespace Mohist.Server.Sessions.Services;
 /// Reads the four launch labels (<see cref="GenericAgentSessionMetadata.IssueNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.EpicNumber"/>,
 /// <see cref="GenericAgentSessionMetadata.Repository"/>,
-/// <see cref="GenericAgentSessionMetadata.WorkspacePath"/>) with the same
+/// <see cref="GenericAgentSessionMetadata.WorkspaceName"/>) with the same
 /// parse-and-null-when-all-empty semantics, returns a nullable value tuple
 /// so each caller maps the resolved labels to its own distinct DTO wire
 /// shape (<see cref="AgentSessionListContextRefsDto"/> vs.
@@ -21,6 +21,7 @@ internal static class AgentSessionContextRefs
         int? IssueNumber,
         int? EpicNumber,
         string? Repository,
+        string? WorkspaceName,
         string? WorkspacePath);
 
     /// <summary>
@@ -39,15 +40,18 @@ internal static class AgentSessionContextRefs
         var issueNumber = TryReadPositiveNumber(issueNumberText);
         var epicNumber = TryReadPositiveNumber(record.Label(GenericAgentSessionMetadata.EpicNumber));
         var repository = record.Label(GenericAgentSessionMetadata.Repository);
+        var workspaceName = record.Label(GenericAgentSessionMetadata.WorkspaceName);
         var workspacePath = record.Label(GenericAgentSessionMetadata.WorkspacePath);
 
         if (issueNumber is null && epicNumber is null
-            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+            && string.IsNullOrWhiteSpace(repository)
+            && string.IsNullOrWhiteSpace(workspaceName)
+            && string.IsNullOrWhiteSpace(workspacePath))
         {
             return null;
         }
 
-        return new ContextRefs(issueNumber, epicNumber, repository, workspacePath);
+        return new ContextRefs(issueNumber, epicNumber, repository, workspaceName, workspacePath);
     }
 
     private static int? TryReadPositiveNumber(string? value) =>

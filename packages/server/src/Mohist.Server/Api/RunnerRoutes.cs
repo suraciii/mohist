@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
@@ -9,6 +10,7 @@ using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workspace.Services;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 
@@ -583,6 +585,63 @@ public static class RunnerRoutes
             return ApiResults.Ok(ClassifyAgentWorkspaceActivity(state));
         });
 
+        // Runner reports a materialized named workspace directory; the
+        // grain records the home (first writer wins) so later dispatches
+        // bind to this runner.
+        group.MapPost("/workspaces/{projectId}/{workspaceName}/materialized", async (
+            string runnerId,
+            string projectId,
+            string workspaceName,
+            WorkspaceMaterializedRequest req,
+            IGrainFactory grains,
+            TimeProvider time,
+            CancellationToken ct) =>
+        {
+            if (req is null || string.IsNullOrWhiteSpace(req.Path))
+                return ApiResults.BadRequest("path is required.", "workspace_materialization_invalid");
+            try
+            {
+                var home = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                        GrainKey.Workspace(projectId, workspaceName))
+                    .EnsureMaterializedOnAsync(runnerId, req.Path, time.GetUtcNow());
+                return home is null
+                    ? ApiResults.NotFound($"Workspace '{workspaceName}' not found")
+                    : ApiResults.Ok(new WorkspaceMaterializedResponse(home.RunnerId, home.Path));
+            }
+            catch (Mohist.Server.Workspace.Domain.WorkspaceDomainException ex)
+            {
+                var details = ex.Hint is null ? null : new { hint = ex.Hint };
+                var status = string.Equals(ex.Code, "workspace_home_claimed", StringComparison.Ordinal)
+                    ? StatusCodes.Status409Conflict
+                    : StatusCodes.Status400BadRequest;
+                return ApiResults.Fail(ex.Message, status, ex.Code, details);
+            }
+        });
+
+        // Runner-scoped lifecycle observation for the named-workspace
+        // cleanup guard: the runner cannot observe archive state or
+        // bound-session activity locally, so the cleanup probe asks the
+        // server. `status` is the Workspace lifecycle status; the count
+        // is sessions bound to and actively using the workspace (the
+        // same predicate the lifecycle-mutation guard uses).
+        group.MapGet("/workspaces/{projectId}/{workspaceName}/reclaimable", async (
+            string projectId,
+            string workspaceName,
+            WorkspaceQuerier querier,
+            IGrainFactory grains,
+            CancellationToken ct) =>
+        {
+            var workspace = grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                GrainKey.Workspace(projectId, workspaceName));
+            var state = await workspace.GetAsync();
+            if (state is null)
+                return ApiResults.NotFound($"Workspace '{workspaceName}' not found");
+            var activeBoundSessions = await querier.CountActiveBoundSessionsAsync(projectId, workspaceName, ct);
+            return ApiResults.Ok(new WorkspaceReclaimableResponse(
+                state.Status == Mohist.Server.Workspace.Domain.WorkspaceStatus.Active ? "active" : "archived",
+                activeBoundSessions));
+        });
+
         return app;
     }
 
@@ -991,6 +1050,7 @@ public record RunnerWorkflowStatusRequest(string[] WorkflowRunIds);
 public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
 
 /// <summary>
+/// <summary>
 /// Activity answer for <c>GET /api/runner/{runnerId}/agent-workspaces/{projectId}/{childSessionId}/activity</c>.
 /// <c>State</c> is one of active / idle / pending / not-found / unknown.
 /// <c>IdleSince</c> is carried only for <c>idle</c> (the instant the session
@@ -1000,3 +1060,22 @@ public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
 public sealed record RunnerAgentWorkspaceActivityResponse(
     [property: JsonPropertyName("state")] string State,
     [property: JsonPropertyName("idleSince")] string? IdleSince = null);
+
+/// <summary>
+/// Body for <c>POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized</c>.
+/// The runner reports the local directory it materialized for a named
+/// workspace; the server records it as the workspace home (first writer
+/// wins) so later dispatches bind to this runner.
+/// </summary>
+public record WorkspaceMaterializedRequest(string? Path);
+
+public record WorkspaceMaterializedResponse(string RunnerId, string Path);
+
+/// <summary>
+/// Answer for <c>GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable</c>.
+/// <c>Status</c> is the Workspace lifecycle status; <c>ActiveBoundSessions</c>
+/// counts sessions bound to and actively using the workspace.
+/// </summary>
+public sealed record WorkspaceReclaimableResponse(
+    [property: JsonPropertyName("status")] string Status,
+    [property: JsonPropertyName("activeBoundSessions")] int ActiveBoundSessions);

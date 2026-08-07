@@ -160,7 +160,7 @@ public abstract class GenericAgentSessionCancelApiTestSupport : IAsyncLifetime
 
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
         await job.PrepareManualLaunchAsync(new PrepareManualLaunchCommand(
-            sessionId, inputId, turnId, "stop this launch", WorkspacePath: workDir, ProjectId: project.Id, Runtime: "pi", AgentId: "launch-stop-agent"));
+            sessionId, inputId, turnId, "stop this launch", WorkspaceName: null, ProjectId: project.Id, Runtime: "pi", AgentId: "launch-stop-agent"));
         await job.SubmitPreparedLaunchAsync();
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{_runnerId}/poll", content: null);
         poll.EnsureSuccessStatusCode();

@@ -239,10 +239,11 @@ internal static class SessionCommands
     {
         var cmd = new Command(
             "list",
-            "List AgentSessions filtered by source. Exactly one of --agent, --issue, or --run is required.");
+            "List AgentSessions filtered by source. Exactly one of --agent, --issue, --run, or --workspace is required.");
         var agentOpt = new Option<string?>("--agent") { Description = "Filter by Agent name or id (agent-launch source)" };
         var issueOpt = new Option<int?>("--issue") { Description = "Filter by Issue number (workflow source)" };
         var runOpt = new Option<string?>("--run") { Description = "Filter by Workflow run id (workflow source)" };
+        var workspaceOpt = new Option<string?>("--workspace") { Description = "Filter by Workspace name" };
         var limitOpt = new Option<int?>("--limit") { Description = "Maximum number of sessions to return" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionList)));
@@ -250,6 +251,7 @@ internal static class SessionCommands
         cmd.Options.Add(agentOpt);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(runOpt);
+        cmd.Options.Add(workspaceOpt);
         cmd.Options.Add(limitOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
@@ -257,15 +259,17 @@ internal static class SessionCommands
         {
             var provided = (result.GetResult(agentOpt) is { Implicit: false } ? 1 : 0)
                 + (result.GetResult(issueOpt) is { Implicit: false } ? 1 : 0)
-                + (result.GetResult(runOpt) is { Implicit: false } ? 1 : 0);
+                + (result.GetResult(runOpt) is { Implicit: false } ? 1 : 0)
+                + (result.GetResult(workspaceOpt) is { Implicit: false } ? 1 : 0);
             if (provided > 1)
-                result.AddError("Only one of --agent, --issue, or --run may be set.");
+                result.AddError("Only one of --agent, --issue, --run, or --workspace may be set.");
         });
         cmd.SetAction(ctx =>
         {
             var agent = ctx.GetValue(agentOpt);
             var issue = ctx.GetValue(issueOpt);
             var run = ctx.GetValue(runOpt);
+            var workspace = ctx.GetValue(workspaceOpt);
             var limit = ctx.GetValue(limitOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
@@ -281,20 +285,21 @@ internal static class SessionCommands
                 var agentProvided = ctx.GetResult(agentOpt) is { Implicit: false };
                 var issueProvided = ctx.GetResult(issueOpt) is { Implicit: false };
                 var runProvided = ctx.GetResult(runOpt) is { Implicit: false };
-                var providedCount = (agentProvided ? 1 : 0) + (issueProvided ? 1 : 0) + (runProvided ? 1 : 0);
+                var workspaceProvided = ctx.GetResult(workspaceOpt) is { Implicit: false };
+                var providedCount = (agentProvided ? 1 : 0) + (issueProvided ? 1 : 0) + (runProvided ? 1 : 0) + (workspaceProvided ? 1 : 0);
                 if (providedCount == 0)
                 {
                     return CommandHelpHook.RenderUsageFailure(
                         ctx,
                         api.Error,
-                        "One of --agent, --issue, or --run is required.");
+                        "One of --agent, --issue, --run, or --workspace is required.");
                 }
                 if (providedCount > 1)
                 {
                     return CommandHelpHook.RenderUsageFailure(
                         ctx,
                         api.Error,
-                        "Only one of --agent, --issue, or --run may be set.");
+                        "Only one of --agent, --issue, --run, or --workspace may be set.");
                 }
 
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
@@ -307,6 +312,8 @@ internal static class SessionCommands
                     queryParts.Add($"issue={issue.Value}");
                 if (runProvided && !string.IsNullOrWhiteSpace(run))
                     queryParts.Add($"run={Uri.EscapeDataString(run)}");
+                if (workspaceProvided && !string.IsNullOrWhiteSpace(workspace))
+                    queryParts.Add($"workspace={Uri.EscapeDataString(workspace)}");
                 if (limit is > 0)
                     queryParts.Add($"limit={limit.Value}");
                 var query = queryParts.Count == 0 ? "" : "?" + string.Join("&", queryParts);

@@ -24,6 +24,7 @@ public sealed record GenericAgentSessionContext(
     int? IssueNumber = null,
     int? EpicNumber = null,
     string? Repository = null,
+    string? WorkspaceName = null,
     string? WorkspacePath = null,
     string? Title = null);
 
@@ -59,8 +60,17 @@ public static class GenericAgentSessionMetadata
     public const string Repository = "mohist.io/agent-launch/repository";
 
     /// <summary>
+    /// Key for the optional workspace binding recorded on the session
+    /// metadata. A bound session executes in the named workspace's
+    /// materialized directory; absence means the runner's default
+    /// working directory.
+    /// </summary>
+    public const string WorkspaceName = AgentSessionMetadata.WorkspaceNameKey;
+
+    /// <summary>
     /// Key for the optional workspace path context reference recorded on
-    /// the session metadata. Does not create scope/mount/supervisor lifecycle.
+    /// the session metadata (legacy worktree/spawn lineage bindings).
+    /// Does not create scope/mount/supervisor lifecycle.
     /// </summary>
     public const string WorkspacePath = "mohist.io/agent-launch/workspace-path";
 
@@ -113,6 +123,8 @@ public static class GenericAgentSessionMetadata
             labels[EpicNumber] = context.EpicNumber.Value.ToString();
         if (!string.IsNullOrWhiteSpace(context.Repository))
             labels[Repository] = context.Repository!;
+        if (!string.IsNullOrWhiteSpace(context.WorkspaceName))
+            labels[WorkspaceName] = context.WorkspaceName!;
         if (!string.IsNullOrWhiteSpace(context.WorkspacePath))
             labels[WorkspacePath] = context.WorkspacePath!;
         return labels;

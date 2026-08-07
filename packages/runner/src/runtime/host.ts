@@ -4,8 +4,13 @@ import { RunnerSignalRClient } from "../server/runner-signalr.js"
 import { ActionRegistry, createDefaultRegistry } from "../actions/registry.js"
 import "../core/prompt-registry.js"
 import { WorkspaceManager } from "./workspace.js"
-import { WorkspaceRegistry } from "./workspace-registry.js"
+import { WorkspaceRegistry, NamedWorkspaceRegistry } from "./workspace-registry.js"
 import { AgentWorkspaceRegistry, type AgentWorkspaceRegistryEntry } from "./agent-workspace-registry.js"
+import { NamedWorkspaceManager } from "./workspace-entity.js"
+import {
+  createNamedWorkspaceCleanupLoop,
+  NamedWorkspaceReclaimProbe,
+} from "./named-workspace-cleanup.js"
 import { AgentWorkspaceManager } from "./agent-workspace.js"
 import { AgentCleanupRunner } from "./agent-workspace-cleanup.js"
 import { AgentWorkspaceIdleProbe } from "./agent-workspace-idle.js"
@@ -119,6 +124,9 @@ export class RunnerHost {
   private readonly signalR: RunnerSignalRClient
   private readonly workspace: WorkspaceManager
   private readonly workspaceRegistry: WorkspaceRegistry
+  private readonly namedWorkspaceRegistry: NamedWorkspaceRegistry
+  private readonly namedWorkspaceManager: NamedWorkspaceManager
+  private readonly namedWorkspaceReclaimProbe: NamedWorkspaceReclaimProbe
   private readonly agentWorkspaceRegistry: AgentWorkspaceRegistry
   private readonly agentWorkspaceManager: AgentWorkspaceManager
   private readonly workspaceSourceConfirmer: WorkspaceSourceConfirmer
@@ -127,6 +135,7 @@ export class RunnerHost {
   private readonly bindingRecoveryCoordinator = new BindingRecoveryCoordinator()
   private readonly convergence: ConvergenceBackstop
   private readonly cleanupLoop: CleanupLoop
+  private readonly namedCleanupLoop: ReturnType<typeof createNamedWorkspaceCleanupLoop>
   private readonly agentCleanupLoop: CleanupLoop<AgentWorkspaceRegistryEntry>
   private readonly agentWorkspaceIdleProbe: AgentWorkspaceIdleProbe
   private readonly cleanupConvergenceIntervalMs: number
@@ -196,6 +205,7 @@ export class RunnerHost {
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
     this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
     this.agentWorkspaceRegistry = new AgentWorkspaceRegistry(options.runnerRoot)
     this.agentWorkspaceManager = new AgentWorkspaceManager(options.runnerRoot, {
       registry: this.agentWorkspaceRegistry,
@@ -221,6 +231,20 @@ export class RunnerHost {
     this.convergence = new ConvergenceBackstop(
       this.workspaceRegistry,
       new ServerConnectionConvergenceAdapter(this.connection),
+    )
+    this.namedWorkspaceManager = new NamedWorkspaceManager(
+      options.runnerRoot,
+      this.namedWorkspaceRegistry,
+      this.connection,
+    )
+    this.namedWorkspaceReclaimProbe = new NamedWorkspaceReclaimProbe(
+      this.namedWorkspaceRegistry,
+      this.connection,
+    )
+    this.namedCleanupLoop = createNamedWorkspaceCleanupLoop(
+      this.namedWorkspaceRegistry,
+      options.runnerRoot,
+      () => this.openCodeRuntime,
     )
     this.cleanupLoop = new CleanupLoop(
       this.workspaceRegistry,
@@ -295,6 +319,13 @@ export class RunnerHost {
         await this.workspaceRegistry.load()
       } catch (error) {
         log.error("failed to load workspace registry; starting empty", { exception: error })
+      }
+      // Named workspace registry: same rebuildable-index rules as the
+      // workflow registry — a missing or corrupt file starts empty.
+      try {
+        await this.namedWorkspaceRegistry.load()
+      } catch (error) {
+        log.error("failed to load named workspace registry; starting empty", { exception: error })
       }
       // Agent worktree registry + rescan: the registry is a rebuildable
       // index; a lost registry is re-derived from safe-ID directories
@@ -444,6 +475,26 @@ export class RunnerHost {
       } catch (error) {
         cleanupLog.warn("agent workspace idle probe failed", { exception: error })
       }
+      // Named workspaces: server-authoritative lifecycle probe first
+      // (archived or no active bound session → eligible), then the
+      // named cleanup pass. Best-effort: a probe failure leaves entries
+      // active and the next tick retries.
+      try {
+        const reclaim = await this.namedWorkspaceReclaimProbe.runOnce(signal)
+        if (reclaim.markedEligible > 0 || reclaim.deferred > 0 || reclaim.unobserved > 0) {
+          cleanupLog.info("named workspace reclaim probe", { markedEligible: reclaim.markedEligible, deferred: reclaim.deferred, unobserved: reclaim.unobserved })
+        }
+      } catch (error) {
+        cleanupLog.warn("named workspace reclaim probe failed", { exception: error })
+      }
+      if (this.namedWorkspaceRegistry.list().some((entry) => entry.phase === "eligible")) {
+        const namedResult = await this.namedCleanupLoop.runOnce(policy, signal, blockedPaths)
+        if (namedResult.retentionRemoved > 0 || namedResult.budgetRemoved > 0 || namedResult.guardAborted > 0 || namedResult.stuckResolved > 0 || namedResult.deferred > 0) {
+          cleanupLog.info("named workspace cleanup completed", {
+            reason: `retention=${namedResult.retentionRemoved} budget=${namedResult.budgetRemoved} guardAborted=${namedResult.guardAborted} stuck=${namedResult.stuckResolved} deferred=${namedResult.deferred} usage=${namedResult.workspaceUsageBytes ?? "unknown"}`,
+          })
+        }
+      }
       // Agent worktrees first: an eligible child worktree must be
       // removed before its parent can be (the parent's removal is
       // deferred while an active child depends on it). The agent loop
@@ -548,7 +599,7 @@ export class RunnerHost {
       new AgentJobExecutor(this.connection, {
         openCode: () => this.openCodeRuntime,
         pi: () => this.piRuntime,
-      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver, this.workspaceSourceConfirmer),
+      }, this.bindingRecoveryCoordinator, process.cwd(), this.skillResolver, this.workspaceSourceConfirmer, this.namedWorkspaceManager),
       this.agentSessionRuntimeEventOutbox,
       undefined,
       this.piRuntime,

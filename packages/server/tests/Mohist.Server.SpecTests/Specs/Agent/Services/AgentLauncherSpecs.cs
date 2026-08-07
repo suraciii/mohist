@@ -72,7 +72,7 @@ public class AgentLauncherSpecs
             result = await launcher.LaunchAsync(
                 agent,
                 prompt: "please review",
-                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                 triggerLabels: new Dictionary<string, string>(StringComparer.Ordinal)
                 {
                     [GenericAgentSessionMetadata.TriggerEventId] = "evt_abc123",
@@ -120,7 +120,7 @@ public class AgentLauncherSpecs
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
-            var context = new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null);
+            var context = new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null);
             first = await launcher.LaunchAsync(agent, "review once", context, labels);
             second = await launcher.LaunchAsync(agent, "review once", context, labels);
         }
@@ -148,7 +148,7 @@ public class AgentLauncherSpecs
                     IssueNumber: 42,
                     EpicNumber: 7,
                     Repository: "feature-repo",
-                    WorkspacePath: "/tmp/launch-ctx",
+                    WorkspaceName: "pay",
                     Title: null),
                 triggerLabels: null);
         }
@@ -158,7 +158,7 @@ public class AgentLauncherSpecs
         Assert.Equal("42", record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
         Assert.Equal("7", record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
         Assert.Equal("feature-repo", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
-        Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
+        Assert.Equal("pay", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspaceName));
 
         // Context refs are prompt context only — no lifecycle labels.
         Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
@@ -194,7 +194,7 @@ public class AgentLauncherSpecs
                 first = await launcher.LaunchAsync(
                     agent,
                     "resume this trigger",
-                    new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                    new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                     labels);
             }
 
@@ -218,7 +218,7 @@ public class AgentLauncherSpecs
                 replay = await launcher.LaunchAsync(
                     agent,
                     "resume this trigger",
-                    new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                    new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                     labels);
             }
 
@@ -250,7 +250,7 @@ public class AgentLauncherSpecs
             result = await launcher.LaunchAsync(
                 agent,
                 prompt: "manual trigger",
-                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                 triggerLabels: null);
         }
 
@@ -320,7 +320,7 @@ public class AgentLauncherSpecs
             result = await launcher.LaunchAsync(
                 agent,
                 prompt: "empty trigger labels",
-                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                 triggerLabels: new Dictionary<string, string>(StringComparer.Ordinal));
         }
 
@@ -348,7 +348,7 @@ public class AgentLauncherSpecs
             result = await launcher.LaunchMentionAsync(
                 agent,
                 prompt: "mention launch",
-                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                 commentId,
                 eventId);
         }
@@ -375,7 +375,7 @@ public class AgentLauncherSpecs
             launcher.LaunchAsync(
                 agent,
                 prompt,
-                new AgentLaunchContext(ProjectId: projectId, WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: projectId, WorkspaceName: null),
                 triggerLabels: null));
 
         var sessionsAfter = await CountSessionsAsync(projectId);
@@ -392,7 +392,7 @@ public class AgentLauncherSpecs
             launcher.LaunchAsync(
                 agent: null!,
                 prompt: "any prompt",
-                new AgentLaunchContext(ProjectId: "any", WorkspacePath: null),
+                new AgentLaunchContext(ProjectId: "any", WorkspaceName: null),
                 triggerLabels: null));
     }
 

@@ -143,7 +143,7 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(2)] string TurnId,
     [property: Id(3)] string Prompt,
     [property: Id(4)] string? Model = null,
-    [property: Id(5)] string? WorkspacePath = null,
+    [property: Id(5)] string? WorkspaceName = null,
     [property: Id(6)] string? ProjectId = null,
     [property: Id(7)] string? Runtime = null,
     [property: Id(8)] string? AgentId = null,
@@ -180,7 +180,9 @@ public sealed record PrepareManualLaunchCommand(
     [property: Id(18)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
     [property: Id(19)] string? PinnedRunnerId = null,
     [property: Id(20)] AgentSessionStartup? AgentSessionStartup = null,
-    [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null);
+    [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null,
+    [property: Id(22)] string? WorkspacePath = null,
+    [property: Id(23)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
 
 [GenerateSerializer]
 public sealed record AgentJobSpawnOrigin(
@@ -451,6 +453,24 @@ public sealed record AgentJobInput(
     [property: Id(0)] string Prompt,
     [property: Id(1)] string? Model = null,
     [property: Id(2)] string? WorkspacePath = null,
+    /// <summary>
+    /// Named Workspace binding resolved at launch time. When set, the
+    /// dispatch envelope carries <c>variables.workspace = { name,
+    /// repositories }</c> and the runner materializes the named
+    /// workspace directory instead of using a free-form path.
+    /// Append-only Orleans field id (next free after
+    /// <see cref="SpawnOrigin"/>).
+    /// </summary>
+    [property: Id(23)] string? WorkspaceName = null,
+    /// <summary>
+    /// Pre-resolved workspace repository list snapshot. Carried from
+    /// the launch boundary so the AgentJob grain can build the
+    /// dispatch envelope without calling IProjectGrain. Null when
+    /// <see cref="WorkspaceName"/> is null or the workspace has no
+    /// repositories. Append-only Orleans field id (next free after
+    /// <see cref="WorkspaceName"/>).
+    /// </summary>
+    [property: Id(24)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(3)] string? ProjectId = null,
     /// <summary>
     /// Resolved execution backend snapshot captured at launch time.

@@ -87,7 +87,7 @@ public sealed class UnifiedAgentConnectionSessionRoutesSpecs
             agent: AgentId,
             issue: null,
             run: null,
-            limit: null,
+            workspace: null, limit: null,
             new AgentQuerier(database.Factory),
             CreateQuerier(database),
             CancellationToken.None);

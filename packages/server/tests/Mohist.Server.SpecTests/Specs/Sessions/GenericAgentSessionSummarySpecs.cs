@@ -28,7 +28,7 @@ public class GenericAgentSessionSummarySpecs
     private const string AgentIssueNumber = "42";
     private const string AgentEpicNumber = "7";
     private const string AgentRepository = "mohist/repo-s";
-    private const string AgentWorkspacePath = "/work/s1";
+    private const string AgentWorkspaceName = "pay";
 
     private const string SessionId = "s_summary_1";
     private const string SessionIdUnknown = "s_nonexistent";
@@ -122,7 +122,7 @@ public class GenericAgentSessionSummarySpecs
         Assert.Equal(int.Parse(AgentIssueNumber), result.ContextRefs!.IssueNumber);
         Assert.Equal(int.Parse(AgentEpicNumber), result.ContextRefs.EpicNumber);
         Assert.Equal(AgentRepository, result.ContextRefs.Repository);
-        Assert.Equal(AgentWorkspacePath, result.ContextRefs.WorkspacePath);
+        Assert.Equal(AgentWorkspaceName, result.ContextRefs.WorkspaceName);
     }
 
     [Fact]
@@ -348,7 +348,7 @@ public class GenericAgentSessionSummarySpecs
             labels[GenericAgentSessionMetadata.IssueNumber] = AgentIssueNumber;
             labels[GenericAgentSessionMetadata.EpicNumber] = AgentEpicNumber;
             labels[GenericAgentSessionMetadata.Repository] = AgentRepository;
-            labels[GenericAgentSessionMetadata.WorkspacePath] = AgentWorkspacePath;
+            labels[GenericAgentSessionMetadata.WorkspaceName] = AgentWorkspaceName;
         }
 
         var stateJson = JsonSerializer.Serialize(new

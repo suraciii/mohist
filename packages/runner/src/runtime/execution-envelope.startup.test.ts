@@ -65,4 +65,27 @@ describe("agent session startup envelope", () => {
     expect(envelope.indexOf("[mohist-execution-definition]")).toBeGreaterThan(envelope.indexOf("[mohist-system-facts]"))
     expect(envelope.endsWith("task prompt")).toBe(true)
   })
+
+  it("places the workspace anchor at the very head of the envelope", () => {
+    const envelope = buildExecutionEnvelope(
+      "task prompt",
+      null,
+      [],
+      null,
+      null,
+      "Working directory: /ws/pay. All workspace files live here — do not search $HOME. Repository checkouts belong under repos/; plans and research belong at the workspace root.",
+    )
+
+    expect(envelope.indexOf("[mohist-workspace-anchor]")).toBe(0)
+    expect(envelope).toMatch(
+      /^\[mohist-workspace-anchor\]\nWorking directory: \/ws\/pay[\s\S]*\[\/mohist-workspace-anchor\]\n\ntask prompt$/,
+    )
+    expect(envelope).toContain("do not search $HOME")
+    expect(envelope).toContain("repos/")
+  })
+
+  it("emits no anchor block when the anchor is absent or blank", () => {
+    expect(buildExecutionEnvelope("task prompt")).not.toContain("[mohist-workspace-anchor]")
+    expect(buildExecutionEnvelope("task prompt", null, [], null, null, "   ")).not.toContain("[mohist-workspace-anchor]")
+  })
 })
