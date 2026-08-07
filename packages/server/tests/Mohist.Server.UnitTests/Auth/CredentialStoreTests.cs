@@ -198,6 +198,51 @@ public sealed class CredentialStoreTests
         Assert.False(revoked);
     }
 
+    [Fact]
+    public async Task Create_ThenFindActive_ReturnsTheIssuedCredential()
+    {
+        using var setup = CreateStore();
+        var now = setup.Time.GetUtcNow();
+        var credential = new Credential(
+            "cred_session", "admin", CredentialKind.Session, TokenHash,
+            [Scope.Operator], Name: null, Prefix: null, now + TimeSpan.FromDays(7), RevokedAt: null, now);
+
+        await setup.Store.CreateAsync(credential);
+
+        var found = await setup.Store.FindActiveAsync(TokenHash);
+        Assert.NotNull(found);
+        Assert.Equal("admin", found.PrincipalId);
+        Assert.Equal(CredentialKind.Session, found.Kind);
+        Assert.Equal(Scope.Operator, Assert.Single(found.Scopes));
+        Assert.Equal(now + TimeSpan.FromDays(7), found.ExpiresAt);
+        Assert.Null(found.RevokedAt);
+    }
+
+    [Fact]
+    public async Task Revoke_ThenFindActive_ReturnsNull()
+    {
+        using var setup = CreateStore();
+        await InsertAsync(setup.Connection, kind: "Pat", scopesJson: """["operator"]""");
+        var revokedAt = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
+
+        var revoked = await setup.Store.RevokeAsync(TokenHash, revokedAt);
+
+        Assert.True(revoked);
+        Assert.Null(await setup.Store.FindActiveAsync(TokenHash));
+    }
+
+    [Fact]
+    public async Task Revoke_UnknownOrAlreadyRevokedToken_ReturnsFalse()
+    {
+        using var setup = CreateStore();
+        var revokedAt = new DateTimeOffset(2026, 1, 2, 0, 0, 0, TimeSpan.Zero);
+
+        Assert.False(await setup.Store.RevokeAsync(TokenHash, revokedAt));
+
+        await InsertAsync(setup.Connection, kind: "Pat", scopesJson: """["operator"]""", revokedAt: revokedAt);
+        Assert.False(await setup.Store.RevokeAsync(TokenHash, revokedAt));
+    }
+
     private static async Task<CredentialRow> ReadRowAsync(SqliteConnection connection)
     {
         await using var command = connection.CreateCommand();

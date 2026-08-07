@@ -145,6 +145,42 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             row.RevokedAt,
             row.CreatedAt);
 
+    public async Task CreateAsync(Credential credential, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        db.Credentials.Add(new CredentialRow
+        {
+            Id = credential.Id,
+            PrincipalId = credential.PrincipalId,
+            Kind = credential.Kind.ToString(),
+            TokenHash = credential.TokenHash,
+            ScopesJson = SerializeScopes(credential.Scopes),
+            Name = credential.Name,
+            Prefix = credential.Prefix,
+            ExpiresAt = credential.ExpiresAt,
+            RevokedAt = credential.RevokedAt,
+            CreatedAt = credential.CreatedAt,
+        });
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var row = await db.Credentials
+            .FirstOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, ct)
+            .ConfigureAwait(false);
+        if (row is null || row.RevokedAt is not null)
+            return false;
+
+        row.RevokedAt = revokedAt;
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
+    private static string SerializeScopes(IReadOnlyList<Scope> scopes) =>
+        JSON.Serialize(scopes.Select(scope => scope.Name).ToArray());
+
     private static IReadOnlyList<Scope> DeserializeScopes(string json)
     {
         var names = JSON.Deserialize<string[]>(json);
