@@ -540,7 +540,7 @@ export interface ActivityEventsResult {
 }
 
 export function useActivityEvents(filters: ActivityEventFilters = {}): ActivityEventsResult {
-  const recordedTypes = filters.types?.filter((type): type is ProjectEventTypeFilter => type !== 'runner')
+  const recordedTypes = filters.types?.filter((type): type is Exclude<ProjectEventTypeFilter, 'workspace'> => type !== 'runner')
   const { data: recordedEvents = [], isLoading: eventsLoading, isError: eventsError, refetch: refetchEvents } = useProjectEvents({
     types: recordedTypes?.length ? recordedTypes : undefined,
     attentionOnly: filters.attentionOnly,

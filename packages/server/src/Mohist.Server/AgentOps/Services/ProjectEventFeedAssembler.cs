@@ -34,6 +34,7 @@ public class ProjectEventFeedAssembler : IScopedService
         buckets.Add(await LoadAgentSessionEventsAsync(db, projectId, limit, filter, ct));
         buckets.Add(await LoadSessionOpenedEventsAsync(db, projectId, limit, filter, ct));
         buckets.Add(await LoadSessionActivityEventsAsync(db, projectId, limit, filter, ct));
+        buckets.Add(await LoadWorkspaceEventsAsync(db, projectId, limit, filter, ct));
 
         var events = buckets
             .SelectMany(bucket => bucket)
@@ -194,6 +195,33 @@ public class ProjectEventFeedAssembler : IScopedService
             .ToList();
     }
 
+    private static async Task<IReadOnlyList<ProjectEventEnvelope>> LoadWorkspaceEventsAsync(
+        MohistDbContext db,
+        string projectId,
+        int limit,
+        ProjectEventFilter? filter,
+        CancellationToken ct)
+    {
+        var allowedTypes = filter?.CandidateTypes(ProjectEventOrigin.Workspace);
+        if (allowedTypes is { Length: 0 }) return [];
+
+        var sourcePrefix = WorkspaceEventPersistence.ProjectSourcePrefix(projectId);
+        var query = db.WorkspaceEvents.AsNoTracking()
+            .Where(row => row.Source.StartsWith(sourcePrefix));
+        if (allowedTypes is not null) query = query.Where(row => allowedTypes.Contains(row.Type));
+
+        var rows = await query
+            .OrderByDescending(row => row.TimeSortKey)
+            .ThenByDescending(row => row.Id)
+            .ThenBy(row => row.Source)
+            .ThenBy(row => row.Type)
+            .ThenBy(row => row.EventId)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        return rows.Select(ProjectEventEnvelope.FromWorkspace).ToList();
+    }
+
 }
 
 public sealed record ProjectEventEnvelope(
@@ -243,6 +271,9 @@ public sealed record ProjectEventEnvelope(
             workflowRunId: session?.WorkflowRunId,
             agentId: session?.AgentId,
             agentName: session?.AgentName);
+
+    internal static ProjectEventEnvelope FromWorkspace(WorkspaceEventRow row) =>
+        Build(row.Id, row.Source, ProjectEventOrigin.Workspace, "workspace", row.Type, row.Time, row.EventId, row.SpecVersion, row.Subject, row.DataContentType, row.Data, row.ExtensionsJson);
 
     internal static ProjectEventEnvelope SessionOpened(ProjectEventSessionContext session) =>
         SessionLifecycle(session, 0, "coder_session_started", ToData(new { status = "opened" }), ToOffset(session.CreatedAt), $"{session.SessionId}:opened");
@@ -324,11 +355,16 @@ public sealed record ProjectEventEnvelope(
 
     private static string ExtractAggregateId(string source, string aggregateKind)
     {
-        if (aggregateKind == "issue")
+        var marker = aggregateKind switch
         {
-            var issueMarker = "/issues/";
-            var index = source.LastIndexOf(issueMarker, StringComparison.Ordinal);
-            return index >= 0 ? source[(index + issueMarker.Length)..] : source;
+            "issue" => "/issues/",
+            "workspace" => "/workspaces/",
+            _ => null,
+        };
+        if (marker is not null)
+        {
+            var index = source.LastIndexOf(marker, StringComparison.Ordinal);
+            return index >= 0 ? source[(index + marker.Length)..] : source;
         }
 
         var prefix = aggregateKind switch
@@ -387,6 +423,7 @@ public enum ProjectEventOrigin
     Issue,
     WorkflowRun,
     AgentSession,
+    Workspace,
 }
 
 public sealed class ProjectEventFilter
@@ -424,6 +461,11 @@ public sealed class ProjectEventFilter
         "com.mohist.agent-session.context-exhausted", "session.activity", "session.liveness",
     ];
 
+    private static readonly string[] WorkspaceTypes =
+    [
+        "com.mohist.workspace.created", "com.mohist.workspace.archived",
+    ];
+
     private readonly HashSet<string> _types;
 
     private ProjectEventFilter(HashSet<string> types, bool attentionOnly)
@@ -448,7 +490,7 @@ public sealed class ProjectEventFilter
 
         var values = types.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .ToHashSet(StringComparer.Ordinal);
-        if (values.Count == 0 || values.Any(type => type is not ("issue-state" or "workflow-stage" or "agent-session" or "failure")))
+        if (values.Count == 0 || values.Any(type => type is not ("issue-state" or "workflow-stage" or "agent-session" or "failure" or "workspace")))
         {
             filter = null;
             return false;
@@ -490,6 +532,7 @@ public sealed class ProjectEventFilter
         ProjectEventOrigin.Issue => IssueTypes,
         ProjectEventOrigin.WorkflowRun => WorkflowTypes,
         ProjectEventOrigin.AgentSession => AgentSessionTypes,
+        ProjectEventOrigin.Workspace => WorkspaceTypes,
         _ => [],
     };
 
@@ -521,6 +564,9 @@ public sealed class ProjectEventFilter
                 || status is "failed" or "timeout" or "cancelled") return new("failure", "failure");
             return new("agent-session", "routine");
         }
+
+        if (origin == ProjectEventOrigin.Workspace && WorkspaceTypes.Contains(type, StringComparer.Ordinal))
+            return new("workspace", "routine");
 
         return null;
     }

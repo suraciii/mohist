@@ -78,6 +78,13 @@ Workspace 持有一组仓库引用（Project 已声明的仓库资源）。workf
   全新的 workspace——"搞乱了重来"就是 close 后继续说话。
 - 归档后 workspace 保留历史可查，不再接受新会话。
 
+## 事件
+
+Workspace 的创建与归档是平台事件（`workspace.created` / `workspace.archived`），
+携带 Project、Workspace 名称与来源（issue / manual / slack / web）。订阅方可以按
+来源过滤——例如：渠道 Agent 在收到归档事件后收尾，创建事件触发依赖预装。
+事件路由见 [事件路由](event-routing.md)，订阅语法见[事件协议](event-protocol.md)。
+
 ## 目录丢失
 
 Workspace 的目录由执行它的 runner 承载。runner 故障或磁盘清理后，workspace 本身
@@ -87,5 +94,7 @@ Workspace 的目录由执行它的 runner 承载。runner 故障或磁盘清理�
 
 ## 实装差距
 
-当前 workspace 仅是 runner 侧按 WorkflowRun 物化的临时 worktree：没有独立身份、
-不能跨会话复用、没有交互入口来源，也没有归档概念。本文描述的是目标形态。
+Workspace 实体与生命周期（创建/归档）已实装；交互入口（Slack / Web 来源）的
+动态创建、Slack channel 归档到 workspace 归档的接线尚未落地，当前交互入口只
+覆盖 manual 来源。目录物化仍在 runner 侧按 WorkflowRun 组织，跨会话复用与
+回收守卫的 Workspace 视角切换待推进。

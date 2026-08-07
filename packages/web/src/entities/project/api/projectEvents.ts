@@ -22,7 +22,7 @@ export interface ProjectEventDto {
 }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
-export type ProjectEventTypeFilter = 'issue-state' | 'workflow-stage' | 'agent-session' | 'failure'
+export type ProjectEventTypeFilter = 'issue-state' | 'workflow-stage' | 'agent-session' | 'failure' | 'workspace'
 
 export function getProjectEvents(params?: {
   projectId?: string | null

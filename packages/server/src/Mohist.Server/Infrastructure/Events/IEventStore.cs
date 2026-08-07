@@ -31,6 +31,7 @@ public interface IEventStore
     Task<IReadOnlyList<StoredCloudEvent>> ListEpicEventsAsync(string projectId, int epicNumber, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListAgentSessionEventsAsync(string sessionId, int limit = 200, CancellationToken ct = default);
     Task<IReadOnlyList<StoredCloudEvent>> ListAgentJobEventsAsync(string agentJobId, int limit = 200, CancellationToken ct = default);
+    Task<IReadOnlyList<StoredCloudEvent>> ListWorkspaceEventsAsync(string projectId, string name, int limit = 200, CancellationToken ct = default);
 
     /// <summary>
     /// Marks the row in the truth table identified by the origin returned from
@@ -58,6 +59,7 @@ public enum EventOrigin
     AgentSession,
     AgentJob,
     Ingress,
+    Workspace,
 }
 
 public sealed record UndeliveredEvent(

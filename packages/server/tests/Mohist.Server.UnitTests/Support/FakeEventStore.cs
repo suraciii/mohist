@@ -63,6 +63,9 @@ public sealed class FakeEventStore : IEventStore
     public Task<IReadOnlyList<StoredCloudEvent>> ListAgentJobEventsAsync(string agentJobId, int limit = 200, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
 
+    public Task<IReadOnlyList<StoredCloudEvent>> ListWorkspaceEventsAsync(string projectId, string name, int limit = 200, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<StoredCloudEvent>>([]);
+
     public Task MarkDispatchedAsync(
         EventOrigin origin,
         string source,

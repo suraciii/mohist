@@ -27,6 +27,7 @@ public sealed class ProjectRecentEventReader : IScopedService
         rows.AddRange((await db.WorkflowRunEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
         rows.AddRange((await db.EpicEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
         rows.AddRange((await db.AgentSessionEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
+        rows.AddRange((await db.WorkspaceEvents.AsNoTracking().ToListAsync(ct)).Select(row => ProjectRecentEventProjection.From(row.Id, row.EventId, row.Type, row.Source, row.Subject, row.Time, row.ExtensionsJson)));
 
         return rows
             .Where(row => row.Extensions.TryGetValue("projectid", out var stampedProject)

@@ -103,6 +103,19 @@ public class RecordingEventStore : IEventStore
         }
     }
 
+    public Task<IReadOnlyList<StoredCloudEvent>> ListWorkspaceEventsAsync(string projectId, string name, int limit = 200, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            var source = $"/mohist/projects/{projectId}/workspaces/{name}";
+            return Task.FromResult<IReadOnlyList<StoredCloudEvent>>(_events
+                .Where(e => e.Envelope.Source.ToString() == source)
+                .TakeLast(limit)
+                .Select((e, idx) => new StoredCloudEvent(idx + 1, e.Envelope))
+                .ToList());
+        }
+    }
+
     public Task MarkDispatchedAsync(EventOrigin origin, string source, long id, DateTimeOffset dispatchedAt, CancellationToken ct = default)
     {
         lock (_gate)

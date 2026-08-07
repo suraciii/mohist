@@ -65,6 +65,8 @@ public static class EventCatalog
         ReverseDns.IssueCompositeStatusChanged,
         ReverseDns.IssueCommentAdded,
         ReverseDns.InboxItemPersisted,
+        ReverseDns.WorkspaceCreated,
+        ReverseDns.WorkspaceArchived,
         ReverseDns.EpicCreated,
         ReverseDns.EpicUpdated,
         ReverseDns.EpicPriorityChanged,
@@ -127,6 +129,8 @@ public static class EventCatalog
         public const string AgentId = "agentid";
         public const string SessionId = "sessionid";
         public const string RunnerId = "runnerid";
+        public const string Workspace = "workspace";
+        public const string WorkspaceOriginKind = "workspaceoriginkind";
         public const string GitHubRepo = "githubrepo";
         public const string GitHubIssue = "githubissue";
     }
@@ -206,6 +210,9 @@ public static class EventCatalog
         public const string EpicClosed = "com.mohist.epic.closed";
         public const string EpicReopened = "com.mohist.epic.reopened";
         public const string EpicStartAttemptFailed = "com.mohist.epic.start-attempt-failed";
+
+        public const string WorkspaceCreated = "com.mohist.workspace.created";
+        public const string WorkspaceArchived = "com.mohist.workspace.archived";
 
         public const string InboxItemPersisted = "com.mohist.inbox.item-persisted";
 

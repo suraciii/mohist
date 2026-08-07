@@ -39,6 +39,8 @@ Origin = { kind: issue, issueNumber }
 ```
 
 - 同一 Project 内，同一 Origin 同时最多一个 active Workspace。
+- workspace 创建与归档发射 `com.mohist.workspace.created` / `com.mohist.workspace.archived`
+  事件，谱系见 [`event-protocol.md`](event-protocol.md) 的 workspace 族。
 - workflow 路径的反向解析走 Issue：Issue 持有 WorkspaceName，Workspace 不重复
   持有 issue 引用之外的状态。
 - AgentSession 持有 WorkspaceName；Workspace 不持有 session 列表。"当前绑定哪些
@@ -135,8 +137,7 @@ Runner 为绑定 workspace 的执行注入工作目录锚定段：绝对路径 +
   重新承接：回收守卫改为上表，Registry 条目身份改为 WorkspaceName。
 - 开放问题：复合 Issue 多仓库 attach 的时机；workflow 干净初始化与现有
   `workspace-prepare` action 的衔接；Slack channel 归档事件到 workspace 归档的接线；
-  workspace 重新物化后绑定 session 的 Runtime Binding 重指语义；workspace 生命周期
-  事件（created / archived）进入事件协议谱系的事件集；workflow 的 openspec 产物
+  workspace 重新物化后绑定 session 的 Runtime Binding 重指语义；workflow 的 openspec 产物
   位置——现位于 repo 检出内部（`openspec/changes/issue-<n>/`），是否随“工作产物属于
   workspace 层”迁到 workspace 根（复合 Issue 场景下该产物不属于任何单一仓库）。
 - 已退役：subagent 的 Managed worktree（交付增量 4）概念——git worktree 属 git 范畴，
