@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
-using Mohist.Server.Infrastructure.Data.Auth;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Auth;
@@ -154,6 +153,7 @@ public sealed class AuthResolutionMiddlewareTests
             CredentialToken.Hash(token),
             [Scope.Runner, Scope.Webhook],
             "spec",
+            "moh_pat_ab",
             null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -180,6 +180,7 @@ public sealed class AuthResolutionMiddlewareTests
             CredentialToken.Hash(token),
             [Scope.Runner],
             "spec",
+            "moh_pat_ab",
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -291,6 +292,32 @@ public sealed class AuthResolutionMiddlewareTests
             }
 
             return Task.FromResult<Credential?>(credential);
+        }
+
+        public Task<PatCreateResult> CreatePatAsync(
+            string principalId,
+            string name,
+            IReadOnlyList<Scope> scopes,
+            DateTimeOffset expiresAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<Credential>> ListPatAsync(
+            string principalId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokePatAsync(
+            string principalId,
+            string name,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
         }
     }
 }

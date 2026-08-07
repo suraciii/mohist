@@ -2,7 +2,6 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
-using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Hosting;
 
 namespace Mohist.Server.Auth.Identity;

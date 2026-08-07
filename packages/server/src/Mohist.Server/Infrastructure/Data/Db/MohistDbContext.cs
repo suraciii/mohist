@@ -130,11 +130,13 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(e => e.ScopesJson).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(256);
+            entity.Property(e => e.Prefix).HasMaxLength(64);
             entity.Property(e => e.ExpiresAt);
             entity.Property(e => e.RevokedAt);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => e.TokenHash).IsUnique();
             entity.HasIndex(e => new { e.PrincipalId, e.Name })
+                .IsUnique()
                 .HasFilter("\"RevokedAt\" IS NULL");
             entity.HasIndex(e => new { e.PrincipalId, e.Kind, e.RevokedAt });
         });

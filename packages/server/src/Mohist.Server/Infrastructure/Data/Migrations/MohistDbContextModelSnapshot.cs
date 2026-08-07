@@ -420,6 +420,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Prefix")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("PrincipalId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -442,6 +446,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("PrincipalId", "Kind", "RevokedAt");
 
                     b.HasIndex("PrincipalId", "Name")
+                        .IsUnique()
                         .HasFilter("\"RevokedAt\" IS NULL");
 
                     b.HasIndex("TokenHash")

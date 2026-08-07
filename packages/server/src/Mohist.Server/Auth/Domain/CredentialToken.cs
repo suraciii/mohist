@@ -63,6 +63,24 @@ public static class CredentialToken
     public static string Hash(string token) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
+    /// <summary>
+    /// A short display prefix for listing: kind prefix plus the first few
+    /// secret characters, so a holder can match a token they have to a
+    /// list entry without revealing enough of the secret to be useful
+    /// (same practice as GitHub's token list).
+    /// </summary>
+    public const int DisplayPrefixSecretChars = 8;
+
+    public static string DisplayPrefix(string token)
+    {
+        if (!TryParse(token, out _))
+            return token;
+
+        var secretStart = token.IndexOf('_', token.IndexOf('_') + 1) + 1;
+        var length = Math.Min(DisplayPrefixSecretChars, token.Length - secretStart);
+        return token[..(secretStart + length)];
+    }
+
     private static string KindName(CredentialKind kind) => kind switch
     {
         CredentialKind.Session => "session",
