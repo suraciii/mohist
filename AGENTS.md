@@ -140,6 +140,40 @@ packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
 
 聚焦跑流程已封装进守卫，可避免手拼 apphost 路径，且绝不退回 `dotnet --filter`：`npm run test:budget -- focused <csproj> <FQCN>`（先 `-list classes` 校验 FQCN 存在，再 `apphost -class` 执行）。
 
+## Broken-CI 处置协议
+
+CI 挂了（hang / flake / red）禁止无限 rerun/poll。先 diagnostic-first——看失败测试与日志、对照已知 flake，定位根因后再按决策树三选一：
+
+```text
+CI 阻塞
+├─ (a) 修 —— 根因在域内且修复便宜：修代码/测试，验证后正常合并
+├─ (b) 带安全网绕过 —— 根因不在域内 / 修复贵 / 已知 flake / CI 基础设施问题：
+│     1. 跑 scripts/pre-merge-check.sh（#314 的本地快速 gate），必须全绿
+│     2. 临时放宽分支保护 → 合并 → 精确恢复分支保护（重新启用被禁的检查）
+└─ (c) 升级 goal_blocked —— 需要用户裁决 / 根因在外部：带证据升级，等用户
+```
+
+- **硬时间盒**：同一 CI 阻塞**连续 2 个 goal turn** 仍在 rerun/poll → **强制**转入三选一，禁止继续 rerun/poll。
+- **沉没成本警戒线**：某子问题花的 turn 超过实现本身 → 停，重审策略（换分支或升级）。
+- **绕过前置**：绕过前必须跑 `scripts/pre-merge-check.sh` 且全绿——快速套件（server build、ArchTests 含 spec-file-size 门槛、UnitTests、mohist-slack vitest）任一步失败即不允许绕过，回到 (a) 或 (c)。
+
+**真实教训（本 milestone 实测）**：既有 flake——`IssueCompositeLifecycleGrainSpecs`、`GitHubWriteBackSpecs.Cancelled_WithReason`、`EventDispatcherImmediateTriggerSpecs`、`AgentJobSubagentTerminalCallbackSpecs`——间歇命中 CI（约 20-40%/run），与本 milestone 改动无关；#312 修了 hang；PR #337 在修 GitHubWriteBack flake。这正是硬时间盒 + 三选一的来由：别在 flake 上无限 rerun。
+
+## 角色边界：灰区规则 + 破例日志
+
+main agent 只协调：不读不写源码，实现一律委派 agent。边界分三类：
+
+| 类别 | 内容 |
+|---|---|
+| **允许**（main agent 直接做） | git/gh 操作、issue/PR/分支保护管理、读 spec 做规划、只读诊断、跑验证 |
+| **灰区**（默认委派） | 改 `docs/`、测试配置 JSON（`test-duration.config.jsonc`、`spec-file-size-baseline.json` 等）、文档冲突处理 |
+| **禁止**（一律委派） | 源码（`packages/**/*.{cs,ts,…}`）与测试逻辑 |
+
+- **破例日志**：灰区动作默认委派；真要自己做，**当场**在 turn 报告里显式标注「破例：<动作>，理由：<原因>」。破例是显式、单次的，不积累成惯例。
+- **轻量委派路径**：灰区小改动必须委派得起——herdr worktree + agent 秒级启动（`herdr worktree create` → `herdr agent prompt`），派单遵守 [`design/dispatch-template.md`](design/dispatch-template.md) 三条硬规则（model fallback 链 + 探活、测试命令 timeout、完成定义）。
+
+**真实教训（本会话）**：Slack milestone 压力下，主 agent 曾自己改 `design/slack.md` + spec-file-size baseline JSON，边界被侵蚀。根因是委派小改动的开销大于直接改——破例日志让破例留痕，轻量委派路径把委派成本降下来，两者配套消除破例诱因。
+
 ## Agent dispatch 模板
 
 向外部 agent（herdr / pi）派发本仓库开发任务时，派单 prompt 必须套用 [`design/dispatch-template.md`](design/dispatch-template.md) 的三条硬规则：
