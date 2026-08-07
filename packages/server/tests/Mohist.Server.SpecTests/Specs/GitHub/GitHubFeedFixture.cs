@@ -106,7 +106,6 @@ public sealed class GitHubFeedFixture : IAsyncLifetime
         await _keeper.OpenAsync();
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
-        Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
         await _factory.EnsureSchemaAsync();
     }
 

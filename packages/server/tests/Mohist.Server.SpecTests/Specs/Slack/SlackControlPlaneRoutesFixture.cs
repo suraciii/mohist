@@ -5,7 +5,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
 using Orleans.TestingHost;
@@ -112,7 +111,6 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
     {
         var client = Factory.CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
-        client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
         return client;
     }
 

@@ -8,7 +8,6 @@ export interface HttpTransportOptions {
 }
 
 const LEASE_ROUTES = "/api/slack-adapter/leases"
-const OPERATOR_TOKEN_HEADER = "x-mohist-operator-token"
 const OPERATOR_ID_HEADER = "x-mohist-operator-id"
 
 /**
@@ -97,7 +96,7 @@ export class HttpAdapterTransport implements AdapterTransport {
 
   private operatorHeaders(): Record<string, string> {
     return {
-      [OPERATOR_TOKEN_HEADER]: this.options.operatorToken,
+      authorization: `Bearer ${this.options.operatorToken}`,
       [OPERATOR_ID_HEADER]: this.options.operatorId,
     }
   }

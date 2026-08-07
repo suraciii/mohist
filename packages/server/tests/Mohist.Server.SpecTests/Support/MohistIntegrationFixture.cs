@@ -93,7 +93,6 @@ public class MohistIntegrationFixture : IAsyncLifetime
             _otelEnabled);
         Client = _factory.CreateClient();
         Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
-        Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
         Client.DefaultRequestHeaders.Add(
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");

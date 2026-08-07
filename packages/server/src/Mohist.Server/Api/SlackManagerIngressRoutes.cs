@@ -1,7 +1,6 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
@@ -18,11 +17,8 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             SlackManagerSetupBody body,
             SlackManagerApplicationService service,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail("Manager setup requires an operator credential.", 403, "operator_credential_required");
             if (body is null
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
                 || string.IsNullOrWhiteSpace(body.ManagerAppId)
@@ -75,11 +71,8 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             string? workspaceTeamId,
             SlackManagerApplicationService service,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail("Manager status requires an operator credential.", 403, "operator_credential_required");
             if (string.IsNullOrWhiteSpace(workspaceTeamId))
                 return ApiResults.BadRequest("workspaceTeamId is required.");
             var status = await service.GetStatusAsync(workspaceTeamId, ct);
@@ -92,10 +85,9 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             SlackControlSetupConfigurationBody body,
             SlackManagerSetupOrchestrator orchestrator,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            var guard = RequireOperatorLoopback(context, credential);
+            var guard = RequireLoopback(context);
             if (guard is not null) return guard;
             if (body is null
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
@@ -127,10 +119,9 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             SlackControlSetupRuntimeBody body,
             SlackManagerSetupOrchestrator orchestrator,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            var guard = RequireOperatorLoopback(context, credential);
+            var guard = RequireLoopback(context);
             if (guard is not null) return guard;
             if (body is null
                 || string.IsNullOrWhiteSpace(body.WorkspaceTeamId)
@@ -161,13 +152,8 @@ public static class SlackManagerIngressRoutes
             HttpContext context,
             string? workspaceTeamId,
             SlackManagerSetupOrchestrator orchestrator,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail(
-                    "Setup progress requires an operator credential.",
-                    403, "operator_credential_required");
             if (string.IsNullOrWhiteSpace(workspaceTeamId))
                 return ApiResults.BadRequest("workspaceTeamId is required.");
             var progress = await orchestrator.GetProgressAsync(workspaceTeamId, ct);
@@ -184,7 +170,7 @@ public static class SlackManagerIngressRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(context.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(context, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Manager ingress requires an operator credential.", 403, "operator_credential_required");
             if (body is null
@@ -221,12 +207,8 @@ public static class SlackManagerIngressRoutes
         return app;
     }
 
-    private static IResult? RequireOperatorLoopback(HttpContext context, OperatorCredential credential)
+    private static IResult? RequireLoopback(HttpContext context)
     {
-        if (!credential.Authorizes(context.Request.Headers))
-            return ApiResults.Fail(
-                "Slack control-plane secret operations require an operator credential.",
-                403, "operator_credential_required");
         if (context.Connection.RemoteIpAddress is not { } remoteAddress
             || !IPAddress.IsLoopback(remoteAddress))
             return ApiResults.Fail(

@@ -1,6 +1,5 @@
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Security;
 using System.Text.Json;
 
 namespace Mohist.Server.Api;
@@ -15,7 +14,6 @@ public static class DeadLetterRoutes
         if (!UsesLoopbackOnlyListener(app.Configuration))
             return app;
 
-        var credential = app.Services.GetRequiredService<OperatorCredential>();
         var group = app.MapGroup("/api/events/dead-letters");
 
         group.MapGet("/", async (
@@ -26,9 +24,6 @@ public static class DeadLetterRoutes
             CancellationToken ct) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail("Dead-letter operations require an operator credential", 403, "operator_credential_required");
-
             var resolvedLimit = limit ?? DefaultLimit;
             if (resolvedLimit is < 1 or > MaxLimit)
                 return ApiResults.BadRequest($"limit must be between 1 and {MaxLimit}");
@@ -55,14 +50,10 @@ public static class DeadLetterRoutes
         });
 
         group.MapPost("/{deadLetterId:long}/redeliver", async (
-            HttpContext context,
             long deadLetterId,
             IGrainFactory grains,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail("Dead-letter operations require an operator credential", 403, "operator_credential_required");
-
             var result = await grains
                 .GetGrain<IEventDispatcherGrain>(EventDispatcherGrain.Global)
                 .RedeliverAsync(deadLetterId, ct);
