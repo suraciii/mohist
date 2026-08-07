@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.Core.Internal;
 using Xunit;

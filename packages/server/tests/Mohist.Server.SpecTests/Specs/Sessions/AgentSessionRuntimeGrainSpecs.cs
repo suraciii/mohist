@@ -1,6 +1,6 @@
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;

@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Runner.Services.SignalR;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
 

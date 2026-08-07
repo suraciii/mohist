@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Inbox;
 using Mohist.Server.Issue.Domain;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 

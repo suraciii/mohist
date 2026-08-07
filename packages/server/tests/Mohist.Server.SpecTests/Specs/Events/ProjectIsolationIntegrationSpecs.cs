@@ -1,9 +1,10 @@
+using Mohist.Server.SpecTests.Support;
 using CloudNative.CloudEvents;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using CloudEvent = Mohist.Server.Infrastructure.Events.CloudEvent;
 

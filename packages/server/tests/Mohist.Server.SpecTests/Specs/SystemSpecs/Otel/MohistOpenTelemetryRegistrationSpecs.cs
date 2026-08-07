@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;

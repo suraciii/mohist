@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Otel;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.SystemInfo;
 using Xunit;
 

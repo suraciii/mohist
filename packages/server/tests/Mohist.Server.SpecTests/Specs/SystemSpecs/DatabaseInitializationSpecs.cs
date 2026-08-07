@@ -5,7 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Hosting;
 using Xunit;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 

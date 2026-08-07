@@ -12,7 +12,7 @@ using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
 using Orleans.TestingHost;

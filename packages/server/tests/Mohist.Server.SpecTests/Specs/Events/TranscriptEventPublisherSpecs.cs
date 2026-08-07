@@ -1,10 +1,11 @@
+using Mohist.Server.SpecTests.Support;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Xunit;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.SpecTests.Specs.Events;
 

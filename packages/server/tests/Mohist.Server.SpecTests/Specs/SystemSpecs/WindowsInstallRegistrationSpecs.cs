@@ -1,5 +1,5 @@
 using Mohist.Cli;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using static Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallTestSupport;
 

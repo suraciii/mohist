@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Orleans.TestingHost;
 using Xunit;

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Issue.Services.WorkflowProfiles;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Services;
 using Xunit;

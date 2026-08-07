@@ -6,7 +6,7 @@ using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
 using Mohist.Server.Otel;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Telemetry;

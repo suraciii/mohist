@@ -1,7 +1,7 @@
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
-using Mohist.Server.SpecTests.Support.TestData;
+using Mohist.Server.TestSupport.TestData;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;

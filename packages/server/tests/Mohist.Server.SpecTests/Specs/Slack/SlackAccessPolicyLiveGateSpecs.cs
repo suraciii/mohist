@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Slack.Ports;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;

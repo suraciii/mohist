@@ -2,7 +2,7 @@ using Mohist.Server.Issue.Services.WorkflowProfiles;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Prompts;
 using Xunit;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Profile;
 
