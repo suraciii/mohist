@@ -378,6 +378,12 @@ export class SlackAdapter {
       ensureCurrent()
       return ack
     }
+    const segments = Array.isArray(payload.segments) && payload.segments.length > 1 ? payload.segments : undefined
+    if (segments) {
+      const ack = await this.deliverSegments(web, delivery, payload, segments, ensureCurrent)
+      ensureCurrent()
+      return ack
+    }
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
@@ -476,6 +482,26 @@ export class SlackAdapter {
     if (response.ok === false)
       return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the post" }
     return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
+  }
+
+  private async deliverSegments(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, segments: readonly string[], ensureCurrent: () => void): Promise<DeliveryAck> {
+    const thread_ts = delivery.threadTs ?? undefined
+    let firstIdentity: ProviderMessageIdentity | undefined
+    for (let index = 0; index < segments.length; index++) {
+      ensureCurrent()
+      const response = await web.chat.postMessage({
+        channel: delivery.conversationId,
+        text: segments[index]!,
+        ...(thread_ts ? { thread_ts } : {}),
+        ...(index === 0 && payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
+      })
+      ensureCurrent()
+      if (response.ok === false)
+        return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected a segmented post" }
+      if (index === 0 && response.ts)
+        firstIdentity = { conversationId: delivery.conversationId, messageTs: response.ts }
+    }
+    return delivered(delivery, firstIdentity)
   }
 
   private async uploadFile(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, ensureCurrent: () => void): Promise<DeliveryAck> {
@@ -771,6 +797,7 @@ interface DeliveryPayload {
   readonly blocks?: readonly Record<string, unknown>[]
   readonly fileName?: string
   readonly fileContentBase64?: string
+  readonly segments?: readonly string[]
 }
 
 function parseDeliveryPayload(value: string): DeliveryPayload {

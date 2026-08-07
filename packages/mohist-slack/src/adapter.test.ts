@@ -1182,6 +1182,44 @@ describe("mohist-slack adapter", () => {
     controller.abort()
   })
 
+  it("posts an over-long reply as ordered threaded segments from one delivery", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.deliveries = [{
+      id: "segmented-reply",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "post_message",
+        text: "the full body that exceeds one Slack message",
+        clientMessageId: "slack-reply:c1:C1:100.001:terminal",
+        segments: ["first segment body", "second segment body", "third segment body"],
+      }),
+    }]
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.posted).toEqual([
+      { channel: "C1", text: "first segment body", thread_ts: "100.001", client_msg_id: "slack-reply:c1:C1:100.001:terminal" },
+      { channel: "C1", text: "second segment body", thread_ts: "100.001" },
+      { channel: "C1", text: "third segment body", thread_ts: "100.001" },
+    ])
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "segmented-reply", outcome: "delivered" },
+    ])
+    controller.abort()
+  })
+
   it("uploads a local image file as a Slack file share reply", async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p1", connectionId: "c1" }]
