@@ -14,6 +14,8 @@
 | Runner | `RunnerId` | `runner_123` |
 | AgentSession | `SessionId` | `session_123` |
 | Event | `EventId` | `evt_123` |
+| Principal | `PrincipalId` | `prin_123` |
+| Credential | `CredentialId` | `cred_123` |
 
 - Issue 与 Epic 的 number 是 Project 内永久身份的一部分，不是展示别名；不再为它们
   维护第二个随机 id。

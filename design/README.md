@@ -131,6 +131,7 @@
 
 ## 支撑主题
 
+- [auth.md](auth.md) — 认证与身份（**已定稿，待实装**）：单一 admin 与 service / agent 主体、文件型与签发型凭据、设备授权登录、Runner 机器凭据与归因。
 - [repositories.md](repositories.md) — Repository 执行：Project 资源权威、Issue 绑定、dispatch 实时解析与最小 workspace identity（**WIP**）。
 - [hermes-webhook.md](hermes-webhook.md) — Hermes 通知网关：事件类型、payload、签名与投递可靠性。
 - [outbound-webhook.md](outbound-webhook.md) — 出站 Webhook（**WIP**）：OHS + PL，CloudEvent 即发布语言，表达式订阅 + HMAC 签名 + best-effort 投递。
