@@ -9,7 +9,7 @@ namespace Mohist.Server.SpecTests.Specs.GitHub;
 
 public class GitHubIssueLinksMigrationSpecs
 {
-    private const string MigrationId = "20260810000000_AddGitHubIssueLinks";
+    private const string MigrationId = "20260817000000_AddGitHubWriteBack";
 
     private static TestDatabase CreateDatabase()
     {

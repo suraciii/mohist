@@ -152,8 +152,9 @@ Agent API 区分两类调用者：
 boundary，由它根据对应 Connection 核对 workspace、成员与访问策略，再调用 Agent API。
 这条边界有调用和观察所需权限，但不能借此编辑 Agent、改变执行配置或管理其它 Project。
 
-第一版的 Connection 凭据是 Mohist 自有服务身份，不是通用第三方 API key。公开 API、外部
-开发者应用和多租户授权需要单独设计，不能从 Slack adapter 的权限模型顺手扩展出来。
+第一版的 Connection 凭据是 Mohist 自有服务身份，不是通用第三方 API key。Mohist 控制面
+的认证与身份模型见 [`auth.md`](auth.md)；公共开发者平台与多租户授权仍为非目标，不能从
+Slack adapter 的权限模型顺手扩展出来。
 
 ## 附件边界
 

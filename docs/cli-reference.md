@@ -93,9 +93,9 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 
 | 分组 | 命令组 | 管理的对象 |
 |---|---|---|
-| Work | `project`、`repo`、`issue`、`epic`、`label` | 项目空间、工作项与组织关系 |
+| Work | `project`、`repo`、`workspace`、`issue`、`epic`、`label` | 项目空间、执行环境、工作项与组织关系 |
 | Automation | `workflow`、`run`、`agent`、`session`、`activity`、`routing` | 工作流定义与执行、Agent 工作、对话和项目活动 |
-| Operations | `runner`、`server`、`service`、`event`、`notification`、`otel` | 执行资源、Server、本机服务、事件投递与可观测性 |
+| Operations | `runner`、`server`、`service`、`event`、`notification`、`otel`、`auth` | 执行资源、Server、本机服务、事件投递、可观测性与身份凭据 |
 | Tools | `help`、`skill`、`install`、`update`、`info` | 帮助主题、Skill 和安装维护 |
 
 ### 核心命令组
@@ -107,6 +107,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 |---|---|
 | `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`workflow prompt get/set/clear/preview`；`repo set-default`；`variable list/get/set/unset` |
 | `repo` | `list`、`create`、`edit`、`delete` |
+| `workspace` | `list`、`view`、`create`、`close`；`repo add/remove` |
 | `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`、`commits`、`logs`、`events`；`comment create`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
 | `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`create`、`edit`、`delete` |
@@ -122,11 +123,13 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | 命令组 | 规范动作 |
 |---|---|
 | `runner` | `list`、`view`、`status` |
+| `auth` | `login`、`logout`、`status`；`token list/create/revoke` |
 | `server` | `status`、`health`、`info`、`logs` |
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
+| `github` | `connect`；`edit`（供料策略与审批者名单） |
 | `notification` | `setup` |
-| `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
+| `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`message send`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
 | `skill` | `list`、`view`、`install`、`path`、`sync` |
 | `help` | 查看 `output`、`environment`、`exit-codes` 等共用规则 |
@@ -200,6 +203,35 @@ mo run variable get --issue 42 agent.model --effective --stage check
 `list` 和 `get` 读取被选 scope 自己保存的值；只有 Run 提供 `--effective`，因为合并结果是
 WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--value-json` 之一。
 
+## Workspace
+
+Workspace 是 Project 下持久存在的执行环境（产品语义见 [Workspace](workspaces.md)）。
+CLI 管理 manual 来源 workspace 的创建、成员与归档，以及所有 workspace 的读取；
+issue 与 Slack / Web 入口的 workspace 由对应动作自动创建与归档，不提供命令。
+
+- `mo workspace list [--status active|archived] [--origin issue|slack|web|manual]`
+  列出当前 Project 的 workspace。
+- `mo workspace view <name>` 读取来源、仓库成员、当前绑定的 Session、物化位置与状态。
+- `mo workspace create <name> [--repo <repo>...]` 创建 manual workspace；名称在
+  Project 内唯一。
+- `mo workspace repo add <name> <repo>` 与 `mo workspace repo remove <name> <repo>`
+  修改仓库成员；workspace 存在活跃绑定 Session 时拒绝修改。
+- `mo workspace close <name>` 归档 workspace；存在活跃绑定 Session 时拒绝并给出
+  下一步。issue 来源的 workspace 不接受手动 close，由 Issue 终态自动归档。
+- `mo agent launch <agent> --workspace <name>` 把新 Session 绑定到既有 workspace；
+  省略 `--workspace` 时不绑定任何 workspace，沿用 Runner 默认工作目录，也不创建
+  workspace 实体。
+- `mo session list --workspace <name>` 查看绑定到该 workspace 的 Session；
+  `mo session view` 输出包含 workspace 字段。
+
+```bash
+mo workspace create payment-refactor --repo server --repo web
+mo agent launch coder --workspace payment-refactor
+mo agent launch reviewer --workspace payment-refactor
+mo workspace view payment-refactor
+mo workspace close payment-refactor
+```
+
 ## Agent、AgentJob 与 Session
 
 `agent` 是 Project 内有稳定身份的 Mohist Agent。AgentJob 是该 Agent 一次 launch 的首次
@@ -208,7 +240,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 解释为对话关闭或用户目标已经交付。
 
 - `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
-  并返回四个稳定 ID、transcript URL 和 composite observation URL。命令接受
+  并返回四个稳定 ID、transcript URL 和 composite observation URL；`--workspace <name>`
+  把新 Session 绑定到既有 Workspace，省略时不绑定（见 [Workspace](#workspace)）。命令接受
   `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
@@ -224,6 +257,7 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
+- `mo session list --workspace <name>` 查看绑定该 Workspace 的 Session。
 - `mo session schedule create <session-id> --at <时间> --text <文本> [--idempotency-key <key>]`
   为会话安排一条到点输入：`--at` 只接受带时区偏移的绝对 RFC 3339 时间且必须晚于当前时间。
   `--idempotency-key` 可省略；省略时按 follow-up 约定在请求前打印生成的 key，重试想跨请求
@@ -268,6 +302,11 @@ Session view 中核对；两条命令都只作用于 `--turn-id` 指定的 Turn�
   当前步骤需要的字段，验证后由 Mohist 加密保存，输出、错误、JSON 与日志均不回显。
 - `mo slack status` 查看 Mohist App、各 Agent 接入和本机连接的当前状态与唯一下一步；
   缺少供给凭据时指向 `setup`，Agent 安装未完成时指向同一条 `install-agent` 命令。
+- `mo slack message send --conversation <conversation-id> [--reply-to <thread-root-ts>] --text <body> [--image <url> | --file <path>]`
+  是 Agent 在 Slack 里发声的命令面：正文按 markdown 渲染为 Slack 原生格式（粗体 / 行内代码 /
+  代码块 / 列表 / 引用，表格与标题降级为可读纯文本）；`--image` 内嵌公网图片 URL，`--file`
+  上传本地图片文件（上限 10 MB），两者互斥。`--text -` 从标准输入读取正文并保留换行；
+  附带图片时 `--text` 可省略。
 - `mo slack claim-owner <id>` 只在 identity verification 完成后生成并显示一次 setup
   claim、有效期和 Slack DM 步骤；再次运行立即使旧 claim 失效。
 - `mo slack view <id>` 始终返回 setup progress、status 和唯一 next action；命令可以退出，
@@ -442,6 +481,8 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
 - `session schedule create/list/cancel`：定时输入命令面已定稿（见 subagents.md），尚未实装。
+- `github` 命令组登记为 `connect`、`edit`（修改连接）；当前实装的修改动词为 `update`，
+  待按动词词表收敛为 `edit`。
 
 ### 已闭合
 

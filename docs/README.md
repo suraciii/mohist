@@ -20,6 +20,7 @@
 ## 板块 3：工作管理
 
 - [仓库](repositories.md) —— Project 声明多个仓库作为执行资源，issue 按目标仓库分流
+- [Workspace](workspaces.md) —— 跨会话、跨 Agent 的持久执行环境：issue 工作流干净初始化，Slack channel 持久复用
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
 - [复合 Issue 与子 Issue](sub-issues.md) —— 一个 issue 追踪跨仓库需求，拆成子 issue 各自走 workflow
 - [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标
@@ -43,6 +44,7 @@
 ## 板块 6：部署与运维
 
 - [Self-host 部署](self-host.md) —— NAS / 家用服务器 / 笔记本长跑
+- [认证与访问](auth.md) —— 一个管理员加机器主体：本机零登录、CLI 设备授权登录、脚本令牌、Runner 注册与 Agent 归因
 - [Hermes 通知](hermes-notifications.md) —— 审批点、失败、完成推送到你的聊天工具
 - [故障恢复](troubleshooting.md) —— 失败、blocked、drift 怎么办
 
