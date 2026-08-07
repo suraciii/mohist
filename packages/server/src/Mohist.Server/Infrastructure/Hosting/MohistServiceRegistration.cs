@@ -12,6 +12,7 @@ using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;

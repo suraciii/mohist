@@ -45,6 +45,7 @@ public class CliCanonicalCommandSurfaceSpecs
             "workflow", "run", "agent", "session", "activity",
             "routing", "runner", "server", "service", "event",
             "notification", "otel", "skill", "install", "update", "info",
+            "auth",
         ];
         foreach (var name in canonical)
             Assert.Contains(name, stdout, StringComparison.Ordinal);

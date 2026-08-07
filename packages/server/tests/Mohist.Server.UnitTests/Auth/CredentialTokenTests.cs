@@ -41,6 +41,27 @@ public sealed class CredentialTokenTests
         Assert.NotEqual(first, second);
     }
 
+    [Fact]
+    public void DisplayPrefix_IsKindPlusFirstSecretCharacters()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Pat);
+
+        var prefix = CredentialToken.DisplayPrefix(token);
+
+        Assert.StartsWith("moh_pat_", prefix, StringComparison.Ordinal);
+        Assert.Equal(
+            token[..("moh_pat_".Length + CredentialToken.DisplayPrefixSecretChars)],
+            prefix);
+        Assert.StartsWith(prefix, token, StringComparison.Ordinal);
+        Assert.True(token.Length > prefix.Length);
+    }
+
+    [Fact]
+    public void DisplayPrefix_WithMalformedToken_ReturnsTheToken()
+    {
+        Assert.Equal("not-a-token", CredentialToken.DisplayPrefix("not-a-token"));
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("moh")]

@@ -54,6 +54,9 @@ internal static class CommandPresentations
         AttachToArea(root, "server", CommandCapability.Operations,
             summary: "Inspect and operate the Mohist Server",
             boundary: "Server commands do not require a Project; they affect control-plane services.");
+        AttachToArea(root, "auth", CommandCapability.Operations,
+            summary: "Manage authentication: personal access tokens for scripts, CI and external agents",
+            boundary: "PATs belong to the calling account; the full token value is printed only once at issuance, and list never echoes it.");
         AttachToArea(root, "service", CommandCapability.Operations,
             summary: "Install and operate Mohist as an OS service",
             boundary: "Service commands interact with systemd / Task Scheduler only; they never read or write Project state.");
@@ -133,6 +136,7 @@ internal static class CommandPresentations
             "skill" => SkillLeaves.Instance,
             "runner" => RunnerLeaves.Instance,
             "server" => ServerLeaves.Instance,
+            "auth" => AuthLeaves.Instance,
             "service" => ServiceLeaves.Instance,
             "event" => EventLeaves.Instance,
             "notification" => NotificationLeaves.Instance,
@@ -526,6 +530,26 @@ internal static class CommandPresentations
                     CommandCapability.Operations, "Show server-side system diagnostics (identity, source, install, update, services, paths). Distinct from `mo info` (CLI-local environment)."));
                 CommandPresentationCatalog.Attach(Find(group, "logs"), new CommandPresentation(
                     CommandCapability.Operations, "Show the connected Server's application logs (the Mohist server's own log tail). These are application logs and are not interchangeable with service-manager logs; use `mo service logs server` for service-manager logs (systemd journal or scheduled-task output)."));
+            }
+        }
+
+        private sealed class AuthLeaves : ILeafPresenter
+        {
+            public static readonly AuthLeaves Instance = new();
+            public void Attach(Command group)
+            {
+                var token = Find(group, "token");
+                CommandPresentationCatalog.Attach(token, new CommandPresentation(
+                    CommandCapability.Operations, "Manage personal access tokens",
+                    Boundary: "The full token value appears exactly once, at issuance; list shows only name and prefix."));
+                if (token is null) return;
+                CommandPresentationCatalog.Attach(Find(token, "create"), new CommandPresentation(
+                    CommandCapability.Operations, "Issue a personal access token (full value shown once)",
+                    Note: "Tokens always expire: default 90 days, max 1 year."));
+                CommandPresentationCatalog.Attach(Find(token, "list"), new CommandPresentation(
+                    CommandCapability.Operations, "List personal access tokens (name and prefix only)"));
+                CommandPresentationCatalog.Attach(Find(token, "revoke"), new CommandPresentation(
+                    CommandCapability.Operations, "Revoke a personal access token (immediate)"));
             }
         }
 
