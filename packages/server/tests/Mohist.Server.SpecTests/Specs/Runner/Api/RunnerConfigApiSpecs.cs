@@ -7,6 +7,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Api;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -377,9 +378,8 @@ public class RunnerConfigFixture : IAsyncLifetime
         TimeProvider.Advance(TimeSpan.FromMilliseconds(100));
 
     public Task WaitForAgentJobAssignmentPreparedAsync(string agentJobId) =>
-        _factory.Services
-            .GetRequiredService<AgentJobDispatchProbe>()
-            .WaitForAssignmentPreparedAsync(agentJobId);
+        AgentJobConvergence.WaitForAssignmentPreparedAsync(
+            Grains.GetGrain<IAgentJobGrain>(agentJobId));
 
     /// <summary>
     /// Unregisters every runner created since the last call so leftover
