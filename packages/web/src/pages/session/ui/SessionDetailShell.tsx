@@ -11,6 +11,7 @@ import { AlertDialog } from '@/shared/ui/components/alert-dialog'
 import { formatSessionTime } from '@/shared/lib/format-time'
 import { useMediaQuery } from '@/shared/lib/use-media-query'
 import { getAgentLaunchObservationMeaning } from '../../../entities/agent'
+import { useProjectPath } from '../../../entities/project'
 import type { TimelineItem } from '../../../entities/session'
 import type { StatusKind, SessionDataSourceResult } from '../data/SessionDataSource'
 import { SessionUsageSummary } from './SessionUsageSummary'
@@ -684,6 +685,7 @@ function SessionHeader({
   const stageClassName = stageChipPresentation[stageLower] ?? 'bg-muted text-muted-foreground border-border'
 
   const isWideViewport = useMediaQuery('(min-width: 1280px)')
+  const toProjectPath = useProjectPath()
 
   const lastActivityAnchorMs = sessionTimeAnchorMs(meta)
   const lastActivityTime = lastActivityAnchorMs == null ? null : formatSessionTime({
@@ -741,6 +743,15 @@ function SessionHeader({
         {meta.agentName && <span>Agent: {meta.agentName}</span>}
         {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
         {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}
+        {meta.workspace && (
+          <Link
+            to={toProjectPath(`/workspaces/${encodeURIComponent(meta.workspace)}`)}
+            data-testid="session-workspace-link"
+            className="text-info hover:text-info/80 transition-colors"
+          >
+            Workspace: {meta.workspace}
+          </Link>
+        )}
       </div>
 
       <div

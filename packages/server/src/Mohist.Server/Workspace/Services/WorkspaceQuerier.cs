@@ -37,11 +37,15 @@ public sealed class WorkspaceQuerier : IScopedService
         if (!string.IsNullOrWhiteSpace(origin))
             query = query.Where(w => w.OriginKind == origin.Trim().ToLowerInvariant());
         var rows = await query.OrderBy(w => w.Name).ToListAsync(ct);
-        return rows
+        var states = rows
             .Select(WorkspaceRowJson.Deserialize)
             .Where(w => w is not null)
             .Cast<WorkspaceState>()
-            .Select(ToDto)
+            .ToList();
+        var boundCounts = await Task.WhenAll(
+            states.Select(state => CountBoundSessionsAsync(projectId, state.Name, ct)));
+        return states
+            .Select((state, index) => ToDto(state) with { BoundSessionCount = boundCounts[index] })
             .ToList();
     }
 
@@ -55,7 +59,18 @@ public sealed class WorkspaceQuerier : IScopedService
             return null;
 
         var sessions = await _agentSessions.ListUnifiedSessionsByWorkspaceAsync(projectId, name, ct: ct);
-        return ToDto(state) with { Sessions = sessions };
+        var boundCount = await CountBoundSessionsAsync(projectId, name, ct);
+        return ToDto(state) with { BoundSessionCount = boundCount, Sessions = sessions };
+    }
+
+    public async Task<int> CountBoundSessionsAsync(string projectId, string workspaceName, CancellationToken ct = default)
+    {
+        var records = await _sessionQuery.ListByLabelsAsync(
+            AgentSessionDtoMapper.Labels(
+                (AgentSessionQueryMetadataKeys.ProjectId, projectId),
+                (AgentSessionQueryMetadataKeys.WorkspaceName, workspaceName)),
+            ct: ct);
+        return records.Count;
     }
 
     /// <summary>

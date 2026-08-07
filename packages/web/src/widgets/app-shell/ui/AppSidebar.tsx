@@ -11,6 +11,7 @@ import {
   PlusIcon,
   ChevronDownIcon,
   FolderIcon,
+  FolderGit2Icon,
   PowerIcon,
   PowerOffIcon,
   InboxIcon,
@@ -64,6 +65,7 @@ const primaryNav: readonly NavItem[] = [
   { key: 'activity', label: 'Activity', icon: ActivityIcon, to: '/activity', scope: 'project' },
   { key: 'runners', label: 'Runners', icon: ServerIcon, to: '/runners', scope: 'project' },
   { key: 'epics', label: 'Epics', icon: ListTodoIcon, to: '/epics', scope: 'project' },
+  { key: 'workspaces', label: 'Workspaces', icon: FolderGit2Icon, to: '/workspaces', scope: 'project' },
 ]
 
 const archivedNav: readonly NavItem[] = [

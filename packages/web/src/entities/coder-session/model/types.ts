@@ -61,6 +61,7 @@ export interface UnifiedSessionContextRefsDto {
   issueNumber?: number | null
   epicNumber?: number | null
   repository?: string | null
+  workspaceName?: string | null
   workspacePath?: string | null
 }
 

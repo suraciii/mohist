@@ -178,6 +178,32 @@ describe('UnifiedSessionPage', () => {
   })
 })
 
+describe('UnifiedSessionPage — workspace context', () => {
+  beforeEach(() => {
+    summary = baseSummary()
+    transcript = { turns: [], partCount: 0, lastActivityAt: null }
+    transcriptOptions = []
+    turnControlCalls = []
+    turnControlState = { state: 'cancelled' }
+  })
+
+  afterEach(() => cleanup())
+
+  it('shows a workspace link in the source context when the session is bound to a workspace', () => {
+    summary = baseSummary({ contextRefs: { workspaceName: 'issue-42' } })
+    renderPage()
+    const link = screen.getByTestId('session-workspace-link')
+    expect(link).toHaveTextContent('Workspace: issue-42')
+    expect(link).toHaveAttribute('href', '/Test/workspaces/issue-42')
+  })
+
+  it('omits the workspace link when the session carries no workspace reference', () => {
+    summary = baseSummary({ contextRefs: null })
+    renderPage()
+    expect(screen.queryByTestId('session-workspace-link')).not.toBeInTheDocument()
+  })
+})
+
 describe('UnifiedSessionPage — turn control and recovery gating', () => {
   beforeEach(() => {
     summary = baseSummary()
