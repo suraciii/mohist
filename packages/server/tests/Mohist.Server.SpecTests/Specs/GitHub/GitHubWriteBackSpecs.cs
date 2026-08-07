@@ -56,15 +56,19 @@ public sealed class GitHubWriteBackSpecs
         var issueNumber = await grains.GetGrain<IIssueCounterGrain>(GrainKey.IssueCounter(projectId)).NextAsync();
         var issue = DomainIssue.Create(projectId, issueNumber, "Write back me", repositoryRef: RepoName, isDraft: false);
         transition(issue);
-        await using (var scope = _fixture.Services.CreateAsyncScope())
-        {
-            var store = scope.ServiceProvider.GetRequiredService<IIssueStore>();
-            await store.SaveAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber)), issue, issue.PendingEvents);
-        }
+        // Link must exist before the issue events become dispatchable:
+        // SaveAsync fires a fire-and-forget dispatch poke, and the
+        // write-back handler drops the event for good when no link exists
+        // yet (best-effort contract). The feed handler orders the same way.
         await using (var scope = _fixture.Services.CreateAsyncScope())
         {
             var links = scope.ServiceProvider.GetRequiredService<GitHubIssueLinkStore>();
             await links.CreateAsync(projectId, RepoName, GithubIssueNumber, issueNumber);
+        }
+        await using (var scope = _fixture.Services.CreateAsyncScope())
+        {
+            var store = scope.ServiceProvider.GetRequiredService<IIssueStore>();
+            await store.SaveAsync(GrainKey.Issue(new IssueKey(projectId, issueNumber)), issue, issue.PendingEvents);
         }
         return issueNumber;
     }
