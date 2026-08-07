@@ -15,7 +15,7 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 | Subdomain | Problem | Ubiquitous language |
 |---|---|---|
 | Issue | what work is, how organized, what progress | issue, epic, sub-issue, parent issue, status, prerequisite, priority, risk, draft, done |
-| Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), variable, prompt |
+| Project Space | environment, isolation, config | project, repository (named resource, default, git URL, base branch), workspace (origin, materialization), variable, prompt |
 | Agent | reusable named intelligence, execution jobs and external connections | Mohist Agent, Agent Readiness, Agent Availability, AgentJob, Agent Connection, provider identity, access policy, WorkResult |
 | Session | logical execution conversation, input delivery, turn execution, compression, query, audit | AgentSession, SessionInput, AgentTurn, Runtime Binding, Activity, Transcript, Context, Usage |
 | Runner | execution resource availability and capacity | resource, presence, registration, capacity |
@@ -34,6 +34,11 @@ Repository belongs to Project Space. Issue stores only the target Repository nam
 stores only the Project/Issue identity needed to resolve that resource. An unfinished Issue prevents
 changes to its Repository execution attributes, so Workflow does not need a Repository snapshot.
 See [`repositories.md`](repositories.md).
+
+Workspace belongs to Project Space. It is a first-class named execution environment whose
+lifecycle is independent of any AgentSession or WorkflowRun; Issue and entry contexts resolve
+to a Workspace through its Origin, and Runner materializes it as a directory. See
+[`workspace.md`](workspace.md).
 
 ### Agent and Session terms
 
@@ -66,7 +71,7 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 |---|---|---|---|---|
 | 1 | Workflow | Issue | C/S | WorkflowProfile, run creation, verdict/output |
 | 2 | Workflow | Runner | OHS+PL | task dispatch, fact report |
-| 3 | Project Space | Workflow | PL | default Profile ref, Repository resource, Project Variables, Prompt key/body |
+| 3 | Project Space | Workflow | PL | default Profile ref, Repository resource, Workspace resource, Project Variables, Prompt key/body |
 | 4 | Project Space | Issue | SK | ProjectId, repo ref |
 | 5 | Issue | Skill·Explore | OHS+PL | issue body/template |
 | 6 | Agent | runner process | C | AgentJob dispatch with Agent definition snapshot |

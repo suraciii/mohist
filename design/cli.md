@@ -29,6 +29,7 @@ CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不�
 |---|---|---|
 | `project` | Project | Project Space 根入口；拥有 Prompt 与 Project Variable |
 | `repo` | Repository | Project 范围的命名执行资源；Issue 只引用它 |
+| `workspace` | Workspace | Project 范围的持久执行环境；仓库成员关系是其子资源 |
 | `issue` | Issue | 工作项及其自身生命周期；`start` 负责开始工作 |
 | `epic` | Epic | 与 Issue 同一限界上下文，但有独立身份和生命周期 |
 | `workflow` | WorkflowProfile | Project 范围的 Workflow 定义入口，不表示一次执行 |
@@ -72,6 +73,11 @@ aggregate 是内部实现，不机械决定命令导航。跨 context 的关系�
   `project repo set-default` 修改。
 - `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
   AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
+- `workspace create/list/view/close` 管理 Workspace 实体，`workspace repo add/remove` 管理其仓库
+  成员关系。Session 与 Workspace 的绑定只有一个显式入口：`agent launch --workspace`；省略时
+  Session 不绑定 Workspace，沿用 Runner 默认工作目录。Issue 与 Slack / Web 入口的绑定是
+  Origin 自动解析，不在 `issue` 或 `session` 下复制 workspace 命令；`session list --workspace`
+  与 `session view` 的 workspace 字段只是读取维度。
 - `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
   管理一个 Agent 的 Slack 接入关系，`permanent-delete` 在无 active binding 时永久删除对应
   Agent App；这些动作不修改 Agent 定义。`install-agent` 是把已有 Agent 安装到
