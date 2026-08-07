@@ -24,6 +24,11 @@ public interface ICredentialStore
     Task<Credential?> FindActiveAsync(string tokenHash, CancellationToken ct = default);
 
     /// <summary>
+    /// Persists an issued credential (used for browser session issuance).
+    /// </summary>
+    Task CreateAsync(Credential credential, CancellationToken ct = default);
+
+    /// <summary>
     /// Issues a PAT for the given principal: generates the token, stores
     /// only its hash (plus a short display prefix) and returns the full
     /// value exactly once. The name must be unused by any active
@@ -53,4 +58,11 @@ public interface ICredentialStore
         string name,
         DateTimeOffset revokedAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes the credential with the given token hash. False when no
+    /// active row matched — the caller never learns whether the token
+    /// was unknown or already revoked.
+    /// </summary>
+    Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default);
 }

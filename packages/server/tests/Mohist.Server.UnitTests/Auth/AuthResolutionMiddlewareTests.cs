@@ -319,5 +319,22 @@ public sealed class AuthResolutionMiddlewareTests
         {
             throw new NotSupportedException();
         }
+
+        public Task CreateAsync(Credential credential, CancellationToken ct = default)
+        {
+            _byHash[credential.TokenHash] = credential;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default)
+        {
+            if (_byHash.TryGetValue(tokenHash, out var credential) && credential.RevokedAt is null)
+            {
+                _byHash[tokenHash] = credential with { RevokedAt = revokedAt };
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
+        }
     }
 }
