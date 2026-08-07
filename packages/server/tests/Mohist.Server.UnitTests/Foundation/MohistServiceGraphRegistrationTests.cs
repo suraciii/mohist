@@ -8,7 +8,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.Infrastructure.Security;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Notifications;
 using Mohist.Server.Notifications.Subscriptions;
 using Orleans.Hosting;
@@ -55,7 +55,7 @@ public sealed class MohistServiceGraphRegistrationTests
         AssertSingleRegistration<HermesIssueNotificationRenderer>(services);
         AssertSingleRegistration<IHermesIssueNotificationDispatcher>(services);
         AssertSingleRegistration<IAgentJobDispatchObserver>(services);
-        AssertSingleRegistration<OperatorCredential>(services);
+        AssertSingleRegistration<FileCredentialLoader>(services);
         AssertSingleRegistration<TimeProvider>(services);
     }
 

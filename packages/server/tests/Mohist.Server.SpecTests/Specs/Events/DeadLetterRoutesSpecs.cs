@@ -7,7 +7,6 @@ using Mohist.Server.Api;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -94,7 +93,7 @@ public sealed class DeadLetterRoutesSpecs
     }
 
     [Fact]
-    public async Task Redeliver_RejectsProxyCallerWithoutCredentialAndHasNoSideEffect()
+    public async Task Redeliver_RejectsUnauthenticatedCallerAndHasNoSideEffect()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow(typeof(EventBridge).FullName!);
@@ -110,22 +109,9 @@ public sealed class DeadLetterRoutesSpecs
             };
             request.Headers.TryAddWithoutValidation("X-Forwarded-For", "203.0.113.10");
 
-            _fixture.Client.DefaultRequestHeaders.Remove(OperatorCredential.HeaderName);
-            HttpResponseMessage response;
-            try
-            {
-                response = await _fixture.Client.SendAsync(request);
-            }
-            finally
-            {
-                _fixture.Client.DefaultRequestHeaders.Add(
-                    OperatorCredential.HeaderName,
-                    MohistIntegrationFixture.OperatorToken);
-            }
-            using (response)
-            {
-                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
-            }
+            using var anonymous = _fixture.CreateClient();
+            using var response = await anonymous.SendAsync(request);
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
             var stored = await store.GetAsync(row.DeadLetterId);
             Assert.NotNull(stored);

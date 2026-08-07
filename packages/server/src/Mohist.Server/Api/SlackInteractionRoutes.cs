@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
@@ -27,7 +26,7 @@ public static class SlackInteractionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;

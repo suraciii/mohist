@@ -81,7 +81,7 @@ public sealed class AgentAvailabilityListFixture : IAsyncLifetime
             gatewayPort,
             _runnerStatus);
         Client = _factory.CreateClient();
-        Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
     }
 

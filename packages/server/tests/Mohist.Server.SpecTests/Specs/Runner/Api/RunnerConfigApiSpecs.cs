@@ -302,6 +302,7 @@ public class RunnerConfigFixture : IAsyncLifetime
             siloPort,
             gatewayPort);
         Client = _factory.CreateClient();
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
     }
 

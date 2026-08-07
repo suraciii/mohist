@@ -248,7 +248,7 @@ describe("mohist-slack CLI composition", () => {
       serverCalls.push({
         url,
         body,
-        operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
+        operatorToken: new Headers(init?.headers).get("authorization"),
         operatorId: new Headers(init?.headers).get("x-mohist-operator-id"),
       })
       let data: unknown
@@ -297,7 +297,7 @@ describe("mohist-slack CLI composition", () => {
     await adapter.start(controller.signal)
 
     expect(serverCalls.length).toBeGreaterThan(0)
-    expect(serverCalls.every((call) => call.operatorToken === "test-operator")).toBe(true)
+    expect(serverCalls.every((call) => call.operatorToken === "Bearer test-operator")).toBe(true)
     expect(serverCalls.every((call) => call.operatorId === "mohist-slack")).toBe(true)
     expect(slackCalls).toHaveLength(1)
     expect(slackCalls[0]).toMatchObject({

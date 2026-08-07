@@ -8,7 +8,6 @@ using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure.Data.Slack;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Infrastructure.Slack;
 using Mohist.Server.Project.Services;
@@ -99,11 +98,8 @@ public static class SlackConnectionRoutes
         app.MapGet("/api/slack-connections/adapter", async (
             HttpContext http,
             AgentConnectionStore connections,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var targets = await connections.ListForAdapterAsync(ct);
             return ApiResults.Ok(targets.Select(target => new
             {
@@ -472,7 +468,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
@@ -562,7 +558,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
@@ -588,7 +584,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
@@ -614,7 +610,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             var projectId = http.GetResolvedProject().Id;
@@ -653,12 +649,8 @@ public static class SlackConnectionRoutes
         app.MapGet("/api/slack-manager/adapter", async (
             HttpContext http,
             SlackManagerAdapterQuerier adapters,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(http.Request.Headers))
-                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
-
             var targets = await adapters.ListReadyTargetsAsync(ct);
             return ApiResults.Ok(targets.Select(target => new
             {
@@ -677,7 +669,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
@@ -700,7 +692,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))
@@ -723,7 +715,7 @@ public static class SlackConnectionRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
             if (!await leases.ValidateManagerRuntimeLeaseByEnrollmentAsync(operatorId, enrollmentId, body?.LeaseId ?? string.Empty, body?.AdapterId ?? string.Empty, ct))

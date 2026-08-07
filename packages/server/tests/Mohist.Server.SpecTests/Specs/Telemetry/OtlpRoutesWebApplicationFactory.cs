@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
@@ -99,6 +100,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:DispatchRetryBound"] = "00:00:05",
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
+                ["Mohist:OperatorToken"] = MohistIntegrationFixture.OperatorToken,
+                ["Mohist:AdminToken"] = MohistIntegrationFixture.AdminToken,
             };
             if (_otelEnabled is { } otelEnabled)
                 values["Mohist:Otel:Enabled"] = otelEnabled ? "true" : "false";
@@ -107,6 +110,8 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IFileCredentialStore>();
+            services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
             services.RemoveAll<IWebContentProvider>();
             services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
             services.RemoveAll<Mohist.Server.SystemInfo.IFileSystem>();
@@ -155,6 +160,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     public new HttpClient CreateClient()
     {
         var client = base.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         return client;
     }
 
@@ -181,6 +187,7 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     {
         var client = base.CreateDefaultClient(new LocalPortHandler(3456));
         client.DefaultRequestHeaders.Host = "localhost:3456";
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         return client;
     }
 

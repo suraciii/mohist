@@ -44,7 +44,7 @@ describe("HttpAdapterTransport", () => {
           url,
           method: String(init?.method ?? "GET"),
           body: String(init?.body ?? ""),
-          operatorToken: new Headers(init?.headers).get("x-mohist-operator-token"),
+          operatorToken: new Headers(init?.headers).get("authorization"),
           operatorId: new Headers(init?.headers).get("x-mohist-operator-id"),
         })
         const data = url.endsWith("/api/slack-adapter/leases/targets")
@@ -140,7 +140,7 @@ describe("HttpAdapterTransport", () => {
     expect(calls.map((call) => call.method)).toEqual([
       "GET", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST", "POST",
     ])
-    expect(calls.every((call) => call.operatorToken === "operator")).toBe(true)
+    expect(calls.every((call) => call.operatorToken === "Bearer operator")).toBe(true)
     expect(calls.every((call) => call.operatorId === "operator-id")).toBe(true)
     expect(calls.every((call) => call.operatorToken !== null && call.operatorId !== null)).toBe(true)
     expect(JSON.parse(calls[1]!.body)).toEqual({
@@ -284,7 +284,7 @@ describe("HttpAdapterTransport", () => {
         const headers = new Headers(init?.headers)
         leaseHeaders.push({
           url: String(input),
-          token: headers.get("x-mohist-operator-token"),
+          token: headers.get("authorization"),
           id: headers.get("x-mohist-operator-id"),
         })
         const url = String(input)
@@ -312,7 +312,7 @@ describe("HttpAdapterTransport", () => {
       "http://127.0.0.1:3456/api/slack-adapter/leases/hello",
       "http://127.0.0.1:3456/api/slack-adapter/leases/renew",
     ])
-    expect(leaseHeaders.every((headers) => headers.token === "shared-token")).toBe(true)
+    expect(leaseHeaders.every((headers) => headers.token === "Bearer shared-token")).toBe(true)
     expect(leaseHeaders.every((headers) => headers.id === "mohist-slack")).toBe(true)
   })
 })

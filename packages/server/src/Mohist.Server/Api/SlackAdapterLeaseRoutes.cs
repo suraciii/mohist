@@ -22,7 +22,7 @@ public static class SlackAdapterLeaseRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return OperatorRequired();
             return ApiResults.Ok(await service.DiscoverAsync(operatorId, ct));
@@ -35,7 +35,7 @@ public static class SlackAdapterLeaseRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return OperatorRequired();
             var invalid = InvalidBody(body);
@@ -66,7 +66,7 @@ public static class SlackAdapterLeaseRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return OperatorRequired();
             var invalid = InvalidBody(body);
@@ -98,7 +98,7 @@ public static class SlackAdapterLeaseRoutes
             ISlackAdapterOperatorAuthenticator auth,
             CancellationToken ct) =>
         {
-            var operatorId = await auth.AuthenticateAsync(http.Request.Headers, ct);
+            var operatorId = await auth.AuthenticateAsync(http, ct);
             if (operatorId is null)
                 return OperatorRequired();
             var invalid = InvalidBody(body);

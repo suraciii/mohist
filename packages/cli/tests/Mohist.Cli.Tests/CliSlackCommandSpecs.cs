@@ -221,7 +221,7 @@ public sealed class CliSlackCommandSpecs
             handler.Requests.Select(request => request.RequestUri?.PathAndQuery ?? string.Empty).ToArray());
 
         foreach (var request in handler.Requests)
-            Assert.Equal(OperatorToken, Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+            Assert.Equal($"Bearer {OperatorToken}", Assert.Single(request.Headers["Authorization"]));
 
         var configurationBody = JsonNode.Parse(handler.Requests[1].Body!)!;
         Assert.Equal("T_W", configurationBody["workspaceTeamId"]!.GetValue<string>());
@@ -544,7 +544,7 @@ public sealed class CliSlackCommandSpecs
 
         var installRequest = handler.Requests[2];
         Assert.Equal(HttpMethod.Post, installRequest.Method);
-        Assert.Equal(OperatorToken, Assert.Single(installRequest.Headers[OperatorCredentialProvider.HeaderName]));
+        Assert.Equal($"Bearer {OperatorToken}", Assert.Single(installRequest.Headers["Authorization"]));
         var installBody = JsonNode.Parse(installRequest.Body!)!;
         Assert.Equal("enrollment_1", installBody["enrollmentId"]!.GetValue<string>());
         Assert.Equal("agent_1", installBody["agentId"]!.GetValue<string>());
@@ -1515,7 +1515,7 @@ public sealed class CliSlackCommandSpecs
     private static MockEnvironmentVariableProvider OperatorEnv(string token = OperatorToken)
     {
         var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        env[OperatorCredentialProvider.TokenEnvironmentVariable] = token;
+        env[CliCredentialProvider.TokenEnvironmentVariable] = token;
         return env;
     }
 

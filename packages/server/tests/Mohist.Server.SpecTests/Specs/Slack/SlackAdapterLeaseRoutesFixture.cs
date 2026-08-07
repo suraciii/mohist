@@ -6,7 +6,6 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
@@ -15,33 +14,6 @@ using Orleans.TestingHost;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
-
-/// <summary>
-/// Operator authentication for the lease route specs: the shared operator
-/// token header plus an explicit <c>X-Mohist-Operator-Id</c> header must
-/// both be present, mirroring the production
-/// <see cref="SlackAdapterOperatorAuthenticator"/> contract without touching
-/// <see cref="OperatorCredential"/>.
-/// </summary>
-public sealed class FakeSlackAdapterOperatorAuthenticator(string operatorToken)
-    : ISlackAdapterOperatorAuthenticator
-{
-    public Task<string?> AuthenticateAsync(IHeaderDictionary headers, CancellationToken ct = default)
-    {
-        if (!string.Equals(
-                headers[OperatorCredential.HeaderName].ToString(),
-                operatorToken,
-                StringComparison.Ordinal)
-            || !headers.TryGetValue(SlackAdapterOperatorAuthenticator.OperatorIdHeaderName, out var values)
-            || values.Count != 1)
-        {
-            return Task.FromResult<string?>(null);
-        }
-
-        var operatorId = values[0]?.Trim();
-        return Task.FromResult(string.IsNullOrWhiteSpace(operatorId) ? null : operatorId);
-    }
-}
 
 public sealed class FakeSlackLeaseSecretResolver : ISlackLeaseSecretResolver
 {
@@ -104,9 +76,6 @@ public sealed class SlackAdapterLeaseRoutesFactory : MohistWebApplicationFactory
             services.AddSingleton<ISlackLeaseTargetProvider>(Targets);
             services.RemoveAll<ISlackLeaseSecretResolver>();
             services.AddSingleton<ISlackLeaseSecretResolver>(Secrets);
-            services.RemoveAll<ISlackAdapterOperatorAuthenticator>();
-            services.AddSingleton<ISlackAdapterOperatorAuthenticator>(
-                new FakeSlackAdapterOperatorAuthenticator(MohistIntegrationFixture.OperatorToken));
         });
     }
 }
@@ -154,7 +123,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     public HttpClient CreateOperatorClient(string operatorId)
     {
         var client = Factory.CreateClient();
-        client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         client.DefaultRequestHeaders.Add(SlackAdapterOperatorAuthenticator.OperatorIdHeaderName, operatorId);
         return client;
     }
@@ -162,7 +131,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     public HttpClient CreateTokenOnlyClient()
     {
         var client = Factory.CreateClient();
-        client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         return client;
     }
 }

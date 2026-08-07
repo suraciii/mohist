@@ -26,15 +26,20 @@ public sealed class SlackAdapterLeaseRoutesSpecs
     [InlineData(AcquirePath)]
     [InlineData(HelloPath)]
     [InlineData(RenewPath)]
-    public async Task Every_route_requires_the_operator_token_and_an_explicit_operator_id(string path)
+    public async Task Every_route_requires_authentication_and_an_explicit_operator_id(string path)
     {
         var body = AcquireBody(new SlackLeaseTargetRef.Manager("enr_auth", "T_AUTH"), "adapter-A");
         using var anonymous = _fixture.CreateUnauthenticatedClient();
         using var tokenOnly = _fixture.CreateTokenOnlyClient();
 
+        // The auth middleware rejects unauthenticated requests before the
+        // route runs; the lease routes additionally require the explicit
+        // operator identity header.
         using var anonymousResponse = await SendAsync(anonymous, path, body);
-        Assert.Equal(HttpStatusCode.Forbidden, anonymousResponse.StatusCode);
-        Assert.Equal("operator_credential_required", await CodeAsync(anonymousResponse));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(anonymousResponse.Headers.WwwAuthenticate).ToString());
 
         using var tokenOnlyResponse = await SendAsync(tokenOnly, path, body);
         Assert.Equal(HttpStatusCode.Forbidden, tokenOnlyResponse.StatusCode);

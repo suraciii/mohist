@@ -152,7 +152,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var startupPath = SlackStartupPath();
         var metadataPath = SlackMetadataPath();
         var serverUrl = options.ServerUrl ?? "http://127.0.0.1:3456";
-        var operatorToken = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenEnvironmentVariable);
+        var operatorToken = _environment.GetEnvironmentVariable(SlackAdapterTokenEnvironmentVariable);
         var spec = new SlackLauncherSpec(
             SanitizeForCmdAssignment(repoRoot),
             SanitizeForCmdAssignment(serverUrl),
@@ -782,6 +782,9 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     private const string ServerTaskName = "Mohist_Server";
     private const string RunnerTaskName = "Mohist_Runner";
     private const string SlackTaskName = "Mohist_Slack";
+    // The Slack adapter's service credential env name is the server's own
+    // (the adapter presents the content as Authorization: Bearer).
+    private const string SlackAdapterTokenEnvironmentVariable = "MOHIST_OPERATOR_TOKEN";
 
     private string ServerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-server.cmd");
     private string RunnerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-runner.cmd");
@@ -837,7 +840,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         sb.AppendLine($"cd /d {repoRoot}");
         sb.AppendLine($"set \"SERVER_URL={spec.ServerUrl}\"");
         if (!string.IsNullOrEmpty(spec.OperatorToken))
-            sb.AppendLine($"set \"{OperatorCredentialProvider.TokenEnvironmentVariable}={spec.OperatorToken}\"");
+            sb.AppendLine($"set \"{SlackAdapterTokenEnvironmentVariable}={spec.OperatorToken}\"");
         sb.AppendLine($"node packages\\mohist-slack\\dist\\cli.js >> \"{logFile}\" 2>&1");
         return sb.ToString();
     }

@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
+using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Webhooks;
 using Mohist.Server.Infrastructure.Data.Epic;
 using Mohist.Server.Infrastructure.Events;
@@ -41,6 +42,7 @@ public class MohistDbContext : DbContext
         value => value == null ? 0 : value.Aggregate(0, (hash, s) => hash ^ (s == null ? 0 : StringComparer.Ordinal.GetHashCode(s))),
         value => value == null ? new List<string>() : new List<string>(value));
 
+    public DbSet<CredentialRow> Credentials { get; set; } = null!;
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -114,6 +116,25 @@ public class MohistDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<CredentialRow>(entity =>
+        {
+            entity.ToTable("Credentials");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.PrincipalId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ScopesJson).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256);
+            entity.Property(e => e.ExpiresAt);
+            entity.Property(e => e.RevokedAt);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => e.TokenHash).IsUnique();
+            entity.HasIndex(e => new { e.PrincipalId, e.Name })
+                .HasFilter("\"RevokedAt\" IS NULL");
+            entity.HasIndex(e => new { e.PrincipalId, e.Kind, e.RevokedAt });
+        });
+
         modelBuilder.Entity<ProjectRow>(entity =>
         {
             entity.HasKey(e => e.Id);

@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
-using Mohist.Server.Infrastructure.Security;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 
@@ -66,13 +65,8 @@ public static class SlackManagerRoutes
             HttpContext context,
             SlackControlInstallAgentBody body,
             SlackInstallAgentService service,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            if (!credential.Authorizes(context.Request.Headers))
-                return ApiResults.Fail(
-                    "Control-plane install operations require an operator credential.",
-                    403, "operator_credential_required");
             if (body is null
                 || string.IsNullOrWhiteSpace(body.EnrollmentId)
                 || string.IsNullOrWhiteSpace(body.AgentId))
@@ -98,10 +92,9 @@ public static class SlackManagerRoutes
             HttpContext context,
             SlackControlInstallAgentCredentialsBody body,
             SlackInstallAgentService service,
-            OperatorCredential credential,
             CancellationToken ct) =>
         {
-            var guard = RequireOperatorLoopback(context, credential);
+            var guard = RequireLoopback(context);
             if (guard is not null) return guard;
             if (body is null
                 || string.IsNullOrWhiteSpace(body.AgentAppId)
@@ -245,12 +238,8 @@ public static class SlackManagerRoutes
             ? ApiResults.NotFound("The managed Agent App was not found.")
             : ApiResults.Ok(result);
 
-    private static IResult? RequireOperatorLoopback(HttpContext context, OperatorCredential credential)
+    private static IResult? RequireLoopback(HttpContext context)
     {
-        if (!credential.Authorizes(context.Request.Headers))
-            return ApiResults.Fail(
-                "Slack control-plane secret operations require an operator credential.",
-                403, "operator_credential_required");
         if (context.Connection.RemoteIpAddress is not { } remoteAddress
             || !IPAddress.IsLoopback(remoteAddress))
             return ApiResults.Fail(
