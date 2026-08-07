@@ -8,16 +8,16 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
 
 /// <summary>
-/// Locks the operate + read surface for the per-issue Agent watch
-/// declarations: <c>POST /watch</c> + <c>DELETE /watch</c> drive the
-/// state machine in <see cref="Mohist.Server.Agent.Services.WatchEntryStore"/>
-/// and return the re-enriched <c>IssueReadModel</c>; <c>GET /issues/{n}</c>
-/// and the list endpoint project <c>Watching</c> / <c>Muted</c> from the
-/// shared <c>MohistDbContext</c>. Validation rejects archived / unknown
-/// agents with their machine codes (<c>agent_not_found</c>,
-/// <c>agent_archived</c>) and mutates no state.
-///
-/// Spec: <c>openspec/changes/issue-489/specs/issue-watch/spec.md</c>.
+/// Route-level contract coverage for the per-issue Agent watch surface.
+/// State-machine semantics live in
+/// <c>IssueWatchServiceSpecs</c> (driven by <c>MohistDbFixture</c>); this
+/// file keeps the route-shape and error-code assertions that must be
+/// driven through <c>HttpClient</c>:
+/// <list type="bullet">
+///   <item>404 on unknown project / unknown issue / unknown agent</item>
+///   <item>409 <c>agent_archived</c> code on archived agent</item>
+///   <item>200 + re-enriched detail JSON shape for the basic success path</item>
+/// </list>
 /// </summary>
 [Collection("IntegrationIssue")]
 public class IssueWatchApiSpecs
@@ -27,137 +27,6 @@ public class IssueWatchApiSpecs
     public IssueWatchApiSpecs(MohistIntegrationFixture fixture)
     {
         _client = fixture.Client;
-    }
-
-    [Fact]
-    public async Task PostWatch_WithNoPriorDeclaration_ReturnsReenrichedIssueWithAgentInWatching()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-add-none");
-
-        var detail = await PostWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Equal(issueNumber, detail.Number);
-        Assert.Single(detail.Watching, entry => entry.AgentId == agent.Id && entry.State == "watching");
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task PostWatch_OnMutedDeclaration_TransitionsToWatching()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-unmute");
-        await DeleteWatchAsync(projectId, issueNumber, agent.Id);
-
-        var detail = await PostWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Single(detail.Watching, entry => entry.AgentId == agent.Id && entry.State == "watching");
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task PostWatch_OnExistingWatching_IsIdempotent()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-add-idempotent");
-        var first = await PostWatchAsync(projectId, issueNumber, agent.Id);
-        var second = await PostWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Single(first.Watching, entry => entry.AgentId == agent.Id);
-        Assert.Single(second.Watching, entry => entry.AgentId == agent.Id);
-        Assert.Equal(first.Watching[0].CreatedAt, second.Watching[0].CreatedAt);
-    }
-
-    [Fact]
-    public async Task DeleteWatch_OnWatchingDeclaration_RemovesEntry()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-remove-watching");
-        await PostWatchAsync(projectId, issueNumber, agent.Id);
-
-        var detail = await DeleteWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Empty(detail.Watching);
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task DeleteWatch_WithNoPriorDeclaration_RecordsMuted()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-remove-none");
-
-        var detail = await DeleteWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Empty(detail.Watching);
-        Assert.Single(detail.Muted, entry => entry.AgentId == agent.Id && entry.State == "muted");
-    }
-
-    [Fact]
-    public async Task DeleteWatch_OnExistingMuted_IsIdempotent()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-remove-muted");
-        var first = await DeleteWatchAsync(projectId, issueNumber, agent.Id);
-        var second = await DeleteWatchAsync(projectId, issueNumber, agent.Id);
-
-        Assert.Single(first.Muted, entry => entry.AgentId == agent.Id);
-        Assert.Single(second.Muted, entry => entry.AgentId == agent.Id);
-        Assert.Equal(first.Muted[0].CreatedAt, second.Muted[0].CreatedAt);
-    }
-
-    [Fact]
-    public async Task PostWatch_ForUnknownAgent_ReturnsAgentNotFoundWithoutMutatingState()
-    {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-unknown-agent");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/watch",
-            new { agentId = "agent_does_not_exist" });
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_not_found", error.GetProperty("code").GetString());
-
-        var detail = await GetIssueDetailAsync(projectId, issueNumber);
-        Assert.Empty(detail.Watching);
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task DeleteWatch_ForUnknownAgent_ReturnsAgentNotFoundWithoutMutatingState()
-    {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-unknown-agent-delete");
-
-        var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/projects/{projectId}/issues/{issueNumber}/watch")
-        {
-            Content = JsonContent.Create(new { agentId = "agent_does_not_exist" }),
-        };
-        using var response = await _client.SendAsync(request);
-
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
-        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_not_found", error.GetProperty("code").GetString());
-
-        var detail = await GetIssueDetailAsync(projectId, issueNumber);
-        Assert.Empty(detail.Watching);
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task PostWatch_ForArchivedAgent_ReturnsAgentArchivedWithoutMutatingState()
-    {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-archived-agent");
-        var archivedAgent = await CreateAgentAsync(projectId, $"archived-{Guid.NewGuid():N}");
-        using var archiveResponse = await _client.DeleteAsync(
-            $"/api/projects/{projectId}/agents/{archivedAgent.Id}");
-        archiveResponse.EnsureSuccessStatusCode();
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/watch",
-            new { agentId = archivedAgent.Id });
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
-        Assert.Equal("agent_archived", error.GetProperty("code").GetString());
-
-        var detail = await GetIssueDetailAsync(projectId, issueNumber);
-        Assert.Empty(detail.Watching);
-        Assert.Empty(detail.Muted);
     }
 
     [Fact]
@@ -173,93 +42,70 @@ public class IssueWatchApiSpecs
     }
 
     [Fact]
-    public async Task GetIssueDetail_WithMixedEntries_ProjectsWatchingAndMutedAsSeparateGroups()
+    public async Task PostWatch_ForUnknownAgent_ReturnsAgentNotFound()
     {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-detail-projection");
-        var watchingA = await CreateAgentAsync(projectId, $"watch-a-{Guid.NewGuid():N}");
-        var watchingB = await CreateAgentAsync(projectId, $"watch-b-{Guid.NewGuid():N}");
-        var muted = await CreateAgentAsync(projectId, $"muted-{Guid.NewGuid():N}");
+        var (projectId, issueNumber, _) = await SeedAsync("watch-unknown-agent");
 
-        await PostWatchAsync(projectId, issueNumber, watchingA.Id);
-        await PostWatchAsync(projectId, issueNumber, watchingB.Id);
-        await DeleteWatchAsync(projectId, issueNumber, muted.Id);
-
-        var detail = await GetIssueDetailAsync(projectId, issueNumber);
-
-        Assert.Equal(2, detail.Watching.Length);
-        Assert.Single(detail.Muted);
-        Assert.Contains(detail.Watching, entry => entry.AgentId == watchingA.Id);
-        Assert.Contains(detail.Watching, entry => entry.AgentId == watchingB.Id);
-        Assert.Contains(detail.Muted, entry => entry.AgentId == muted.Id);
-        Assert.Contains(detail.Watching[0].State, new[] { "watching" });
-        Assert.Equal("muted", detail.Muted[0].State);
-    }
-
-    [Fact]
-    public async Task GetIssueDetail_WithNoEntries_ReturnsEmptyArrays()
-    {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-detail-empty");
-
-        var detail = await GetIssueDetailAsync(projectId, issueNumber);
-
-        Assert.NotNull(detail.Watching);
-        Assert.NotNull(detail.Muted);
-        Assert.Empty(detail.Watching);
-        Assert.Empty(detail.Muted);
-    }
-
-    [Fact]
-    public async Task ListIssues_WithWatchingEntries_ProjectsWatchingAndMutedOnEachItem()
-    {
-        var (projectId, issueNumber, agent) = await SeedAsync("watch-list-projection");
-        await PostWatchAsync(projectId, issueNumber, agent.Id);
-
-        var list = await _client.GetDataAsync<IssueDetailDto[]>($"/api/projects/{projectId}/issues?all=true");
-
-        var item = Assert.Single(list, dto => dto.Number == issueNumber);
-        Assert.Single(item.Watching, entry => entry.AgentId == agent.Id);
-        Assert.Empty(item.Muted);
-    }
-
-    [Fact]
-    public async Task ListIssues_WithNoEntries_ReturnsEmptyArraysPerItem()
-    {
-        var (projectId, issueNumber, _) = await SeedAsync("watch-list-empty");
-
-        var list = await _client.GetDataAsync<IssueDetailDto[]>($"/api/projects/{projectId}/issues?all=true");
-
-        var item = Assert.Single(list, dto => dto.Number == issueNumber);
-        Assert.Empty(item.Watching);
-        Assert.Empty(item.Muted);
-    }
-
-    private async Task<IssueDetailDto> PostWatchAsync(string projectId, int issueNumber, string agentId)
-    {
         using var response = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/watch",
-            new { agentId });
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return IssueDetailDto.FromElement(body.GetProperty("data"));
+            new { agentId = "agent_does_not_exist" });
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("agent_not_found", error.GetProperty("code").GetString());
     }
 
-    private async Task<IssueDetailDto> DeleteWatchAsync(string projectId, int issueNumber, string agentId)
+    [Fact]
+    public async Task DeleteWatch_ForUnknownAgent_ReturnsAgentNotFound()
     {
+        var (projectId, issueNumber, _) = await SeedAsync("watch-unknown-agent-delete");
+
         var request = new HttpRequestMessage(HttpMethod.Delete, $"/api/projects/{projectId}/issues/{issueNumber}/watch")
         {
-            Content = JsonContent.Create(new { agentId }),
+            Content = JsonContent.Create(new { agentId = "agent_does_not_exist" }),
         };
         using var response = await _client.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        return IssueDetailDto.FromElement(body.GetProperty("data"));
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("agent_not_found", error.GetProperty("code").GetString());
     }
 
-    private async Task<IssueDetailDto> GetIssueDetailAsync(string projectId, int issueNumber)
+    [Fact]
+    public async Task PostWatch_ForArchivedAgent_ReturnsAgentArchived()
     {
-        var raw = await _client.GetRawAsync($"/api/projects/{projectId}/issues/{issueNumber}");
+        var (projectId, issueNumber, _) = await SeedAsync("watch-archived-agent");
+        var archivedAgent = await CreateAgentAsync(projectId, $"archived-{Guid.NewGuid():N}");
+        using var archiveResponse = await _client.DeleteAsync(
+            $"/api/projects/{projectId}/agents/{archivedAgent.Id}");
+        archiveResponse.EnsureSuccessStatusCode();
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/watch",
+            new { agentId = archivedAgent.Id });
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("agent_archived", error.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task PostWatch_AndGetIssueDetail_JsonShape_ExposesWatchingAndMutedArrays()
+    {
+        var (projectId, issueNumber, agent) = await SeedAsync("watch-shape");
+
+        using var response = await _client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/issues/{issueNumber}/watch",
+            new { agentId = agent.Id });
+        response.EnsureSuccessStatusCode();
+        var raw = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(raw);
-        return IssueDetailDto.FromElement(doc.RootElement.GetProperty("data"));
+        var data = doc.RootElement.GetProperty("data");
+
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("watching").ValueKind);
+        Assert.Equal(JsonValueKind.Array, data.GetProperty("muted").ValueKind);
+        Assert.Equal(1, data.GetProperty("watching").GetArrayLength());
+        Assert.Equal(0, data.GetProperty("muted").GetArrayLength());
     }
 
     private async Task<(string projectId, int issueNumber, AgentRef agent)> SeedAsync(string purpose)
@@ -315,40 +161,4 @@ public class IssueWatchApiSpecs
     }
 
     private sealed record AgentRef(string Id, string Name);
-
-    private sealed record IssueDetailDto(
-        int Number,
-        string Title,
-        WatchEntryDto[] Watching,
-        WatchEntryDto[] Muted)
-    {
-        public static IssueDetailDto FromElement(JsonElement element) => new(
-            element.GetProperty("number").GetInt32(),
-            element.GetProperty("title").GetString() ?? string.Empty,
-            ParseWatching(element),
-            ParseMuted(element));
-
-        private static WatchEntryDto[] ParseWatching(JsonElement element) =>
-            element.TryGetProperty("watching", out var arr) && arr.ValueKind == JsonValueKind.Array
-                ? arr.EnumerateArray()
-                    .Select(item => new WatchEntryDto(
-                        item.GetProperty("agentId").GetString() ?? string.Empty,
-                        item.GetProperty("state").GetString() ?? string.Empty,
-                        item.GetProperty("createdAt").GetString() ?? string.Empty,
-                        item.GetProperty("updatedAt").GetString() ?? string.Empty))
-                    .ToArray()
-                : throw new InvalidOperationException("watching field missing from issue detail");
-        private static WatchEntryDto[] ParseMuted(JsonElement element) =>
-            element.TryGetProperty("muted", out var arr) && arr.ValueKind == JsonValueKind.Array
-                ? arr.EnumerateArray()
-                    .Select(item => new WatchEntryDto(
-                        item.GetProperty("agentId").GetString() ?? string.Empty,
-                        item.GetProperty("state").GetString() ?? string.Empty,
-                        item.GetProperty("createdAt").GetString() ?? string.Empty,
-                        item.GetProperty("updatedAt").GetString() ?? string.Empty))
-                    .ToArray()
-                : throw new InvalidOperationException("muted field missing from issue detail");
-    }
-
-    private sealed record WatchEntryDto(string AgentId, string State, string CreatedAt, string UpdatedAt);
 }
