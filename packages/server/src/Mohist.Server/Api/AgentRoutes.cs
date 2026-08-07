@@ -57,26 +57,14 @@ public static class AgentRoutes
             return ApiResults.Ok(await usage.GetUsageTimeseriesAsync(project.Id, windowDays, ct));
         });
 
-        group.MapGet("/cost", async (HttpContext context, string? range, AgentUsageReporter usage, IssueQuerier issues, CancellationToken ct) =>
+        group.MapGet("/cost", async (HttpContext context, string? range, AgentCostRollupQuerier costRollup, CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
 
             if (!TryParseRange(range, out var windowDays, out var rangeError))
                 return rangeError;
 
-            var cost = await usage.GetCostRollupAsync(project.Id, ct);
-            var projectIssues = await issues.ListAsync(project.Id, project, all: true);
-            var doneIssuesCount = projectIssues.Count(i => i.Status == "done");
-            var costPerShip = BuildCostPerShip(cost.TotalCost, doneIssuesCount);
-            var windowed = await usage.GetCostWindowedAsync(project.Id, windowDays, ct);
-
-            return ApiResults.Ok(new AgentCostRollupDto(
-                cost.TotalCost,
-                cost.TodayCost,
-                doneIssuesCount,
-                costPerShip,
-                windowed.CurrentWindow,
-                windowed.PreviousWindow));
+            return ApiResults.Ok(await costRollup.GetCostRollupAsync(project.Id, windowDays, ct));
         });
 
         app.MapGet("/api/agent/status", async (
@@ -132,13 +120,6 @@ public static class AgentRoutes
         windowDays = days;
         error = null;
         return true;
-    }
-
-    private static AgentCostMetricDto BuildCostPerShip(AgentCostMetricDto totalCost, int doneIssuesCount)
-    {
-        if (doneIssuesCount <= 0) return new AgentCostMetricDto(null, totalCost.Currency, 0);
-        if (totalCost.Amount is null) return new AgentCostMetricDto(null, totalCost.Currency, 0);
-        return new AgentCostMetricDto(totalCost.Amount.Value / doneIssuesCount, totalCost.Currency, 1);
     }
 }
 

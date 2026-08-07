@@ -1,19 +1,18 @@
-using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Issue;
-using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Issue.Domain;
-using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
-using Mohist.Server.Sessions.Services;
 using Xunit;
-using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
+/// <summary>
+/// Route contract for <c>GET /api/projects/{projectRef}/agent/cost</c>:
+/// route resolution (404 unknown project), parameter validation (400
+/// unknown range), and accepted ranges (200). The cost-rollup
+/// calculation matrix (all-time total/today, done-issue count,
+/// cost-per-ship, windowed current/previous) is owned by
+/// <c>AgentCostRollupQuerierSpecs</c> and exercised without an HTTP
+/// round-trip; see <see cref="Mohist.Server.SpecTests.Specs.AgentOps.AgentCostRollupQuerierSpecs"/>.
+/// </summary>
 [Collection("IntegrationApi")]
 public class AgentCostRollupApiSpecs
 {
@@ -26,194 +25,11 @@ public class AgentCostRollupApiSpecs
         _client = fixture.Client;
     }
 
-    private DateTime Today => _fixture.TimeProvider.GetUtcNow().UtcDateTime.Date;
-
-    [Fact]
-    public async Task GetCost_ReturnsEnvelopeWithAllFourFields()
-    {
-        var project = await CreateProjectAsync();
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.NotNull(response.TotalCost);
-        Assert.NotNull(response.TodayCost);
-        Assert.Equal(0, response.DoneIssuesCount);
-        Assert.NotNull(response.CostPerShip);
-    }
-
-    [Fact]
-    public async Task GetCost_DoneIssuesCountCountsOnlyDone()
-    {
-        var project = await CreateProjectAsync();
-        await InsertIssueWithStatusAsync(project.Id, number: 1, title: "d1", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 2, title: "d2", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 3, title: "d3", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 4, title: "d4", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 5, title: "d5", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 6, title: "d6", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 7, title: "d7", IssueStatus.Done);
-        await InsertIssueWithStatusAsync(project.Id, number: 8, title: "p1", IssueStatus.InProgress);
-        await InsertIssueWithStatusAsync(project.Id, number: 9, title: "p2", IssueStatus.InProgress);
-        await InsertIssueWithStatusAsync(project.Id, number: 10, title: "p3", IssueStatus.InProgress);
-        await InsertIssueWithStatusAsync(project.Id, number: 11, title: "open1", IssueStatus.Backlog);
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.Equal(7, response.DoneIssuesCount);
-    }
-
-    [Fact]
-    public async Task GetCost_CostPerShipEqualsTotalCostOverDoneIssues()
-    {
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
-            costAmount: 1.50, costCurrency: "USD");
-        for (var i = 0; i < 6; i++)
-            await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.Equal(1.50, response.TotalCost.Amount);
-        Assert.Equal(6, response.DoneIssuesCount);
-        Assert.Equal(0.25, response.CostPerShip.Amount);
-        Assert.Equal(1, response.CostPerShip.SampleCount);
-        Assert.Equal("USD", response.CostPerShip.Currency);
-    }
-
-    [Fact]
-    public async Task GetCost_FreeShippingIsRealZeroNotEmpty()
-    {
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
-            costAmount: 0.0, costCurrency: "USD");
-        for (var i = 0; i < 5; i++)
-            await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.Equal(0.0, response.TotalCost.Amount);
-        Assert.Equal(1, response.TotalCost.SampleCount);
-        Assert.Equal(5, response.DoneIssuesCount);
-        Assert.NotNull(response.CostPerShip.Amount);
-        Assert.Equal(0.0, response.CostPerShip.Amount);
-        Assert.Equal(1, response.CostPerShip.SampleCount);
-    }
-
-    [Fact]
-    public async Task GetCost_ZeroShippedIssuesYieldsUndefinedCostPerShip()
-    {
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-1).AddHours(8),
-            costAmount: 1.20, costCurrency: "USD");
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.Equal(1.20, response.TotalCost.Amount);
-        Assert.Equal(0, response.DoneIssuesCount);
-        Assert.Null(response.CostPerShip.Amount);
-        Assert.Equal(0, response.CostPerShip.SampleCount);
-    }
-
     [Fact]
     public async Task GetCost_UnknownProjectReturns404()
     {
         using var response = await _client.GetAsync($"/api/projects/unknown-project-{Guid.NewGuid():N}/agent/cost");
         Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
-    }
-
-    [Fact]
-    public async Task GetCost_Range90d_ScalesWindowedCurrentAndPreviousWindow()
-    {
-        // `range=90d` re-bases the windowed current/previous spend and
-        // per-issue-cost to a 90-day current window and a 90-day
-        // immediately-preceding previous window. Sessions placed 60d ago
-        // (in current) and 120d ago (in previous) verify the boundary;
-        // the 5d-ago session stays inside both windows (current under
-        // both 30d and 90d).
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-60).AddHours(8),
-            costAmount: 1.00, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-120).AddHours(8),
-            costAmount: 0.50, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-200).AddHours(8),
-            costAmount: 9.99, costCurrency: "USD");
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost?range=90d");
-
-        Assert.Equal(1.00, response.CurrentWindow.Spend.Amount);
-        Assert.Equal(1, response.CurrentWindow.Spend.SampleCount);
-        Assert.Equal(0.50, response.PreviousWindow.Spend.Amount);
-        Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
-    }
-
-    [Fact]
-    public async Task GetCost_Range_DoesNotAffectAllTimeFigures()
-    {
-        // All-time `totalCost`, `todayCost`, all-time `costPerShip`, and
-        // `doneIssuesCount` are byte-identical with and without a range.
-        // Only the windowed current/previous figures re-base.
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddHours(8),
-            costAmount: 0.10, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-2).AddHours(8),
-            costAmount: 0.20, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-100).AddHours(8),
-            costAmount: 0.99, costCurrency: "USD");
-        for (var i = 0; i < 4; i++)
-            await InsertIssueWithStatusAsync(project.Id, i + 1, $"d{i + 1}", IssueStatus.Done);
-
-        var omit = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-        var r90 = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost?range=90d");
-        var r7 = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost?range=7d");
-
-        // All-time figures are byte-identical regardless of range.
-        Assert.Equal(omit.TotalCost.Amount, r90.TotalCost.Amount);
-        Assert.Equal(omit.TotalCost.SampleCount, r90.TotalCost.SampleCount);
-        Assert.Equal(omit.TotalCost.Currency, r90.TotalCost.Currency);
-        Assert.Equal(omit.TodayCost.Amount, r90.TodayCost.Amount);
-        Assert.Equal(omit.TodayCost.SampleCount, r90.TodayCost.SampleCount);
-        Assert.Equal(omit.DoneIssuesCount, r90.DoneIssuesCount);
-        Assert.Equal(omit.CostPerShip.Amount, r90.CostPerShip.Amount);
-
-        Assert.Equal(omit.TotalCost.Amount, r7.TotalCost.Amount);
-        Assert.Equal(omit.TotalCost.SampleCount, r7.TotalCost.SampleCount);
-        Assert.Equal(omit.TodayCost.Amount, r7.TodayCost.Amount);
-        Assert.Equal(omit.TodayCost.SampleCount, r7.TodayCost.SampleCount);
-        Assert.Equal(omit.DoneIssuesCount, r7.DoneIssuesCount);
-        Assert.Equal(omit.CostPerShip.Amount, r7.CostPerShip.Amount);
-    }
-
-    [Fact]
-    public async Task GetCost_OmittedRange_Reproduces30DayWindow()
-    {
-        // Omit-equality witness: omitting `range` reproduces today's
-        // fixed 30-day windowed figures. A session at 10d ago (in
-        // current 30d window) is included; a session at 40d ago is in
-        // the previous 30d window; a session at 80d ago is ignored.
-        var project = await CreateProjectAsync();
-        await InsertSessionAsync(project.Id, Today.AddDays(-10).AddHours(8),
-            costAmount: 0.40, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-40).AddHours(8),
-            costAmount: 0.20, costCurrency: "USD");
-        await InsertSessionAsync(project.Id, Today.AddDays(-80).AddHours(8),
-            costAmount: 9.99, costCurrency: "USD");
-
-        var response = await _client.GetDataAsync<AgentCostRollupResponseDto>(
-            $"/api/projects/{project.Id}/agent/cost");
-
-        Assert.Equal(0.40, response.CurrentWindow.Spend.Amount);
-        Assert.Equal(1, response.CurrentWindow.Spend.SampleCount);
-        Assert.Equal(0.20, response.PreviousWindow.Spend.Amount);
-        Assert.Equal(1, response.PreviousWindow.Spend.SampleCount);
     }
 
     [Fact]
@@ -251,87 +67,5 @@ public class AgentCostRollupApiSpecs
         return project;
     }
 
-    private async Task InsertSessionAsync(
-        string projectId,
-        DateTime createdAt,
-        long inputTokens = 0,
-        long outputTokens = 0,
-        long totalTokens = 0,
-        double costAmount = 0,
-        string? costCurrency = null,
-        string? agentSessionId = null)
-    {
-        var session = new AgentSession
-        {
-            Id = $"session-{Guid.NewGuid():N}",
-            Runtime = new AgentSessionRuntime("runner-test", null),
-            Settings = new AgentSessionSettings("test-model"),
-            Status = new AgentSessionStatusSnapshot(
-                CreatedAt: createdAt,
-                UsageSummary: new AgentUsageSummary(
-                    InputTokens: inputTokens,
-                    OutputTokens: outputTokens,
-                    TotalTokens: totalTokens,
-                    CostAmount: costAmount,
-                    CostCurrency: costCurrency),
-                AgentRuntimeSessionId: agentSessionId),
-            Metadata = new AgentSessionMetadata(
-                Labels: new Dictionary<string, string>(StringComparer.Ordinal)
-                {
-                    [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-                })
-        };
-
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        db.AgentSessions.Add(new AgentSessionRow
-        {
-            Id = session.Id,
-            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
-            CreatedAt = createdAt,
-            Status = agentSessionId is null ? "opened" : "bound",
-            AgentSessionId = agentSessionId,
-            RunnerId = "runner-test",
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task InsertIssueWithStatusAsync(
-        string projectId,
-        int number,
-        string title,
-        IssueStatus status)
-    {
-        var issue = new DomainIssue
-        {
-            ProjectId = projectId,
-            Number = number,
-            Title = title,
-            Status = status,
-        };
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        db.Issues.Add(new IssueRow
-        {
-            ProjectId = projectId,
-            Number = number,
-            State = IssueStore.Serialize(issue),
-        });
-        await db.SaveChangesAsync();
-    }
-
     private sealed record ProjectDto(string Id, string Name);
-
-    private sealed record AgentCostMetricResponseDto(double? Amount, string? Currency, int SampleCount);
-
-    private sealed record AgentCostWindowedFigureResponseDto(
-        AgentCostMetricResponseDto Spend,
-        AgentCostMetricResponseDto PerIssueCost);
-
-    private sealed record AgentCostRollupResponseDto(
-        AgentCostMetricResponseDto TotalCost,
-        AgentCostMetricResponseDto TodayCost,
-        int DoneIssuesCount,
-        AgentCostMetricResponseDto CostPerShip,
-        AgentCostWindowedFigureResponseDto CurrentWindow,
-        AgentCostWindowedFigureResponseDto PreviousWindow);
-
 }
