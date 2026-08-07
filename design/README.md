@@ -106,8 +106,7 @@
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、SessionInput、AgentTurn、AgentSession 与 Runtime Session 的分层、生命周期所有权、activity 和 transcript DSL。
 - [agent-api.md](agent-api.md) — Web、CLI 与外部接入共用的 Agent 调用边界：统一能力、状态、身份和可靠性决策。
-- [subagents.md](subagents.md) — Subagent 与会话树：flat Agent 下的 child launch、capability snapshot、父子 link、terminal callback、cascade stop、定时输入与受管工作空间增量。
-- [agent-workspace.md](agent-workspace.md) — Agent 受管工作空间（Managed worktree，交付增量 4 **WIP**）：Project Space 定义、被 pin Runner 物化的隔离 worktree，spawn 受约束的 workspace mode 与 Server→Runner 物化/释放/回收契约。
+- [subagents.md](subagents.md) — Subagent 与会话树：flat Agent 下的 child launch、capability snapshot、父子 link、terminal callback、cascade stop 与定时输入。
 - [slack.md](slack.md) — Slack 集成的组件边界：adapter 为什么独立且无状态、Session 边界取舍、可靠性契约与实施顺序；产品行为见 `docs/slack.md`。
 - [event-routing.md](event-routing.md) — Agent 事件路由：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 - [agent-supervision.md](agent-supervision.md) — Agent 监管预设：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
