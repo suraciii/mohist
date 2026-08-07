@@ -159,6 +159,13 @@ CI 阻塞
 
 **真实教训（本 milestone 实测）**：既有 flake——`IssueCompositeLifecycleGrainSpecs`、`GitHubWriteBackSpecs.Cancelled_WithReason`、`EventDispatcherImmediateTriggerSpecs`、`AgentJobSubagentTerminalCallbackSpecs`——间歇命中 CI（约 20-40%/run），与本 milestone 改动无关；#312 修了 hang；PR #337 在修 GitHubWriteBack flake。这正是硬时间盒 + 三选一的来由：别在 flake 上无限 rerun。
 
+## 分支拓扑：多 PR 重叠时的默认策略
+
+多个 PR 并行时开枝前先画**文件重叠图**（本次将改的文件 × 飞行中 PR 的改动求交集）；
+有重叠/依赖的 PR 用 **stack**（PR n+1 基于 PR n）或**单一集成分支**，不要各自从
+master 独立开枝后串行 squash 互撞；**spec 先入主干**——文档 PR 先合 master，实现分支
+基于含 spec 的 master 开。完整约定与实测教训：[`design/branching.md`](design/branching.md)。
+
 ## 角色边界：灰区规则 + 破例日志
 
 main agent 只协调：不读不写源码，实现一律委派 agent。边界分三类：
