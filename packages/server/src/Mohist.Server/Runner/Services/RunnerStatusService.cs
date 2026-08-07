@@ -18,7 +18,7 @@ public class RunnerStatusService : IScopedService, IRunnerStatusSource
         _timeProvider = timeProvider;
     }
 
-    public async Task<IReadOnlyList<RunnerStatusView>> GetRunnersAsync(string projectId)
+    public virtual async Task<IReadOnlyList<RunnerStatusView>> GetRunnersAsync(string projectId)
     {
         var registry = _grainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
 

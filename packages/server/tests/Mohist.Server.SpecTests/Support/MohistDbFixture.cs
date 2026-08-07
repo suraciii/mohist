@@ -136,6 +136,14 @@ public sealed class MohistDbFixture : IAsyncLifetime
         // latency optimization — a missing poke is invisible to specs
         // that exercise the stores without the dispatcher.
         services.AddSingleton<IGrainFactory, NullDispatchGrainFactory>();
+        // RunnerStatusService internally calls IRunnerRegistryGrain via the
+        // grain factory, which the null dispatch above rejects. Replace the
+        // service with a fake that returns an empty runner list by default
+        // and lets specs seed runners via the RunnerStatus property when
+        // they need to assert on global runner projection.
+        services.RemoveAll<Mohist.Server.Runner.Services.RunnerStatusService>();
+        services.AddSingleton<NoopRunnerStatusService>();
+        services.AddSingleton<Mohist.Server.Runner.Services.RunnerStatusService>(sp => sp.GetRequiredService<NoopRunnerStatusService>());
         // RecordingEventStore remains available via the EventStore
         // property for specs that explicitly want to assert on recorded
         // calls; the in-scope IEventStore is the real one.
@@ -245,5 +253,44 @@ public sealed class MohistDbFixture : IAsyncLifetime
 
         public GrainId GrainId => default;
         public string Key => string.Empty;
+    }
+
+    /// <summary>
+    /// Replaces <see cref="Mohist.Server.Runner.Services.RunnerStatusService"/> in
+    /// this fixture: the production service requires the silo-backed
+    /// <c>IRunnerRegistryGrain</c>, which the null dispatch grain factory
+    /// above rejects. The fake returns an empty runner list by default and
+    /// lets specs seed runners via the <see cref="SetRunners"/> method
+    /// when they need to assert on global runner projection.
+    /// </summary>
+    public sealed class NoopRunnerStatusService : Mohist.Server.Runner.Services.RunnerStatusService
+    {
+        private readonly object _gate = new();
+        private IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView> _runners =
+            Array.Empty<Mohist.Server.Runner.Services.RunnerStatusView>();
+
+        public NoopRunnerStatusService()
+            : base(
+                grainFactory: new NullDispatchGrainFactory(),
+                connectionTracker: new Mohist.Server.Runner.Services.SignalR.RunnerConnectionTracker(),
+                timeProvider: new Microsoft.Extensions.Time.Testing.FakeTimeProvider(Mohist.Server.TestSupport.TestTime.UtcNow))
+        {
+        }
+
+        public void SetRunners(IEnumerable<Mohist.Server.Runner.Services.RunnerStatusView> runners)
+        {
+            lock (_gate)
+            {
+                _runners = runners.ToArray();
+            }
+        }
+
+        public override Task<IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView>> GetRunnersAsync(string projectId)
+        {
+            lock (_gate)
+            {
+                return Task.FromResult<IReadOnlyList<Mohist.Server.Runner.Services.RunnerStatusView>>(_runners.ToArray());
+            }
+        }
     }
 }

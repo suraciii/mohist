@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Issue.Domain;
+using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
@@ -15,6 +16,15 @@ using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
+/// <summary>
+/// Route contract for <c>GET /api/projects/{projectRef}/activity</c>:
+/// parameter validation (400 invalid limit) and one cross-aggregate
+/// success-path shape (recorded + snapshot kinds, stable-order window).
+/// The calculation matrix (project isolation, runner only as global,
+/// limit-after-stable-merged ordering, default limit = 100) is owned by
+/// <c>ActivityEvidenceAssemblerSpecs</c> and exercised without an HTTP
+/// round-trip; see <see cref="Mohist.Server.SpecTests.Specs.AgentOps.ActivityEvidenceAssemblerSpecs"/>.
+/// </summary>
 [Collection("IntegrationApi")]
 public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
 {
@@ -40,7 +50,6 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await SeedWaitingIssueAsync(project.Id, 2, FixedTime.AddMinutes(4));
         await RegisterRunnerAsync(runnerId, project.Id, "activity-host", FixedTime.AddMinutes(5));
 
-        await GetActivityAsync(project.Id, 200);
         var first = await GetActivityAsync(project.Id, 200);
         var second = await GetActivityAsync(project.Id, 200);
 
@@ -63,50 +72,6 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         await _client.PostAsync($"/api/runner/{runnerId}/unregister", null);
     }
 
-    [Fact]
-    public async Task GetActivity_IsolatesProjectEvidenceWhileRepeatingRunnerOnlyAsGlobal()
-    {
-        var firstProject = await CreateProjectAsync("activity-first");
-        var secondProject = await CreateProjectAsync("activity-second");
-        var runnerId = $"runner_{Guid.NewGuid():N}";
-        await SeedIssueAsync(firstProject.Id, 11);
-        await SeedIssueAsync(secondProject.Id, 22);
-        await AppendIssueEventAsync(firstProject.Id, 11, "first.project.event", FixedTime);
-        await AppendIssueEventAsync(secondProject.Id, 22, "second.project.event", FixedTime);
-        await RegisterRunnerAsync(runnerId, firstProject.Id, "shared-host", FixedTime);
-
-        var first = await GetActivityAsync(firstProject.Id);
-        var second = await GetActivityAsync(secondProject.Id);
-
-        Assert.Contains(first, entry => entry.EventType == "first.project.event");
-        Assert.DoesNotContain(first, entry => entry.EventType == "second.project.event");
-        Assert.Contains(second, entry => entry.EventType == "second.project.event");
-        Assert.DoesNotContain(second, entry => entry.EventType == "first.project.event");
-        Assert.Contains(first, entry => entry.RunnerId == runnerId && entry.Scope == "global");
-        Assert.Contains(second, entry => entry.RunnerId == runnerId && entry.Scope == "global");
-        Assert.DoesNotContain(first.Concat(second), entry => entry.RunnerId == runnerId && entry.Scope == "project");
-        await _client.PostAsync($"/api/runner/{runnerId}/unregister", null);
-    }
-
-    [Fact]
-    public async Task GetActivity_AppliesLimitAfterStableMergedOrdering()
-    {
-        var project = await CreateProjectAsync("activity-limit");
-        await SeedIssueAsync(project.Id, 1);
-        await AppendIssueEventAsync(project.Id, 1, "older", FixedTime.AddMinutes(-1));
-        await AppendIssueEventAsync(project.Id, 1, "newer", FixedTime.AddMinutes(1));
-
-        var all = await GetActivityAsync(project.Id, 200);
-        var first = await GetActivityAsync(project.Id, 1);
-        var second = await GetActivityAsync(project.Id, 1);
-
-        Assert.Single(first);
-        Assert.Equal(first, second);
-        Assert.Equal(all.Take(1), first);
-        Assert.True(all.FindIndex(entry => entry.EventType == "newer")
-            < all.FindIndex(entry => entry.EventType == "older"));
-    }
-
     [Theory]
     [InlineData(0)]
     [InlineData(201)]
@@ -120,20 +85,6 @@ public class ActivityEvidenceApiSpecs : ProjectEventsApiTestSupport
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("invalid_limit", body);
         Assert.Contains("between 1 and 200", body);
-    }
-
-    [Fact]
-    public async Task GetActivity_DefaultLimitIsOneHundred()
-    {
-        var project = await CreateProjectAsync("activity-default-limit");
-        await SeedIssueAsync(project.Id, 1);
-        await SeedIssueEventHistoryAsync(project.Id, 1, 105);
-
-        var all = await GetActivityAsync(project.Id, 200);
-        var result = await GetActivityAsync(project.Id);
-
-        Assert.Equal(100, result.Count);
-        Assert.Equal(all.Take(100), result);
     }
 
     private async Task SeedSnapshotSessionAsync(string projectId, string sessionId)
