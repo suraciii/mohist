@@ -205,7 +205,7 @@ public sealed class CredentialStoreTests
         var now = setup.Time.GetUtcNow();
         var credential = new Credential(
             "cred_session", "admin", CredentialKind.Session, TokenHash,
-            [Scope.Operator], Name: null, Prefix: null, now + TimeSpan.FromDays(7), RevokedAt: null, now);
+            [Scope.Operator], Name: null, Prefix: null, ProjectId: null, now + TimeSpan.FromDays(7), RevokedAt: null, now);
 
         await setup.Store.CreateAsync(credential);
 
@@ -232,6 +232,90 @@ public sealed class CredentialStoreTests
     }
 
     [Fact]
+    public async Task CreateIntegration_ReturnsTheFullTokenOnlyOnce_AndStoresProjectConstraint()
+    {
+        using var setup = CreateStore();
+
+        var result = await setup.Store.CreateIntegrationAsync("admin", "github-webhook", "proj_a");
+
+        Assert.Equal(IntegrationCreateStatus.Created, result.Status);
+        Assert.NotNull(result.Token);
+        Assert.StartsWith("moh_integration_", result.Token, StringComparison.Ordinal);
+        Assert.Equal(CredentialToken.DisplayPrefix(result.Token), result.Credential!.Prefix);
+        Assert.Equal(CredentialKind.Integration, result.Credential.Kind);
+        Assert.Equal(Scope.Webhook, Assert.Single(result.Credential.Scopes));
+        Assert.Equal("proj_a", result.Credential.ProjectId);
+        Assert.Null(result.Credential.ExpiresAt);
+        Assert.Null(result.Credential.RevokedAt);
+
+        // The full token is not persisted — only its hash, a short
+        // display prefix and the project constraint are.
+        var stored = await ReadRowAsync(setup.Connection, name: "github-webhook");
+        Assert.Equal(CredentialToken.Hash(result.Token), stored.TokenHash);
+        Assert.Equal(CredentialToken.DisplayPrefix(result.Token), stored.Prefix);
+        Assert.Equal("proj_a", stored.ProjectId);
+
+        var resolved = await setup.Store.FindActiveAsync(CredentialToken.Hash(result.Token));
+        Assert.NotNull(resolved);
+        Assert.Equal("proj_a", resolved.ProjectId);
+        Assert.Equal(Scope.Webhook, Assert.Single(resolved.Scopes));
+    }
+
+    [Fact]
+    public async Task CreateIntegration_WithAnActiveName_IsRejectedAsDuplicate()
+    {
+        using var setup = CreateStore();
+        await InsertAsync(setup.Connection, kind: "Integration", scopesJson: """["webhook"]""");
+
+        var result = await setup.Store.CreateIntegrationAsync("admin", "ci", "proj_a");
+
+        Assert.Equal(IntegrationCreateStatus.DuplicateName, result.Status);
+        Assert.Null(result.Token);
+    }
+
+    [Fact]
+    public async Task FindActive_ReturnsTheProjectConstraint_ForIntegrationRows()
+    {
+        using var setup = CreateStore();
+        await InsertAsync(
+            setup.Connection,
+            kind: "Integration",
+            scopesJson: """["webhook"]""",
+            name: "github-webhook",
+            projectId: "proj_a");
+
+        var credential = await setup.Store.FindActiveAsync(TokenHash);
+
+        Assert.NotNull(credential);
+        Assert.Equal(CredentialKind.Integration, credential.Kind);
+        Assert.Equal("proj_a", credential.ProjectId);
+        Assert.Equal(Scope.Webhook, Assert.Single(credential.Scopes));
+    }
+
+    [Fact]
+    public async Task RevokeIntegration_ById_SetsRevokedAt_AndIsIdempotent()
+    {
+        using var setup = CreateStore();
+        await InsertAsync(
+            setup.Connection,
+            kind: "Integration",
+            scopesJson: """["webhook"]""",
+            name: "github-webhook",
+            projectId: "proj_a",
+            id: "itok_victim");
+        var revokedAt = setup.Time.GetUtcNow();
+
+        var revoked = await setup.Store.RevokeIntegrationAsync("admin", "itok_victim", revokedAt);
+        var revokedAgain = await setup.Store.RevokeIntegrationAsync("admin", "itok_victim", revokedAt);
+
+        Assert.True(revoked);
+        Assert.True(revokedAgain);
+        var row = await ReadRowAsync(setup.Connection, name: "github-webhook");
+        Assert.Equal(revokedAt, row.RevokedAt);
+        Assert.Null(await setup.Store.FindActiveAsync(TokenHash));
+    }
+
+    [Fact]
     public async Task Revoke_UnknownOrAlreadyRevokedToken_ReturnsFalse()
     {
         using var setup = CreateStore();
@@ -244,9 +328,48 @@ public sealed class CredentialStoreTests
     }
 
     private static async Task<CredentialRow> ReadRowAsync(SqliteConnection connection)
+    public async Task RevokeIntegration_WithUnknownId_ReturnsFalse()
+    {
+        using var setup = CreateStore();
+
+        var revoked = await setup.Store.RevokeIntegrationAsync(
+            "admin", "missing", setup.Time.GetUtcNow());
+
+        Assert.False(revoked);
+    }
+
+    [Fact]
+    public async Task RevokeIntegration_OnlyAffectsTheMatchingIntegrationToken()
+    {
+        using var setup = CreateStore();
+        await InsertAsync(
+            setup.Connection,
+            kind: "Integration",
+            scopesJson: """["webhook"]""",
+            tokenHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            name: "victim",
+            id: "itok_victim");
+        await InsertAsync(
+            setup.Connection,
+            kind: "Integration",
+            scopesJson: """["webhook"]""",
+            tokenHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            name: "survivor",
+            id: "itok_survivor");
+
+        var revoked = await setup.Store.RevokeIntegrationAsync(
+            "admin", "itok_victim", setup.Time.GetUtcNow());
+
+        Assert.True(revoked);
+        Assert.Null(await setup.Store.FindActiveAsync("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        Assert.NotNull(await setup.Store.FindActiveAsync("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+    }
+
+    private static async Task<CredentialRow> ReadRowAsync(SqliteConnection connection, string name = "ci")
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT * FROM \"Credentials\" WHERE \"Name\" = 'ci';";
+        command.CommandText = "SELECT * FROM \"Credentials\" WHERE \"Name\" = $name;";
+        command.Parameters.AddWithValue("$name", name);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
         return new CredentialRow
@@ -261,6 +384,7 @@ public sealed class CredentialStoreTests
             ExpiresAt = reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7)),
             RevokedAt = reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
             CreatedAt = DateTimeOffset.Parse(reader.GetString(9)),
+            ProjectId = reader.IsDBNull(10) ? null : reader.GetString(10),
         };
     }
 
@@ -282,7 +406,8 @@ public sealed class CredentialStoreTests
                     "Prefix" TEXT NULL,
                     "ExpiresAt" TEXT NULL,
                     "RevokedAt" TEXT NULL,
-                    "CreatedAt" TEXT NOT NULL
+                    "CreatedAt" TEXT NOT NULL,
+                    "ProjectId" TEXT NULL
                 );
                 CREATE UNIQUE INDEX "IX_Credentials_TokenHash" ON "Credentials" ("TokenHash");
                 CREATE UNIQUE INDEX "IX_Credentials_PrincipalId_Name" ON "Credentials" ("PrincipalId", "Name") WHERE "RevokedAt" IS NULL;
@@ -307,14 +432,16 @@ public sealed class CredentialStoreTests
         DateTimeOffset? revokedAt = null,
         string tokenHash = TokenHash,
         string principalId = "admin",
-        string name = "ci")
+        string name = "ci",
+        string? projectId = null,
+        string? id = null)
     {
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO "Credentials" ("Id", "PrincipalId", "Kind", "TokenHash", "ScopesJson", "Name", "Prefix", "ExpiresAt", "RevokedAt", "CreatedAt")
-            VALUES ($id, $principalId, $kind, $tokenHash, $scopesJson, $name, $prefix, $expiresAt, $revokedAt, $createdAt);
+            INSERT INTO "Credentials" ("Id", "PrincipalId", "Kind", "TokenHash", "ScopesJson", "Name", "Prefix", "ExpiresAt", "RevokedAt", "CreatedAt", "ProjectId")
+            VALUES ($id, $principalId, $kind, $tokenHash, $scopesJson, $name, $prefix, $expiresAt, $revokedAt, $createdAt, $projectId);
             """;
-        command.Parameters.AddWithValue("$id", Guid.NewGuid().ToString("N"));
+        command.Parameters.AddWithValue("$id", id ?? Guid.NewGuid().ToString("N"));
         command.Parameters.AddWithValue("$principalId", principalId);
         command.Parameters.AddWithValue("$kind", kind);
         command.Parameters.AddWithValue("$tokenHash", tokenHash);
@@ -324,6 +451,7 @@ public sealed class CredentialStoreTests
         command.Parameters.AddWithValue("$expiresAt", (object?)expiresAt ?? DBNull.Value);
         command.Parameters.AddWithValue("$revokedAt", (object?)revokedAt ?? DBNull.Value);
         command.Parameters.AddWithValue("$createdAt", new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        command.Parameters.AddWithValue("$projectId", (object?)projectId ?? DBNull.Value);
         await command.ExecuteNonQueryAsync();
     }
 

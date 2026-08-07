@@ -1,8 +1,14 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Project.Services;
 using Xunit;
 using static Mohist.Server.UnitTests.Auth.AuthResolutionTestSupport;
 
@@ -12,6 +18,13 @@ public sealed class AuthResolutionMiddlewareTests
 {
     private const string AdminToken = AuthResolutionTestSupport.AdminToken;
     private const string ServiceToken = AuthResolutionTestSupport.ServiceToken;
+
+    // A read-only in-memory project catalog shared by the tests that
+    // exercise the integration project constraint; the resolver only
+    // ever SELECTs, so the shared connection cannot leak state between
+    // tests.
+    private static readonly ProjectResolverSetup Projects =
+        CreateProjectResolver(("proj_a", "alpha"), ("proj_b", "beta"));
 
     [Fact]
     public async Task BearerAdminToken_ResolvesTheAdminPrincipal()
@@ -155,6 +168,7 @@ public sealed class AuthResolutionMiddlewareTests
             "moh_pat_ab",
             null,
             null,
+            null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         var middleware = NewMiddleware(db);
         var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
@@ -180,6 +194,7 @@ public sealed class AuthResolutionMiddlewareTests
             [Scope.Runner],
             "spec",
             "moh_pat_ab",
+            null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -213,5 +228,379 @@ public sealed class AuthResolutionMiddlewareTests
 
         Assert.Equal(HttpStatusCode.OK, (HttpStatusCode)context.Response.StatusCode);
         Assert.False(context.Items.ContainsKey(MohistPrincipal.HttpContextItemKey));
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_ResolvesThePrincipalWithTheProjectConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "itok_1",
+            "admin",
+            CredentialKind.Integration,
+            CredentialToken.Hash(token),
+            [Scope.Webhook],
+            "github-webhook",
+            "moh_integration_ab",
+            "proj_a",
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        var middleware = NewMiddleware(db);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
+        Assert.Equal("proj_a", principal.ProjectId);
+        Assert.Equal(Scope.Webhook, Assert.Single(principal.Scopes));
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestForTheConstrainedProject_SatisfiesTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.RouteValues["projectRef"] = "proj_a";
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_a", resolution.ConstrainedProjectId);
+        Assert.Equal("proj_a", resolution.RequestProjectId);
+        Assert.True(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestForAnotherProject_DoesNotSatisfyTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.RouteValues["projectRef"] = "proj_b";
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_b", resolution.RequestProjectId);
+        Assert.False(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_ProjectInQueryParam_IsExtractedAndEvaluated()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.QueryString = new QueryString("?projectRef=proj_a");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_a", resolution.RequestProjectId);
+        Assert.True(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestWithoutAProject_NeverSatisfiesTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Null(resolution.RequestProjectId);
+        Assert.False(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task NonIntegrationCredential_RecordsNoProjectConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Pat);
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "pat_1",
+            "admin",
+            CredentialKind.Pat,
+            CredentialToken.Hash(token),
+            [Scope.Operator],
+            "ci",
+            "moh_pat_ab",
+            null,
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        var middleware = NewMiddleware(db);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.False(context.Items.ContainsKey(IntegrationProjectConstraint.ItemKey));
+        var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
+        Assert.Null(principal.ProjectId);
+    }
+
+    private static FakeCredentialStore NewIntegrationStore(string token, string projectId)
+    {
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "itok_1",
+            "admin",
+            CredentialKind.Integration,
+            CredentialToken.Hash(token),
+            [Scope.Webhook],
+            "github-webhook",
+            "moh_integration_ab",
+            projectId,
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        return db;
+    }
+
+    private static void AssertUnauthorized(HttpContext context)
+    {
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(context.Response.Headers.WWWAuthenticate));
+    }
+
+    private static string ReadBody(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    private static AuthResolutionMiddleware NewMiddleware(
+        FakeCredentialStore? db = null,
+        ProjectRefResolver? projects = null)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Mohist:AdminToken"] = AdminToken,
+                ["Mohist:OperatorToken"] = ServiceToken,
+            })
+            .Build();
+        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        var loader = new FileCredentialLoader(configuration, environment, new FakeFileStore());
+        return new AuthResolutionMiddleware(
+            loader,
+            db ?? new FakeCredentialStore(),
+            projects ?? Projects.Resolver);
+    }
+
+    private static ProjectResolverSetup CreateProjectResolver(params (string Id, string Name)[] projects)
+    {
+        var connection = new SqliteConnection($"Data Source=auth-middleware-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        connection.Open();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                CREATE TABLE "Projects" (
+                    "Id" TEXT NOT NULL CONSTRAINT "PK_Projects" PRIMARY KEY,
+                    "Name" TEXT NOT NULL,
+                    "RepositoriesJson" TEXT NOT NULL,
+                    "CreatedAt" TEXT NOT NULL,
+                    "UpdatedAt" TEXT NOT NULL,
+                    "RepositoryRevision" INTEGER NOT NULL,
+                    "LastRepositoryCommandJson" TEXT NULL
+                );
+                CREATE TABLE "ProjectWorkflowProfiles" (
+                    "ProjectId" TEXT NOT NULL CONSTRAINT "PK_ProjectWorkflowProfiles" PRIMARY KEY,
+                    "Variables" TEXT NOT NULL
+                );
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        foreach (var (id, name) in projects)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO "Projects" ("Id", "Name", "RepositoriesJson", "CreatedAt", "UpdatedAt", "RepositoryRevision", "LastRepositoryCommandJson")
+                VALUES ($id, $name, '[]', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', 0, NULL);
+                """;
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$name", name);
+            command.ExecuteNonQuery();
+        }
+
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connection));
+        var provider = services.BuildServiceProvider();
+        return new ProjectResolverSetup(
+            new ProjectRefResolver(new ProjectQuerier(
+                provider.GetRequiredService<IDbContextFactory<MohistDbContext>>())),
+            provider,
+            connection);
+    }
+
+    private sealed record ProjectResolverSetup(
+        ProjectRefResolver Resolver,
+        ServiceProvider Provider,
+        SqliteConnection Connection) : IDisposable
+    {
+        public void Dispose()
+        {
+            Provider.Dispose();
+            Connection.Dispose();
+        }
+    }
+
+    private static DefaultHttpContext NewContext(
+        Action<HttpRequest>? configure = null,
+        string path = "/api/projects")
+    {
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Method = HttpMethods.Get,
+                Path = path,
+            },
+        };
+        context.Response.Body = new MemoryStream();
+        configure?.Invoke(context.Request);
+        return context;
+    }
+
+    private sealed class FakeFileStore : IFileCredentialStore
+    {
+        public int CreateCount { get; private set; }
+
+        public string LoadOrCreateDefault(string path) =>
+            throw new InvalidOperationException("Tokens are always configured in these tests.");
+
+        public string ReadExplicit(string path) =>
+            throw new InvalidOperationException("Tokens are always configured in these tests.");
+    }
+
+    private sealed class FakeCredentialStore : ICredentialStore
+    {
+        // Models the documented ICredentialStore contract: rows that are
+        // missing, revoked, or expired are read as not-found.
+        private static readonly DateTimeOffset Now = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+        private readonly Dictionary<string, Credential> _byHash = new(StringComparer.Ordinal);
+
+        public void Add(Credential credential) => _byHash[credential.TokenHash] = credential;
+
+        public Task<Credential?> FindActiveAsync(string tokenHash, CancellationToken ct = default)
+        {
+            if (!_byHash.TryGetValue(tokenHash, out var credential)
+                || credential.RevokedAt is not null
+                || credential.ExpiresAt is { } expiresAt && expiresAt <= Now)
+            {
+                return Task.FromResult<Credential?>(null);
+            }
+
+            return Task.FromResult<Credential?>(credential);
+        }
+
+        public Task<PatCreateResult> CreatePatAsync(
+            string principalId,
+            string name,
+            IReadOnlyList<Scope> scopes,
+            DateTimeOffset expiresAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IReadOnlyList<Credential>> ListPatAsync(
+            string principalId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokePatAsync(
+            string principalId,
+            string name,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task CreateAsync(Credential credential, CancellationToken ct = default)
+        {
+            _byHash[credential.TokenHash] = credential;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default)
+        {
+            if (_byHash.TryGetValue(tokenHash, out var credential) && credential.RevokedAt is null)
+            {
+                _byHash[tokenHash] = credential with { RevokedAt = revokedAt };
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
+        }
+
+        public Task<EnrollmentTokenCreateResult> CreateEnrollmentTokenAsync(
+            DateTimeOffset expiresAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<EnrollmentTokenConsumeStatus> ConsumeEnrollmentTokenAsync(
+            string tokenHash,
+            DateTimeOffset now,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<RunnerCredentialCreateResult?> CreateRunnerCredentialAsync(
+            string principalId,
+            string runnerId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokeRunnerCredentialAsync(
+            string runnerId,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IntegrationCreateResult> CreateIntegrationAsync(
+            string principalId,
+            string name,
+            string projectId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokeIntegrationAsync(
+            string principalId,
+            string id,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
     }
 }
