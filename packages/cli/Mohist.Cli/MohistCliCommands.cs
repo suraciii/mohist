@@ -20,11 +20,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(SkillCommands.Build(provider));
         root.Subcommands.Add(RunCommands.Build(api));
         root.Subcommands.Add(WorkflowCommands.Build(api));
-        var environment = provider.GetService<IEnvironmentVariableProvider>()
-            ?? SystemEnvironmentVariableProvider.Instance;
-        var operatorCredential = provider.GetService<CliCredentialProvider>()
-            ?? new CliCredentialProvider(api.FileSystem, environment);
-        root.Subcommands.Add(EventCommands.Build(api, operatorCredential));
+        root.Subcommands.Add(EventCommands.Build(api));
         root.Subcommands.Add(ActivityCommands.Build(api));
         root.Subcommands.Add(RoutingCommands.Build(api));
         root.Subcommands.Add(WebhookCommands.Build(api));
@@ -32,7 +28,7 @@ internal static class MohistCliCommands
         root.Subcommands.Add(RepositoryCommands.Build(api));
         root.Subcommands.Add(IssueCommands.Build(api));
         root.Subcommands.Add(AgentCommands.Build(api));
-        root.Subcommands.Add(SlackCommands.Build(api, operatorCredential));
+        root.Subcommands.Add(SlackCommands.Build(api));
         root.Subcommands.Add(GithubCommands.Build(api));
         root.Subcommands.Add(SessionCommands.Build(api));
         root.Subcommands.Add(EpicCommands.Build(api));
@@ -186,6 +182,16 @@ internal static class MohistCliCommands
         getUserHome ??= fileSystem is RealFileSystem
             ? null
             : () => "/mohist-tests/user";
+        // Single injection point for the command credential: every request
+        // this client sends carries Authorization: Bearer when a credential
+        // is resolvable (CliCredentialHandler), regardless of which command
+        // originates it. The caller-supplied client remains the transport.
+        var credentials = new CliCredentialProvider(fileSystem, environment);
+        http = new HttpClient(new CliCredentialHandler(credentials, http))
+        {
+            BaseAddress = http.BaseAddress,
+            Timeout = http.Timeout,
+        };
         var terminal = terminalOverride ?? new CliTerminal(standardInput is null || standardInput == Console.In
             ? !Console.IsInputRedirected
             : standardInput != TextReader.Null);
@@ -210,7 +216,6 @@ internal static class MohistCliCommands
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
-        services.AddSingleton<CliCredentialProvider>();
         services.AddSingleton(http);
         // Production callers leave installer/updater null and the default
         // SystemdServiceInstaller / WindowsScheduledTaskInstaller and a default
