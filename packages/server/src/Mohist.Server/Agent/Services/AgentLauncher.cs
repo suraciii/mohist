@@ -376,7 +376,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return await LaunchIdempotentCoreAsync(
             admission.TargetAgent,
             prompt,
-            new AgentLaunchContext(projectId, WorkspacePath: admission.WorkDir),
+            new AgentLaunchContext(
+                projectId,
+                WorkspaceName: admission.ParentWorkspaceName,
+                WorkspacePath: admission.WorkDir),
             idempotencyKey,
             request,
             ct: ct,
