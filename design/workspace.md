@@ -63,11 +63,16 @@ Workspace 在 Origin 首次需要执行时被动态创建，没有独立的全�
   活跃绑定 session 时拒绝修改，错误给出停止会话或等待的下一步。
 - workflow 路径初始成员 = Issue 的 RepositoryName；复合 Issue 跨仓库交付经
   `repo add` 挂载（attach 时机见 Status 开放问题）。
+- 物化时 Runner 按 RepositoryNames 为 workspace 注入仓库访问凭据，与 workflow
+  prepare 复用同一注入通道（`GH_TOKEN` / git credential，见
+  [`github-integration.md`](github-integration.md)）；Agent 自助 clone 不感知凭据细节。
 
 ### 绑定与解析
 
 - workflow task dispatch：经 Issue 持有的 WorkspaceName 绑定。
 - root session 启动：经入口上下文解析 Origin → active workspace；无则动态创建。
+  Slack 路径的 workspace 归属被触发 Agent 的 Project；同一 channel 被不同 Project
+  的 Agent 使用时，各 Project 持有各自独立的 workspace。
 - 被邀请或被委托产生的 session：继承父 session（或所在入口）的 workspace。
 - 显式覆盖：`mo agent launch <agent> --workspace <name>` 把新 session 绑定到既有
   workspace（manual 场景的唯一显式入口）；省略 `--workspace` 时 session 不绑定任何
@@ -125,4 +130,6 @@ Runner 为绑定 workspace 的执行注入工作目录锚定段：绝对路径 +
   的旧教条。旧模型的 worktree 物化、WorkspaceRegistry 与终态回收语义由本模型
   重新承接：回收守卫改为上表，Registry 条目身份改为 WorkspaceName。
 - 开放问题：复合 Issue 多仓库 attach 的时机；workflow 干净初始化与现有
-  `workspace-prepare` action 的衔接；Slack channel 归档事件到 workspace 归档的接线。
+  `workspace-prepare` action 的衔接；Slack channel 归档事件到 workspace 归档的接线；
+  workspace 重新物化后绑定 session 的 Runtime Binding 重指语义；workspace 生命周期
+  事件（created / archived）进入事件协议谱系的事件集。
