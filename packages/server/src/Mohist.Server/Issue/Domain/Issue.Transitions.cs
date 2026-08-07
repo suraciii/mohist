@@ -148,13 +148,14 @@ public sealed partial class Issue
     }
 
     public void StartWorkflow(string wrId, DateTime? now = null) =>
-        StartWorkflow(wrId, repository: null, workspace: null, context: null, now);
+        StartWorkflow(wrId, repository: null, workspace: null, context: null, workspaceName: null, now);
 
     public void StartWorkflow(
         string wrId,
         IssueWorkStartedRepository? repository,
         IssueWorkStartedWorkspace? workspace,
         IssueWorkStartedContext? context,
+        string? workspaceName,
         DateTime? now = null)
     {
         if (_status == IssueStatus.Cancelled || _status == IssueStatus.Done)
@@ -162,6 +163,7 @@ public sealed partial class Issue
         if (_workflowRunId is not null)
             throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
         _workflowRunId = NormalizeOptional(wrId);
+        _workspaceName = NormalizeOptional(workspaceName);
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
         _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
@@ -170,7 +172,8 @@ public sealed partial class Issue
             wrId,
             repository,
             workspace,
-            context));
+            context,
+            workspaceName));
     }
 
     public IssueStartBlocker? StartBlocker(
@@ -197,7 +200,7 @@ public sealed partial class Issue
         IReadOnlySet<int>? undeliveredPrerequisites,
         DateTime? now = null,
         bool hasChildren = false) =>
-        Start(wrId, undeliveredPrerequisites, repository: null, workspace: null, context: null, now, hasChildren);
+        Start(wrId, undeliveredPrerequisites, repository: null, workspace: null, context: null, workspaceName: null, now, hasChildren);
 
     public void Start(
         string wrId,
@@ -205,6 +208,7 @@ public sealed partial class Issue
         IssueWorkStartedRepository? repository,
         IssueWorkStartedWorkspace? workspace,
         IssueWorkStartedContext? context,
+        string? workspaceName,
         DateTime? now = null,
         bool hasChildren = false)
     {
@@ -220,6 +224,7 @@ public sealed partial class Issue
             throw new InvalidOperationException($"Issue #{Number} already has workflow {_workflowRunId}");
 
         _workflowRunId = NormalizeOptional(wrId);
+        _workspaceName = NormalizeOptional(workspaceName);
         _status = IssueStatus.InProgress;
         _hasWorkflowStarted = true;
         _repositoryBindingRevision = NextRevision(_repositoryBindingRevision, null);
@@ -228,7 +233,8 @@ public sealed partial class Issue
             wrId,
             repository,
             workspace,
-            context));
+            context,
+            workspaceName));
     }
 
     public void ClearStoppedWorkflow(string workflowRunId, DateTime? now = null)
