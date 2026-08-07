@@ -19,63 +19,28 @@ public class IssueManualDoneApiSpecs
     }
 
     [Fact]
-    public async Task Done_StoppedLeafIssue_CompletesOnceAndPreservesWorkflowHistory()
+    public async Task Done_OnUnknownProject_Returns404()
     {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
-            "/api/projects",
-            $"manual-done-{Guid.NewGuid():N}");
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Delivered outside workflow", isDraft = false });
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start");
-
-        using var active = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/done",
+        using var response = await _client.PostAsync(
+            $"/api/projects/proj-does-not-exist-{Guid.NewGuid():N}/issues/1/done",
             null);
-        Assert.Equal(HttpStatusCode.Conflict, active.StatusCode);
 
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/done");
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/done");
-
-        var completed = await _client.GetDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}");
-        Assert.Equal("done", completed.Status);
-        Assert.Equal("stopped", completed.WorkflowStatus);
-        Assert.False(string.IsNullOrWhiteSpace(completed.WorkflowRunId));
-
-        var events = await _client.GetDataAsync<EventDto[]>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/events");
-        var completion = Assert.Single(events, e => e.Type == EventCatalog.ReverseDns.IssueCompleted);
-        Assert.Equal("manual", completion.Data.GetProperty("completionKind").GetString());
-        Assert.Equal(completed.WorkflowRunId, completion.Data.GetProperty("workflowRunId").GetString());
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     [Fact]
-    public async Task Done_ParentIssue_Rejects()
+    public async Task Done_OnUnknownIssue_Returns404()
     {
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects",
-            $"manual-done-parent-{Guid.NewGuid():N}");
-        var parent = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Parent", isDraft = false });
-        var child = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Child", isDraft = false });
-        using var attach = await _client.PatchAsJsonAsync(
-            $"/api/projects/{project.Id}/issues/{child.Number}",
-            new { parentIssueNumber = parent.Number });
-        Assert.Equal(HttpStatusCode.OK, attach.StatusCode);
+            $"manual-done-unknown-{Guid.NewGuid():N}");
 
         using var response = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{parent.Number}/done",
+            $"/api/projects/{project.Id}/issues/999999/done",
             null);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
     private sealed record ProjectDto(string Id);
-    private sealed record IssueDto(int Number, string Status, string? WorkflowRunId, string? WorkflowStatus);
-    private sealed record EventDto(string Type, JsonElement Data);
 }

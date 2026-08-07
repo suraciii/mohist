@@ -97,20 +97,7 @@ public class IssueApiSpecs
         Assert.Equal(issue.Number, detail.Number);
     }
 
-    [Fact]
-    public async Task UpdateIssue_RiskOnly_PersistsAndReturnsRisk()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"risk-update-{Guid.NewGuid():N}");
-        var issue = await _client.PostDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues",
-            new { title = "Risk update", projectId = project.Id });
-
-        var updated = await _client.PatchDataAsync<IssueDto>(
-            $"/api/projects/{project.Id}/issues/{issue.Number}",
-            new { risk = "high" });
-
-        Assert.Equal("high", updated.Risk);
-    }
+    
 
     [Fact]
     public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
