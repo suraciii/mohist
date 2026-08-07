@@ -53,6 +53,7 @@ CloudEvents 扩展属性名限小写字母数字。业务实体使用其唯一�
 - `projectid`：Project 的全局身份；
 - `issue`、`epic`：Project 内的 Issue / Epic 编号，也是它们的领域身份组成部分；
 - `workflowrunid`、`agentid`、`sessionid`、`runnerid`：各自的全局身份。
+- `workspace`：Project 内的 Workspace 名称（与 `projectid` 共同构成其唯一身份）；`workspaceoriginkind`：Workspace 创建来源类别（`manual` / `issue` / `slack` / `web`）。
 
 不同时携带 `issue` + `issueid` 或 `epic` + `epicid`。Issue 与 Epic 没有第二套内部 id，
 因此也没有 `issueno` / `epicno` 别名。
@@ -66,9 +67,14 @@ CloudEvents 扩展属性名限小写字母数字。业务实体使用其唯一�
 | `epic.*` | ✅ | ✅ | – | – | – | – | – |
 | `agent-session.*` | ✅ | 如 Workflow 来源且有 | 如 Workflow 来源 | 如 Workflow 来源 | 如 Agent 来源 | ✅ | – |
 | `runner.*` | 如有 | – | – | – | – | – | ✅ |
+| `workspace.*` | ✅ | – | 如有 | – | – | – | – |
 | `inbox.item-persisted` | ✅ | 原事件如有 | ✅ | 原事件如有 | – | – | – |
 
 「如有」= 生产时该归属存在则必印，不存在则省略（不印空值）。
+
+`workspace.*` 事件另印 `workspace`（Workspace 名称）与 `workspaceoriginkind`（`manual` /
+`issue` / `slack` / `web`）——Origin 是 Workspace 的解析键，订阅方按入口上下文
+（channel / 对话）响应时必须能按它过滤。
 
 任何结构化携带 Stage 的 Workflow 事件都另印 `stage`（包括 `workflow.stage.*`、
 `workflow.task.*`、`workflow.check.*` 与 `workflow.feedback.requested`）——渲染占位符
@@ -139,7 +145,7 @@ event.type == "com.mohist.issue.completed" && has(event.epic)
 ## Conformance
 
 - `EventCatalog` 只维护事件 type，不承担第二份谱系矩阵；
-- 生产规则按聚合事件族定义：WorkflowRun、Issue、Epic、AgentSession、Runner 各有一组
+- 生产规则按聚合事件族定义：WorkflowRun、Issue、Epic、AgentSession、Runner、Workspace 各有一组
   基础必填上下文；Inbox 派生事件继承原事件上下文；`stage` 由事件是否结构化携带 Stage
   决定，而不是手列 type 名称；
 - 一组 spec 测试遍历每个实际事件生产路径，按生产者事件族和事件结构断言信封。新增
@@ -150,5 +156,7 @@ event.type == "com.mohist.issue.completed" && has(event.epic)
 
 已实装：三轴信封与事件 catalog、业务谱系 stamping（各生产者 Lineage +
 ProducerConformance 覆盖事件生产路径）、CEL 子集求值器与用户侧路由求值、
-`stage` 属性提升。Issue / Epic 双身份与 `issueid` / `epicid` / `issueno` /
+`stage` 属性提升、workspace 创建/归档事件（`com.mohist.workspace.created` /
+`com.mohist.workspace.archived`，含 `workspace` 与 `workspaceoriginkind` 谱系）。
+Issue / Epic 双身份与 `issueid` / `epicid` / `issueno` /
 `epicno` 旧属性已随 issue #412 移除。

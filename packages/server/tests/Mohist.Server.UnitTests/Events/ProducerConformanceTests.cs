@@ -36,6 +36,14 @@ public sealed class ProducerConformanceTests
             EventProducerFamily.InboxItemPersisted,
             Extensions(("projectid", "proj"), ("issue", "42"), ("epic", "7"), ("workflowrunid", "run"), ("stage", "build")),
             new(ProjectId: "proj", Issue: "42", Epic: "7", WorkflowRunId: "run", Stage: "build"));
+        ProducerConformance.Assert(
+            EventProducerFamily.Workspace,
+            Extensions(("projectid", "proj"), ("workspace", "ws-a"), ("workspaceoriginkind", "manual")),
+            new(ProjectId: "proj", Workspace: "ws-a", WorkspaceOriginKind: "manual"));
+        ProducerConformance.Assert(
+            EventProducerFamily.Workspace,
+            Extensions(("projectid", "proj"), ("workspace", "issue-42"), ("workspaceoriginkind", "issue"), ("issue", "42")),
+            new(ProjectId: "proj", Workspace: "issue-42", WorkspaceOriginKind: "issue", Issue: "42"));
     }
 
     [Theory]
@@ -46,6 +54,8 @@ public sealed class ProducerConformanceTests
     [InlineData(EventProducerFamily.AgentJob, "agentid")]
     [InlineData(EventProducerFamily.Runner, "runnerid")]
     [InlineData(EventProducerFamily.InboxItemPersisted, "issue")]
+    [InlineData(EventProducerFamily.Workspace, "workspace")]
+    [InlineData(EventProducerFamily.Workspace, "workspaceoriginkind")]
     public void Assert_RejectsMissingRequiredContext(EventProducerFamily family, string missingKey)
     {
         var extensions = Extensions(
@@ -67,6 +77,7 @@ public sealed class ProducerConformanceTests
             EventProducerFamily.AgentJob => new ProducerLineageContext(AgentId: "agent"),
             EventProducerFamily.Runner => new ProducerLineageContext(RunnerId: "runner"),
             EventProducerFamily.InboxItemPersisted => new ProducerLineageContext(ProjectId: "proj", Issue: "42"),
+            EventProducerFamily.Workspace => new ProducerLineageContext(ProjectId: "proj", Workspace: "ws-a", WorkspaceOriginKind: "manual"),
             _ => throw new ArgumentOutOfRangeException(nameof(family)),
         };
 

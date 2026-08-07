@@ -9,6 +9,7 @@ public enum EventProducerFamily
     AgentJob,
     Runner,
     InboxItemPersisted,
+    Workspace,
 }
 
 public readonly record struct ProducerLineageContext(
@@ -20,6 +21,8 @@ public readonly record struct ProducerLineageContext(
     string? SessionId = null,
     string? RunnerId = null,
     string? Stage = null,
+    string? Workspace = null,
+    string? WorkspaceOriginKind = null,
     bool StageRequired = false,
     bool WorkflowOrigin = false);
 
@@ -113,6 +116,12 @@ public static class ProducerConformance
                 Optional(family, extensions, EventCatalog.Lineage.WorkflowRunId, context.WorkflowRunId);
                 Optional(family, extensions, EventCatalog.Lineage.Stage, context.Stage);
                 break;
+            case EventProducerFamily.Workspace:
+                Require(family, extensions, EventCatalog.Lineage.ProjectId, context.ProjectId);
+                Require(family, extensions, EventCatalog.Lineage.Workspace, context.Workspace);
+                Require(family, extensions, EventCatalog.Lineage.WorkspaceOriginKind, context.WorkspaceOriginKind);
+                Optional(family, extensions, EventCatalog.Lineage.Issue, context.Issue);
+                break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(family), family, null);
         }
@@ -181,7 +190,9 @@ public static class ProducerConformance
                 or EventCatalog.Lineage.Stage
                 or EventCatalog.Lineage.AgentId
                 or EventCatalog.Lineage.SessionId
-                or EventCatalog.Lineage.RunnerId)
+                or EventCatalog.Lineage.RunnerId
+                or EventCatalog.Lineage.Workspace
+                or EventCatalog.Lineage.WorkspaceOriginKind)
             {
                 if (string.IsNullOrWhiteSpace(extensions[key]))
                     Fail(family, $"canonical extension '{key}' is empty");

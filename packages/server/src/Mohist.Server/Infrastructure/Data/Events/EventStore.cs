@@ -152,6 +152,26 @@ public class EventStore : IEventStore
             return;
         }
 
+        if (WorkspaceEventPersistence.IsWorkspaceSource(source))
+        {
+            var nextSequence = await NextWorkspaceSequenceAsync(db, source, ct);
+            db.WorkspaceEvents.Add(new WorkspaceEventRow
+            {
+                Id = nextSequence,
+                Source = source,
+                TimelineSource = source,
+                EventId = envelope.Id,
+                Type = envelope.Type,
+                Time = envelope.Time,
+                SpecVersion = envelope.SpecVersion,
+                Subject = envelope.Subject,
+                DataContentType = envelope.DataContentType ?? "application/json",
+                Data = envelope.Data ?? JsonDocument.Parse("null").RootElement,
+                ExtensionsJson = SerializeExtensions(envelope.Extensions),
+            });
+            return;
+        }
+
         var workflowNextId = await NextWorkflowIdAsync(db, source, ct);
         db.WorkflowRunEvents.Add(new WorkflowRunEventRow
         {
@@ -248,6 +268,20 @@ public class EventStore : IEventStore
         return rows.Select(ToAgentJobStored).ToList();
     }
 
+    public async Task<IReadOnlyList<StoredCloudEvent>> ListWorkspaceEventsAsync(string projectId, string name, int limit = 200, CancellationToken ct = default)
+    {
+        var source = WorkspaceEventPersistence.WorkspaceSource(projectId, name);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var rows = await db.WorkspaceEvents.AsNoTracking()
+            .Where(e => e.TimelineSource == source)
+            .OrderByDescending(e => e.Id)
+            .Take(limit)
+            .OrderBy(e => e.Id)
+            .ToListAsync(ct);
+
+        return rows.Select(ToWorkspaceStored).ToList();
+    }
+
     public async Task MarkDispatchedAsync(
         EventOrigin origin,
         string source,
@@ -310,6 +344,14 @@ public class EventStore : IEventStore
                 row.DispatchedAt = dispatchedAt;
                 break;
             }
+            case EventOrigin.Workspace:
+            {
+                var row = await db.WorkspaceEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
+                if (row is null)
+                    throw new InvalidOperationException($"Workspace event '{source}'/{id} was not found.");
+                row.DispatchedAt = dispatchedAt;
+                break;
+            }
             case EventOrigin.WorkflowRun:
             {
                 var row = await db.WorkflowRunEvents.FirstOrDefaultAsync(e => e.Source == source && e.Id == id, ct);
@@ -351,6 +393,10 @@ public class EventStore : IEventStore
             SELECT 'Ingress' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
                    "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
             FROM "IngressEvents" WHERE "DispatchedAt" IS NULL
+            UNION ALL
+            SELECT 'Workspace' AS "Origin", "Id", "Source", "EventId", "Type", "Time",
+                   "SpecVersion", "Subject", "DataContentType", "Data", "ExtensionsJson"
+            FROM "WorkspaceEvents" WHERE "DispatchedAt" IS NULL
             ORDER BY "Source", "Id"
             LIMIT @limit
             """;
@@ -422,6 +468,18 @@ public class EventStore : IEventStore
             specVersion: row.SpecVersion,
             extensions: DeserializeExtensions(row.ExtensionsJson)));
 
+    private static StoredCloudEvent ToWorkspaceStored(WorkspaceEventRow row) =>
+        new(row.Id, new CloudEvent(
+            id: row.EventId,
+            source: new Uri(row.Source, UriKind.RelativeOrAbsolute),
+            type: row.Type,
+            time: row.Time,
+            data: row.Data,
+            dataContentType: row.DataContentType,
+            subject: row.Subject,
+            specVersion: row.SpecVersion,
+            extensions: DeserializeExtensions(row.ExtensionsJson)));
+
     private static string SerializeExtensions(IReadOnlyDictionary<string, string>? extensions) =>
         extensions is null ? "{}" : JsonSerializer.Serialize(extensions, CloudEvent.JsonOptions);
 
@@ -446,6 +504,9 @@ public class EventStore : IEventStore
 
     private static Task<long> NextIngressIdAsync(MohistDbContext db, string source, CancellationToken ct) =>
         NextIdAsync(db.IngressEvents, source, ct);
+
+    private static Task<long> NextWorkspaceSequenceAsync(MohistDbContext db, string source, CancellationToken ct) =>
+        NextIdAsync(db.WorkspaceEvents, source, ct);
 
     private static async Task<long> NextIdAsync<T>(DbSet<T> set, string source, CancellationToken ct)
         where T : class, IEventRow
@@ -498,6 +559,7 @@ private sealed class UndeliveredSqlRow
         "AgentSession" => EventOrigin.AgentSession,
         "AgentJob" => EventOrigin.AgentJob,
         "Ingress" => EventOrigin.Ingress,
+        "Workspace" => EventOrigin.Workspace,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 
