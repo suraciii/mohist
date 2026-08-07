@@ -43,7 +43,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string runnerId,
         string expectedSessionId)
     {
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
+            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
         // Assignment-prepared does not guarantee the dispatch has propagated to
         // the runner's poll endpoint; retry over a window (as PollAgentJobDispatchAsync
         // does) instead of a fixed two attempts, which flaked on slower CI runners.
@@ -60,7 +61,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected async Task<string> PollAgentJobDispatchAsync(string agentJobId, string runnerId)
     {
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
+            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
         var dispatch = (await TestWait.ForAsync(
             () => PollDispatchOnceAsync(runnerId, expectedSessionId: null, expectedAgentJobId: agentJobId),
             candidate => candidate is not null,
