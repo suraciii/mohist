@@ -91,3 +91,19 @@ Activity 不是一次工作的成功或失败结果。
 到外部系统交付时以独立 bot 身份出现，不冒用管理员。
 
 避免用法：用“用户”指代 service 或 agent 主体；用“登录”指代 Runner 或集成的凭据认证。
+
+## Workspace
+
+**Workspace**：Project 范围内持久存在的命名执行环境。它持有来源、仓库引用与
+归档状态，跨 AgentSession 与 WorkflowRun 存在；同一来源的多个会话与多个 Agent
+共享同一个 Workspace。目录内容与 git 组织不属于 Workspace 的定义。
+
+**Workspace 来源（Origin）**：Workspace 的创建来源与唯一解析键——一个 Issue、
+一个交互入口上下文（Slack channel、Web 对话）或一次显式创建。同一来源同时
+最多对应一个 active Workspace。
+
+**Workspace 物化（Materialization）**：Workspace 在某台 Runner 上的目录实例及其
+路由事实。物化位置决定后续执行的调度去向；目录可以被回收或随 Runner 丢失，
+重新物化从空目录开始，不是 Workspace 身份的变更。
+
+避免用法：用“worktree”“runner 目录”指代 Workspace 的身份；它们只是物化结果。
