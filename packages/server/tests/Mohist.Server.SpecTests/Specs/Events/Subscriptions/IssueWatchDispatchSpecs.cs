@@ -4,6 +4,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Events.Subscriptions;

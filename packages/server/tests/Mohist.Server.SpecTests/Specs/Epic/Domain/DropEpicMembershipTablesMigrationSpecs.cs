@@ -6,6 +6,7 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;
 using IssueStatus = Mohist.Server.Issue.Domain.IssueStatus;

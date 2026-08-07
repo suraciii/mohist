@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using Mohist.Cli;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;
 

@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Hosting;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using OpenTelemetry;
 using Xunit;
 

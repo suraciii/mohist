@@ -2,7 +2,7 @@ using System.Net;
 using System.Text;
 using EnvironmentAbstractions.TestHelpers;
 using Mohist.Cli;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.CliInfo;

@@ -16,7 +16,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.GitHub;
 using Mohist.Server.Workflow.Services;
 using Mohist.Workflow.Definition;

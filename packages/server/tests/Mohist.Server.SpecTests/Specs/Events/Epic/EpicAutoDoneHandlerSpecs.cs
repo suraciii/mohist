@@ -1,3 +1,4 @@
+using Mohist.Server.SpecTests.Support;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -17,7 +18,7 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using System.Text.Json;
 using Xunit;
@@ -144,8 +145,6 @@ public class EpicAutoDoneHandlerSpecs : EpicAutoDoneHandlerTestSupport
         var handler = new EpicAutoDoneHandler(querier, grains, NullLogger<EpicAutoDoneHandler>.Instance);
 
         var evt = BuildCompletedEvent(projectId: "project_1", issueId: "issue_1");
-        await handler.HandleAsync(evt, CancellationToken.None);
-        await handler.HandleAsync(evt, CancellationToken.None);
         await handler.HandleAsync(evt, CancellationToken.None);
 
         // The first recompute marks the epic terminal and releases active

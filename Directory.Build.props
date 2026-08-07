@@ -24,7 +24,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.BannedApiAnalyzers" PrivateAssets="all" GeneratePathProperty="true" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)eng/BannedSymbols.Product.txt" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)eng/BannedSymbols.Tests.txt"
-                     Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('Tests'))" />
+                     Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('Tests')) Or '$(MSBuildProjectName)' == 'Mohist.Server.TestSupport'" />
     <Compile Include="$(MSBuildThisFileDirectory)eng/TestTime.cs"
              Link="TestSupport/TestTime.cs"
              Condition="$([System.String]::Copy('$(MSBuildProjectName)').EndsWith('Tests'))" />

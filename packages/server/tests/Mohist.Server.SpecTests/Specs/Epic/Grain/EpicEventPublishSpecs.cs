@@ -2,7 +2,7 @@ using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Epic.Domain;
 using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using static Mohist.Server.SpecTests.Specs.Epic.Grain.EpicEventPublishTestSupport;
 

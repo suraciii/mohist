@@ -5,7 +5,7 @@ using Mohist.Server.Epic.Grains;
 using Mohist.Server.Epic.Services;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Domain;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 using static Mohist.Server.SpecTests.Specs.Epic.Grain.EpicEventPublishTestSupport;
 

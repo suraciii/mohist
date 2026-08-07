@@ -2,7 +2,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Runner.Subscriptions;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Domain.Run;
 using Xunit;
 

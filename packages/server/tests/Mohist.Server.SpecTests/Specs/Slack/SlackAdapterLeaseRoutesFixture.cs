@@ -10,6 +10,7 @@ using Mohist.Server.Infrastructure.Security.Secrets;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans.TestingHost;
 using Xunit;
 

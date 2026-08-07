@@ -6,7 +6,8 @@ using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.SpecTests.Support.TestData;
+using Mohist.Server.TestSupport;
+using Mohist.Server.TestSupport.TestData;
 using Orleans;
 using Xunit;
 
