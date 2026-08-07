@@ -343,6 +343,58 @@ public class TraceQuerierSpecs : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteBoundedQuery_ClientCancellation_InterruptsAndDisposesConnection()
+    {
+        // The caller-supplied token must interrupt active SQLite work
+        // through the same registration as the execution budget, and the
+        // read-only connection must be disposed on the way out.
+        var query = """
+            WITH RECURSIVE busy(value, filler) AS (
+                SELECT 1, randomblob(16777216)
+                UNION ALL
+                SELECT value + 1, randomblob(16777216) FROM busy WHERE value < 100000000
+            )
+            SELECT value FROM busy;
+            """;
+
+        using var cts = new CancellationTokenSource();
+        var execution = Task.Run(() => _querier.ExecuteBoundedQuery(query, cts.Token));
+        await _readerStarted.Task;
+        cts.Cancel();
+
+        var exception = await Record.ExceptionAsync(() => execution);
+
+        Assert.NotNull(exception);
+        Assert.True(
+            exception is OperationCanceledException
+                || exception is SqliteException { SqliteErrorCode: 9 },
+            $"Expected cancellation or SQLITE_INTERRUPT (9), got {exception}");
+        Assert.True(_queryInterrupted.Task.IsCompletedSuccessfully);
+        Assert.True(_connectionDisposed.Task.IsCompletedSuccessfully);
+    }
+
+    [Fact]
+    public async Task ExecuteBoundedQuery_WideColumnName_TruncatesAtByteLimit()
+    {
+        // The wide alias inflates the serialized column header, so the
+        // response hits the byte cap before the 1000-row cap.
+        const int aliasLength = 10_000;
+        const int cellBytes = 2 * 1024;
+        var alias = new string('\u0001', aliasLength);
+        var sql = "WITH RECURSIVE cnt(x) AS (" +
+                  "SELECT 1 UNION ALL SELECT x + 1 FROM cnt WHERE x < 1000) " +
+                  $"SELECT hex(randomblob({cellBytes / 2})) AS \"{alias}\" FROM cnt;";
+
+        var result = await _querier.ExecuteBoundedQuery(sql);
+
+        Assert.True(result.Truncated);
+        Assert.Equal(TraceQuerier.ByteLimitTruncateReason, result.TruncateReason);
+        Assert.True(result.Rows.Count > 0);
+        Assert.True(result.Rows.Count < TraceQuerier.MaxQueryResponseRows);
+        Assert.Equal(aliasLength, result.Columns[0].Length);
+    }
+
+    [Fact]
     public void ValidateSelectOnly_EmptyOrWhitespace_Rejects()
     {
         Assert.NotNull(TraceQuerier.ValidateSelectOnly(null));

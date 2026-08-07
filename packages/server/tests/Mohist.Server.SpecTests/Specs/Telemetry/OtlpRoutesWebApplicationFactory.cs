@@ -46,7 +46,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
     private readonly bool? _otelEnabled;
 
     public int OtlpPort { get; }
-    public FakeOtelQueryExecutor FakeQueryExecutor => Services.GetRequiredService<FakeOtelQueryExecutor>();
     public FakeTimeProvider TimeProvider { get; private set; } = null!;
 
     public OtlpRoutesWebApplicationFactory(
@@ -140,10 +139,6 @@ public class OtlpRoutesWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<TimeProvider>();
             TimeProvider = new FakeTimeProvider(new DateTimeOffset(2026, 7, 21, 0, 0, 0, TimeSpan.Zero));
             services.AddSingleton<TimeProvider>(TimeProvider);
-            services.RemoveAll<IOtelQueryExecutor>();
-            services.AddSingleton<FakeOtelQueryExecutor>();
-            services.AddSingleton<IOtelQueryExecutor>(provider =>
-                provider.GetRequiredService<FakeOtelQueryExecutor>());
             services.AddSingleton<OtlpRequestBodyReadProbe>();
             services.AddSingleton<IStartupFilter, OtlpRequestBodyProbeStartupFilter>();
         });
@@ -263,48 +258,4 @@ public sealed class OtlpRequestBodyProbeStartupFilter(OtlpRequestBodyReadProbe p
         });
         next(app);
     };
-}
-
-public sealed class FakeOtelQueryExecutor : IOtelQueryExecutor
-{
-    private readonly TraceQuerier _fallback;
-    private TaskCompletionSource<bool>? _block;
-
-    public FakeOtelQueryExecutor(TraceQuerier fallback)
-    {
-        _fallback = fallback;
-    }
-
-    public bool CancellationObserved { get; private set; }
-    public Task Blocked => _block?.Task ?? Task.CompletedTask;
-
-    public void BlockNextExecution()
-    {
-        _block = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        BlockStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        CancellationObserved = false;
-    }
-
-    public async Task<QueryResult> Execute(string sql, CancellationToken cancellationToken = default)
-    {
-        var block = Interlocked.Exchange(ref _block, null);
-        if (block is null)
-            return await _fallback.Execute(sql, cancellationToken);
-
-        try
-        {
-            BlockStarted.TrySetResult(true);
-            await block.Task.WaitAsync(cancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            CancellationObserved = true;
-            throw;
-        }
-
-        return new QueryResult([], [], false, null);
-    }
-
-    public TaskCompletionSource<bool> BlockStarted { get; private set; } =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
 }

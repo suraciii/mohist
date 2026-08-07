@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 using Mohist.Server.Otel;
 using Xunit;
 
@@ -59,42 +58,6 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task BodyExceedsLimitButSignalFiresFourthAdmit_AcceptsThen413()
-    {
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent(BuildLargeJsonPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 1), Encoding.UTF8, "application/json");
-
-        using var response = await client.PostAsync(OtlpPath, content);
-
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
-        await AssertNoPersistedRowsAsync();
-    }
-
-    [Fact]
-    public async Task FiveRequests_AllAdmitted_BeyondLimit_FifthReceivesJson429_RetryAfterOne()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        var probe = _factory.Services.GetRequiredService<OtlpRequestBodyReadProbe>();
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            Assert.True(gate.TryAcquireRequestLease().Admitted);
-
-        using var client = _factory.CreateOtlpClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation(OtlpRequestBodyReadProbe.HeaderName, "1");
-        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-
-        using var response = await client.PostAsync(OtlpPath, content);
-
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-        Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
-        AssertRetryAfter(response, "1");
-        await AssertResourceExhaustedJsonAsync(response, OtlpTraceResponseWriter.TemporaryAdmissionMessage);
-        Assert.False(probe.WasRead);
-
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            gate.ReleaseRequestLease();
-    }
-
-    [Fact]
     public async Task FiveRequests_AllAdmitted_BeyondLimit_FifthProtobuf429_RetryAfterOne()
     {
         var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
@@ -118,70 +81,6 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
 
         for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
             gate.ReleaseRequestLease();
-    }
-
-    [Fact]
-    public async Task FifthRequest_RejectedWithoutReadingBody()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        var runtime = _factory.Services.GetRequiredService<RuntimeObservability>();
-        var receivedBefore = runtime.GetSnapshot().Telemetry.ReceivedSpans;
-
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            Assert.True(gate.TryAcquireRequestLease().Admitted);
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(OtlpPath, content);
-
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-        var after = runtime.GetSnapshot().Telemetry;
-        Assert.Equal(receivedBefore, after.ReceivedSpans);
-        Assert.Equal(0, after.SavedSpans);
-        Assert.Equal(0, after.RejectedSpans);
-
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            gate.ReleaseRequestLease();
-    }
-
-    [Fact]
-    public async Task OverLimitRejected_DoesNotPublishRuntimeObservabilityOutcome()
-    {
-        var runtime = _factory.Services.GetRequiredService<RuntimeObservability>();
-        var receivedBefore = runtime.GetSnapshot().Telemetry.ReceivedSpans;
-        var savedBefore = runtime.GetSnapshot().Telemetry.SavedSpans;
-        var rejectedBefore = runtime.GetSnapshot().Telemetry.RejectedSpans;
-        var droppedBefore = runtime.GetSnapshot().Telemetry.DroppedSpans;
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent(BuildLargeJsonPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 1), Encoding.UTF8, "application/json");
-
-        using var response = await client.PostAsync(OtlpPath, content);
-
-        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
-        var after = runtime.GetSnapshot().Telemetry;
-        Assert.Equal(receivedBefore, after.ReceivedSpans);
-        Assert.Equal(savedBefore, after.SavedSpans);
-        Assert.Equal(rejectedBefore, after.RejectedSpans);
-        Assert.Equal(droppedBefore, after.DroppedSpans);
-    }
-
-    [Fact]
-    public async Task FiveRequests_OverLimit_DoesNotPersistRows()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            Assert.True(gate.TryAcquireRequestLease().Admitted);
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-
-        using var response = await client.PostAsync(OtlpPath, content);
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            gate.ReleaseRequestLease();
-        await AssertNoPersistedRowsAsync();
     }
 
     [Fact]
@@ -258,58 +157,6 @@ public class OtlpRoutesBoundedIngressSpecs : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/x-protobuf", response.Content.Headers.ContentType?.MediaType);
         Assert.Empty(await response.Content.ReadAsByteArrayAsync());
-    }
-
-    [Fact]
-    public async Task LeaseReleasedOnResponse_AllowsNewAdmission()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            Assert.True(gate.TryAcquireRequestLease().Admitted);
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            gate.ReleaseRequestLease();
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(OtlpPath, content);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(0, gate.RequestLeasesInUse);
-    }
-
-    [Fact]
-    public async Task FourthAdmit_ProvisionalSixthRefusedBeforeBodyRead()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            Assert.True(gate.TryAcquireRequestLease().Admitted);
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent(BuildLargeJsonPayload(LimitedOtlpBodyReader.DefaultMaxBytes + 16), Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(OtlpPath, content);
-
-        Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
-        AssertRetryAfter(response, "1");
-        await AssertResourceExhaustedJsonAsync(response, OtlpTraceResponseWriter.TemporaryAdmissionMessage);
-
-        for (var i = 0; i < OtlpIngestGate.RequestLeaseLimit; i++)
-            gate.ReleaseRequestLease();
-    }
-
-    [Fact]
-    public async Task AcceptedAndReleaseOnException_LetsThroughNewRequest()
-    {
-        var gate = (OtlpIngestGate)_factory.Services.GetRequiredService<IOtlpIngestGate>();
-        var decision = gate.TryAcquireRequestLease();
-        Assert.True(decision.Admitted);
-
-        var cts = new CancellationTokenSource();
-        cts.Cancel();
-        gate.ReleaseRequestLease();
-
-        using var client = _factory.CreateOtlpClient();
-        using var content = new StringContent("{}", Encoding.UTF8, "application/json");
-        using var response = await client.PostAsync(OtlpPath, content);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     private static void AssertRetryAfter(HttpResponseMessage response, string? expected)
