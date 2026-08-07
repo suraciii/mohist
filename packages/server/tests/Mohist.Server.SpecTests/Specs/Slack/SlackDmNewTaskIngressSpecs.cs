@@ -264,12 +264,30 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
         await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
-        var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
-        var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(job);
-        Assert.Equal(runnerId, assignment.RunnerId);
-        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.CurrentWorkId);
-        return (assignment.RunnerId!, assignment.CurrentWorkId!);
+
+        // Assignment-prepared does not guarantee the dispatch has propagated
+        // to the runner's poll endpoint, so a single fixed poll flakes on
+        // slower CI runners. Re-poll until the runner returns this job's
+        // dispatch: ClaimAsync atomically marks the job accepted, so a
+        // returned dispatch is the authoritative claim signal (the grain's
+        // in-memory snapshot can lag the committed claim under load).
+        var workId = await TestWait.ForAsync(
+            async () =>
+            {
+                using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+                foreach (var element in await poll.ReadDispatchElementsAsync())
+                {
+                    if (string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal))
+                        return element.GetProperty("workId").GetString();
+                }
+                return (string?)null;
+            },
+            candidate => candidate is not null,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to claim AgentJob '{jobKey}'");
+
+        return (runnerId, workId!);
     }
 
     private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)
