@@ -31,6 +31,8 @@ const AgentListPage = lazy(() => import('../pages/agent-list').then(({ AgentList
 const AgentDetailPage = lazy(() => import('../pages/agent-detail').then(({ AgentDetailPage }) => ({ default: AgentDetailPage })))
 const AgentSessionComposerPage = lazy(() => import('../pages/agent-session-composer').then(({ AgentSessionComposerPage }) => ({ default: AgentSessionComposerPage })))
 const ConnectionDiagnosticPage = lazy(() => import('../pages/connection-diagnostic').then(({ ConnectionDiagnosticPage }) => ({ default: ConnectionDiagnosticPage })))
+const WorkspacesPage = lazy(() => import('../pages/workspaces').then(({ WorkspacesPage }) => ({ default: WorkspacesPage })))
+const WorkspaceDetailPage = lazy(() => import('../pages/workspace-detail').then(({ WorkspaceDetailPage }) => ({ default: WorkspaceDetailPage })))
 
 export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { sessionPage?: ComponentType } = {}) {
   const { projectId, setProjectId, setProjects } = useProject()
@@ -81,6 +83,8 @@ export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { 
                   <Route path="archived" element={<ArchivedPage />} />
                   <Route path="epics" element={<EpicListPage />} />
                   <Route path="epics/:number" element={<EpicDetailPage />} />
+                  <Route path="workspaces" element={<WorkspacesPage />} />
+                  <Route path="workspaces/:name" element={<WorkspaceDetailPage />} />
                   <Route path="inbox" element={<InboxPage />} />
                   <Route path="insights" element={<InsightsPage />} />
                   <Route path="runners/:runnerId" element={<RunnerDetailPage />} />
