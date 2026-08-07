@@ -11,7 +11,9 @@ namespace Mohist.Server.SpecTests.Support;
 public enum LaunchParticipantGate
 {
     PrepareJob,
+    ReserveLink,
     EnsureInitialLaunch,
+    ParentLinkCommitted,
     SubmitJob,
 }
 
@@ -30,10 +32,13 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         new();
     private readonly ConcurrentDictionary<LaunchParticipantGate, ConcurrentQueue<string>> _commandIds =
         new();
+    private readonly ConcurrentDictionary<LaunchParticipantGate, ConcurrentQueue<string>> _participantIds =
+        new();
 
     public void FailNext(LaunchParticipantGate gate, int times = 1)
     {
         _commandIds.TryRemove(gate, out _);
+        _participantIds.TryRemove(gate, out _);
         if (times <= 0)
         {
             StopFailing(gate);
@@ -45,20 +50,36 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
     public void StopFailing(LaunchParticipantGate gate) =>
         _remaining.TryRemove(gate, out _);
 
+    public void ClearObservations()
+    {
+        _commandIds.Clear();
+        _participantIds.Clear();
+    }
+
     public IReadOnlyList<string> CommandIds(LaunchParticipantGate gate) =>
         _commandIds.TryGetValue(gate, out var commandIds) ? commandIds.ToArray() : [];
 
+    public IReadOnlyList<string> ParticipantIds(LaunchParticipantGate gate) =>
+        _participantIds.TryGetValue(gate, out var participantIds) ? participantIds.ToArray() : [];
+
     public Task OnPrepareJobAsync(string jobKey, string commandId) =>
-        RecordAndMaybeThrow(LaunchParticipantGate.PrepareJob, commandId);
+        RecordAndMaybeThrow(LaunchParticipantGate.PrepareJob, jobKey, commandId);
+
+    public Task OnReserveLinkAsync(string edgeId, string commandId) =>
+        RecordAndMaybeThrow(LaunchParticipantGate.ReserveLink, edgeId, commandId);
 
     public Task OnEnsureInitialLaunchAsync(string sessionId, string commandId) =>
-        RecordAndMaybeThrow(LaunchParticipantGate.EnsureInitialLaunch, commandId);
+        RecordAndMaybeThrow(LaunchParticipantGate.EnsureInitialLaunch, sessionId, commandId);
+
+    public Task OnParentLinkCommittedAsync(string edgeId, string commandId) =>
+        RecordAndMaybeThrow(LaunchParticipantGate.ParentLinkCommitted, edgeId, commandId);
 
     public Task OnSubmitJobAsync(string jobKey, string commandId) =>
-        RecordAndMaybeThrow(LaunchParticipantGate.SubmitJob, commandId);
+        RecordAndMaybeThrow(LaunchParticipantGate.SubmitJob, jobKey, commandId);
 
-    private Task RecordAndMaybeThrow(LaunchParticipantGate gate, string commandId)
+    private Task RecordAndMaybeThrow(LaunchParticipantGate gate, string participantId, string commandId)
     {
+        _participantIds.GetOrAdd(gate, _ => new()).Enqueue(participantId);
         _commandIds.GetOrAdd(gate, _ => new()).Enqueue(commandId);
         while (_remaining.TryGetValue(gate, out var current) && current > 0)
         {

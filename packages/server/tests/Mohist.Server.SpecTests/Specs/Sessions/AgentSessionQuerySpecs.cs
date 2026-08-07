@@ -77,6 +77,48 @@ public class AgentSessionQuerySpecs
     }
 
     [Fact]
+    public async Task ProvisionalLaunch_IsHiddenFromDefaultSessionQueries()
+    {
+        using var database = TestSqliteDatabase.CreateMigrated();
+        var fixture = new TestDbContextFactory(database.Options);
+        var state = JsonSerializer.Serialize(new
+        {
+            id = "s_provisional",
+            metadata = new
+            {
+                labels = new Dictionary<string, string>
+                {
+                    [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
+                    [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                    [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
+                },
+            },
+            runtime = new { runnerId = "runner-provisional", workDir = "/workspace" },
+            settings = new { },
+            status = new { createdAt = TimeProvider.GetUtcNow().UtcDateTime },
+        }, JSON.Options);
+        await using (var db = fixture.CreateDbContext())
+        {
+            db.AgentSessions.Add(new AgentSessionRow
+            {
+                Id = "s_provisional",
+                State = state,
+                Status = "opened",
+                CreatedAt = TimeProvider.GetUtcNow().UtcDateTime,
+                LaunchVisibility = "provisional",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var query = new AgentSessionQuery(fixture, TimeProvider);
+        Assert.Empty(await query.ListByIdsAsync(["s_provisional"]));
+        Assert.Empty(await query.ListByLabelsAsync(new Dictionary<string, string>
+        {
+            [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
+        }));
+    }
+
+    [Fact]
     public async Task QueryByAgentName_ResolvesToSameSetAsAgentId()
     {
         using var database = TestSqliteDatabase.CreateMigrated();

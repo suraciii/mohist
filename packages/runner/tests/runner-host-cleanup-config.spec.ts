@@ -1,6 +1,6 @@
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => {
       budgetRemoved: 0,
       guardAborted: 0,
       stuckResolved: 0,
+      deferred: 0,
       workspaceUsageBytes: null,
     },
     blockedPaths: null,
@@ -132,6 +133,7 @@ function resetState() {
     budgetRemoved: 0,
     guardAborted: 0,
     stuckResolved: 0,
+    deferred: 0,
     workspaceUsageBytes: null,
   }
   mocks.state.blockedPaths = null
@@ -287,6 +289,7 @@ describe("RunnerHost idle-system cleanup", () => {
       budgetRemoved: 0,
       guardAborted: 0,
       stuckResolved: 0,
+      deferred: 0,
       workspaceUsageBytes: 200_000,
     }
 
@@ -330,6 +333,7 @@ describe("RunnerHost idle-system cleanup", () => {
       budgetRemoved: 0,
       guardAborted: 0,
       stuckResolved: 0,
+      deferred: 0,
       workspaceUsageBytes: null,
     }
 
@@ -377,6 +381,7 @@ describe("RunnerHost idle-system cleanup", () => {
       budgetRemoved: 0,
       guardAborted: 0,
       stuckResolved: 0,
+      deferred: 0,
       workspaceUsageBytes: 100_000,
     }
 
@@ -566,6 +571,61 @@ describe("RunnerHost idle-system cleanup", () => {
     // Five consecutive ticks issue five independent GETs to /config.
     expect(mocks.state.fetchConfigCalls).toHaveLength(5)
     expect(mocks.state.cleanupCalls).toHaveLength(5)
+
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+  })
+
+  it("EligibleAgentWorktree_RunsTheAgentCleanupLoopAlongsideTheWorkflowLoop", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+    const hostEvents = configureHost()
+    const cleanupEvents = observeCleanupTicks()
+    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    // Seed an eligible agent worktree entry so the host's gate admits
+    // the agent cleanup loop on every tick.
+    const agentWorkspacesFile = join(root, ".mohist", "runner-state", "agent-workspaces.json")
+    await mkdir(dirname(agentWorkspacesFile), { recursive: true })
+    const childSessionId = "00000000000000000000000000000001"
+    await writeFile(agentWorkspacesFile, JSON.stringify({
+      version: 1,
+      entries: {
+        [childSessionId]: {
+          childSessionId,
+          projectId: "project-1",
+          workspaceIdentity: `agent-wt:${childSessionId}`,
+          workspacePath: join(root, "agent-workspaces", childSessionId),
+          branch: `mohist/wt-${childSessionId}`,
+          parentWorkDir: join(root, "workspaces", "wr-1"),
+          repositoryName: "main",
+          phase: "eligible",
+          materializedAt: "2026-01-01T00:00:00.000Z",
+          terminalAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    }))
+
+    const RunnerHost = await importHost()
+    const controller = new AbortController()
+    const host = new RunnerHost(defaultOptions())
+    const run = host.run(controller.signal)
+
+    await waitForHostStartup(hostEvents)
+    const collected: CleanupCall[] = []
+    for (let tick = 0; tick < 2; tick += 1) {
+      // One timer tick runs the agent pass and the workflow pass
+      // back to back, so wait for both before advancing again.
+      const agentCall = cleanupEvents.cleanupCalls.next()
+      const workflowCall = cleanupEvents.cleanupCalls.next()
+      await advanceFetchTick(cleanupEvents)
+      collected.push(await agentCall, await workflowCall)
+    }
+
+    // One agent pass + one workflow pass per tick, both with the same
+    // freshly fetched policy.
+    expect(mocks.state.cleanupCalls).toHaveLength(4)
+    for (const call of collected) {
+      expect(call.policy).toEqual({ retentionDays: 7 })
+    }
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()

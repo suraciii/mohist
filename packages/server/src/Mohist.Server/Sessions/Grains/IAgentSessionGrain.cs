@@ -59,7 +59,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentTurnCancelResult> CancelQueuedTurnAsync(string turnId);
     Task CancelTurnAsync(string turnId);
 
-    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId);
+    Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null);
     Task MarkTurnStopDispatchedAsync(string turnId, string operationId);
     Task AbandonUndispatchedTurnStopAsync(string turnId, string operationId);
     Task CompleteTurnStopAsync(string turnId, string operationId);
@@ -68,6 +68,16 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentTurnControlState?> ResolveCurrentTurnControlAsync();
 
     Task<AgentSessionInfo?> GetAsync();
+
+    /// <summary>
+    /// Lean read for the runner-owned activity query. Returns
+    /// <c>null</c> when the session does not exist so the caller can
+    /// report <c>not-found</c>. Carries the durable idle timestamp, the
+    /// launch visibility (to classify a not-yet-promoted launch as
+    /// <c>pending</c>), and the bound runner / project so the route can
+    /// authorize the caller in a single grain read.
+    /// </summary>
+    Task<AgentSessionActivityState?> GetActivityStateAsync();
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
 
@@ -83,6 +93,15 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     /// dispatch with the durable session artifacts.
     /// </summary>
     Task<EnsureInitialLaunchResult> EnsureInitialLaunchAsync(EnsureInitialLaunchCommand command);
+    Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command);
+    Task<ApplyParentLinkAttachResult> ApplyParentLinkAttachAsync(ApplyParentLinkAttachCommand command);
+    Task<AcquireChildAttachBindingResult> AcquireChildAttachBindingAsync(AcquireChildAttachBindingCommand command);
+    Task<ReleaseChildAttachBindingResult> ReleaseChildAttachBindingAsync(ReleaseChildAttachBindingCommand command);
+    Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(ClaimSubagentTerminalReportCommand command);
+    Task<RecordSubagentTerminalReportDeliveredResult> RecordSubagentTerminalReportDeliveredAsync(RecordSubagentTerminalReportDeliveredCommand command);
+    Task<ApplyParentLinkDetachResult> ApplyParentLinkDetachAsync(ApplyParentLinkDetachCommand command);
+    Task PromoteProvisionalLaunchAsync();
+    Task AbortProvisionalLaunchAsync(string jobId, string turnId, string reason);
 
     /// <summary>
     /// Mark the initial turn for the given job id as executing.
@@ -105,6 +124,39 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<IReadOnlyList<AgentTurnRecord>> ListTurnsAsync();
 
+    /// <summary>
+    /// Create a scheduled input (or replay an existing schedule for the
+    /// same idempotency key). Idempotent by
+    /// <c>(ProjectId, SessionId, IdempotencyKey)</c>: same normalized body
+    /// returns the original schedule, different body throws
+    /// <see cref="ScheduleIdempotencyConflictException"/>. A due time not
+    /// strictly after the injected clock throws
+    /// <see cref="ScheduleDueInPastException"/>.
+    /// </summary>
+    Task<CreateSessionScheduleResult> CreateScheduleAsync(CreateSessionScheduleCommand command);
+
+    /// <summary>
+    /// All schedules of this session ordered by <see cref="SessionScheduleRecord.DueAt"/> ascending.
+    /// </summary>
+    Task<IReadOnlyList<SessionScheduleRecord>> ListSchedulesAsync();
+
+    /// <summary>
+    /// Cancel a schedule by target state: <c>scheduled</c> / <c>pending-delivery</c>
+    /// advance to <c>cancelled</c>; <c>delivered</c> / <c>cancelled</c> return the
+    /// current record unchanged. Unknown schedule id throws
+    /// <see cref="ScheduleNotFoundException"/>.
+    /// </summary>
+    Task<CancelSessionScheduleResult> CancelScheduleAsync(CancelSessionScheduleCommand command);
+
+    /// <summary>
+    /// Deterministic recovery seam for scheduled-input delivery: scans this
+    /// session's non-terminal schedules, delivers everything due (or still
+    /// pending delivery) through the same idempotent follow-up path, and
+    /// re-registers reminders. Driven by the recovery reminder; tests call it
+    /// directly with a fake clock instead of waiting on real reminder timers.
+    /// </summary>
+    Task RunScheduledInputRecoveryAsync();
+
 }
 
 [GenerateSerializer]
@@ -114,7 +166,9 @@ public sealed record OpenAgentSessionCommand(
     [property: Id(2)] string? WorkDir = null,
     [property: Id(3)] string? Model = null,
     [property: Id(4)] AgentSessionMetadata? Metadata = null,
-    [property: Id(5)] AgentExecutionDefinition? Definition = null);
+    [property: Id(5)] AgentExecutionDefinition? Definition = null,
+    [property: Id(6)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(7)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible);
 
 [GenerateSerializer]
 public sealed record AttachPhysicalSessionCommand(
@@ -193,7 +247,8 @@ public sealed record CompactAgentSessionCommand(
 public sealed record ResetAgentSessionCommand(
     [property: Id(0)] string? ExpectedRuntimeSessionId,
     [property: Id(1)] string ReplacementRuntimeSessionId,
-    [property: Id(2)] string ReplacementRuntime = "opencode");
+    [property: Id(2)] string ReplacementRuntime = "opencode",
+    [property: Id(3)] long? ExpectedBindingEpoch = null);
 
 [GenerateSerializer]
 public sealed record CompleteResetAgentSessionCommand(
@@ -282,7 +337,33 @@ public sealed record AgentSessionInfo(
     [property: Id(20)] int? ToolCallCount,
     [property: Id(21)] int? ToolErrorCount,
     [property: Id(22)] string? Runtime,
-    [property: Id(23)] long? CachedWriteTokens);
+    [property: Id(23)] long? CachedWriteTokens,
+    [property: Id(24)] long BindingEpoch = 0,
+    /// <summary>
+    /// Durable Project Repository workspace source, if any. <c>null</c>
+    /// for sessions without a Project-backed source; otherwise carries
+    /// the immutable snapshot and the <c>unconfirmed/confirmed/rejected</c>
+    /// state advanced by the Runner first-execution report. Append-only
+    /// Orleans field id.
+    /// </summary>
+    [property: Id(25)] WorkspaceRepository? WorkspaceRepository = null);
+
+/// <summary>
+/// Lean activity projection of an <see cref="AgentSession"/> for the
+/// runner-owned activity query. Carries the current activity, the
+/// durable idle timestamp, the launch visibility, and the bound
+/// runner / project label so the route can both classify the session
+/// (active / idle+idleSince / pending / unknown) and authorize the
+/// caller in a single grain read. <c>null</c> from the grain means the
+/// session does not exist (not-found). Append-only Orleans field ids.
+/// </summary>
+[GenerateSerializer]
+public sealed record AgentSessionActivityState(
+    [property: Id(0)] AgentSessionActivity Activity,
+    [property: Id(1)] DateTime? IdleSince,
+    [property: Id(2)] AgentLaunchVisibility LaunchVisibility,
+    [property: Id(3)] string? RunnerId,
+    [property: Id(4)] string? ProjectId);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(
@@ -347,7 +428,18 @@ public sealed record EnsureInitialLaunchCommand(
     /// Append-only Orleans field id (next free after
     /// <see cref="Provenance"/>).
     /// </summary>
-    [property: Id(10)] AgentStartupContext? StartupContext = null);
+    [property: Id(10)] AgentStartupContext? StartupContext = null,
+    [property: Id(11)] AgentExecutionDefinition? Definition = null,
+    [property: Id(12)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible,
+    /// <summary>
+    /// Confirmed Project Repository source for a managed-worktree child.
+    /// Set by the spawn coordinator after materialization succeeds so the
+    /// child AgentSession owns a confirmed source without a Runner
+    /// first-execution check (the worktree is materialized from a confirmed
+    /// parent). Absent for inherit spawns and non-spawn launches.
+    /// </summary>
+    [property: Id(14)] WorkspaceRepositorySnapshot? ConfirmedWorkspaceRepository = null);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(
@@ -355,6 +447,20 @@ public sealed record EnsureInitialLaunchResult(
     [property: Id(1)] string InputId,
     [property: Id(2)] string TurnId,
     [property: Id(3)] bool AlreadyPersisted);
+
+[GenerateSerializer]
+public sealed record EnsureParentLinkCommand(
+    [property: Id(0)] SessionParentLink Link,
+    [property: Id(1)] string? ExpectedWorkDir,
+    [property: Id(2)] string? ExpectedRunnerId,
+    [property: Id(3)] string? ExpectedRuntime,
+    [property: Id(4)] string? ExpectedRuntimeSessionId);
+
+[GenerateSerializer]
+public sealed record EnsureParentLinkResult(
+    [property: Id(0)] string SessionId,
+    [property: Id(1)] string EdgeId,
+    [property: Id(2)] bool AlreadyPersisted);
 
 [GenerateSerializer]
 public sealed record AgentInitialLaunchSnapshot(
@@ -385,3 +491,30 @@ public sealed record RecordFollowupTurnCommand(
     /// </summary>
     [property: Id(4)] IReadOnlyList<AgentSessionInputAttachmentDescriptor>? Attachments = null,
     [property: Id(5)] AgentSessionInputProvenance? Provenance = null);
+
+/// <summary>
+/// Command body for <see cref="IAgentSessionGrain.CreateScheduleAsync"/>.
+/// <see cref="DueAt"/> must be an offset RFC 3339 instant strictly after
+/// the injected clock; the grain stores its UTC instant. An omitted
+/// <see cref="IdempotencyKey"/> mints a fresh key (no cross-request
+/// dedup); an explicit key makes creation replayable per the contract.
+/// </summary>
+[GenerateSerializer]
+public sealed record CreateSessionScheduleCommand(
+    [property: Id(0)] string Text,
+    [property: Id(1)] DateTimeOffset DueAt,
+    [property: Id(2)] string? IdempotencyKey = null);
+
+[GenerateSerializer]
+public sealed record CreateSessionScheduleResult(
+    [property: Id(0)] SessionScheduleRecord Schedule,
+    [property: Id(1)] bool AlreadyExists);
+
+[GenerateSerializer]
+public sealed record CancelSessionScheduleCommand(
+    [property: Id(0)] string ScheduleId);
+
+[GenerateSerializer]
+public sealed record CancelSessionScheduleResult(
+    [property: Id(0)] SessionScheduleRecord Schedule,
+    [property: Id(1)] bool AlreadyTerminal);

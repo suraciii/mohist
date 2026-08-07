@@ -40,7 +40,8 @@ public static class AgentDefinitionRoutes
                     req.Instructions,
                     req.AgentConfig?.Clone(),
                     req.Skills,
-                    req.MaxConcurrentRuns));
+                    req.MaxConcurrentRuns,
+                    req.AllowedSubagentAgentIds));
                 return Results.Json(new ApiResponse<AgentInfo>(true, created), statusCode: 201);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -106,7 +107,8 @@ public static class AgentDefinitionRoutes
                     req.AgentConfig?.Clone(),
                     req.Skills,
                     req.MaxConcurrentRuns,
-                    req.Fields));
+                    req.Fields,
+                    req.AllowedSubagentAgentIds));
                 return updated is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(updated);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -170,7 +172,8 @@ public sealed record AgentCreateRequest(
     string? Description = null,
     JsonElement? AgentConfig = null,
     IReadOnlyList<string>? Skills = null,
-    int? MaxConcurrentRuns = null);
+    int? MaxConcurrentRuns = null,
+    IReadOnlyList<string>? AllowedSubagentAgentIds = null);
 
 public sealed record AgentUpdateRequest(
     string? Name,
@@ -179,6 +182,7 @@ public sealed record AgentUpdateRequest(
     JsonElement? AgentConfig,
     IReadOnlyList<string>? Skills,
     int? MaxConcurrentRuns,
+    IReadOnlyList<string>? AllowedSubagentAgentIds,
     IReadOnlySet<string> Fields,
     JsonElement Raw)
 {
@@ -192,6 +196,7 @@ public sealed record AgentUpdateRequest(
             GetElement(raw, "agentConfig"),
             GetStringList(raw, "skills"),
             GetInt(raw, "maxConcurrentRuns"),
+            GetStringList(raw, "allowedSubagentAgentIds"),
             GetFields(raw),
             raw);
     }
@@ -206,6 +211,7 @@ public sealed record AgentUpdateRequest(
         if (raw.TryGetProperty("agentConfig", out _)) fields.Add(nameof(AgentConfig));
         if (raw.TryGetProperty("skills", out _)) fields.Add(nameof(Skills));
         if (raw.TryGetProperty("maxConcurrentRuns", out _)) fields.Add(nameof(MaxConcurrentRuns));
+        if (raw.TryGetProperty("allowedSubagentAgentIds", out _)) fields.Add(nameof(AllowedSubagentAgentIds));
         return fields;
     }
 

@@ -103,7 +103,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         {
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
-                || State.PendingTerminalDeliveryEvent is not null)
+                || State.PendingTerminalDeliveryEvent is not null
+                || State.PendingSubagentTerminalEvent is not null)
             {
                 await EnsureRecoveryReminderAsync();
                 if (State.PendingSessionClose is not null)
@@ -112,6 +113,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                     await EmitFailureEventAsync(State.PendingFailureEvent);
                 if (State.PendingTerminalDeliveryEvent is not null)
                     await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+                if (State.PendingSubagentTerminalEvent is not null)
+                    await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             }
             return;
         }
@@ -293,6 +296,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await DeliverTerminalToSessionAsync(State.PendingSessionClose);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingSubagentTerminalEvent is not null)
+                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             return new AgentJobReportResult(false, "stale");
         }
 
@@ -629,6 +634,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
 
         State.ManualPlan = command;
+        State.LaunchVisibility = command.AgentSessionStartup?.ParentSessionId is null
+            ? AgentLaunchVisibility.Visible
+            : AgentLaunchVisibility.Provisional;
         var input = BuildManualInput(command);
         State.AgentConfigJson = SerializeAgentConfig(command.AgentConfig);
         State.Input = input with { AgentConfig = null };
@@ -650,6 +658,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (State.Input is null)
             throw new InvalidOperationException(
                 $"AgentJob '{Key}' manual launch plan has no input to submit.");
+        if (State.LaunchVisibility != AgentLaunchVisibility.Visible)
+            throw new InvalidOperationException("AgentJob launch is not visible and must not submit.");
         if (IsTerminal)
             return;
         if (!State.LaunchReady)
@@ -658,6 +668,58 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             await PersistAsync();
         }
         await TryAdmitAsync();
+    }
+
+    public async Task PromotePreparedLaunchAsync()
+    {
+        await HydrateAsync();
+        if (State.LaunchVisibility == AgentLaunchVisibility.Rejected)
+            throw new InvalidOperationException("Rejected AgentJob launch cannot be promoted.");
+        if (State.LaunchVisibility == AgentLaunchVisibility.Visible)
+            return;
+        State.LaunchVisibility = AgentLaunchVisibility.Visible;
+        await PersistAsync();
+    }
+
+    public async Task UpdatePreparedWorkspaceAsync(string? workspacePath, AgentSessionStartup? startup)
+    {
+        await HydrateAsync();
+        if (State.ManualPlan is null || State.Input is null)
+            return;
+        if (State.LaunchVisibility != AgentLaunchVisibility.Provisional)
+            return;
+        var nextStartup = startup ?? State.ManualPlan.AgentSessionStartup;
+        if (string.Equals(State.ManualPlan.WorkspacePath, workspacePath, StringComparison.Ordinal)
+            && Equals(State.ManualPlan.AgentSessionStartup, nextStartup))
+            return;
+        var updated = State.ManualPlan with
+        {
+            WorkspacePath = workspacePath,
+            AgentSessionStartup = nextStartup,
+        };
+        State.ManualPlan = updated;
+        State.Input = BuildManualInput(updated);
+        await PersistAsync();
+    }
+
+    public async Task AbortPreparedLaunchAsync(string reason)
+    {
+        await HydrateAsync();
+        if (State.ManualPlan is null && State.Input is null)
+            return;
+        if (State.LaunchVisibility == AgentLaunchVisibility.Rejected && IsTerminal)
+            return;
+        State.LaunchVisibility = AgentLaunchVisibility.Rejected;
+        await EnterTerminalStateAsync(
+            AgentJobStatus.Cancelled,
+            exitCode: null,
+            failureReason: reason,
+            failureCategory: null,
+            pendingReason: reason,
+            message: "cancelled",
+            output: null,
+            artifactUploadIds: null,
+            terminalExitCode: null);
     }
 
     public Task MarkUnknownAsync(string reason) => EnterUnknownStateAsync(reason);
@@ -737,7 +799,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             InitialTurnId: command.TurnId,
             Attachments: command.Attachments,
             StartupContext: command.StartupContext,
-            SlackExecutionContext: SlackExecutionContextFor(command));
+            SlackExecutionContext: SlackExecutionContextFor(command),
+            AllowedSubagents: command.AllowedSubagents,
+            PinnedRunnerId: command.PinnedRunnerId,
+            AgentSessionStartup: command.AgentSessionStartup,
+            SpawnOrigin: command.SpawnOrigin);
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
     {
@@ -806,7 +872,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 input.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 input.Model,
                 input.Variant,
-                input.Skills ?? []);
+                input.Skills ?? [],
+                input.AllowedSubagents);
 
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
@@ -821,6 +888,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         && JsonEquals(left.AgentConfig, right.AgentConfig)
         && AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)
         && Equals(left.StartupContext, right.StartupContext)
+        && Equals(left.AllowedSubagents, right.AllowedSubagents)
+        && string.Equals(left.PinnedRunnerId, right.PinnedRunnerId, StringComparison.Ordinal)
+        && Equals(left.AgentSessionStartup, right.AgentSessionStartup)
         && Equals(left.SlackExecutionContext, right.SlackExecutionContext);
 
     private static string DescribeInputDifferences(AgentJobInput left, AgentJobInput right)
@@ -837,6 +907,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (!string.Equals(left.Variant, right.Variant, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Variant));
         if (!JsonEquals(left.AgentConfig, right.AgentConfig)) fields.Add(nameof(AgentJobInput.AgentConfig));
         if (!AttachmentDescriptorsEquivalent(left.Attachments, right.Attachments)) fields.Add(nameof(AgentJobInput.Attachments));
+        if (!Equals(left.AllowedSubagents, right.AllowedSubagents)) fields.Add(nameof(AgentJobInput.AllowedSubagents));
+        if (!string.Equals(left.PinnedRunnerId, right.PinnedRunnerId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.PinnedRunnerId));
+        if (!Equals(left.AgentSessionStartup, right.AgentSessionStartup)) fields.Add(nameof(AgentJobInput.AgentSessionStartup));
         if (!Equals(left.SlackExecutionContext, right.SlackExecutionContext)) fields.Add(nameof(AgentJobInput.SlackExecutionContext));
         return string.Join(", ", fields);
     }
@@ -883,6 +956,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task TryAdmitAsync()
     {
+        if (State.LaunchVisibility != AgentLaunchVisibility.Visible)
+            return;
         if (State.Status != AgentJobStatus.Pending || State.Input is null || State.SubmittedAt is null)
             return;
 
@@ -890,10 +965,23 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         // admission succeeded), the next claim race is owned by the
         // poll path. Re-admitting here would clobber ReadySince and
         // extend the deadline; only re-admit when no runner was found.
+        var pinnedRunnerId = State.Input.PinnedRunnerId;
         if (!string.IsNullOrWhiteSpace(State.RunnerId)
             && !string.IsNullOrWhiteSpace(_ledger?.DispatchJson)
             && !string.IsNullOrWhiteSpace(State.WorkId))
         {
+            if (!string.IsNullOrWhiteSpace(pinnedRunnerId)
+                && !string.Equals(State.RunnerId, pinnedRunnerId, StringComparison.Ordinal))
+            {
+                State.RunnerId = null;
+                State.WorkId = null;
+                State.RunnerAccepted = false;
+                State.RunningSince = null;
+                State.ReadySince = null;
+                await PersistAsync();
+            }
+            else
+            {
             var assignedRunner = GrainFactory.GetGrain<IRunnerGrain>(State.RunnerId);
             if ((await assignedRunner.GetRuntimeStateAsync()).Status == RunnerStatus.Online)
                 return;
@@ -903,6 +991,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.RunningSince = null;
             State.ReadySince = null;
             await PersistAsync();
+            }
         }
 
         if (!await AcquireConcurrencyPermitAsync())
@@ -912,6 +1001,18 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await PersistAsync();
 
         var projectId = State.Input.ProjectId ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(pinnedRunnerId))
+        {
+            State.WaitingReason = null;
+            if (!await TryAdmitOnRunnerAsync(pinnedRunnerId))
+            {
+                State.WaitingReason = AgentAvailabilityWaitReasons.NoOnlineRunner;
+                await ReleaseConcurrencyPermitAsync();
+                await PersistAsync();
+            }
+            return;
+        }
+
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         var runners = await registry.ListEligibleRunnersAsync(projectId);
         if (runners.Count == 0)
@@ -1055,7 +1156,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             IssueNumber: State.Input?.IssueNumber,
             AgentSessionId: State.Input?.AgentSessionId,
             InitialInputId: State.Input?.InitialInputId,
-            InitialTurnId: State.Input?.InitialTurnId);
+            InitialTurnId: State.Input?.InitialTurnId,
+            PinnedRunnerId: State.Input?.PinnedRunnerId,
+            LaunchVisibility: State.LaunchVisibility.ToString().ToLowerInvariant());
 
         if (_ledger is null)
         {
@@ -1167,7 +1270,10 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AgentSessionId: string.IsNullOrWhiteSpace(input.AgentSessionId) ? null : input.AgentSessionId,
             AgentId: input.AgentId,
             InitialInputId: string.IsNullOrWhiteSpace(input.InitialInputId) ? null : input.InitialInputId,
-            InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId);
+            InitialTurnId: string.IsNullOrWhiteSpace(input.InitialTurnId) ? null : input.InitialTurnId,
+            AgentDefinition: ExecutionDefinitionFrom(input),
+            PinnedRunnerId: input.PinnedRunnerId,
+            AgentSessionStartup: input.AgentSessionStartup);
     }
 
     private static WorkDispatch? DeserializeDispatch(string? json)
@@ -1277,7 +1383,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             State.PendingSessionClose ??= pending;
             if (State.PendingSessionClose is not null
                 || State.PendingFailureEvent is not null
-                || State.PendingTerminalDeliveryEvent is not null)
+                || State.PendingTerminalDeliveryEvent is not null
+                || State.PendingSubagentTerminalEvent is not null)
                 await EnsureRecoveryReminderAsync();
             await PersistAsync();
             if (State.PendingSessionClose is not null)
@@ -1286,6 +1393,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitFailureEventAsync(State.PendingFailureEvent);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingSubagentTerminalEvent is not null)
+                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             return;
         }
 
@@ -1309,6 +1418,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             failureCategory,
             artifactUploadIds,
             terminalExitCode ?? exitCode);
+        StageSubagentTerminalEvent(terminalStatus);
 
         if (terminalStatus == AgentJobStatus.Failed)
         {
@@ -1338,6 +1448,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             await EmitFailureEventAsync(State.PendingFailureEvent);
         if (State.PendingTerminalDeliveryEvent is not null)
             await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+        if (State.PendingSubagentTerminalEvent is not null)
+            await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
     }
 
     private async Task MarkInitialTurnExecutingAsync()
@@ -1361,7 +1473,11 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (string.IsNullOrWhiteSpace(sessionId) || string.IsNullOrWhiteSpace(State.Input?.InitialTurnId))
             return;
 
-        await _grains.GetGrain<IAgentSessionGrain>(sessionId).MarkTurnTerminalAsync(
+        var sessionGrain = _grains.GetGrain<IAgentSessionGrain>(sessionId);
+        if (await sessionGrain.GetAsync() is null)
+            return;
+
+        await sessionGrain.MarkTurnTerminalAsync(
             State.Input!.InitialTurnId!,
             status switch
             {
@@ -1506,7 +1622,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     {
         State.PendingSessionClose = null;
         await PersistAsync();
-        if (State.PendingFailureEvent is not null || State.PendingTerminalDeliveryEvent is not null)
+        if (State.PendingFailureEvent is not null
+            || State.PendingTerminalDeliveryEvent is not null
+            || State.PendingSubagentTerminalEvent is not null)
             return;
         try
         {
@@ -1564,6 +1682,43 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
+    private void StageSubagentTerminalEvent(AgentJobStatus status)
+    {
+        if (status is not (AgentJobStatus.Completed or AgentJobStatus.Failed or AgentJobStatus.Cancelled)
+            || State.Input?.SpawnOrigin is null
+            || State.LaunchVisibility != AgentLaunchVisibility.Visible
+            || State.PendingSubagentTerminalEvent is not null)
+            return;
+
+        // Only an accepted (visible) delegation owes a terminal callback;
+        // a provisional or rejected launch was never attached to a parent
+        // SessionParentLink, so a cancelled job here must stay silent.
+        State.PendingSubagentTerminalEvent = new PendingSubagentTerminalEvent(
+            AgentJobSessionDeliveryIds.SubagentTerminalEventId(Key),
+            State.Input.SpawnOrigin,
+            status,
+            $"agent-job:{Key}",
+            _timeProvider.GetUtcNow());
+    }
+
+    private async Task EmitSubagentTerminalEventAsync(PendingSubagentTerminalEvent pending)
+    {
+        try
+        {
+            await _eventStore.AppendAsync(BuildSubagentTerminalEnvelope(pending), CancellationToken.None);
+            EventDispatcherPoke.PokeAfterCommit(GrainFactory, _log, nameof(AgentJobGrain), _backgroundTasks);
+            State.PendingSubagentTerminalEvent = null;
+            await PersistAsync();
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "AgentJob {Id} subagent terminal event is retained for retry", Key);
+        }
+    }
+
+    internal CloudEvent BuildSubagentTerminalEnvelope(PendingSubagentTerminalEvent pending) =>
+        AgentJobLineage.BuildSubagentTerminalEnvelope(Key, pending);
+
     internal CloudEvent BuildTerminalDeliveryEnvelope(PendingTerminalDeliveryEvent obligation)
     {
         var extensions = AgentJobLineage.BuildExtensions(State.Input, State.RoutedPlan);
@@ -1592,9 +1747,12 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 await EmitFailureEventAsync(State.PendingFailureEvent);
             if (State.PendingTerminalDeliveryEvent is not null)
                 await EmitTerminalDeliveryEventAsync(State.PendingTerminalDeliveryEvent);
+            if (State.PendingSubagentTerminalEvent is not null)
+                await EmitSubagentTerminalEventAsync(State.PendingSubagentTerminalEvent);
             if (State.PendingSessionClose is null
                 && State.PendingFailureEvent is null
-                && State.PendingTerminalDeliveryEvent is null)
+                && State.PendingTerminalDeliveryEvent is null
+                && State.PendingSubagentTerminalEvent is null)
             {
                 await UnregisterSelfAsync(reminderName);
                 return;
@@ -1690,6 +1848,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         _state.SubmittedAt ??= record.ReadySince;
         _state.ReadySince ??= record.ReadySince;
         _state.RunningSince ??= record.RunningSince;
+        if (Enum.TryParse<AgentLaunchVisibility>(record.LaunchVisibility, true, out var visibility))
+            _state.LaunchVisibility = visibility;
         _hydrated = true;
     }
 
@@ -1719,7 +1879,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             IssueNumber: State.Input?.IssueNumber,
             AgentSessionId: State.Input?.AgentSessionId,
             InitialInputId: State.Input?.InitialInputId,
-            InitialTurnId: State.Input?.InitialTurnId);
+            InitialTurnId: State.Input?.InitialTurnId,
+            PinnedRunnerId: State.Input?.PinnedRunnerId,
+            LaunchVisibility: State.LaunchVisibility.ToString().ToLowerInvariant());
 
         if (_ledger is null)
         {

@@ -1,0 +1,81 @@
+{
+  // Test-duration policy. Drives scripts/test-duration/guard.ts.
+  // See design/testing.md "Test-duration guard" for the full model.
+  //
+  // Hard constraints per enforced track (all FAIL, never warnings):
+  //   - unit:  p95 <= 50ms (population, "most are fast") AND per-test <= 500ms.
+  //   - spec:  p95 <= 500ms (population) AND per-test <= 5s (design/testing.md hard cap).
+  //   - arch:  per-test <= 500ms only (structural; no p95 — design/testing.md
+  //            separates Architecture tests as their own category).
+  // A test over its per-test cap FAILS unless listed below as governed
+  // governance: identity + observed baseline + reason + owner + removal
+  // deadline. p95 cannot be allowlisted away. On the deadline the entry
+  // expires and the guard fails until the test is optimized or renewed.
+  //
+  // Full suite 5-minute deadline (suiteDeadlineMs); per-track hard deadlines
+  // via a Node-spawned subprocess kill (cross-platform; never the Linux
+  // `timeout` binary as the only executor). Tracks with enforce=false are
+  // deadline-governed only (baseline-pending) — explicit status, not a warning.
+  //
+  // Allowlist entries are real >cap exact identities (no class/glob exemptions).
+  "suiteDeadlineMs": 300000,
+  "killGraceMs": 5000,
+  "tracks": [
+    { "id": "mohist-slack", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/mohist-slack","--","--reporter=json","--outputFile={report}"], "report": "reports/mohist-slack.json", "reportFormat": "vitest", "deadlineMs": 30000, "enforce": true, "rules": [
+        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+      ]
+    },
+    { "id": "runner", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": true, "rules": [
+        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [
+          { "id": "RunnerHost idle-system cleanup FetchesConfigOnEachCleanupTick_AndRunsEviction_WhenPollStays204", "observedMs": 1041.8, "reason": "cleanup tick runs eviction against a poll-stays-204 path; optimize or move behind a fake clock signal", "owner": "runner", "deadline": "2026-09-30" }
+          ] }
+      ]
+    },
+    { "id": "workflow-def", "kind": "dotnet-vstest", "csproj": "packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj", "report": "reports/workflow-def.trx", "reportFormat": "trx", "deadlineMs": 30000, "enforce": true, "rules": [
+        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+      ]
+    },
+    { "id": "cli", "kind": "dotnet-apphost", "csproj": "packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj", "report": "reports/cli.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+        { "id": "spec", "namePattern": "Specs\\.", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] },
+        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [] }
+      ]
+    },
+    { "id": "web", "kind": "vitest", "run": ["npm","run","test:run","-w","packages/web","--","--reporter=json","--outputFile={report}"], "report": "reports/web.json", "reportFormat": "vitest", "deadlineMs": 180000, "enforce": false, "status": "baseline-pending", "reason": "large suite; ratchet pending a baseline capture run"
+    },
+    { "id": "server-unit", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj", "apphostArgs": ["-parallel", "none"], "report": "reports/server-unit.trx", "reportFormat": "trx", "deadlineMs": 90000, "enforce": true, "rules": [
+        { "id": "unit", "absoluteMs": 500, "percentile": 95, "percentileMs": 50, "allowlist": [
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncFansOutToEveryMatchingSubscription", "observedMs": 951.4, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Agent.Services.ProjectRecentEventReaderTests.ListAsyncFiltersProjectOrdersNewestFirstAndBoundsResults", "observedMs": 2034.2, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Issue.Services.AttachmentServiceValidateAndBindAgentInputTests.ValidateAndBindAgentInput_RejectsNotReadableAttachment", "observedMs": 952.1, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Security.AesGcmSecretStoreTests.StoreAsync_ThrowsArgumentException_OnEmptyProjectId", "observedMs": 914.1, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowRunWorkProjectionTests.ReadsReturnProjectionValuesWithoutSelectingState", "observedMs": 1750.5, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Issue.Services.AttachmentServiceIngestProviderFileTests.IngestProviderFileAsync_CreatesPendingRowWithStampedSourceAndPersistedBytes", "observedMs": 976.3, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncRecordsFailureAndContinuesWithOtherMatchingSubscriptions", "observedMs": 948.7, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Issue.Services.AttachmentServiceAgentInputTests.BindAgentInputAsync_StoredRecordExposesUserMetadataAndOmitsCallerSecrets", "observedMs": 832.2, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncDeliversOnlySelectedEventTypes", "observedMs": 773.6, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncAppliesCustomHeaderAuthFromSecretStore", "observedMs": 548.5, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncPostsStructuredCloudEventAndSignsWhenSubscriptionHasSecret", "observedMs": 3328.2, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Webhooks.WebhookDispatchHandlerTests.HandleAsyncOmitsSignatureForNoSecretAndSkipsNonMatchingSubscription", "observedMs": 814.6, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Slack.SlackThreadSessionMappingStoreTests.UpsertAsync_ThrowsOnEmptyArguments", "observedMs": 760.1, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Workflow.Storage.DispatchSnapshotStoreTests.SaveFirstAsync_OnSecondCallForSameAttempt_ReturnsFirstStoredUnchanged", "observedMs": 754.8, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Slack.SlackThreadLaunchReservationStoreTests.ReserveAsync_AllowsOnlyOneLaunchAndRecognizesRedelivery", "observedMs": 688.7, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" },
+          { "id": "Mohist.Server.UnitTests.Slack.SlackDmSessionMappingStoreTests.Upsert_AdvancesUpdatedAtFromTimeProvider", "observedMs": 682.6, "reason": "test over 500ms absolute cap; optimize or split", "owner": "server", "deadline": "2026-09-30" }
+          ] }
+      ]
+    },
+    { "id": "server-spec", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj", "report": "reports/server-spec.trx", "reportFormat": "trx", "deadlineMs": 240000, "enforce": true, "rules": [
+        { "id": "spec", "absoluteMs": 5000, "percentile": 95, "percentileMs": 500, "allowlist": [] }
+      ]
+    },
+    { "id": "server-arch", "kind": "dotnet-apphost", "csproj": "packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj", "report": "reports/server-arch.trx", "reportFormat": "trx", "deadlineMs": 60000, "enforce": true, "rules": [
+        { "id": "arch", "absoluteMs": 500, "allowlist": [
+          { "id": "Mohist.Server.ArchTests.ArchitectureRules.Migrations_AreInInfrastructureData", "observedMs": 5257.4, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
+          { "id": "Mohist.Server.ArchTests.ArchitectureRules.DbContexts_AreInInfrastructureData", "observedMs": 5085.2, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
+          { "id": "Mohist.Server.ArchTests.CommentReferenceRules.ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline", "observedMs": 3336.9, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" }
+          ] }
+      ]
+    },
+    { "id": "runner-integration", "kind": "vitest", "run": ["npm","run","test:integration","-w","packages/runner","--","--reporter=json","--outputFile={report}"], "report": "reports/runner-integration.json", "reportFormat": "vitest", "deadlineMs": 90000, "enforce": false, "status": "baseline-pending", "reason": "integration track; ratchet pending a baseline capture run"
+    }
+  ]
+}

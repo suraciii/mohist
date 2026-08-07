@@ -121,5 +121,6 @@ public class AgentQuerier : IScopedService
         agent.MaxConcurrentRuns,
         agent.Status,
         agent.CreatedAt.ToString("o"),
-        agent.UpdatedAt.ToString("o"));
+        agent.UpdatedAt.ToString("o"),
+        AllowedSubagentAgentIds: agent.AllowedSubagentAgentIds);
 }

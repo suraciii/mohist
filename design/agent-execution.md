@@ -147,6 +147,10 @@ RuntimeBinding
 以下是不变量：
 
 - `Id`、`Source` 与 `WorkDir` 在 AgentSession 生命周期内不变。
+- Session parentage is an optional `SessionParentLink` owned separately from immutable `Source`.
+  It can only be established for a newly launched child Session and later detached; it never turns
+  an Agent launch Source into another Source. The complete tree contract is
+  [`subagents.md`](subagents.md).
 - `CurrentBinding` 是当前路由事实，可以整体替换；AgentSession 不保存物理 Session 历史。
 - `Transcript` 是一个按 AgentSession 顺序追加的会话记录，不按物理 Session 或其它
   子实体拆分。
@@ -234,6 +238,10 @@ binding 历史。首次从无 binding 建立物理 Session 时不写该事实。
 空闲 Session 收到 Follow-up 时开始新的 Turn。执行中的 Session 在 Runtime 支持时把输入加入
 当前 Turn，否则按顺序等待后续 Turn；`unknown` 时拒绝新输入并先核对状态。API 的同步结果
 只确认 Input 是否已被 Mohist 接受，不能假装 Runtime 已经完成处理。
+
+定时输入是到点才投递的一次性 follow-up：Server 在到期时经同一受理路径把一条普通
+`SessionInput` 追加给目标会话，不创建新输入类别、调度器或 Session 终态。完整契约见
+[`subagents.md`](subagents.md) 的「定时输入」节。
 
 Follow-up 命令只需要三种同步结果：
 

@@ -92,6 +92,17 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// belongs to a different plan.
     /// </summary>
     Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
+    Task PromotePreparedLaunchAsync() => Task.CompletedTask;
+    /// <summary>
+    /// Update the prepared manual launch's workspace path after a
+    /// managed-worktree materialization resolves the child workDir.
+    /// Idempotent no-op before the manual plan exists or after the
+    /// launch is promoted/terminal; only mutates a still-provisional
+    /// prepared plan so the dispatch envelope carries the materialized
+    /// workDir.
+    /// </summary>
+    Task UpdatePreparedWorkspaceAsync(string? workspacePath, AgentSessionStartup? startup) => Task.CompletedTask;
+    Task AbortPreparedLaunchAsync(string reason) => Task.CompletedTask;
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
     /// Used when a Runner disconnect, a status
@@ -165,7 +176,20 @@ public sealed record PrepareManualLaunchCommand(
     /// capability existed. Append-only Orleans field id (next free
     /// after <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(17)] AgentStartupContext? StartupContext = null);
+    [property: Id(17)] AgentStartupContext? StartupContext = null,
+    [property: Id(18)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(19)] string? PinnedRunnerId = null,
+    [property: Id(20)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(21)] AgentJobSpawnOrigin? SpawnOrigin = null);
+
+[GenerateSerializer]
+public sealed record AgentJobSpawnOrigin(
+    [property: Id(0)] string ParentSessionId,
+    [property: Id(1)] string ParentAgentId,
+    [property: Id(2)] string EdgeId,
+    [property: Id(3)] string ChildSessionId,
+    [property: Id(4)] string ChildLaunchJobId,
+    [property: Id(5)] string InitialTurnId);
 
 [GenerateSerializer]
 public sealed record PendingTerminalDeliveryEvent(
@@ -179,6 +203,14 @@ public sealed record PendingTerminalDeliveryEvent(
     [property: Id(8)] int? ExitCode,
     [property: Id(9)] DateTimeOffset RecordedAt,
     [property: Id(10)] string? Output = null);
+
+[GenerateSerializer]
+public sealed record PendingSubagentTerminalEvent(
+    [property: Id(0)] string EventId,
+    [property: Id(1)] AgentJobSpawnOrigin Origin,
+    [property: Id(2)] AgentJobStatus Status,
+    [property: Id(3)] string ResultReference,
+    [property: Id(4)] DateTimeOffset RecordedAt);
 
 [GenerateSerializer]
 public sealed record AgentJobReportResult(
@@ -267,6 +299,9 @@ public static class AgentJobSessionDeliveryIds
 
     public static string TerminalDeliveryEventId(string jobKey) =>
         $"agent-job:{jobKey}:terminal-delivery";
+
+    public static string SubagentTerminalEventId(string jobKey) =>
+        $"agent-job:{jobKey}:subagent-terminal";
 }
 
 public static class AgentJobFailureReasons
@@ -541,7 +576,11 @@ public sealed record AgentJobInput(
     /// <see cref="Attachments"/>).
     /// </summary>
     [property: Id(17)] AgentStartupContext? StartupContext = null,
-    [property: Id(18)] AgentSlackExecutionContext? SlackExecutionContext = null);
+    [property: Id(18)] AgentSlackExecutionContext? SlackExecutionContext = null,
+    [property: Id(19)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(20)] string? PinnedRunnerId = null,
+    [property: Id(21)] AgentSessionStartup? AgentSessionStartup = null,
+    [property: Id(22)] AgentJobSpawnOrigin? SpawnOrigin = null);
 
 [GenerateSerializer]
 public sealed record AgentJobTerminalResult(

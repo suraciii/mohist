@@ -769,7 +769,7 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
-    public async Task AgentLaunch_ForwardsExplicitIdempotencyKeyAndPrintsAllReferences()
+    public async Task AgentLaunch_ForwardsExplicitIdempotencyKeyAndPrintsReferences()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
@@ -800,11 +800,21 @@ public class CliAgentCommandSpecs
         Assert.Single(handler.Requests);
         Assert.Equal("retry-1", handler.Requests[0].Headers["Idempotency-Key"].Single());
         var text = output.ToString();
-        Assert.Contains("job-1", text);
-        Assert.Contains("session-1", text);
-        Assert.Contains("input-1", text);
-        Assert.Contains("turn-1", text);
-        Assert.Contains("/observation", text);
+        Assert.Contains("job-1", text, StringComparison.Ordinal);
+        Assert.Contains("session-1", text, StringComparison.Ordinal);
+        Assert.Contains("input-1", text, StringComparison.Ordinal);
+        Assert.Contains("turn-1", text, StringComparison.Ordinal);
+        Assert.Contains("agent-1", text, StringComparison.Ordinal);
+        Assert.Contains("reviewer", text, StringComparison.Ordinal);
+        Assert.Contains("queued", text, StringComparison.Ordinal);
+        Assert.Contains("/transcript", text, StringComparison.Ordinal);
+        Assert.Contains("/job", text, StringComparison.Ordinal);
+        Assert.Contains("/observation", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("parent session:", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("edge id:", text, StringComparison.Ordinal);
+        Assert.Equal(
+            ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "status", "attachments", "rejectedAttachments", "transcriptUrl", "jobUrl", "observationUrl"],
+            ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)).Fields);
     }
 
     [Fact]
