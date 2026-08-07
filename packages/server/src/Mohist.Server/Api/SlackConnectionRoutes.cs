@@ -18,6 +18,7 @@ using Mohist.Server.Slack;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Slack.Services;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
 
@@ -547,6 +548,43 @@ public static class SlackConnectionRoutes
                     launcher, attachmentBinder, grains, followupDispatcher,
                     http.RequestServices),
                 ct);
+        });
+
+        group.MapPost("/channel-archive", async (
+            HttpContext http,
+            string connectionId,
+            SlackChannelArchiveBody body,
+            AgentConnectionStore connections,
+            SlackAdapterLeaseService leases,
+            ISlackAdapterOperatorAuthenticator auth,
+            InteractionWorkspaceProvisioner provisioner,
+            TimeProvider timeProvider,
+            CancellationToken ct) =>
+        {
+            var operatorId = await auth.AuthenticateAsync(http, ct);
+            if (operatorId is null)
+                return ApiResults.Fail("Slack adapter authentication is required.", 403, "operator_credential_required");
+            var projectId = http.GetResolvedProject().Id;
+            if (!await leases.ValidateRuntimeLeaseAsync(
+                    operatorId,
+                    new SlackLeaseTargetRef.Connection(projectId, connectionId),
+                    body?.LeaseId ?? string.Empty,
+                    body?.AdapterId ?? string.Empty,
+                    ct))
+            {
+                return LeaseStaleOrExpired();
+            }
+            if (body is null || string.IsNullOrWhiteSpace(body.TeamId) || string.IsNullOrWhiteSpace(body.ConversationId))
+                return ApiResults.BadRequest("teamId and conversationId are required.", "invalid_archive_target");
+            var connection = await connections.GetAsync(projectId, connectionId, ct);
+            if (connection is null)
+                return ApiResults.NotFound("Slack Connection was not found.");
+            if (!string.Equals(body.TeamId, connection.WorkspaceTeamId, StringComparison.Ordinal))
+                return ApiResults.BadRequest("The Slack workspace does not match this Connection.", "workspace_mismatch");
+
+            var archived = await provisioner.ArchiveSlackChannelAsync(
+                projectId, body.TeamId, body.ConversationId, timeProvider.GetUtcNow());
+            return ApiResults.Ok(new { archived });
         });
 
         group.MapPost("/deliveries/claim", async (
@@ -1325,11 +1363,15 @@ public static class SlackConnectionRoutes
 
                 try
                 {
+                    var time = req.Services.GetRequiredService<TimeProvider>();
+                    var workspaceName = await req.Services.GetRequiredService<InteractionWorkspaceProvisioner>()
+                        .EnsureSlackWorkspaceAsync(projectId, body.TeamId, body.ConversationId, time.GetUtcNow());
                     launch = await req.Launcher.LaunchConnectionAsync(
                         agent!,
                         launchPrompt,
                         new ConnectionLaunchOrigin(
                             connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, body.ThreadTs),
+                        workspaceName: workspaceName,
                         startupContext: null,
                         attachments: attachmentBinding.AcceptedDescriptors,
                         attachmentIds: attachmentBinding.AttachmentIds,
@@ -1940,11 +1982,15 @@ public static class SlackConnectionRoutes
 
             try
             {
+                var time = req.Services.GetRequiredService<TimeProvider>();
+                var workspaceName = await req.Services.GetRequiredService<InteractionWorkspaceProvisioner>()
+                    .EnsureSlackWorkspaceAsync(projectId, body.TeamId, body.ConversationId, time.GetUtcNow());
                 launch = await req.Launcher.LaunchConnectionAsync(
                     agent,
                     prompt,
                     new ConnectionLaunchOrigin(
                         connection.Id, body.TeamId, req.SenderSlackUserId, body.ConversationId, body.MessageTs, rootTs),
+                    workspaceName: workspaceName,
                     startupContext: startupContext,
                     attachments: attachmentBinding.AcceptedDescriptors,
                     attachmentIds: attachmentBinding.AttachmentIds,
@@ -2310,6 +2356,14 @@ public sealed class SlackReplyBody
     public string? ImageUrl { get; init; }
     public string? FileName { get; init; }
     public string? FileContentBase64 { get; init; }
+}
+
+public sealed class SlackChannelArchiveBody
+{
+    public string TeamId { get; init; } = string.Empty;
+    public string ConversationId { get; init; } = string.Empty;
+    public string LeaseId { get; init; } = string.Empty;
+    public string AdapterId { get; init; } = string.Empty;
 }
 
 public sealed class SlackIngressBody
