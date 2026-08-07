@@ -327,7 +327,7 @@ public sealed class CredentialStoreTests
         Assert.False(await setup.Store.RevokeAsync(TokenHash, revokedAt));
     }
 
-    private static async Task<CredentialRow> ReadRowAsync(SqliteConnection connection)
+    [Fact]
     public async Task RevokeIntegration_WithUnknownId_ReturnsFalse()
     {
         using var setup = CreateStore();
