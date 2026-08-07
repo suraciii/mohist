@@ -11,6 +11,7 @@ public static class MohistApiRegistration
         app.UseApiExceptionHandler();
         app.MapHealthRoutes();
         app.MapStatusRoutes();
+        app.MapAuthSessionRoutes();
         app.MapDeadLetterRoutes();
         app.MapProjectRoutes();
         app.MapProjectEventsRoutes();

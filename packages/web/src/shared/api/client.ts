@@ -15,6 +15,16 @@ class ApiError extends Error {
   }
 }
 
+let unauthorizedListener: (() => void) | null = null
+
+/**
+ * Registers the app-level reaction to an unexpected 401: the auth surface
+ * (login/probe/logout) drives its own state and is deliberately excluded.
+ */
+export function setUnauthorizedListener(listener: (() => void) | null) {
+  unauthorizedListener = listener
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (!headers.has('Content-Type')) {
@@ -41,6 +51,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!json.success) {
+    if (res.status === 401 && !path.startsWith('/auth/')) {
+      unauthorizedListener?.()
+    }
     throw new ApiError(
       json.error ?? `Request failed: ${res.status}`,
       res.status,

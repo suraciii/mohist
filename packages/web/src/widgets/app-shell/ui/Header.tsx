@@ -1,9 +1,10 @@
 import { useLocation, useParams } from 'react-router-dom'
 import { SidebarTrigger, useSidebar } from '@/shared/ui/components/sidebar'
 import { Button } from '@/shared/ui/components/button'
-import { PlusIcon } from 'lucide-react'
+import { LogOutIcon, PlusIcon } from 'lucide-react'
 import { useAgentStatus, useAgent } from '../../../entities/agent'
 import { useEpic } from '../../../entities/epic'
+import { useLogout } from '../../../entities/auth'
 
 function findEpicNumberSegment(pathname: string): number | null {
   const segments = pathname.split('/').filter(Boolean)
@@ -112,9 +113,11 @@ function useIsSettingsRoute(): boolean {
 export function Header({
   onCreateIssue,
   dataHooks,
+  onLogout,
 }: {
   onCreateIssue: () => void
   dataHooks?: Partial<HeaderDataHooks>
+  onLogout?: () => void
 }) {
   const resolvedDataHooks = { ...defaultDataHooks, ...dataHooks }
   const { isMobile } = useSidebar()
@@ -122,6 +125,8 @@ export function Header({
   const isSettingsRoute = useIsSettingsRoute()
   const { data: agentStatus } = resolvedDataHooks.agentStatusHook()
   const running = agentStatus?.running ?? false
+  const logout = useLogout()
+  const handleLogout = onLogout ?? (() => logout.mutate())
 
   return (
     <header className="h-12 shrink-0 flex items-center gap-2 border-b bg-background px-3 md:px-4">
@@ -155,6 +160,16 @@ export function Header({
             New Issue
           </Button>
         )}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={handleLogout}
+          data-testid="header-logout"
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOutIcon />
+        </Button>
       </div>
     </header>
   )
