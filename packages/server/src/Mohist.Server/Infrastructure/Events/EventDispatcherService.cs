@@ -350,6 +350,7 @@ public sealed class EventDispatcherService : IDisposable
         nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
         nameof(EventOrigin.AgentJob) => EventOrigin.AgentJob,
         nameof(EventOrigin.Ingress) => EventOrigin.Ingress,
+        nameof(EventOrigin.Workspace) => EventOrigin.Workspace,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 

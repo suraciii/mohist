@@ -155,6 +155,7 @@ public sealed class DeadLetterStore : IDeadLetterStore
         nameof(EventOrigin.Issue) => EventOrigin.Issue,
         nameof(EventOrigin.Epic) => EventOrigin.Epic,
         nameof(EventOrigin.AgentSession) => EventOrigin.AgentSession,
+        nameof(EventOrigin.Workspace) => EventOrigin.Workspace,
         _ => throw new InvalidOperationException($"Unknown event origin '{text}'."),
     };
 

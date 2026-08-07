@@ -1,7 +1,13 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Events.Grains;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workspace;
+using Mohist.Server.Infrastructure.Events;
+using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Project.Services;
 using Mohist.Server.Workspace.Domain;
 using Mohist.Server.Workspace.Services;
@@ -14,20 +20,31 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     private readonly IWorkspaceStore _store;
     private readonly WorkspaceQuerier _querier;
     private readonly ProjectQuerier _projects;
+    private readonly IEventStore _eventStore;
+    private readonly IGrainFactory _grainFactory;
+    private readonly IBackgroundTaskLauncher _backgroundTasks;
     private readonly ILogger<WorkspaceGrain> _log;
     private WorkspaceState? _state;
+
+    private const string SpecVersion = "1.0";
 
     public WorkspaceGrain(
         IDbContextFactory<MohistDbContext> dbFactory,
         IWorkspaceStore store,
         WorkspaceQuerier querier,
         ProjectQuerier projects,
+        IEventStore eventStore,
+        IGrainFactory grainFactory,
+        IBackgroundTaskLauncher backgroundTasks,
         ILogger<WorkspaceGrain> log)
     {
         _dbFactory = dbFactory;
         _store = store;
         _querier = querier;
         _projects = projects;
+        _eventStore = eventStore;
+        _grainFactory = grainFactory;
+        _backgroundTasks = backgroundTasks;
         _log = log;
     }
 
@@ -97,6 +114,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         _state = state;
         _log.LogInformation("Workspace {ProjectId}/{Name} created (manual)", state.ProjectId, state.Name);
+        await EmitCreatedAsync(state);
         return state;
     }
 
@@ -157,6 +175,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         _state = state;
         _log.LogInformation("Workspace {ProjectId}/{Name} created (issue #{IssueNumber})", state.ProjectId, state.Name, issueNumber);
+        await EmitCreatedAsync(state);
         return state;
     }
 
@@ -215,6 +234,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         state.ArchivedAt = now;
         await _store.SaveAsync(state);
         _log.LogInformation("Workspace {ProjectId}/{Name} archived (issue #{IssueNumber})", state.ProjectId, state.Name, issueNumber);
+        await EmitArchivedAsync(state);
     }
 
     public async Task<WorkspaceState?> CloseAsync(DateTimeOffset now)
@@ -238,6 +258,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         state.Status = WorkspaceStatus.Archived;
         state.ArchivedAt = now;
         await _store.SaveAsync(state);
+        await EmitArchivedAsync(state);
         return state;
     }
 
@@ -297,6 +318,56 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
                 $"Workspace '{state.Name}' has {active} active bound session(s).",
                 hint: "Stop or wait for the bound sessions to finish, then retry. List them with 'mo session list --workspace <name>'.");
     }
+
+    private async Task EmitCreatedAsync(WorkspaceState state)
+    {
+        var envelope = BuildEvent(state, EventCatalog.ReverseDns.WorkspaceCreated);
+        await _eventStore.AppendAsync(envelope);
+        PokeDispatcherBestEffort();
+    }
+
+    private async Task EmitArchivedAsync(WorkspaceState state)
+    {
+        var envelope = BuildEvent(state, EventCatalog.ReverseDns.WorkspaceArchived);
+        await _eventStore.AppendAsync(envelope);
+        PokeDispatcherBestEffort();
+    }
+
+    private static CloudEvent BuildEvent(WorkspaceState state, string type)
+    {
+        var source = WorkspaceEventPersistence.WorkspaceSource(state.ProjectId, state.Name);
+        var extensions = WorkspaceLineage.BuildExtensions(state);
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            name = state.Name,
+            originKind = WorkspaceRowJson.OriginKind(state.Origin),
+            origin = state.Origin switch
+            {
+                WorkspaceOrigin.Issue issue => (object)new { issueNumber = issue.IssueNumber },
+                WorkspaceOrigin.Manual => new { },
+                WorkspaceOrigin.Slack slack => new { teamId = slack.TeamId, channelId = slack.ChannelId },
+                WorkspaceOrigin.Web web => new { conversationId = web.ConversationId },
+                _ => new { },
+            },
+            repositoryNames = state.RepositoryNames,
+            status = state.Status == WorkspaceStatus.Active ? "active" : "archived",
+            createdAt = state.CreatedAt,
+            archivedAt = state.ArchivedAt,
+        }, JSON.Options);
+
+        return new CloudEvent(
+            id: Guid.NewGuid().ToString(),
+            source: new Uri(source, UriKind.Relative),
+            type: type,
+            time: DateTimeOffset.UtcNow,
+            data: data,
+            subject: state.Name,
+            specVersion: SpecVersion,
+            extensions: extensions);
+    }
+
+    private void PokeDispatcherBestEffort() =>
+        EventDispatcherPoke.PokeAfterCommit(_grainFactory, _log, nameof(WorkspaceGrain), _backgroundTasks);
 }
 
 internal readonly record struct WorkspaceGrainKey(string ProjectId, string Name)

@@ -962,6 +962,83 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("IssueEvents", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.WorkspaceEventRow", b =>
+                            {
+                                b.Property<string>("Source")
+                                    .HasMaxLength(256)
+                                    .HasColumnType("TEXT");
+
+                                b.Property<long>("Id")
+                                    .HasColumnType("INTEGER");
+
+                                b.Property<string>("Data")
+                                    .IsRequired()
+                                    .HasColumnType("JSON");
+
+                                b.Property<string>("DataContentType")
+                                    .IsRequired()
+                                    .HasMaxLength(64)
+                                    .HasColumnType("TEXT");
+
+                                b.Property<DateTimeOffset?>("DispatchedAt")
+                                    .HasColumnType("TEXT");
+
+                                b.Property<string>("EventId")
+                                    .IsRequired()
+                                    .HasMaxLength(128)
+                                    .HasColumnType("TEXT");
+
+                                b.Property<string>("ExtensionsJson")
+                                    .IsRequired()
+                                    .HasColumnType("JSON");
+
+                                b.Property<string>("SpecVersion")
+                                    .IsRequired()
+                                    .HasMaxLength(16)
+                                    .HasColumnType("TEXT");
+
+                                b.Property<string>("Subject")
+                                    .HasMaxLength(256)
+                                    .HasColumnType("TEXT");
+
+                                b.Property<DateTimeOffset>("Time")
+                                    .HasColumnType("TEXT");
+
+                                b.Property<string>("TimeSortKey")
+                                    .ValueGeneratedOnAddOrUpdate()
+                                    .HasColumnType("TEXT")
+                                    .HasComputedColumnSql("strftime('%Y-%m-%dT%H:%M:%S', \"Time\") ||\nsubstr(\n    CASE\n        WHEN instr(substr(\"Time\", 20), '+') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '+') - 1)\n        WHEN instr(substr(\"Time\", 20), '-') > 0 THEN substr(\"Time\", 20, instr(substr(\"Time\", 20), '-') - 1)\n        ELSE ''\n    END || '.0000000',\n    1,\n    8\n) || 'Z'", true);
+
+                                b.Property<string>("TimelineSource")
+                                    .IsRequired()
+                                    .ValueGeneratedOnAdd()
+                                    .HasMaxLength(256)
+                                    .HasColumnType("TEXT")
+                                    .HasDefaultValue("");
+
+                                b.Property<string>("Type")
+                                    .IsRequired()
+                                    .HasMaxLength(256)
+                                    .HasColumnType("TEXT");
+
+                                b.HasKey("Source", "Id");
+
+                                b.HasIndex("Source", "Id", "DispatchedAt")
+                                    .HasDatabaseName("IX_WorkspaceEvents_Source_Id_DispatchedAt")
+                                    .HasFilter("\"DispatchedAt\" IS NULL");
+
+                                b.HasIndex("TimeSortKey", "Source", "Id")
+                                    .HasDatabaseName("IX_WorkspaceEvents_TimeSortKey_Source_Id");
+
+                                b.HasIndex("Type", "Source", "Id");
+
+                                b.HasIndex("TimelineSource", "Time", "Source", "Id")
+                                    .HasDatabaseName("IX_WorkspaceEvents_TimelineSource_Time_Source_Id");
+
+                                b.ToTable("WorkspaceEvents", (string)null);
+                            });
+
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Events.WorkflowRunEventRow", b =>
                 {
                     b.Property<string>("Source")
