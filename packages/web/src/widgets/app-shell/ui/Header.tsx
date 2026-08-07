@@ -57,6 +57,10 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
     if (segments.length > 1) return formatEpicTitle(epicLoading, epic, epicNumberSegment)
     return 'Epics'
   }
+  if (firstSegment === 'workspaces') {
+    if (segments.length > 1) return `Workspace ${decodeURIComponent(segments[1])}`
+    return 'Workspaces'
+  }
   if (firstSegment === 'agents') {
     if (segments.length > 1 && agent) return agent.name
     if (segments.length > 1) return `Agent #${agentId?.slice(0, 8)}`
@@ -75,6 +79,10 @@ function usePageTitle(dataHooks: HeaderDataHooks): string {
   if (section === '/epics') return 'Epics'
   if (section.startsWith('/epics/')) {
     return formatEpicTitle(epicLoading, epic, epicNumberSegment)
+  }
+  if (section === '/workspaces') return 'Workspaces'
+  if (section.startsWith('/workspaces/')) {
+    return `Workspace ${decodeURIComponent(section.split('/')[2])}`
   }
   if (section.startsWith('/issues/')) {
     return `Issue #${params.number ?? section.split('/')[2]}`

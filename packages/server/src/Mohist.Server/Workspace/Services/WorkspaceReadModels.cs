@@ -20,4 +20,5 @@ public sealed record WorkspaceDto(
     WorkspaceHomeDto? Home,
     string CreatedAt,
     string? ArchivedAt,
+    int BoundSessionCount = 0,
     IReadOnlyList<UnifiedSessionListItemDto>? Sessions = null);
