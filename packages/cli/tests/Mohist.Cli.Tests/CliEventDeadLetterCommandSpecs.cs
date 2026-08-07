@@ -13,7 +13,7 @@ public sealed class CliEventDeadLetterCommandSpecs
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(responder);
         var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "test-operator-token-0123456789abcdef";
+        environment[CliCredentialProvider.TokenEnvironmentVariable] = "test-operator-token-0123456789abcdef";
         return (
             http,
             handler,
@@ -64,8 +64,8 @@ public sealed class CliEventDeadLetterCommandSpecs
         Assert.Contains("Redelivering", env.Output.ToString(), StringComparison.Ordinal);
         Assert.Contains("temporary failure", env.Output.ToString(), StringComparison.Ordinal);
         Assert.Equal(
-            "test-operator-token-0123456789abcdef",
-            Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+            "Bearer test-operator-token-0123456789abcdef",
+            Assert.Single(request.Headers["Authorization"]));
         Assert.Empty(env.Error.ToString());
     }
 
@@ -136,8 +136,8 @@ public sealed class CliEventDeadLetterCommandSpecs
         Assert.Equal("/api/events/dead-letters/17/redeliver", request.RequestUri?.PathAndQuery);
         Assert.Equal("{}", request.Body);
         Assert.Equal(
-            "test-operator-token-0123456789abcdef",
-            Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+            "Bearer test-operator-token-0123456789abcdef",
+            Assert.Single(request.Headers["Authorization"]));
         Assert.Contains("Dead-letter 17: delivered after 2 attempt(s)", env.Output.ToString(), StringComparison.Ordinal);
     }
 
@@ -167,7 +167,7 @@ public sealed class CliEventDeadLetterCommandSpecs
     public async Task List_MissingCredential_FailsBeforeCallingApi()
     {
         var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
-        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
+        env.Environment[CliCredentialProvider.TokenEnvironmentVariable] = "";
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
@@ -179,7 +179,7 @@ public sealed class CliEventDeadLetterCommandSpecs
             env.Environment);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("operator credential was not found", env.Error.ToString(), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("credential was not found", env.Error.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Empty(env.Handler.Requests);
     }
 
@@ -188,7 +188,7 @@ public sealed class CliEventDeadLetterCommandSpecs
     {
         var env = Setup((_, _) => throw new InvalidOperationException("API must not be called"));
         env.Http.BaseAddress = new Uri("https://example.test");
-        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
+        env.Environment[CliCredentialProvider.TokenEnvironmentVariable] = "";
         env.Environment["HOME"] = "/home/no-credential";
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -207,18 +207,18 @@ public sealed class CliEventDeadLetterCommandSpecs
     }
 
     [Fact]
-    public async Task List_DefaultCredentialFileAuthenticatesRequest()
+    public async Task List_DefaultAdminTokenFileAuthenticatesRequest()
     {
         var env = Setup((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
         {
             success = true,
             data = Array.Empty<object>(),
         })));
-        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
+        env.Environment[CliCredentialProvider.TokenEnvironmentVariable] = "";
         env.Environment["HOME"] = "/home/test";
         env.FileSystem.AddFile(
-            "/home/test/.mohist/operator-token",
-            "file-operator-token-0123456789abcdef");
+            "/home/test/.mohist/admin-token",
+            "file-admin-token-0123456789abcdef");
 
         var exitCode = await MohistCliCommands.RunAsync(
             env.Http,
@@ -232,49 +232,8 @@ public sealed class CliEventDeadLetterCommandSpecs
         Assert.Equal(0, exitCode);
         var request = Assert.Single(env.Handler.Requests);
         Assert.Equal(
-            "file-operator-token-0123456789abcdef",
-            Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
-    }
-
-    [Fact]
-    public async Task List_ConfiguredCredentialPathAuthenticatesRequest()
-    {
-        var env = Setup((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
-        {
-            success = true,
-            data = Array.Empty<object>(),
-        })));
-        env.Environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "";
-        env.Environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = "";
-        env.Environment["HOME"] = "/home/test";
-        env.FileSystem.AddFile(
-            "/home/test/.mohist/config.jsonc",
-            """
-            {
-              // Shared by the server and mo CLI.
-              "Mohist": {
-                "OperatorTokenPath": "/run/mohist/operator-token",
-              },
-            }
-            """);
-        env.FileSystem.AddFile(
-            "/run/mohist/operator-token",
-            "configured-file-token-0123456789abcdef");
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            env.Http,
-            ["event", "dead-letter", "list"],
-            env.Output,
-            env.Error,
-            env.FileSystem,
-            env.Executor,
-            env.Environment);
-
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(env.Handler.Requests);
-        Assert.Equal(
-            "configured-file-token-0123456789abcdef",
-            Assert.Single(request.Headers[OperatorCredentialProvider.HeaderName]));
+            "Bearer file-admin-token-0123456789abcdef",
+            Assert.Single(request.Headers["Authorization"]));
     }
 
     [Fact]

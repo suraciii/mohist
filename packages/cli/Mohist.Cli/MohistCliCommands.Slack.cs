@@ -22,7 +22,7 @@ internal static class SlackCommands
 
     private const int WizardStepBudget = 8;
 
-    public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
+    public static Command Build(MohistCliApi api, CliCredentialProvider credentials)
     {
         var group = new Command("slack", "Manage Slack integrations");
         group.Subcommands.Add(BuildSetup(api, credentials));
@@ -46,7 +46,7 @@ internal static class SlackCommands
         return group;
     }
 
-    private static Command BuildSetup(MohistCliApi api, OperatorCredentialProvider credentials)
+    private static Command BuildSetup(MohistCliApi api, CliCredentialProvider credentials)
     {
         var command = new Command("setup", "Install or resume the workspace-level Mohist Slack App (idempotent wizard)");
         var workspaceTeam = new Option<string?>("--workspace-team")
@@ -85,7 +85,7 @@ internal static class SlackCommands
 
     private static async Task<(JsonObject? State, int Exit)> RunSetupWizardAsync(
         MohistCliApi api,
-        OperatorCredentialProvider credentials,
+        CliCredentialProvider credentials,
         ParseResult ctx,
         Option<string?> workspaceTeam,
         Option<string?> configurationTokenFile,
@@ -295,7 +295,7 @@ internal static class SlackCommands
             headers: headers,
             cancellationToken: api.Invocation.CancellationToken).ConfigureAwait(false);
 
-    private static Command BuildInstallAgent(MohistCliApi api, OperatorCredentialProvider credentials)
+    private static Command BuildInstallAgent(MohistCliApi api, CliCredentialProvider credentials)
     {
         var command = new Command("install-agent", "Install or resume an existing Agent's Slack installation (idempotent wizard)");
         var agent = new Argument<string>("agent") { Description = "Agent name or id" };
@@ -336,7 +336,7 @@ internal static class SlackCommands
 
     private static async Task<(JsonObject? State, int Exit)> RunInstallAgentWizardAsync(
         MohistCliApi api,
-        OperatorCredentialProvider credentials,
+        CliCredentialProvider credentials,
         ParseResult ctx,
         Option<string?> workspaceTeam,
         Option<string?> credentialsFile,
@@ -576,7 +576,7 @@ internal static class SlackCommands
         api.Output.WriteLine("Invite the bot to a channel, or DM it to start a task.");
     }
 
-    private static Command BuildStatus(MohistCliApi api, OperatorCredentialProvider credentials)
+    private static Command BuildStatus(MohistCliApi api, CliCredentialProvider credentials)
     {
         var command = new Command("status", "Show the workspace Slack integration status");
         var workspaceTeam = new Option<string?>("--workspace-team", "--workspace-team-id")
@@ -1622,7 +1622,7 @@ internal static class SlackCommands
 
     private static async Task<IReadOnlyDictionary<string, string>?> GetOperatorHeadersAsync(
         MohistCliApi api,
-        OperatorCredentialProvider credentials)
+        CliCredentialProvider credentials)
     {
         var baseAddress = api.Http.BaseAddress;
         if (baseAddress is null || !baseAddress.IsLoopback)
@@ -1637,7 +1637,7 @@ internal static class SlackCommands
             var token = await credentials.GetAsync().ConfigureAwait(false);
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                [OperatorCredentialProvider.HeaderName] = token,
+                ["authorization"] = $"Bearer {token}",
             };
         }
         catch (InvalidOperationException ex)

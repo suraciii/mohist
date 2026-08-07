@@ -22,8 +22,8 @@ internal static class MohistCliCommands
         root.Subcommands.Add(WorkflowCommands.Build(api));
         var environment = provider.GetService<IEnvironmentVariableProvider>()
             ?? SystemEnvironmentVariableProvider.Instance;
-        var operatorCredential = provider.GetService<OperatorCredentialProvider>()
-            ?? new OperatorCredentialProvider(api.FileSystem, environment);
+        var operatorCredential = provider.GetService<CliCredentialProvider>()
+            ?? new CliCredentialProvider(api.FileSystem, environment);
         root.Subcommands.Add(EventCommands.Build(api, operatorCredential));
         root.Subcommands.Add(ActivityCommands.Build(api));
         root.Subcommands.Add(RoutingCommands.Build(api));
@@ -210,7 +210,7 @@ internal static class MohistCliCommands
         services.AddSingleton<IFileSystem>(fileSystem);
         services.AddSingleton<ICommandExecutor>(commandExecutor);
         services.AddSingleton<IEnvironmentVariableProvider>(environment);
-        services.AddSingleton<OperatorCredentialProvider>();
+        services.AddSingleton<CliCredentialProvider>();
         services.AddSingleton(http);
         // Production callers leave installer/updater null and the default
         // SystemdServiceInstaller / WindowsScheduledTaskInstaller and a default

@@ -13,7 +13,7 @@ internal static class EventCommands
         set => TailCancellation.Value = value;
     }
 
-    public static Command Build(MohistCliApi api, OperatorCredentialProvider credentials)
+    public static Command Build(MohistCliApi api, CliCredentialProvider credentials)
     {
         var eventCommand = new Command(
             "event",
@@ -104,7 +104,7 @@ internal static class EventCommands
         }
     }
 
-    private static Command BuildList(MohistCliApi api, OperatorCredentialProvider credentials)
+    private static Command BuildList(MohistCliApi api, CliCredentialProvider credentials)
     {
         var cmd = new Command(
             "list",
@@ -150,7 +150,7 @@ internal static class EventCommands
         return cmd;
     }
 
-    private static Command BuildRedeliver(MohistCliApi api, OperatorCredentialProvider credentials)
+    private static Command BuildRedeliver(MohistCliApi api, CliCredentialProvider credentials)
     {
         var cmd = new Command(
             "redeliver",
@@ -189,7 +189,7 @@ internal static class EventCommands
 
     private static async Task<IReadOnlyDictionary<string, string>?> GetAuthorizationHeadersAsync(
         MohistCliApi api,
-        OperatorCredentialProvider credentials)
+        CliCredentialProvider credentials)
     {
         var baseAddress = api.Http.BaseAddress;
         if (baseAddress is null || !baseAddress.IsLoopback)
@@ -204,7 +204,7 @@ internal static class EventCommands
             var token = await credentials.GetAsync().ConfigureAwait(false);
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
-                [OperatorCredentialProvider.HeaderName] = token,
+                ["authorization"] = $"Bearer {token}",
             };
         }
         catch (InvalidOperationException ex)
