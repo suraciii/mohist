@@ -262,13 +262,14 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
     {
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobKey);
+        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
+        await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
-        var assignment = await _fixture.AgentJobDispatches.WaitForRunnerAcceptedAsync(jobKey);
+        var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(job);
         Assert.Equal(runnerId, assignment.RunnerId);
-        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.WorkId);
-        return (assignment.RunnerId, assignment.WorkId);
+        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.CurrentWorkId);
+        return (assignment.RunnerId!, assignment.CurrentWorkId!);
     }
 
     private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)

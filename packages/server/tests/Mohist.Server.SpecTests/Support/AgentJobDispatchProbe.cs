@@ -3,44 +3,28 @@ using Mohist.Server.Agent.Grains;
 
 namespace Mohist.Server.SpecTests.Support;
 
+/// <summary>
+/// Counting probe for the best-effort AgentJob dispatch-observer side
+/// channel. Tests must converge on the authoritative
+/// <see cref="IAgentJobGrain"/> runtime snapshot
+/// (<see cref="AgentJobConvergence"/>) rather than await these signals:
+/// the observer is a NoOp in production and can silently drop signals
+/// under load. Retained only for <see cref="PreparedCount"/> assertions.
+/// </summary>
 public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 {
-    private readonly ConcurrentDictionary<string, TaskCompletionSource<AgentJobDispatchAssignment>> _accepted =
-        new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, TaskCompletionSource> _prepared =
-        new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _preparedCounts =
         new(StringComparer.Ordinal);
 
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
         _preparedCounts.AddOrUpdate(agentJobId, 1, (_, count) => count + 1);
-        PreparedSignal(agentJobId).TrySetResult();
         return Task.CompletedTask;
     }
 
-    public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)
-    {
-        Signal(agentJobId).TrySetResult(new AgentJobDispatchAssignment(runnerId, workId));
-        return Task.CompletedTask;
-    }
-
-    public Task<AgentJobDispatchAssignment> WaitForRunnerAcceptedAsync(string agentJobId) =>
-        Signal(agentJobId).Task;
-
-    public Task WaitForAssignmentPreparedAsync(string agentJobId) =>
-        PreparedSignal(agentJobId).Task;
+    public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId) =>
+        Task.CompletedTask;
 
     public int PreparedCount(string agentJobId) =>
         _preparedCounts.GetValueOrDefault(agentJobId);
-
-    private TaskCompletionSource<AgentJobDispatchAssignment> Signal(string agentJobId) =>
-        _accepted.GetOrAdd(agentJobId, _ => new(
-            TaskCreationOptions.RunContinuationsAsynchronously));
-
-    private TaskCompletionSource PreparedSignal(string agentJobId) =>
-        _prepared.GetOrAdd(agentJobId, _ => new(
-            TaskCreationOptions.RunContinuationsAsynchronously));
 }
-
-public sealed record AgentJobDispatchAssignment(string RunnerId, string WorkId);

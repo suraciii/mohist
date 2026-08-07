@@ -106,8 +106,8 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
             var claim = await jobGrain.ClaimNextAsync(runnerId);
             Assert.NotNull(claim);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
@@ -158,8 +158,8 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var originalInputId = launchPayload.GetProperty("data").GetProperty("inputId").GetString()!;
             var originalTurnId = launchPayload.GetProperty("data").GetProperty("turnId").GetString()!;
 
-            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
             var claim = await jobGrain.ClaimNextAsync(runnerId);
             Assert.NotNull(claim);
 
