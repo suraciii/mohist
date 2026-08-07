@@ -656,7 +656,7 @@ internal static class AgentCommands
         var issueRefOpt = new Option<int?>("--issue") { Description = "Optional context reference: record the issue number on the session metadata" };
         var epicRefOpt = new Option<string?>("--epic") { Description = "Optional context reference: record the epic number on the session metadata" };
         var repositoryRefOpt = new Option<string?>("--repo") { Description = "Optional context reference: record the repository on the session metadata" };
-        var workspacePathOpt = new Option<string?>("--workspace-path") { Description = "Optional context reference: record the workspace path on the session metadata" };
+        var workspaceOpt = new Option<string?>("--workspace") { Description = "Bind to a named workspace" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Reuse this key to safely retry a launch after response loss" };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)));
@@ -668,7 +668,7 @@ internal static class AgentCommands
         cmd.Options.Add(issueRefOpt);
         cmd.Options.Add(epicRefOpt);
         cmd.Options.Add(repositoryRefOpt);
-        cmd.Options.Add(workspacePathOpt);
+        cmd.Options.Add(workspaceOpt);
         cmd.Options.Add(idempotencyKeyOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
@@ -681,7 +681,7 @@ internal static class AgentCommands
             var issueRef = ctx.GetValue(issueRefOpt);
             var epicRef = ctx.GetValue(epicRefOpt);
             var repositoryRef = ctx.GetValue(repositoryRefOpt);
-            var workspacePath = ctx.GetValue(workspacePathOpt);
+            var workspace = ctx.GetValue(workspaceOpt);
             var suppliedIdempotencyKey = ctx.GetValue(idempotencyKeyOpt);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
@@ -719,7 +719,7 @@ internal static class AgentCommands
                 if (string.IsNullOrWhiteSpace(suppliedIdempotencyKey) && mode == "table")
                     api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
 
-                var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspacePath);
+                var contextRefs = BuildLaunchContext(issueRef, epicRef, repositoryRef, workspace);
                 var attachmentIds = uploads.Select(attachment => attachment.Id).ToArray();
                 object body = contextRefs is null && attachmentIds.Length == 0
                     ? new { prompt = promptText }
@@ -860,9 +860,9 @@ internal static class AgentCommands
         await Task.CompletedTask;
     }
 
-    private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspacePath)
+    private static object? BuildLaunchContext(int? issue, string? epic, string? repository, string? workspace)
     {
-        if (issue is null && string.IsNullOrWhiteSpace(epic) && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+        if (issue is null && string.IsNullOrWhiteSpace(epic) && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspace))
             return null;
 
         return new
@@ -870,7 +870,7 @@ internal static class AgentCommands
             issueNumber = issue,
             epicNumber = string.IsNullOrWhiteSpace(epic) ? null : epic,
             repository = string.IsNullOrWhiteSpace(repository) ? null : repository,
-            workspacePath = string.IsNullOrWhiteSpace(workspacePath) ? null : workspacePath,
+            workspace = string.IsNullOrWhiteSpace(workspace) ? null : workspace,
         };
     }
 

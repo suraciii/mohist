@@ -200,6 +200,54 @@ public class AgentSessionQuerier : IScopedService
         }).ToList();
     }
 
+    /// <summary>
+    /// Lists sessions bound to a named Workspace for the source-agnostic
+    /// session list and the workspace view. The workspace-name label is
+    /// optional on sessions, so the query matches only sessions that
+    /// explicitly bound the workspace at launch.
+    /// </summary>
+    public async Task<IReadOnlyList<UnifiedSessionListItemDto>> ListUnifiedSessionsByWorkspaceAsync(
+        string projectId,
+        string workspaceName,
+        int limit = 100,
+        CancellationToken ct = default)
+    {
+        var records = await _sessionQuery.ListByLabelsAsync(
+            AgentSessionDtoMapper.Labels(
+                (AgentSessionQueryMetadataKeys.ProjectId, projectId),
+                (AgentSessionQueryMetadataKeys.WorkspaceName, workspaceName)),
+            AgentSessionQueryOrder.CreatedDescending,
+            limit: limit,
+            ct: ct);
+        if (records.Count == 0) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(
+            db,
+            records.Select(record => record.Session.Id).ToArray(),
+            ct);
+
+        return records.Select(record =>
+        {
+            var session = record.Session;
+            var summary = eventSummaries.GetValueOrDefault(session.Id);
+            return new UnifiedSessionListItemDto(
+                Id: session.Id,
+                Source: record.Label(AgentSessionQueryMetadataKeys.SourceKind) ?? "agent-launch",
+                RuntimeSessionId: session.Status.AgentRuntimeSessionId,
+                Runtime: session.Runtime.Runtime,
+                Activity: ResolveAgentSessionActivity(record),
+                CreatedAt: session.Status.CreatedAt.ToString("o"),
+                LastActivityAt: AgentSessionJsonHelper.LastActivityAt(session).ToString("o"),
+                Model: summary?.ResolvedModel ?? session.Settings.Model,
+                AgentId: record.Label(GenericAgentSessionMetadata.AgentId),
+                AgentName: record.Label(GenericAgentSessionMetadata.AgentName),
+                WorkflowRunId: null,
+                SessionName: null,
+                ContextRefs: BuildUnifiedContextRefs(record));
+        }).ToList();
+    }
+
     private async Task<IReadOnlyList<AgentSessionRecord>> ListAgentSessionRecordsAsync(
         string projectId,
         string agentId,
@@ -307,7 +355,7 @@ public class AgentSessionQuerier : IScopedService
         var refs = AgentSessionContextRefs.TryBuild(record);
         return refs is null
             ? null
-            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
     }
 
     public async Task<string?> ResolveIssueSessionIdAsync(string projectId, int issueNumber, string sessionName, CancellationToken ct = default)
@@ -836,13 +884,16 @@ public class AgentSessionQuerier : IScopedService
         var issueNumber = agentRefs?.IssueNumber ?? (workflowIssue > 0 ? workflowIssue : null);
         var epicNumber = agentRefs?.EpicNumber;
         var repository = agentRefs?.Repository;
+        var workspaceName = agentRefs?.WorkspaceName;
         var workspacePath = agentRefs?.WorkspacePath;
 
         if (issueNumber is null && epicNumber is null
-            && string.IsNullOrWhiteSpace(repository) && string.IsNullOrWhiteSpace(workspacePath))
+            && string.IsNullOrWhiteSpace(repository)
+            && string.IsNullOrWhiteSpace(workspaceName)
+            && string.IsNullOrWhiteSpace(workspacePath))
             return null;
 
-        return new UnifiedSessionContextRefsDto(issueNumber, epicNumber, repository, workspacePath);
+        return new UnifiedSessionContextRefsDto(issueNumber, epicNumber, repository, workspaceName, workspacePath);
     }
 
     /// <summary>
@@ -858,7 +909,7 @@ public class AgentSessionQuerier : IScopedService
         var refs = AgentSessionContextRefs.TryBuild(record);
         return refs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
     }
 
     private async Task<AgentSessionMetadataDto> BuildSessionMetadataDtoAsync(

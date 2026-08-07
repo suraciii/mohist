@@ -17,12 +17,14 @@ using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Project;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Workflow.Prompts;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Data.Label;
 using Mohist.Server.Infrastructure.Data.Runner;
 using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.Infrastructure.Data.Secrets;
 using Mohist.Server.Infrastructure.Data.Slack;
+using Mohist.Server.Infrastructure.Data.Workspace;
 using Mohist.Server.Inbox;
 using Mohist.Server.Slack.Domain;
 using Mohist.Server.Project.Domain;
@@ -92,6 +94,7 @@ public class MohistDbContext : DbContext
     public DbSet<TaskLogEntryRow> TaskLogEntries { get; set; } = null!;
     public DbSet<TaskLogBatchRow> TaskLogBatches { get; set; } = null!;
     public DbSet<AgentJobRow> AgentJobs { get; set; } = null!;
+    public DbSet<WorkspaceRow> Workspaces { get; set; } = null!;
     public DbSet<StoredSecretRow> StoredSecrets { get; set; } = null!;
     public DbSet<SlackProviderInboxRow> SlackProviderInboxRows { get; set; } = null!;
     public DbSet<SlackOutboxRow> SlackOutboxRows { get; set; } = null!;
@@ -234,6 +237,13 @@ public class MohistDbContext : DbContext
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.Repository), stored: true);
             entity.Property(e => e.LabelAgentLaunchWorkspacePath)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.WorkspacePath), stored: true);
+            entity.Property(e => e.LabelWorkspaceName)
+                .HasComputedColumnSql(JsonExtractLabel(AgentSessionMetadata.WorkspaceNameKey), stored: true);
+            entity.HasIndex(e => e.LabelWorkspaceName)
+                .HasDatabaseName("IX_AgentSessions_LabelWorkspaceName");
+            entity.Property(e => e.LaunchVisibility)
+                .IsRequired()
+                .HasDefaultValue("visible");
 
             entity.Property(e => e.LabelTriggerEventId)
                 .HasComputedColumnSql(JsonExtractLabel(GenericAgentSessionMetadata.TriggerEventId), stored: false);
@@ -379,6 +389,24 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_AgentJobs_PinnedRunner_Status_ReadySince");
             entity.HasIndex(e => new { e.LaunchVisibility, e.Status, e.ReadySince })
                 .HasDatabaseName("IX_AgentJobs_LaunchVisibility_Status_ReadySince");
+        });
+
+        modelBuilder.Entity<WorkspaceRow>(entity =>
+        {
+            entity.ToTable("Workspaces");
+            entity.HasKey(e => new { e.ProjectId, e.Name });
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.Name).HasMaxLength(256);
+            entity.Property(e => e.OriginKind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.OriginPayloadJson).IsRequired();
+            entity.Property(e => e.RepositoriesJson).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired().HasConversion<string>();
+            entity.Property(e => e.HomeRunnerId).HasMaxLength(256);
+            // One active workspace per origin: the partial unique index is
+            // the hard backstop behind the grain's create-time check.
+            entity.HasIndex(e => new { e.ProjectId, e.OriginKind, e.OriginPayloadJson })
+                .IsUnique()
+                .HasFilter("\"Status\" = 'active'");
         });
 
         modelBuilder.Entity<AgentSessionTranscriptPartRow>(entity =>

@@ -17,6 +17,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Auth;
+using Mohist.Server.Infrastructure.Data.Workspace;
 using Mohist.Server.Infrastructure.Data.Issue;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Services;
@@ -150,6 +151,7 @@ public static class MohistServiceRegistration
         services.AddScoped<WorkflowRunQuerier>();
         services.AddScoped<IWorkflowRunWorkProjection, WorkflowRunWorkProjection>();
         services.AddScoped<IDispatchSnapshotStore, DispatchSnapshotStore>();
+        services.AddScoped<IWorkspaceStore, WorkspaceStore>();
         services.AddScoped<IAgentSessionStore, AgentSessionStore>();
         services.AddScoped<AgentSessionReconcileQuerier>();
         services.AddScoped<IStateStore<AgentSession>>(sp => sp.GetRequiredService<IAgentSessionStore>());

@@ -201,6 +201,18 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected const int ProjectDomainMaxLength = 63;
 
+    protected async Task CreateWorkspaceAsync(string projectId, string name)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/workspaces",
+            new { name, repositories = new[] { "main" } });
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"CreateWorkspace '{name}' failed: {(int)response.StatusCode} {body}");
+        }
+    }
+
     protected async Task<AgentRef> CreateAgentAsync(string projectId, string name)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(

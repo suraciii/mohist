@@ -14,6 +14,7 @@ using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
+using Mohist.Server.Workspace.Grains;
 using Orleans.Runtime;
 
 namespace Mohist.Server.Agent.Grains;
@@ -507,7 +508,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         if (plan.EpicNumber is > 0)
             labels[GenericAgentSessionMetadata.EpicNumber] = plan.EpicNumber.Value.ToString();
         if (!string.IsNullOrWhiteSpace(plan.WorkspacePath))
-            labels[GenericAgentSessionMetadata.WorkspacePath] = plan.WorkspacePath!;
+            labels["mohist.io/agent-launch/workspace-path"] = plan.WorkspacePath!;
         var metadata = new AgentSessionMetadata(labels, null);
 
         await sessionGrain.OpenAsync(new OpenAgentSessionCommand(
@@ -784,6 +785,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         new(
             Prompt: command.Prompt,
             Model: command.Model,
+            WorkspaceName: command.WorkspaceName,
             WorkspacePath: command.WorkspacePath,
             ProjectId: command.ProjectId,
             Runtime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
@@ -803,7 +805,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             AllowedSubagents: command.AllowedSubagents,
             PinnedRunnerId: command.PinnedRunnerId,
             AgentSessionStartup: command.AgentSessionStartup,
-            SpawnOrigin: command.SpawnOrigin);
+            SpawnOrigin: command.SpawnOrigin,
+            WorkspaceRepositories: command.WorkspaceRepositories);
 
     private static AgentSlackExecutionContext? SlackExecutionContextFor(PrepareManualLaunchCommand command)
     {
@@ -824,6 +827,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private static bool PlansEquivalent(PrepareManualLaunchCommand left, PrepareManualLaunchCommand right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspaceName, right.WorkspaceName, StringComparison.Ordinal)
         && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
         && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
         && string.Equals(left.Runtime ?? string.Empty, right.Runtime ?? string.Empty, StringComparison.Ordinal)
@@ -878,6 +882,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
     private static bool EquivalentInput(AgentJobInput left, AgentJobInput right) =>
         string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)
         && string.Equals(left.Model, right.Model, StringComparison.Ordinal)
+        && string.Equals(left.WorkspaceName, right.WorkspaceName, StringComparison.Ordinal)
         && string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)
         && string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)
         && string.Equals(left.Runtime, right.Runtime, StringComparison.Ordinal)
@@ -898,6 +903,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var fields = new List<string>();
         if (!string.Equals(left.Prompt, right.Prompt, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Prompt));
         if (!string.Equals(left.Model, right.Model, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Model));
+        if (!string.Equals(left.WorkspaceName, right.WorkspaceName, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspaceName));
         if (!string.Equals(left.WorkspacePath, right.WorkspacePath, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.WorkspacePath));
         if (!string.Equals(left.ProjectId, right.ProjectId, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.ProjectId));
         if (!string.Equals(left.Runtime, right.Runtime, StringComparison.Ordinal)) fields.Add(nameof(AgentJobInput.Runtime));
@@ -1022,6 +1028,31 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             return;
         }
 
+        // Workspace affinity: a bound job routes to the workspace's home
+        // runner first. A stale home (runner offline) is cleared and the
+        // job falls back to the generic election; the runner that wins
+        // materializes the workspace and reports the new home.
+        if (!string.IsNullOrWhiteSpace(State.Input.WorkspaceName)
+            && !string.IsNullOrWhiteSpace(State.Input.ProjectId))
+        {
+            var workspace = GrainFactory.GetGrain<IWorkspaceGrain>(
+                GrainKey.Workspace(State.Input.ProjectId, State.Input.WorkspaceName));
+            var home = await workspace.GetHomeAsync();
+            if (home is not null)
+            {
+                var homeRunner = GrainFactory.GetGrain<IRunnerGrain>(home.RunnerId);
+                var homeState = await homeRunner.GetRuntimeStateAsync();
+                if (homeState.Status == RunnerStatus.Online
+                    && await TryAdmitOnRunnerAsync(home.RunnerId))
+                {
+                    return;
+                }
+
+                if (homeState.Status != RunnerStatus.Online)
+                    await workspace.ClearHomeIfAsync(home.RunnerId);
+            }
+        }
+
         foreach (var runnerInfo in runners)
         {
             if (await TryAdmitOnRunnerAsync(runnerInfo.RunnerId))
@@ -1132,7 +1163,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         // the job to Running; the next poll claim does that.
         var now = _timeProvider.GetUtcNow();
         var workId = StableWorkId(Key);
-        var dispatch = BuildDispatch(workId);
+        var dispatch = await BuildDispatchAsync(workId);
 
         State.RunnerId = runnerId;
         State.WorkId = workId;
@@ -1211,11 +1242,21 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         }
     }
 
-    private WorkDispatch BuildDispatch(string workId)
+    private async Task<WorkDispatch> BuildDispatchAsync(string workId)
     {
         var input = InputWithAgentConfig()!;
         var payload = new Dictionary<string, JsonElement?>(StringComparer.Ordinal);
-        if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
+        if (!string.IsNullOrWhiteSpace(input.WorkspaceName))
+            payload["workspace"] = JSON.SerializeToElement(new
+            {
+                name = input.WorkspaceName,
+                repositories = (input.WorkspaceRepositories is { Count: > 0 }
+                    ? input.WorkspaceRepositories
+                        .Select(r => (object)new { name = r.Name, gitUrl = r.GitUrl })
+                        .ToList()
+                    : []),
+            });
+        else if (!string.IsNullOrWhiteSpace(input.WorkspacePath))
             payload["workspace"] = JSON.SerializeToElement(
                 new { path = input.WorkspacePath });
 

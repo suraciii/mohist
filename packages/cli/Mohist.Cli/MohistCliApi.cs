@@ -1274,6 +1274,8 @@ internal sealed class MohistCliApi
         WebhookSubscriptionList,
         WebhookSubscription,
         WebhookDeliveryFailureList,
+        WorkspaceList,
+        WorkspaceShow,
     }
 
     internal static TableShape ParseTableShape(string? shape)

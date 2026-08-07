@@ -36,11 +36,12 @@ public static class UnifiedSessionRoutes
             string? agent,
             int? issue,
             string? run,
+            string? workspace,
             int? limit,
             AgentQuerier agentQuerier,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
-            HandleListAsync(context.GetResolvedProject(), agent, issue, run, limit, agentQuerier, sessions, ct));
+            HandleListAsync(context.GetResolvedProject(), agent, issue, run, workspace, limit, agentQuerier, sessions, ct));
 
         group.MapGet("/{sessionId}", (
             HttpContext context,
@@ -67,6 +68,7 @@ public static class UnifiedSessionRoutes
         string? agent,
         int? issue,
         string? run,
+        string? workspace,
         int? limit,
         AgentQuerier agentQuerier,
         AgentSessionQuerier sessions,
@@ -74,16 +76,27 @@ public static class UnifiedSessionRoutes
     {
         var filterCount = (!string.IsNullOrWhiteSpace(agent) ? 1 : 0)
             + (issue is > 0 ? 1 : 0)
-            + (!string.IsNullOrWhiteSpace(run) ? 1 : 0);
+            + (!string.IsNullOrWhiteSpace(run) ? 1 : 0)
+            + (!string.IsNullOrWhiteSpace(workspace) ? 1 : 0);
         if (filterCount == 0)
             return ApiResults.BadRequest(
-                "One of 'agent', 'issue', or 'run' filter is required.",
+                "One of 'agent', 'issue', 'run', or 'workspace' filter is required.",
                 "session_filter_required");
+        if (filterCount > 1)
+            return ApiResults.BadRequest(
+                "Only one of 'agent', 'issue', 'run', or 'workspace' filter may be set.",
+                "session_filter_multiple");
 
         if (!string.IsNullOrWhiteSpace(agent))
             return await ListByAgentAsync(project, agent, limit, agentQuerier, sessions, ct);
         if (issue is > 0)
             return await ListByIssueAsync(project, issue.Value, sessions, ct);
+        if (!string.IsNullOrWhiteSpace(workspace))
+        {
+            var items = await sessions.ListUnifiedSessionsByWorkspaceAsync(
+                project.Id, workspace, limit ?? 100, ct);
+            return ApiResults.Ok(items);
+        }
         return await ListByRunAsync(project, run!, sessions, ct);
     }
 
@@ -193,7 +206,7 @@ public static class UnifiedSessionRoutes
 
     private static UnifiedSessionContextRefsDto? MapWorkflowContextRefs(int? issueNumber) =>
         issueNumber is > 0
-            ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null)
+            ? new UnifiedSessionContextRefsDto(issueNumber, null, null, null, null)
             : null;
 
 }

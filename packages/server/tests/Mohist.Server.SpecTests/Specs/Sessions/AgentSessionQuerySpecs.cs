@@ -27,7 +27,7 @@ public class AgentSessionQuerySpecs
     private const string AgentA1IssueNumber = "42";
     private const string AgentA1EpicNumber = "7";
     private const string AgentA1Repository = "mohist/repo-a";
-    private const string AgentA1WorkspacePath = "/work/a1";
+    private const string AgentA1WorkspaceName = "pay";
 
     // Agent profile A2 also lives in ProjectA so the agent-id filter
     // can distinguish between two agents sharing a project.
@@ -147,7 +147,7 @@ public class AgentSessionQuerySpecs
     [InlineData("s_a1_2_with_issue", GenericAgentSessionMetadata.IssueNumber, AgentA1IssueNumber)]
     [InlineData("s_a1_3_with_epic", GenericAgentSessionMetadata.EpicNumber, AgentA1EpicNumber)]
     [InlineData("s_a1_with_repo", GenericAgentSessionMetadata.Repository, AgentA1Repository)]
-    [InlineData("s_a1_with_workspace", GenericAgentSessionMetadata.WorkspacePath, AgentA1WorkspacePath)]
+    [InlineData("s_a1_with_workspace", GenericAgentSessionMetadata.WorkspaceName, AgentA1WorkspaceName)]
     public async Task QueryByAgentLaunchContextRef_ResolvesViaIndexedColumn(
         string matchedSessionId, string labelKey, string labelValue)
     {
@@ -431,7 +431,7 @@ public class AgentSessionQuerySpecs
                     [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
                     [GenericAgentSessionMetadata.AgentId] = AgentA1Id,
                     [GenericAgentSessionMetadata.AgentName] = AgentA1Name,
-                    [GenericAgentSessionMetadata.WorkspacePath] = AgentA1WorkspacePath,
+                    [GenericAgentSessionMetadata.WorkspaceName] = AgentA1WorkspaceName,
                 }, createdAt: createdAt.AddMinutes(4)),
             // Second agent A2 sharing ProjectA — must not leak into A1 queries.
             BuildRow("s_a2_1",

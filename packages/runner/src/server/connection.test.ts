@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { ServerConnection } from "./connection.js"
+import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
 
 const options = {
   serverUrl: "http://server",
@@ -136,5 +137,73 @@ describe("ServerConnection agent-input attachments", () => {
     )
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain("temp")
     expect(JSON.stringify(fetchSpy.mock.calls[0]?.[1])).not.toContain("token")
+  })
+})
+
+describe("ServerConnection named workspace materialization report", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it("posts the materialized path and parses the recorded home", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ runnerId: "runner-1", path: "/tmp/ws/pay" }), { status: 200, headers: { "content-type": "application/json" } }),
+    )
+
+    const report = await new ServerConnection(options).reportWorkspaceMaterialized("project-1", "pay", "/tmp/ws/pay", signal)
+
+    expect(report).toEqual({ runnerId: "runner-1", path: "/tmp/ws/pay" })
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://server/api/runner/runner-1/workspaces/project-1/pay/materialized")
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(init?.method).toBe("POST")
+    expect(JSON.parse(String(init?.body))).toEqual({ path: "/tmp/ws/pay" })
+  })
+
+  it("throws WorkspaceHomeClaimedError on a 409 workspace_home_claimed answer", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: false, code: "workspace_home_claimed", error: "already materialized" }), { status: 409, headers: { "content-type": "application/json" } }),
+    )
+
+    await expect(
+      new ServerConnection(options).reportWorkspaceMaterialized("project-1", "pay", "/tmp/ws/pay", signal),
+    ).rejects.toBeInstanceOf(WorkspaceHomeClaimedError)
+  })
+
+  it("throws a plain error on other non-2xx answers", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("bad", { status: 400 }))
+    await expect(
+      new ServerConnection(options).reportWorkspaceMaterialized("project-1", "pay", "/tmp/ws/pay", signal),
+    ).rejects.toThrow("workspace materialization failed: 400")
+  })
+})
+
+describe("ServerConnection workspace reclaimability", () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it.each([
+    ["active with no bound sessions", { status: "active", activeBoundSessions: 0 }, { status: "active", activeBoundSessions: 0 }],
+    ["active with bound sessions", { status: "active", activeBoundSessions: 2 }, { status: "active", activeBoundSessions: 2 }],
+    ["archived", { status: "archived", activeBoundSessions: 0 }, { status: "archived", activeBoundSessions: 0 }],
+  ] as const)("parses the %s answer", async (_label, payload, expected) => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }))
+
+    const info = await new ServerConnection(options).getWorkspaceReclaimability("project-1", "pay", signal)
+
+    expect(info).toEqual(expected)
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://server/api/runner/runner-1/workspaces/project-1/pay/reclaimable")
+    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
+    expect(init?.method).toBe("GET")
+  })
+
+  it("throws on non-2xx", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("gone", { status: 404 }))
+    await expect(new ServerConnection(options).getWorkspaceReclaimability("project-1", "pay", signal)).rejects.toThrow("workspace reclaimability failed: 404")
+  })
+
+  it.each([
+    ["an unknown status", JSON.stringify({ status: "suspended", activeBoundSessions: 0 }), "unknown status"],
+    ["a malformed count", JSON.stringify({ status: "active", activeBoundSessions: -1 }), "invalid session count"],
+    ["malformed JSON", "not-json", "malformed JSON"],
+  ])("rejects %s", async (_label, body, message) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "application/json" } }))
+    await expect(new ServerConnection(options).getWorkspaceReclaimability("project-1", "pay", signal)).rejects.toThrow(message)
   })
 })

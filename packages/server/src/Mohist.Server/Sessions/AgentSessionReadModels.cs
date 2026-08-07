@@ -210,6 +210,7 @@ public sealed record AgentSessionListContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
+    string? WorkspaceName,
     string? WorkspacePath);
 
 /// <summary>
@@ -347,6 +348,7 @@ public sealed record GenericAgentSessionSummaryContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
+    string? WorkspaceName,
     string? WorkspacePath);
 
 /// <summary>
@@ -460,6 +462,7 @@ public sealed record UnifiedSessionContextRefsDto(
     int? IssueNumber,
     int? EpicNumber,
     string? Repository,
+    string? WorkspaceName,
     string? WorkspacePath);
 
 public sealed record WorkflowSessionDetailDto(WorkflowSessionDto Session, AgentSessionTranscriptResponse Transcript);

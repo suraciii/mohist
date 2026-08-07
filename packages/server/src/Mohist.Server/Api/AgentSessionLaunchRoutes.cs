@@ -67,6 +67,7 @@ public static class AgentSessionLaunchRoutes
             AgentReadinessService readiness,
             IAgentLauncher launcher,
             AttachmentService attachments,
+            IGrainFactory grains,
             CancellationToken ct) =>
         {
             if (body is null)
@@ -130,16 +131,37 @@ public static class AgentSessionLaunchRoutes
             // is rejected as a conflicting idempotency replay. The
             // accepted subset is what the dispatch envelope carries and
             // is established later via ValidateAndBindAgentInputAsync.
+
+            IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
+            if (!string.IsNullOrWhiteSpace(body.Context?.Workspace))
+            {
+                var wsGrain = grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, body.Context.Workspace.Trim()));
+                var ws = await wsGrain.GetAsync();
+                if (ws is { RepositoryNames.Count: > 0 })
+                {
+                    var repos = project.Repositories;
+                    workspaceRepositories = ws.RepositoryNames
+                        .Select(name => repos.FirstOrDefault(r =>
+                            string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        .Where(r => r is not null)
+                        .Select(r => new WorkspaceRepositorySnapshot(r!.Name, r.GitUrl, r.ResolvedBaseBranch))
+                        .ToList();
+                }
+            }
+
             var launchRequest = new AgentLaunchCoordinatorRequest(
                 Prompt: prompt?.Trim() ?? string.Empty,
                 AgentRef: agentRef,
                 Runtime: null,
+                WorkspaceName: body.Context?.Workspace,
                 WorkspacePath: body.Context?.WorkspacePath,
                 IssueNumber: body.Context?.IssueNumber,
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 Title: null,
-                AttachmentIds: body.Attachments?.ToArray());
+                AttachmentIds: body.Attachments?.ToArray(),
+                WorkspaceRepositories: workspaceRepositories);
 
             // Resume first: a replay that conflicts on the existing
             // fingerprint (prompt, attachments, context) must surface as
@@ -189,7 +211,7 @@ public static class AgentSessionLaunchRoutes
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
 
-            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier);
+            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier, grains);
             if (contextError is not null)
                 return contextError;
 
@@ -254,6 +276,7 @@ public static class AgentSessionLaunchRoutes
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 WorkspacePath: body.Context?.WorkspacePath,
+                WorkspaceName: body.Context?.Workspace,
                 Title: null,
                 WorkspaceRepository: workspaceRepositorySnapshot);
 
@@ -391,7 +414,8 @@ public static class AgentSessionLaunchRoutes
         AgentSessionLaunchContextRef? context,
         string projectId,
         IssueQuerier issueQuerier,
-        EpicQuerier epicQuerier)
+        EpicQuerier epicQuerier,
+        IGrainFactory grains)
     {
         if (context?.IssueNumber is <= 0)
             return ApiResults.BadRequest("issueNumber must be positive", "validation_failed");
@@ -408,6 +432,16 @@ public static class AgentSessionLaunchRoutes
             && await epicQuerier.GetAsync(projectId, epicNumber) is null)
         {
             return ApiResults.NotFound($"Epic #{epicNumber} not found");
+        }
+
+        if (!string.IsNullOrWhiteSpace(context?.Workspace))
+        {
+            var workspace = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                Infrastructure.Orleans.GrainKey.Workspace(projectId, context.Workspace.Trim())).GetAsync();
+            if (workspace is null)
+                return ApiResults.BadRequest($"Workspace '{context.Workspace}' not found", "workspace_not_found");
+            if (workspace.Status != Mohist.Server.Workspace.Domain.WorkspaceStatus.Active)
+                return ApiResults.BadRequest($"Workspace '{context.Workspace}' is archived and cannot accept new sessions", "workspace_archived");
         }
 
         return null;
@@ -486,6 +520,7 @@ public sealed record AgentSessionLaunchBody(
                 IssueNumber: TryReadPositiveInt(ctxElement, "issueNumber"),
                 EpicNumber: TryReadPositiveInt(ctxElement, "epicNumber"),
                 Repository: TryReadString(ctxElement, "repository"),
+                Workspace: TryReadString(ctxElement, "workspace"),
                 WorkspacePath: TryReadString(ctxElement, "workspacePath"));
         }
 
@@ -551,6 +586,7 @@ public sealed record AgentSessionLaunchContextRef(
     int? IssueNumber = null,
     int? EpicNumber = null,
     string? Repository = null,
+    string? Workspace = null,
     string? WorkspacePath = null);
 
 /// <summary>

@@ -1613,6 +1613,11 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasColumnType("TEXT")
                         .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/agent-launch/workspace-path\"')", true);
 
+                    b.Property<string>("LabelWorkspaceName")
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("TEXT")
+                        .HasComputedColumnSql("json_extract(\"State\", '$.metadata.labels.\"mohist.io/workspace-name\"')", true);
+
                     b.Property<string>("LabelAgentName")
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("TEXT")
@@ -1693,7 +1698,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.Property<string>("LaunchVisibility")
                         .IsRequired()
-                        .HasColumnType("TEXT");
+                        .HasColumnType("TEXT")
+                        .HasDefaultValue("visible");
 
                     b.Property<string>("ParentAgentId")
                         .HasColumnType("TEXT");
@@ -1744,6 +1750,9 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("LabelAgentLaunchIssueNumber")
                         .HasDatabaseName("IX_AgentSessions_LabelAgentLaunchIssueNumber");
+
+                    b.HasIndex("LabelWorkspaceName")
+                        .HasDatabaseName("IX_AgentSessions_LabelWorkspaceName");
 
                     b.HasIndex("LabelConnectionId")
                         .HasDatabaseName("IX_AgentSessions_LabelConnectionId");
@@ -3957,6 +3966,58 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.HasIndex("ProjectId", "CreatedAt");
 
                     b.ToTable("GitHubWriteBackFailures", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Workspace.WorkspaceRow", b =>
+                {
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ArchivedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HomePath")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("HomeRunnerId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginKind")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OriginPayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("RepositoriesJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ProjectId", "Name");
+
+                    b.HasIndex("ProjectId", "OriginKind", "OriginPayloadJson")
+                        .IsUnique()
+                        .HasFilter("\"Status\" = 'active'");
+
+                    b.ToTable("Workspaces", (string)null);
                 });
 #pragma warning restore 612, 618
         }

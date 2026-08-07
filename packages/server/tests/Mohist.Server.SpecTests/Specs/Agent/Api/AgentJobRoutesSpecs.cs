@@ -47,7 +47,7 @@ public class AgentJobRoutesSpecs
     }
 
     [Fact]
-    public async Task PostValidate_WorkspacePathMissing_ReturnsValidationError()
+    public async Task PostValidate_WorkspaceMissing_ReturnsValidationError()
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
             AgentJobController.ValidatePath,
@@ -61,7 +61,7 @@ public class AgentJobRoutesSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(payload.GetProperty("success").GetBoolean());
-        Assert.Contains("workspace.path", payload.GetProperty("error").GetString()!);
+        Assert.Contains("workspace.name or workspace.path", payload.GetProperty("error").GetString()!);
     }
 
     [Fact]
