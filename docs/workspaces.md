@@ -37,7 +37,9 @@ issue 完成或取消时，workspace 随之归档。
 - 新会话默认绑定所在场所解析出的 workspace；在同一个 channel 里再开新会话，
   落在同一个 workspace。
 - 把别的 Agent 拉进会话或 channel，它就进入同一个 workspace，看到同样的文件。
-- 会话里委托出的子会话继承同一个 workspace。
+- 会话里委托出的子会话继承同一个 workspace；需要隔离的子会话，委托时绑定另一个
+  workspace，或由 Agent 在目录内自行 git worktree（git 范畴的工具，平台不提供
+  “隔离工作空间”原语）。
 - 任何时候，一个场所只对应一个活跃 workspace——“我在这里说话，Agent 在哪个目录”
   永远有唯一答案。
 

@@ -139,3 +139,5 @@ Runner 为绑定 workspace 的执行注入工作目录锚定段：绝对路径 +
   事件（created / archived）进入事件协议谱系的事件集；workflow 的 openspec 产物
   位置——现位于 repo 检出内部（`openspec/changes/issue-<n>/`），是否随“工作产物属于
   workspace 层”迁到 workspace 根（复合 Issue 场景下该产物不属于任何单一仓库）。
+- 已退役：subagent 的 Managed worktree（交付增量 4）概念——git worktree 属 git 范畴，
+  不是平台概念；spawn 的目录来源统一为继承 parent workspace 或绑定命名 Workspace。
