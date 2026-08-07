@@ -17,7 +17,8 @@ public sealed record AgentSpawnAdmission(
     string RunnerId,
     string Runtime,
     string RuntimeSessionId,
-    long BindingEpoch);
+    long BindingEpoch,
+    string? ParentWorkspaceName = null);
 
 [Serializable]
 [Orleans.GenerateSerializer]
@@ -187,7 +188,8 @@ public sealed class AgentSpawnAdmissionService(
             runnerId,
             runtime,
             runtimeSessionId,
-            parent.Session.BindingEpoch);
+            parent.Session.BindingEpoch,
+            ParentWorkspaceName: parent.Label(AgentSessionQueryMetadataKeys.WorkspaceName));
     }
 
     private static bool HasNonTerminalStopBlockingSpawn(

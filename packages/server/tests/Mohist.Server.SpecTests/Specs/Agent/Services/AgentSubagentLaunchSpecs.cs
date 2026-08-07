@@ -121,6 +121,80 @@ public sealed class AgentSubagentLaunchSpecs
         }
     }
 
+    [Fact]
+    public async Task LaunchSubagent_ChildSession_InheritsParentWorkspaceName()
+    {
+        var projectId = await CreateProjectAsync("launcher-subagent-workspace");
+        var allowed = await CreateAgentAsync(projectId, "allowed-ws-child");
+        var target = await CreateAgentAsync(projectId, "target-ws-child");
+        using (var update = await _fixture.Client.PatchAsJsonAsync(
+                   $"/api/projects/{projectId}/agents/{target.Id}",
+                   new { allowedSubagentAgentIds = new[] { allowed.Id } }))
+        {
+            update.EnsureSuccessStatusCode();
+        }
+        await SeedCompletedTargetExecutionAsync(projectId, target);
+
+        var runnerId = $"launcher-subagent-ws-runner-{Guid.NewGuid():N}";
+        await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId).RegisterAsync(new RunnerInfo(
+            runnerId,
+            ["spec/*"],
+            "launcher-subagent-host",
+            projectId));
+
+        try
+        {
+            const string parentWorkspace = "slack-C-ws-parent";
+            var parentSessionId = $"launcher-subagent-ws-parent-{Guid.NewGuid():N}";
+            var parent = _fixture.Grains.GetGrain<IAgentSessionGrain>(parentSessionId);
+            await parent.OpenAsync(new OpenAgentSessionCommand(
+                RunnerId: runnerId,
+                AgentRuntime: "opencode",
+                WorkDir: "/workspace/launcher-subagent-ws",
+                Metadata: SpawnMetadata(projectId, "agent-parent")
+                    .WithLabel(AgentSessionMetadata.WorkspaceNameKey, parentWorkspace),
+                Definition: new AgentExecutionDefinition(
+                    "parent instructions",
+                    "opencode",
+                    "gpt-5.6-luna",
+                    "xhigh",
+                    [],
+                    [new AllowedSubagentSnapshot(target.Id, target.Name, target.Description)])));
+            await parent.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand(
+                "parent-runtime-ws",
+                ExpectedRunnerId: runnerId,
+                ExpectedRuntime: "opencode"));
+
+            AgentLaunchResult result;
+            await using (var scope = _fixture.Services.CreateAsyncScope())
+            {
+                var launcher = scope.ServiceProvider.GetRequiredService<IAgentLauncher>();
+                result = await launcher.LaunchSubagentAsync(
+                    projectId,
+                    parentSessionId,
+                    target.Id,
+                    "launch inheriting the parent workspace",
+                    $"launcher-subagent-ws-key-{Guid.NewGuid():N}");
+            }
+
+            await using var verifyScope = _fixture.Services.CreateAsyncScope();
+            var db = verifyScope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var childSession = await db.AgentSessions.SingleAsync(row => row.Id == result.SessionId);
+            Assert.Equal(parentWorkspace, childSession.LabelWorkspaceName);
+
+            var store = verifyScope.ServiceProvider.GetRequiredService<IAgentJobStore>();
+            var ledger = await store.LoadLedgerAsync(result.JobKey);
+            Assert.NotNull(ledger);
+            var state = JsonSerializer.Deserialize<AgentJobState>(ledger!.StateJson, JSON.Options);
+            Assert.Equal(parentWorkspace, state!.Input!.WorkspaceName);
+            Assert.Equal("/workspace/launcher-subagent-ws", state.Input.WorkspacePath);
+        }
+        finally
+        {
+            await _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global).UnregisterAsync(runnerId);
+        }
+    }
+
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
