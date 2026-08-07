@@ -16,7 +16,7 @@ internal sealed record ResourceDescriptor(
 internal static class ResourceOutputCatalog
 {
     private static readonly IReadOnlyList<string> AgentFields =
-        ["id", "projectId", "name", "description", "instructions", "agentConfig", "skills", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "readiness"];
+        ["id", "projectId", "name", "description", "instructions", "agentConfig", "skills", "allowedSubagentAgentIds", "maxConcurrentRuns", "status", "createdAt", "updatedAt", "readiness"];
 
     public static ResourceDescriptor For(string? tableShape)
     {
@@ -48,6 +48,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.ActivityList or
             MohistCliApi.TableShape.AgentJobList or
             MohistCliApi.TableShape.SessionList or
+            MohistCliApi.TableShape.SessionScheduleList or
             MohistCliApi.TableShape.OtelTracesList or
             MohistCliApi.TableShape.WebhookSubscriptionList or
             MohistCliApi.TableShape.WebhookDeliveryFailureList => ResourceCardinality.Collection,
@@ -79,6 +80,7 @@ internal static class ResourceOutputCatalog
                 ["sessionId", "agentId", "agentName", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns"],
             MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "status", "attachments", "rejectedAttachments", "transcriptUrl", "jobUrl", "observationUrl"],
+            MohistCliApi.TableShape.AgentSessionSpawn => ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
             MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
             MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
@@ -87,9 +89,16 @@ internal static class ResourceOutputCatalog
                 ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs"],
             MohistCliApi.TableShape.SessionShow =>
                 ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory"],
+            MohistCliApi.TableShape.SessionTree => ["root", "revision", "nodes", "edges", "continuation"],
             MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.SessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.SessionCancel => ["state", "interruptUnconfirmed"],
+            MohistCliApi.TableShape.SessionStop => ["operationId", "rootSessionId", "status", "admissionFenceActive", "graphRevision", "membership", "targets"],
+            MohistCliApi.TableShape.SessionDetach => ["state", "childSessionId", "parentSessionId", "edgeId", "childLaunchJobId", "attachedRevision", "detachedRevision", "historic", "reason"],
+            MohistCliApi.TableShape.SessionScheduleCreate or
+            MohistCliApi.TableShape.SessionScheduleList or
+            MohistCliApi.TableShape.SessionScheduleCancel =>
+                ["scheduleId", "status", "dueAt", "text", "inputId", "createdAt", "idempotencyKey", "cancelledAt"],
             MohistCliApi.TableShape.SessionRecovery =>
                 ["id", "status", "contextWindowSize", "contextWindowUsed", "contextUsagePercent", "contextWindowUsedBefore", "operation", "wasCompacted"],
             MohistCliApi.TableShape.IssueTemplateList => ["id", "name", "description", "source"],

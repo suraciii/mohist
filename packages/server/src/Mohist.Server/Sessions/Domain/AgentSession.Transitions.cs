@@ -76,6 +76,9 @@ public static partial class AgentSessionExtensions
             var isNewRuntimeBinding = !string.Equals(existingAgentSessionId, agentSessionId, StringComparison.Ordinal)
                 || !string.Equals(existingRuntime, nextRuntime, StringComparison.OrdinalIgnoreCase);
 
+            if (isNewRuntimeBinding && HasHeldBindingUse(session))
+                throw new InvalidOperationException("binding_attach_in_progress");
+
             // A runtime change (e.g. runner restart on a different backend) replaces
             // the binding through the idle-only CAS path so the context window is
             // cleared while cumulative usage is preserved. Same-runtime rebind was
@@ -88,7 +91,8 @@ public static partial class AgentSessionExtensions
                     session.CurrentRuntimeBinding(),
                     new AgentRuntimeBinding(session.Runtime.RunnerId, nextRuntime, agentSessionId),
                     "runtime-change",
-                    now: now).ToList();
+                    now: now,
+                    expectedBindingEpoch: session.BindingEpoch).ToList();
                 if (!string.Equals(oldModel, model ?? oldModel, StringComparison.Ordinal))
                     replacementEvents.Add(new AgentSessionModelChanged(model ?? oldModel));
                 return replacementEvents;
@@ -106,6 +110,8 @@ public static partial class AgentSessionExtensions
                 BoundAt = isNewRuntimeBinding ? now : session.Status.BoundAt ?? now,
                 LastDataAt = now,
             };
+            if (isNewRuntimeBinding)
+                session.BindingEpoch = checked(session.BindingEpoch + 1);
             var events = new List<AgentSessionEvent>();
             if (isNewRuntimeBinding)
                 events.Add(new AgentSessionRuntimeBound(agentSessionId, session.Runtime.Runtime));
@@ -138,9 +144,16 @@ public static partial class AgentSessionExtensions
                 Activity = activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = activity == AgentSessionActivity.Idle ? now : session.Status.CurrentTurnEndedAt,
+                IdleSince = IdleSinceFor(activity, now),
             };
             return [];
         }
+
+        // Single derivation so every activity transition keeps IdleSince
+        // consistent: set on idle, cleared on active and on unknown so an
+        // unconfirmable activity can never retain a stale idle time.
+        private static DateTime? IdleSinceFor(AgentSessionActivity activity, DateTime now) =>
+            activity == AgentSessionActivity.Idle ? now : null;
 
         public IReadOnlyList<AgentSessionEvent> ApplyUsage(
             long? inputTokens,
@@ -185,18 +198,29 @@ public static partial class AgentSessionExtensions
         {
             EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
             session.SetActivity(AgentSessionActivity.Idle, now);
-            return session.RebindRuntimeSession(expected, replacement, "missing-recovery", now);
+            return session.RebindRuntimeSession(
+                expected,
+                replacement,
+                "missing-recovery",
+                now,
+                session.BindingEpoch);
         }
 
         public IReadOnlyList<AgentSessionEvent> RebindRuntimeSession(
             AgentRuntimeBinding expected,
             AgentRuntimeBinding replacement,
             string reason,
-            DateTime now)
+            DateTime now,
+            long expectedBindingEpoch = 0)
         {
             if (session.Status.Activity != AgentSessionActivity.Idle)
                 throw new InvalidOperationException($"AgentSession {session.Id} is currently {session.Status.Activity}; binding replacement requires idle activity.");
+            if (HasHeldBindingUse(session))
+                throw new InvalidOperationException("binding_attach_in_progress");
             EnsureExpectedRuntimeBinding(session, expected, session.CurrentRuntimeBinding());
+            if (session.BindingEpoch != expectedBindingEpoch)
+                throw new InvalidOperationException(
+                    $"AgentSession {session.Id} binding epoch changed from {expectedBindingEpoch} to {session.BindingEpoch}.");
             if (string.IsNullOrWhiteSpace(replacement.RunnerId) || string.IsNullOrWhiteSpace(replacement.RuntimeSessionId))
                 throw new InvalidOperationException("Binding replacement requires a runner and runtime session.");
             if (reason is not ("reset" or "runtime-change" or "missing-recovery"))
@@ -215,6 +239,7 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 UsageSummary = usage with { ContextWindowUsed = null, ContextWindowSize = null },
             };
+            session.BindingEpoch = checked(session.BindingEpoch + 1);
             return [new AgentSessionRuntimeBound(replacement.RuntimeSessionId, session.Runtime.Runtime)];
         }
 
@@ -229,6 +254,9 @@ public static partial class AgentSessionExtensions
             if (expected == actual) return;
             throw new StaleRuntimeSessionBindingException(actualSession.Id, expected.RuntimeSessionId, actual.RuntimeSessionId);
         }
+
+        private static bool HasHeldBindingUse(AgentSession currentSession) =>
+            currentSession.BindingUseReceipts?.Any(item => item.State == SessionTreeBindingUseState.Held) == true;
 
         public IReadOnlyList<AgentSessionEvent> RecordCompaction(
             long? contextWindowUsedBefore,
@@ -477,6 +505,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = null,
             };
 
             return [];
@@ -586,6 +615,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Active,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = null,
             };
 
             return [];
@@ -633,6 +663,7 @@ public static partial class AgentSessionExtensions
                 Activity = wasUnknown ? AgentSessionActivity.Active : session.Status.Activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = wasUnknown ? null : session.Status.CurrentTurnEndedAt,
+                IdleSince = wasUnknown ? null : session.Status.IdleSince,
             };
             return [];
         }
@@ -701,6 +732,7 @@ public static partial class AgentSessionExtensions
                     ? AgentSessionActivity.Unknown
                     : AgentSessionActivity.Idle,
                 CurrentTurnEndedAt = now,
+                IdleSince = status == AgentTurnStatus.Unknown ? null : now,
             };
             return [];
         }
@@ -731,6 +763,7 @@ public static partial class AgentSessionExtensions
                 LastDataAt = now,
                 Activity = AgentSessionActivity.Idle,
                 CurrentTurnEndedAt = now,
+                IdleSince = now,
             };
             return [];
         }
@@ -745,7 +778,7 @@ public static partial class AgentSessionExtensions
             return new AgentTurnCancelResult(session.ResolveTurnControl(turnId), true);
         }
 
-        public AgentTurnStopClaimResult ClaimTurnStop(string turnId)
+        public AgentTurnStopClaimResult ClaimTurnStop(string turnId, string? operationId = null)
         {
             var control = session.ResolveTurnControl(turnId);
             var pending = session.Status.PendingStop;
@@ -764,7 +797,9 @@ public static partial class AgentSessionExtensions
 
             if (pending is null)
             {
-                pending = new AgentSessionStopClaim(turnId, Guid.NewGuid().ToString("N"));
+                pending = new AgentSessionStopClaim(
+                    turnId,
+                    string.IsNullOrWhiteSpace(operationId) ? Guid.NewGuid().ToString("N") : operationId);
                 session.Status = session.Status with { PendingStop = pending };
             }
 
@@ -823,6 +858,7 @@ public static partial class AgentSessionExtensions
                 Activity = AgentSessionActivity.Idle,
                 LastDataAt = now,
                 CurrentTurnEndedAt = now,
+                IdleSince = now,
             };
             return [];
         }
@@ -1256,6 +1292,9 @@ public static partial class AgentSessionExtensions
                     : session.Status.Activity,
                 LastDataAt = now,
                 CurrentTurnEndedAt = null,
+                IdleSince = session.Status.Activity == AgentSessionActivity.Unknown
+                    ? null
+                    : session.Status.IdleSince,
             };
             return [];
         }
@@ -1320,6 +1359,11 @@ public static partial class AgentSessionExtensions
                         ? AgentSessionActivity.Idle
                         : session.Status.Activity,
                 },
+                IdleSince = status == AgentTurnStatus.Unknown
+                    ? null
+                    : remainingFollowupTurns == 0
+                        ? now
+                        : session.Status.IdleSince,
                 CurrentTurnEndedAt = status is AgentTurnStatus.Completed
                     or AgentTurnStatus.Failed
                     or AgentTurnStatus.Cancelled

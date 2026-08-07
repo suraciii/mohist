@@ -5,6 +5,7 @@ using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Workflow.Storage;
@@ -41,10 +42,7 @@ public class DispatchSnapshotStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        await using (var db = new MohistDbContext(options))
-        {
-            await db.Database.EnsureCreatedAsync();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
         var factory = new TestDbContextFactory(options);
         var store = new DispatchSnapshotStore(factory, NullLogger<DispatchSnapshotStore>.Instance);
         return new Harness(store, factory, keeper);

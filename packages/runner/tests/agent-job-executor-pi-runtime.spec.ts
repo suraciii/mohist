@@ -285,6 +285,66 @@ describe("AgentJobExecutor selects the runtime from the dispatch", () => {
     expect(parsed.kind).toBe("opencode")
   })
 
+  it("passes the same complete startup-before-task prompt to OpenCode and Pi", async () => {
+    const openCode = makeFakeOpenCodeRuntime()
+    const pi = makeFakePiRuntime()
+    const connection = makeFakeConnection()
+    const executor = new AgentJobExecutor(connection.connection, {
+      openCode: openCode.runtime,
+      pi: pi.runtime,
+    })
+    const startup = {
+      projectId: "proj_1",
+      sessionId: "sess_child",
+      parentSessionId: "sess_parent",
+      allowedSubagents: [{
+        agentId: "agent_allowed",
+        nameAtLaunch: "allowed-agent",
+        descriptionAtLaunch: "stable launch description",
+      }],
+      spawnCommand: "mo agent spawn <agent-ref> --parent-session <session-id>",
+      workDir: "/inherited/agent-workspace",
+      pinnedRunnerId: "runner_pinned",
+      agentId: "agent_target",
+      agentName: "target-agent",
+    } as const
+
+    const commonWork = {
+      agentSessionId: null,
+      agentSessionStartup: startup,
+      with: { prompt: "target task", instructions: "follow the brief", runtime: "opencode" },
+    } satisfies Partial<DispatchWorkItem>
+    const openCodeResult = await executor.execute(buildAgentJobWork(commonWork), new AbortController().signal)
+    const piResult = await executor.execute(buildAgentJobWork({
+      ...commonWork,
+      workId: "aj-pi",
+      agentJobId: "aj-pi",
+      with: { ...commonWork.with, runtime: "pi" },
+    }), new AbortController().signal)
+
+    expect(openCodeResult.status).toBe("completed")
+    expect(piResult.status).toBe("completed")
+    const openCodePrompt = openCode.runTurnCalls[0]?.prompt
+    const piPrompt = pi.runTurnCalls[0]?.prompt
+    expect(openCodePrompt).toBeDefined()
+    expect(piPrompt).toBe(openCodePrompt)
+    expect(openCodePrompt).toMatch(/^\[mohist-agent-session-startup\][\s\S]*\[\/mohist-agent-session-startup\]\n\n[\s\S]*target task$/)
+    for (const value of [
+      "agent_target",
+      "target-agent",
+      "/inherited/agent-workspace",
+      "runner_pinned",
+      "sess_parent",
+      "sess_child",
+      "agent_allowed",
+      "allowed-agent",
+      "stable launch description",
+      "mo agent spawn <agent-ref> --parent-session <session-id>",
+    ]) {
+      expect(openCodePrompt).toContain(value)
+    }
+  })
+
   it("selects PiRuntime for a dispatch with runtime: pi", async () => {
     const openCode = makeFakeOpenCodeRuntime()
     const pi = makeFakePiRuntime()

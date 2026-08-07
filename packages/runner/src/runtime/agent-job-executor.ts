@@ -26,6 +26,7 @@ import { resolveAccessor, type RuntimeAccessor } from "../server/command-runtime
 import type { ServerConnection } from "../server/connection.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator, type RuntimeBinding } from "./binding-recovery.js"
 import { SkillResolver, type ResolvedSkill } from "./skill-resolver.js"
+import type { WorkspaceSourceConfirmer } from "./workspace-source.js"
 import { runnerLogger } from "../system/logger.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
 import { inlineSlackCollaborationSkill, readSlackExecutionContext } from "./slack-execution-context.js"
@@ -78,6 +79,7 @@ export class AgentJobExecutor {
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly defaultWorkDir: string = process.cwd(),
     private readonly skillResolver: SkillResolver = new SkillResolver(),
+    private readonly workspaceSourceConfirmer: WorkspaceSourceConfirmer | null = null,
   ) {}
 
   async execute(work: DispatchWorkItem, signal: AbortSignal): Promise<WorkItemResult> {
@@ -130,7 +132,8 @@ export class AgentJobExecutor {
         prompt ?? "",
         instructions,
         skills,
-        slackContext.kind === "resolved" ? slackContext.value : null),
+        slackContext.kind === "resolved" ? slackContext.value : null,
+        work.agentSessionStartup),
       attachmentDelivery)
 
     let binding: BindingResolution
@@ -247,9 +250,11 @@ export class AgentJobExecutor {
     // dispatch only carries the correlation ids so the runner knows
     // the initial input is already accepted.
     const skipInitialInput = Boolean(work.initialInputId && work.initialTurnId)
+    let attachedRuntimeSessionId: string | null = null
     const observer: RuntimeTurnObserver | undefined = binding.agentSessionId
       ? {
         onSessionReady: async (session) => {
+          attachedRuntimeSessionId = session.runtimeSessionId
           await eventSink.attachSession(session.runtimeSessionId, session.workDir, modelInput)
           if (!skipInitialInput) {
             await eventSink.publishSessionInput(composed, session.runtimeSessionId)
@@ -268,6 +273,7 @@ export class AgentJobExecutor {
       return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
     }
     await eventSink.drain()
+    await this.confirmWorkspaceSource(work, workDir, attachedRuntimeSessionId, signal)
     return projectTurnToWorkItemResult(result, "opencode", modelInput, variant)
   }
 
@@ -356,7 +362,35 @@ export class AgentJobExecutor {
       return failureResult("turn-failed", `AgentJob turn threw: ${errorMessage(error)}`)
     }
     await eventSink.drain()
+    await this.confirmWorkspaceSource(work, workDir, runtimeSessionId, signal)
     return projectPiTurnToWorkItemResult(result, "pi", modelInput, variant)
+  }
+
+  // First-execution Project source confirmation. Runs only when the
+  // launch carried a Project Repository snapshot; the verdict is
+  // reported to the Server after the runtime session is attached so the
+  // runner-owned route's ownership check (existing.RunnerId == runnerId)
+  // holds and the report carries the real attached runtime session id.
+  // A failed report throws inside the confirmer (which does not cache
+  // it) so the next execution retries; it never blocks the session's
+  // own work outcome.
+  private async confirmWorkspaceSource(
+    work: DispatchWorkItem,
+    workDir: string,
+    runtimeSessionId: string | null,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const startup = work.agentSessionStartup
+    const repository = startup?.workspaceRepository
+    if (!startup || !repository || !this.workspaceSourceConfirmer) return
+    await this.workspaceSourceConfirmer.confirm({
+      sessionId: startup.sessionId,
+      workDir,
+      repository,
+      runtimeSessionId,
+    }, signal).catch((error) => {
+      log.error("workspace source confirmation failed", { session: startup.sessionId, exception: error })
+    })
   }
 }
 

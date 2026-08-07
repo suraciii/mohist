@@ -5,6 +5,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Slack;
 using Mohist.Server.Infrastructure.Slack;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Slack;
@@ -199,10 +200,7 @@ public class SlackDmSessionMappingStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(keeper)
             .Options;
-        using (var db = new MohistDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(keeper);
         var factory = new TestDbContextFactory(options);
         var time = new FakeTimeProvider(FixedNow);
         var store = new SlackDmSessionMappingStore(factory, time);

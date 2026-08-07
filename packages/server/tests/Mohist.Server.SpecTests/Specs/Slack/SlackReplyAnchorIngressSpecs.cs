@@ -22,7 +22,7 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Slack;
 
-[Collection("MohistIntegration")]
+[Collection("SlackReplyAnchorIngress")]
 public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 {
     private readonly MohistIntegrationFixture _fixture;

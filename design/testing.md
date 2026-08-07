@@ -87,11 +87,35 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 
 ### 4. Fast and concise
 
-| Track | Per test | Per file |
+The duration budget is enforced by the test-duration guard
+(`scripts/test-duration/`, `npm run test:budget`), locally and in CI. It is two
+hard constraints, both FAIL — never a warning:
+
+| Constraint | What it proves | Threshold |
 |---|---|---|
-| Unit | < 50ms | < 300 LOC |
-| Spec | < 500ms (hard cap 5s); collection ≤ 2min | < 800 LOC (C# ratchet: 24,000 bytes, ≈540 lines at this repo's density) |
-| Browser | separate `npm run test:browser`; never in default `npm test` | |
+| p95 (population) | the vast majority of tests are millisecond-fast | unit p95 ≤ 50ms; spec p95 ≤ 500ms |
+| absolute (single test) | no real slow test slips through | unit/arch ≤ 500ms; spec ≤ 5s (hard cap) |
+
+Architecture tests are a structural category (Roslyn-based): they get the 500ms
+absolute cap only, no p95 population budget. A test above its absolute cap
+fails unless it is in the version-controlled allowlist
+(`test-duration.config.jsonc`) with identity + observed baseline + reason +
+owner + removal deadline. p95 cannot be allowlisted away: if the population
+drifts over budget, the track fails regardless of any allowlist. The 50ms unit
+target is this population guard, not a per-test cliff, so normal scheduling
+flutter around 50ms is tolerated as long as p95 holds; the per-test absolute
+cap catches real slow tests regardless of population. The whole suite runs
+under a five-minute hard deadline.
+
+Tracks without a seeded baseline run deadline-governed only
+(`enforce: false`, `status: baseline-pending`): explicit governance status, not
+a silent warning. Baselines expand incrementally.
+
+| Track | Per-file budget |
+|---|---|
+| Unit | < 300 LOC |
+| Spec | < 800 LOC (C# ratchet: 24,000 bytes, ≈540 lines at this repo's density) |
+| Browser | separate `npm run test:browser`; never in default `npm test` and never in the guard | |
 
 Extract shared setup. One product ability = one test file. Migration splits: delete old file once equivalent coverage exists.
 
@@ -104,9 +128,12 @@ along the behavior it specifies, never to compress formatting to fit.
 
 ### Repository CI time budget
 
-The GitHub CI gate is expected to complete within five minutes. Each job has a
-five-minute timeout; reaching it is an abnormal condition to diagnose, not a
-normal way to finish a test run.
+The whole suite must finish within five minutes. The test-duration guard
+enforces a hard five-minute deadline (cross-platform Node-spawned kill; never
+the Linux `timeout` binary as the only executor) plus the per-track deadlines
+above. CI and local run the same guard, so the budget is identical in both.
+Reaching any deadline is an abnormal condition to diagnose, not a normal way to
+finish a test run.
 
 The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 
@@ -133,6 +160,7 @@ xUnit collection = scheduling unit; classes inside a collection run serially, so
 ## Guards (automated)
 
 Existing:
+- test-duration guard (`scripts/test-duration/`, `npm run test:budget`): enforces the suite 5-minute deadline, per-track deadlines, p95 population budgets (unit ≤ 50ms / spec ≤ 500ms), and the 500ms absolute single-test cap; parses real vitest JSON and xUnit TRX; FAILs on timeout, over-budget, p95 breach, and stale or deadline-expired allowlist entries. `test-duration.config.jsonc` holds thresholds and the per-item governed allowlist. Deterministic unit tests cover parsing, budget, deadline, focused-flow, and config validation (no real network/process/wall-clock).
 - ArchTests: layer deps, spec naming, namespace, public, and analyzer wiring backstops.
 - `BannedApiAnalyzers`: compile-time enforcement of product and test API deny lists; test projects additionally ban wall-clock, scheduler-based waiting, host paths, physical adapters, and real filesystem APIs.
 - EnvironmentAbstractions BannedApiAnalyzer: compile-time ban on direct env reads.

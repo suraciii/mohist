@@ -187,7 +187,9 @@ public record WorkDispatch(
     /// executing/terminal progress with this id. Null for legacy
     /// dispatches.
     /// </summary>
-    [property: Id(23)] string? InitialTurnId = null)
+    [property: Id(23)] string? InitialTurnId = null,
+    [property: Id(24)] string? PinnedRunnerId = null,
+    [property: Id(25)] AgentSessionStartup? AgentSessionStartup = null)
 {
     public WorkDispatch() : this(string.Empty, string.Empty) { }
 }

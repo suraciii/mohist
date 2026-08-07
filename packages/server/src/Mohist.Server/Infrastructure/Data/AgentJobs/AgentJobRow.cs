@@ -67,4 +67,6 @@ public class AgentJobRow
     public string? AgentSessionId { get; set; }
     public string? InitialInputId { get; set; }
     public string? InitialTurnId { get; set; }
+    public string? PinnedRunnerId { get; set; }
+    public string LaunchVisibility { get; set; } = "visible";
 }

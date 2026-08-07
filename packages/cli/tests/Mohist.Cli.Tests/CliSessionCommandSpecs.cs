@@ -42,6 +42,7 @@ public class CliSessionCommandSpecs
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
         Assert.Contains("cancel", stdout, StringComparison.Ordinal);
+        Assert.Contains("schedule", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("ls", stdout, StringComparison.Ordinal);
     }

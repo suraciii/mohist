@@ -267,6 +267,18 @@ reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在
 
 ## 本地 workspace 生命周期
 
+Runner 拥有两类可物化的本地 workspace，二者都是可重建执行状态、都只由 Runner 接触文件系统，
+但身份来源与终态信号不同：
+
+- **WorkflowRun workspace**：身份由 `WorkflowRunId` 推导（Issue-backed），终态信号是
+  WorkflowRun 进入不可恢复终态。本节以下描述的生命周期 phase、single-flight 维护与 Runtime/
+  磁盘双重回收均针对它。
+- **Agent managed worktree**：身份由 child AgentSession 推导（会话树 spawn），物化是被 pin 的
+  Runner 上 parent 工作空间的 git worktree，终态信号是 child AgentSession 的 activity。其物化/
+  释放/回收契约、opaque identity、fail-closed 语义与 parent-child 工作空间依赖以
+  [`agent-workspace.md`](agent-workspace.md) 为唯一权威；它复用本节的 phase 模型与维护周期，
+  但不属于本节描述的 WorkflowRun workspace。
+
 Runner 拥有自己物化的 workspace 与本地 `WorkspaceRegistry`。注册表只是可重建的
 生命周期索引，不是 WorkflowRun 状态权威。每个条目只有三种 phase：
 

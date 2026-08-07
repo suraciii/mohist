@@ -18,11 +18,25 @@ public sealed class AgentExecutionSnapshotResolver(
         if (AgentConfigSchema.Validate(config) is not null)
             return null;
 
+        var allowedSubagents = new List<AllowedSubagentSnapshot>();
+        foreach (var allowedId in agent.AllowedSubagentAgentIds ?? [])
+        {
+            var allowed = await agents.GetByIdAsync(projectId, allowedId);
+            if (allowed is not null)
+            {
+                allowedSubagents.Add(new AllowedSubagentSnapshot(
+                    allowed.Id,
+                    allowed.Name,
+                    allowed.Description));
+            }
+        }
+
         return new AgentExecutionDefinition(
             Instructions: agent.Instructions,
             Runtime: AgentLauncher.ResolveRuntime(config),
             Model: AgentLauncher.ResolveModelAndVariant(config).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
-            Skills: agent.Skills.ToArray());
+            Skills: agent.Skills.ToArray(),
+            AllowedSubagents: allowedSubagents.ToArray());
     }
 }

@@ -88,6 +88,11 @@ AgentSession 的稳定 `Session ID` 是跨入口观察和继续操作的唯一�
 - 伪装成系统指令的聊天平台元数据；
 - 仅为了通过校验而生成、但用户没有看到的隐藏 prompt。
 
+Subagent spawn is the one launch form whose caller is an AgentSession. Its caller Session ID and
+idempotency key are explicit, while Server inherits both the authoritative workDir and current
+Runner binding from that caller; clients cannot provide a substitute path or Runner. The authoritative
+contract is [`subagents.md`](subagents.md).
+
 一条输入必须包含可见文本或至少一个可用附件。只含附件的输入是有效输入；普通 URL 保留为
 文本，是否访问由 Agent 已有能力决定，Agent API 不替客户端抓取任意链接。
 

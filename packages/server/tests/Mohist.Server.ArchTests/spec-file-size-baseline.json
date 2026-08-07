@@ -1,5 +1,5 @@
 {
-  "Mohist.Server.ArchTests/ArchitectureRules.cs": 35000,
+  "Mohist.Server.ArchTests/ArchitectureRules.cs": 34000,
   "Mohist.Server.SpecTests/Specs/Agent/Api/AgentJobRoutesSpecs.cs": 27000,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentJobGrainSpecs.cs": 26000,
   "Mohist.Server.SpecTests/Specs/Agent/Grain/AgentTurnLifecycleT001Specs.cs": 26000,

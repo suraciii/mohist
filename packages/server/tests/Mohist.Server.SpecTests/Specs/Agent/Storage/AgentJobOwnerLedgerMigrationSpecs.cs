@@ -181,6 +181,12 @@ public sealed class AgentJobOwnerLedgerMigrationSpecs
             await db.Database.GetService<IMigrator>().MigrateAsync(Migration);
         }
 
+        await using var schema = database.CreateContext();
+        Assert.DoesNotContain("LaunchVisibility", await ReadColumnAsync(
+            schema,
+            "name",
+            "PRAGMA table_info('AgentJobs')"));
+
         var store = new AgentJobStore(
             new TestDbContextFactory(database.Options),
             NullLogger<AgentJobStore>.Instance,

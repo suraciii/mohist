@@ -20,6 +20,7 @@ using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -97,6 +98,12 @@ public static class MohistServiceRegistration
         // without taking on the concrete type. Lifetime matches the
         // concrete type — scoped, like IssueQuerier.
         services.AddScoped<IAgentLauncher>(sp => sp.GetRequiredService<AgentLauncher>());
+        services.AddScoped<ISessionTreeMutationFenceReadPort>(sp =>
+            new SessionTreeMutationFenceReadPort(
+                sp.GetRequiredService<IGrainFactory>(),
+                sp.GetRequiredService<IDbContextFactory<MohistDbContext>>()));
+        services.AddScoped<ISessionTreeStopTargetAdapter>(sp =>
+            sp.GetRequiredService<SessionTreeStopTargetAdapter>());
         services.AddScoped<AgentLaunchObservationAssembler>();
         services.AddScoped<SlackSetupVerifier>();
         services.AddScoped<IAgentExecutionSnapshotResolver>(sp => sp.GetRequiredService<AgentExecutionSnapshotResolver>());
@@ -313,6 +320,7 @@ public static class MohistServiceRegistration
         services.AddSingleton<IOtelQueryExecutor>(provider => provider.GetRequiredService<TraceQuerier>());
         services.AddScoped<IRunnerWorkspaceClient, RunnerWorkspaceClient>();
         services.AddScoped<ISessionCommandDispatcher, RunnerSessionCommandDispatcher>();
+        services.AddScoped<IAgentWorkspaceMaterializer, RunnerAgentWorkspaceClient>();
         services.AddScoped<IActionCatalogSource>(sp => sp.GetRequiredService<RunnerRegistryCatalogSource>());
         services.AddScoped<IRunnerStatusSource>(sp => sp.GetRequiredService<RunnerStatusService>());
         services.AddSingleton<IRunnerWorkflowStatusRouter, RunnerWorkflowStatusRouter>();

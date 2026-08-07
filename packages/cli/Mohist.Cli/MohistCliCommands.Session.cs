@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.Globalization;
 using System.Net;
 using System.Text.Json.Nodes;
 
@@ -37,9 +38,11 @@ internal static class SessionCommands
             "Manage one AgentSession by its stable Session ID (issue-479). " +
             "Subcommands: list (--agent|--issue|--run), view <session-id>, " +
             "transcript <session-id>, followup <session-id>, " +
-             "compact <session-id>, reset <session-id>, cancel <session-id>, stop <session-id>.");
+             "compact <session-id>, reset <session-id>, cancel <session-id>, stop <session-id>, " +
+             "schedule create|list|cancel.");
 
         session.Subcommands.Add(BuildList(api));
+        session.Subcommands.Add(BuildTree(api));
         session.Subcommands.Add(BuildView(api));
         session.Subcommands.Add(BuildTranscript(api));
         session.Subcommands.Add(BuildFollowup(api));
@@ -47,9 +50,176 @@ internal static class SessionCommands
         session.Subcommands.Add(BuildReset(api));
         session.Subcommands.Add(BuildCancel(api));
         session.Subcommands.Add(BuildStop(api));
+        session.Subcommands.Add(BuildDetach(api));
+        session.Subcommands.Add(BuildSchedule(api));
 
         return session;
     }
+
+    private static Command BuildSchedule(MohistCliApi api)
+    {
+        var schedule = new Command(
+            "schedule",
+            "Manage scheduled inputs for an AgentSession: inputs delivered to the session when their due time arrives.");
+        schedule.Subcommands.Add(BuildScheduleCreate(api));
+        schedule.Subcommands.Add(BuildScheduleList(api));
+        schedule.Subcommands.Add(BuildScheduleCancel(api));
+        return schedule;
+    }
+
+    private static Command BuildScheduleCreate(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "create",
+            "Schedule a follow-up input for an AgentSession at an absolute due time. " +
+            "Sends POST /api/projects/:projectId/agent-sessions/:sessionId/schedules.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
+        var atOpt = new Option<string?>("--at")
+        {
+            Description = "Absolute due time as RFC 3339 with a timezone offset (e.g. 2026-08-06T14:00:00+08:00 or 2026-08-06T06:00:00Z)",
+        };
+        var textOpt = new Option<string?>("--text") { Description = "Follow-up text delivered when the schedule is due" };
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key")
+        {
+            Description = "Reuse this key to safely retry schedule creation after response loss",
+        };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionScheduleCreate)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(atOpt);
+        cmd.Options.Add(textOpt);
+        cmd.Options.Add(idempotencyKeyOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => CreateAsync(ctx));
+
+        async Task<int> CreateAsync(ParseResult ctx)
+        {
+            var at = ctx.GetValue(atOpt);
+            if (string.IsNullOrWhiteSpace(at))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--at is required.");
+            if (!IsRfc3339WithOffset(at))
+                return CommandHelpHook.RenderUsageFailure(
+                    ctx,
+                    api.Error,
+                    "--at must be an RFC 3339 timestamp with a timezone offset (e.g. 2026-08-06T14:00:00+08:00 or 2026-08-06T06:00:00Z).");
+
+            var text = ctx.GetValue(textOpt);
+            if (string.IsNullOrWhiteSpace(text))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--text is required.");
+
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+
+            var suppliedKey = ctx.GetValue(idempotencyKeyOpt);
+            var idempotencyKey = string.IsNullOrWhiteSpace(suppliedKey)
+                ? Guid.NewGuid().ToString("N")
+                : suppliedKey;
+            if (string.IsNullOrWhiteSpace(suppliedKey))
+            {
+                if (mode == "table")
+                    api.Output.WriteLine($"Idempotency-Key: {idempotencyKey}");
+                else
+                {
+                    api.Error.WriteLine($"Idempotency-Key: {idempotencyKey}");
+                    api.Error.WriteLine($"If the outcome is unknown, retry with --idempotency-key {idempotencyKey}.");
+                }
+            }
+
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(sessionIdArg)!)}/schedules"),
+                new { text, dueAt = at },
+                mode,
+                nameof(MohistCliApi.TableShape.SessionScheduleCreate),
+                headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey },
+                retries: 1);
+        }
+
+        return cmd;
+    }
+
+    private static Command BuildScheduleList(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "list",
+            "List scheduled inputs for an AgentSession (including delivered and cancelled), ordered by due time.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionScheduleList)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => ListAsync(ctx));
+
+        async Task<int> ListAsync(ParseResult ctx)
+        {
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(sessionIdArg)!)}/schedules"),
+                mode,
+                nameof(MohistCliApi.TableShape.SessionScheduleList));
+        }
+
+        return cmd;
+    }
+
+    private static Command BuildScheduleCancel(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "cancel",
+            "Cancel a scheduled input that has not been delivered yet. " +
+            "Cancelling an already delivered or cancelled schedule reports the current status and leaves the delivered input untouched.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id" };
+        var scheduleIdArg = new Argument<string>("schedule-id") { Description = "Stable schedule id returned by schedule create or list" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionScheduleCancel)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Arguments.Add(scheduleIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => CancelAsync(ctx));
+
+        async Task<int> CancelAsync(ParseResult ctx)
+        {
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(
+                    project,
+                    $"/{MohistCliCommands.Escape(ctx.GetValue(sessionIdArg)!)}/schedules/{MohistCliCommands.Escape(ctx.GetValue(scheduleIdArg)!)}/cancel"),
+                new { },
+                mode,
+                nameof(MohistCliApi.TableShape.SessionScheduleCancel));
+        }
+
+        return cmd;
+    }
+
+    private static readonly string[] Rfc3339OffsetFormats =
+    [
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:sszzz",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz",
+    ];
+
+    private static bool IsRfc3339WithOffset(string value) =>
+        DateTimeOffset.TryParseExact(
+            value,
+            Rfc3339OffsetFormats,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out _);
 
     private static string ProjectSessionsPath(string? projectId, string path = "")
     {
@@ -147,6 +317,53 @@ internal static class SessionCommands
                     nameof(MohistCliApi.TableShape.SessionList));
             }
         });
+        return cmd;
+    }
+
+    private static Command BuildTree(MohistCliApi api)
+    {
+        var cmd = new Command("tree", "Show the Server-authoritative AgentSession tree rooted at a session.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Root AgentSession id" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var limitOpt = new Option<int?>("--limit") { Description = "Maximum number of tree nodes/edges" };
+        var continuationOpt = new Option<string?>("--continuation") { Description = "Continuation token returned by the Server" };
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTree)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(limitOpt);
+        cmd.Options.Add(continuationOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => TreeAsync(ctx));
+
+        async Task<int> TreeAsync(ParseResult ctx)
+        {
+            var project = ctx.GetValue(projectOpt);
+            var sessionId = ctx.GetValue(sessionIdArg);
+            var limit = ctx.GetValue(limitOpt);
+            var continuation = ctx.GetValue(continuationOpt);
+            var output = ctx.GetValue(outputOpt);
+
+            var (mode, exit) = api.ResolveOutputMode(output);
+            if (exit != 0)
+                return exit;
+
+            var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
+            if (resolveExit != 0)
+                return resolveExit;
+
+            var query = new List<string>();
+            if (limit is not null)
+                query.Add($"limit={limit.Value}");
+            if (continuation is not null)
+                query.Add($"continuation={Uri.EscapeDataString(continuation)}");
+            var suffix = query.Count == 0 ? "" : "?" + string.Join("&", query);
+            return await api.PrintWithOutputAsync(
+                $"/api/projects/{MohistCliCommands.Escape(resolvedProjectId)}/agent-sessions/{MohistCliCommands.Escape(sessionId!)}/tree{suffix}",
+                mode,
+                nameof(MohistCliApi.TableShape.SessionTree));
+        }
+
         return cmd;
     }
 
@@ -357,10 +574,73 @@ internal static class SessionCommands
         "cancel",
         "Deterministically cancel a queued Turn. Sends a Server-only cancel request; use stop for an executing Turn.");
 
-    private static Command BuildStop(MohistCliApi api) => BuildTurnControl(
-        api,
-        "stop",
-        "Request that the Runtime stop an executing Turn. This is a best-effort request; use cancel for a queued Turn.");
+    private static Command BuildStop(MohistCliApi api)
+    {
+        var cmd = new Command("stop", "Cascade stop a session tree with a durable idempotency key.");
+        var sessionIdArg = new Argument<string>("session-id") { Description = "Root AgentSession id" };
+        var idempotencyKeyOpt = new Option<string?>("--idempotency-key")
+        {
+            Description = "Stable key used to retry the same cascade stop operation",
+        };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionStop)));
+
+        cmd.Arguments.Add(sessionIdArg);
+        cmd.Options.Add(idempotencyKeyOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => StopAsync(ctx));
+
+        async Task<int> StopAsync(ParseResult ctx)
+        {
+            var key = ctx.GetValue(idempotencyKeyOpt);
+            if (string.IsNullOrWhiteSpace(key))
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--idempotency-key is required.");
+
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(sessionIdArg)!)}/stop"),
+                null,
+                mode,
+                nameof(MohistCliApi.TableShape.SessionStop),
+                rawJson: true,
+                headers: new Dictionary<string, string> { ["Idempotency-Key"] = key });
+        }
+
+        return cmd;
+    }
+
+    private static Command BuildDetach(MohistCliApi api)
+    {
+        var cmd = new Command("detach", "Detach a child session using its durable parent-link tuple.");
+        var childSessionIdArg = new Argument<string>("child-session-id") { Description = "Attached child AgentSession id" };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionDetach)));
+
+        cmd.Arguments.Add(childSessionIdArg);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => DetachAsync(ctx));
+
+        async Task<int> DetachAsync(ParseResult ctx)
+        {
+            var (mode, exit) = api.ResolveOutputMode(ctx.GetValue(outputOpt));
+            if (exit != 0) return exit;
+            var (project, projectExit) = await api.ResolveProject(ctx.GetValue(projectOpt));
+            if (projectExit != 0) return projectExit;
+            return await api.PrintPostWithOutputAsync(
+                ProjectAgentSessionsPath(project, $"/{MohistCliCommands.Escape(ctx.GetValue(childSessionIdArg)!)}/detach"),
+                null,
+                mode,
+                nameof(MohistCliApi.TableShape.SessionDetach),
+                rawJson: true);
+        }
+
+        return cmd;
+    }
 
     private static Command BuildTurnControl(MohistCliApi api, string operation, string description)
     {

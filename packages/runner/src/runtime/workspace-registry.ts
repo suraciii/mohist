@@ -103,6 +103,12 @@ export class WorkspaceRegistry {
     return entry ? { ...entry } : null
   }
 
+  // The registry key for an entry. Used by the shared maintenance loop
+  // to address `markStuck` / `remove` without knowing the entry type.
+  entryKey(entry: WorkspaceRegistryEntry): string {
+    return entry.workflowRunId
+  }
+
   // Upsert a workspace registration in the `active` phase. Called from
   // WorkspaceManager.materialize() success. Every
   // successful materialize stamps `materializedAt = now` so the

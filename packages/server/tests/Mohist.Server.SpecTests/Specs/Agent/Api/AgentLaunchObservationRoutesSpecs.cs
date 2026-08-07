@@ -22,7 +22,7 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 ///   original Job/Turn
 /// - launch 201 surfaces all four stable references plus the observation URL
 /// </summary>
-[Collection("MohistIntegration")]
+[Collection("AgentLaunchObservationRoutes")]
 public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
     public AgentLaunchObservationRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
@@ -106,12 +106,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
-            var polled = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId);
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            var claim = await jobGrain.ClaimNextAsync(runnerId);
+            Assert.NotNull(claim);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
             var report = await jobGrain.ReportResultAsync(
                 runnerId,
-                polled.WorkId,
+                claim!.WorkId,
                 new WorkResult(
                     Status: "completed",
                     Message: "all done",
@@ -156,20 +158,16 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var originalInputId = launchPayload.GetProperty("data").GetProperty("inputId").GetString()!;
             var originalTurnId = launchPayload.GetProperty("data").GetProperty("turnId").GetString()!;
 
-            var jobGrain = await FindAgentJobGrainAsync(sessionId);
-            Assert.NotNull(jobGrain);
-            await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
+            await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobId);
+            var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
+            var claim = await jobGrain.ClaimNextAsync(runnerId);
+            Assert.NotNull(claim);
 
             // Drive past the configured 8s timeout via fake time.
-            await WaitForJobTerminalAsync(
-                jobGrain!,
-                AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
-                async () =>
-                {
-                    _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
-                    await jobGrain!.CheckTimeoutsAsync();
-                });
+            _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
+            await jobGrain.CheckTimeoutsAsync();
+            var terminal = await jobGrain.GetTerminalResultAsync();
+            Assert.Equal(AgentJobStatus.Unknown, terminal.Status);
 
             var observation = await ReadObservationAsync(projectId, jobId);
             Assert.NotNull(observation);

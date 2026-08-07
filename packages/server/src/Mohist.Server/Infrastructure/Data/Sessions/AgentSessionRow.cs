@@ -51,4 +51,15 @@ public class AgentSessionRow
     /// <c>"unknown"</c>.
     /// </summary>
     public string? Activity { get; set; }
+
+    public string? ParentLinkEdgeId { get; set; }
+    public string? ParentSessionId { get; set; }
+    public string? ParentAgentId { get; set; }
+    public string? ChildLaunchJobId { get; set; }
+    public string? ParentLinkState { get; set; }
+    public long? ParentLinkAttachedRevision { get; set; }
+    public string? ParentLinkAttachedAt { get; set; }
+    public long? ParentLinkDetachedRevision { get; set; }
+    public string? ParentLinkDetachedAt { get; set; }
+    public string LaunchVisibility { get; set; } = "visible";
 }

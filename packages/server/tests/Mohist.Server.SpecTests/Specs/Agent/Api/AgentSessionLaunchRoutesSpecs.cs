@@ -179,7 +179,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
                     {
                         issueNumber,
                         epicNumber,
-                        repository = "feature-repo",
+                        repository = "main",
                         workspacePath = "/tmp/launch-ctx",
                     },
                 });
@@ -199,7 +199,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.NotNull(record);
             Assert.Equal(issueNumber.ToString(), record!.Session.Metadata.Label(GenericAgentSessionMetadata.IssueNumber));
             Assert.Equal(epicNumber.ToString(), record.Session.Metadata.Label(GenericAgentSessionMetadata.EpicNumber));
-            Assert.Equal("feature-repo", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
+            Assert.Equal("main", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
             Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
 
             Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));

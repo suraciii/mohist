@@ -20,7 +20,8 @@ public sealed record AgentCreateData(
     [property: Id(3)] string Instructions,
     [property: Id(4)] JsonElement? AgentConfig,
     [property: Id(5)] IReadOnlyList<string>? Skills,
-    [property: Id(6)] int? MaxConcurrentRuns);
+    [property: Id(6)] int? MaxConcurrentRuns,
+    [property: Id(7)] IReadOnlyList<string>? AllowedSubagentAgentIds = null);
 
 [GenerateSerializer]
 public sealed record AgentUpdateData(
@@ -30,7 +31,8 @@ public sealed record AgentUpdateData(
     [property: Id(3)] JsonElement? AgentConfig,
     [property: Id(4)] IReadOnlyList<string>? Skills,
     [property: Id(5)] int? MaxConcurrentRuns,
-    [property: Id(6)] IReadOnlySet<string> Fields);
+    [property: Id(6)] IReadOnlySet<string> Fields,
+    [property: Id(7)] IReadOnlyList<string>? AllowedSubagentAgentIds = null);
 
 public sealed class AgentNameConflictException : InvalidOperationException
 {

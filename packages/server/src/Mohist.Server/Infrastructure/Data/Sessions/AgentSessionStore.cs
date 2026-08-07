@@ -198,6 +198,16 @@ public static class AgentSessionJson
         Status = session.Status.AgentRuntimeSessionId is null ? "opened" : "bound",
         CreatedAt = session.Status.CreatedAt,
         LastDataAt = session.Status.LastDataAt,
+        ParentLinkEdgeId = session.ParentLink?.EdgeId,
+        ParentSessionId = session.ParentLink?.ParentSessionId,
+        ParentAgentId = session.ParentLink?.ParentAgentId,
+        ChildLaunchJobId = session.ParentLink?.ChildLaunchJobId,
+        ParentLinkState = session.ParentLink?.State.ToString().ToLowerInvariant(),
+        ParentLinkAttachedRevision = session.ParentLink?.AttachedRevision,
+        ParentLinkAttachedAt = session.ParentLink?.AttachedAt.ToString("O"),
+        ParentLinkDetachedRevision = session.ParentLink?.DetachedRevision,
+        ParentLinkDetachedAt = session.ParentLink?.DetachedAt?.ToString("O"),
+        LaunchVisibility = session.LaunchVisibility.ToString().ToLowerInvariant(),
     };
 
     private static void ApplyColumnDefaults(AgentSession session, AgentSessionRow row)
@@ -208,5 +218,8 @@ public static class AgentSessionJson
             LastDataAt = session.Status.LastDataAt ?? row.LastDataAt,
             UsageSummary = session.Status.UsageSummary ?? new AgentUsageSummary()
         };
+        if (!Enum.TryParse<AgentLaunchVisibility>(row.LaunchVisibility, true, out var visibility))
+            visibility = AgentLaunchVisibility.Visible;
+        session.LaunchVisibility = visibility;
     }
 }

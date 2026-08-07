@@ -83,6 +83,34 @@ export interface AgentExecutionDefinition {
   skills: readonly string[]
 }
 
+export interface AgentSessionStartup {
+  projectId: string
+  sessionId: string
+  parentSessionId?: string | null
+  allowedSubagents: readonly {
+    agentId: string
+    nameAtLaunch: string
+    descriptionAtLaunch: string
+  }[]
+  spawnCommand: string
+  workDir?: string | null
+  pinnedRunnerId?: string | null
+  agentId?: string | null
+  agentName?: string | null
+  /**
+   * Project Repository snapshot for sessions whose authoritative
+   * workDir is Project-backed (`context.repository` at launch). The
+   * runner verifies the workDir's ownership and origin against this
+   * snapshot on first execution and reports
+   * `workspace_source_confirmed` / `workspace_source_rejected`.
+   */
+  workspaceRepository?: {
+    name: string
+    gitUrl: string
+    baseBranch: string
+  } | null
+}
+
 export type WorkDispatchResponse = {
   workflowRunId: string
   workId: string
@@ -119,6 +147,7 @@ export type WorkDispatchResponse = {
   recovery?: string | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  agentSessionStartup?: AgentSessionStartup | null
   /**
    * Launch-time `SessionInput` id the coordinator durably recorded
    * on the AgentSession before the AgentJob dispatched. The runner
@@ -210,6 +239,7 @@ export interface DispatchWorkItem {
   recovery?: JsonObject | null
   recoveryRemaining?: number | null
   agentDefinition?: AgentExecutionDefinition | null
+  agentSessionStartup?: AgentSessionStartup | null
   /**
    * Launch-time `SessionInput` id the coordinator durably recorded
    * on the AgentSession before the AgentJob dispatched. When set,

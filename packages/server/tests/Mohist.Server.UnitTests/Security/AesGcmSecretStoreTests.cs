@@ -8,6 +8,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Security.Secrets;
+using Mohist.Server.UnitTests.Support;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Security;
@@ -257,10 +258,7 @@ public sealed class AesGcmSecretStoreTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
-        using (var db = new MohistDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         return new TestDatabase(connection, options);
     }
 

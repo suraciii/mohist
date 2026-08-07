@@ -44,7 +44,7 @@ describe("CleanupLoop", () => {
 
       const policy: CleanupPolicy = { retentionDays: 5 }
       const result = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
@@ -63,7 +63,7 @@ describe("CleanupLoop", () => {
 
       const policy: CleanupPolicy = { retentionDays: 5 }
       const result = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker workflowRunId (wr-other-run) does not match registry (wr-mismatch)`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity (wr-other-run) does not match registry (wr-mismatch)`],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
@@ -119,7 +119,7 @@ describe("CleanupLoop", () => {
         storageTargetWatermarkBytes: null,
       }
       const result = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
 
@@ -148,7 +148,7 @@ describe("CleanupLoop", () => {
 
       const policy: CleanupPolicy = { retentionDays: 5 }
       const tick1 = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
         () => fixture.loop.runOnce(policy, new AbortController().signal),
       )
       expect(tick1.stuckResolved).toBe(1)
@@ -240,7 +240,7 @@ describe("CleanupLoop", () => {
       fixture.runner.markerRunIds.set(path, "wr-other")
 
       const removed = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker workflowRunId (wr-other) does not match registry (wr-1)`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity (wr-other) does not match registry (wr-1)`],
         () => fixture.loop.safeRemove(entry),
       )
 
@@ -255,7 +255,7 @@ describe("CleanupLoop", () => {
       fixture.runner.markerRunIds.delete(path)
 
       const removed = await fixture.expectWarnings(
-        [`workspace cleanup: refused to remove ${path} — marker is missing or unreadable`],
+        [`workspace cleanup: refused to remove ${path} — workspace identity is missing or unreadable`],
         () => fixture.loop.safeRemove(entry),
       )
 

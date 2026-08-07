@@ -363,6 +363,26 @@ export class ServerConnection {
     return response.json() as Promise<AgentSession>
   }
 
+  /**
+   * Runner-owned activity query for a managed-worktree child session
+   * (`GET /api/runner/{runnerId}/agent-workspaces/{projectId}/{childSessionId}/activity`).
+   * The server answers one of five states (active / idle / pending /
+   * not-found / unknown) and carries `idleSince` only for `idle`. A
+   * non-2xx response (e.g. a 403 authorization refusal) throws so the
+   * idle probe can treat the entry as not-yet-eligible this tick.
+   */
+  async getAgentWorkspaceActivity(projectId: string, childSessionId: string, signal: AbortSignal): Promise<AgentWorkspaceActivity> {
+    const response = await fetch(this.url(`agent-workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(childSessionId)}/activity`), { method: "GET", signal })
+    if (!response.ok) throw new Error(`agent workspace activity failed: ${response.status} ${await response.text()}`)
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error("agent workspace activity returned malformed JSON")
+    }
+    return parseAgentWorkspaceActivity(payload)
+  }
+
   async openAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
     const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
@@ -467,6 +487,19 @@ export interface AgentSessionReconcileBinding {
   readonly workDir: string
 }
 
+/**
+ * Activity answer shape for
+ * `GET /api/runner/{runnerId}/agent-workspaces/{projectId}/{childSessionId}/activity`.
+ * `state` is one of active / idle / pending / not-found / unknown.
+ * `idleSince` is the server's durable idle timestamp, carried only for
+ * `idle`; `null` for every other state (fail-closed: a missing value
+ * can never confer eligibility).
+ */
+export interface AgentWorkspaceActivity {
+  readonly state: "active" | "idle" | "pending" | "not-found" | "unknown"
+  readonly idleSince: string | null
+}
+
 export interface WorkflowAgentSession {
   runtimeSessionId?: string | null
   runtime?: string | null
@@ -514,6 +547,7 @@ function parseDispatchWorkItem(dispatch: WorkDispatchResponse): DispatchWorkItem
     agentSessionId: dispatch.agentSessionId ?? undefined,
     recovery: parseObject(dispatch.recovery),
     agentDefinition: dispatch.agentDefinition ?? undefined,
+    agentSessionStartup: dispatch.agentSessionStartup ?? undefined,
   }
   if (Object.prototype.hasOwnProperty.call(dispatch, "parentIssueContext"))
     work.parentIssueContext = dispatch.parentIssueContext
@@ -576,6 +610,17 @@ function readNumber(value: unknown, path: string[]): number | null {
 function readBoolean(value: unknown, path: string[]): boolean | null {
     const found = getSegments(value, path)
   return typeof found === "boolean" ? found : null
+}
+
+const AGENT_WORKSPACE_ACTIVITY_STATES = new Set(["active", "idle", "pending", "not-found", "unknown"])
+
+export function parseAgentWorkspaceActivity(payload: unknown): AgentWorkspaceActivity {
+  if (!isObjectRecord(payload)) throw new Error("agent workspace activity returned a malformed response")
+  const state = readString(payload, ["state"])
+  if (state === null || !AGENT_WORKSPACE_ACTIVITY_STATES.has(state)) {
+    throw new Error("agent workspace activity returned an unknown state")
+  }
+  return { state: state as AgentWorkspaceActivity["state"], idleSince: readString(payload, ["idleSince"]) }
 }
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {

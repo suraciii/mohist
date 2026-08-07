@@ -56,6 +56,7 @@ public class AgentGrain : Grain, IAgentGrain
             Instructions = data.Instructions,
             AgentConfig = Clone(data.AgentConfig),
             Skills = data.Skills?.ToArray() ?? [],
+            AllowedSubagentAgentIds = await ValidateAllowedSubagentsAsync(projectId, agentId, data.AllowedSubagentAgentIds),
             MaxConcurrentRuns = data.MaxConcurrentRuns,
             Status = AgentStatus.Active,
             CreatedAt = now,
@@ -81,6 +82,8 @@ public class AgentGrain : Grain, IAgentGrain
         if (data.Fields.Contains(nameof(data.Instructions))) _agent.Instructions = data.Instructions ?? string.Empty;
         if (data.Fields.Contains(nameof(data.AgentConfig))) _agent.AgentConfig = Clone(data.AgentConfig);
         if (data.Fields.Contains(nameof(data.Skills))) _agent.Skills = data.Skills?.ToArray() ?? [];
+        if (data.Fields.Contains(nameof(data.AllowedSubagentAgentIds)))
+            _agent.AllowedSubagentAgentIds = await ValidateAllowedSubagentsAsync(_agent.ProjectId, _agent.Id, data.AllowedSubagentAgentIds);
         if (data.Fields.Contains(nameof(data.MaxConcurrentRuns))) _agent.MaxConcurrentRuns = data.MaxConcurrentRuns;
         _agent.UpdatedAt = _timeProvider.GetUtcNow();
 
@@ -117,6 +120,28 @@ public class AgentGrain : Grain, IAgentGrain
             throw new AgentNameConflictException(projectId, name);
     }
 
+    private async Task<IReadOnlyList<string>> ValidateAllowedSubagentsAsync(
+        string projectId,
+        string agentId,
+        IReadOnlyList<string>? ids)
+    {
+        var normalized = (ids ?? [])
+            .Select(id => id?.Trim() ?? string.Empty)
+            .Where(id => id.Length > 0)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        foreach (var id in normalized)
+        {
+            if (string.Equals(id, agentId, StringComparison.Ordinal))
+                continue;
+            if (await _querier.GetByIdAsync(projectId, id) is null)
+                throw new AgentCapabilityReferenceException(projectId, id);
+        }
+
+        return normalized;
+    }
+
     private (string ProjectId, string AgentId) ParseKey()
     {
         var key = CurrentKey();
@@ -130,4 +155,17 @@ public class AgentGrain : Grain, IAgentGrain
         value is null ? null : value.Value.Clone();
 
     private string CurrentKey() => GrainKey;
+}
+
+public sealed class AgentCapabilityReferenceException : InvalidOperationException
+{
+    public AgentCapabilityReferenceException(string projectId, string agentId)
+        : base($"Allowed subagent Agent '{agentId}' does not exist in project '{projectId}'.")
+    {
+        ProjectId = projectId;
+        AgentId = agentId;
+    }
+
+    public string ProjectId { get; }
+    public string AgentId { get; }
 }

@@ -133,6 +133,30 @@ public static class AgentJobLineage
             extensions: extensions);
     }
 
+    public static CloudEvent BuildSubagentTerminalEnvelope(
+        string jobKey,
+        PendingSubagentTerminalEvent payload)
+    {
+        var data = JsonSerializer.SerializeToElement(new
+        {
+            childLaunchJobId = payload.Origin.ChildLaunchJobId,
+            childSessionId = payload.Origin.ChildSessionId,
+            parentSessionId = payload.Origin.ParentSessionId,
+            parentAgentId = payload.Origin.ParentAgentId,
+            edgeId = payload.Origin.EdgeId,
+            initialTurnId = payload.Origin.InitialTurnId,
+            status = payload.Status.ToString().ToLowerInvariant(),
+            resultReference = payload.ResultReference,
+        }, JSON.Options);
+        return new CloudEvent(
+            id: payload.EventId,
+            source: new Uri(AgentJobEventPersistence.AgentJobSource(jobKey), UriKind.Relative),
+            type: EventCatalog.ReverseDns.AgentJobSubagentTerminal,
+            time: payload.RecordedAt,
+            data: data,
+            subject: jobKey);
+    }
+
     public static string? ExtractAssistantText(string? output)
     {
         if (string.IsNullOrWhiteSpace(output))

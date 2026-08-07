@@ -11,6 +11,7 @@ using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Runner.Grains;
+using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.SpecTests.Support;
 using Orleans;
 using Orleans.Runtime;
@@ -30,6 +31,8 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
     public FakeRunnerWorkspaceClient RunnerWorkspace => Cluster.GetSiloServiceProvider(null).GetRequiredService<FakeRunnerWorkspaceClient>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     public ControllableAgentJobDispatchObserver DispatchObserver { get; } = new();
+    public AgentLaunchParticipantProbe LaunchFaults { get; } = new();
+    public FakeAgentWorkspaceMaterializer AgentWorkspaceMaterializer { get; } = new();
     public ControllableAgentSessionTranscriptPersistence SessionPersistence { get; } = new();
     public AgentSessionPersistenceTestProbe Persistence { get; }
 
@@ -63,9 +66,11 @@ public sealed class AgentJobGrainFixture : IAsyncLifetime
                 _sharedEventStore,
                 TimeProvider,
                 Persistence);
+            siloBuilder.Services.RemoveAll<IAgentLaunchParticipantProbe>();
+            siloBuilder.Services.AddSingleton<IAgentLaunchParticipantProbe>(LaunchFaults);
+            siloBuilder.Services.RemoveAll<IAgentWorkspaceMaterializer>();
+            siloBuilder.Services.AddSingleton<IAgentWorkspaceMaterializer>(AgentWorkspaceMaterializer);
             siloBuilder.Services.AddSingleton<IAgentJobDispatchObserver>(DispatchObserver);
-            siloBuilder.Services.AddSingleton<IAgentLaunchParticipantProbe>(
-                NoopAgentLaunchParticipantProbe.Instance);
             siloBuilder.Services.AddSingleton(SessionPersistence);
             siloBuilder.Services.RemoveAll<IAgentSessionTranscriptStore>();
             siloBuilder.Services.AddScoped<IAgentSessionTranscriptStore>(provider =>

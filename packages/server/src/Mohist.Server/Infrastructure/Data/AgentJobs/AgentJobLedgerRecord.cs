@@ -22,7 +22,9 @@ public sealed record AgentJobLedgerRecord(
     int? IssueNumber,
     string? AgentSessionId,
     string? InitialInputId,
-    string? InitialTurnId);
+    string? InitialTurnId,
+    string? PinnedRunnerId = null,
+    string LaunchVisibility = "visible");
 
 /// <summary>
 /// Sentinel for an optimistic-concurrency conflict on a save. Thrown when

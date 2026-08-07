@@ -178,6 +178,9 @@ Mohist Agent 的核心位置是代理人：它进入流水线上原本由 owner 
 和人相同的命令与审批通道执行动作。一个 Mohist Agent 可以有多个 AgentJob，也可以
 有多个 AgentSession。
 
+Mohist Agent 还可以在自己的会话里 spawn 其它 Agent 的子会话，把运行时才能看清
+形状的任务分解出去，形成会话树。见 [Subagent 与会话树](subagents.md)。
+
 把 Agent 接入 Slack 的线程与权限规则见 [Slack](slack.md)。
 
 ## AgentJob 与 AgentSession

@@ -196,10 +196,7 @@ public sealed class AttachmentServiceIngestProviderFileTests
         var options = new DbContextOptionsBuilder<MohistDbContext>()
             .UseSqlite(connection)
             .Options;
-        using (var db = new MohistDbContext(options))
-        {
-            db.Database.EnsureCreated();
-        }
+        SqliteSchemaTemplate.CopyModelSchemaTo(connection);
         return new TestDatabase(connection, options, new TestDbContextFactory(options));
     }
 

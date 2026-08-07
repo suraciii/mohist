@@ -7,6 +7,7 @@ using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -389,6 +390,24 @@ public class AgentJobStoreSpecs : IAsyncLifetime
 
         Assert.Equal(new[] { early, late }, result.Select(r => r.JobKey).ToArray());
         Assert.All(result, r => Assert.Null(r.AssignedRunnerId));
+    }
+
+    [Fact]
+    public async Task ProvisionalLaunch_IsHiddenFromSchedulingAndDefaultJobQuery()
+    {
+        var key = $"ledger-provisional-{Guid.NewGuid():N}";
+        var state = MakeState(AgentJobStatus.Pending, "proj-provisional", "agent-provisional");
+        state.LaunchVisibility = AgentLaunchVisibility.Provisional;
+        await _store.InsertLedgerAsync(
+            NewPendingRecord(key, "runner-provisional", _time.GetUtcNow()) with
+            {
+                StateJson = Serialize(state),
+                LaunchVisibility = "provisional",
+            });
+
+        Assert.Empty(await _store.ListEligiblePendingAsync("proj-provisional", 10));
+        Assert.Empty(await _store.ListAssignedPendingForRunnerAsync("runner-provisional", 10));
+        Assert.Null(await _querier.GetByKeyAsync(key));
     }
 
     [Fact]

@@ -9,7 +9,7 @@ using static Mohist.Server.SpecTests.Support.PathContractAssertions;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
-[Collection("IntegrationApi")]
+[Collection("PathContractRegression")]
 public class PathContractRegressionSpecs
 {
     private readonly MohistIntegrationFixture _fixture;

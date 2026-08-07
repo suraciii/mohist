@@ -27,4 +27,6 @@ public sealed record AgentInfo(
     [property: Id(10)]
     string UpdatedAt,
     [property: Id(11)]
-    AgentReadinessResult? Readiness = null);
+    AgentReadinessResult? Readiness = null,
+    [property: Id(12)]
+    IReadOnlyList<string>? AllowedSubagentAgentIds = null);

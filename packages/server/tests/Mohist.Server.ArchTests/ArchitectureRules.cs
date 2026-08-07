@@ -1,6 +1,5 @@
 using ArchUnitNET.Domain;
 using ArchUnitNET.Fluent;
-using ArchUnitNET.Loader;
 using ArchUnitNET.xUnitV3;
 using Mohist.Server.Infrastructure.Data.Db;
 using Xunit;
@@ -11,11 +10,7 @@ namespace Mohist.Server.ArchTests;
 
 public class ArchitectureRules
 {
-    private static readonly ArchUnitNET.Domain.Architecture _architecture = new ArchLoader()
-        .LoadAssemblies(
-            System.Reflection.Assembly.Load("Mohist.Server"),
-            System.Reflection.Assembly.Load("Mohist.Cli"))
-        .Build();
+    private static readonly ArchUnitNET.Domain.Architecture _architecture = ArchitectureRulesSupport.Architecture;
 
     private static readonly IObjectProvider<IType> OrleansGeneratedTypes = Types()
         .That().ResideInNamespaceMatching("OrleansCodeGen")
@@ -232,7 +227,7 @@ public class ArchitectureRules
             ["Epic"] = ["EpicHandlers.cs"],
             ["Workflow"] = ["WorkflowStageLockReleaseHandler.cs"],
             ["Runner"] = ["RunnerWorkflowTerminalStatusHandler.cs"],
-            ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs"],
+            ["Agent"] = ["RoutingDispatchHandler.cs", "MentionDispatchHandler.cs", "RoutedAgentLaunchContextResolver.cs", "ResponsePromptRenderer.cs", "MentionTokenParser.cs", "AgentJobSubagentTerminalHandler.cs"],
             ["Inbox"] = ["InboxProjectionHandler.cs"],
             ["Notifications"] = ["HermesIssueNotificationHandler.cs"],
             ["Webhooks"] = ["WebhookDispatchHandler.cs"],
@@ -769,20 +764,7 @@ public class ArchitectureRules
     }
 
     private static IReadOnlyList<EmbeddedSource> EmbeddedSources(string prefix)
-    {
-        var assembly = typeof(ArchitectureRules).Assembly;
-        return assembly.GetManifestResourceNames()
-            .Where(name => name.StartsWith(prefix, StringComparison.Ordinal))
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .Select(name =>
-            {
-                using var stream = assembly.GetManifestResourceStream(name)!;
-                var byteLength = checked((int)stream.Length);
-                using var reader = new StreamReader(stream);
-                return new EmbeddedSource(name[prefix.Length..], reader.ReadToEnd(), byteLength);
-            })
-            .ToArray();
-    }
+        => ArchitectureRulesSupport.EmbeddedSources(prefix);
 
-    private sealed record EmbeddedSource(string Path, string Content, int ByteLength);
+    internal sealed record EmbeddedSource(string Path, string Content, int ByteLength);
 }

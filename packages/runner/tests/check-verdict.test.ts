@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest"
-import type { WorkExecutor } from "../src/runtime/executor.js"
+import { WorkExecutor } from "../src/runtime/executor.js"
 import type { ActionRegistry, ActionDefinition } from "../src/actions/registry.js"
 import { defineAction } from "../src/actions/define-action.js"
 import type { ServerConnection } from "../src/server/connection.js"
@@ -12,9 +12,9 @@ const mockFallbackWorkDir = "/tmp"
 describe("Check verdict validation", () => {
   let executor: WorkExecutor
   let mockActionRegistry: ActionRegistry
-    let capturedHandler: ((inputs: unknown, host: ActionHost) => Promise<ActionResult>) | null
+  let capturedHandler: ((inputs: unknown, host: ActionHost) => Promise<ActionResult>) | null
 
-  beforeEach(async () => {
+  beforeEach(() => {
     const mockWorkspaceManager = verifyOnlyWorkspaceManager({ path: "/tmp/test-work", branch: "main" })
 
     const mockConnection = {} as unknown as ServerConnection
@@ -30,8 +30,8 @@ describe("Check verdict validation", () => {
         outputs: [],
         errors: [{ code: "marker-failed" }],
       },
-       run: async (inputs, host) => {
-         if (capturedHandler) return await capturedHandler(inputs, host)
+      run: async (inputs, host) => {
+        if (capturedHandler) return await capturedHandler(inputs, host)
         return { output: null }
       },
     })
@@ -39,8 +39,7 @@ describe("Check verdict validation", () => {
       resolve: vi.fn().mockImplementation(() => ({ kind: "definition", definition, canonicalName: definition.manifest.name })),
     } as unknown as ActionRegistry
 
-    const mod = await import("../src/runtime/executor.js")
-    executor = new mod.WorkExecutor(
+    executor = new WorkExecutor(
       mockActionRegistry,
       mockWorkspaceManager as any,
       mockConnection,

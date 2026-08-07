@@ -102,4 +102,40 @@ spec 定稿后规划实施 issues 时，把 spec 作为已有需求材料交给 
 * **禁止真实时间**：时间逻辑必须可注入（C# `TimeProvider` / TS `vi.useFakeTimers`），不得走墙钟；不得用 `while(now<deadline)` 或 `elapsed < N` 做断言。
 * **不得 flaky**：不得依赖顺序、时间戳种子、未恢复的 stub；不得用 `it.skip` 掩盖 flaky。
 * **简洁、无冗余、读得出 spec**：setup 抽共享 helper，迁移/回归完成后删旧文件，禁止新旧并存。
-* **足够快**：unit < 50ms，spec < 500ms；browser 单独跑，不进默认 `npm test`。
+* **足够快（由 test-duration 守卫强制执行）**：群体硬约束 unit p95 ≤ 50ms、spec p95 ≤ 500ms（“绝大多数快”）；逐测绝对硬上限 unit/arch ≤ 500ms、spec ≤ 5s（design/testing.md 的 hard cap），超过必须进入版本控制的逐项 allowlist（含 identity/observed/reason/owner/移除期限），否则失败；全量 suite 5 分钟 hard deadline。p95 超限不可用 allowlist 免除。Architecture 测试为结构类，只受 500ms 绝对上限约束，不设 p95。详见 [design/testing.md](design/testing.md)。browser 单独跑，不进默认 `npm test`，也不进守卫。
+
+### 测试时长守卫
+
+`npm run test:budget`（`scripts/test-duration/guard.ts`）在本地与 CI 以同一机制强制执行时长策略：
+
+* 全量 5 分钟 hard deadline + 每 track hard deadline，跨平台用 Node 子进程 kill，不依赖 Linux `timeout`。
+* 解析真实报告：vitest JSON 与 xUnit TRX。
+* 两道硬约束（都为失败，不是 warning）：群体 unit p95 ≤ 50ms / spec p95 ≤ 500ms；逐测绝对上限 unit/arch ≤ 500ms、spec ≤ 5s（design/testing.md hard cap）。Architecture 测试为结构类，只受 500ms 绝对上限约束，不设 p95。
+* 超逐测绝对上限的测试必须在 `test-duration.config.jsonc` 逐项 allowlist 中，含 identity/observed/reason/owner/removal deadline；过期则失败。p95 超限不可用 allowlist 免除。
+* MTP 忽略 `dotnet test --filter`：focused 流程直接跑编译后的 xUnit v3 apphost（见下）。
+
+默认只跑受控 track（enforce=true，含 server-unit/server-spec/server-arch）；`--all` 加入 deadline-governed、baseline-pending track。未 baseline 的 track 显式 `status: baseline-pending`，只受 deadline 管控。
+
+### C# focused test
+
+C# 测试项目使用 Microsoft Testing Platform + xUnit v3。不要把 VSTest
+筛选器当作 focused test：
+
+* 禁止使用 `dotnet test <csproj> --filter "FullyQualifiedName~..."`。当前会报告 `MTP0001`，说明 `VSTestTestCaseFilter` 被忽略，并可能执行整个测试程序集。
+* `dotnet test <csproj> --no-restore --no-build -- -class <FQCN>` 的 pass-through 当前不可靠：MTP 会把 `-class` 变成 `--class` 并报告未知选项。
+* 新 worktree 先显式运行 `npm ci`。缺少 `obj/project.assets.json` 时先显式运行 `dotnet restore <csproj>`；之后 build/test 都显式使用 `--no-restore`，已 build 的 focused test 使用 `--no-build` 的 dotnet 命令或直接使用编译产物，禁止隐式安装、改写 lock。
+
+正确的 focused class 命令是直接运行编译后的 xUnit v3 apphost。先用该 apphost 的 `--help` 确认存在 `-class`，再执行：
+
+```bash
+dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -list classes -noColor -noLogo \
+  -class Mohist.Cli.Tests.Skills.SkillsContentTests
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -noColor -noLogo -class Mohist.Cli.Tests.Skills.SkillsContentTests
+```
+
+验收时必须确认 discovery 列出目标 FQCN，执行摘要为 `Total: N` 且 `N > 0`；`Total: 0` 不是通过证据。上例本次实测只列出 `Mohist.Cli.Tests.Skills.SkillsContentTests`，执行为 `Total: 24`。
+
+聚焦跑流程已封装进守卫，可避免手拼 apphost 路径，且绝不退回 `dotnet --filter`：`npm run test:budget -- focused <csproj> <FQCN>`（先 `-list classes` 校验 FQCN 存在，再 `apphost -class` 执行）。
