@@ -42,7 +42,10 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("fallbackText")] string? FallbackText = null,
     [property: JsonPropertyName("fallbackDispatchRef")] string? FallbackDispatchRef = null,
     [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
-    [property: JsonPropertyName("blocks")] JsonElement? Blocks = null)
+    [property: JsonPropertyName("blocks")] JsonElement? Blocks = null,
+    [property: JsonPropertyName("fileName")] string? FileName = null,
+    [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null,
+    [property: JsonPropertyName("segments")] IReadOnlyList<string>? Segments = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {
@@ -83,6 +86,22 @@ public sealed class SlackOutboxEntry
 }
 
 public sealed record SlackOutboxList(IReadOnlyList<SlackOutboxEntry> Entries);
+
+/// <summary>
+/// Outcome of an Agent-authored reply action
+/// (<c>mo slack message send</c>). The reply lands in the same outbox as
+/// liveness projections; when a replaceable progress message exists it is
+/// promoted in place (one input = one final answer), repeated sends merge
+/// their text, and the stable dispatch reference protects against
+/// duplication. <see cref="Accepted"/> is false only when no live
+/// Connection owns the conversation.
+/// </summary>
+public sealed record SlackAgentReplyResult(
+    bool Accepted,
+    string? ConnectionId = null,
+    string? DeliveryId = null,
+    string? DispatchRef = null,
+    bool MergedIntoExisting = false);
 
 public static class SlackDeliveryOwnerKinds
 {

@@ -1,4 +1,4 @@
-import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, RuntimeLease, SlackAdapterTarget, SlackEnvelope, SlackFileRef, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
+import type { AdapterLease, AdapterTransport, Delivery, DeliveryAck, IngressResult, ProviderMessageIdentity, RuntimeLease, SlackAdapterTarget, SlackEnvelope, SlackFileRef, SlackFileUploadResponse, SlackInteractionEnvelope, SlackManagerRef, SlackSenderKind, SlackWebClient, SocketClient, SocketClientFactory, WebClientFactory } from "./types.js"
 import { LeaseStaleError } from "./transport.js"
 import { slackLogger } from "./logger.js"
 
@@ -378,6 +378,12 @@ export class SlackAdapter {
       ensureCurrent()
       return ack
     }
+    const segments = Array.isArray(payload.segments) && payload.segments.length > 1 ? payload.segments : undefined
+    if (segments) {
+      const ack = await this.deliverSegments(web, delivery, payload, segments, ensureCurrent)
+      ensureCurrent()
+      return ack
+    }
     if (operation === "chat_update") {
       const target = payload.providerMessageIdentity
       if (!target) throw new Error("chat.update delivery has no provider message identity")
@@ -440,7 +446,13 @@ export class SlackAdapter {
       return delivered(delivery)
     }
 
-    const text = requiredText(payload)
+    if (operation === "upload_file") {
+      const ack = await this.uploadFile(web, delivery, payload, ensureCurrent)
+      ensureCurrent()
+      return ack
+    }
+
+    const text = payload.text ?? (payload.blocks && payload.blocks.length > 0 ? "" : requiredText(payload))
     const existingStatus = payload.statusDispatchRef
       ? await findStatusMessage(web, delivery.conversationId, payload.statusDispatchRef, ensureCurrent)
       : undefined
@@ -472,6 +484,60 @@ export class SlackAdapter {
     return delivered(delivery, response.ts ? { conversationId: delivery.conversationId, messageTs: response.ts } : undefined)
   }
 
+  private async deliverSegments(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, segments: readonly string[], ensureCurrent: () => void): Promise<DeliveryAck> {
+    const thread_ts = delivery.threadTs ?? undefined
+    let firstIdentity: ProviderMessageIdentity | undefined
+    for (let index = 0; index < segments.length; index++) {
+      ensureCurrent()
+      const response = await web.chat.postMessage({
+        channel: delivery.conversationId,
+        text: segments[index]!,
+        ...(thread_ts ? { thread_ts } : {}),
+        ...(index === 0 && payload.clientMessageId ? { client_msg_id: payload.clientMessageId } : {}),
+      })
+      ensureCurrent()
+      if (response.ok === false)
+        return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected a segmented post" }
+      if (index === 0 && response.ts)
+        firstIdentity = { conversationId: delivery.conversationId, messageTs: response.ts }
+    }
+    return delivered(delivery, firstIdentity)
+  }
+
+  private async uploadFile(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, ensureCurrent: () => void): Promise<DeliveryAck> {
+    if (!web.filesUploadV2 || !payload.fileName || !payload.fileContentBase64)
+      throw new Error("upload_file delivery is missing the Slack upload client or file payload")
+    ensureCurrent()
+    const response = await web.filesUploadV2({
+      ...(delivery.threadTs
+        ? { channels: delivery.conversationId, thread_ts: delivery.threadTs }
+        : { channel_id: delivery.conversationId }),
+      filename: payload.fileName,
+      file: Buffer.from(payload.fileContentBase64, "base64"),
+      ...(payload.text ? { initial_comment: payload.text } : {}),
+    })
+    ensureCurrent()
+    if (response.ok === false)
+      return { id: delivery.id, outcome: "retry", reason: response.error ?? "Slack rejected the file upload" }
+    const identity = await this.fileShareIdentity(web, delivery, response, ensureCurrent)
+    ensureCurrent()
+    return identity ? delivered(delivery, identity) : delivered(delivery)
+  }
+
+  private async fileShareIdentity(web: SlackWebClient, delivery: Delivery, response: SlackFileUploadResponse, ensureCurrent: () => void): Promise<ProviderMessageIdentity | undefined> {
+    const file = response.files?.[0]?.files?.[0]
+    const ts = file?.shares?.public?.[delivery.conversationId]?.[0]?.ts
+      ?? file?.shares?.private?.[delivery.conversationId]?.[0]?.ts
+    if (ts) return { conversationId: delivery.conversationId, messageTs: ts }
+    if (!file?.id) return undefined
+    ensureCurrent()
+    const history = await web.conversations?.history?.({ channel: delivery.conversationId, limit: 200 })
+    ensureCurrent()
+    const share = history?.messages?.find(candidate =>
+      candidate.files?.some(candidateFile => candidateFile.id === file.id) && candidate.ts)
+    return share?.ts ? { conversationId: delivery.conversationId, messageTs: share.ts } : undefined
+  }
+
   private async fallbackAfterUpdateFailure(web: SlackWebClient, delivery: Delivery, payload: DeliveryPayload, reason: string, ensureCurrent: () => void) {
     if (!payload.fallbackText || !payload.fallbackDispatchRef)
       return { id: delivery.id, outcome: "retry" as const, reason }
@@ -484,7 +550,7 @@ export class SlackAdapter {
     ensureCurrent()
     const response = await web.chat.postMessage({
       channel: delivery.conversationId,
-      text: payload.fallbackText ?? requiredText(payload),
+      text: payload.fallbackText ?? payload.text ?? "",
       ...(delivery.threadTs ? { thread_ts: delivery.threadTs } : {}),
       client_msg_id: payload.fallbackDispatchRef,
       ...(payload.blocks ? { blocks: payload.blocks } : {}),
@@ -729,6 +795,9 @@ interface DeliveryPayload {
   readonly fallbackDispatchRef?: string
   readonly statusDispatchRef?: string
   readonly blocks?: readonly Record<string, unknown>[]
+  readonly fileName?: string
+  readonly fileContentBase64?: string
+  readonly segments?: readonly string[]
 }
 
 function parseDeliveryPayload(value: string): DeliveryPayload {
@@ -752,11 +821,12 @@ function withAdapterId(ack: DeliveryAck, adapterId: string): DeliveryAck {
   return { ...ack, adapterId }
 }
 
-function isKnownDeliveryOperation(operation: unknown): operation is "post_message" | "chat_update" | "reaction_add" | "reaction_remove" {
+function isKnownDeliveryOperation(operation: unknown): operation is "post_message" | "chat_update" | "reaction_add" | "reaction_remove" | "upload_file" {
   return operation === "post_message"
     || operation === "chat_update"
     || operation === "reaction_add"
     || operation === "reaction_remove"
+    || operation === "upload_file"
 }
 
 function isUnsupportedReactionError(error: string | undefined): boolean {
