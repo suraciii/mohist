@@ -8,6 +8,7 @@ public class CredentialRow
     public string TokenHash { get; set; } = string.Empty;
     public string ScopesJson { get; set; } = "[]";
     public string? Name { get; set; }
+    public string? Prefix { get; set; }
     public DateTimeOffset? ExpiresAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
     public DateTimeOffset CreatedAt { get; set; }

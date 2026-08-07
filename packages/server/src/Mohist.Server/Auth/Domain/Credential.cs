@@ -7,6 +7,7 @@ public sealed record Credential(
     string TokenHash,
     IReadOnlyList<Scope> Scopes,
     string? Name,
+    string? Prefix,
     DateTimeOffset? ExpiresAt,
     DateTimeOffset? RevokedAt,
     DateTimeOffset CreatedAt);
