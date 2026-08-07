@@ -8,11 +8,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     private const string ServerUnit = "mohist.service";
     private const string RunnerUnit = "mohist-runner.service";
     private const string SlackUnit = "mohist-slack.service";
+    // The Slack adapter's service credential env names are the server's
+    // own (the adapter presents the content as Authorization: Bearer).
+    private const string AdapterTokenEnvironmentVariable = "MOHIST_OPERATOR_TOKEN";
+    private const string AdapterTokenPathEnvironmentVariable = "MOHIST_OPERATOR_TOKEN_PATH";
     private const string OperatorCredentialName = "operator-token";
-    private const string DefaultOperatorCredentialSource = "%h/"
-        + OperatorCredentialProvider.DefaultTokenDirectoryName
-        + "/"
-        + OperatorCredentialProvider.DefaultTokenFileName;
+    private const string DefaultOperatorCredentialSource = "%h/.mohist/operator-token";
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -79,9 +80,9 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         var repoRoot = ResolveRepoRoot(options.RepoRoot);
         var environment = BuildServiceEnvironment(includeOperatorToken: true);
         var loadCredentials = Array.Empty<string>();
-        if (!environment.ContainsKey(OperatorCredentialProvider.TokenEnvironmentVariable))
+        if (!environment.ContainsKey(AdapterTokenEnvironmentVariable))
         {
-            environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = $"%d/{OperatorCredentialName}";
+            environment[AdapterTokenPathEnvironmentVariable] = $"%d/{OperatorCredentialName}";
             loadCredentials = [$"{OperatorCredentialName}:{ResolveOperatorCredentialSource()}"];
         }
         environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
@@ -341,9 +342,9 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         };
         if (includeOperatorToken)
         {
-            var operatorToken = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenEnvironmentVariable);
+            var operatorToken = _environment.GetEnvironmentVariable(AdapterTokenEnvironmentVariable);
             if (!string.IsNullOrWhiteSpace(operatorToken))
-                environment[OperatorCredentialProvider.TokenEnvironmentVariable] = operatorToken;
+                environment[AdapterTokenEnvironmentVariable] = operatorToken;
         }
         var dotnetRoot = ResolveDotnetRoot();
         if (!string.IsNullOrWhiteSpace(dotnetRoot))
@@ -410,7 +411,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     private string ResolveOperatorCredentialSource()
     {
-        var configured = _environment.GetEnvironmentVariable(OperatorCredentialProvider.TokenPathEnvironmentVariable);
+        var configured = _environment.GetEnvironmentVariable(AdapterTokenPathEnvironmentVariable);
         return string.IsNullOrWhiteSpace(configured)
             ? DefaultOperatorCredentialSource
             : NormalizePath(Path.GetFullPath(configured));

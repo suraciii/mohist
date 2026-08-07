@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Logging;
 using Mohist.Server.Otel;
@@ -140,6 +141,7 @@ public sealed class MohistHostFactory : IMohistHostFactory
         app.UseRouting();
         app.UseOtelSuppression();
         app.UseRuntimeRequestMetrics();
+        app.UseMohistAuth();
         app.MapMohistApi();
         app.MapMohistWeb();
 

@@ -13,6 +13,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Events;
@@ -36,6 +37,7 @@ namespace Mohist.Server.SpecTests.Support;
 public class MohistIntegrationFixture : IAsyncLifetime
 {
     public const string OperatorToken = "test-operator-token-0123456789abcdef";
+    public const string AdminToken = "test-admin-token-0123456789abcdef";
     private const string VirtualRunnerRoot = "/mohist-tests/runner";
     private const string VirtualSystemUpdateStatePath = "/mohist-tests/system-update.json";
     private const string VirtualLogsPath = "/mohist-tests/logs";
@@ -50,6 +52,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
     public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
+    public HttpClient CreateClient() => _factory.CreateClient();
     public FakeRunnerWorkspaceClient RunnerWorkspace => _factory.Services.GetRequiredService<FakeRunnerWorkspaceClient>();
     public AgentJobDispatchProbe AgentJobDispatches => _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public AgentLaunchParticipantProbe LaunchFaults => _factory.Services.GetRequiredService<AgentLaunchParticipantProbe>();
@@ -89,7 +92,7 @@ public class MohistIntegrationFixture : IAsyncLifetime
             gatewayPort,
             _otelEnabled);
         Client = _factory.CreateClient();
-        Client.DefaultRequestHeaders.Add(Mohist.Server.Infrastructure.Security.OperatorCredential.HeaderName, OperatorToken);
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {OperatorToken}");
         Client.DefaultRequestHeaders.Add(
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
@@ -209,11 +212,14 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
                 ["Mohist:AgentJob:JobTimeout"] = "00:00:08",
                 ["Mohist:Notifications:Hermes:WebhookUrl"] = null,
                 ["Mohist:OperatorToken"] = MohistIntegrationFixture.OperatorToken,
+                ["Mohist:AdminToken"] = MohistIntegrationFixture.AdminToken,
             });
         });
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<IFileCredentialStore>();
+            services.AddSingleton<IFileCredentialStore>(new InMemoryFileCredentialStore());
             for (var index = services.Count - 1; index >= 0; index--)
             {
                 if (services[index].ServiceType == typeof(ILoggerProvider))

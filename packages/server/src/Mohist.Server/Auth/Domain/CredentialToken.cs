@@ -1,0 +1,75 @@
+using System.Security.Cryptography;
+using System.Text;
+
+namespace Mohist.Server.Auth.Domain;
+
+/// <summary>
+/// Shape of issued credentials: <c>moh_&lt;kind&gt;_&lt;base64url(32B)&gt;</c>.
+/// The kind prefix keeps tokens human-recognizable and leak-scan friendly;
+/// only the SHA-256 hash of the full token is ever persisted.
+/// </summary>
+public static class CredentialToken
+{
+    private const int RandomByteCount = 32;
+
+    public static string Generate(CredentialKind kind)
+    {
+        var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(RandomByteCount))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+        return $"moh_{KindName(kind)}_{secret}";
+    }
+
+    /// <summary>
+    /// True when <paramref name="token"/> has the issued shape with a
+    /// known kind and a non-empty secret. The secret itself is not
+    /// validated further: lookup hashes the full token, so any garbage
+    /// secret simply misses.
+    /// </summary>
+    public static bool TryParse(string token, out CredentialKind kind)
+    {
+        kind = default;
+        if (string.IsNullOrEmpty(token))
+            return false;
+
+        // The secret is base64url and may itself contain '_', so only the
+        // first two separators delimit the shape.
+        var firstSeparator = token.IndexOf('_');
+        if (firstSeparator <= 0)
+            return false;
+        if (!string.Equals(token[..firstSeparator], "moh", StringComparison.Ordinal))
+            return false;
+
+        var secondSeparator = token.IndexOf('_', firstSeparator + 1);
+        if (secondSeparator <= firstSeparator + 1)
+            return false;
+        if (token.Length <= secondSeparator + 1)
+            return false;
+
+        var kindName = token[(firstSeparator + 1)..secondSeparator];
+        foreach (var candidate in Enum.GetValues<CredentialKind>())
+        {
+            if (string.Equals(kindName, KindName(candidate), StringComparison.Ordinal))
+            {
+                kind = candidate;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static string Hash(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+
+    private static string KindName(CredentialKind kind) => kind switch
+    {
+        CredentialKind.Session => "session",
+        CredentialKind.Refresh => "refresh",
+        CredentialKind.Pat => "pat",
+        CredentialKind.Runner => "runner",
+        CredentialKind.Integration => "integration",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, null),
+    };
+}

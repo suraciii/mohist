@@ -63,7 +63,7 @@ public class InstallSpecs
     {
         var files = new FakeFileSystem();
         var environment = new MockEnvironmentVariableProvider();
-        environment[OperatorCredentialProvider.TokenEnvironmentVariable] = "operator-token-for-test";
+        environment["MOHIST_OPERATOR_TOKEN"] = "operator-token-for-test";
         var installer = new SystemdServiceInstaller(
             TextWriter.Null, TextWriter.Null, files, new FakeCommandExecutor(), environment);
 
@@ -112,7 +112,7 @@ public class InstallSpecs
     {
         var files = new FakeFileSystem();
         var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        environment[OperatorCredentialProvider.TokenPathEnvironmentVariable] = "/run/mohist/operator-token";
+        environment["MOHIST_OPERATOR_TOKEN_PATH"] = "/run/mohist/operator-token";
         var installer = new SystemdServiceInstaller(
             TextWriter.Null, TextWriter.Null, files, new FakeCommandExecutor(), environment);
 
