@@ -210,6 +210,7 @@ export class RunnerHost {
     this.agentWorkspaceManager = new AgentWorkspaceManager(options.runnerRoot, {
       registry: this.agentWorkspaceRegistry,
       workflowRegistry: this.workspaceRegistry,
+      namedWorkspaceRegistry: this.namedWorkspaceRegistry,
       getStorageBudgetBytes: () => this.lastCleanupPolicy?.storageBudgetBytes ?? null,
     })
     this.workspaceSourceConfirmer = new WorkspaceSourceConfirmer(
@@ -605,6 +606,7 @@ export class RunnerHost {
       this.piRuntime,
       this.bindingRecoveryCoordinator,
       this.skillResolver,
+      this.namedWorkspaceManager,
     )
   }
 

@@ -14,6 +14,7 @@ public sealed partial class Issue
     private DateTime? _archivedAt;
     private DateTime? _completedAt;
     private string? _workflowRunId;
+    private string? _workspaceName;
     private int? _epicNumber;
     private int? _parentIssueNumber;
     private IssueStatus _status = IssueStatus.Backlog;
@@ -91,6 +92,12 @@ public sealed partial class Issue
     {
         get => _workflowRunId;
         init => _workflowRunId = NormalizeOptional(value);
+    }
+
+    public string? WorkspaceName
+    {
+        get => _workspaceName;
+        init => _workspaceName = NormalizeOptional(value);
     }
 
     public int? EpicNumber

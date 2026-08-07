@@ -6,6 +6,7 @@ import { stringAt } from "../core/json-path.js"
 import { renderTemplate, renderWithSkippedFields, unresolvedReferences } from "../core/template.js"
 import { ensureDir } from "../system/process.js"
 import { WorkspaceManager, WorkspaceNetworkTimeoutError } from "./workspace.js"
+import type { NamedWorkspaceManager } from "./workspace-entity.js"
 import type { ActionRegistry } from "../actions/registry.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { AgentSessionRuntimeEventOutbox } from "../server/runtime-event-outbox.js"
@@ -65,6 +66,7 @@ export class WorkExecutor {
     private piRuntime: PiRuntime | null = null,
     private readonly bindingRecoveryCoordinator: BindingRecoveryCoordinator | null = null,
     private readonly skillResolver: SkillResolver = new SkillResolver(),
+    private readonly namedWorkspaceManager: NamedWorkspaceManager | null = null,
   ) {}
 
   updateOpenCodeRuntime(runtime: OpenCodeRuntime | null) {
@@ -101,6 +103,21 @@ export class WorkExecutor {
 
   private async prepareWorkspace(work: DispatchWorkItem, signal: AbortSignal, log: TaskLogger): Promise<{ kind: "ok", workspace: ResolvedWorkspace } | { kind: "failure", result: WorkItemResult }> {
     try {
+      const wsName = readWorkspaceName(work)
+      if (wsName && this.namedWorkspaceManager && work.projectId) {
+        const gitUrl = stringInput(work.variables ?? {}, "repository.gitUrl")
+        const baseBranch = stringInput(work.variables ?? {}, "repository.baseBranch")
+        if (gitUrl && baseBranch) {
+          const info = await this.namedWorkspaceManager.materializeForIssue(
+            work.projectId,
+            wsName,
+            gitUrl,
+            baseBranch,
+            signal,
+          )
+          return { kind: "ok", workspace: { path: info.path, branch: `mohist/ws-${wsName}` } }
+        }
+      }
       const info = await this.workspaceManager.prepare(work, signal, log)
       return { kind: "ok", workspace: infoToResolved(info) }
     } catch (error) {
@@ -537,6 +554,10 @@ export class WorkExecutor {
     if (!isObject(ws)) {
       return { path: "", branch: null }
     }
+    const name = stringField(ws, "name")
+    if (name) {
+      return { path: name, branch: `mohist/ws-${name}` }
+    }
     return {
       path: stringField(ws, "path") ?? "",
       branch: stringField(ws, "branch"),
@@ -629,6 +650,14 @@ function infoToResolved(info: { path: string, branch?: string | null }): Resolve
 
 function resolvedWorkspaceToVariables(workspace: ResolvedWorkspace): JsonObject {
   return { path: workspace.path, branch: workspace.branch }
+}
+
+function readWorkspaceName(work: DispatchWorkItem): string | null {
+  const variables = work.variables ?? {}
+  const ws = variables["workspace"]
+  if (!isObject(ws)) return null
+  const name = ws["name"]
+  return typeof name === "string" && name.trim().length > 0 ? name.trim() : null
 }
 
 function defaultRuntimeEventRecordId(): string {
