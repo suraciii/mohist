@@ -33,6 +33,14 @@ public static class SlackFinalReplyRenderer
 {
     public const int DefaultMaximumSegmentLength = 3_000;
 
+    /// <summary>
+    /// Per-segment ceiling for an Agent-authored reply body. Slack rejects or
+    /// truncates a single message whose text nears ~40 000 characters, so an
+    /// over-long reply is split into ordered segments that each stay safely
+    /// under that limit and are posted as separate messages in the same thread.
+    /// </summary>
+    public const int DefaultReplySegmentLength = 35_000;
+
     private const int MaximumKeyResults = 3;
     private static readonly Regex SecretAssignment = new(
         "(?i)(?:\\\"(?:token|secret|api[_-]?key|password)[^\\\"]*\\\"\\s*:\\s*\\\"|(?:token|secret|api[_-]?key|password)\\s*[:=]\\s*)(?:[^\\\"\\s,}]+|[^\\\"]*\\\")",
@@ -87,6 +95,28 @@ public static class SlackFinalReplyRenderer
 
         var safeLines = lines.Select(NeutralizeSlackControlSyntax).ToArray();
         return new SlackFinalReplyProjection(Segment(safeLines, maximumSegmentLength));
+    }
+
+    /// <summary>
+    /// Splits an Agent-authored reply body into ordered segments that each
+    /// stay within Slack's single-message text limit, so an over-long reply is
+    /// delivered as multiple messages instead of being truncated or rejected.
+    /// Whitespace-separated boundaries are preferred; a line with no boundary
+    /// inside the limit is hard-split at the limit. Empty or whitespace-only
+    /// input yields no segments.
+    /// </summary>
+    public static IReadOnlyList<string> SegmentReplyText(
+        string? text,
+        int maximumSegmentLength = DefaultReplySegmentLength)
+    {
+        if (maximumSegmentLength < 1)
+            throw new ArgumentOutOfRangeException(nameof(maximumSegmentLength));
+
+        var clean = NormalizeText(text);
+        if (clean is null)
+            return Array.Empty<string>();
+
+        return Segment(clean.Split('\n'), maximumSegmentLength);
     }
 
     /// <summary>

@@ -480,10 +480,18 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         CancellationToken ct)
     {
         var previous = SlackDeliveryPayload.Parse(terminal.PayloadJson);
-        var combined = string.IsNullOrWhiteSpace(previous.Text)
+        var previousText = !string.IsNullOrWhiteSpace(previous.FallbackText)
+            ? previous.FallbackText
+            : previous.Text;
+        var combined = string.IsNullOrWhiteSpace(previousText)
             ? redactedText
-            : previous.Text + "\n\n" + redactedText;
-        terminal.PayloadJson = JsonSerializer.Serialize(previous with { Text = combined });
+            : previousText + "\n\n" + redactedText;
+        var segments = SlackFinalReplyRenderer.SegmentReplyText(combined);
+        terminal.PayloadJson = JsonSerializer.Serialize(previous with
+        {
+            Text = combined,
+            Segments = segments.Count > 1 ? segments : null,
+        });
         terminal.State = SlackOutboxStates.Pending;
         terminal.NextAttemptAt = _timeProvider.GetUtcNow();
         terminal.ClaimedAt = null;
@@ -504,6 +512,7 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
         var operation = providerIdentity is null
             ? SlackDeliveryOperations.PostMessage
             : SlackDeliveryOperations.ChatUpdate;
+        var segments = SlackFinalReplyRenderer.SegmentReplyText(text);
         return new SlackDeliveryPayload(
             operation,
             text,
@@ -511,7 +520,8 @@ public sealed class SlackOutboxStore : IScopedService, IAgentConnectionProviderC
             ProviderMessageIdentity: providerIdentity,
             FallbackText: text,
             FallbackDispatchRef: $"{dispatchRef}:fallback",
-            StatusDispatchRef: statusDispatchRef);
+            StatusDispatchRef: statusDispatchRef,
+            Segments: segments.Count > 1 ? segments : null);
     }
 
     private static bool IsAttachmentReplyPayload(SlackDeliveryPayload payload) =>

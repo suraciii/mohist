@@ -44,7 +44,8 @@ public sealed record SlackDeliveryPayload(
     [property: JsonPropertyName("statusDispatchRef")] string? StatusDispatchRef = null,
     [property: JsonPropertyName("blocks")] JsonElement? Blocks = null,
     [property: JsonPropertyName("fileName")] string? FileName = null,
-    [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null)
+    [property: JsonPropertyName("fileContentBase64")] string? FileContentBase64 = null,
+    [property: JsonPropertyName("segments")] IReadOnlyList<string>? Segments = null)
 {
     public static SlackDeliveryPayload Parse(string payloadJson)
     {
