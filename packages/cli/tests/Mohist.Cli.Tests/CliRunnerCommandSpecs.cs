@@ -1005,4 +1005,51 @@ public class CliRunnerCommandSpecs
         Assert.Contains("busy", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RunnerRevoke_SendsTheDeleteRequest_AndReportsSuccess()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { runnerId = "runner-1", revokedAt = "2026-08-21T00:00:00+00:00" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "revoke", "runner-1"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Delete, request.Method);
+        Assert.Equal("/api/runners/runner-1/credentials", request.RequestUri!.AbsolutePath);
+        Assert.Contains("runner-1", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunnerRevoke_EscapesTheRunnerIdInThePath()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "revoke", "runner with space"], output, error, fileSystem, executor, env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/runners/runner%20with%20space/credentials", Assert.Single(handler.Requests).RequestUri!.AbsolutePath);
+    }
+
+    [Fact]
+    public async Task RunnerRevoke_UnknownRunner_ReportsNotFound()
+    {
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.JsonError(
+                "No active credential for runner 'runner-missing'", "not_found", HttpStatusCode.NotFound)));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["runner", "revoke", "runner-missing"], output, error, fileSystem, executor, env);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains("No active credential for runner 'runner-missing'", error.ToString());
+    }
+
 }

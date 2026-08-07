@@ -74,12 +74,13 @@ internal static class RunnerCommands
     {
         var runner = new Command(
             "runner",
-            "Server-registered Runner resources. Read-only — reads presence, capacity, heartbeat, and status from the connected Server.");
+            "Server-registered Runner resources. Reads presence, capacity, heartbeat, and status from the connected Server; revoke invalidates a runner's machine credential.");
         var environment = provider.GetService<IEnvironmentVariableProvider>() ?? SystemEnvironmentVariableProvider.Instance;
 
         runner.Subcommands.Add(BuildList(api, environment));
         runner.Subcommands.Add(BuildView(api));
         runner.Subcommands.Add(BuildStatus(api));
+        runner.Subcommands.Add(BuildRevoke(api));
 
         return runner;
     }
@@ -167,6 +168,27 @@ internal static class RunnerCommands
                     Uri.EscapeDataString(runnerId!),
                     mode);
             }
+        });
+        return cmd;
+    }
+
+    private static Command BuildRevoke(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "revoke",
+            "Revoke a runner's machine credential; its requests are rejected until it re-runs 'mo install runner'");
+        var runnerId = new Argument<string>("runnerId") { Description = "Runner id" };
+        cmd.Arguments.Add(runnerId);
+        cmd.SetAction(ctx =>
+        {
+            var id = ctx.GetValue(runnerId);
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                api.Error.WriteLine("runnerId is required");
+                return Task.FromResult(1);
+            }
+
+            return api.PrintDeleteAsync($"/api/runners/{Uri.EscapeDataString(id)}/credentials");
         });
         return cmd;
     }
