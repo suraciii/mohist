@@ -66,14 +66,14 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
         Assert.Equal($"/api/workflow-runs/{WrId}/approve", postReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(postReq.Body!) as JsonObject;
         Assert.NotNull(body);
-        Assert.Equal("supervisor", body!["author"]?.GetValue<string>());
+        Assert.Equal("supervisor", body!["displayName"]?.GetValue<string>());
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public class CliRunControlSpecs
         }, activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.RequestUri?.PathAndQuery.Contains("/projects/") == true);
@@ -124,7 +124,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", "--issue", issueNumber.ToString(), "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", "--issue", issueNumber.ToString(), "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains(handler.Requests, r =>
@@ -161,7 +161,7 @@ public class CliRunControlSpecs
         }, activeProjectId: null);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", "--issue", issueNumber.ToString(), "--project", projectRef, "--author", "supervisor"],
+            http, ["run", "approve", "--issue", issueNumber.ToString(), "--project", projectRef, "--display-name", "supervisor"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -182,7 +182,7 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--issue", "42", "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--issue", "42", "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
@@ -196,7 +196,7 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
@@ -218,7 +218,7 @@ public class CliRunControlSpecs
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
         Assert.NotNull(body);
-        Assert.Null(body!["author"]);
+        Assert.Null(body!["displayName"]);
     }
 
     [Fact]
@@ -230,12 +230,12 @@ public class CliRunControlSpecs
                 : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "   "], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", "   "], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
         Assert.NotNull(body);
-        Assert.Null(body!["author"]);
+        Assert.Null(body!["displayName"]);
     }
 
     [Fact]
@@ -244,11 +244,11 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", new string('a', 101)], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", new string('a', 101)], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--author", error.ToString());
+        Assert.Contains("--display-name", error.ToString());
     }
 
     [Fact]
@@ -262,13 +262,13 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "  supervisor  "], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", "  supervisor  "], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Single(r => r.Method == HttpMethod.Post);
         var body = JsonNode.Parse(postReq.Body!) as JsonObject;
         Assert.NotNull(body);
-        Assert.Equal("supervisor", body!["author"]?.GetValue<string>());
+        Assert.Equal("supervisor", body!["displayName"]?.GetValue<string>());
     }
 
     // ────────────────────────────────────────────────────────────────────
@@ -295,7 +295,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", "--issue", issueNumber.ToString(), "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", "--issue", issueNumber.ToString(), "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -321,7 +321,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", "--issue", issueNumber.ToString(), "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", "--issue", issueNumber.ToString(), "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -347,7 +347,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", WrId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -371,7 +371,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", missingRunId, "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "approve", missingRunId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
         var stderr = error.ToString();
@@ -408,7 +408,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "approve", WrId, "--author", "supervisor", "--json", "workflowRunId,approved"],
+            http, ["run", "approve", WrId, "--display-name", "supervisor", "--json", "workflowRunId,approved"],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -458,7 +458,7 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--author", "supervisor"], output, error, fs, executor);
+            http, ["run", "reject", WrId, "--display-name", "supervisor"], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -471,7 +471,7 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--author", "supervisor", "--message", "   "], output, error, fs, executor);
+            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", "   "], output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
@@ -493,7 +493,7 @@ public class CliRunControlSpecs
         var body = JsonNode.Parse(handler.Requests.Single().Body!) as JsonObject;
         Assert.NotNull(body);
         Assert.Equal("needs more detail", body!["message"]?.GetValue<string>());
-        Assert.Null(body["author"]);
+        Assert.Null(body["displayName"]);
     }
 
     [Fact]
@@ -502,12 +502,12 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--author", new string('a', 101), "--message", "needs more detail"],
+            http, ["run", "reject", WrId, "--display-name", new string('a', 101), "--message", "needs more detail"],
             output, error, fs, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--author", error.ToString());
+        Assert.Contains("--display-name", error.ToString());
     }
 
     [Fact]
@@ -526,7 +526,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--author", "supervisor", "--message", reason],
+            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", reason],
             output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
@@ -535,7 +535,7 @@ public class CliRunControlSpecs
         var body = JsonNode.Parse(postReq.Body!) as JsonObject;
         Assert.NotNull(body);
         Assert.Equal(reason, body!["message"]?.GetValue<string>());
-        Assert.Equal("supervisor", body!["author"]?.GetValue<string>());
+        Assert.Equal("supervisor", body!["displayName"]?.GetValue<string>());
     }
 
     [Fact]
@@ -544,7 +544,7 @@ public class CliRunControlSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--issue", "42", "--message", "anything", "--author", "supervisor"],
+            http, ["run", "reject", WrId, "--issue", "42", "--message", "anything", "--display-name", "supervisor"],
             output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
@@ -565,7 +565,7 @@ public class CliRunControlSpecs
         });
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["run", "reject", WrId, "--author", "supervisor", "--message", "anything"],
+            http, ["run", "reject", WrId, "--display-name", "supervisor", "--message", "anything"],
             output, error, fs, executor);
 
         Assert.NotEqual(0, exitCode);
@@ -892,8 +892,8 @@ public class CliRunControlSpecs
 
         var args = verb switch
         {
-            "approve" => new[] { "run", verb, WrId, "--author", "supervisor" },
-            "reject" => new[] { "run", verb, WrId, "--author", "supervisor", "--message", "reason" },
+            "approve" => new[] { "run", verb, WrId, "--display-name", "supervisor" },
+            "reject" => new[] { "run", verb, WrId, "--display-name", "supervisor", "--message", "reason" },
             _ => new[] { "run", verb, WrId },
         };
 
