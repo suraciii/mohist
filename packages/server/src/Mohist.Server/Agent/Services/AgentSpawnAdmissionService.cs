@@ -17,9 +17,7 @@ public sealed record AgentSpawnAdmission(
     string RunnerId,
     string Runtime,
     string RuntimeSessionId,
-    long BindingEpoch,
-    WorkspaceMode WorkspaceMode,
-    WorkspaceRepositorySnapshot? WorkspaceRepository);
+    long BindingEpoch);
 
 [Serializable]
 [Orleans.GenerateSerializer]
@@ -67,10 +65,9 @@ public sealed class AgentSpawnAdmissionService(
         string parentSessionId,
         string idempotencyKey,
         string targetAgentRef,
-        string prompt,
-        string? workspace = null)
+        string prompt)
     {
-        var fingerprint = Fingerprint(targetAgentRef, prompt, workspace);
+        var fingerprint = AgentLaunchCoordinatorCodec.SpawnFingerprint(targetAgentRef, prompt);
         var fence = grains.GetGrain<ISpawnRequestFenceGrain>(
             AgentLaunchCoordinatorCodec.KeyFor(projectId, parentSessionId, idempotencyKey));
         var current = await fence.GetAsync();
@@ -94,7 +91,6 @@ public sealed class AgentSpawnAdmissionService(
         string idempotencyKey,
         string targetAgentRef,
         string prompt,
-        string? workspace = null,
         CancellationToken ct = default)
     {
         var fence = grains.GetGrain<ISpawnRequestFenceGrain>(
@@ -104,11 +100,7 @@ public sealed class AgentSpawnAdmissionService(
             parentSessionId,
             idempotencyKey,
             targetAgentRef,
-            prompt,
-            workspace);
-
-        if (!WorkspaceModeNormalizer.TryNormalize(workspace, out var mode))
-            return await RejectAsync(fence, "invalid-workspace-mode");
+            prompt);
 
         if (current.Outcome == SpawnRequestFenceOutcome.PreplanRejected)
             throw new AgentSpawnPreplanRejectedException(current.PreplanRejectionReason ?? "spawn_rejected");
@@ -187,19 +179,6 @@ public sealed class AgentSpawnAdmissionService(
         var targetDefinition = await snapshots.ResolveAsync(projectId, target.Id)
             ?? throw new AgentSpawnPreplanRejectedException("target_agent_definition_unavailable");
 
-        WorkspaceRepositorySnapshot? workspaceRepository = null;
-        if (mode == WorkspaceMode.Worktree)
-        {
-            var source = parent.Session.WorkspaceRepository;
-            if (source is null || source.State == WorkspaceRepositoryState.Rejected)
-                return await RejectAsync(fence, "parent_workspace_not_project_backed");
-            if (source.State != WorkspaceRepositoryState.Confirmed)
-                throw new AgentSpawnValidationPendingException("workspace_repository_unconfirmed");
-            if (string.IsNullOrWhiteSpace(source.GitUrl) || string.IsNullOrWhiteSpace(source.BaseBranch))
-                return await RejectAsync(fence, "workspace_repository_unresolved");
-            workspaceRepository = source.Snapshot;
-        }
-
         return new AgentSpawnAdmission(
             target,
             targetDefinition,
@@ -208,9 +187,7 @@ public sealed class AgentSpawnAdmissionService(
             runnerId,
             runtime,
             runtimeSessionId,
-            parent.Session.BindingEpoch,
-            mode,
-            workspaceRepository);
+            parent.Session.BindingEpoch);
     }
 
     private static bool HasNonTerminalStopBlockingSpawn(
@@ -235,10 +212,4 @@ public sealed class AgentSpawnAdmissionService(
         await fence.SetOutcomeAsync(SpawnRequestFenceOutcome.PreplanRejected, reason);
         throw new AgentSpawnPreplanRejectedException(reason);
     }
-
-    private static string Fingerprint(string targetAgentRef, string prompt, string? workspace) =>
-        AgentLaunchCoordinatorCodec.SpawnFingerprint(
-            targetAgentRef,
-            prompt,
-            WorkspaceModeNormalizer.FingerprintToken(workspace));
 }

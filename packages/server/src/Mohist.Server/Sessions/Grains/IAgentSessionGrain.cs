@@ -69,15 +69,6 @@ public interface IAgentSessionGrain : IGrainWithStringKey
 
     Task<AgentSessionInfo?> GetAsync();
 
-    /// <summary>
-    /// Lean read for the runner-owned activity query. Returns
-    /// <c>null</c> when the session does not exist so the caller can
-    /// report <c>not-found</c>. Carries the durable idle timestamp, the
-    /// launch visibility (to classify a not-yet-promoted launch as
-    /// <c>pending</c>), and the bound runner / project so the route can
-    /// authorize the caller in a single grain read.
-    /// </summary>
-    Task<AgentSessionActivityState?> GetActivityStateAsync();
     Task EnsureRuntimeSessionPresentAsync();
     Task RunnerDisconnectedAsync();
 
@@ -338,32 +329,7 @@ public sealed record AgentSessionInfo(
     [property: Id(21)] int? ToolErrorCount,
     [property: Id(22)] string? Runtime,
     [property: Id(23)] long? CachedWriteTokens,
-    [property: Id(24)] long BindingEpoch = 0,
-    /// <summary>
-    /// Durable Project Repository workspace source, if any. <c>null</c>
-    /// for sessions without a Project-backed source; otherwise carries
-    /// the immutable snapshot and the <c>unconfirmed/confirmed/rejected</c>
-    /// state advanced by the Runner first-execution report. Append-only
-    /// Orleans field id.
-    /// </summary>
-    [property: Id(25)] WorkspaceRepository? WorkspaceRepository = null);
-
-/// <summary>
-/// Lean activity projection of an <see cref="AgentSession"/> for the
-/// runner-owned activity query. Carries the current activity, the
-/// durable idle timestamp, the launch visibility, and the bound
-/// runner / project label so the route can both classify the session
-/// (active / idle+idleSince / pending / unknown) and authorize the
-/// caller in a single grain read. <c>null</c> from the grain means the
-/// session does not exist (not-found). Append-only Orleans field ids.
-/// </summary>
-[GenerateSerializer]
-public sealed record AgentSessionActivityState(
-    [property: Id(0)] AgentSessionActivity Activity,
-    [property: Id(1)] DateTime? IdleSince,
-    [property: Id(2)] AgentLaunchVisibility LaunchVisibility,
-    [property: Id(3)] string? RunnerId,
-    [property: Id(4)] string? ProjectId);
+    [property: Id(24)] long BindingEpoch = 0);
 
 [GenerateSerializer]
 public sealed record AgentSessionRecoveryResult(
@@ -431,15 +397,7 @@ public sealed record EnsureInitialLaunchCommand(
     [property: Id(10)] AgentStartupContext? StartupContext = null,
     [property: Id(11)] AgentExecutionDefinition? Definition = null,
     [property: Id(12)] AgentSessionStartup? AgentSessionStartup = null,
-    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible,
-    /// <summary>
-    /// Confirmed Project Repository source for a managed-worktree child.
-    /// Set by the spawn coordinator after materialization succeeds so the
-    /// child AgentSession owns a confirmed source without a Runner
-    /// first-execution check (the worktree is materialized from a confirmed
-    /// parent). Absent for inherit spawns and non-spawn launches.
-    /// </summary>
-    [property: Id(14)] WorkspaceRepositorySnapshot? ConfirmedWorkspaceRepository = null);
+    [property: Id(13)] AgentLaunchVisibility LaunchVisibility = AgentLaunchVisibility.Visible);
 
 [GenerateSerializer]
 public sealed record EnsureInitialLaunchResult(

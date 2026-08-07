@@ -99,7 +99,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
       null,
       "/virtual/runner",
       undefined,
-      null,
       manager,
     )
 
@@ -155,7 +154,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
       null,
       "/virtual/runner",
       undefined,
-      null,
       { materialize } as never,
     )
 
@@ -182,7 +180,6 @@ describe("AgentJobExecutor resolves a named workspace binding", () => {
       null,
       "/virtual/runner",
       undefined,
-      null,
       { materialize } as never,
     )
 

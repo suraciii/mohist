@@ -766,7 +766,7 @@ internal static class AgentCommands
     {
         var cmd = new Command(
             "spawn",
-            "Spawn an allowed child AgentSession from a parent session. Sends targetAgentRef, prompt and the optional workspace mode to the Server spawn endpoint.");
+            "Spawn an allowed child AgentSession from a parent session. Sends targetAgentRef and prompt to the Server spawn endpoint; the child always inherits the parent's workdir.");
         var agentRefArg = new Argument<string>("agent-ref") { Description = "Stable target Agent ref" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var parentSessionOpt = new Option<string?>("--parent-session") { Description = "Parent AgentSession id" };
@@ -774,7 +774,7 @@ internal static class AgentCommands
         var idempotencyKeyOpt = new Option<string?>("--idempotency-key") { Description = "Required stable retry key" };
         var workspaceOpt = new Option<string?>("--workspace")
         {
-            Description = "Workspace mode: inherit (share the parent workdir; default) or worktree (isolated workspace created by the system)",
+            Description = "Retired: the workspace-mode concept was removed; child sessions always inherit the parent workdir",
         };
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionSpawn)));
 
@@ -805,16 +805,14 @@ internal static class AgentCommands
                 return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--prompt is required");
             if (string.IsNullOrWhiteSpace(idempotencyKey))
                 return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--idempotency-key is required");
-            if (workspace is not null && workspace is not ("inherit" or "worktree"))
-                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--workspace must be one of: inherit, worktree");
+            if (workspace is not null)
+                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--workspace was retired: child sessions always inherit the parent workdir");
 
             var (mode, exit) = api.ResolveOutputMode(output);
             if (exit != 0)
                 return exit;
 
-            object body = workspace is null
-                ? new { targetAgentRef = agentRef, prompt }
-                : new { targetAgentRef = agentRef, prompt, workspace };
+            var body = new { targetAgentRef = agentRef, prompt };
             return await api.PrintPostWithOutputAsync(
                 $"/api/projects/{MohistCliCommands.Escape(project)}/agent-sessions/{MohistCliCommands.Escape(parentSessionId)}/spawns",
                 body,

@@ -110,7 +110,6 @@ public interface IAgentLauncher
         string targetAgentRef,
         string prompt,
         string idempotencyKey,
-        string? workspace = null,
         CancellationToken ct = default);
 
     Task<AgentLaunchResult> LaunchConnectionAsync(
@@ -234,17 +233,7 @@ public sealed record AgentLaunchContext(
     string? Repository = null,
     string? WorkspacePath = null,
     string? WorkspaceName = null,
-    string? Title = null,
-    /// <summary>
-    /// Resolved Project Repository snapshot for an explicit
-    /// Project-backed launch (both <c>repository</c> and
-    /// <c>workspacePath</c> supplied). The route resolves it from
-    /// <c>Project.Repository(name)</c> (fail-fast on unknown) and the
-    /// launcher threads it into <see cref="AgentSessionStartup"/> so
-    /// the Runner can confirm the workDir source on first execution.
-    /// Null for launches without a Project-backed source.
-    /// </summary>
-    WorkspaceRepositorySnapshot? WorkspaceRepository = null);
+    string? Title = null);
 
 [Orleans.GenerateSerializer]
 public sealed record ConnectionLaunchOrigin(

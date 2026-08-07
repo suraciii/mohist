@@ -113,28 +113,9 @@ public sealed class CliSubagentIncrementSpecs
     }
 
     [Fact]
-    public async Task AgentSpawn_WorkspaceWorktree_SendsWorkspaceModeInBody()
+    public async Task AgentSpawn_WorkspaceModeRetired_RejectedWithoutRequest()
     {
-        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
-            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = new
-                {
-                    jobId = "job_child",
-                    sessionId = "sess_child",
-                    inputId = "input_child",
-                    turnId = "turn_child",
-                    agentId = "agent_child",
-                    agentName = "Child",
-                    status = "queued",
-                    parentSessionId = "sess_parent",
-                    edgeId = "edge_1",
-                    transcriptUrl = "/transcript",
-                    jobUrl = "/job",
-                    observationUrl = "/observation",
-                },
-            })));
+        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
@@ -151,136 +132,13 @@ public sealed class CliSubagentIncrementSpecs
             fileSystem,
             executor);
 
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
-        var body = JsonNode.Parse(request.Body!)!.AsObject();
-        Assert.Equal("agent_child", body["targetAgentRef"]!.GetValue<string>());
-        Assert.Equal("do the work", body["prompt"]!.GetValue<string>());
-        Assert.Equal("worktree", body["workspace"]!.GetValue<string>());
-        Assert.Equal(3, body.Count);
-        Assert.Empty(error.ToString());
-    }
-
-    [Fact]
-    public async Task AgentSpawn_WorkspaceInherit_SendsWorkspaceModeInBody()
-    {
-        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
-            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = new
-                {
-                    jobId = "job_child",
-                    sessionId = "sess_child",
-                    inputId = "input_child",
-                    turnId = "turn_child",
-                    agentId = "agent_child",
-                    agentName = "Child",
-                    status = "queued",
-                    parentSessionId = "sess_parent",
-                    edgeId = "edge_1",
-                    transcriptUrl = "/transcript",
-                    jobUrl = "/job",
-                    observationUrl = "/observation",
-                },
-            })));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            [
-                "agent", "spawn", "agent_child",
-                "--project", "proj_parent",
-                "--parent-session", "sess_parent",
-                "--prompt", "do the work",
-                "--idempotency-key", "spawn-1",
-                "--workspace", "inherit",
-            ],
-            output,
-            error,
-            fileSystem,
-            executor);
-
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
-        var body = JsonNode.Parse(request.Body!)!.AsObject();
-        Assert.Equal("inherit", body["workspace"]!.GetValue<string>());
-        Assert.Equal(3, body.Count);
-        Assert.Empty(error.ToString());
-    }
-
-    [Fact]
-    public async Task AgentSpawn_WorkspaceOmitted_DefaultsToInheritWithoutBodyField()
-    {
-        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
-            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
-            {
-                success = true,
-                data = new
-                {
-                    jobId = "job_child",
-                    sessionId = "sess_child",
-                    inputId = "input_child",
-                    turnId = "turn_child",
-                    agentId = "agent_child",
-                    agentName = "Child",
-                    status = "queued",
-                    parentSessionId = "sess_parent",
-                    edgeId = "edge_1",
-                    transcriptUrl = "/transcript",
-                    jobUrl = "/job",
-                    observationUrl = "/observation",
-                },
-            })));
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            [
-                "agent", "spawn", "agent_child",
-                "--project", "proj_parent",
-                "--parent-session", "sess_parent",
-                "--prompt", "do the work",
-                "--idempotency-key", "spawn-1",
-            ],
-            output,
-            error,
-            fileSystem,
-            executor);
-
-        Assert.Equal(0, exitCode);
-        var request = Assert.Single(handler.Requests);
-        var body = JsonNode.Parse(request.Body!)!.AsObject();
-        Assert.Equal(2, body.Count);
-        Assert.False(body.ContainsKey("workspace"));
-        Assert.Empty(error.ToString());
-    }
-
-    [Fact]
-    public async Task AgentSpawn_InvalidWorkspaceMode_RejectedWithoutRequest()
-    {
-        var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create();
-
-        var exitCode = await MohistCliCommands.RunAsync(
-            http,
-            [
-                "agent", "spawn", "agent_child",
-                "--project", "proj_parent",
-                "--parent-session", "sess_parent",
-                "--prompt", "do the work",
-                "--idempotency-key", "spawn-1",
-                "--workspace", "clone",
-            ],
-            output,
-            error,
-            fileSystem,
-            executor);
-
         Assert.Equal(2, exitCode);
         Assert.Empty(handler.Requests);
-        Assert.Contains("--workspace must be one of: inherit, worktree", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--workspace was retired: child sessions always inherit the parent workdir", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task AgentSpawn_SameKeyDifferentWorkspaceMode_SurfacesIdempotencyConflict()
+    public async Task AgentSpawn_SameKeyDifferentPrompt_SurfacesIdempotencyConflict()
     {
         var (handler, http, output, error, fileSystem, executor) = CliTestFactory.Create(
             (_, _) => Task.FromResult(RecordingHttpHandler.JsonError(
@@ -294,9 +152,8 @@ public sealed class CliSubagentIncrementSpecs
                 "agent", "spawn", "agent_child",
                 "--project", "proj_parent",
                 "--parent-session", "sess_parent",
-                "--prompt", "do the work",
+                "--prompt", "do other work",
                 "--idempotency-key", "spawn-1",
-                "--workspace", "worktree",
             ],
             output,
             error,
@@ -307,7 +164,7 @@ public sealed class CliSubagentIncrementSpecs
         var request = Assert.Single(handler.Requests);
         Assert.Equal("spawn-1", request.Headers["Idempotency-Key"].Single());
         var body = JsonNode.Parse(request.Body!)!.AsObject();
-        Assert.Equal("worktree", body["workspace"]!.GetValue<string>());
+        Assert.False(body.ContainsKey("workspace"));
         Assert.Contains("spawn_idempotency_conflict", error.ToString(), StringComparison.Ordinal);
     }
 
