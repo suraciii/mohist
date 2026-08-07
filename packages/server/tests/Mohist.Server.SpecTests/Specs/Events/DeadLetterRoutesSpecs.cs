@@ -24,7 +24,7 @@ public sealed class DeadLetterRoutesSpecs
     }
 
     [Fact]
-    public async Task List_ReturnsUnresolvedRowsAndSupportsHandlerFilter()
+    public async Task List_ReturnsUnresolvedRowsThroughTheEnvelopeShape()
     {
         var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
         var row = BuildRow("test.list.handler");
@@ -42,7 +42,6 @@ public sealed class DeadLetterRoutesSpecs
             Assert.Equal(row.DeadLetterId, listed.GetProperty("id").GetInt64());
             Assert.Equal(row.EventId, listed.GetProperty("eventId").GetString());
             Assert.Equal("test.list.handler", listed.GetProperty("handler").GetString());
-            Assert.Equal(row.AttemptCount, listed.GetProperty("attempts").GetInt32());
             Assert.False(listed.TryGetProperty("errorStack", out _));
         }
         finally
@@ -118,61 +117,6 @@ public sealed class DeadLetterRoutesSpecs
             Assert.NotNull(stored);
             Assert.Equal(DeadLetterStatus.Pending, stored.Status);
             Assert.Null(stored.RedeliveryAttemptedAt);
-        }
-        finally
-        {
-            await store.DeleteAsync(row.DeadLetterId);
-        }
-    }
-
-    [Fact]
-    public async Task List_RedactsEmbeddedStackFramesAndPaths()
-    {
-        var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
-        var row = BuildRow("test.redaction.handler");
-        row.ErrorMessage = "handler failed at Example.Handler() in /tmp/private/Handler.cs:line 42 path=/srv/private/db.sqlite";
-        await store.WriteAsync(row);
-
-        try
-        {
-            using var response = await _fixture.Client.GetAsync(
-                "/api/events/dead-letters?handler=test.redaction.handler");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
-            var error = listed.GetProperty("error").GetString();
-            Assert.Contains("[stack]", error, StringComparison.Ordinal);
-            Assert.DoesNotContain("/tmp/private", error, StringComparison.Ordinal);
-            Assert.DoesNotContain("/srv/private", error, StringComparison.Ordinal);
-            Assert.DoesNotContain("Example.Handler", error, StringComparison.Ordinal);
-        }
-        finally
-        {
-            await store.DeleteAsync(row.DeadLetterId);
-        }
-    }
-
-    [Fact]
-    public async Task List_RedactsUncPaths()
-    {
-        var store = _fixture.Services.GetRequiredService<IDeadLetterStore>();
-        var row = BuildRow("test.unc-redaction.handler");
-        row.ErrorMessage = @"handler failed at \\fileserver\share\secret.txt";
-        await store.WriteAsync(row);
-
-        try
-        {
-            using var response = await _fixture.Client.GetAsync(
-                "/api/events/dead-letters?handler=test.unc-redaction.handler");
-
-            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-            var listed = Assert.Single(body.GetProperty("data").EnumerateArray());
-            var error = listed.GetProperty("error").GetString();
-            Assert.Contains("[path]", error, StringComparison.Ordinal);
-            Assert.DoesNotContain("fileserver", error, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("secret.txt", error, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

@@ -4,7 +4,6 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Api;
-using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -18,6 +17,17 @@ using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Api;
 
+/// <summary>
+/// Route-level contract specs for the task-log upload
+/// (<c>POST /api/.../task-log</c>) and read
+/// (<c>GET /api/.../logs</c>) endpoints: request binding/validation
+/// (400 malformed json / duplicate seq / invalid metadata / oversized
+/// text), owner resolution (404 unknown owner), the dependency boundary
+/// (upload must not invoke a grain), and one empty-page read shape. The
+/// store's write/read calculation matrix (append + dedup, owner-kind
+/// isolation, cursor pagination in seq order, empty page for unknown
+/// owner) lives in <c>TaskLogStoreSpecs</c>.
+/// </summary>
 [Collection("IntegrationApi")]
 public class TaskLogRouteSpecs
 {
@@ -64,22 +74,6 @@ public class TaskLogRouteSpecs
                 isDraft = false,
             });
         return issue.GetProperty("number").GetInt32();
-    }
-
-    /// <summary>
-    /// Persists a workflow run that contains a single task with a
-    /// known <c>TaskRun.Id</c> and <c>WorkId</c>. The run's
-    /// <c>metadata.annotations.projectId</c> is wired so the GET
-    /// endpoint can resolve it via the issue's workflow run id.
-    /// </summary>
-    private async Task<(string workflowRunId, string workId)> SeedWorkflowRunAsync(
-        string projectId,
-        string taskId,
-        string workId)
-    {
-        var workflowRunId = $"wr_tasklog_spec_{Guid.NewGuid():N}";
-        await SeedActiveWorkflowRunAsync(workflowRunId, taskId, workId, projectId);
-        return (workflowRunId, workId);
     }
 
     private async Task SeedActiveWorkflowRunAsync(
@@ -132,29 +126,9 @@ public class TaskLogRouteSpecs
     {
         await using var scope = _fixture.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        // WorkflowRunId is a computed column sourced from the State
-        // JSON, so the binding is done by mutating State directly.
-        // json_quote() produces a valid JSON string literal from the
-        // SQL parameter so json_set accepts it.
         await db.Database.ExecuteSqlRawAsync(
             "UPDATE Issues SET State = json_set(State, '$.workflowRunId', json_quote({0})) WHERE ProjectId = {1} AND Number = {2}",
             workflowRunId, projectId, issueNumber);
-    }
-
-    private async Task SeedAgentJobAsync(string runnerId, string ownerId, string workId, string status = "running")
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var state = $"{{\"status\":\"{status}\",\"runnerId\":\"{runnerId}\",\"workId\":\"{workId}\",\"input\":{{\"prompt\":\"task log\",\"agentId\":\"agent\"}}}}";
-        db.AgentJobs.Add(new AgentJobRow
-        {
-            JobKey = ownerId,
-            State = state,
-            AssignedRunnerId = runnerId,
-            WorkId = workId,
-            RunningSince = _fixture.TimeProvider.GetUtcNow().ToString("O"),
-        });
-        await db.SaveChangesAsync();
     }
 
     private async Task<HttpResponseMessage> PostTaskLogAsync(string url, object body, string runnerId = RunnerId)
@@ -172,75 +146,6 @@ public class TaskLogRouteSpecs
         entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text } },
         truncated = false,
     };
-
-    [Fact]
-    public async Task UploadEndpoint_StoresEntriesAndReturnsAcceptedCount()
-    {
-        var workflowRunId = $"wr-tasklog-{Guid.NewGuid():N}";
-        var workId = $"work-{Guid.NewGuid():N}";
-        await SeedActiveWorkflowRunAsync(workflowRunId, "task-1", workId);
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var body = new
-        {
-            entries = new[]
-            {
-                new { seq = 1L, timestamp = now, source = "workspace-prep", text = "Cloning repo..." },
-                new { seq = 2L, timestamp = now.AddSeconds(1), source = "branch-check", text = "Stable" },
-            },
-            truncated = false,
-        };
-
-        using var response = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            body);
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = json.GetProperty("data");
-        Assert.Equal(2, data.GetProperty("accepted").GetInt32());
-        Assert.False(data.GetProperty("truncated").GetBoolean());
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var rows = await db.TaskLogEntries.AsNoTracking()
-            .Where(e => e.OwnerKind == "workflow" && e.OwnerId == workflowRunId && e.WorkId == workId)
-            .OrderBy(e => e.Seq)
-            .ToListAsync();
-        Assert.Equal(2, rows.Count);
-        Assert.Equal("Cloning repo...", rows[0].Text);
-        Assert.Equal("Stable", rows[1].Text);
-    }
-
-    [Fact]
-    public async Task UploadEndpoint_AgentJobRoute_StoresUnderAgentJobOwnerKind()
-    {
-        var agentJobId = $"aj-tasklog-{Guid.NewGuid():N}";
-        var workId = $"work-{Guid.NewGuid():N}";
-        await SeedAgentJobAsync(RunnerId, agentJobId, workId);
-
-        using var response = await PostTaskLogAsync(
-            $"/api/agent-jobs/{agentJobId}/work/{workId}/task-log",
-            new
-            {
-                entries = new[] { new { seq = 1L, timestamp = _fixture.TimeProvider.GetUtcNow(), source = "action", text = "agent-job line" } },
-                truncated = false,
-            });
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        await using var scope = _fixture.Services.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
-        var rows = await db.TaskLogEntries.AsNoTracking()
-            .Where(e => e.OwnerKind == "agent-job" && e.OwnerId == agentJobId && e.WorkId == workId)
-            .ToListAsync();
-        Assert.Single(rows);
-        Assert.Equal("agent-job line", rows[0].Text);
-
-        // Same work id under a different owner kind must not collide.
-        var workflowCollision = await db.TaskLogEntries.AsNoTracking()
-            .CountAsync(e => e.WorkId == workId && e.OwnerKind == "workflow");
-        Assert.Equal(0, workflowCollision);
-    }
 
     [Fact]
     public async Task UploadEndpoint_RejectsMalformedJson()
@@ -359,11 +264,13 @@ public class TaskLogRouteSpecs
     }
 
     [Fact]
-    public async Task GetEndpoint_TaskWithoutCapturedLines_ReturnsEmptyPage()
+    public async Task GetEndpoint_TaskWithoutCapturedLines_ReturnsEmptyPageShape()
     {
         var projectId = await CreateProjectAsync("tasklog-empty");
         var issueNumber = await CreateIssueAsync(projectId, "no logs");
-        var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
+        var workflowRunId = $"wr_tasklog_spec_{Guid.NewGuid():N}";
+        var workId = $"work-{Guid.NewGuid():N}";
+        await SeedActiveWorkflowRunAsync(workflowRunId, "build.1", workId, projectId);
         await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
 
         using var response = await _fixture.Client.GetAsync(
@@ -373,98 +280,6 @@ public class TaskLogRouteSpecs
         var json = await response.Content.ReadFromJsonAsync<JsonElement>();
         var data = json.GetProperty("data");
         Assert.Equal(JsonValueKind.Array, data.GetProperty("lines").ValueKind);
-        Assert.Empty(data.GetProperty("lines").EnumerateArray());
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("nextCursor").ValueKind);
-        Assert.False(data.GetProperty("truncated").GetBoolean());
-    }
-
-    [Fact]
-    public async Task GetEndpoint_ReturnsPaginatedLinesInSeqOrder()
-    {
-        var projectId = await CreateProjectAsync("tasklog-page");
-        var issueNumber = await CreateIssueAsync(projectId, "with logs");
-        var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
-        await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
-
-        var now = _fixture.TimeProvider.GetUtcNow();
-        var entries = Enumerable.Range(1, 5).Select(seq => new
-        {
-            seq = (long)seq,
-            timestamp = now.AddSeconds(seq),
-            source = "action",
-            text = $"line {seq}",
-        }).ToArray();
-
-        using (var upload = await PostTaskLogAsync(
-            $"/api/workflow-runs/{workflowRunId}/work/{workId}/task-log",
-            new { entries, truncated = false }))
-        {
-            Assert.Equal(HttpStatusCode.OK, upload.StatusCode);
-        }
-
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?limit=2");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var json = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = json.GetProperty("data");
-        var lines = data.GetProperty("lines").EnumerateArray().ToList();
-        Assert.Equal(2, lines.Count);
-        Assert.Equal(1, lines[0].GetProperty("seq").GetInt64());
-        Assert.Equal(2, lines[1].GetProperty("seq").GetInt64());
-        Assert.Equal("line 1", lines[0].GetProperty("text").GetString());
-        var cursor = data.GetProperty("nextCursor").GetInt64();
-        Assert.Equal(2L, cursor);
-
-        using var second = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?cursor={cursor}&limit=2");
-        var secondData = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        var secondLines = secondData.GetProperty("lines").EnumerateArray().ToList();
-        Assert.Equal(2, secondLines.Count);
-        Assert.Equal(3, secondLines[0].GetProperty("seq").GetInt64());
-        Assert.Equal(4, secondLines[1].GetProperty("seq").GetInt64());
-        var secondCursor = secondData.GetProperty("nextCursor").GetInt64();
-        Assert.Equal(4L, secondCursor);
-
-        using var final = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs?cursor={secondCursor}&limit=2");
-        var finalData = (await final.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        var finalLines = finalData.GetProperty("lines").EnumerateArray().ToList();
-        Assert.Single(finalLines);
-        Assert.Equal(5, finalLines[0].GetProperty("seq").GetInt64());
-        Assert.Equal(JsonValueKind.Null, finalData.GetProperty("nextCursor").ValueKind);
-        Assert.False(finalData.GetProperty("truncated").GetBoolean());
-    }
-
-    [Fact]
-    public async Task GetEndpoint_UnknownTaskId_ReturnsEmptyPage()
-    {
-        var projectId = await CreateProjectAsync("tasklog-unknown");
-        var issueNumber = await CreateIssueAsync(projectId, "unknown task");
-        var (workflowRunId, workId) = await SeedWorkflowRunAsync(projectId, "build.1", workId: $"work-{Guid.NewGuid():N}");
-        await BindIssueToWorkflowRunAsync(projectId, issueNumber, workflowRunId);
-
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/missing.1/logs");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
-        Assert.Empty(data.GetProperty("lines").EnumerateArray());
-        Assert.Equal(JsonValueKind.Null, data.GetProperty("nextCursor").ValueKind);
-        Assert.False(data.GetProperty("truncated").GetBoolean());
-    }
-
-    [Fact]
-    public async Task GetEndpoint_IssueWithoutWorkflowRun_ReturnsEmptyPage()
-    {
-        var projectId = await CreateProjectAsync("tasklog-norun");
-        var issueNumber = await CreateIssueAsync(projectId, "no run yet");
-
-        using var response = await _fixture.Client.GetAsync(
-            $"/api/projects/{projectId}/issues/{issueNumber}/workflow/tasks/build.1/logs");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
         Assert.Empty(data.GetProperty("lines").EnumerateArray());
         Assert.Equal(JsonValueKind.Null, data.GetProperty("nextCursor").ValueKind);
         Assert.False(data.GetProperty("truncated").GetBoolean());

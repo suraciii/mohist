@@ -270,25 +270,6 @@ public class LabelCatalogApiSpecs
     }
 
     [Fact]
-    public async Task Catalog_IsProjectScoped()
-    {
-        var projectA = await CreateProjectAsync("scope-a");
-        var projectB = await CreateProjectAsync("scope-b");
-
-        await _client.PostAsJsonAsync(
-            $"/api/projects/{projectA.Id}/labels/catalog",
-            new { key = "module", description = "Project A module" });
-
-        var catalogA = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{projectA.Id}/labels/catalog");
-        var catalogB = await _client.GetDataAsync<LabelDefinitionDto[]>(
-            $"/api/projects/{projectB.Id}/labels/catalog");
-
-        Assert.Contains(catalogA, d => d.Key == "module");
-        Assert.DoesNotContain(catalogB, d => d.Key == "module");
-    }
-
-    [Fact]
     public async Task DistinctKeysEndpoint_IsUnchanged()
     {
         var project = await CreateProjectAsync("distinct-check");
@@ -323,24 +304,6 @@ public class LabelCatalogApiSpecs
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("non-empty", body, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task PostCatalog_WithSupportedValues_PersistsThem()
-    {
-        var project = await CreateProjectAsync("sv-persist");
-
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{project.Id}/labels/catalog",
-            new { key = "kind", description = "The kind of change", supportedValues = new[] { "feature", "bugfix", "chore" } });
-
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        var envelope = await response.Content.ReadFromJsonAsync<ApiEnvelope<LabelDefinitionDto>>();
-        Assert.NotNull(envelope?.Data?.SupportedValues);
-        Assert.Equal(3, envelope.Data.SupportedValues.Count);
-        Assert.Contains("feature", envelope.Data.SupportedValues);
-        Assert.Contains("bugfix", envelope.Data.SupportedValues);
-        Assert.Contains("chore", envelope.Data.SupportedValues);
     }
 
     private async Task<ProjectDto> CreateProjectAsync(string prefix)

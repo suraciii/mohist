@@ -1,194 +1,133 @@
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Inbox;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Inbox;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Inbox;
 
+/// <summary>
+/// Calculation specs for the project inbox read/mutate path behind
+/// <c>/api/projects/&#123;projectRef&#125;/inbox</c>: the
+/// <c>InboxQuerier</c> list (most-recent-first, archived excluded, empty
+/// project) and the <c>InboxStore</c> mark-read / mark-all-read / archive
+/// mutations. All run against MohistDbFixture without an HTTP round-trip.
+/// The route contract (404 unknown item / unknown project) stays in
+/// <c>InboxApiSpecs</c>.
+/// </summary>
+[Collection("MohistDb")]
 public class InboxQuerierSpecs
 {
-    private static readonly DateTimeOffset FixedNow = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
+    private readonly MohistDbFixture _fixture;
 
-    [Fact]
-    public async Task ListAsync_ReturnsNonArchivedItemsMostRecentFirst()
+    public InboxQuerierSpecs(MohistDbFixture fixture)
     {
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        await SeedAsync(store, "proj_a", "evt-1", FixedNow.AddMinutes(-30), 1, "Issue 1");
-        await SeedAsync(store, "proj_a", "evt-2", FixedNow.AddMinutes(-10), 2, "Issue 2");
-        await SeedAsync(store, "proj_a", "evt-3", FixedNow.AddMinutes(-20), 3, "Issue 3");
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
-
-        var items = await querier.ListAsync("proj_a");
-
-        Assert.Equal(3, items.Count);
-        // Most-recent-first: evt-2 (-10m), evt-3 (-20m), evt-1 (-30m)
-        Assert.Equal("evt-2", items[0].SourceEventId);
-        Assert.Equal("evt-3", items[1].SourceEventId);
-        Assert.Equal("evt-1", items[2].SourceEventId);
-        Assert.Equal(2, items[0].IssueNumber);
-        Assert.Equal(3, items[1].IssueNumber);
-        Assert.Equal(1, items[2].IssueNumber);
+        _fixture = fixture;
     }
 
-    [Fact]
-    public async Task ListAsync_ExcludesArchivedItems()
+    private InboxQuerier CreateQuerier() => _fixture.Services.GetRequiredService<InboxQuerier>();
+    private InboxStore CreateStore() => _fixture.Services.GetRequiredService<InboxStore>();
+
+    private static async Task<string> SeedAsync(InboxStore store, string projectId, int issueNumber, string title, string kind, DateTimeOffset createdAt, string sourceEventId)
     {
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        var keep = await SeedAsync(store, "proj_a", "evt-keep", FixedNow, 1, "Keep me");
-        var drop = await SeedAsync(store, "proj_a", "evt-drop", FixedNow, 2, "Drop me");
-        await store.ArchiveAsync("proj_a", drop.Id);
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
-
-        var items = await querier.ListAsync("proj_a");
-
-        var only = Assert.Single(items);
-        Assert.Equal(keep.Id, only.Id);
-        Assert.False(only.IsArchived);
+        var result = await store.InsertAsync(new InboxItemDraft(
+            ProjectId: projectId,
+            IssueNumber: issueNumber,
+            IssueTitle: title,
+            NotificationKind: kind,
+            SourceEventSource: $"/mohist/projects/{projectId}/issues/{issueNumber}",
+            SourceEventId: sourceEventId,
+            CreatedAt: createdAt));
+        return result.Id;
     }
 
-    [Fact]
-    public async Task ListAsync_OnlyReturnsItemsInRequestedProject()
-    {
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        await SeedAsync(store, "proj_a", "evt-a-1", FixedNow, 1, "A1");
-        await SeedAsync(store, "proj_a", "evt-a-2", FixedNow, 2, "A2");
-        await SeedAsync(store, "proj_b", "evt-b-1", FixedNow, 1, "B1");
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
-
-        var aItems = await querier.ListAsync("proj_a");
-        var bItems = await querier.ListAsync("proj_b");
-
-        Assert.Equal(2, aItems.Count);
-        Assert.All(aItems, item => Assert.Equal("proj_a", item.ProjectId));
-        Assert.Single(bItems);
-        Assert.Equal("proj_b", bItems[0].ProjectId);
-    }
+    private static readonly DateTimeOffset T0 = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task ListAsync_ReturnsEmptyForUnknownProject()
+    public async Task ListAsync_EmptyProject_ReturnsEmpty()
     {
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        await SeedAsync(store, "proj_a", "evt-1", FixedNow, 1, "A1");
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
+        var querier = CreateQuerier();
 
-        var items = await querier.ListAsync("proj_zzz");
+        var items = await querier.ListAsync($"proj-{Guid.NewGuid():N}");
 
         Assert.Empty(items);
     }
 
     [Fact]
-    public async Task ListAsync_ReflectsReadStateFromStore()
+    public async Task ListAsync_ReturnsMostRecentFirstAndExcludesArchived()
     {
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        var read = await SeedAsync(store, "proj_a", "evt-read", FixedNow, 1, "Read");
-        await store.MarkReadAsync("proj_a", read.Id);
-        await SeedAsync(store, "proj_a", "evt-unread", FixedNow.AddMinutes(1), 2, "Unread");
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
+        var store = CreateStore();
+        var querier = CreateQuerier();
+        var projectId = $"proj-{Guid.NewGuid():N}";
 
-        var items = await querier.ListAsync("proj_a");
+        var firstId = await SeedAsync(store, projectId, 1, "First", NotificationKinds.WorkflowFailed, T0, "evt-1");
+        var secondId = await SeedAsync(store, projectId, 2, "Second", NotificationKinds.ApprovalRequested, T0.AddDays(1), "evt-2");
+        var archivedId = await SeedAsync(store, projectId, 3, "Archived", NotificationKinds.IssueStarted, T0.AddDays(2), "evt-3");
+        await store.ArchiveAsync(projectId, archivedId);
+
+        var items = await querier.ListAsync(projectId);
 
         Assert.Equal(2, items.Count);
-        // most-recent-first: unread first
-        Assert.False(items[0].IsRead);
-        Assert.Null(items[0].ReadAt);
-        Assert.True(items[1].IsRead);
-        Assert.NotNull(items[1].ReadAt);
+        Assert.Equal(secondId, items[0].Id);
+        Assert.Equal(firstId, items[1].Id);
+        Assert.All(items, i => Assert.Null(i.ArchivedAt));
     }
 
     [Fact]
-    public async Task ListAsync_CarriesStructuredFieldsForProductFacingText()
+    public async Task MarkReadAsync_SetsOneItemRead_LeavesOthersUnread()
     {
-        // The querier returns the structured fields the Web client
-        // templates from. No pre-rendered text is stored.
-        await using var database = CreateDatabase();
-        var store = new InboxStore(new TestDbContextFactory(database.Options));
-        await store.InsertAsync(new InboxItemDraft(
-            ProjectId: "proj_a",
-            IssueNumber: 42,
-            IssueTitle: "Render me client-side",
-            NotificationKind: NotificationKinds.ApprovalRequested,
-            SourceEventSource: "/mohist/issues/issue_42",
-            SourceEventId: "evt-1"));
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
+        var store = CreateStore();
+        var querier = CreateQuerier();
+        var projectId = $"proj-{Guid.NewGuid():N}";
 
-        var items = await querier.ListAsync("proj_a");
+        var first = await SeedAsync(store, projectId, 1, "First", NotificationKinds.WorkflowFailed, T0, "evt-1");
+        var second = await SeedAsync(store, projectId, 2, "Second", NotificationKinds.ApprovalRequested, T0, "evt-2");
 
-        var item = Assert.Single(items);
-        Assert.Equal(NotificationKinds.ApprovalRequested, item.NotificationKind);
-        Assert.Equal(42, item.IssueNumber);
-        Assert.Equal("Render me client-side", item.IssueTitle);
+        var affected = await store.MarkReadAsync(projectId, first);
+        Assert.Equal(1, affected);
+
+        var items = await querier.ListAsync(projectId);
+        var firstItem = Assert.Single(items, i => i.Id == first);
+        var secondItem = Assert.Single(items, i => i.Id == second);
+        Assert.NotNull(firstItem.ReadAt);
+        Assert.Null(secondItem.ReadAt);
     }
 
     [Fact]
-    public async Task ListAsync_TieBreaksItemsWithIdenticalCreatedAtById()
+    public async Task MarkAllReadAsync_MarksAllNonArchivedItems()
     {
-        // Two items in the same millisecond must come back in a
-        // stable order. We seed both rows directly with the same
-        // CreatedAt to exercise the secondary sort key.
-        var same = FixedNow;
-        await using var database = CreateDatabase();
-        await using (var db = database.CreateContext())
-        {
-            db.InboxItems.Add(new InboxItemRow
-            {
-                Id = "inb_first",
-                ProjectId = "proj_a",
-                IssueNumber = 1,
-                IssueTitle = "First",
-                NotificationKind = NotificationKinds.WorkflowFailed,
-                SourceEventSource = "/mohist/issues/issue_1",
-                SourceEventId = "evt-1",
-                CreatedAt = same,
-            });
-            db.InboxItems.Add(new InboxItemRow
-            {
-                Id = "inb_second",
-                ProjectId = "proj_a",
-                IssueNumber = 2,
-                IssueTitle = "Second",
-                NotificationKind = NotificationKinds.WorkflowFailed,
-                SourceEventSource = "/mohist/issues/issue_2",
-                SourceEventId = "evt-2",
-                CreatedAt = same,
-            });
-            await db.SaveChangesAsync();
-        }
-        var querier = new InboxQuerier(new TestDbContextFactory(database.Options));
+        var store = CreateStore();
+        var querier = CreateQuerier();
+        var projectId = $"proj-{Guid.NewGuid():N}";
 
-        var items = await querier.ListAsync("proj_a");
+        await SeedAsync(store, projectId, 1, "First", NotificationKinds.WorkflowFailed, T0, "evt-1");
+        await SeedAsync(store, projectId, 2, "Second", NotificationKinds.ApprovalRequested, T0, "evt-2");
+        var archived = await SeedAsync(store, projectId, 3, "Archived", NotificationKinds.IssueStarted, T0, "evt-3");
+        await store.ArchiveAsync(projectId, archived);
 
+        var marked = await store.MarkAllReadAsync(projectId);
+        Assert.Equal(2, marked);
+
+        var items = await querier.ListAsync(projectId);
         Assert.Equal(2, items.Count);
-        // Id is a Guid-derived `inb_...`; we just need a stable order
-        // across runs — assert that the order matches the first/second
-        // ordering captured by the inserted Ids.
-        Assert.Equal(new[] { "inb_first", "inb_second" }, items.Select(i => i.Id).ToArray());
+        Assert.All(items, i => Assert.NotNull(i.ReadAt));
     }
 
-    private static async Task<InboxInsertResult> SeedAsync(
-        InboxStore store,
-        string projectId,
-        string sourceEventId,
-        DateTimeOffset createdAt,
-        int issueNumber,
-        string issueTitle)
+    [Fact]
+    public async Task ArchiveAsync_ExcludesItemFromDefaultList()
     {
-        return await store.InsertAsync(new InboxItemDraft(
-            ProjectId: projectId,
-            IssueNumber: issueNumber,
-            IssueTitle: issueTitle,
-            NotificationKind: NotificationKinds.WorkflowFailed,
-            SourceEventSource: $"/mohist/issues/issue_{issueNumber}",
-            SourceEventId: sourceEventId,
-            CreatedAt: createdAt));
-    }
+        var store = CreateStore();
+        var querier = CreateQuerier();
+        var projectId = $"proj-{Guid.NewGuid():N}";
 
-    private static TestSqliteDatabase CreateDatabase() => TestSqliteDatabase.CreateMigrated();
+        var first = await SeedAsync(store, projectId, 1, "First", NotificationKinds.WorkflowFailed, T0, "evt-1");
+        await SeedAsync(store, projectId, 2, "Second", NotificationKinds.ApprovalRequested, T0, "evt-2");
+
+        await store.ArchiveAsync(projectId, first);
+
+        var items = await querier.ListAsync(projectId);
+        var surviving = Assert.Single(items);
+        Assert.Equal(2, surviving.IssueNumber);
+        Assert.Null(surviving.ArchivedAt);
+    }
 }

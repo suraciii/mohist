@@ -440,6 +440,27 @@ public class IssueTemplateRegistrySpecs
     }
 
     [Fact]
+    public void DisableDefaultInOneProject_DoesNotAffectAnotherProject()
+    {
+        var dbFactory = new FakeDbContextFactory(db =>
+        {
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = "project-A",
+                DisableDefaultIssueTemplate = true,
+            });
+            db.SaveChanges();
+        });
+        var registry = new IssueTemplateRegistry(dbFactory, Builtins());
+
+        var listA = registry.List("project-A");
+        Assert.DoesNotContain(listA, t => t.Id == "feature");
+
+        var listB = registry.List("project-B");
+        Assert.Contains(listB, t => t.Id == "feature");
+    }
+
+    [Fact]
     public void CustomTemplates_AreProjectPrivate()
     {
         var dbFactory = new FakeDbContextFactory(db =>
