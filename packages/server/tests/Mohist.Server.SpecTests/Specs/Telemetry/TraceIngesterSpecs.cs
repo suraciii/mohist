@@ -1,8 +1,10 @@
 using System.Text.Json;
+using Google.Protobuf;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Mohist.Server.Otel;
 using Mohist.Server.Otel.OtlpJson;
+using Mohist.Server.Otel.OtlpProtobuf;
 using Mohist.Server.TestSupport;
 using Xunit;
 
@@ -136,6 +138,47 @@ public class TraceIngesterSpecs : IDisposable
                 Assert.Equal(2, resDoc.RootElement.GetArrayLength());
             }
         }
+    }
+
+    [Fact]
+    public void IngestProtobuf_ValidPayload_PersistsSpanAndTrace()
+    {
+        const string traceId = "00000000000000000000000000000003";
+        var payload = BuildMinimalProtobufTracePayload(traceId, "0000000000000003", "proto", "protobuf span");
+
+        var outcome = _ingester.IngestBatch(OtlpProtobufTraceParser.Parse(payload));
+
+        Assert.Equal(IngestResponseDisposition.Success, outcome.ResponseDisposition);
+        Assert.Equal(1, outcome.Saved);
+
+        using var connection = _db.OpenReadOnlyConnection();
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText = $"SELECT {OtelDb.TracesServiceNameColumn}, {OtelDb.TracesSpanCountColumn} FROM {OtelDb.TracesTable} WHERE {OtelDb.TracesTraceIdColumn} = $id";
+        cmd.Parameters.AddWithValue("$id", traceId);
+        using var reader = cmd.ExecuteReader();
+        Assert.True(reader.Read());
+        Assert.Equal("proto", reader.GetString(0));
+        Assert.Equal(1L, reader.GetInt64(1));
+    }
+
+    [Fact]
+    public void ProtobufPayload_ParsesRequiredSpanFields()
+    {
+        const string traceId = "00000000000000000000000000000004";
+        const string spanId = "0000000000000004";
+        var payload = BuildMinimalProtobufTracePayload(traceId, spanId, "protobuf-parser", "protobuf parser span");
+
+        var parsed = OtlpProtobufTraceParser.Parse(payload);
+        var resourceSpans = Assert.Single(parsed.ResourceSpans ?? []);
+        var serviceName = Assert.Single(resourceSpans.Resource?.Attributes ?? [], a => a.Key == "service.name");
+        Assert.Equal("protobuf-parser", serviceName.Value?.StringValue);
+        var scopeSpans = Assert.Single(resourceSpans.ScopeSpans ?? []);
+        var span = Assert.Single(scopeSpans.Spans ?? []);
+        Assert.Equal(traceId, span.TraceId);
+        Assert.Equal(spanId, span.SpanId);
+        Assert.Equal("protobuf parser span", span.Name);
+        Assert.False(string.IsNullOrEmpty(span.StartTimeUnixNano));
+        Assert.False(string.IsNullOrEmpty(span.EndTimeUnixNano));
     }
 
     [Fact]
@@ -398,6 +441,41 @@ public class TraceIngesterSpecs : IDisposable
     public void TryConvertUnixNanoToUtcIso_RejectsBadInputs(string? raw)
     {
         Assert.False(TraceIngester.TryConvertUnixNanoToUtcIso(raw, out _));
+    }
+
+    private static byte[] BuildMinimalProtobufTracePayload(string traceId, string spanId, string serviceName, string spanName)
+    {
+        var resourceAttribute = Message(w =>
+        {
+            w.WriteRawTag(10); w.WriteString("service.name");
+            w.WriteRawTag(18); w.WriteBytes(Message(v => { v.WriteRawTag(10); v.WriteString(serviceName); }));
+        });
+        var resource = Message(w => { w.WriteRawTag(10); w.WriteBytes(resourceAttribute); });
+        var span = Message(w =>
+        {
+            w.WriteRawTag(10); w.WriteBytes(ByteString.CopyFrom(Convert.FromHexString(traceId)));
+            w.WriteRawTag(18); w.WriteBytes(ByteString.CopyFrom(Convert.FromHexString(spanId)));
+            w.WriteRawTag(42); w.WriteString(spanName);
+            w.WriteRawTag(48); w.WriteEnum(1);
+            w.WriteRawTag(57); w.WriteFixed64(1767225600000000000UL);
+            w.WriteRawTag(65); w.WriteFixed64(1767225601000000000UL);
+        });
+        var scopeSpans = Message(w => { w.WriteRawTag(18); w.WriteBytes(span); });
+        var resourceSpans = Message(w =>
+        {
+            w.WriteRawTag(10); w.WriteBytes(resource);
+            w.WriteRawTag(18); w.WriteBytes(scopeSpans);
+        });
+        return Message(w => { w.WriteRawTag(10); w.WriteBytes(resourceSpans); }).ToByteArray();
+    }
+
+    private static ByteString Message(Action<CodedOutputStream> write)
+    {
+        using var stream = new MemoryStream();
+        var output = new CodedOutputStream(stream);
+        write(output);
+        output.Flush();
+        return ByteString.CopyFrom(stream.ToArray());
     }
 
     private sealed class RejectAllProtectionDecision : IIngestProtectionDecision

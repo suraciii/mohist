@@ -335,6 +335,42 @@ public sealed class TraceIngesterBoundedWriteSpecs : IDisposable
     }
 
     [Fact]
+    public async Task IngestBatch_WriterLeaseSerializesWritersAndIsReleasedAfterCommit()
+    {
+        var gate = new OtlpIngestGate();
+        var ingester = new TraceIngester(
+            _db,
+            NullLogger<TraceIngester>.Instance,
+            runtime: null,
+            protection: null,
+            transactionStarted: null,
+            gate: gate);
+
+        var request = BuildJsonRequest(TraceId, SpanIdPrefix + "01", "svc-a");
+        var plan = ingester.Planner.Plan(ingester.Prepare(request));
+
+        // While the writer lease is held the ingest must wait; the
+        // zero-timeout probe turns "still blocked" into an instant
+        // assertion instead of a hang.
+        Task<IngestOutcome> blocked;
+        using (await gate.AcquireWriterLeaseAsync(CancellationToken.None))
+        {
+            blocked = ingester.IngestPlannedAsync(plan, CancellationToken.None);
+            await Assert.ThrowsAsync<TimeoutException>(() => blocked.WaitAsync(TimeSpan.Zero));
+        }
+
+        var outcome = await blocked;
+
+        Assert.Equal(IngestResponseDisposition.Success, outcome.ResponseDisposition);
+        Assert.Equal(1, outcome.Saved);
+
+        // The lease is released by the time the ingest completes: a
+        // fresh acquisition succeeds immediately.
+        using var again = await gate.AcquireWriterLeaseAsync(CancellationToken.None).WaitAsync(TimeSpan.Zero);
+        Assert.True(again.IsHeld);
+    }
+
+    [Fact]
     public async Task IngestBatch_RuntimeObservability_RecordsSavedAndRejectedAndDroppedSeparately()
     {
         var runtime = new RuntimeObservability(
