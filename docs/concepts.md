@@ -30,6 +30,8 @@ mo server status   # 查看整体 Server 状态（含 Runner / 容量）
 
 **多个仓库的场景**：产品的 server 和 web 是两个代码库，同一个 Project 声明两个仓库，issue 按目标仓库分流。详见 [仓库](repositories.md)。
 
+Project 下的执行发生在 **Workspace** 里：issue 启动时获得自己的干净 workspace，Slack channel 等交互入口也各自对应一个持久 workspace。详见 [Workspace](workspaces.md)。
+
 ## Issue（工作单元）
 
 一个 Issue = 一份可进入生产线的工作。

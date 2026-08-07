@@ -20,6 +20,7 @@
 ## 板块 3：工作管理
 
 - [仓库](repositories.md) —— Project 声明多个仓库作为执行资源，issue 按目标仓库分流
+- [Workspace](workspaces.md) —— 跨会话、跨 Agent 的持久执行环境：issue 工作流干净初始化，Slack channel 持久复用
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
 - [复合 Issue 与子 Issue](sub-issues.md) —— 一个 issue 追踪跨仓库需求，拆成子 issue 各自走 workflow
 - [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标

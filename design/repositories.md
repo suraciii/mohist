@@ -25,17 +25,15 @@ WorkflowRun
   Id
   ProjectId
   IssueNumber
-
-WorkspaceMarker
-  WorkflowRunId
 ```
 
 - Project Repository 是 `GitUrl` 与 `BaseBranch` 的唯一写入权威。
 - Issue 的 `RepositoryName` 是对 Project Repository 的稳定引用。Issue 首次启动后不能改绑。
 - WorkflowRun 只保存定位 Issue 所需的标量，不保存 Repository snapshot、workspace path 或
   branch。
-- Workspace 是 Runner 的可重建执行状态。它没有独立业务身份；`WorkflowRunId` 足以标识
-  它属于哪次运行。
+- Workspace 是 Project 下的一等执行环境资源，持有独立身份、来源与生命周期；它对
+  Repository 的引用是访问授权，不复制 Repository 定义。模型见
+  [`workspace.md`](workspace.md)。
 - Git remote 的规范化结果是校验过程中的临时值，不是领域字段。系统不持久化
   `RemoteFingerprint` 或 `RemoteIdentityVersion`。
 
