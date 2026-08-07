@@ -4,6 +4,10 @@ Workspace 是 Project 下持久存在的执行环境：一组工作目录，加�
 它跨会话、跨 Agent 存在——多个会话、多个 Agent 可以在同一个 workspace 里接力，
 后加入者看到的是同一个目录：装好的依赖、检索到的资料、未提交的改动都在。
 
+Workspace 是“工作”发生的地方，仓库只是它的材料：仓库检出位于 workspace 之下，
+而计划、调研、笔记等工作产物直接属于 workspace，不属于任何一个仓库——一件横跨
+多个仓库的工作，其成果在 workspace 层始终有安放之处。
+
 ## 两种来源
 
 ### Issue 工作流的 workspace
@@ -61,7 +65,8 @@ mo workspace close payment-refactor
 
 Workspace 持有一组仓库引用（Project 已声明的仓库资源）。workflow 路径从 issue 的
 目标仓库预填；交互路径按需挂载。挂载表示授予访问权和默认检出目标；真正的 clone、
-分支与 worktree 组织由 Agent 在目录内自行完成，平台不规定目录内部结构。
+分支与 worktree 组织由 Agent 在目录内自行完成，平台不规定目录内部结构。布局约定
+（检出放 `repos/` 下、工作产物放 workspace 根）由 prompt 承载，不是平台强制。
 
 ## 生命周期终点
 

@@ -10,6 +10,10 @@ Workspace 是 Project 下的一等命名执行环境资源：持久的目录与�
 边界：Workspace 只持有身份、来源、仓库引用、状态与物化路由事实。目录内容、
 git 组织（clone / branch / worktree）是 Agent 的行为，不是平台的 schema。
 
+Workspace 是“工作”的家，仓库是材料：仓库检出位于 workspace 之下（约定 `repos/`），
+计划、调研等工作产物属于 workspace 层。这层语义由 prompt 约定承载，不进入平台
+schema；它使跨仓库工作的产物始终有不属于任何单一仓库的安放之处。
+
 参考对应（仅帮助理解，不是术语来源）：Runner ≈ Node，WorkflowRun ≈ Pod，
 AgentSession ≈ Container，Workspace ≈ local PersistentVolume——生命周期独立于
 消费者、物化位置决定调度亲和、随节点丢失、同一消费者组内共享。
@@ -132,4 +136,6 @@ Runner 为绑定 workspace 的执行注入工作目录锚定段：绝对路径 +
 - 开放问题：复合 Issue 多仓库 attach 的时机；workflow 干净初始化与现有
   `workspace-prepare` action 的衔接；Slack channel 归档事件到 workspace 归档的接线；
   workspace 重新物化后绑定 session 的 Runtime Binding 重指语义；workspace 生命周期
-  事件（created / archived）进入事件协议谱系的事件集。
+  事件（created / archived）进入事件协议谱系的事件集；workflow 的 openspec 产物
+  位置——现位于 repo 检出内部（`openspec/changes/issue-<n>/`），是否随“工作产物属于
+  workspace 层”迁到 workspace 根（复合 Issue 场景下该产物不属于任何单一仓库）。
