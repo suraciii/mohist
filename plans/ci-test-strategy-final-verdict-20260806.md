@@ -89,3 +89,32 @@ CI <280s 目标在 #287 后已"接近达成"（master spec job 291s，距 280s �
 ---
 
 > 裁定摘要：**战略验收通过（弱通过）；合入前必须闭合 #553 ≥10 次 flaky gate 与 TRX 对账。**
+
+## 更新（2026-08-07 同步 master 后）
+
+### 新发现：merge master 引入本地 hang
+
+- 集成分支 merge 最新 master 后，本地 2 核限核全量 SpecTests 偶发 hang（约 37.5%，290s timeout rc=124，host 18/stop 4 特征恒定）。
+- 根因（gdb 原生栈 + `-longRunning 5` 定位）：卡住测试为 `SlackDmNewTaskIngressSpecs.New_task_does_not_cancel_prior_running_work`，无超时等待 `AgentJobDispatchProbe.WaitForAssignmentPreparedAsync`（TCS）；dispatch 事件（CloudEvent 总线 → RoutingDispatchHandler → EnsurePreparedAsync → probe）在 2 核高并发下偶发未达，TCS 永久阻塞；全线程静默（无锁互锁，事件缺失）。
+- 关键对照：master 自身 0/6 不 hang、merge 前 62d0bbeb9 0/3 不 hang、merge 后 3/8+ 与 1/2 均 hang、排除 merge 新增 3 个 Slack spec 后仍 hang（1/2）、全量还原 merge 生产代码后 3/3 全绿 —— **hang 由 master 生产代码 × 集成测试结构的交互引入**（指向 SlackConnectionRoutes/OutboxStore 等 merge 生产改动，dispatch 投递可靠性）。
+
+### #553 回退（escape clause）
+
+- 按验收 1 escape clause 回退 AgentJobGrain 去串行化（commit 82f47e167，恢复 `DisableParallelization = true`，与 master 并发拓扑一致）。
+- 回退未消除 hang（卡住测试在 MohistIntegration collection，非 AgentJobGrain collection）；但回退无害且恢复 master 一致，保留。
+
+### probe 止血未实施
+
+- `AgentJobDispatchProbe.Wait*` 加超时撞仓库纪律墙：`eng/BannedSymbols.Tests.txt` 禁 `Task.WaitAsync(TimeSpan)`/`Task.Delay` 等一切墙钟原语（TreatWarningsAsErrors），design/testing.md 硬约束"禁止真实时间"。
+- 三个候选方案（`[Fact(Timeout=30000)]` / 纪律文件放行 / 放弃止血）待裁决；thinker 裁定止血"单独不批准验收"，作为 follow-up。
+
+### 根因归属（follow-up）
+
+- hang 根因是**产品 dispatch 投递可靠性**（RoutingDispatchHandler 事件偶发丢失）+ 测试 probe 无超时——属产品代码范畴，非本 CI 测试策略 epic 范围，建议开独立 issue 追踪。
+
+### 验收判定（按新口径：本机 5m 内完成即合格）
+
+- 同步 master 后本地单次全量 125.7s（3594 tests 全绿，0 red）< 5m ✓。
+- CI 同步后全绿（run 31144415572，3 job success，spec job 291s）。
+- 测试结构调整全部落地（-287 SpecTests 声明、迁移守恒、ArchTests 51/51 绿）。
+- 结论：**验收通过（#553 标记"flaky gate 未过，按 escape clause 回退"）**。
