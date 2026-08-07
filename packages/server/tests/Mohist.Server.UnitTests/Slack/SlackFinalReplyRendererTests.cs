@@ -43,6 +43,30 @@ public sealed class SlackFinalReplyRendererTests
     }
 
     [Fact]
+    public void RedactReplyText_StripsSecretsAndNeutralizesSlackControlSyntax()
+    {
+        var redacted = SlackFinalReplyRenderer.RedactReplyText(
+            "Result ready. token=xoxb-secret and api_key=abc123. Ping <!channel> and <@U123>.");
+
+        Assert.Contains("Result ready.", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("xoxb-secret", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("abc123", redacted, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", redacted, StringComparison.Ordinal);
+        // Slack control syntax is neutralized so the Agent body cannot trigger
+        // mentions/broadcasts or forge controls.
+        Assert.DoesNotContain("<!channel>", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("<@U123>", redacted, StringComparison.Ordinal);
+        Assert.Contains("&lt;!channel&gt;", redacted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RedactReplyText_ReturnsEmptyForBlankInput()
+    {
+        Assert.Equal(string.Empty, SlackFinalReplyRenderer.RedactReplyText("   "));
+        Assert.Equal(string.Empty, SlackFinalReplyRenderer.RedactReplyText(null));
+    }
+
+    [Fact]
     public void Project_RendersBlockingFailureActionsAndExplicitNextStep()
     {
         var blocked = SlackFinalReplyRenderer.Project(new SlackConfirmedAgentResult(
@@ -238,5 +262,54 @@ public sealed class SlackFinalReplyRendererTests
         var text = string.Join('\n', first.Segments);
         Assert.DoesNotContain("\uFFFD", text);
         Assert.Equal(40, text.EnumerateRunes().Count(rune => rune.Value == 0x1F680));
+    }
+
+    [Fact]
+    public void SegmentReplyText_ReturnsOneSegmentForShortBody()
+    {
+        var segments = SlackFinalReplyRenderer.SegmentReplyText("A short final answer.");
+
+        var single = Assert.Single(segments);
+        Assert.Equal("A short final answer.", single);
+    }
+
+    [Fact]
+    public void SegmentReplyText_SplitsLongBodyIntoOrderedSegmentsUnderTheLimit()
+    {
+        var lines = Enumerable.Range(0, 4_000)
+            .Select(index => $"Line {index:D5}: the quick brown fox jumps over the lazy dog.")
+            .ToList();
+        var body = string.Join('\n', lines);
+
+        var segments = SlackFinalReplyRenderer.SegmentReplyText(body, maximumSegmentLength: 1_000);
+
+        Assert.True(segments.Count > 1);
+        Assert.All(segments, segment => Assert.InRange(segment.EnumerateRunes().Count(), 1, 1_000));
+        var rejoined = string.Join('\n', segments);
+        Assert.Contains(lines[0], rejoined, StringComparison.Ordinal);
+        Assert.Contains(lines[^1], rejoined, StringComparison.Ordinal);
+        Assert.All(lines, line => Assert.Contains(line, rejoined, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SegmentReplyText_PreservesOrderAcrossSegments()
+    {
+        var marker = (int index) => $"MARKER_{index:D5}";
+        var body = string.Join('\n', Enumerable.Range(0, 2_000).Select(index => marker(index) + " content"));
+
+        var segments = SlackFinalReplyRenderer.SegmentReplyText(body, maximumSegmentLength: 500);
+        var rejoined = string.Join('\n', segments);
+
+        var positions = Enumerable.Range(0, 2_000).Select(index => rejoined.IndexOf(marker(index), StringComparison.Ordinal)).ToArray();
+        Assert.All(positions, position => Assert.True(position >= 0));
+        Assert.Equal(positions.OrderBy(p => p), positions);
+    }
+
+    [Fact]
+    public void SegmentReplyText_HandlesEmptyBodyAndRejectsNonPositiveLimit()
+    {
+        Assert.Empty(SlackFinalReplyRenderer.SegmentReplyText("   \n  \t  "));
+        Assert.Empty(SlackFinalReplyRenderer.SegmentReplyText(null));
+        Assert.Throws<ArgumentOutOfRangeException>(() => SlackFinalReplyRenderer.SegmentReplyText("body", 0));
     }
 }

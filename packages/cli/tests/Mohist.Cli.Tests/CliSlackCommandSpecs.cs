@@ -16,7 +16,7 @@ public sealed class CliSlackCommandSpecs
 
         Assert.Equal(0, exit);
         var text = output.ToString();
-        foreach (var command in new[] { "setup", "status", "install-agent", "list", "view", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete" })
+        foreach (var command in new[] { "setup", "status", "install-agent", "list", "view", "claim-owner", "edit", "transfer-owner", "enable", "disable", "remove-binding", "permanent-delete", "deliveries", "resend-delivery", "clear-gap", "reconcile-create", "reconcile-delete", "message" })
             Assert.Contains(command, text, StringComparison.Ordinal);
         Assert.DoesNotContain("agent connection", text, StringComparison.OrdinalIgnoreCase);
         Assert.Empty(handler.Requests);
@@ -1094,6 +1094,172 @@ public sealed class CliSlackCommandSpecs
             ["clear-gap", "connection_1"],
             "/api/projects/proj_abc/slack-connections/connection_1/clear-gap",
             HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task MessageSend_PostsAgentReplyToTheReplyEndpoint()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_1", dispatchRef = "slack-reply:connection_1:C1:1710000000.000100:terminal", merged = false },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--reply-to", "1710000000.000100", "--text", "All green. token=xoxb-leak"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var request = handler.Requests.Single();
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/projects/proj_abc/slack-connections/reply", request.RequestUri?.PathAndQuery);
+        var body = JsonNode.Parse(request.Body!)!;
+        Assert.Equal("C1", body["conversationId"]!.GetValue<string>());
+        Assert.Equal("1710000000.000100", body["threadTs"]!.GetValue<string>());
+        // The CLI forwards the Agent-authored body verbatim; the Server redacts.
+        Assert.Equal("All green. token=xoxb-leak", body["text"]!.GetValue<string>());
+        Assert.Contains("accepted", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MessageSend_ReadsBodyFromStdinWhenTextIsDash()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_2", dispatchRef = "d", merged = false } })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "D1", "--text", "-"],
+            output, error, fs, executor,
+            standardInput: new StringReader("line one\nline two\n"));
+
+        Assert.Equal(0, exit);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("line one\nline two\n", body["text"]!.GetValue<string>());
+        Assert.Equal("D1", body["conversationId"]!.GetValue<string>());
+        // --reply-to is optional (omitted for a DM).
+        Assert.Null(body["threadTs"]?.GetValue<string?>());
+    }
+
+    [Fact]
+    public async Task MessageSend_EmptyTextFailsBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--text", "   "],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--text, --file, or --image is required", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MessageSend_WithFile_ReadsLocalImageAndSendsBase64()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_f", dispatchRef = "slack-reply:connection_1:D1:dm:file", merged = false },
+            })));
+        fs.AddFile("/mohist-tests/shot.png", "fake-png");
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "D1", "--file", "/mohist-tests/shot.png"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("D1", body["conversationId"]!.GetValue<string>());
+        Assert.Equal("shot.png", body["fileName"]!.GetValue<string>());
+        Assert.Equal(Convert.ToBase64String("fake-png"u8), body["fileContentBase64"]!.GetValue<string>());
+        Assert.Null(body["text"]?.GetValue<string?>());
+    }
+
+    [Fact]
+    public async Task MessageSend_WithFileAndText_SendsBoth()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_f2", dispatchRef = "d", merged = false },
+            })));
+        fs.AddFile("/mohist-tests/shot.png", "fake-png");
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "D1", "--file", "/mohist-tests/shot.png", "--text", "see shot"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("see shot", body["text"]!.GetValue<string>());
+        Assert.Equal(Convert.ToBase64String("fake-png"u8), body["fileContentBase64"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task MessageSend_WithImageUrl_SendsImageUrl()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { accepted = true, connectionId = "connection_1", deliveryId = "slkout_i", dispatchRef = "slack-reply:connection_1:C1:dm:image", merged = false },
+            })));
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--image", "https://example.com/chart.png"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exit);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("https://example.com/chart.png", body["imageUrl"]!.GetValue<string>());
+        Assert.Null(body["text"]?.GetValue<string?>());
+    }
+
+    [Fact]
+    public async Task MessageSend_MissingFileFailsBeforeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--file", "/mohist-tests/nope.png"],
+            output, error, fs, executor);
+
+        Assert.NotEqual(0, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--file", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MessageSend_FileAndImageAreMutuallyExclusive()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+        fs.AddFile("/mohist-tests/shot.png", "fake-png");
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--file", "/mohist-tests/shot.png", "--image", "https://example.com/p.png"],
+            output, error, fs, executor);
+
+        Assert.Equal(2, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("mutually exclusive", error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task MessageSend_ImageUrlMustBeHttp()
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create();
+
+        var exit = await MohistCliCommands.RunAsync(http,
+            ["slack", "message", "send", "--conversation", "C1", "--image", "ftp://example.com/p.png"],
+            output, error, fs, executor);
+
+        Assert.Equal(2, exit);
+        Assert.Empty(handler.Requests);
+        Assert.Contains("--image must be a public http(s) image URL", error.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

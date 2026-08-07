@@ -137,7 +137,12 @@ class FakeTransport implements AdapterTransport {
   }
 
   async ackDelivery(ref: SlackAdapterTarget, ack: DeliveryAck) {
-    this.acks.push({ ref, id: ack.id, outcome: ack.outcome })
+    this.acks.push({
+      ref,
+      id: ack.id,
+      outcome: ack.outcome,
+      ...(ack.providerMessageIdentity ? { providerMessageIdentity: ack.providerMessageIdentity } : {}),
+    })
   }
 }
 
@@ -153,11 +158,13 @@ function runtimeLease(ref: SlackAdapterTarget): RuntimeLease {
 }
 
 class FakeWeb implements SlackWebClient {
-  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; blocks?: readonly Record<string, unknown>[] }> = []
+  readonly posted: Array<{ channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }> = []
   readonly updated: Array<{ channel: string; ts: string; text: string; blocks?: readonly Record<string, unknown>[] }> = []
+  readonly uploaded: Array<Record<string, unknown>> = []
   nextResponses: Array<{ ok?: boolean; error?: string }> = []
+  nextUploadResponses: Array<{ ok?: boolean; error?: string; files?: readonly { ok?: boolean; error?: string; files?: readonly { id?: string; shares?: { public?: Record<string, readonly { ts?: string }[]>; private?: Record<string, readonly { ts?: string }[]> } }[] }[] }> = []
   readonly chat = {
-    postMessage: async (input: { channel: string; text: string; thread_ts?: string; blocks?: readonly Record<string, unknown>[] }) => {
+    postMessage: async (input: { channel: string; text: string; thread_ts?: string; client_msg_id?: string; blocks?: readonly Record<string, unknown>[] }) => {
       this.posted.push(input)
       const next = this.nextResponses.shift()
       return next ?? { ok: true }
@@ -166,6 +173,11 @@ class FakeWeb implements SlackWebClient {
       this.updated.push(input)
       return { ok: true, ts: input.ts }
     },
+  }
+  readonly filesUploadV2 = async (input: { channel_id: string; filename?: string; file: Buffer; initial_comment?: string; alt_text?: string } | { channels: string; thread_ts: string; filename?: string; file: Buffer; initial_comment?: string; alt_text?: string }) => {
+    this.uploaded.push({ ...input })
+    const next = this.nextUploadResponses.shift()
+    return next ?? { ok: true }
   }
 }
 
@@ -1170,6 +1182,172 @@ describe("mohist-slack adapter", () => {
     controller.abort()
   })
 
+  it("posts an over-long reply as ordered threaded segments from one delivery", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.deliveries = [{
+      id: "segmented-reply",
+      conversationId: "C1",
+      threadTs: "100.001",
+      payloadJson: JSON.stringify({
+        operation: "post_message",
+        text: "the full body that exceeds one Slack message",
+        clientMessageId: "slack-reply:c1:C1:100.001:terminal",
+        segments: ["first segment body", "second segment body", "third segment body"],
+      }),
+    }]
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.posted).toEqual([
+      { channel: "C1", text: "first segment body", thread_ts: "100.001", client_msg_id: "slack-reply:c1:C1:100.001:terminal" },
+      { channel: "C1", text: "second segment body", thread_ts: "100.001" },
+      { channel: "C1", text: "third segment body", thread_ts: "100.001" },
+    ])
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "segmented-reply", outcome: "delivered" },
+    ])
+    controller.abort()
+  })
+
+  it("uploads a local image file as a Slack file share reply", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.deliveries = [{
+      id: "delivery-file",
+      conversationId: "D1",
+      threadTs: "1710000000.000100",
+      payloadJson: JSON.stringify({
+        operation: "upload_file",
+        text: "screenshot attached",
+        fileName: "shot.png",
+        fileContentBase64: Buffer.from("png-bytes").toString("base64"),
+      }),
+    }, {
+      id: "delivery-file-dm",
+      conversationId: "D2",
+      threadTs: null,
+      payloadJson: JSON.stringify({
+        operation: "upload_file",
+        fileName: "shot.png",
+        fileContentBase64: Buffer.from("png-bytes").toString("base64"),
+      }),
+    }]
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.uploaded).toHaveLength(2)
+    expect(web.uploaded[0]).toMatchObject({
+      channels: "D1",
+      thread_ts: "1710000000.000100",
+      filename: "shot.png",
+      initial_comment: "screenshot attached",
+    })
+    expect(web.uploaded[0]?.file).toEqual(Buffer.from("png-bytes"))
+    expect(web.uploaded[1]).toMatchObject({ channel_id: "D2", filename: "shot.png" })
+    expect(web.uploaded[1]?.initial_comment).toBeUndefined()
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-file", outcome: "delivered" },
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-file-dm", outcome: "delivered" },
+    ])
+    controller.abort()
+  })
+
+  it("posts an image-only reply with blocks and without a text body", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    const blocks = [{ type: "image", image_url: "https://example.com/p.png", alt_text: "Image" }]
+    transport.deliveries = [{
+      id: "delivery-image",
+      conversationId: "D1",
+      threadTs: null,
+      payloadJson: JSON.stringify({
+        operation: "post_message",
+        clientMessageId: "slack-reply:c1:D1:dm:image",
+        blocks,
+      }),
+    }]
+    const web = new FakeWeb()
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(web.posted).toEqual([{
+      channel: "D1",
+      text: "",
+      client_msg_id: "slack-reply:c1:D1:dm:image",
+      blocks,
+    }])
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-image", outcome: "delivered" },
+    ])
+    controller.abort()
+  })
+
+  it("records the file share identity from the upload response for reconciliation", async () => {
+    const transport = new FakeTransport()
+    transport.connections = [{ projectId: "p1", connectionId: "c1" }]
+    transport.deliveries = [{
+      id: "delivery-file-identity",
+      conversationId: "C_PUBLIC",
+      threadTs: null,
+      payloadJson: JSON.stringify({
+        operation: "upload_file",
+        fileName: "shot.png",
+        fileContentBase64: Buffer.from("png-bytes").toString("base64"),
+      }),
+    }]
+    const web = new FakeWeb()
+    web.nextUploadResponses = [{
+      ok: true,
+      files: [{ ok: true, files: [{ id: "F1", shares: { public: { C_PUBLIC: [{ ts: "1710000000.000200" }] } } }] }],
+    }]
+    const adapter = new SlackAdapter({
+      adapterId: "adapter-1",
+      transport,
+      socketFactory: () => new FakeSocket(),
+      webFactory: () => web,
+      heartbeatIntervalMs: 60_000,
+      deliveryPollIntervalMs: 60_000,
+    })
+    const controller = new AbortController()
+
+    await adapter.start(controller.signal)
+
+    expect(transport.acks).toEqual([
+      { ref: { projectId: "p1", connectionId: "c1" }, id: "delivery-file-identity", outcome: "delivered", providerMessageIdentity: { conversationId: "C_PUBLIC", messageTs: "1710000000.000200" } },
+    ])
+    controller.abort()
+  })
+
   it("forwards interactions to the Server and drains its block update after acknowledging", async () => {
     const transport = new FakeTransport()
     transport.connections = [{ projectId: "p1", connectionId: "c1" }]
@@ -1229,7 +1407,7 @@ describe("mohist-slack adapter", () => {
       text: "Stop requested. Waiting for the runtime to confirm.",
       blocks: [{ type: "section", text: { type: "mrkdwn", text: "Stop requested. Waiting for the runtime to confirm." } }],
     }])
-    expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "control-update", outcome: "delivered" }])
+    expect(transport.acks).toEqual([{ ref: { projectId: "p1", connectionId: "c1" }, id: "control-update", outcome: "delivered", providerMessageIdentity: { conversationId: "C1", messageTs: "100.002" } }])
     controller.abort()
   })
 

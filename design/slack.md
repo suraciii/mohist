@@ -449,6 +449,61 @@ Reaction 的默认映射是 `Received=👀`、`Working=⏳`、`Completed=✅`、
 只是 liveness 提示，不是 Session/Turn 事实；reaction 缺失、延迟或成功都不改变 Server 的状态。
 Reaction mutation 必须带目标的稳定 provider message identity；状态裁判不放入 provider 或 adapter。
 
+### 回复正文归 Agent，liveness 归 Server
+
+回复呈现分两层，归属不同：
+
+- **liveness 投影归 Server**：`SlackStatusProjection` 维护 Received/Working/Completed 的
+  reaction mutation 与可替换进度消息（progress `DispatchRef`），不依赖 Agent。只要输入被接受
+  就开始投影；Agent 是否发送回复不影响 liveness 收尾。
+- **回复正文归 Agent**：Agent 在 turn 中通过 Mohist 提供的 **reply action**（向 Server 发送
+  意图 API 提交正文与回复锚点）主动发送要说的话。reply action 进入同一 outbox，复用脱敏、
+  重复保护、锚点校验与 Delivery uncertain 核对；Agent 不直连 Slack。落点优先是该 `DispatchRef`
+  的进度消息原位更新为最终答案，避免第二条消息。
+
+Server 不再从 Runner turn 输出里提取 assistant text 作为回复正文。turn 输出是 Runner 事实（用于
+裁定 Session/Turn 状态），不是 Slack 回复的真源；Slack 回复的真源是 Agent 主动发起的 reply
+action。
+
+- **沉默合法**：turn 结束时 Agent 未发起任何 reply action，视为 Agent 选择沉默；liveness 正常
+  收尾（进度消息标记完成、Completed reaction），不产生回复正文，Server 不替 Agent 编状态摘要。
+- **失败自报**：执行失败或需人工介入时，由 Agent 自己经 reply action 发送失败原因与下一步；
+  只有 Agent 进程崩溃或彻底无响应时，Server 才以系统身份发出兜底提示（标注为系统故障）。
+
+### reply action 的 CLI 形态：`mo slack message send`
+
+reply action 的命令面是 `mo slack message send`——通用 CLI（人与 Agent 都可用，不是 Agent 专属黑盒），
+destination 显式传递，对齐 Buzz 的 `buzz messages send`：
+
+```
+mo slack message send --conversation <id> --text "<正文>"
+mo slack message send --conversation <id> --reply-to <ts> --text "<正文>"        # 回到 thread
+printf '长正文\n\n多段\n' | mo slack message send --conversation <id> --text -     # stdin
+mo slack message send --conversation <id> --text "看这个截图" --file ./screenshot.png
+mo slack message send --conversation <id> --text "架构图" --image https://example.com/diagram.png
+```
+
+- **destination 显式**：`--conversation` 必填，`--reply-to`（thread 锚点）可选。Agent 从
+  dispatch 注入的 `SlackReplyAnchor` 读出这两者再传，不凭记忆选历史消息当回复目标。Agent
+  主动发到别处（跨频道/开线程）时按真实意图显式传，与“不猜回复位置”不冲突——后者只约束
+  回复当前输入。
+- **正文 `--text`**：字符串或 `-`（stdin），避免 shell 转义吞掉换行。Agent 写标准 markdown，
+  CLI/outbox 渲染层转成 Slack mrkdwn（`*粗体*`、`_斜体_`、`<url|文本>` 等）；Slack 不支持的
+  表格/标题降级为代码块或粗体，不报错。
+- **@人写进正文**：正文里的 `@displayname` 由 CLI 解析为有效 Slack mention（`<@U123>`）；歧义或
+  目标非可见成员时报错并给修复提示，不静默发送。不单独传 `--mention`。
+- **图片**：`--file <path>` 上传本地图片（走 Slack `files.upload`，显示预览，可重复）；
+  `--image <url>` 引用公网图片 URL（Block Kit image block）。Agent 主动发关键截图/artifact
+  说明问题，与 spec“不把 artifact 自动复制成 Slack 文件”不冲突——后者约束系统自动堆，不是
+  Agent 显式动作。
+- **成功 = outbox ack**：send 同步提交 outbox 并返回确认，代表“已提交、会可靠投递”，不代表
+  Slack 已显示。Slack 侧 eventual 投递失败（Delivery uncertain）由 outbox 处理，不回传 Agent。
+- **分段**：turn 内多次 send，Server 合并到该 `DispatchRef` 的一条最终答案（优先原位更新进度
+  消息），守住“一条输入最多一个最终答案”。
+- **第一版不支持**：broadcast（跨频道广播）、消息类型区分；留到将来松绑到“平等参与者”模型。
+  `mo slack message` 是 group 而非孤立命令：将来还容纳 `message get` / `message thread`（读历史），
+  让 Agent 主动获取上下文；第一版只实装 send。
+
 ### Delivery intent、claim/ack 与未知结果
 
 Server 为每个逻辑投影持久化一个 `DeliveryIntent`。intent 至少包含 Connection、`DispatchRef`、
@@ -482,11 +537,17 @@ terminal delivery key，故重试、重连和重复入站不会再追加第二�
 - **P0-C** 只接收 Server 已确认的成功、部分完成、取消、阻塞或失败结果，渲染结果优先的文本。
   C 不创建或更新 Slack 消息，不操作 reaction，不重试 provider，也不把 raw tool stream、JSON 或
   隐藏推理交给用户。
-- **终态渲染优先级**：Agent 成功且给出了可消费回复（terminal delivery 的 assistant 文本非空）时，
-  Slack 正文直接使用该文本（沿用脱敏、Slack 控制语法转义与分段）；状态字段（exit code、artifact
-  计数、Job/Session 标识）只作为次要元数据或稳定链接，不参与正文模板。Agent 无回复时才退化为
-  状态摘要：成功无回复给简短结论，失败/阻塞必须给出原因与可操作的下一步，不用模板官话代替原因。
-  Manager 与 Agent connection 遵循同一渲染规则，不再区分两套模板。
+- **回复正文渲染**：Agent 主动经 reply action 发送的正文就是 Slack 展示的内容（沿用脱敏、
+  Slack 控制语法转义与分段）；正文先脱敏、再经 markdown → mrkdwn 转换（粗体 `**x**`→`*x*`、
+  行内代码、代码块、列表 `-`→`•`、引用；表格与标题降级为可读纯文本；代码跨度内不转换），
+  之后才进 outbox。回复可附带图片：公网 URL 由 Server 组装 image block（带正文时置于 section
+  block）随 post_message/chat_update 投递；本地文件以 `upload_file` operation 投递，adapter 用
+  filesUploadV2 上传为文件分享（`--text` 作为 initial comment），两者各有独立 dispatch ref，
+  不与正文 terminal 行合并，也不做原位提升（chat.update 无法附加文件）。状态字段（exit code、
+  artifact 计数、Job/Session 标识）只作为次要元数据或稳定链接，不参与正文。Agent 没有发起
+  reply action 即为沉默（合法，不产生回复正文）；执行失败或需人工介入由 Agent 自己发送原因
+  与下一步。Server 不替 Agent 从 turn 输出提取或编造回复。Manager 与 Agent connection 遵循
+  同一规则。
 - **P0-I** 负责 ingress 到 Agent API、Session/Turn、状态投影和最终结果之间的 orchestration，并
   验证 DM/@mention、thread follow-up、失败、取消、重复投递、update failure fallback、Agent 未就绪
   和 Connection Disabled。I 不绕过 B 的 provider mutation contract。
@@ -639,8 +700,10 @@ install）。
 数据面已具备 `AgentConnection` 的 Setup progress、Desired state、Connection health 与 Agent
 Readiness 分离，以及 Server 持有的 provider inbox、conversation mapping 和 outbound outbox。无状态
 `mohist-slack` adapter 负责把稳定 delivery identity 投影为 post、update 与 reaction；未知 mutation
-会依据该 identity 核对，update 的明确失败只产生一次 fallback。终态 delivery 由 Server 基于 session
-和管理员配置的 external web URL 构造 link block，adapter 不解析 Agent 文本为 Slack 控制对象。
+会依据该 identity 核对，update 的明确失败只产生一次 fallback。终态 delivery 当前由 Server 从 Runner turn 输出提取 assistant 文本，并基于 session 与管理员配置的
+external web URL 构造 link block，adapter 不解析 Agent 文本为 Slack 控制对象。**reply action
+（Agent 主动发送回复正文）尚未实装——当前回复正文仍由 Server 从 turn 输出提取并渲染，是
+本文「回复正文归 Agent」模型的过渡态。**
 
 控制面已有 Slack-specific Enrollment、`ManagedSlackAgentApp` 聚合、claim
 与 ManagerActor 边界。operator setup 签发
@@ -669,7 +732,8 @@ manifest 只输出 Socket Mode（无 HTTPS transport / `PublicIngressBaseUrl`）
 固定为不含 `mpim:history` 的目标 contract。与真实 Slack 的端到端验收已在隔离工作区跑通：
 `setup`、`install-agent`、owner 认领、DM 任务执行与回复投递的全链路通过真实 Socket Mode 与
 Slack 工作区验证。Configuration token 的过期 reactive 轮换尚未接入生产调用点（当前只在
-setup 时验证性轮换）。
+setup 时验证性轮换）。**Agent 主动发送回复正文（reply action）尚未实装，回复正文仍由 Server
+从 turn 输出提取与渲染；沉默合法与失败自报依赖该能力落地。**
 
 Server 的旧面已退役：OAuth redirect 路径（`begin-authorization` / `authorization-progress` /
 `authorize`，连同 `SlackOAuthStateService` / `SlackOAuthAuthorizationService` 与
