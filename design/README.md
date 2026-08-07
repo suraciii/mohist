@@ -97,6 +97,7 @@
 - [domain-analysis.md](domain-analysis.md) — 领域分析与上下文映射：子域划分、限界上下文关系、依赖不变量。
 - [conventions.md](conventions.md) — 命名、分层、变量等约定。
 - [dispatch-template.md](dispatch-template.md) — Agent 派单约定：model fallback 链与探活、测试命令 timeout、完成定义。
+- [branching.md](branching.md) — 分支拓扑：多 PR 重叠时的默认策略（重叠图 / stack / 集成分支 / spec 先入主干）。
 - [cli.md](cli.md) — 面向人和 Agent 的命令语言：领域归属、渐进式 help / Skill 上下文、字段选择输出、错误与可靠性契约。
 - [testing.md](testing.md) — 测试两条轨道（spec/unit）、外部依赖、时间依赖、fake 入口速查。
 - [observability.md](observability.md) — 观测信号分工、资源预算、降级规则和高频路径成本约束。
