@@ -2,7 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Mohist.Server.Infrastructure.Config;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Runner.Config;

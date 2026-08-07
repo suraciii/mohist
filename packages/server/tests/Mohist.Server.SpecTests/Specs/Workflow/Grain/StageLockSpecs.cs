@@ -5,7 +5,7 @@ using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;
@@ -103,7 +103,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
 
         // Poll the second runner until the dispatch service claims the
         // released lock and assigns the next integrate stage.
-        var secondIntegrate = await Mohist.Server.SpecTests.Support.TestWait.ForAsync(
+        var secondIntegrate = await Mohist.Server.TestSupport.TestWait.ForAsync(
             async () => await secondRunner.PollAsync(Services),
             work => work is not null
                 && work.WorkflowRunId == secondWorkflowId
@@ -335,7 +335,7 @@ public class StageLockSpecs : WorkflowGrainSpecs
     {
         using var scope = Services.CreateScope();
         var events = scope.ServiceProvider.GetRequiredService<IEventStore>();
-        var stored = await Mohist.Server.SpecTests.Support.TestWait.ForAsync(
+        var stored = await Mohist.Server.TestSupport.TestWait.ForAsync(
             async () =>
             {
                 var list = await events.ListAsync(workflowRunId);

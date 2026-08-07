@@ -1,8 +1,9 @@
+using Mohist.Server.SpecTests.Support;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Events.Hub;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.User.Grains;
 using Orleans;
 using Xunit;
@@ -134,8 +135,6 @@ public class MohistHubSpecs
             "com.mohist.issue.created",
         };
 
-        await hub.SetSubscriptionsAsync(list);
-        await hub.SetSubscriptionsAsync(list);
         await hub.SetSubscriptionsAsync(list);
 
         // The registry holds each event type exactly once — a

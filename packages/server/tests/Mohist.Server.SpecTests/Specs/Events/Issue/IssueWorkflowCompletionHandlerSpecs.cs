@@ -11,7 +11,7 @@ using Mohist.Server.Issue.Domain.Events;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Issue.Subscriptions;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
 using DomainIssue = Mohist.Server.Issue.Domain.Issue;

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Inbox;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Inbox;

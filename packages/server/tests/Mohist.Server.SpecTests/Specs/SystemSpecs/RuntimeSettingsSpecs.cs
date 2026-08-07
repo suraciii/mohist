@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.SystemSpecs;

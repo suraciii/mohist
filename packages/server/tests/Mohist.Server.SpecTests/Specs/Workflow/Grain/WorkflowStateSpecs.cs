@@ -9,7 +9,7 @@ using System.Text.Json;
 using Mohist.Server.Workflow.Grains;
 using Xunit;
 using System.Linq;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.SpecTests.Specs.Workflow;
 
 namespace Mohist.Server.SpecTests.Specs.Workflow.Grain;

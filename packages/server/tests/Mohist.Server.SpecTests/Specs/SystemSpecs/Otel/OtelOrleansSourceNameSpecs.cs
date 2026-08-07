@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.SpecTests.Specs.Workflow.Grain;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Orleans;
 using Xunit;
 
