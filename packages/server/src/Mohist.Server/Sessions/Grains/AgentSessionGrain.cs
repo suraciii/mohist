@@ -13,10 +13,14 @@ using Orleans;
 
 namespace Mohist.Server.Sessions.Grains;
 
-public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
+public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 {
     private static readonly TimeSpan FollowupLeaseWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan PersistTimerDueTime = TimeSpan.FromMilliseconds(200);
+    internal const string ScheduleReminderPrefix = "schedule:";
+    internal const string ScheduleRecoveryReminderName = "schedule-recovery";
+    internal static readonly TimeSpan ScheduleRecoveryReminderPeriod = TimeSpan.FromMinutes(1);
+    internal static readonly TimeSpan OneShotReminderPeriod = TimeSpan.FromMinutes(1);
     private const string OpenCodeRuntime = "opencode";
     private const string PiRuntime = "pi";
 
@@ -85,6 +89,35 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         if (_session?.Status.PendingTranscriptEvidence?.Count > 0)
             EnsurePersistenceTimer();
+        await EnsureScheduleRemindersAsync();
+    }
+
+    public async Task ReceiveReminder(string reminderName, TickStatus status)
+    {
+        if (reminderName.StartsWith(ScheduleReminderPrefix, StringComparison.Ordinal))
+        {
+            // One-shot delivery reminder: unregister explicitly so the
+            // reminder never re-fires; activation loss / registration
+            // failure is covered by the recovery reminder tick and by
+            // re-registration on activation.
+            try
+            {
+                var reminder = await this.GetReminder(reminderName);
+                if (reminder is not null)
+                    await this.UnregisterReminder(reminder);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+            var scheduleId = reminderName[ScheduleReminderPrefix.Length..];
+            var schedule = _session?.Status.Schedules?.FirstOrDefault(candidate =>
+                string.Equals(candidate.ScheduleId, scheduleId, StringComparison.Ordinal));
+            if (schedule is not null)
+                await DeliverScheduledInputAsync(schedule);
+            return;
+        }
+        if (string.Equals(reminderName, ScheduleRecoveryReminderName, StringComparison.Ordinal))
+            await RunScheduledInputRecoveryAsync();
     }
 
     public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
@@ -151,7 +184,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             command.Metadata,
             Now(),
             runtime: command.AgentRuntime);
-        session.Settings = new AgentSessionSettings(command.Model, command.Definition);
+        session.LaunchVisibility = command.LaunchVisibility;
+        session.Settings = new AgentSessionSettings(command.Model, command.Definition, command.AgentSessionStartup);
+        if (command.AgentSessionStartup?.WorkspaceRepository is { } workspaceRepository)
+            session.InitializeWorkspaceRepository(workspaceRepository);
         return session;
     }
 
@@ -209,7 +245,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(command.ExpectedRunnerId, command.ExpectedRuntime, command.ReplacementRuntimeSessionId),
             "missing-recovery",
-            now);
+            now,
+            session.BindingEpoch);
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "missing-recovery", now));
         return await ToInfoAsync(session);
     }
@@ -267,6 +304,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
+        EnsureBindingChangeAllowed(session, command.ExpectedBindingEpoch);
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
@@ -276,7 +314,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, command.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
             "reset",
-            now);
+            now,
+            command.ExpectedBindingEpoch ?? session.BindingEpoch);
 
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now));
 
@@ -311,6 +350,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         var session = await GetRequiredAsync();
         await ExpireAcceptedFollowupsAsync(session);
         EnsureSessionIdleForRecovery(session);
+        if (command == SessionCommandKind.Reset)
+            EnsureBindingChangeAllowed(session, null);
         var key = RecoveryIdempotencyKey(idempotencyKey);
         var commandName = CommandName(command);
 
@@ -362,7 +403,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             runtime,
             Now(),
             commandName,
-            IdempotencyKey: key);
+            IdempotencyKey: key,
+            ExpectedBindingEpoch: session.BindingEpoch);
         session.Status = session.Status with { PendingReset = reservation };
         await CommitAsync(session, []);
         return BuildSessionCommandRequest(session, command, reservation);
@@ -404,6 +446,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             throw new InvalidOperationException($"Reset replacement runtime for AgentSession {session.Id} does not match its reservation.");
 
         EnsureSessionIdleForRecovery(session);
+        EnsureBindingChangeAllowed(session, reservation.ExpectedBindingEpoch);
         var now = Now();
         var usage = AgentSessionJsonHelper.Usage(session);
         var usedBefore = usage.ContextWindowUsed;
@@ -412,7 +455,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             new AgentRuntimeBinding(session.Runtime.RunnerId, session.Runtime.Runtime, reservation.ExpectedRuntimeSessionId),
             new AgentRuntimeBinding(session.Runtime.RunnerId, command.ReplacementRuntime, command.ReplacementRuntimeSessionId),
             "reset",
-            now);
+            now,
+            reservation.ExpectedBindingEpoch);
         var result = BuildRecoveryResult(session, usedBefore, size, "reset", wasCompacted: false);
         session.Status = session.Status with { PendingReset = reservation with { Outcome = ToRecoveryOutcome(result) } };
         await PersistRecoveryAsync(session, events, BuildContextResetTranscriptEntries(session, "reset", now), reservation.OperationId);
@@ -631,6 +675,168 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         }
         return true;
     }
+
+    public async Task<CreateSessionScheduleResult> CreateScheduleAsync(CreateSessionScheduleCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        if (string.IsNullOrWhiteSpace(command.Text))
+            throw new ArgumentException("Schedule text is required.", nameof(command));
+
+        var dueAt = command.DueAt.UtcDateTime;
+        var now = Now();
+        if (dueAt <= now)
+            throw new ScheduleDueInPastException(session.Id, dueAt);
+
+        var idempotencyKey = string.IsNullOrWhiteSpace(command.IdempotencyKey)
+            ? Guid.NewGuid().ToString("N")
+            : command.IdempotencyKey!;
+        var existing = session.FindScheduleByIdempotencyKey(idempotencyKey);
+        if (existing is not null)
+        {
+            var normalizedText = command.Text.Trim();
+            if (!string.Equals(existing.Text.Trim(), normalizedText, StringComparison.Ordinal)
+                || existing.DueAt != dueAt)
+            {
+                throw new ScheduleIdempotencyConflictException(session.Id, idempotencyKey);
+            }
+            return new CreateSessionScheduleResult(existing, AlreadyExists: true);
+        }
+
+        var scheduleId = Guid.NewGuid().ToString("N");
+        var schedule = session.CreateSchedule(scheduleId, command.Text, dueAt, idempotencyKey, now);
+        await CommitAsync(session, []);
+        await EnsureScheduleRemindersAsync();
+        return new CreateSessionScheduleResult(schedule, AlreadyExists: false);
+    }
+
+    public async Task<IReadOnlyList<SessionScheduleRecord>> ListSchedulesAsync()
+    {
+        var session = await GetRequiredAsync();
+        return session.SortedSchedules();
+    }
+
+    public async Task<CancelSessionScheduleResult> CancelScheduleAsync(CancelSessionScheduleCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.ScheduleId))
+            throw new ArgumentException("Schedule id is required.", nameof(command));
+        var session = await GetRequiredAsync();
+        var before = session.FindSchedule(command.ScheduleId)
+            ?? throw new ScheduleNotFoundException(session.Id, command.ScheduleId);
+        var alreadyTerminal = before.IsTerminal;
+        var schedule = session.CancelSchedule(command.ScheduleId, Now());
+        if (!alreadyTerminal)
+        {
+            await CommitAsync(session, []);
+            await EnsureScheduleRemindersAsync();
+        }
+        return new CancelSessionScheduleResult(schedule, AlreadyTerminal: alreadyTerminal);
+    }
+
+    public async Task RunScheduledInputRecoveryAsync()
+    {
+        var session = await GetRequiredAsync();
+        var now = Now();
+        foreach (var schedule in session.SortedSchedules())
+        {
+            if (schedule.IsTerminal)
+                continue;
+            if (schedule.Status == SessionScheduleStatus.Scheduled && schedule.DueAt > now)
+                continue;
+            await DeliverScheduledInputAsync(schedule);
+        }
+        await EnsureScheduleRemindersAsync();
+    }
+
+    private async Task DeliverScheduledInputAsync(SessionScheduleRecord schedule)
+    {
+        var session = await GetRequiredAsync();
+        var current = session.FindSchedule(schedule.ScheduleId);
+        if (current is null || current.IsTerminal)
+            return;
+        var now = Now();
+        if (current.Status == SessionScheduleStatus.Scheduled)
+        {
+            if (current.DueAt > now)
+                return;
+            current = session.BeginScheduleDelivery(current.ScheduleId, now);
+            await CommitAsync(session, []);
+        }
+        if (current.Status != SessionScheduleStatus.PendingDelivery)
+            return;
+
+        AgentSessionFollowupAcceptResult accept;
+        try
+        {
+            accept = await AcceptFollowupAsync(new AcceptFollowupCommand(
+                Text: current.Text,
+                Source: "session-schedule",
+                IdempotencyKey: $"{ScheduleReminderPrefix}{current.ScheduleId}"));
+        }
+        catch (Exception ex) when (ex is RuntimeSessionMissingException
+            or SessionActivityUnknownException
+            or StopOperationInProgressException
+            or AgentSessionFollowupCapacityExceededException
+            or FollowupOperationInProgressException
+            or FollowupConcurrencyLimitException
+            or InvalidOperationException)
+        {
+            // Blocked delivery: stay pending-delivery and retry on the
+            // next recovery tick. Runtime-session-missing is NOT treated
+            // as deterministic confirmation of a gone runtime session —
+            // only the Runner can prove that, and it replaces the binding
+            // via its own recovery endpoint; until then we never invent a
+            // binding or drop the schedule.
+            return;
+        }
+
+        session = await GetRequiredAsync();
+        var delivered = session.MarkScheduleDelivered(current.ScheduleId, accept.InputId);
+        if (delivered.Status == SessionScheduleStatus.Delivered)
+        {
+            await CommitAsync(session, []);
+            await EnsureScheduleRemindersAsync();
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
+        }
+    }
+
+    private async Task EnsureScheduleRemindersAsync()
+    {
+        var schedules = _session?.Status.Schedules ?? [];
+        var nonTerminal = schedules.Where(candidate => !candidate.IsTerminal).ToList();
+        var now = Now();
+        foreach (var schedule in nonTerminal)
+        {
+            var due = schedule.DueAt - now;
+            await this.RegisterOrUpdateReminder(
+                $"{ScheduleReminderPrefix}{schedule.ScheduleId}",
+                due <= TimeSpan.Zero ? TimeSpan.Zero : due,
+                OneShotReminderPeriod);
+        }
+        if (nonTerminal.Count > 0)
+        {
+            await this.RegisterOrUpdateReminder(
+                ScheduleRecoveryReminderName,
+                ScheduleRecoveryReminderPeriod,
+                ScheduleRecoveryReminderPeriod);
+        }
+        else
+        {
+            try
+            {
+                var reminder = await this.GetReminder(ScheduleRecoveryReminderName);
+                if (reminder is not null)
+                    await this.UnregisterReminder(reminder);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+            }
+        }
+    }
+
 
     public async Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync()
     {
@@ -906,6 +1112,14 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
     private static bool IsRuntimeRegistered(string runtime) =>
         string.Equals(runtime, OpenCodeRuntime, StringComparison.OrdinalIgnoreCase)
         || string.Equals(runtime, PiRuntime, StringComparison.OrdinalIgnoreCase);
+
+    private static void EnsureBindingChangeAllowed(AgentSession session, long? expectedEpoch)
+    {
+        if (expectedEpoch is not null && expectedEpoch.Value != session.BindingEpoch)
+            throw new InvalidOperationException("binding_epoch_changed");
+        if (session.BindingUseReceipts?.Any(item => item.State == SessionTreeBindingUseState.Held) == true)
+            throw new InvalidOperationException("binding_attach_in_progress");
+    }
 
     private void EnsureSessionIdleForRecovery(AgentSession session)
     {
@@ -1189,12 +1403,68 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return new AppendTerminalCloseResult(SessionId, command.DeliveryId, false);
     }
 
+    private const string WorkspaceSourceConfirmedEvent = "workspace_source_confirmed";
+    private const string WorkspaceSourceRejectedEvent = "workspace_source_rejected";
+
+    private static bool IsWorkspaceSourceEvent(AgentSessionRuntimeEventInput e) =>
+        string.Equals(e.Type, WorkspaceSourceConfirmedEvent, StringComparison.Ordinal)
+        || string.Equals(e.Type, WorkspaceSourceRejectedEvent, StringComparison.Ordinal);
+
+    private static WorkspaceSourceRejectionReason MapWorkspaceSourceRejectionReason(string? reason) =>
+        string.Equals(reason, "origin-mismatch", StringComparison.Ordinal)
+            ? WorkspaceSourceRejectionReason.OriginMismatch
+            : WorkspaceSourceRejectionReason.NotRunnerOwned;
+
+    private async Task<IReadOnlyList<AgentSessionRuntimeEventInput>> ApplyWorkspaceSourceEventsAsync(
+        IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents)
+    {
+        var session = await GetRequiredAsync();
+        var changed = false;
+        foreach (var e in runtimeEvents.Where(IsWorkspaceSourceEvent))
+        {
+            var payload = AgentSessionJsonHelper.ParsePayloadOrEmpty(e.PayloadJson);
+            var repositoryName = AgentSessionJsonHelper.GetStringProp(payload, "repositoryName");
+            var gitUrl = AgentSessionJsonHelper.GetStringProp(payload, "gitUrl");
+            if (string.IsNullOrWhiteSpace(repositoryName) || string.IsNullOrWhiteSpace(gitUrl))
+                continue;
+            if (string.Equals(e.Type, WorkspaceSourceConfirmedEvent, StringComparison.Ordinal))
+                changed |= session.ApplyWorkspaceSourceConfirmation(repositoryName!, gitUrl!);
+            else
+                changed |= session.ApplyWorkspaceSourceRejection(
+                    repositoryName!,
+                    gitUrl!,
+                    MapWorkspaceSourceRejectionReason(AgentSessionJsonHelper.GetStringProp(payload, "reason")));
+        }
+        if (changed)
+        {
+            _session = session;
+            _stateDirty = true;
+            await _stateStore.SaveAsync(SessionId, _session);
+        }
+        return runtimeEvents.Where(e => !IsWorkspaceSourceEvent(e)).ToArray();
+    }
+
     private async Task<IReadOnlyList<AgentSessionRuntimeEventInfo>> AppendEventsAsync(
         IReadOnlyList<AgentSessionRuntimeEventInput> runtimeEvents,
         string? runtimeSessionId,
         bool requireCurrentRuntimeBinding)
     {
         if (runtimeEvents.Count == 0) return [];
+
+        // Workspace source confirmation/rejection is a control fact, not
+        // transcript content: it arrives on the runner-owned session
+        // runtime-events route before the runtime turn is bound, so it is
+        // handled here without requiring a current runtime binding and is
+        // never persisted as transcript. The route already validated that
+        // the reporting runner owns this session (existing.RunnerId ==
+        // runnerId); the transition additionally requires the report to
+        // name the session's durable Project Repository snapshot and only
+        // advances an unconfirmed source. Idempotent by construction.
+        if (runtimeEvents.Any(IsWorkspaceSourceEvent))
+        {
+            runtimeEvents = await ApplyWorkspaceSourceEventsAsync(runtimeEvents);
+            if (runtimeEvents.Count == 0) return [];
+        }
 
         var supportedEvents = runtimeEvents
             .Where(runtimeEvent => TranscriptAccumulator.EventTypes.Contains(runtimeEvent.Type))
@@ -1740,6 +2010,21 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         return _session is null ? null : await ToInfoAsync(_session);
     }
 
+    public async Task<AgentSessionActivityState?> GetActivityStateAsync()
+    {
+        RejectIfReloadRequired();
+        var session = _session ?? await _stateStore.LoadAsync(SessionId);
+        if (session is null)
+            return null;
+        _session ??= session;
+        return new AgentSessionActivityState(
+            session.Status.Activity,
+            session.Status.IdleSince,
+            session.LaunchVisibility,
+            session.Runtime.RunnerId,
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId));
+    }
+
     public async Task EnsureRuntimeSessionPresentAsync()
     {
         var session = await GetRequiredAsync();
@@ -1824,7 +2109,9 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             eventSummary.ToolCallCount,
             eventSummary.ToolErrorCount,
             s.Runtime.Runtime,
-            usage.CachedWriteTokens);
+            usage.CachedWriteTokens,
+            s.BindingEpoch,
+            s.WorkspaceRepository);
     }
 
     private async Task<AgentSessionTranscriptSummary> LoadEventSummaryAsync(string sessionId)
@@ -2151,7 +2438,15 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
                 RunnerId: string.Empty,
                 AgentRuntime: command.Runtime ?? AgentConfigSchema.OpenCodeRuntime,
                 WorkDir: command.WorkDir,
-                Metadata: command.Metadata));
+                Metadata: command.Metadata,
+                Definition: command.Definition,
+                AgentSessionStartup: command.AgentSessionStartup,
+                LaunchVisibility: command.LaunchVisibility));
+            if (command.ConfirmedWorkspaceRepository is { } confirmedSource
+                && _session.WorkspaceRepository is null)
+            {
+                _session.InitializeWorkspaceRepository(confirmedSource, confirmed: true);
+            }
         }
         else
         {
@@ -2180,6 +2475,434 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
             InputId: command.InputId,
             TurnId: command.TurnId,
             AlreadyPersisted: alreadyPersisted);
+    }
+
+    public async Task<EnsureParentLinkResult> EnsureParentLinkAsync(EnsureParentLinkCommand command)
+    {
+        throw new InvalidOperationException("Parent link attachment requires the fence receipt protocol.");
+    }
+
+    public async Task<ApplyParentLinkAttachResult> ApplyParentLinkAttachAsync(
+        ApplyParentLinkAttachCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (command.AttachedRevision <= 0
+            || string.IsNullOrWhiteSpace(command.CommandId)
+            || string.IsNullOrWhiteSpace(command.EdgeId)
+            || string.IsNullOrWhiteSpace(command.ParentSessionId)
+            || string.IsNullOrWhiteSpace(command.ParentAgentId)
+            || string.IsNullOrWhiteSpace(command.ChildLaunchJobId)
+            || string.IsNullOrWhiteSpace(command.ProjectId)
+            || command.ExpectedBindingEpoch <= 0
+            || string.IsNullOrWhiteSpace(command.BindingUseReceiptId)
+            || command.ExpectedLinkState != SessionTreeExpectedLinkState.Absent)
+        {
+            return new ApplyParentLinkAttachResult(
+                SessionTreeAttachMutationState.Rejected,
+                RejectionReason: "parent_link_attach_identity_invalid");
+        }
+
+        var session = await GetRequiredAsync();
+        if (!string.Equals(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId),
+                command.ProjectId,
+                StringComparison.Ordinal))
+        {
+            return new ApplyParentLinkAttachResult(
+                SessionTreeAttachMutationState.ReconciliationRequired,
+                RejectionReason: "parent_link_project_mismatch");
+        }
+
+        if (session.ParentLink is { } existing)
+        {
+            var replayMatches = existing.EdgeId == command.EdgeId
+                && existing.ParentSessionId == command.ParentSessionId
+                && existing.ParentAgentId == command.ParentAgentId
+                && existing.ChildLaunchJobId == command.ChildLaunchJobId
+                && existing.State == SessionParentLinkState.Attached
+                && existing.AttachedRevision == command.AttachedRevision
+                && existing.AttachCommandId == command.CommandId
+                && existing.ParentWorkDir == command.ExpectedWorkDir
+                && existing.ParentRunnerId == command.ExpectedRunnerId
+                && existing.ParentRuntime == command.ExpectedRuntime
+                && existing.ParentRuntimeSessionId == command.ExpectedRuntimeSessionId
+                && existing.BindingEpoch == command.ExpectedBindingEpoch
+                && existing.BindingUseReceiptId == command.BindingUseReceiptId
+                && existing.ExpectedLinkState == command.ExpectedLinkState;
+            return replayMatches
+                ? new ApplyParentLinkAttachResult(
+                    SessionTreeAttachMutationState.Attached,
+                    existing,
+                    AttachReceipt(command))
+                : new ApplyParentLinkAttachResult(
+                    SessionTreeAttachMutationState.ReconciliationRequired,
+                    RejectionReason: "parent_link_identity_mismatch");
+        }
+
+        session.ParentLink = new SessionParentLink(
+            command.EdgeId,
+            command.ParentSessionId,
+            command.ParentAgentId,
+            command.ChildLaunchJobId,
+            _timeProvider.GetUtcNow(),
+            command.AttachedRevision,
+            SessionParentLinkState.Attached,
+            AttachCommandId: command.CommandId,
+            ParentWorkDir: command.ExpectedWorkDir,
+            ParentRunnerId: command.ExpectedRunnerId,
+            ParentRuntime: command.ExpectedRuntime,
+            ParentRuntimeSessionId: command.ExpectedRuntimeSessionId,
+            BindingEpoch: command.ExpectedBindingEpoch,
+            BindingUseReceiptId: command.BindingUseReceiptId,
+            ExpectedLinkState: command.ExpectedLinkState);
+        await CommitAsync(session, []);
+        return new ApplyParentLinkAttachResult(
+            SessionTreeAttachMutationState.Attached,
+            session.ParentLink,
+            AttachReceipt(command));
+    }
+
+    public async Task<AcquireChildAttachBindingResult> AcquireChildAttachBindingAsync(
+        AcquireChildAttachBindingCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var projectId = session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        if (!string.Equals(command.ParentSessionId, SessionId, StringComparison.Ordinal)
+            || !string.Equals(command.ProjectId, projectId, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(command.ParentAgentId)
+            || command.ExpectedBindingEpoch <= 0)
+        {
+            return new AcquireChildAttachBindingResult(
+                SessionTreeBindingAcquireState.BindingChanged,
+                RejectionReason: "parent_binding_changed");
+        }
+
+        var receipts = session.BindingUseReceipts?.ToList() ?? [];
+        var existing = receipts.FirstOrDefault(item =>
+            item.CommandId == command.CommandId && item.EdgeId == command.EdgeId);
+        if (existing is not null)
+        {
+            return BindingUseMatches(existing, command)
+                && existing.State == SessionTreeBindingUseState.Held
+                ? new AcquireChildAttachBindingResult(SessionTreeBindingAcquireState.AlreadyAcquired, existing)
+                : new AcquireChildAttachBindingResult(
+                    SessionTreeBindingAcquireState.ReconciliationRequired,
+                    RejectionReason: "parent_binding_use_mismatch");
+        }
+
+        if (!BindingMatches(session, command))
+        {
+            return new AcquireChildAttachBindingResult(
+                SessionTreeBindingAcquireState.BindingChanged,
+                RejectionReason: "parent_binding_changed");
+        }
+
+        var receipt = new SessionTreeBindingUseReceipt(
+            Guid.NewGuid().ToString("N"),
+            command.ProjectId,
+            command.CommandId,
+            command.EdgeId,
+            SessionId,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            command.ExpectedBindingEpoch,
+            ParentAgentId: command.ParentAgentId);
+        session.BindingUseReceipts = receipts.Append(receipt).ToArray();
+        await CommitAsync(session, []);
+        return new AcquireChildAttachBindingResult(SessionTreeBindingAcquireState.Acquired, receipt);
+    }
+
+    public async Task<ReleaseChildAttachBindingResult> ReleaseChildAttachBindingAsync(
+        ReleaseChildAttachBindingCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var receipts = session.BindingUseReceipts?.ToList() ?? [];
+        var index = receipts.FindIndex(item => item.ReceiptId == command.Receipt.ReceiptId);
+        if (index < 0)
+            return new ReleaseChildAttachBindingResult(
+                SessionTreeBindingReleaseState.ReconciliationRequired,
+                "parent_binding_use_missing");
+
+        var current = receipts[index];
+        if (!BindingUseMatches(current, command.Receipt))
+            return new ReleaseChildAttachBindingResult(
+                SessionTreeBindingReleaseState.ReconciliationRequired,
+                "parent_binding_use_mismatch");
+        if (current.State == SessionTreeBindingUseState.Released)
+        {
+            return current.ReleaseOutcome == command.Outcome
+                ? new ReleaseChildAttachBindingResult(SessionTreeBindingReleaseState.AlreadyReleased)
+                : new ReleaseChildAttachBindingResult(
+                    SessionTreeBindingReleaseState.ReconciliationRequired,
+                    "parent_binding_release_mismatch");
+        }
+
+        receipts[index] = current with
+        {
+            State = SessionTreeBindingUseState.Released,
+            ReleaseOutcome = command.Outcome,
+        };
+        session.BindingUseReceipts = receipts;
+        await CommitAsync(session, []);
+        return new ReleaseChildAttachBindingResult(SessionTreeBindingReleaseState.Released);
+    }
+
+    private SessionTreeAttachReceipt AttachReceipt(ApplyParentLinkAttachCommand command) =>
+        new(
+            command.CommandId,
+            command.EdgeId,
+            command.ParentSessionId,
+            SessionId,
+            command.ChildLaunchJobId,
+            command.AttachedRevision,
+            command.ProjectId,
+            SessionTreeMutationKind.Attach,
+            command.ExpectedWorkDir,
+            command.ExpectedRunnerId,
+            command.ExpectedRuntime,
+            command.ExpectedRuntimeSessionId,
+            command.ExpectedBindingEpoch,
+            command.BindingUseReceiptId,
+            command.ExpectedLinkState,
+            command.ParentAgentId);
+
+    private bool BindingMatches(AgentSession session, AcquireChildAttachBindingCommand command) =>
+        session.BindingEpoch == command.ExpectedBindingEpoch
+        && session.Runtime.WorkDir == command.ExpectedWorkDir
+        && session.Runtime.RunnerId == command.ExpectedRunnerId
+        && string.Equals(session.Runtime.Runtime, command.ExpectedRuntime, StringComparison.Ordinal)
+        && session.Status.AgentRuntimeSessionId == command.ExpectedRuntimeSessionId;
+
+    private static bool BindingUseMatches(
+        SessionTreeBindingUseReceipt receipt,
+        AcquireChildAttachBindingCommand command) =>
+        receipt.ProjectId == command.ProjectId
+        && receipt.CommandId == command.CommandId
+        && receipt.EdgeId == command.EdgeId
+        && receipt.ParentSessionId == command.ParentSessionId
+        && receipt.ParentWorkDir == command.ExpectedWorkDir
+        && receipt.RunnerId == command.ExpectedRunnerId
+        && receipt.Runtime == command.ExpectedRuntime
+        && receipt.RuntimeSessionId == command.ExpectedRuntimeSessionId
+        && receipt.BindingEpoch == command.ExpectedBindingEpoch
+        && receipt.ParentAgentId == command.ParentAgentId;
+
+    private static bool BindingUseMatches(
+        SessionTreeBindingUseReceipt current,
+        SessionTreeBindingUseReceipt expected) =>
+        current.ReceiptId == expected.ReceiptId
+        && current.ProjectId == expected.ProjectId
+        && current.CommandId == expected.CommandId
+        && current.EdgeId == expected.EdgeId
+        && current.ParentSessionId == expected.ParentSessionId
+        && current.ParentWorkDir == expected.ParentWorkDir
+        && current.RunnerId == expected.RunnerId
+        && current.Runtime == expected.Runtime
+        && current.RuntimeSessionId == expected.RuntimeSessionId
+        && current.BindingEpoch == expected.BindingEpoch
+        && current.ParentAgentId == expected.ParentAgentId;
+
+    public async Task<ClaimSubagentTerminalReportResult> ClaimSubagentTerminalReportAsync(
+        ClaimSubagentTerminalReportCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null || !MatchesParentLink(link, command.EdgeId, command.ChildLaunchJobId))
+        {
+            return new ClaimSubagentTerminalReportResult(
+                SubagentTerminalReportClaimDisposition.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+
+        if (link.TerminalReport == TerminalReportState.Delivered)
+        {
+            return new ClaimSubagentTerminalReportResult(
+                SubagentTerminalReportClaimDisposition.Delivered,
+                link.TerminalReportDeliveredInputId);
+        }
+        if (link.TerminalReport == TerminalReportState.Pending)
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Pending);
+        if (link.TerminalReport == TerminalReportState.Suppressed)
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Suppressed);
+        if (link.State == SessionParentLinkState.Detached)
+        {
+            session.ParentLink = link with { TerminalReport = TerminalReportState.Suppressed };
+            await CommitAsync(session, []);
+            return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.Suppressed);
+        }
+
+        session.ParentLink = link with { TerminalReport = TerminalReportState.Pending };
+        await CommitAsync(session, []);
+        return new ClaimSubagentTerminalReportResult(SubagentTerminalReportClaimDisposition.ClaimedPending);
+    }
+
+    public async Task<RecordSubagentTerminalReportDeliveredResult> RecordSubagentTerminalReportDeliveredAsync(
+        RecordSubagentTerminalReportDeliveredCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (string.IsNullOrWhiteSpace(command.ParentInputId))
+            throw new ArgumentException("ParentInputId is required.", nameof(command));
+
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null || !MatchesParentLink(link, command.EdgeId, command.ChildLaunchJobId))
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                SubagentTerminalReportDeliveryDisposition.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+        if (link.TerminalReport == TerminalReportState.Delivered)
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                link.TerminalReportDeliveredInputId == command.ParentInputId
+                    ? SubagentTerminalReportDeliveryDisposition.AlreadyDelivered
+                    : SubagentTerminalReportDeliveryDisposition.InputIdConflict,
+                link.TerminalReportDeliveredInputId,
+                link.TerminalReportDeliveredInputId == command.ParentInputId
+                    ? null
+                    : "parent_input_id_conflict");
+        }
+        if (link.TerminalReport != TerminalReportState.Pending)
+        {
+            return new RecordSubagentTerminalReportDeliveredResult(
+                SubagentTerminalReportDeliveryDisposition.Rejected,
+                RejectionReason: "terminal_report_not_pending");
+        }
+
+        session.ParentLink = link with
+        {
+            TerminalReport = TerminalReportState.Delivered,
+            TerminalReportDeliveredInputId = command.ParentInputId,
+        };
+        await CommitAsync(session, []);
+        return new RecordSubagentTerminalReportDeliveredResult(
+            SubagentTerminalReportDeliveryDisposition.Delivered,
+            command.ParentInputId);
+    }
+
+    public async Task<ApplyParentLinkDetachResult> ApplyParentLinkDetachAsync(
+        ApplyParentLinkDetachCommand command)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        if (command.DetachedRevision <= 0
+            || string.IsNullOrWhiteSpace(command.CommandId)
+            || string.IsNullOrWhiteSpace(command.ChildSessionId)
+            || command.ExpectedAttachedRevision is null
+            || command.ExpectedAttachedRevision <= 0)
+            throw new ArgumentOutOfRangeException(nameof(command), "DetachedRevision must be positive.");
+
+        var session = await GetRequiredAsync();
+        var link = session.ParentLink;
+        if (link is null
+            || command.ChildSessionId != SessionId
+            || !MatchesParentLink(link, command.EdgeId, command.ParentSessionId, command.ChildLaunchJobId))
+        {
+            return new ApplyParentLinkDetachResult(
+                SessionTreeDetachMutationState.Rejected,
+                RejectionReason: "parent_link_identity_mismatch");
+        }
+        if (link.AttachedRevision != command.ExpectedAttachedRevision)
+        {
+            return new ApplyParentLinkDetachResult(
+                SessionTreeDetachMutationState.ReconciliationRequired,
+                link,
+                "reconciliation_required");
+        }
+        if (link.State == SessionParentLinkState.Detached)
+        {
+            return link.DetachCommandId == command.CommandId
+                && link.DetachedRevision == command.DetachedRevision
+                && link.DetachExpectedAttachedRevision == command.ExpectedAttachedRevision
+                ? new ApplyParentLinkDetachResult(
+                    SessionTreeDetachMutationState.Detached,
+                    link,
+                    Receipt: new SessionTreeDetachReceipt(
+                        command.CommandId!,
+                        command.EdgeId,
+                        command.ParentSessionId,
+                        command.ChildSessionId!,
+                        command.DetachedRevision,
+                        command.ChildLaunchJobId,
+                        command.ExpectedAttachedRevision.Value))
+                : new ApplyParentLinkDetachResult(
+                    SessionTreeDetachMutationState.ReconciliationRequired,
+                    link,
+                    "reconciliation_required");
+        }
+
+        session.ParentLink = link with
+        {
+            State = SessionParentLinkState.Detached,
+            DetachedAt = Now(),
+            DetachedRevision = command.DetachedRevision,
+            DetachCommandId = command.CommandId,
+            DetachExpectedAttachedRevision = command.ExpectedAttachedRevision,
+            TerminalReport = link.TerminalReport == TerminalReportState.None
+                ? TerminalReportState.Suppressed
+                : link.TerminalReport,
+        };
+        await CommitAsync(session, []);
+        return new ApplyParentLinkDetachResult(
+            SessionTreeDetachMutationState.Detached,
+            session.ParentLink,
+            Receipt: new SessionTreeDetachReceipt(
+                command.CommandId!,
+                command.EdgeId,
+                command.ParentSessionId,
+                command.ChildSessionId!,
+                command.DetachedRevision,
+                command.ChildLaunchJobId,
+                command.ExpectedAttachedRevision.Value));
+    }
+
+    private static bool MatchesParentLink(
+        SessionParentLink link,
+        string edgeId,
+        string childLaunchJobId) =>
+        MatchesParentLink(link, edgeId, link.ParentSessionId, childLaunchJobId);
+
+    private static bool MatchesParentLink(
+        SessionParentLink link,
+        string edgeId,
+        string parentSessionId,
+        string childLaunchJobId) =>
+        link.EdgeId == edgeId
+        && link.ParentSessionId == parentSessionId
+        && link.ChildLaunchJobId == childLaunchJobId;
+
+    public async Task PromoteProvisionalLaunchAsync()
+    {
+        var session = await GetRequiredAsync();
+        if (session.LaunchVisibility == AgentLaunchVisibility.Rejected)
+            throw new InvalidOperationException("Rejected AgentSession launch cannot be promoted.");
+        if (session.LaunchVisibility == AgentLaunchVisibility.Visible)
+            return;
+        session.LaunchVisibility = AgentLaunchVisibility.Visible;
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
+    }
+
+    public async Task AbortProvisionalLaunchAsync(string jobId, string turnId, string reason)
+    {
+        var info = await GetAsync();
+        if (info is null)
+            return;
+        var session = await GetRequiredAsync();
+        if (session.LaunchVisibility == AgentLaunchVisibility.Rejected)
+            return;
+        if (!string.IsNullOrWhiteSpace(turnId))
+            await CancelQueuedTurnAsync(turnId);
+        session = await GetRequiredAsync();
+        session.LaunchVisibility = AgentLaunchVisibility.Rejected;
+        session.ParentLink = null;
+        session.Status = session.Status with { Activity = AgentSessionActivity.Idle };
+        await _stateStore.SaveAsync(SessionId, session);
+        _session = session;
     }
 
     private void CheckInputsAndTurns(EnsureInitialLaunchCommand command, out bool alreadyPersisted)
@@ -2370,10 +3093,10 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain
         _ = await CancelQueuedTurnAsync(turnId);
     }
 
-    public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId)
+    public async Task<AgentTurnStopClaimResult> ClaimTurnStopAsync(string turnId, string? operationId = null)
     {
         var session = await GetRequiredAsync();
-        var result = session.ClaimTurnStop(turnId);
+        var result = session.ClaimTurnStop(turnId, operationId);
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
         return result;

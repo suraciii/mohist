@@ -40,6 +40,8 @@ public static class MohistApiRegistration
         app.MapAgentJobRoutes();
         app.MapAgentJobReadRoutes();
         app.MapAgentSessionLaunchRoutes();
+        app.MapAgentSessionTreeRoutes();
+        app.MapAgentSessionSpawnRoutes();
         app.MapSlackConnectionRoutes();
         app.MapSlackInteractionRoutes();
         app.MapSlackManagerRoutes();
@@ -54,8 +56,11 @@ public static class MohistApiRegistration
         app.MapAgentSessionListRoutes();
         app.MapAgentSessionContextAssociationRoutes();
         app.MapAgentSessionFollowupRoutes();
+        app.MapAgentSessionScheduleRoutes();
         app.MapAgentSessionCancelRoutes();
         app.MapAgentSessionStopRoutes();
+        app.MapAgentSessionStopOperationReadRoute();
+        app.MapAgentSessionDetachRoutes();
         app.MapAgentSessionRecoveryRoutes();
         app.MapRunnerRoutes();
         app.MapRunnerStatusRoutes();

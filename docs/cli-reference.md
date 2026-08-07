@@ -93,7 +93,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 
 | 分组 | 命令组 | 管理的对象 |
 |---|---|---|
-| Work | `project`、`repo`、`issue`、`epic`、`label` | 项目空间、工作项与组织关系 |
+| Work | `project`、`repo`、`workspace`、`issue`、`epic`、`label` | 项目空间、执行环境、工作项与组织关系 |
 | Automation | `workflow`、`run`、`agent`、`session`、`activity`、`routing` | 工作流定义与执行、Agent 工作、对话和项目活动 |
 | Operations | `runner`、`server`、`service`、`event`、`notification`、`otel`、`auth` | 执行资源、Server、本机服务、事件投递、可观测性与身份凭据 |
 | Tools | `help`、`skill`、`install`、`update`、`info` | 帮助主题、Skill 和安装维护 |
@@ -107,13 +107,14 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 |---|---|
 | `project` | `list`、`view`、`create`、`use`、`delete`；`workflow set-default`；`workflow prompt get/set/clear/preview`；`repo set-default`；`variable list/get/set/unset` |
 | `repo` | `list`、`create`、`edit`、`delete` |
+| `workspace` | `list`、`view`、`create`、`close`；`repo add/remove` |
 | `issue` | `list`、`view`、`create`、`edit`、`start`、`done`、`close`、`reopen`、`archive`、`restore`、`rebase`、`diff`、`commits`、`logs`、`events`；`comment create`；`prereq add/remove`；`template list/view`；`variable list/get/set/unset`；`watch list/add/remove` |
 | `epic` | `list`、`view`、`create`、`edit`、`add`、`remove`、`start`、`pause`、`resume`、`done`、`close`、`reopen` |
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
 | `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
-| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel` |
+| `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel`；`schedule create/list/cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
 
@@ -202,6 +203,35 @@ mo run variable get --issue 42 agent.model --effective --stage check
 `list` 和 `get` 读取被选 scope 自己保存的值；只有 Run 提供 `--effective`，因为合并结果是
 WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--value-json` 之一。
 
+## Workspace
+
+Workspace 是 Project 下持久存在的执行环境（产品语义见 [Workspace](workspaces.md)）。
+CLI 管理 manual 来源 workspace 的创建、成员与归档，以及所有 workspace 的读取；
+issue 与 Slack / Web 入口的 workspace 由对应动作自动创建与归档，不提供命令。
+
+- `mo workspace list [--status active|archived] [--origin issue|slack|web|manual]`
+  列出当前 Project 的 workspace。
+- `mo workspace view <name>` 读取来源、仓库成员、当前绑定的 Session、物化位置与状态。
+- `mo workspace create <name> [--repo <repo>...]` 创建 manual workspace；名称在
+  Project 内唯一。
+- `mo workspace repo add <name> <repo>` 与 `mo workspace repo remove <name> <repo>`
+  修改仓库成员；workspace 存在活跃绑定 Session 时拒绝修改。
+- `mo workspace close <name>` 归档 workspace；存在活跃绑定 Session 时拒绝并给出
+  下一步。issue 来源的 workspace 不接受手动 close，由 Issue 终态自动归档。
+- `mo agent launch <agent> --workspace <name>` 把新 Session 绑定到既有 workspace；
+  省略 `--workspace` 时不绑定任何 workspace，沿用 Runner 默认工作目录，也不创建
+  workspace 实体。
+- `mo session list --workspace <name>` 查看绑定到该 workspace 的 Session；
+  `mo session view` 输出包含 workspace 字段。
+
+```bash
+mo workspace create payment-refactor --repo server --repo web
+mo agent launch coder --workspace payment-refactor
+mo agent launch reviewer --workspace payment-refactor
+mo workspace view payment-refactor
+mo workspace close payment-refactor
+```
+
 ## Agent、AgentJob 与 Session
 
 `agent` 是 Project 内有稳定身份的 Mohist Agent。AgentJob 是该 Agent 一次 launch 的首次
@@ -210,7 +240,8 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 解释为对话关闭或用户目标已经交付。
 
 - `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
-  并返回四个稳定 ID、transcript URL 和 composite observation URL。命令接受
+  并返回四个稳定 ID、transcript URL 和 composite observation URL；`--workspace <name>`
+  把新 Session 绑定到既有 Workspace，省略时不绑定（见 [Workspace](#workspace)）。命令接受
   `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
@@ -226,6 +257,14 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 - `mo session list --agent <agent>` 查看该 Agent 发起的 Session。
 - `mo session list --issue <number>` 查看该 Issue 的 Workflow 产生的 Session。
 - `mo session list --run <run-id>` 查看该 Run 的 Session。
+- `mo session list --workspace <name>` 查看绑定该 Workspace 的 Session。
+- `mo session schedule create <session-id> --at <时间> --text <文本> [--idempotency-key <key>]`
+  为会话安排一条到点输入：`--at` 只接受带时区偏移的绝对 RFC 3339 时间且必须晚于当前时间。
+  `--idempotency-key` 可省略；省略时按 follow-up 约定在请求前打印生成的 key，重试想跨请求
+  去重必须显式复用同一个 key，否则会创建新的调度。`mo session schedule list` 列出该会话的
+  调度，`mo session schedule cancel <session-id> <schedule-id>` 取消尚未投递的调度；已投递的
+  调度取消无效，已投递的输入不受影响。完整契约见
+  [Subagent 与会话树](subagents.md) 的「定时输入」一节。
 - 后续读取、follow-up、compact、reset、cancel 和 stop 都使用稳定的 Session ID；cancel 与 stop
   还必须通过 `--turn-id` 指定目标 Turn。cancel 确定性取消排队中的 Turn，stop 请求 Runtime
   停止执行中的 Turn。follow-up 返回新的
@@ -441,6 +480,7 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
+- `session schedule create/list/cancel`：定时输入命令面已定稿（见 subagents.md），尚未实装。
 - `github` 命令组登记为 `connect`、`edit`（修改连接）；当前实装的修改动词为 `update`，
   待按动词词表收敛为 `edit`。
 

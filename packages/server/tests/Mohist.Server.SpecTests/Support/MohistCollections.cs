@@ -33,6 +33,12 @@ public class SlackControlPlaneRoutesCollection : ICollectionFixture<SlackControl
 [CollectionDefinition("MohistIntegration")]
 public class MohistIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("SlackReplyAnchorIngress")]
+public class SlackReplyAnchorIngressCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("AgentLaunchObservationRoutes", DisableParallelization = true)]
+public class AgentLaunchObservationRoutesCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 [CollectionDefinition("PlatformIntegration")]
 public class PlatformIntegrationCollection : ICollectionFixture<MohistIntegrationFixture>;
 
@@ -47,6 +53,12 @@ public class IssueProfileCollection : ICollectionFixture<MohistIntegrationFixtur
 
 [CollectionDefinition("IntegrationApi")]
 public class IntegrationApiCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("WorkspaceSpecs", DisableParallelization = true)]
+public class WorkspaceSpecsCollection : ICollectionFixture<MohistIntegrationFixture>;
+
+[CollectionDefinition("PathContractRegression", DisableParallelization = true)]
+public class PathContractRegressionCollection : ICollectionFixture<MohistIntegrationFixture>;
 
 [CollectionDefinition("IntegrationSessions")]
 public class IntegrationSessionsCollection : ICollectionFixture<MohistIntegrationFixture>;
@@ -95,6 +107,9 @@ public class RunnerGrainCollection : ICollectionFixture<WorkflowGrainFixture>;
 
 [CollectionDefinition("AgentJobGrain", DisableParallelization = true)]
 public class AgentJobGrainCollection : ICollectionFixture<AgentJobGrainFixture>;
+
+[CollectionDefinition("AgentSpawnCoordinator", DisableParallelization = true)]
+public class AgentSpawnCoordinatorCollection : ICollectionFixture<AgentJobGrainFixture>;
 
 [CollectionDefinition("Backlog")]
 public class BacklogCollection : ICollectionFixture<BacklogFixture>;

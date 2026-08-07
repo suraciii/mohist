@@ -28,7 +28,9 @@ public class AgentJobQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.AgentJobs
             .AsNoTracking()
-            .Where(r => r.AgentId == agentId && r.ProjectId == projectId);
+            .Where(r => r.AgentId == agentId
+                && r.ProjectId == projectId
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"));
 
         if (statusSet is { Count: > 0 })
         {
@@ -54,7 +56,9 @@ public class AgentJobQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var groups = await db.AgentJobs
             .AsNoTracking()
-            .Where(r => r.ProjectId == projectId && r.Status == pending)
+            .Where(r => r.ProjectId == projectId
+                && r.Status == pending
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
             .GroupBy(r => r.AgentId)
             .Select(g => new { AgentId = g.Key, Count = g.Count() })
             .ToListAsync(ct);
@@ -73,7 +77,8 @@ public class AgentJobQuerier : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.AgentJobs
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.JobKey == jobKey, ct);
+            .FirstOrDefaultAsync(r => r.JobKey == jobKey
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"), ct);
         return row is null ? null : ToItem(row);
     }
 
@@ -103,7 +108,10 @@ public class AgentJobQuerier : IScopedService
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var states = await db.AgentJobs.AsNoTracking()
-            .Where(r => r.ProjectId == projectId && r.AgentId == agentId && r.TerminalAt != null)
+            .Where(r => r.ProjectId == projectId
+                && r.AgentId == agentId
+                && r.TerminalAt != null
+                && (r.LaunchVisibility == null || r.LaunchVisibility == "visible"))
             .OrderByDescending(r => r.TerminalAt)
             .ThenByDescending(r => r.JobKey)
             .Take(20)

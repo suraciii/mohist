@@ -12,7 +12,7 @@ public sealed class WorkflowRunProfileDefaultsMigrationSpecs
     private const string Migration = "20260729000000_DropWorkflowRunProfileDefaults";
 
     [Fact]
-    public async Task UpAndDown_PreserveExplicitProfileDataAndChangeOnlyTheDefaultsColumn()
+    public async Task UpDownAndReupgrade_PreserveExplicitProfileDataAndChangeOnlyTheDefaultsColumn()
     {
         await using var database = TestSqliteDatabase.CreateEmpty();
         MigratedSqliteTemplate.CopyTo(database.Keeper, BeforeMigration);
@@ -43,6 +43,12 @@ public sealed class WorkflowRunProfileDefaultsMigrationSpecs
         Assert.Equal("{\"vars\":{\"archive\":\"/explicit\"}}", await ReadStringAsync(db, "Variables"));
         Assert.Equal("{}", await ReadStringAsync(db, "DefaultVariables"));
         Assert.Equal("2026-01-01T00:00:00+00:00", await ReadStringAsync(db, "UpdatedAt"));
+        Assert.Equal(7L, await ReadInt64Async(db, "ETag"));
+        await migrator.MigrateAsync(Migration);
+        Assert.Contains(Migration, await db.Database.GetAppliedMigrationsAsync());
+        Assert.DoesNotContain("DefaultVariables", await ReadColumnsAsync(db));
+        Assert.Equal("wr_defaults_migration", await ReadStringAsync(db, "WorkflowRunId"));
+        Assert.Equal("{\"vars\":{\"archive\":\"/explicit\"}}", await ReadStringAsync(db, "Variables"));
         Assert.Equal(7L, await ReadInt64Async(db, "ETag"));
     }
 

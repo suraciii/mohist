@@ -1,6 +1,7 @@
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Subscriptions;
 using Mohist.Server.Contracts;
+using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
@@ -103,6 +104,15 @@ public interface IAgentLauncher
         string? preMintedTurnId = null,
         CancellationToken ct = default);
 
+    Task<AgentLaunchResult> LaunchSubagentAsync(
+        string projectId,
+        string parentSessionId,
+        string targetAgentRef,
+        string prompt,
+        string idempotencyKey,
+        string? workspace = null,
+        CancellationToken ct = default);
+
     Task<AgentLaunchResult> LaunchConnectionAsync(
         AgentInfo agent,
         string prompt,
@@ -183,7 +193,8 @@ public sealed record AgentLaunchResult(
     string InputId,
     string TurnId,
     string AgentId,
-    string AgentName);
+    string AgentName,
+    string? ParentLinkEdgeId = null);
 
 /// <summary>
 /// Outcome of a routed launch. Carries the session id the AgentJob
@@ -222,7 +233,17 @@ public sealed record AgentLaunchContext(
     int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null,
-    string? Title = null);
+    string? Title = null,
+    /// <summary>
+    /// Resolved Project Repository snapshot for an explicit
+    /// Project-backed launch (both <c>repository</c> and
+    /// <c>workspacePath</c> supplied). The route resolves it from
+    /// <c>Project.Repository(name)</c> (fail-fast on unknown) and the
+    /// launcher threads it into <see cref="AgentSessionStartup"/> so
+    /// the Runner can confirm the workDir source on first execution.
+    /// Null for launches without a Project-backed source.
+    /// </summary>
+    WorkspaceRepositorySnapshot? WorkspaceRepository = null);
 
 [Orleans.GenerateSerializer]
 public sealed record ConnectionLaunchOrigin(

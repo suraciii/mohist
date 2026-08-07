@@ -380,7 +380,7 @@ async function validateWorkspaceOrigin(workspacePath: string, gitUrl: string, si
   }
 }
 
-async function assertManagedWorkspacePath(runnerRoot: string, candidate: string, requireFinal: boolean): Promise<void> {
+export async function assertManagedWorkspacePath(runnerRoot: string, candidate: string, requireFinal: boolean): Promise<void> {
   const root = resolve(runnerRoot)
   const target = resolve(candidate)
   const rel = relative(root, target)

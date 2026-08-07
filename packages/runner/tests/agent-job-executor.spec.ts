@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AgentJobExecutor, projectTurnToWorkItemResult } from "../src/runtime/agent-job-executor.js"
 import type { AgentJobRuntimeAccessors } from "../src/runtime/agent-job-executor.js"
+import type { WorkspaceSourceConfirmer } from "../src/runtime/workspace-source.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import type { DispatchWorkItem } from "../src/core/types.js"
 import type {
@@ -472,6 +473,50 @@ describe("AgentJobExecutor reports the runtime session binding", () => {
     expect(connection.attachCalls).toHaveLength(1)
     expect(connection.bindingCalls).toEqual(["open", "attach"])
     expect(connection.attachCalls[0].body.runtimeSessionId).toMatch(/ses_/)
+  })
+
+  it("confirms the workspace source after the runtime session attaches", async () => {
+    const runtime = makeFakeRuntime()
+    const connection = makeFakeConnection()
+    connection.setAgentSession({ runtimeSessionId: "ses_existing" })
+    const confirmer = {
+      confirm: vi.fn(async () => ({ kind: "confirmed" as const })),
+    } as unknown as WorkspaceSourceConfirmer
+    const executor = new AgentJobExecutor(
+      connection.connection,
+      makeAccessors(runtime.runtime),
+      null,
+      "/tmp",
+      undefined,
+      confirmer,
+    )
+
+    const work = buildAgentJobWork({
+      agentSessionId: "session-existing",
+      agentSessionStartup: {
+        projectId: "proj-1",
+        sessionId: "session-existing",
+        spawnCommand: "spawn",
+        allowedSubagents: [],
+        workspaceRepository: {
+          name: "main",
+          gitUrl: "https://example.test/mohist.git",
+          baseBranch: "master",
+        },
+      },
+    })
+    const result = await executor.execute(work, new AbortController().signal)
+
+    expect(result.status).toBe("completed")
+    expect(confirmer.confirm).toHaveBeenCalledExactlyOnceWith(
+      {
+        sessionId: "session-existing",
+        workDir: "/tmp/agent-job-ws",
+        repository: { name: "main", gitUrl: "https://example.test/mohist.git", baseBranch: "master" },
+        runtimeSessionId: "ses_default",
+      },
+      expect.any(AbortSignal),
+    )
   })
 
   it("fails before prompting when the runtime binding cannot be recorded", async () => {

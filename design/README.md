@@ -106,6 +106,7 @@
 
 - [agent-execution.md](agent-execution.md) — Action、Inline Agent、Mohist Agent、AgentJob、SessionInput、AgentTurn、AgentSession 与 Runtime Session 的分层、生命周期所有权、activity 和 transcript DSL。
 - [agent-api.md](agent-api.md) — Web、CLI 与外部接入共用的 Agent 调用边界：统一能力、状态、身份和可靠性决策。
+- [subagents.md](subagents.md) — Subagent 与会话树：flat Agent 下的 child launch、capability snapshot、父子 link、terminal callback、cascade stop 与定时输入。
 - [slack.md](slack.md) — Slack 集成的组件边界：adapter 为什么独立且无状态、Session 边界取舍、可靠性契约与实施顺序；产品行为见 `docs/slack.md`。
 - [event-routing.md](event-routing.md) — Agent 事件路由：项目级有序路由表，表达式匹配 + first-match/continue 触发 Agent，取代订阅优先级仲裁。
 - [agent-supervision.md](agent-supervision.md) — Agent 监管预设：一条命令安装监管 Agent 与审批/失败两条路由规则；升级靠通知全开 + `[supervisor]` comment 纪律，不引入 escalate 命令与系统级频控。
@@ -132,7 +133,8 @@
 ## 支撑主题
 
 - [auth.md](auth.md) — 认证与身份（**已定稿，待实装**）：单一 admin 与 service / agent 主体、文件型与签发型凭据、设备授权登录、Runner 机器凭据与归因。
-- [repositories.md](repositories.md) — Repository 执行：Project 资源权威、Issue 绑定、dispatch 实时解析与最小 workspace identity（**WIP**）。
+- [repositories.md](repositories.md) — Repository 执行：Project 资源权威、Issue 绑定、dispatch 实时解析（**WIP**）。
+- [workspace.md](workspace.md) — Workspace：Project 下的一等持久执行环境（**WIP**）：Origin 唯一解析、动态创建、绑定与调度亲和、归档与 runner 目录回收。
 - [hermes-webhook.md](hermes-webhook.md) — Hermes 通知网关：事件类型、payload、签名与投递可靠性。
 - [outbound-webhook.md](outbound-webhook.md) — 出站 Webhook（**WIP**）：OHS + PL，CloudEvent 即发布语言，表达式订阅 + HMAC 签名 + best-effort 投递。
 - [github-integration.md](github-integration.md) — GitHub 集成（**WIP**）：入站事件接收与验签、供料/关闭/审批翻译器、回写器与凭据边界；产品行为见 [`docs/github.md`](../docs/github.md)。

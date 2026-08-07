@@ -99,6 +99,32 @@ public static class AgentSessionLaunchRoutes
 
             var project = context.GetResolvedProject();
 
+            // Explicit Project-backed launch: when the caller supplies both a
+            // repository name and a workspacePath, resolve the Project
+            // Repository snapshot now and fail-fast on an unknown name so
+            // the launch never creates a permanent unconfirmed Session. A
+            // repository without a workspacePath (or vice versa) is
+            // intentionally not a Project-backed source — the Session gets
+            // no WorkspaceRepository and can never become a confirmed
+            // worktree parent.
+            WorkspaceRepositorySnapshot? workspaceRepositorySnapshot = null;
+            if (!string.IsNullOrWhiteSpace(body.Context?.Repository)
+                && !string.IsNullOrWhiteSpace(body.Context?.WorkspacePath))
+            {
+                var repository = project.GetRepository(body.Context!.Repository);
+                if (repository is null)
+                {
+                    return ApiResults.BadRequest(
+                        $"Unknown repository '{body.Context!.Repository}' for project '{project.Id}'.",
+                        "repository_not_found",
+                        new { fields = new[] { "context.repository" } });
+                }
+                workspaceRepositorySnapshot = new WorkspaceRepositorySnapshot(
+                    repository.Name,
+                    repository.GitUrl,
+                    repository.ResolvedBaseBranch);
+            }
+
             // The fingerprint folds the caller-submitted attachment ids
             // (raw, in order) so a replay with a different attachment set
             // is rejected as a conflicting idempotency replay. The
@@ -228,7 +254,8 @@ public static class AgentSessionLaunchRoutes
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 WorkspacePath: body.Context?.WorkspacePath,
-                Title: null);
+                Title: null,
+                WorkspaceRepository: workspaceRepositorySnapshot);
 
             AgentLaunchResult result;
             var retainNewlyBoundAttachments = false;

@@ -20,6 +20,7 @@
 ## 板块 3：工作管理
 
 - [仓库](repositories.md) —— Project 声明多个仓库作为执行资源，issue 按目标仓库分流
+- [Workspace](workspaces.md) —— 跨会话、跨 Agent 的持久执行环境：issue 工作流干净初始化，Slack channel 持久复用
 - [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
 - [复合 Issue 与子 Issue](sub-issues.md) —— 一个 issue 追踪跨仓库需求，拆成子 issue 各自走 workflow
 - [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标
@@ -38,6 +39,7 @@
 - [GitHub](github.md) —— GitHub 作为需求入口、进度公告板与审批来源：打标签供料、review 即审批、进度回写
 - [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
 - [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
+- [Subagent 与会话树](subagents.md) —— Agent 在自己的会话里分解任务：spawn 子会话、终态回报、级联停止、定时输入
 
 ## 板块 6：部署与运维
 

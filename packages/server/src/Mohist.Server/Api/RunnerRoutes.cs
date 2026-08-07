@@ -557,6 +557,32 @@ public static class RunnerRoutes
             return Results.Ok(events);
         });
 
+        // Runner-owned activity query for a managed-worktree child session.
+        // The runner asks by (ProjectId, ChildSessionId) for every local
+        // agent-worktree it still tracks; the server answers with one of
+        // five states (active / idle+idleSince / pending / not-found /
+        // unknown). not-found is a normal query answer (orphan candidate),
+        // never an authorization outcome: a session that exists but is
+        // bound to a different runner or project is rejected 403 so an
+        // unrelated caller can neither recycle it nor read its activity.
+        // pending (a not-yet-promoted launch) and unknown are fail-closed —
+        // the runner never treats them as eligible.
+        group.MapGet("/agent-workspaces/{projectId}/{childSessionId}/activity", async (
+            string runnerId, string projectId, string childSessionId,
+            AgentSessionResolver sessions) =>
+        {
+            var state = await sessions.GetGrain(childSessionId).GetActivityStateAsync();
+            if (state is null)
+                return ApiResults.Ok(new RunnerAgentWorkspaceActivityResponse("not-found"));
+
+            if (!string.Equals(state.RunnerId, runnerId, StringComparison.Ordinal))
+                return ApiResults.Fail("runner is not authorized for this agent session", 403, "runner_not_authorized");
+            if (!string.Equals(state.ProjectId, projectId, StringComparison.Ordinal))
+                return ApiResults.Fail("agent session does not belong to this project", 403, "project_mismatch");
+
+            return ApiResults.Ok(ClassifyAgentWorkspaceActivity(state));
+        });
+
         return app;
     }
 
@@ -598,7 +624,8 @@ public static class RunnerRoutes
             RecoveryRemaining: work.RecoveryRemaining,
             Expect: work.Expect,
             ParentIssueContext: parentIssueContext,
-            AgentDefinition: work.AgentDefinition);
+            AgentDefinition: work.AgentDefinition,
+            AgentSessionStartup: work.AgentSessionStartup);
     }
 
     private static RunnerGenericAgentSessionResponse ToRunnerGenericAgentSession(AgentSessionInfo session) =>
@@ -609,6 +636,18 @@ public static class RunnerRoutes
             session.Model,
             session.ResolvedModel,
             session.Runtime);
+
+    internal static RunnerAgentWorkspaceActivityResponse ClassifyAgentWorkspaceActivity(AgentSessionActivityState state)
+    {
+        if (state.LaunchVisibility == AgentLaunchVisibility.Provisional)
+            return new RunnerAgentWorkspaceActivityResponse("pending");
+        return state.Activity switch
+        {
+            AgentSessionActivity.Active => new RunnerAgentWorkspaceActivityResponse("active"),
+            AgentSessionActivity.Idle => new RunnerAgentWorkspaceActivityResponse("idle", state.IdleSince?.ToString("o")),
+            _ => new RunnerAgentWorkspaceActivityResponse("unknown"),
+        };
+    }
 
     private static async Task<bool> IsGenericAgentSessionInProjectAsync(
         AgentSessionQuery sessionQuery,
@@ -900,7 +939,8 @@ public record WorkDispatchResponse(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] int? RecoveryRemaining = null,
     string? Expect = null,
     ParentIssueContextResponse? ParentIssueContext = null,
-    AgentExecutionDefinition? AgentDefinition = null);
+    AgentExecutionDefinition? AgentDefinition = null,
+    AgentSessionStartup? AgentSessionStartup = null);
 
 public sealed record ParentIssueContextResponse(string Title, string? Body);
 
@@ -949,3 +989,14 @@ public record RunnerWorkflowStatusRequest(string[] WorkflowRunIds);
 /// are echoed back; unknown / untracked run ids are simply absent.
 /// </summary>
 public record RunnerWorkflowStatusResponse(Dictionary<string, string> Statuses);
+
+/// <summary>
+/// Activity answer for <c>GET /api/runner/{runnerId}/agent-workspaces/{projectId}/{childSessionId}/activity</c>.
+/// <c>State</c> is one of active / idle / pending / not-found / unknown.
+/// <c>IdleSince</c> is carried only for <c>idle</c> (the instant the session
+/// last went idle under the server's injected clock); absent for every other
+/// state, so a missing value is fail-closed.
+/// </summary>
+public sealed record RunnerAgentWorkspaceActivityResponse(
+    [property: JsonPropertyName("state")] string State,
+    [property: JsonPropertyName("idleSince")] string? IdleSince = null);

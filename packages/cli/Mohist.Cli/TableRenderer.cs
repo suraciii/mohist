@@ -105,6 +105,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.AgentSessionLaunch:
                 RenderAgentSessionLaunch(data);
                 break;
+            case MohistCliApi.TableShape.AgentSessionSpawn:
+                RenderAgentSessionSpawn(data);
+                break;
             case MohistCliApi.TableShape.AgentSessionFollowup:
                 RenderAgentSessionFollowup(data);
                 break;
@@ -141,6 +144,9 @@ internal sealed partial class TableRenderer
             case MohistCliApi.TableShape.SessionShow:
                 RenderSessionShow(data);
                 break;
+            case MohistCliApi.TableShape.SessionTree:
+                RenderSessionTree(data);
+                break;
             case MohistCliApi.TableShape.SessionTranscript:
                 RenderSessionTranscript(data);
                 break;
@@ -149,6 +155,19 @@ internal sealed partial class TableRenderer
                 break;
             case MohistCliApi.TableShape.SessionCancel:
                 RenderSessionCancel(data);
+                break;
+            case MohistCliApi.TableShape.SessionStop:
+                RenderSessionStop(data);
+                break;
+            case MohistCliApi.TableShape.SessionDetach:
+                RenderSessionDetach(data);
+                break;
+            case MohistCliApi.TableShape.SessionScheduleCreate:
+            case MohistCliApi.TableShape.SessionScheduleCancel:
+                RenderSessionSchedule(data);
+                break;
+            case MohistCliApi.TableShape.SessionScheduleList:
+                RenderSessionScheduleList(data);
                 break;
             case MohistCliApi.TableShape.RoutingRuleList:
                 RenderRoutingRuleList(data);

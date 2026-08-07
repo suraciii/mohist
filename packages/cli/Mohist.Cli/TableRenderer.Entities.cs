@@ -104,6 +104,8 @@ internal sealed partial class TableRenderer
 
         var skills = data["skills"] as JsonArray;
         var skillText = skills is null ? "" : string.Join(",", skills.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
+        var allowedSubagents = data["allowedSubagentAgentIds"] as JsonArray;
+        var allowedSubagentText = allowedSubagents is null ? "" : string.Join(",", allowedSubagents.Select(s => s?.GetValue<string>() ?? "").Where(s => !string.IsNullOrWhiteSpace(s)));
 
         _out.WriteLine($"id:                  {StringOf(data, "id")}");
         _out.WriteLine($"name:                {StringOf(data, "name")}");
@@ -111,6 +113,7 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"description:         {Truncate(StringOf(data, "description"), TitleSoftCap)}");
         _out.WriteLine($"max concurrent runs: {NumberOf(data, "maxConcurrentRuns")}");
         _out.WriteLine($"skills:              {skillText}");
+        _out.WriteLine($"allowed subagents:   {allowedSubagentText}");
         _out.WriteLine($"createdAt:           {Truncate(StringOf(data, "createdAt"), TitleSoftCap)}");
         _out.WriteLine($"updatedAt:           {Truncate(StringOf(data, "updatedAt"), TitleSoftCap)}");
         var instructions = StringOf(data, "instructions");
@@ -241,6 +244,46 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
         _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
         _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");
+    }
+
+    private void RenderAgentSessionSpawn(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"job id:         {StringOf(data, "jobId")}");
+        _out.WriteLine($"session id:     {StringOf(data, "sessionId")}");
+        _out.WriteLine($"turn id:        {StringOf(data, "turnId")}");
+        _out.WriteLine($"parent session: {StringOf(data, "parentSessionId")}");
+        _out.WriteLine($"edge id:        {StringOf(data, "edgeId")}");
+    }
+
+    private void RenderSessionTree(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"root:         {data["root"]?.ToJsonString() ?? ""}");
+        _out.WriteLine($"revision:     {StringOf(data, "revision")}");
+        _out.WriteLine("nodes:");
+        if (data["nodes"] is JsonArray nodes)
+        {
+            foreach (var node in nodes)
+                _out.WriteLine($"  {node?.ToJsonString() ?? "null"}");
+        }
+        _out.WriteLine("edges:");
+        if (data["edges"] is JsonArray edges)
+        {
+            foreach (var edge in edges)
+                _out.WriteLine($"  {edge?.ToJsonString() ?? "null"}");
+        }
+        _out.WriteLine($"continuation: {StringOf(data, "continuation")}");
     }
 
     private void RenderAgentSessionFollowup(JsonNode? data)
@@ -628,6 +671,84 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"state: {stateText}");
         if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
             _out.WriteLine("verification: Session view");
+    }
+
+    private void RenderSessionStop(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"operation: {StringOf(data, "operationId")}");
+        _out.WriteLine($"status:    {StringOf(data, "status")}");
+        _out.WriteLine($"fence:     {StringOf(data, "admissionFenceActive")}");
+        _out.WriteLine($"revision:  {StringOf(data, "graphRevision")}");
+    }
+
+    private void RenderSessionDetach(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"child:     {StringOf(data, "childSessionId")}");
+        _out.WriteLine($"parent:    {StringOf(data, "parentSessionId")}");
+        _out.WriteLine($"edge:      {StringOf(data, "edgeId")}");
+        _out.WriteLine($"revision:  {StringOf(data, "detachedRevision")}");
+        _out.WriteLine($"historic:  {StringOf(data, "historic")}");
+    }
+
+    private void RenderSessionSchedule(JsonNode? data)
+    {
+        if (data is null)
+        {
+            _out.WriteLine("");
+            return;
+        }
+
+        _out.WriteLine($"schedule id: {StringOf(data, "scheduleId")}");
+        _out.WriteLine($"status:      {StringOf(data, "status")}");
+        _out.WriteLine($"due at:      {StringOf(data, "dueAt")}");
+        _out.WriteLine($"text:        {StringOf(data, "text")}");
+        var inputId = StringOf(data, "inputId");
+        if (!string.IsNullOrEmpty(inputId))
+            _out.WriteLine($"input id:    {inputId}");
+        var cancelledAt = StringOf(data, "cancelledAt");
+        if (!string.IsNullOrEmpty(cancelledAt))
+            _out.WriteLine($"cancelled:   {cancelledAt}");
+    }
+
+    private void RenderSessionScheduleList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No schedules");
+            return;
+        }
+
+        var headers = new[] { "schedule id", "status", "due at", "input id", "text" };
+        var widths = new[] { IdSoftCap, 18, 25, IdSoftCap, BodySoftCap };
+
+        var cells = new List<string[]>();
+        foreach (var row in rows)
+        {
+            if (row is not JsonObject obj) continue;
+            cells.Add(new[]
+            {
+                Truncate(StringOf(obj, "scheduleId"), IdSoftCap),
+                Truncate(StringOf(obj, "status"), 18),
+                Truncate(StringOf(obj, "dueAt"), 25),
+                Truncate(StringOf(obj, "inputId"), IdSoftCap),
+                Truncate(StringOf(obj, "text"), BodySoftCap),
+            });
+        }
+
+        WriteTable(headers, widths, cells);
     }
 
     private static string FormatSessionOwner(JsonObject obj)

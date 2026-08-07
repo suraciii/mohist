@@ -22,7 +22,7 @@ export class StubCleanupRunner implements CleanupRunner {
     return !this.missingPaths.has(path)
   }
 
-  async readMarkerWorkflowRunId(workspacePath: string): Promise<string | null | undefined> {
+  async readWorkspaceIdentity(workspacePath: string): Promise<string | null | undefined> {
     return this.markerRunIds.get(workspacePath)
   }
 

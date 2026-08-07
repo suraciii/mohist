@@ -10,6 +10,20 @@ public sealed class AgentSession
     public AgentSessionMetadata Metadata { get; set; } = new();
     public required AgentSessionRuntime Runtime { get; set; }
     public AgentSessionSettings Settings { get; set; } = new();
+    public SessionParentLink? ParentLink { get; set; }
+    public long BindingEpoch { get; set; }
+    public IReadOnlyList<SessionTreeBindingUseReceipt>? BindingUseReceipts { get; set; }
+    public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
+    /// <summary>
+    /// Durable authoritative workspace source (Project Repository).
+    /// <c>null</c> for sessions without a Project-backed source
+    /// (Agent Connection / mention / routed / bare direct launch). Set
+    /// to <c>unconfirmed</c> at explicit Project-backed launch and
+    /// advanced by the Runner's first-execution
+    /// <c>workspace_source_confirmed</c>/<c>workspace_source_rejected</c>
+    /// report.
+    /// </summary>
+    public WorkspaceRepository? WorkspaceRepository { get; set; }
     [JsonInclude]
     [JsonPropertyName("activitySummary")]
     internal AgentSessionActivitySummaryState PersistedActivitySummary { get; set; } = AgentSessionActivitySummaryState.Empty;
@@ -47,10 +61,75 @@ public sealed class AgentSession
             throw new InvalidOperationException("AgentSession state requires a non-empty Id.");
         if (Runtime is null)
             throw new InvalidOperationException("AgentSession state requires a Runtime.");
+        if (BindingEpoch < 0)
+            throw new InvalidOperationException("AgentSession state requires a non-negative binding epoch.");
         if (Status.CreatedAt == default)
             throw new InvalidOperationException("AgentSession state requires CreatedAt to be set.");
         PersistedActivitySummary = (PersistedActivitySummary ?? AgentSessionActivitySummaryState.Empty).Normalize();
         Metadata.ValidateSource(allowLegacySource);
+    }
+
+    /// <summary>
+    /// Records the launch-time Project Repository snapshot as
+    /// <c>unconfirmed</c>. Idempotent: a replay of the same launch must
+    /// not reset an already-decided source. Only the initial launch may
+    /// set it.
+    /// </summary>
+    public void InitializeWorkspaceRepository(WorkspaceRepositorySnapshot snapshot, bool confirmed = false)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        if (WorkspaceRepository is not null)
+            return;
+        WorkspaceRepository = new WorkspaceRepository(
+            snapshot.Name,
+            snapshot.GitUrl,
+            snapshot.BaseBranch,
+            confirmed ? WorkspaceRepositoryState.Confirmed : WorkspaceRepositoryState.Unconfirmed);
+    }
+
+    /// <summary>
+    /// Advances an <c>unconfirmed</c> source to <c>confirmed</c> when the
+    /// Runner's first-execution check succeeded. The report must name the
+    /// same Project Repository (name + gitUrl). Returns whether the state
+    /// changed; a missing or already-decided source is a no-op so the
+    /// report is idempotent.
+    /// </summary>
+    public bool ApplyWorkspaceSourceConfirmation(string repositoryName, string gitUrl)
+    {
+        var current = WorkspaceRepository;
+        if (current is null || current.State != WorkspaceRepositoryState.Unconfirmed)
+            return false;
+        if (!string.Equals(current.Name, repositoryName, StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(current.GitUrl, gitUrl, StringComparison.Ordinal))
+            return false;
+        WorkspaceRepository = current.AsConfirmed();
+        return true;
+    }
+
+    /// <summary>
+    /// Advances an <c>unconfirmed</c> source to <c>rejected</c> (terminal).
+    /// Same name/gitUrl match as confirmation; the reason is the
+    /// Runner-reported <c>origin-mismatch</c>/<c>not-runner-owned</c>.
+    /// </summary>
+    public bool ApplyWorkspaceSourceRejection(
+        string repositoryName,
+        string gitUrl,
+        WorkspaceSourceRejectionReason reason)
+    {
+        var current = WorkspaceRepository;
+        if (current is null || current.State != WorkspaceRepositoryState.Unconfirmed)
+            return false;
+        if (!string.Equals(current.Name, repositoryName, StringComparison.Ordinal))
+            return false;
+        if (!string.Equals(current.GitUrl, gitUrl, StringComparison.Ordinal))
+            return false;
+        WorkspaceRepository = current with
+        {
+            State = WorkspaceRepositoryState.Rejected,
+            RejectionReason = reason,
+        };
+        return true;
     }
 }
 
@@ -305,7 +384,8 @@ public sealed record AgentSessionRuntime(
 
 public sealed record AgentSessionSettings(
     string? Model = null,
-    AgentExecutionDefinition? Definition = null);
+    AgentExecutionDefinition? Definition = null,
+    AgentSessionStartup? AgentSessionStartup = null);
 
 public enum AgentSessionActivity
 {
@@ -346,10 +426,25 @@ public sealed record AgentSessionStatusSnapshot(
     /// turn status, not for the AgentJob's terminal result.
     /// </summary>
     IReadOnlyList<AgentTurnRecord>? Turns = null,
-    AgentSessionStopClaim? PendingStop = null)
+    AgentSessionStopClaim? PendingStop = null,
+    /// <summary>
+    /// Durable child records of this session's scheduled inputs.
+    /// Creation, cancellation and due delivery are serialized on the
+    /// owning Session grain; list order is by <see cref="SessionScheduleRecord.DueAt"/>.
+    /// </summary>
+    IReadOnlyList<SessionScheduleRecord>? Schedules = null,
+    /// <summary>
+    /// Wall-clock instant the session last entered <c>idle</c>, stamped
+    /// by the injected <see cref="TimeProvider"/> through the activity
+    /// transitions. Non-null only while <see cref="Activity"/> is
+    /// <c>idle</c>: cleared on <c>active</c> and on <c>unknown</c> so an
+    /// unconfirmable activity can never retain a stale idle time. A
+    /// <c>null</c> value is fail-closed (never confirmed idle).
+    /// </summary>
+    [property: JsonPropertyName("idleSince")] DateTime? IdleSince = null)
 {
     public static AgentSessionStatusSnapshot Created(DateTime now) =>
-        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: []);
+        new(CreatedAt: now, UsageSummary: new AgentUsageSummary(), ContextUsageHistory: [], IdleSince: now);
 }
 
 public sealed record AgentUsageSummary(
@@ -384,7 +479,8 @@ public sealed record AgentSessionResetReservation(
     string Command = "reset",
     AgentSessionRecoveryOutcome? Outcome = null,
     string? IdempotencyKey = null,
-    IReadOnlyList<string>? AdditionalIdempotencyKeys = null);
+    IReadOnlyList<string>? AdditionalIdempotencyKeys = null,
+    long ExpectedBindingEpoch = 0);
 
 public sealed record AgentSessionRecoveryOutcome(
     string Id,

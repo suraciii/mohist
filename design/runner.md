@@ -267,6 +267,12 @@ reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在
 
 ## 本地 workspace 生命周期
 
+Runner 拥有可物化的本地 workspace，它是可重建执行状态、只由 Runner 接触文件系统。
+身份由 `WorkflowRunId` 推导（Issue-backed），终态信号是 WorkflowRun 进入不可恢复终态——
+该身份模型将随 [`workspace.md`](workspace.md) 迁移为 Workspace 实体视角（回收守卫见该文）。
+本节以下描述的生命周期 phase、single-flight 维护与 Runtime/磁盘双重回收针对当前
+WorkflowRun workspace。
+
 Runner 拥有自己物化的 workspace 与本地 `WorkspaceRegistry`。注册表只是可重建的
 生命周期索引，不是 WorkflowRun 状态权威。每个条目只有三种 phase：
 
