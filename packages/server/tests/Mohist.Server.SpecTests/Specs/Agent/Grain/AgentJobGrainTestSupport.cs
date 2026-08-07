@@ -24,7 +24,6 @@ public abstract class AgentJobGrainTestSupport
         _fixture = fixture;
         _fixture.DispatchObserver.Reset();
         _fixture.LaunchFaults.ClearObservations();
-        _fixture.AgentWorkspaceMaterializer.Reset();
     }
 
     protected IGrainFactory Grains => _fixture.Grains;

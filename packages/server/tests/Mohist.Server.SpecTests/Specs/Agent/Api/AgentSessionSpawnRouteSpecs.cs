@@ -46,6 +46,25 @@ public sealed class AgentSessionSpawnRouteSpecs
     }
 
     [Fact]
+    public async Task SpawnRoute_WorkspaceModeRetired_RejectsWithRetiredCode()
+    {
+        var projectId = await CreateProjectAsync();
+        var path = $"/api/projects/{projectId}/agent-sessions/missing-parent/spawns";
+
+        foreach (var value in new[] { "worktree", "inherit" })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = JsonContent($"{{\"targetAgentRef\":\"agent-target\",\"prompt\":\"foo\",\"workspace\":\"{value}\"}}")
+            };
+            request.Headers.Add("Idempotency-Key", $"spawn-retired-{value}");
+            using var response = await _fixture.Client.SendAsync(request);
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+            Assert.Equal("workspace_mode_retired", await ReadCodeAsync(response));
+        }
+    }
+
+    [Fact]
     public async Task TreeRoute_ReturnsApiEnvelopeWithLockedTreePageShape()
     {
         var projectId = await CreateProjectAsync();

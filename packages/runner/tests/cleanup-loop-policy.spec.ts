@@ -25,7 +25,6 @@ describe("CleanupLoop", () => {
         budgetRemoved: 0,
         guardAborted: 0,
         stuckResolved: 0,
-        deferred: 0,
         workspaceUsageBytes: null,
       })
       expect(fixture.registry.get("wr-old")).not.toBeNull()

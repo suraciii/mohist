@@ -682,27 +682,6 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         await PersistAsync();
     }
 
-    public async Task UpdatePreparedWorkspaceAsync(string? workspacePath, AgentSessionStartup? startup)
-    {
-        await HydrateAsync();
-        if (State.ManualPlan is null || State.Input is null)
-            return;
-        if (State.LaunchVisibility != AgentLaunchVisibility.Provisional)
-            return;
-        var nextStartup = startup ?? State.ManualPlan.AgentSessionStartup;
-        if (string.Equals(State.ManualPlan.WorkspacePath, workspacePath, StringComparison.Ordinal)
-            && Equals(State.ManualPlan.AgentSessionStartup, nextStartup))
-            return;
-        var updated = State.ManualPlan with
-        {
-            WorkspacePath = workspacePath,
-            AgentSessionStartup = nextStartup,
-        };
-        State.ManualPlan = updated;
-        State.Input = BuildManualInput(updated);
-        await PersistAsync();
-    }
-
     public async Task AbortPreparedLaunchAsync(string reason)
     {
         await HydrateAsync();

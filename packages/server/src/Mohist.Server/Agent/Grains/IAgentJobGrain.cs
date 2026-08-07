@@ -93,15 +93,6 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     /// </summary>
     Task SubmitPreparedLaunchAsync() => Task.CompletedTask;
     Task PromotePreparedLaunchAsync() => Task.CompletedTask;
-    /// <summary>
-    /// Update the prepared manual launch's workspace path after a
-    /// managed-worktree materialization resolves the child workDir.
-    /// Idempotent no-op before the manual plan exists or after the
-    /// launch is promoted/terminal; only mutates a still-provisional
-    /// prepared plan so the dispatch envelope carries the materialized
-    /// workDir.
-    /// </summary>
-    Task UpdatePreparedWorkspaceAsync(string? workspacePath, AgentSessionStartup? startup) => Task.CompletedTask;
     Task AbortPreparedLaunchAsync(string reason) => Task.CompletedTask;
     /// <summary>
     /// Move a non-terminal AgentJob to <see cref="AgentJobStatus.Unknown"/>
