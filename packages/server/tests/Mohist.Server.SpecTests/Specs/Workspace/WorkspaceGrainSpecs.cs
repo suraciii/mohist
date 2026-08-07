@@ -53,6 +53,85 @@ public class WorkspaceGrainSpecs
     private string UniqueName(string purpose) => $"{purpose}-{Guid.NewGuid():N}";
 
     [Fact]
+    public async Task CreateAsync_SlackOrigin_CreatesActiveWorkspaceWithSlackOrigin()
+    {
+        var name = UniqueName("slack");
+        var origin = new WorkspaceOrigin.Slack("T1", "C123");
+
+        var created = await Grain(name).CreateAsync(name, origin, [], _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(name, created.Name);
+        Assert.Equal(origin, created.Origin);
+        Assert.Equal(WorkspaceStatus.Active, created.Status);
+        Assert.Empty(created.RepositoryNames);
+        Assert.NotNull(await Grain(name).GetAsync());
+    }
+
+    [Fact]
+    public async Task CreateAsync_WebOrigin_CreatesActiveWorkspaceWithWebOrigin()
+    {
+        var name = UniqueName("web");
+        var origin = new WorkspaceOrigin.Web("conv-9");
+
+        var created = await Grain(name).CreateAsync(name, origin, [], _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(origin, created.Origin);
+        Assert.Equal(WorkspaceStatus.Active, created.Status);
+    }
+
+    [Fact]
+    public async Task CreateAsync_SameActiveOriginUnderDifferentName_ThrowsOriginConflict()
+    {
+        var firstName = UniqueName("origin-a");
+        var secondName = UniqueName("origin-b");
+        var origin = new WorkspaceOrigin.Slack("T1", "C-shared");
+        await Grain(firstName).CreateAsync(firstName, origin, [], _fixture.TimeProvider.GetUtcNow());
+
+        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
+            () => Grain(secondName).CreateAsync(secondName, origin, [], _fixture.TimeProvider.GetUtcNow()));
+        Assert.Equal("workspace_origin_conflict", ex.Code);
+    }
+
+    [Fact]
+    public async Task ArchiveByOriginAsync_ArchivesWorkspaceAndIsIdempotent()
+    {
+        var name = UniqueName("archive-slack");
+        var origin = new WorkspaceOrigin.Slack("T1", "C-archive");
+        await Grain(name).CreateAsync(name, origin, [], _fixture.TimeProvider.GetUtcNow());
+
+        await Grain(name).ArchiveByOriginAsync(origin, _fixture.TimeProvider.GetUtcNow());
+        var archived = await Grain(name).GetAsync();
+        Assert.Equal(WorkspaceStatus.Archived, archived!.Status);
+        Assert.NotNull(archived.ArchivedAt);
+
+        await Grain(name).ArchiveByOriginAsync(origin, _fixture.TimeProvider.GetUtcNow());
+        Assert.Equal(WorkspaceStatus.Archived, (await Grain(name).GetAsync())!.Status);
+    }
+
+    [Fact]
+    public async Task ArchiveByOriginAsync_WrongOrigin_ThrowsOriginMismatch()
+    {
+        var name = UniqueName("archive-mismatch");
+        await Grain(name).CreateAsync(name, new WorkspaceOrigin.Web("conv-m"), [], _fixture.TimeProvider.GetUtcNow());
+
+        var ex = await Assert.ThrowsAsync<WorkspaceDomainException>(
+            () => Grain(name).ArchiveByOriginAsync(new WorkspaceOrigin.Slack("T1", "C-other"), _fixture.TimeProvider.GetUtcNow()));
+        Assert.Equal("workspace_origin_mismatch", ex.Code);
+    }
+
+    [Fact]
+    public async Task ArchiveByOriginAsync_ActiveBoundSession_DoesNotBlockArchive()
+    {
+        var name = UniqueName("archive-no-guard");
+        await Grain(name).CreateAsync(name, new WorkspaceOrigin.Slack("T1", "C-guard"), [], _fixture.TimeProvider.GetUtcNow());
+        await SeedBoundSessionAsync(name, active: true, bound: true);
+
+        await Grain(name).ArchiveByOriginAsync(new WorkspaceOrigin.Slack("T1", "C-guard"), _fixture.TimeProvider.GetUtcNow());
+
+        Assert.Equal(WorkspaceStatus.Archived, (await Grain(name).GetAsync())!.Status);
+    }
+
+    [Fact]
     public async Task CreateManualAsync_ValidInput_CreatesActiveManualWorkspace()
     {
         var name = UniqueName("pay");

@@ -59,6 +59,13 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
     public Task<WorkspaceState?> GetAsync() => Task.FromResult(_state);
 
     public async Task<WorkspaceState> CreateManualAsync(string name, string[] repositoryNames, DateTimeOffset now)
+        => await CreateAsync(name, new WorkspaceOrigin.Manual(), repositoryNames ?? [], now);
+
+    public async Task<WorkspaceState> CreateAsync(
+        string name,
+        WorkspaceOrigin origin,
+        IReadOnlyList<string> repositoryNames,
+        DateTimeOffset now)
     {
         var key = WorkspaceGrainKey.Parse(GrainKey);
         if (_state is not null)
@@ -70,7 +77,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         var error = WorkspacePolicy.ValidateCreate(
             name,
-            new WorkspaceOrigin.Manual(),
+            origin,
             repositoryNames ?? [],
             project.Repositories.Select(r => r.Name).ToList());
         if (error is not null)
@@ -78,18 +85,18 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
 
         var existing = await _store.FindActiveByOriginAsync(
             key.ProjectId,
-            WorkspaceRowJson.OriginKind(new WorkspaceOrigin.Manual()),
-            WorkspaceRowJson.OriginPayload(new WorkspaceOrigin.Manual()));
+            WorkspaceRowJson.OriginKind(origin),
+            WorkspaceRowJson.OriginPayload(origin));
         if (existing is not null)
             throw new WorkspaceDomainException(
                 "workspace_origin_conflict",
-                $"Project already has an active manual workspace '{existing.Name}'; close it before creating another.");
+                $"Project already has an active workspace for this origin ('{existing.Name}'); close or archive it before creating another.");
 
         var state = new WorkspaceState
         {
             ProjectId = key.ProjectId,
             Name = name.Trim(),
-            Origin = new WorkspaceOrigin.Manual(),
+            Origin = origin,
             RepositoryNames = (repositoryNames ?? [])
                 .Select(r => r.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -113,7 +120,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         }
 
         _state = state;
-        _log.LogInformation("Workspace {ProjectId}/{Name} created (manual)", state.ProjectId, state.Name);
+        _log.LogInformation("Workspace {ProjectId}/{Name} created ({OriginKind})", state.ProjectId, state.Name, WorkspaceRowJson.OriginKind(origin));
         await EmitCreatedAsync(state);
         return state;
     }
@@ -218,22 +225,23 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         return state;
     }
 
-    public async Task ArchiveByIssueAsync(int issueNumber, DateTimeOffset now)
+    public Task ArchiveByIssueAsync(int issueNumber, DateTimeOffset now)
+        => ArchiveByOriginAsync(new WorkspaceOrigin.Issue(issueNumber), now);
+
+    public async Task ArchiveByOriginAsync(WorkspaceOrigin origin, DateTimeOffset now)
     {
         var state = _state;
-        if (state is null) return;
+        if (state is null || state.Status == WorkspaceStatus.Archived) return;
 
-        if (state.Origin is not WorkspaceOrigin.Issue org || org.IssueNumber != issueNumber)
+        if (!Equals(state.Origin, origin))
             throw new WorkspaceDomainException(
                 "workspace_origin_mismatch",
-                $"Workspace '{state.Name}' does not belong to issue #{issueNumber}.");
-
-        if (state.Status == WorkspaceStatus.Archived) return;
+                $"Workspace '{state.Name}' does not belong to origin '{WorkspaceRowJson.OriginKind(origin)}'.");
 
         state.Status = WorkspaceStatus.Archived;
         state.ArchivedAt = now;
         await _store.SaveAsync(state);
-        _log.LogInformation("Workspace {ProjectId}/{Name} archived (issue #{IssueNumber})", state.ProjectId, state.Name, issueNumber);
+        _log.LogInformation("Workspace {ProjectId}/{Name} archived ({OriginKind})", state.ProjectId, state.Name, WorkspaceRowJson.OriginKind(origin));
         await EmitArchivedAsync(state);
     }
 
