@@ -139,3 +139,11 @@ packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
 验收时必须确认 discovery 列出目标 FQCN，执行摘要为 `Total: N` 且 `N > 0`；`Total: 0` 不是通过证据。上例本次实测只列出 `Mohist.Cli.Tests.Skills.SkillsContentTests`，执行为 `Total: 24`。
 
 聚焦跑流程已封装进守卫，可避免手拼 apphost 路径，且绝不退回 `dotnet --filter`：`npm run test:budget -- focused <csproj> <FQCN>`（先 `-list classes` 校验 FQCN 存在，再 `apphost -class` 执行）。
+
+## Agent dispatch 模板
+
+向外部 agent（herdr / pi）派发本仓库开发任务时，派单 prompt 必须套用 [`design/dispatch-template.md`](design/dispatch-template.md) 的三条硬规则：
+
+1. **model fallback 链**：廉价默认 `opencode-go/deepseek-v4-flash` → 廉价备选（`minimax/MiniMax-M3` 等，异 provider）→ 宝贵 `zai-coding-cn/glm-5.2`（用时显式标注"宝贵智力资源"）。模型名必须带 provider 前缀（裸名在多个 provider 间歧义，pi 启动即报错）；派单前先探活（`timeout 15s pi --no-session --model <m> -p 'ok'`），探活失败直接跳下一档，不赌 broken provider。
+2. **测试命令强制 timeout**：所有会跑测试的命令必带 `timeout -k 10s <N>s …`（unit/arch `120s`、spec `180s`、全量套件 `480s`），避免被 hang 拖死。
+3. **完成定义**：build 过 + 相关测试过 + PR 已开，缺一不算完成；完成报告附三件证据（命令 + 退出码/结果摘要 + PR 链接）。
