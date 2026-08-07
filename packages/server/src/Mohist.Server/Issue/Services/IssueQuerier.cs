@@ -752,7 +752,8 @@ public class IssueQuerier : IScopedService
             comment.Body,
             comment.CreatedAt.ToString("o"),
             attachmentsByComment.TryGetValue(comment.Id, out var attachments) ? attachments : [],
-            comment.Author);
+            comment.Author,
+            comment.DisplayName);
 
     private static AttachmentInfo ToAttachmentInfo(AttachmentRow row) => new(
         row.Id,

@@ -129,7 +129,8 @@ public sealed record ApprovalStatusView(
     string? Result,
     string RequestedAt,
     string? RespondedAt,
-    string? DecidedBy = null);
+    string? DecidedBy = null,
+    string? DisplayName = null);
 
 /// <summary>
 /// Minimal associated-issue reference surfaced by the

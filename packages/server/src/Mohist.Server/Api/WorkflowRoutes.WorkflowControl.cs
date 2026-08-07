@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
@@ -26,20 +27,15 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             ApproveRequest? req,
             IGrainFactory grains,
-            WorkflowQuerier reader) =>
+            WorkflowQuerier reader,
+            ICurrentUser currentUser) =>
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
-            string? decidedBy;
-            try
-            {
-                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(decidedBy);
+            var displayName = NormalizeDisplayName(req?.DisplayName);
+            if (displayName.Failure is { } displayFailure)
+                return displayFailure;
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).ApproveAsync(currentUser.Principal.Id, displayName.Value);
             return ApiResults.Ok();
         });
 
@@ -47,22 +43,17 @@ public static partial class WorkflowRoutes
             string workflowRunId,
             RejectWithAuthorRequest? req,
             IGrainFactory grains,
-            WorkflowQuerier reader) =>
+            WorkflowQuerier reader,
+            ICurrentUser currentUser) =>
         {
             if (await ResolveWorkflowRunControlAsync(workflowRunId, reader, WorkflowControlAction.ActiveOnly) is { } failure)
                 return failure;
-            string? decidedBy;
-            try
-            {
-                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
+            var displayName = NormalizeDisplayName(req?.DisplayName);
+            if (displayName.Failure is { } displayFailure)
+                return displayFailure;
             if (string.IsNullOrWhiteSpace(req?.Message))
                 return ApiResults.BadRequest("Reject reason is required");
-            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, decidedBy);
+            await grains.GetGrain<IWorkflowGrain>(workflowRunId).RequestChangesAsync(req.Message, currentUser.Principal.Id, displayName.Value);
             return ApiResults.Ok();
         });
 
@@ -160,6 +151,20 @@ public static partial class WorkflowRoutes
     }
 
     internal sealed record RerunFromStageRequest(string? Stage);
+
+    private static DisplayNameResult NormalizeDisplayName(string? raw)
+    {
+        try
+        {
+            return new DisplayNameResult(ApprovalOperatorValidation.Normalize(raw), null);
+        }
+        catch (ArgumentException ex)
+        {
+            return new DisplayNameResult(null, ApiResults.BadRequest(ex.Message));
+        }
+    }
+
+    private sealed record DisplayNameResult(string? Value, IResult? Failure);
 
     private static async Task<IResult?> ResolveWorkflowRunControlAsync(
         string workflowRunId,

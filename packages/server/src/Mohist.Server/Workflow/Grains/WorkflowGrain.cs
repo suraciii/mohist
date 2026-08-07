@@ -296,24 +296,26 @@ public partial class WorkflowGrain : Grain, IWorkflowGrain, IWorkflowGrainContex
             await DeleteSnapshotBestEffortAsync(abandonedWorkId);
     }
 
-    public async Task ApproveAsync(string? decidedBy = null)
+    public async Task ApproveAsync(string? decidedBy = null, string? displayName = null)
     {
         EnsureRun();
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
-        var events = _run.Approve(Now(), normalizedOperator);
+        var normalizedDisplayName = ApprovalOperatorValidation.Normalize(displayName);
+        var events = _run.Approve(Now(), normalizedOperator, normalizedDisplayName);
         _log.LogInformation("Workflow {Id} approved at stage={Stage} by {Operator}", GrainKey, _run.CurrentStageId, normalizedOperator);
         await CommitAsync(events);
     }
 
-    public async Task<string> RequestChangesAsync(string body, string? decidedBy = null)
+    public async Task<string> RequestChangesAsync(string body, string? decidedBy = null, string? displayName = null)
     {
         EnsureRun();
         var normalizedOperator = ApprovalOperatorValidation.Normalize(decidedBy);
+        var normalizedDisplayName = ApprovalOperatorValidation.Normalize(displayName);
         var stage = _run.CurrentStage();
         var approval = await _definitionResolver.LoadApprovalConfigAsync(GrainKey);
         var feedbackTasks = WorkflowRunExtensions.ResolveFeedbackTasks(approval?.Feedback?.Tasks, stage.Id);
         var feedbackId = CreateFeedbackId();
-        var events = _run.RequestChanges(body, feedbackId, Now(), normalizedOperator, feedbackTasks);
+        var events = _run.RequestChanges(body, feedbackId, Now(), normalizedOperator, feedbackTasks, normalizedDisplayName);
         _log.LogInformation("Workflow {Id} requested changes at stage={Stage} by {Operator}: feedback={FeedbackId}", GrainKey, stage.Id, normalizedOperator, feedbackId);
         await CommitAsync(events);
         return feedbackId;
