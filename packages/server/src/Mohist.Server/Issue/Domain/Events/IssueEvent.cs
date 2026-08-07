@@ -67,7 +67,8 @@ public sealed record IssueWorkStarted(
     string WorkflowRunId,
     IssueWorkStartedRepository? Repository = null,
     IssueWorkStartedWorkspace? Workspace = null,
-    IssueWorkStartedContext? Context = null);
+    IssueWorkStartedContext? Context = null,
+    string? WorkspaceName = null);
 
 public sealed record IssueWorkStartedRepository(
     string Name,

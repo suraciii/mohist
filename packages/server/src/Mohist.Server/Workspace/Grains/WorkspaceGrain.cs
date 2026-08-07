@@ -100,6 +100,66 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         return state;
     }
 
+    public async Task<WorkspaceState> EnsureIssueWorkspaceAsync(int issueNumber, string repositoryName, DateTimeOffset now)
+    {
+        var key = WorkspaceGrainKey.Parse(GrainKey);
+        var workspaceName = $"issue-{issueNumber}";
+        if (!string.Equals(key.Name, workspaceName, StringComparison.Ordinal))
+            throw new WorkspaceDomainException(
+                "workspace_name_mismatch",
+                $"Grain key name '{key.Name}' does not match expected name '{workspaceName}'.");
+
+        if (_state is not null)
+        {
+            if (_state.Origin is WorkspaceOrigin.Issue org && org.IssueNumber == issueNumber)
+                return _state;
+            throw new WorkspaceDomainException(
+                "workspace_name_taken",
+                $"Workspace '{_state.Name}' already exists with a different origin.");
+        }
+
+        var project = await _projects.GetByIdAsync(key.ProjectId);
+        if (project is null)
+            throw new WorkspaceDomainException("workspace_project_not_found", "Project not found.");
+
+        var origin = new WorkspaceOrigin.Issue(issueNumber);
+        var existing = await _store.FindActiveByOriginAsync(
+            key.ProjectId,
+            WorkspaceRowJson.OriginKind(origin),
+            WorkspaceRowJson.OriginPayload(origin));
+        if (existing is not null)
+        {
+            _state = existing;
+            return existing;
+        }
+
+        var state = new WorkspaceState
+        {
+            ProjectId = key.ProjectId,
+            Name = workspaceName,
+            Origin = origin,
+            RepositoryNames = [repositoryName.Trim()],
+            Status = WorkspaceStatus.Active,
+            CreatedAt = now,
+        };
+
+        try
+        {
+            await _store.InsertAsync(state);
+        }
+        catch (DbUpdateException)
+        {
+            throw new WorkspaceDomainException(
+                "workspace_conflict",
+                $"Workspace '{workspaceName}' already exists in this project.",
+                hint: "A workspace for this issue may have been created by a concurrent request.");
+        }
+
+        _state = state;
+        _log.LogInformation("Workspace {ProjectId}/{Name} created (issue #{IssueNumber})", state.ProjectId, state.Name, issueNumber);
+        return state;
+    }
+
     public async Task<WorkspaceState?> AddRepositoryAsync(string repoName)
     {
         var state = RequireActive();
@@ -137,6 +197,24 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
         state.RepositoryNames.RemoveAll(r => string.Equals(r, repoName.Trim(), StringComparison.OrdinalIgnoreCase));
         await _store.SaveAsync(state);
         return state;
+    }
+
+    public async Task ArchiveByIssueAsync(int issueNumber, DateTimeOffset now)
+    {
+        var state = _state;
+        if (state is null) return;
+
+        if (state.Origin is not WorkspaceOrigin.Issue org || org.IssueNumber != issueNumber)
+            throw new WorkspaceDomainException(
+                "workspace_origin_mismatch",
+                $"Workspace '{state.Name}' does not belong to issue #{issueNumber}.");
+
+        if (state.Status == WorkspaceStatus.Archived) return;
+
+        state.Status = WorkspaceStatus.Archived;
+        state.ArchivedAt = now;
+        await _store.SaveAsync(state);
+        _log.LogInformation("Workspace {ProjectId}/{Name} archived (issue #{IssueNumber})", state.ProjectId, state.Name, issueNumber);
     }
 
     public async Task<WorkspaceState?> CloseAsync(DateTimeOffset now)

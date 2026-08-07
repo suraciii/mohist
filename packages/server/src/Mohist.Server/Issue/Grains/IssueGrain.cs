@@ -23,6 +23,7 @@ using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Domain.Run;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Grains;
 
 namespace Mohist.Server.Issue.Grains;
 
@@ -228,6 +229,11 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         IReadOnlySet<int>? undeliveredPrerequisites,
         bool hasChildren)
     {
+        var workspaceName = $"issue-{_issue!.Number}";
+        var wsGrain = GrainFactory.GetGrain<IWorkspaceGrain>(
+            Infrastructure.Orleans.GrainKey.Workspace(_issue.ProjectId, workspaceName));
+        await wsGrain.EnsureIssueWorkspaceAsync(_issue.Number, repo.Name, _timeProvider.GetUtcNow());
+
         var (repositoryContext, workspace, issueContext) = await PrepareWorkflowStartContextAsync(project, wrId, repo);
 
         // Synchronously start the workflow run carrying the immutable
@@ -253,6 +259,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
                 workspace.Branch,
                 workspace.ChangeDir),
             context: issueContext,
+            workspaceName: workspaceName,
             hasChildren: hasChildren);
         try
         {
@@ -643,17 +650,6 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
     public async Task CancelAsync()
     {
         EnsureIssue();
-        // "Has a workflow run reference" (an execution fact) is NOT the
-        // same as "has an active, controllable workflow" (status + run
-        // state). Only run the cannot-close-while-running guard when the
-        // issue is actually InProgress with a non-null workflowRunId AND
-        // the run is not stopped/terminal — a Done or archived issue that
-        // preserved its reference is not a running workflow, and Close()
-        // already rejects Done/archived itself.
-        // The WorkflowRunStatus state machine splits the old single
-        // "running" into Created/Pending/Ready/Running; all four
-        // represent a non-terminal, controllable workflow that the user
-        // must explicitly stop before closing the issue.
         var wfStatus = await GetControllableWorkflowStatusAsync();
         if (wfStatus is { } running
             && running is "created" or "pending" or "ready" or "running" or "paused" or "awaiting-approval")
@@ -662,6 +658,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
         _issue!.Close("user-cancelled");
         await SaveIssueAsync();
+        await TryArchiveWorkspaceAsync(_issue);
     }
 
     /// <summary>
@@ -692,6 +689,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         if (_issue is null) return;
         if (!_issue.Complete(workflowRunId, _timeProvider.GetUtcNow().UtcDateTime)) return;
         await SaveIssueAsync();
+        await TryArchiveWorkspaceAsync(_issue);
     }
 
     public async Task MarkDoneAsync()
@@ -713,6 +711,26 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         if (!_issue.MarkDone(_timeProvider.GetUtcNow().UtcDateTime)) return;
         await SaveIssueAsync();
+        await TryArchiveWorkspaceAsync(_issue);
+    }
+
+    private async Task TryArchiveWorkspaceAsync(Domain.Issue issue)
+    {
+        var workspaceName = issue.WorkspaceName;
+        if (string.IsNullOrWhiteSpace(workspaceName)) return;
+
+        try
+        {
+            var wsGrain = GrainFactory.GetGrain<IWorkspaceGrain>(
+                Infrastructure.Orleans.GrainKey.Workspace(issue.ProjectId, workspaceName));
+            await wsGrain.ArchiveByIssueAsync(issue.Number, _timeProvider.GetUtcNow());
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "Issue {IssueKey}: best-effort archive of workspace {WorkspaceName} failed",
+                GrainKey, workspaceName);
+        }
     }
 
     public async Task UpdateAsync(string title, string? body)
@@ -729,6 +747,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         var snapshot = ChildSnapshotFromComposite(children);
         _issue!.Close(snapshot, "user-cancelled");
         await SaveIssueAsync();
+        await TryArchiveWorkspaceAsync(_issue);
     }
 
     public async Task ReopenCompositeAsync()

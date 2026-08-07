@@ -98,4 +98,30 @@ public class WorkspacePolicyTests
         Assert.True(WorkspacePolicy.IsManual(new WorkspaceOrigin.Manual()));
         Assert.False(WorkspacePolicy.IsManual(new WorkspaceOrigin.Issue(1)));
     }
+
+    [Theory]
+    [InlineData("issue-42")]
+    [InlineData("issue-1")]
+    [InlineData("issue-99999")]
+    public void TryNormalizeName_IssuePrefix_Accepts(string raw)
+    {
+        Assert.True(WorkspacePolicy.TryNormalizeName(raw, out var name));
+        Assert.Equal(raw, name);
+    }
+
+    [Fact]
+    public void ValidateCreate_IssueOrigin_ValidInput_ReturnsNoError()
+    {
+        var issueOrigin = new WorkspaceOrigin.Issue(42);
+        var error = WorkspacePolicy.ValidateCreate("issue-42", issueOrigin, ["server"], ["server"]);
+        Assert.Null(error);
+    }
+
+    [Fact]
+    public void ValidateCreate_IssueOrigin_NullOrigin_ReportsRequired()
+    {
+        var error = WorkspacePolicy.ValidateCreate("issue-42", null!, ["server"], ["server"]);
+        Assert.NotNull(error);
+        Assert.Equal("workspace_origin_required", error!.Code);
+    }
 }

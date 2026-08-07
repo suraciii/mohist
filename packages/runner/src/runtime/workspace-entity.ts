@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto"
-import { mkdir, writeFile } from "node:fs/promises"
+import { mkdir, rename, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { deleteDirectory, exists, readText } from "../system/process.js"
+import { deleteDirectory, ensureDir, exists, readText, runCommand } from "../system/process.js"
+import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { NamedWorkspaceRegistry } from "./workspace-registry.js"
 import { slugify, withManagedWorkspacePath } from "./workspace.js"
@@ -113,6 +114,82 @@ export async function materializeNamedWorkspace(
   return { path: workspacePath, created }
 }
 
+export interface IssueWorkspaceCloneOptions {
+  runnerRoot: string
+  projectId: string
+  workspaceName: string
+  gitUrl: string
+  baseBranch: string
+  runBranch: string
+  registry: NamedWorkspaceRegistry
+  signal: AbortSignal
+  now?: () => Date
+}
+
+export async function materializeIssueWorkspace(
+  options: IssueWorkspaceCloneOptions,
+): Promise<NamedWorkspaceMaterializeResult> {
+  const workspacePath = namedWorkspacePath(options.runnerRoot, options.projectId, options.workspaceName)
+  let created = false
+  await withManagedWorkspacePath(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
+    if (exists(managedWorkspacePath)) {
+      const marker = await readNamedWorkspaceMarker(managedWorkspacePath)
+      if (!marker || marker.projectId !== options.projectId || marker.workspaceName !== options.workspaceName) {
+        throw new Error(`Named workspace marker mismatch at ${managedWorkspacePath}`)
+      }
+      return
+    }
+
+    const preparationPath = `${managedWorkspacePath}.preparing`
+    if (exists(preparationPath)) await deleteDirectory(preparationPath)
+    await ensureDir(join(preparationPath, ".."))
+
+    const cloneResult = await runCommand("git", ["clone", options.gitUrl, preparationPath], ".", options.signal, undefined, { timeoutMs: NETWORK_COMMAND_TIMEOUT_MS })
+    if (cloneResult.exitCode !== 0) {
+      await deleteDirectory(preparationPath).catch(() => {})
+      throw new Error(`git clone failed for ${options.gitUrl}: ${cloneResult.stderr || cloneResult.stdout}`)
+    }
+
+    const originResult = await runCommand("git", ["-C", preparationPath, "remote", "get-url", "origin"], ".", options.signal)
+    if (originResult.exitCode !== 0 || originResult.stdout.trim() !== options.gitUrl.trim()) {
+      await deleteDirectory(preparationPath).catch(() => {})
+      throw new Error(`Workspace clone origin mismatch: expected ${options.gitUrl}, got ${originResult.stdout.trim()}`)
+    }
+
+    const hasRemote = await runCommand("git", ["-C", preparationPath, "rev-parse", "--verify", `refs/remotes/origin/${options.runBranch}`], ".", options.signal)
+    if (hasRemote.exitCode === 0) {
+      const checkoutResult = await runCommand("git", ["-C", preparationPath, "checkout", "-B", options.runBranch, `origin/${options.runBranch}`], ".", options.signal)
+      if (checkoutResult.exitCode !== 0) {
+        await deleteDirectory(preparationPath).catch(() => {})
+        throw new Error(`Failed to checkout run branch ${options.runBranch}: ${checkoutResult.stderr || checkoutResult.stdout}`)
+      }
+    } else {
+      const branchResult = await runCommand("git", ["-C", preparationPath, "checkout", "-B", options.runBranch, `origin/${options.baseBranch}`], ".", options.signal)
+      if (branchResult.exitCode !== 0) {
+        await deleteDirectory(preparationPath).catch(() => {})
+        throw new Error(`Failed to create run branch ${options.runBranch} from ${options.baseBranch}: ${branchResult.stderr || branchResult.stdout}`)
+      }
+    }
+
+    const markerDir = join(preparationPath, ".mohist")
+    await mkdir(markerDir, { recursive: true })
+    const marker: NamedWorkspaceMarker = {
+      projectId: options.projectId,
+      workspaceName: options.workspaceName,
+      repositories: [{ name: options.gitUrl.split("/").pop()?.replace(".git", "") ?? "unknown", gitUrl: options.gitUrl }],
+    }
+    await writeFile(join(preparationPath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
+    await rename(preparationPath, managedWorkspacePath)
+    created = true
+  })
+  await options.registry.register({
+    projectId: options.projectId,
+    workspaceName: options.workspaceName,
+    workspacePath,
+  })
+  return { path: workspacePath, created }
+}
+
 // Thrown when the server refused the materialization report because
 // another runner already owns the workspace home (first writer wins).
 export class WorkspaceHomeClaimedError extends Error {
@@ -136,6 +213,40 @@ export class NamedWorkspaceManager {
     private readonly connection: ServerConnection,
     private readonly now: () => Date = () => new Date(),
   ) {}
+
+  async materializeForIssue(
+    projectId: string,
+    workspaceName: string,
+    gitUrl: string,
+    baseBranch: string,
+    signal: AbortSignal,
+  ): Promise<NamedWorkspaceMaterializeResult> {
+    const runBranch = `mohist/ws-${workspaceName}`
+    const result = await materializeIssueWorkspace({
+      runnerRoot: this.runnerRoot,
+      projectId,
+      workspaceName,
+      gitUrl,
+      baseBranch,
+      runBranch,
+      registry: this.registry,
+      signal,
+      now: this.now,
+    })
+    try {
+      await this.connection.reportWorkspaceMaterialized(projectId, workspaceName, result.path, signal)
+    } catch (error) {
+      if (error instanceof WorkspaceHomeClaimedError) {
+        if (result.created) {
+          await deleteDirectory(result.path).catch(() => {})
+          await this.registry.remove(`ws:${projectId}:${workspaceName}`).catch(() => {})
+        }
+        throw error
+      }
+      throw error
+    }
+    return result
+  }
 
   async materialize(
     projectId: string,

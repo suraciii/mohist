@@ -1,6 +1,6 @@
 import { basename, dirname, join, resolve } from "node:path"
 import { readdir } from "node:fs/promises"
-import type { WorkspaceRegistry } from "./workspace-registry.js"
+import type { NamedWorkspaceRegistry, WorkspaceRegistry } from "./workspace-registry.js"
 import type { AgentWorkspaceRegistry, AgentWorkspaceRegisterInput } from "./agent-workspace-registry.js"
 import { ensureDir, exists, readText, runCommand } from "../system/process.js"
 import { assertManagedWorkspacePath } from "./workspace.js"
@@ -93,6 +93,7 @@ export interface AgentWorkspaceRecoverResult {
 export interface AgentWorkspaceOwnershipDeps {
   registry: AgentWorkspaceRegistry
   workflowRegistry?: WorkspaceRegistry | null
+  namedWorkspaceRegistry?: NamedWorkspaceRegistry | null
   defaultWorkspacePaths?: readonly string[]
 }
 
@@ -105,6 +106,11 @@ export async function isRunnerOwnedWorkspacePath(path: string, deps: AgentWorksp
   }
   try {
     if (deps.registry.findByWorkspacePath(target)) return true
+  } catch {
+    // Registry not loaded → fail closed: treat as not owned.
+  }
+  try {
+    if (deps.namedWorkspaceRegistry?.findByWorkspacePath(target)) return true
   } catch {
     // Registry not loaded → fail closed: treat as not owned.
   }
@@ -185,6 +191,7 @@ export class AgentWorkspaceManager {
   private readonly registry: AgentWorkspaceRegistry
   private readonly options: {
     workflowRegistry: WorkspaceRegistry | null
+    namedWorkspaceRegistry: NamedWorkspaceRegistry | null
     defaultWorkspacePaths: readonly string[]
     getStorageBudgetBytes: () => number | null
     computeDirectorySize: (path: string, signal: AbortSignal) => Promise<number | null>
@@ -198,6 +205,7 @@ export class AgentWorkspaceManager {
     this.registry = options.registry
     this.options = {
       workflowRegistry: options.workflowRegistry ?? null,
+      namedWorkspaceRegistry: options.namedWorkspaceRegistry ?? null,
       defaultWorkspacePaths: options.defaultWorkspacePaths ?? [],
       getStorageBudgetBytes: options.getStorageBudgetBytes ?? (() => null),
       computeDirectorySize: options.computeDirectorySize ?? defaultComputeDirectorySize,
@@ -418,6 +426,7 @@ export class AgentWorkspaceManager {
     return {
       registry: this.registry,
       workflowRegistry: this.options.workflowRegistry,
+      namedWorkspaceRegistry: this.options.namedWorkspaceRegistry,
       defaultWorkspacePaths: this.options.defaultWorkspacePaths,
     }
   }

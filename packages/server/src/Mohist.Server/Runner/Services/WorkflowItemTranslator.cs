@@ -216,9 +216,11 @@ EpicNumber: ReadEpicNumber(run),
         payload["repository"] = run.Repository is { } repository
             ? JSON.SerializeToElement(new { name = repository.Name, gitUrl = repository.GitUrl, baseBranch = repository.BaseBranch })
             : JSON.SerializeToElement<object?>(null);
-        payload["workspace"] = run.Workspace is { } workspace
-            ? JSON.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch })
-            : JSON.SerializeToElement<object?>(null);
+        payload["workspace"] = ReadIssueNumber(run) is { } issueNumber
+            ? JSON.SerializeToElement(new { name = $"issue-{issueNumber}" })
+            : run.Workspace is { } workspace
+                ? JSON.SerializeToElement(new { path = workspace.Path, branch = workspace.Branch })
+                : JSON.SerializeToElement<object?>(null);
 
         WorkflowDispatchHelpers.MergeTaskOutputsIntoPayload(payload, run);
 
