@@ -119,8 +119,10 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
     {
         using var anonymous = _fixture.CreateUnauthenticatedClient();
         using var anonymousResponse = await anonymous.PostAsJsonAsync(path, SecretBody(path, "T_CTRL_AUTH"));
-        Assert.Equal(HttpStatusCode.Forbidden, anonymousResponse.StatusCode);
-        Assert.Equal("operator_credential_required", await CodeAsync(anonymousResponse));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(anonymousResponse.Headers.WwwAuthenticate).ToString());
 
         using var loopback = _fixture.CreateOperatorClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, path)
@@ -138,8 +140,10 @@ public sealed class SlackControlPlaneSetupRoutesSpecs
     {
         using var anonymous = _fixture.CreateUnauthenticatedClient();
         using var anonymousResponse = await anonymous.GetAsync("/api/slack-manager/setup/progress?workspaceTeamId=T_CTRL_PROGRESS");
-        Assert.Equal(HttpStatusCode.Forbidden, anonymousResponse.StatusCode);
-        Assert.Equal("operator_credential_required", await CodeAsync(anonymousResponse));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(anonymousResponse.Headers.WwwAuthenticate).ToString());
 
         using var client = _fixture.CreateOperatorClient();
         using var unknown = await client.GetAsync("/api/slack-manager/setup/progress?workspaceTeamId=T_CTRL_UNKNOWN");

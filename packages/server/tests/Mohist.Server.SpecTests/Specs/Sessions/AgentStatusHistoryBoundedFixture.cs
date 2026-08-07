@@ -47,7 +47,7 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
             gatewayPort);
     }
 
-    public HttpClient Client => _factory.CreateClient();
+    public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public CountingWorkflowQuerier CountingWorkflowQuerier =>
         _factory.CountingWorkflowQuerier
@@ -58,6 +58,8 @@ public sealed class AgentStatusHistoryBoundedFixture : IAsyncLifetime
     {
         _keeper = new SqliteConnection(_connectionString);
         await _keeper.OpenAsync();
+        Client = _factory.CreateClient();
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
     }
 

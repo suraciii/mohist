@@ -88,8 +88,10 @@ public sealed class SlackControlPlaneInstallAgentRoutesSpecs
 
         using var anonymous = _fixture.CreateUnauthenticatedClient();
         using var anonymousResponse = await anonymous.PostAsJsonAsync(path, body);
-        Assert.Equal(HttpStatusCode.Forbidden, anonymousResponse.StatusCode);
-        Assert.Equal("operator_credential_required", await CodeAsync(anonymousResponse));
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymousResponse.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(anonymousResponse.Headers.WwwAuthenticate).ToString());
 
         using var loopback = _fixture.CreateOperatorClient();
         using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonContent.Create(body) };

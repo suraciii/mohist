@@ -111,6 +111,7 @@ public sealed class SlackControlPlaneRoutesFixture : IAsyncLifetime
     public HttpClient CreateOperatorClient()
     {
         var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
         return client;
     }

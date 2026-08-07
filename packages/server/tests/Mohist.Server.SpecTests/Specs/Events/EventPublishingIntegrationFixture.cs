@@ -42,7 +42,7 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
     }
 
     public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
-    public HttpClient Client => _factory.CreateClient();
+    public HttpClient Client { get; private set; } = null!;
     public IServiceProvider Services => _factory.Services;
     public RecordingIEventPublisher RecordingPublisher => _factory.RecordingPublisher;
     public RecordingTranscriptEventPublisher RecordingTranscriptPublisher => _factory.RecordingTranscriptPublisher;
@@ -56,6 +56,8 @@ public sealed class EventPublishingIntegrationFixture : IAsyncLifetime
         // and our test's queries. Mirrors MohistIntegrationFixture.
         _keeper = new SqliteConnection(_connectionString);
         await _keeper.OpenAsync();
+        Client = _factory.CreateClient();
+        Client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         await _factory.EnsureSchemaAsync();
     }
 

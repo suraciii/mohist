@@ -154,6 +154,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     public HttpClient CreateOperatorClient(string operatorId)
     {
         var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
         client.DefaultRequestHeaders.Add(SlackAdapterOperatorAuthenticator.OperatorIdHeaderName, operatorId);
         return client;
@@ -162,6 +163,7 @@ public sealed class SlackAdapterLeaseRoutesFixture : IAsyncLifetime
     public HttpClient CreateTokenOnlyClient()
     {
         var client = Factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Authorization", $"Bearer {MohistIntegrationFixture.OperatorToken}");
         client.DefaultRequestHeaders.Add(OperatorCredential.HeaderName, MohistIntegrationFixture.OperatorToken);
         return client;
     }
