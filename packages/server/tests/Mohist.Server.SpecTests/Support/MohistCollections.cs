@@ -80,6 +80,9 @@ public class GitHubFeedCollection : ICollectionFixture<GitHubFeedFixture>;
 [CollectionDefinition("IntegrationMisc")]
 public class IntegrationMiscCollection : ICollectionFixture<MohistIntegrationFixture>;
 
+[CollectionDefinition("RunnerEnrollment")]
+public class RunnerEnrollmentCollection : ICollectionFixture<MohistIntegrationFixture>;
+
 // OTLP/query route specs share one OtlpRoutesWebApplicationFactory (web host
 // + silo, TestClusterPortAllocator-assigned ports). Tests reset the otel
 // tables and collector status via OtlpRoutesHostFixture.ResetOtelStateAsync
