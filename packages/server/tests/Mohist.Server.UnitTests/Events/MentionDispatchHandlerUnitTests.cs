@@ -102,18 +102,18 @@ public class MentionDispatchHandlerUnitTests
     [Fact]
     public void IsAuthoredByActiveAgent_ReturnsFalseForEmptyAuthor()
     {
-        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("", []));
-        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("   ", []));
+        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("", null, []));
+        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("   ", "   ", []));
     }
 
     [Fact]
     public void IsAuthoredByActiveAgent_ReturnsFalseForEmptyAgentList()
     {
-        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("supervisor", []));
+        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("supervisor", null, []));
     }
 
     [Fact]
-    public void IsAuthoredByActiveAgent_MatchesCaseInsensitively()
+    public void IsAuthoredByActiveAgent_MatchesNameAndPrincipalId()
     {
         var agents = new[]
         {
@@ -121,11 +121,16 @@ public class MentionDispatchHandlerUnitTests
             NewAgentInfo("agent_2", "coder"),
         };
 
-        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("supervisor", agents));
-        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("SuperVisor", agents));
-        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("SUPERVISOR", agents));
-        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("coder", agents));
-        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("reviewer", agents));
+        // Display alias matches the agent name case-insensitively.
+        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("admin", "supervisor", agents));
+        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("admin", "SuperVisor", agents));
+        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("admin", "SUPERVISOR", agents));
+        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("admin", "coder", agents));
+        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("admin", "reviewer", agents));
+        // The actor is the agent principal id (agent id), matching even
+        // without a display alias.
+        Assert.True(MentionDispatchHandler.IsAuthoredByActiveAgent("agent_1", null, agents));
+        Assert.False(MentionDispatchHandler.IsAuthoredByActiveAgent("service", null, agents));
     }
 
     [Fact]

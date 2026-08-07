@@ -83,7 +83,7 @@ public class AttachmentApiSpecs
 
         var commentResponse = await _fixture.Client.PostDataAsync<JsonElement>(
             $"/api/projects/{projectId}/issues/{issueNumber}/comments",
-            new { author = "Attachment tester", body = $"see [vector](att:{upload.Id})", attachmentIds = new[] { upload.Id } });
+            new { displayName = "Attachment tester", body = $"see [vector](att:{upload.Id})", attachmentIds = new[] { upload.Id } });
         var commentId = commentResponse.GetProperty("id").GetString()!;
 
         using var response = await _fixture.Client.GetAsync(
@@ -135,7 +135,7 @@ public class AttachmentApiSpecs
 
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/comments",
-            new { author = "Attachment tester", body = "dangling [file](att:att_missing)", attachmentIds = new[] { "att_missing" } });
+            new { displayName = "Attachment tester", body = "dangling [file](att:att_missing)", attachmentIds = new[] { "att_missing" } });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
         var issue = await _fixture.Client.GetDataAsync<JsonElement>($"/api/projects/{projectId}/issues/{issueNumber}");
