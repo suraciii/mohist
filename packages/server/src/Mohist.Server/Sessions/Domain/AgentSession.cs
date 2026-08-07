@@ -364,6 +364,13 @@ public sealed record AgentSessionMetadata(
     private const string SessionNameKey = "mohist.io/session-name";
     private const string AgentIdKey = "mohist.io/agent-id";
 
+    /// <summary>
+    /// Optional binding of the session to a named Workspace. Binding is
+    /// orthogonal to source-kind and never required; absence means the
+    /// session runs in the runner's default working directory.
+    /// </summary>
+    public const string WorkspaceNameKey = "mohist.io/workspace-name";
+
     private static bool IsSourceLabel(string key) =>
         key is ProjectIdKey or SourceKindKey or WorkflowRunIdKey or SessionNameKey or AgentIdKey;
 

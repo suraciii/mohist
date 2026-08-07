@@ -1,3 +1,5 @@
+using Mohist.Server.Sessions.Domain;
+
 namespace Mohist.Server.Sessions.Services;
 
 public static class AgentSessionQueryMetadataKeys
@@ -17,4 +19,6 @@ public static class AgentSessionQueryMetadataKeys
     public const string SlackUserId = "mohist.io/slack-user-id";
     public const string SlackConversationId = "mohist.io/slack-conversation-id";
     public const string SlackThreadTs = "mohist.io/slack-thread-ts";
+
+    public const string WorkspaceName = AgentSessionMetadata.WorkspaceNameKey;
 }

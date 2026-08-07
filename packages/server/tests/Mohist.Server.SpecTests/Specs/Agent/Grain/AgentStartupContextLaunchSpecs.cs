@@ -289,6 +289,7 @@ public sealed class AgentStartupContextLaunchSpecs : AgentJobGrainTestSupport
             Variant: null,
             Runtime: "opencode",
             Prompt: "summarize",
+            WorkspaceName: null,
             WorkspacePath: null,
             IssueNumber: null,
             EpicNumber: null,

@@ -136,6 +136,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 Variant: command.Variant,
                 Runtime: command.Runtime,
                 Prompt: command.Prompt,
+                WorkspaceName: command.WorkspaceName,
                 WorkspacePath: command.WorkspacePath,
                 IssueNumber: command.IssueNumber,
                 EpicNumber: command.EpicNumber,
@@ -159,7 +160,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 SpawnRequestFingerprint: command.SpawnRequestFingerprint,
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
                 WorkspaceMode: command.WorkspaceMode,
-                WorkspaceRepository: command.WorkspaceRepository);
+                WorkspaceRepository: command.WorkspaceRepository,
+                WorkspaceRepositories: command.WorkspaceRepositories);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -516,6 +518,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             TurnId: plan.TurnId,
             Prompt: plan.Prompt,
             Model: plan.Model,
+            WorkspaceName: plan.WorkspaceName,
             WorkspacePath: plan.WorkspacePath,
             ProjectId: plan.ProjectId,
             Runtime: plan.Runtime,
@@ -532,7 +535,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AllowedSubagents: plan.AllowedSubagents,
             PinnedRunnerId: plan.PinnedRunnerId,
             AgentSessionStartup: plan.AgentSessionStartup,
-            SpawnOrigin: SpawnOriginFor(plan)));
+            SpawnOrigin: SpawnOriginFor(plan),
+            WorkspaceRepositories: plan.WorkspaceRepositories));
         await _participantProbe.OnPrepareJobAsync(plan.JobKey, commandId);
 
         _state.State.Plan = plan with
@@ -713,6 +717,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         var childWorkDirLabel = EffectiveChildWorkDir(plan);
         if (!string.IsNullOrWhiteSpace(childWorkDirLabel))
             labels[GenericAgentSessionMetadata.WorkspacePath] = childWorkDirLabel!;
+        if (!string.IsNullOrWhiteSpace(plan.WorkspaceName))
+            labels[GenericAgentSessionMetadata.WorkspaceName] = plan.WorkspaceName!;
         if (!string.IsNullOrWhiteSpace(plan.Repository))
             labels[GenericAgentSessionMetadata.Repository] = plan.Repository!;
         if (plan.ConnectionOrigin is { } origin)
@@ -1192,4 +1198,6 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(32)] string? SpawnRequestFingerprint = null,
     [property: Id(33)] long? ParentExpectedBindingEpoch = null,
     [property: Id(34)] WorkspaceMode? WorkspaceMode = null,
-    [property: Id(35)] WorkspaceRepositorySnapshot? WorkspaceRepository = null);
+    [property: Id(35)] WorkspaceRepositorySnapshot? WorkspaceRepository = null,
+    [property: Id(36)] string? WorkspaceName = null,
+    [property: Id(37)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);

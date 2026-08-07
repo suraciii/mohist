@@ -32,6 +32,7 @@ public class AgentSessionRow
     public string? LabelAgentLaunchEpicNumber { get; set; }
     public string? LabelAgentLaunchRepository { get; set; }
     public string? LabelAgentLaunchWorkspacePath { get; set; }
+    public string? LabelWorkspaceName { get; set; }
 
     public string? LabelTriggerEventId { get; set; }
     public string? LabelTriggerRuleId { get; set; }

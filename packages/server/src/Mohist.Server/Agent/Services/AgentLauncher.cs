@@ -115,6 +115,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var jobInput = new AgentJobInput(
             Prompt: trimmedPrompt,
             Model: definition.Model,
+            WorkspaceName: context.WorkspaceName,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
             Runtime: definition.Runtime,
@@ -275,6 +276,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Variant: resolvedVariant,
             Runtime: resolvedRuntime,
             Prompt: request.ExactPromptFingerprint ? prompt! : trimmedPrompt,
+            WorkspaceName: context.WorkspaceName,
             WorkspacePath: context.WorkspacePath,
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
@@ -310,7 +312,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
             WorkspaceMode: workspaceMode,
-            WorkspaceRepository: workspaceRepository));
+            WorkspaceRepository: workspaceRepository,
+            WorkspaceRepositories: request.WorkspaceRepositories));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -442,6 +445,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Variant: resolvedVariant,
             Runtime: resolvedRuntime,
             Prompt: trimmedPrompt,
+            WorkspaceName: null,
             WorkspacePath: null,
             IssueNumber: null,
             EpicNumber: null,
@@ -669,6 +673,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var jobInput = new AgentJobInput(
             Prompt: trimmedPrompt,
             Model: definition.Model,
+            WorkspaceName: context.WorkspaceName,
             WorkspacePath: context.WorkspacePath,
             ProjectId: context.ProjectId,
             Runtime: definition.Runtime,
@@ -701,6 +706,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             IssueNumber: context.IssueNumber,
             EpicNumber: context.EpicNumber,
             Repository: context.Repository,
+            WorkspaceName: context.WorkspaceName,
             WorkspacePath: context.WorkspacePath,
             Title: context.Title);
 

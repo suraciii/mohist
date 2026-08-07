@@ -10,7 +10,7 @@ namespace Mohist.Server.UnitTests.Sessions;
 /// Issue-327 T-002 / design D4: locks in the consolidated
 /// <see cref="AgentSessionContextRefs.TryBuild"/> parser — the single
 /// construction site for the four-label context-reference envelope
-/// (issue-number / epic-number / repository / workspace-path) with the
+/// (issue-number / epic-number / repository / workspace-name) with the
 /// null-when-all-empty invariant previously duplicated in
 /// <see cref="AgentSessionQuerier.BuildAgentSessionListContextRefs"/>
 /// and
@@ -33,7 +33,7 @@ public sealed class AgentSessionContextRefsTests
         Assert.Equal(42, result!.Value.IssueNumber);
         Assert.Equal(7, result.Value.EpicNumber);
         Assert.Equal("owner/repo", result.Value.Repository);
-        Assert.Equal("/work/agent", result.Value.WorkspacePath);
+        Assert.Equal("/work/agent", result.Value.WorkspaceName);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class AgentSessionContextRefsTests
         Assert.Null(result!.Value.IssueNumber);
         Assert.Equal(7, result.Value.EpicNumber);
         Assert.Equal("owner/repo", result.Value.Repository);
-        Assert.Equal("/work", result.Value.WorkspacePath);
+        Assert.Equal("/work", result.Value.WorkspaceName);
     }
 
     [Fact]
@@ -61,7 +61,7 @@ public sealed class AgentSessionContextRefsTests
         Assert.Null(result!.Value.IssueNumber);
         Assert.Equal(9, result.Value.EpicNumber);
         Assert.Null(result.Value.Repository);
-        Assert.Null(result.Value.WorkspacePath);
+        Assert.Null(result.Value.WorkspaceName);
     }
 
     [Fact]
@@ -107,7 +107,7 @@ public sealed class AgentSessionContextRefsTests
         Assert.Equal(11, result!.Value.IssueNumber);
         Assert.Equal(3, result.Value.EpicNumber);
         Assert.Equal("owner/metarepo", result.Value.Repository);
-        Assert.Equal("/work/meta", result.Value.WorkspacePath);
+        Assert.Equal("/work/meta", result.Value.WorkspaceName);
     }
 
     [Fact]
@@ -131,13 +131,13 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
         Assert.Equal(7, dto.EpicNumber);
         Assert.Equal("owner/repo", dto.Repository);
-        Assert.Equal("/work/agent", dto.WorkspacePath);
+        Assert.Equal("/work/agent", dto.WorkspaceName);
     }
 
     [Fact]
@@ -148,13 +148,13 @@ public sealed class AgentSessionContextRefsTests
         var refs = AgentSessionContextRefs.TryBuild(record);
         var dto = refs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(refs.Value.IssueNumber, refs.Value.EpicNumber, refs.Value.Repository, refs.Value.WorkspaceName, refs.Value.WorkspacePath);
 
         Assert.NotNull(dto);
         Assert.Equal(42, dto!.IssueNumber);
         Assert.Equal(7, dto.EpicNumber);
         Assert.Equal("owner/repo", dto.Repository);
-        Assert.Equal("/work/agent", dto.WorkspacePath);
+        Assert.Equal("/work/agent", dto.WorkspaceName);
     }
 
     [Fact]
@@ -165,12 +165,12 @@ public sealed class AgentSessionContextRefsTests
         var listRefs = AgentSessionContextRefs.TryBuild(record);
         var listDto = listRefs is null
             ? null
-            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspacePath);
+            : new AgentSessionListContextRefsDto(listRefs.Value.IssueNumber, listRefs.Value.EpicNumber, listRefs.Value.Repository, listRefs.Value.WorkspaceName, listRefs.Value.WorkspacePath);
 
         var summaryRefs = AgentSessionContextRefs.TryBuild(record);
         var summaryDto = summaryRefs is null
             ? null
-            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspacePath);
+            : new GenericAgentSessionSummaryContextRefsDto(summaryRefs.Value.IssueNumber, summaryRefs.Value.EpicNumber, summaryRefs.Value.Repository, summaryRefs.Value.WorkspaceName, summaryRefs.Value.WorkspacePath);
 
         Assert.Null(listDto);
         Assert.Null(summaryDto);
@@ -186,7 +186,7 @@ public sealed class AgentSessionContextRefsTests
         if (issueNumber is not null) labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber;
         if (epic is not null) labels[GenericAgentSessionMetadata.EpicNumber] = epic;
         if (repo is not null) labels[GenericAgentSessionMetadata.Repository] = repo;
-        if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspacePath] = workspace;
+        if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspaceName] = workspace;
         return new AgentSessionRecord(
             new AgentSessionRow(),
             new AgentSession { Id = "s_test", Runtime = new AgentSessionRuntime("r", null) },
@@ -203,7 +203,7 @@ public sealed class AgentSessionContextRefsTests
         if (issueNumber is not null) labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber;
         if (epic is not null) labels[GenericAgentSessionMetadata.EpicNumber] = epic;
         if (repo is not null) labels[GenericAgentSessionMetadata.Repository] = repo;
-        if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspacePath] = workspace;
+        if (workspace is not null) labels[GenericAgentSessionMetadata.WorkspaceName] = workspace;
         return new AgentSessionRecord(
             new AgentSessionRow(),
             new AgentSession

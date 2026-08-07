@@ -3,6 +3,7 @@ import type { CleanupPolicy, DispatchWorkItem, JsonObject, RunnerConfigResponse,
 import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 import type { TaskLogBatch } from "../runtime/task-log.js"
+import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -383,6 +384,72 @@ export class ServerConnection {
     return parseAgentWorkspaceActivity(payload)
   }
 
+  /**
+   * Reports a materialized named workspace directory to the server
+   * (`POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`).
+   * The server records the workspace home (first writer wins); a 409
+   * `workspace_home_claimed` answer throws {@link WorkspaceHomeClaimedError}
+   * so the dispatching runner can yield its local directory and fail the
+   * dispatch (the job retries against the home runner).
+   */
+  async reportWorkspaceMaterialized(
+    projectId: string,
+    workspaceName: string,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceMaterializedReport> {
+    const response = await fetch(
+      this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/materialized`),
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path }), signal },
+    )
+    if (!response.ok) {
+      const text = await response.text()
+      let code: string | null = null
+      try {
+        const payload = JSON.parse(text) as unknown
+        if (payload && typeof payload === "object") {
+          const candidate = (payload as { code?: unknown }).code
+          if (typeof candidate === "string") code = candidate
+        }
+      } catch {
+        // non-JSON error body; the status still explains the failure
+      }
+      if (code === "workspace_home_claimed") {
+        throw new WorkspaceHomeClaimedError(
+          `workspace materialization rejected: workspace is already materialized on another runner (${response.status})`,
+        )
+      }
+      throw new Error(`workspace materialization failed: ${response.status} ${text}`)
+    }
+    return response.json() as Promise<WorkspaceMaterializedReport>
+  }
+
+  /**
+   * Runner-scoped lifecycle observation for the named-workspace cleanup
+   * guard (`GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`).
+   * The server is the lifecycle referee: the runner cannot know archive
+   * state or bound-session activity locally, so each active entry is
+   * probed against this endpoint before it may be promoted to eligible.
+   */
+  async getWorkspaceReclaimability(
+    projectId: string,
+    workspaceName: string,
+    signal: AbortSignal,
+  ): Promise<WorkspaceReclaimability> {
+    const response = await fetch(
+      this.url(`workspaces/${encodeURIComponent(projectId)}/${encodeURIComponent(workspaceName)}/reclaimable`),
+      { method: "GET", signal },
+    )
+    if (!response.ok) throw new Error(`workspace reclaimability failed: ${response.status} ${await response.text()}`)
+    let payload: unknown
+    try {
+      payload = await response.json()
+    } catch {
+      throw new Error("workspace reclaimability returned malformed JSON")
+    }
+    return parseWorkspaceReclaimability(payload)
+  }
+
   async openAgentSession(projectId: string, sessionId: string, body: unknown, signal: AbortSignal): Promise<AgentSession> {
     const response = await fetch(this.url(`agent-sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(sessionId)}/open`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`agent session open failed: ${response.status} ${await response.text()}`)
@@ -622,6 +689,42 @@ export function parseAgentWorkspaceActivity(payload: unknown): AgentWorkspaceAct
   }
   return { state: state as AgentWorkspaceActivity["state"], idleSince: readString(payload, ["idleSince"]) }
 }
+
+/**
+ * Answer shape for
+ * `POST /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/materialized`.
+ * `runnerId` is the workspace home runner recorded by the server (this
+ * runner on success).
+ */
+export interface WorkspaceMaterializedReport {
+  readonly runnerId: string
+  readonly path: string
+}
+
+/**
+ * Answer shape for
+ * `GET /api/runner/{runnerId}/workspaces/{projectId}/{workspaceName}/reclaimable`.
+ * `status` is the Workspace entity lifecycle status; `activeBoundSessions`
+ * counts sessions currently bound to and actively using the workspace.
+ */
+export interface WorkspaceReclaimability {
+  readonly status: "active" | "archived"
+  readonly activeBoundSessions: number
+}
+
+export function parseWorkspaceReclaimability(payload: unknown): WorkspaceReclaimability {
+  if (!isObjectRecord(payload)) throw new Error("workspace reclaimability returned a malformed response")
+  const status = readString(payload, ["status"])
+  if (status !== "active" && status !== "archived") {
+    throw new Error("workspace reclaimability returned an unknown status")
+  }
+  const count = readNumber(payload, ["activeBoundSessions"])
+  if (count === null || !Number.isInteger(count) || count < 0) {
+    throw new Error("workspace reclaimability returned an invalid session count")
+  }
+  return { status, activeBoundSessions: count }
+}
+
 
 function extractErrorMessage(payload: Record<string, unknown> | null, fallback: string) {
   if (!payload) return null

@@ -256,7 +256,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: AgentId, issue: null, run: null, limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: AgentId, issue: null, run: null, workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var data = await OkDataAsync(result);
         var items = data.EnumerateArray().ToList();
@@ -276,7 +276,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: "agent_missing", issue: null, run: null, limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: "agent_missing", issue: null, run: null, workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         await AssertNotFoundAsync(result, "agent_missing");
     }
@@ -289,7 +289,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: null, issue: WorkflowIssueNumber, run: null, limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: null, issue: WorkflowIssueNumber, run: null, workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var data = await OkDataAsync(result);
         var items = data.EnumerateArray().ToList();
@@ -310,7 +310,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: null, issue: null, run: WorkflowRunId, limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: null, issue: null, run: WorkflowRunId, workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var data = await OkDataAsync(result);
         var item = Assert.Single(data.EnumerateArray());
@@ -327,7 +327,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: null, issue: null, run: "wr-other-project", limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: null, issue: null, run: "wr-other-project", workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var data = await OkDataAsync(result);
         Assert.Equal(0, data.GetArrayLength());
@@ -341,7 +341,7 @@ public class UnifiedSessionRoutesSpecs
         var agentQuerier = new AgentQuerier(db.Factory);
 
         var result = await UnifiedSessionRoutes.HandleListAsync(
-            ProjectAInfo, agent: null, issue: null, run: null, limit: null, agentQuerier, querier, CancellationToken.None);
+            ProjectAInfo, agent: null, issue: null, run: null, workspace: null, limit: null, agentQuerier, querier, CancellationToken.None);
 
         var (body, status) = await ExecuteAsync(result);
         Assert.Equal(400, status);

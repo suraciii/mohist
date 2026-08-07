@@ -43,7 +43,7 @@ public interface IAgentLauncher
     /// </param>
     /// <param name="context">
     /// Launch context carrying the project id and any optional context
-    /// references (issue, epic, repository, workspace path) that are
+    /// references (issue, epic, repository, workspace name) that are
     /// recorded as generic-session labels/annotations.
     /// </param>
     /// <param name="triggerLabels">
@@ -233,6 +233,7 @@ public sealed record AgentLaunchContext(
     int? EpicNumber = null,
     string? Repository = null,
     string? WorkspacePath = null,
+    string? WorkspaceName = null,
     string? Title = null,
     /// <summary>
     /// Resolved Project Repository snapshot for an explicit

@@ -51,7 +51,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionScheduleList or
             MohistCliApi.TableShape.OtelTracesList or
             MohistCliApi.TableShape.WebhookSubscriptionList or
-            MohistCliApi.TableShape.WebhookDeliveryFailureList => ResourceCardinality.Collection,
+            MohistCliApi.TableShape.WebhookDeliveryFailureList or
+            MohistCliApi.TableShape.WorkspaceList => ResourceCardinality.Collection,
             _ => ResourceCardinality.Single,
         };
 
@@ -121,6 +122,9 @@ internal static class ResourceOutputCatalog
                 ["id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookDeliveryFailureList =>
                 ["id", "projectId", "subscriptionId", "eventId", "eventType", "targetUrl", "responseStatus", "durationMs", "errorSummary", "occurredAt"],
+            MohistCliApi.TableShape.WorkspaceList or
+            MohistCliApi.TableShape.WorkspaceShow =>
+                ["projectId", "name", "origin", "repositories", "status", "home", "createdAt", "archivedAt", "sessions"],
             MohistCliApi.TableShape.DeadLetterList => ["id", "origin", "sourceId", "source", "eventId", "type", "time", "subject", "dataContentType", "data", "extensions", "handler", "error", "attempts", "deadLetteredAt", "status", "redeliveryAttemptedAt"],
             MohistCliApi.TableShape.DeadLetterRedelivery => ["id", "delivered", "attempts", "error"],
             MohistCliApi.TableShape.ActivityList => ["id", "provenance", "scope", "kind", "time", "title", "description", "eventType", "issueNumber", "workflowRunId", "sessionId", "runnerId", "status"],

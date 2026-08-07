@@ -137,7 +137,7 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
                 IssueNumber: issueContext.IssueNumber,
                 EpicNumber: issueContext.EpicNumber,
                 Repository: null,
-                WorkspacePath: null,
+                WorkspaceName: null,
                 Title: null);
 
             await launcher.LaunchMentionAsync(

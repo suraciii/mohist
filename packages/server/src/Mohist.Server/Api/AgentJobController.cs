@@ -75,8 +75,10 @@ public static class AgentJobController
             errors.Add("prompt is required");
         if (string.IsNullOrWhiteSpace(body.AgentId))
             errors.Add("agentId is required");
-        if (body.Workspace is not null && string.IsNullOrWhiteSpace(body.Workspace.Path))
-            errors.Add("workspace.path is required when workspace is provided");
+        if (body.Workspace is not null
+            && string.IsNullOrWhiteSpace(body.Workspace.Name)
+            && string.IsNullOrWhiteSpace(body.Workspace.Path))
+            errors.Add("workspace.name or workspace.path is required when workspace is provided");
         if (body.JobId is { Length: > 0 } && !IsValidJobId(body.JobId))
             errors.Add("jobId is invalid (max 128 chars, [A-Za-z0-9_.-]+ only)");
 
@@ -111,6 +113,7 @@ public static class AgentJobController
         var input = new AgentJobInput(
             Prompt: body.Prompt!.Trim(),
             Model: string.IsNullOrWhiteSpace(body.Model) ? null : body.Model.Trim(),
+            WorkspaceName: body.Workspace?.Name,
             WorkspacePath: body.Workspace?.Path,
             ProjectId: body.Workspace?.ProjectId,
             AgentId: body.AgentId!.Trim());
@@ -231,6 +234,7 @@ public sealed record AgentJobValidationRequest
 
 public sealed record AgentJobValidationWorkspace
 {
+    public string? Name { get; init; }
     public string? Path { get; init; }
     public string? ProjectId { get; init; }
 }
