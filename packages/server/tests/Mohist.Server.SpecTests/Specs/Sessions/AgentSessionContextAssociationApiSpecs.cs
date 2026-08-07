@@ -1,22 +1,19 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
-using Mohist.Server.Infrastructure.Orleans;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Data.Sessions;
-using Mohist.Server.Issue.Grains;
-using Mohist.Server.Project.Grains;
-using Mohist.Server.Project.Services;
-using Mohist.Server.Sessions.Domain;
-using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
-using Mohist.Server.TestSupport;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
+/// <summary>
+/// Route contract for the issue/epic → agent-session association
+/// endpoints (<c>GET /api/projects/{projectRef}/issues/{n}/agent-sessions</c>
+/// and <c>GET .../epics/{n}/agent-sessions</c>). The lookup rules
+/// (issue-number label match, epic-number label match, project
+/// scoping, agent-launch source filter) live in
+/// <c>IssueSessionAssociationQuerierSpecs</c>.
+/// </summary>
 [Collection("IntegrationSessions")]
 public class AgentSessionContextAssociationApiSpecs
 {
@@ -30,41 +27,13 @@ public class AgentSessionContextAssociationApiSpecs
     }
 
     [Fact]
-    public async Task IssueAssociation_ReturnsSessionsReferencingThatIssue()
-    {
-        var project = await CreateProjectAsync("issue-assoc");
-        var agentId = "agent_issueAssoc";
-        var agentName = "issue-assoc-agent";
-        var sessionId = $"sess-{Guid.NewGuid():N}";
-
-        var issueInfo = await CreateIssueAsync(project, "Issue for agent session");
-
-        await InsertGenericSessionWithContextAsync(project, sessionId, agentId, agentName,
-            issueNumber: issueInfo.Number.ToString());
-
-        var result = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/issues/{issueInfo.Number}/agent-sessions");
-
-        var items = result.EnumerateArray().ToList();
-        Assert.Single(items);
-        var entry = items[0];
-        Assert.Equal(sessionId, entry.GetProperty("sessionId").GetString());
-        Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
-        Assert.NotNull(entry.GetProperty("activity").GetString());
-        Assert.NotNull(entry.GetProperty("createdAt").GetString());
-        Assert.NotNull(entry.GetProperty("sessionLink").GetString());
-        Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);
-    }
-
-    [Fact]
     public async Task IssueAssociation_EmptyList_Returns200WithEmptyArray()
     {
-        var project = await CreateProjectAsync("issue-empty");
-        var issueInfo = await CreateIssueAsync(project, "Empty issue");
+        var project = await CreateProjectAsync($"issue-empty-{Guid.NewGuid():N}");
+        var issueNumber = await CreateIssueAsync(project, "Empty issue");
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project}/issues/{issueInfo.Number}/agent-sessions");
+            $"/api/projects/{project}/issues/{issueNumber}/agent-sessions");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -75,7 +44,7 @@ public class AgentSessionContextAssociationApiSpecs
     [Fact]
     public async Task IssueAssociation_UnknownIssueNumber_Returns404()
     {
-        var project = await CreateProjectAsync("issue-404");
+        var project = await CreateProjectAsync($"issue-404-{Guid.NewGuid():N}");
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project}/issues/9999/agent-sessions");
@@ -84,41 +53,13 @@ public class AgentSessionContextAssociationApiSpecs
     }
 
     [Fact]
-    public async Task EpicAssociation_ReturnsSessionsReferencingThatEpic()
-    {
-        var project = await CreateProjectAsync("epic-assoc");
-        var agentId = "agent_epicAssoc";
-        var agentName = "epic-assoc-agent";
-        var sessionId = $"sess-{Guid.NewGuid():N}";
-
-        var epic = await CreateEpicAsync(project, "Epic for agent session");
-
-        await InsertGenericSessionWithContextAsync(project, sessionId, agentId, agentName,
-            epicNumber: epic.Number.ToString());
-
-        var result = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
-
-        var items = result.EnumerateArray().ToList();
-        Assert.Single(items);
-        var entry = items[0];
-        Assert.Equal(sessionId, entry.GetProperty("sessionId").GetString());
-        Assert.Equal(agentId, entry.GetProperty("agentId").GetString());
-        Assert.Equal(agentName, entry.GetProperty("agentName").GetString());
-        Assert.NotNull(entry.GetProperty("activity").GetString());
-        Assert.NotNull(entry.GetProperty("createdAt").GetString());
-        Assert.NotNull(entry.GetProperty("sessionLink").GetString());
-        Assert.Contains(sessionId, entry.GetProperty("sessionLink").GetString()!);
-    }
-
-    [Fact]
     public async Task EpicAssociation_EmptyList_Returns200WithEmptyArray()
     {
-        var project = await CreateProjectAsync("epic-empty");
+        var project = await CreateProjectAsync($"epic-empty-{Guid.NewGuid():N}");
         var epic = await CreateEpicAsync(project, "Empty epic");
 
         using var response = await _client.GetAsync(
-            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
+            $"/api/projects/{project}/epics/{epic}/agent-sessions");
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -127,30 +68,9 @@ public class AgentSessionContextAssociationApiSpecs
     }
 
     [Fact]
-    public async Task EpicAssociation_ByEpicNumber_ResolvesCorrectly()
-    {
-        var project = await CreateProjectAsync("epic-by-id");
-        var agentId = "agent_epicById";
-        var agentName = "epic-by-id-agent";
-        var sessionId = $"sess-{Guid.NewGuid():N}";
-
-        var epic = await CreateEpicAsync(project, "Epic by number");
-
-        await InsertGenericSessionWithContextAsync(project, sessionId, agentId, agentName,
-            epicNumber: epic.Number.ToString());
-
-        var result = await _client.GetDataAsync<JsonElement>(
-            $"/api/projects/{project}/epics/{epic.Number}/agent-sessions");
-
-        var items = result.EnumerateArray().ToList();
-        Assert.Single(items);
-        Assert.Equal(sessionId, items[0].GetProperty("sessionId").GetString());
-    }
-
-    [Fact]
     public async Task EpicAssociation_UnknownEpicRef_Returns404()
     {
-        var project = await CreateProjectAsync("epic-404");
+        var project = await CreateProjectAsync($"epic-404-{Guid.NewGuid():N}");
 
         using var response = await _client.GetAsync(
             $"/api/projects/{project}/epics/9999/agent-sessions");
@@ -158,89 +78,34 @@ public class AgentSessionContextAssociationApiSpecs
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
     }
 
-    private async Task InsertGenericSessionWithContextAsync(
-        string projectId,
-        string sessionId,
-        string agentId,
-        string agentName,
-        string? issueNumber = null,
-        string? epicNumber = null)
+    private async Task<int> CreateIssueAsync(string projectId, string title)
     {
-        var labels = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
-            [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
-            [GenericAgentSessionMetadata.AgentId] = agentId,
-            [GenericAgentSessionMetadata.AgentName] = agentName,
-        };
-        if (issueNumber is not null)
-            labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber;
-        if (epicNumber is not null)
-            labels[GenericAgentSessionMetadata.EpicNumber] = epicNumber;
-
-        var createdAt = TestTime.UtcDateTime;
-        var session = new AgentSession
-        {
-            Id = sessionId,
-            Runtime = new AgentSessionRuntime("test-runner", null),
-            Settings = new AgentSessionSettings("test-model"),
-            Status = new AgentSessionStatusSnapshot(
-                CreatedAt: createdAt,
-                AgentRuntimeSessionId: sessionId),
-            Metadata = new AgentSessionMetadata(labels),
-        };
-
-        await using var db = await _fixture.Services
-            .GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        db.AgentSessions.Add(new AgentSessionRow
-        {
-            Id = session.Id,
-            State = JsonSerializer.Serialize(session, AgentSessionJson.JsonOptions),
-            CreatedAt = createdAt,
-            Status = "opened",
-            AgentSessionId = sessionId,
-            RunnerId = "test-runner",
-        });
-        await db.SaveChangesAsync();
-    }
-
-    private async Task<string> CreateProjectAsync(string prefix)
-    {
-        var id = $"proj_{Guid.NewGuid():N}";
-        var projectGrain = _fixture.Grains.GetGrain<IProjectGrain>(id);
-        var raw = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
-        var name = raw.Length > 63 ? raw[..63] : raw;
-        var project = await projectGrain.CreateAsync(name, new Mohist.Server.Project.Domain.RepositoryInfo
-        {
-            Name = "placeholder",
-            GitUrl = "git@example.com:placeholder.git",
-            BaseBranch = "main",
-            IsDefault = true,
-        });
-        await projectGrain.AddRepositoryAsync("main", $"file://{Guid.NewGuid():N}", "main");
-        return project.Id;
-    }
-
-    private async Task<IssueInfo> CreateIssueAsync(string projectId, string title)
-    {
-        var number = await _fixture.Grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, number)));
+        var number = await _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueCounterGrain>(projectId).NextAsync();
+        var grain = _fixture.Grains.GetGrain<Mohist.Server.Issue.Grains.IIssueGrain>(
+            Mohist.Server.Infrastructure.Orleans.GrainKey.Issue(new Mohist.Server.Infrastructure.Orleans.IssueKey(projectId, number)));
         await grain.CreateAsync(projectId, number, title, body: null, labels: null, priority: null, repositoryRef: null, risk: null, isDraft: true);
-        return new IssueInfo(number);
+        return number;
     }
 
-    private async Task<EpicDto> CreateEpicAsync(string projectId, string title)
+    private async Task<int> CreateEpicAsync(string projectId, string title)
     {
         using var response = await _client.PostAsJsonAsync(
             $"/api/projects/{projectId}/epics",
             new { title, description = "test epic", priority = "p2" });
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
-        var data = body.GetProperty("data");
-        return new EpicDto(data.GetProperty("number").GetInt32());
+        return body.GetProperty("data").GetProperty("number").GetInt32();
     }
 
-    private sealed record IssueInfo(int Number);
-
-    private sealed record EpicDto(int Number);
+    private async Task<string> CreateProjectAsync(string name)
+    {
+        using var response = await _client.PostAsJsonAsync("/api/projects", new
+        {
+            name,
+            repository = new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main" },
+        });
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetProperty("id").GetString()!;
+    }
 }
