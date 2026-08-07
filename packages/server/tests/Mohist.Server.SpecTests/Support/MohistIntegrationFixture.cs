@@ -98,6 +98,52 @@ public class MohistIntegrationFixture : IAsyncLifetime
             Mohist.Server.Slack.Services.SlackAdapterOperatorAuthenticator.OperatorIdHeaderName,
             "spec-operator");
         await _factory.EnsureSchemaAsync();
+        await WarmUpWorkspaceCodegenAsync();
+    }
+
+    /// <summary>
+    /// Activates a WorkspaceGrain and round-trips a workspace through it so
+    /// Orleans serializer/codegen for the workspace types is paid during
+    /// fixture setup (unmeasured) instead of inside the first spec that
+    /// creates a workspace. The first workspace-touching test of a
+    /// collection used to absorb 1-10s of codegen under parallel load and
+    /// could exceed the per-test spec budget.
+    /// </summary>
+    private async Task WarmUpWorkspaceCodegenAsync()
+    {
+        try
+        {
+            await using var scope = Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var projectId = $"warmup-{Guid.NewGuid():N}";
+            db.Projects.Add(new Mohist.Server.Infrastructure.Data.Project.ProjectRow
+            {
+                Id = projectId,
+                Name = projectId,
+                CreatedAt = TimeProvider.GetUtcNow(),
+                UpdatedAt = TimeProvider.GetUtcNow(),
+            });
+            await db.SaveChangesAsync();
+            var name = $"warmup-{Guid.NewGuid():N}";
+            var origin = new Mohist.Server.Workspace.Domain.WorkspaceOrigin.Slack("T-warmup", "C-warmup");
+            var grain = Grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+                Mohist.Server.Infrastructure.Orleans.GrainKey.Workspace(projectId, name));
+            await grain.CreateAsync(name, origin, [], TimeProvider.GetUtcNow());
+            await grain.ArchiveByOriginAsync(origin, TimeProvider.GetUtcNow());
+            // Remove the scratch rows: spec classes share this fixture's
+            // database and some query project-wide state (e.g. repository
+            // data upgrades) that must not see warm-up artifacts.
+            db.WorkspaceEvents.RemoveRange(db.WorkspaceEvents
+                .Where(row => row.Source.StartsWith("/mohist/projects/" + projectId + "/workspaces/")));
+            db.Workspaces.RemoveRange(db.Workspaces
+                .Where(row => row.ProjectId == projectId));
+            db.Projects.Remove(db.Projects.Single(row => row.Id == projectId));
+            await db.SaveChangesAsync();
+        }
+        catch
+        {
+            // Warm-up is best-effort; specs must not depend on it.
+        }
     }
 
     public async ValueTask DisposeAsync()

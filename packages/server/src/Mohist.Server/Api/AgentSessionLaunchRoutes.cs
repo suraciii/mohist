@@ -12,6 +12,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
 
@@ -68,6 +69,8 @@ public static class AgentSessionLaunchRoutes
             IAgentLauncher launcher,
             AttachmentService attachments,
             IGrainFactory grains,
+            InteractionWorkspaceProvisioner provisioner,
+            TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             if (body is null)
@@ -244,13 +247,24 @@ public static class AgentSessionLaunchRoutes
                     });
             }
 
+            // Web conversations have no client-owned conversation id; the
+            // pre-minted session id is the stable conversation identity, so
+            // the first launch of a conversation creates and binds its
+            // workspace here (followups reuse the same session/workspace).
+            // An explicit caller-supplied workspace keeps its override
+            // semantics (the CLI-style explicit binding).
+            var workspaceName = body.Context?.Workspace?.Trim() is { Length: > 0 } explicitWorkspace
+                ? explicitWorkspace
+                : await provisioner.EnsureWebWorkspaceAsync(
+                    project.Id, preMintedSessionId, timeProvider.GetUtcNow());
+
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
                 IssueNumber: body.Context?.IssueNumber,
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 WorkspacePath: body.Context?.WorkspacePath,
-                WorkspaceName: body.Context?.Workspace,
+                WorkspaceName: workspaceName,
                 Title: null);
 
             AgentLaunchResult result;

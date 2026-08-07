@@ -376,7 +376,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         return await LaunchIdempotentCoreAsync(
             admission.TargetAgent,
             prompt,
-            new AgentLaunchContext(projectId, WorkspacePath: admission.WorkDir),
+            new AgentLaunchContext(
+                projectId,
+                WorkspaceName: admission.ParentWorkspaceName,
+                WorkspacePath: admission.WorkDir),
             idempotencyKey,
             request,
             ct: ct,
@@ -398,6 +401,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
+        string? workspaceName = null,
         AgentStartupContext? startupContext = null,
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
         IReadOnlyList<string>? attachmentIds = null,
@@ -430,7 +434,7 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Variant: resolvedVariant,
             Runtime: resolvedRuntime,
             Prompt: trimmedPrompt,
-            WorkspaceName: null,
+            WorkspaceName: workspaceName,
             WorkspacePath: null,
             IssueNumber: null,
             EpicNumber: null,

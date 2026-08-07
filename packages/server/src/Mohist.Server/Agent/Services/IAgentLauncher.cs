@@ -116,6 +116,7 @@ public interface IAgentLauncher
         AgentInfo agent,
         string prompt,
         ConnectionLaunchOrigin origin,
+        string? workspaceName = null,
         AgentStartupContext? startupContext = null,
         IReadOnlyList<AgentSessionInputAttachmentDescriptor>? attachments = null,
         IReadOnlyList<string>? attachmentIds = null,
