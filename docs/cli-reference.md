@@ -95,7 +95,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 |---|---|---|
 | Work | `project`、`repo`、`issue`、`epic`、`label` | 项目空间、工作项与组织关系 |
 | Automation | `workflow`、`run`、`agent`、`session`、`activity`、`routing` | 工作流定义与执行、Agent 工作、对话和项目活动 |
-| Operations | `runner`、`server`、`service`、`event`、`notification`、`otel` | 执行资源、Server、本机服务、事件投递与可观测性 |
+| Operations | `runner`、`server`、`service`、`event`、`notification`、`otel`、`auth` | 执行资源、Server、本机服务、事件投递、可观测性与身份凭据 |
 | Tools | `help`、`skill`、`install`、`update`、`info` | 帮助主题、Skill 和安装维护 |
 
 ### 核心命令组
@@ -122,9 +122,11 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | 命令组 | 规范动作 |
 |---|---|
 | `runner` | `list`、`view`、`status` |
+| `auth` | `login`、`logout`、`status`；`token list/create/revoke` |
 | `server` | `status`、`health`、`info`、`logs` |
 | `service` | `start`、`stop`、`restart`、`status`、`logs`、`uninstall`，target 为 `server`、`runner` 或 `slack` |
 | `event` | `tail`；`dead-letter list/redeliver` |
+| `github` | `connect`；`edit`（供料策略与审批者名单） |
 | `notification` | `setup` |
 | `slack` | `setup`、`status`、`install-agent`；`list`、`view`、`claim-owner`、`edit`、`transfer-owner`、`enable`、`disable`、`remove-binding`、`permanent-delete`；`message send`；`deliveries`、`resend-delivery`、`clear-gap`、`reconcile-create`、`reconcile-delete` |
 | `otel` | `status`、`query <sql>`、`traces`，`query` 经 Server 执行并支持 `--json <fields>` 字段选择 |
@@ -439,6 +441,8 @@ Mohist Skill 是短决策指南，不是第二份 CLI 参考。它只保留这�
 
 - `agent restore`；`agent create/edit` 类型化 `--runtime/--model/--variant/--avatar-file` 与
   Readiness 输出；`--agent-config` 透传入口退役。
+- `github` 命令组登记为 `connect`、`edit`（修改连接）；当前实装的修改动词为 `update`，
+  待按动词词表收敛为 `edit`。
 
 ### 已闭合
 

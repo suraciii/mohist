@@ -42,6 +42,7 @@
 ## 板块 6：部署与运维
 
 - [Self-host 部署](self-host.md) —— NAS / 家用服务器 / 笔记本长跑
+- [认证与访问](auth.md) —— 一个管理员加机器主体：本机零登录、CLI 设备授权登录、脚本令牌、Runner 注册与 Agent 归因
 - [Hermes 通知](hermes-notifications.md) —— 审批点、失败、完成推送到你的聊天工具
 - [故障恢复](troubleshooting.md) —— 失败、blocked、drift 怎么办
 
