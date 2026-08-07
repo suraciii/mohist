@@ -13,45 +13,6 @@ const options = {
 
 const signal = new AbortController().signal
 
-describe("ServerConnection agent workspace activity", () => {
-  afterEach(() => vi.restoreAllMocks())
-
-  it.each([
-    ["active", { state: "active" }, { state: "active", idleSince: null }],
-    ["idle with idleSince", { state: "idle", idleSince: "2026-01-02T00:00:00.000Z" }, { state: "idle", idleSince: "2026-01-02T00:00:00.000Z" }],
-    ["pending", { state: "pending" }, { state: "pending", idleSince: null }],
-    ["not-found", { state: "not-found" }, { state: "not-found", idleSince: null }],
-    ["unknown", { state: "unknown" }, { state: "unknown", idleSince: null }],
-  ] as const)("parses the %s answer", async (_label, payload, expected) => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } }))
-
-    const activity = await new ServerConnection(options).getAgentWorkspaceActivity("project-1", "child-1", signal)
-
-    expect(activity).toEqual(expected)
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("http://server/api/runner/runner-1/agent-workspaces/project-1/child-1/activity")
-    const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined
-    expect(init?.method).toBe("GET")
-  })
-
-  it.each([
-    [403, "a 403 authorization refusal", "agent workspace activity failed: 403"],
-    [500, "a server error", "agent workspace activity failed: 500"],
-  ])("throws on non-2xx (%s)", async (status, _label, message) => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("forbidden", { status }))
-    await expect(new ServerConnection(options).getAgentWorkspaceActivity("project-1", "child-1", signal)).rejects.toThrow(message)
-  })
-
-  it.each([
-    ["malformed JSON", "not-json", "malformed JSON"],
-    ["a non-object body", "[]", "malformed response"],
-    ["an unknown state", JSON.stringify({ state: "busy" }), "unknown state"],
-    ["a missing state", JSON.stringify({ idleSince: "2026-01-02T00:00:00.000Z" }), "unknown state"],
-  ])("rejects %s", async (_label, body, message) => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "application/json" } }))
-    await expect(new ServerConnection(options).getAgentWorkspaceActivity("project-1", "child-1", signal)).rejects.toThrow(message)
-  })
-})
-
 describe("ServerConnection AgentSession reconciliation", () => {
   afterEach(() => vi.restoreAllMocks())
 

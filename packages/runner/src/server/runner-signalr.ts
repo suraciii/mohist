@@ -7,7 +7,6 @@
 
 import * as signalR from "@microsoft/signalr"
 import { WorkspaceManager } from "../runtime/workspace.js"
-import type { AgentWorkspaceManager } from "../runtime/agent-workspace.js"
 import type { WorkspaceRegistry } from "../runtime/workspace-registry.js"
 import type { WorkspaceRemovalFence } from "../runtime/workspace-removal-fence.js"
 import {
@@ -31,7 +30,6 @@ import {
   setRunnerSignalRGitRunnerForTest,
 } from "./workspace-git-handlers.js"
 import { registerWorkspaceRemovalHandler } from "./workspace-removal-handler.js"
-import { registerAgentWorkspaceHandler } from "./agent-workspace-handler.js"
 import { registerFollowupHandler } from "./followup-handler.js"
 import { registerCancelHandler } from "./cancel-handler.js"
 import {
@@ -83,11 +81,7 @@ export interface RunnerSignalRClientOptions {
   followupTargetResolver?: FollowupTargetResolver | null
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   registry?: WorkspaceRegistry | null
-  /**
-   * The runner's agent managed-worktree manager, shared with the
-   * `MaterializeAgentWorkspace` / `ReleaseAgentWorkspace` handlers.
-   */
-  agentWorkspaceManager?: AgentWorkspaceManager | null
+
   /**
    * Late-binding runtime accessor used by the Follow-up / Cancel
    * handlers. The host wires this so
@@ -121,7 +115,7 @@ export class RunnerSignalRClient {
   private connection: signalR.HubConnection
   private readonly workspaceManager: WorkspaceManager
   private readonly registry: WorkspaceRegistry | null
-  private readonly agentWorkspaceManager: AgentWorkspaceManager | null
+
   private readonly probeTimeoutMs: number
   private readonly onReconnected: ((connectionId: string) => void) | undefined
   private readonly followupTargetResolver: FollowupTargetResolver | null
@@ -154,7 +148,6 @@ export class RunnerSignalRClient {
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
     this.registry = options.registry ?? null
-    this.agentWorkspaceManager = options.agentWorkspaceManager ?? null
     this.workspaceManager = new WorkspaceManager(runnerRoot, this.registry)
     this.followupTargetResolver = options.followupTargetResolver ?? null
     this.agentSessionRuntimeEventOutbox = options.agentSessionRuntimeEventOutbox ?? null
@@ -247,10 +240,6 @@ export class RunnerSignalRClient {
       runnerRoot: this.runnerRoot,
       registry: this.registry,
       removalFence: () => resolveAccessor(this.openCodeRuntime) as WorkspaceRemovalFence | null,
-    })
-
-    registerAgentWorkspaceHandler(this.connection, {
-      manager: this.agentWorkspaceManager,
     })
 
     registerFollowupHandler(this.connection, {

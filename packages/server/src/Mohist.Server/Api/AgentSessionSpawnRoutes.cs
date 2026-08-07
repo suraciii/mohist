@@ -34,6 +34,10 @@ public static class AgentSessionSpawnRoutes
                 return ApiResults.BadRequest("targetAgentRef is required", "target_agent_ref_required");
             if (string.IsNullOrWhiteSpace(body.Prompt))
                 return ApiResults.BadRequest("prompt is required", "prompt_required");
+            if (!string.IsNullOrWhiteSpace(body.Workspace))
+                return ApiResults.BadRequest(
+                    "the workspace mode was retired: child sessions always inherit the parent workdir",
+                    "workspace_mode_retired");
             if (!context.Request.Headers.TryGetValue("Idempotency-Key", out var values)
                 || string.IsNullOrWhiteSpace(values.FirstOrDefault()))
                 return ApiResults.BadRequest("Idempotency-Key is required", "idempotency_key_required");
@@ -47,7 +51,6 @@ public static class AgentSessionSpawnRoutes
                     body.TargetAgentRef.Trim(),
                     body.Prompt,
                     values.First()!.Trim(),
-                    body.Workspace,
                     ct);
                 return Results.Json(new ApiResponse<AgentSessionSpawnResponse>(
                     true,

@@ -22,7 +22,6 @@ public enum AgentLaunchCoordinatorCommand
     ReserveLink = 4,
     EnsureParentLink = 5,
     AbortLaunch = 6,
-    MaterializeWorkspace = 7,
 }
 
 /// <summary>
@@ -124,15 +123,8 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(44)] SessionTreeBindingUseReceipt? ParentBindingUseReceipt = null,
     [property: Id(45)] bool ParentBindingReleased = false,
     [property: Id(46)] bool AbortParentBindingAcknowledged = false,
-    [property: Id(47)] WorkspaceMode? WorkspaceMode = null,
-    [property: Id(48)] MaterializeState MaterializeState = MaterializeState.None,
-    [property: Id(49)] string? WorkspaceIdentity = null,
-    [property: Id(50)] string? MaterializedWorkDir = null,
-    [property: Id(51)] MaterializeRejectionReason? MaterializeRejectionReason = null,
-    [property: Id(52)] WorkspaceReleaseState ReleaseState = WorkspaceReleaseState.None,
-    [property: Id(53)] WorkspaceRepositorySnapshot? WorkspaceRepository = null,
-    [property: Id(54)] string? WorkspacePath = null,
-    [property: Id(55)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(47)] string? WorkspacePath = null,
+    [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -331,10 +323,9 @@ public static class AgentLaunchCoordinatorCodec
         return trimmed;
     }
 
-    public static string SpawnFingerprint(string targetAgentRef, string prompt, string workspaceMode = "inherit")
+    public static string SpawnFingerprint(string targetAgentRef, string prompt)
     {
-        var mode = string.IsNullOrWhiteSpace(workspaceMode) ? "inherit" : workspaceMode.Trim();
-        var canonical = $"{targetAgentRef.Trim()}\u001f{prompt}\u001f{mode}";
+        var canonical = $"{targetAgentRef.Trim()}\u001f{prompt}";
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
