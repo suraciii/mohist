@@ -14,6 +14,7 @@ using Mohist.Server.Infrastructure.Data.Workflow;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Infrastructure.Workspace;
+using Mohist.Server.Logging;
 using Mohist.Server.Otel;
 using Mohist.Server.SystemInfo;
 using Mohist.Server.Workflow.Storage;
@@ -112,6 +113,9 @@ public sealed class MohistDbFixture : IAsyncLifetime
         services.AddSingleton<IWebContentProvider, InMemoryWebContentProvider>();
         services.RemoveAll<IPromptLoader>();
         services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
+        services.RemoveAll<ILogTailSource>();
+        services.AddSingleton<InMemoryLogTailSource>();
+        services.AddSingleton<ILogTailSource>(provider => provider.GetRequiredService<InMemoryLogTailSource>());
         services.RemoveAll<IEnvironmentVariableProvider>();
         services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
         services.RemoveAll<Mohist.Server.Infrastructure.Config.IConfigDocumentStore>();

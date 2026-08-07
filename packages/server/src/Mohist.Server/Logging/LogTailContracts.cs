@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
-using Mohist.Server.Logging;
 
-namespace Mohist.Server.Api;
+namespace Mohist.Server.Logging;
 
 /// <summary>
 /// Per-line element type for the <c>/api/logs/tail</c> response. This is
@@ -60,26 +59,3 @@ public sealed record LogTailResponse(
     bool Unavailable,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? ExpectedLocation,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Reason);
-
-internal static class LogEntryProjection
-{
-    public static LogEntry Project(string rawLine)
-    {
-        if (Logfmt.TryParse(rawLine, out var values))
-        {
-            return new LogEntry(
-                Level: values["level"],
-                Time: values["time"],
-                Service: values["service"],
-                Message: values["msg"],
-                Raw: rawLine);
-        }
-
-        return new LogEntry(
-            Level: null,
-            Time: null,
-            Service: null,
-            Message: rawLine,
-            Raw: rawLine);
-    }
-}
