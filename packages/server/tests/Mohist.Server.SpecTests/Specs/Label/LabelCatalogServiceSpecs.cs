@@ -193,6 +193,21 @@ public class LabelCatalogServiceSpecs
     }
 
     [Fact]
+    public async Task UpdateAsync_WithEmptySupportedValues_ClearsThem()
+    {
+        var service = CreateService();
+        var projectId = $"proj-{Guid.NewGuid():N}";
+
+        await service.CreateAsync(projectId, "module", "Classifies the subsystem", new[] { "auth", "ui" });
+        var result = await service.UpdateAsync(projectId, "module",
+            "Classifies the subsystem", Array.Empty<string>());
+
+        Assert.Null(result.Error);
+        Assert.NotNull(result.Definition);
+        Assert.Null(result.Definition.SupportedValues);
+    }
+
+    [Fact]
     public async Task DeleteAsync_ExistingUserKey_RemovesIt()
     {
         var service = CreateService();
