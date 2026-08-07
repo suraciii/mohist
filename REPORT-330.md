@@ -44,55 +44,52 @@ spec 均走 `[Collection("MohistIntegration")]` 共享 fixture（真 Orleans + S
 
 ## 2. 改动清单
 
-### 子任务 A — Server 核心（`7a653a43c`）
+### 子任务 A — Server 核心（`cf2a85ec9`）
 - `WorkspaceGrain`：`CreateManualAsync` 内部逻辑提取为通用 `CreateAsync(name, origin, repos, now)`（公开签名保留，manual 行为不变）；新增 `ArchiveByOriginAsync(origin, now)`（幂等、origin 结构校验、**无活跃 session 守卫**、置 archived + 发事件）。
 - 新增 `Workspace/Services/InteractionWorkspaceProvisioner.cs`：`EnsureSlackWorkspaceAsync` / `EnsureWebWorkspaceAsync` / `ArchiveSlackChannelAsync` / `ArchiveWebConversationAsync` + 私有 `DeriveUniqueName`（归档行占基础名时 `-N` 递增）。
 - **零 schema 变更**（slack/web origin 列、partial unique index、`LabelWorkspaceName` 均已有）。
 - 测试：`WorkspaceGrainSpecs` +3（slack/web origin 创建、同 origin 异名冲突）、unit `InteractionWorkspaceProvisionerTests` 新文件。
 
-### 子任务 B — Slack 入口接线（`6d8597a04`）
+### 子任务 B — Slack 入口接线（`9f608641f`）
 - `IAgentLauncher.LaunchConnectionAsync` 新增 `string? workspaceName = null`（默认 null 向后兼容）；`AgentLauncher` 用其替换硬编码 `null`。
 - `SlackConnectionRoutes`：channel 根提及 / DM 入口在 launch 前经 provisioner `EnsureSlackWorkspaceAsync` 解析绑定；新增 `POST .../connections/{c}/channel-archive` 入口 hook（lease 鉴权，body `{teamId, conversationId}`，D1 选型 (a)）。
 - 测试：`InteractionWorkspaceSpecs` 新文件（slack 全场景）。
 
-### 子任务 C — Web 入口接线（`38cb1911b`）
+### 子任务 C — Web 入口接线（`dd5c1743c`）
 - `AgentSessionLaunchRoutes` 新建 session 分支：pre-mint `sessionId` 即 conversationId（D2 决策），`EnsureWebWorkspaceAsync` 解析并覆写 launch context 的 WorkspaceName；resume 分支不动。
 - 测试：`InteractionWorkspaceSpecs`（web 基线用例）。
 
-### 子任务 D — 子 session 继承（`a32759275`）
+### 子任务 D — 子 session 继承（`ef969a18d`）
 - `AgentSpawnAdmission` 新增 `ParentWorkspaceName`（`AdmitAsync` 读父 session 的 `mohist.io/workspace-name` 标签）；`LaunchSubagentAsync` 透传至子 `AgentLaunchContext.WorkspaceName`。
 - 测试：`AgentSubagentLaunchSpecs` +1 继承用例。
 
-### spec 拆分 + 最终化（`882cb8071` + `8514b7a84`）
-- `882cb8071`：slack/web interaction spec 拆分为 `InteractionWorkspaceSpecs.cs` + `WebConversationWorkspaceSpecs.cs`，满足 spec-file-size 预算。
-- `8514b7a84`（最终化，含 PLAN/DECISIONS）：
+### spec 拆分 + 最终化（`a4edc94de` + `674839a80`）
+- `a4edc94de`：slack/web interaction spec 拆分为 `InteractionWorkspaceSpecs.cs` + `WebConversationWorkspaceSpecs.cs`，满足 spec-file-size 预算。
+- `674839a80`（最终化，含 PLAN/DECISIONS）：
   - `MohistIntegrationFixture.WarmUpWorkspaceCodegenAsync`：fixture setup 时预热 workspace codegen（创建 + 归档一个 scratch workspace 后清理），把首个 workspace 测试吸收的 1–10s codegen 移到未计时段。
   - `test-duration.config.jsonc` allowlist 共 **3 条**（主 agent 摘要里只提了 2 条 arch，实际还有 1 条 spec，见 §3 说明）：arch `SpecClasses_MustBePublic`（641.8ms）、`BannedApiAnalyzerTests` theory（511.3ms）、spec `WebConversation_Followup_ReusesSameSessionAndWorkspace`（observed 12723.6ms，owner slack，deadline 2026-10-31）。
   - `spec-file-size-baseline.json`：`MohistIntegrationFixture.cs` allowance 25000 → 28000（warmup 使其 27208 字节，arch 守卫明确要求提升）。
   - 提交 `PLAN-330.md` / `DECISIONS-330.md`。
 
-## 3. 最终验证结果（rebase 后全新运行）
+## 3. 最终验证结果（rebase 后全新运行，二次 rebase 后复验）
 
 | 轨道 | 结果 |
 |---|---|
-| `npm test`（根） | **exit 0** |
+| `npm test`（根，两次） | **exit 0** |
 | Mohist.Server.UnitTests | 2113 passed |
-| Mohist.Server.SpecTests | 4046 passed（1m 57s） |
+| Mohist.Server.SpecTests | 4032 passed（#355 把部分用例下沉到 MohistDbFixture 驱动后计数） |
 | Mohist.Server.ArchTests | 51 passed |
 | Mohist.Cli.Tests / Workflow.Definition.Tests | 1661 / 175 passed |
 | web vitest（test:ci） | 371 files / 4716 passed；`npm run typecheck -w packages/web` exit 0 |
 | runner / mohist-slack | 140 files / 1569 passed；5 files / 70 passed |
-| `npm run test:budget`（预算守卫） | **0 failing, 0 timed out**；spec p95=277.1ms（<500ms）；suite 300s deadline 内 |
+| `npm run test:budget`（预算守卫，两次） | **0 failing, 0 timed out**；spec p95=277ms（<500ms）；suite 300s deadline 内 |
 
 - server build 0 错误 0 警告（TreatWarningsAsErrors 当 lint）。
 - `WebConversation_Followup` 实测仍 7.80s（超 5s 绝对上限）——warmup 已将其从 12.7s 压到 7.8s，但 launch POST 在全量并行负载下仍有 silo 调度积压，**allowlist 条目（deadline 2026-10-31）目前确实必要**，不是死条目。这与主 agent 摘要（"2 个 arch 测试"）有出入，特此说明。
 
 ## 4. Rebase 结果
 
-- `git rebase origin/master`：**干净，零冲突**（6/6 重放）。master 侧合入 #354（TestSupport 迁移，554 文件）+ #331（Workspace Web UI）+ #335。
-- 文件重叠预判：ws330 实际改动 15 个文件，与 #354 重叠 3 个（`AgentSubagentLaunchSpecs.cs` / `WorkspaceGrainSpecs.cs` / `RoutingDispatchTestSupport.cs`，均只差一行 using，区域不重叠）；与 #331 零重叠。
-- **无需补 `using Mohist.Server.TestSupport;`**：`SlackRuntimeLeaseTestSupport` 未被 #354 迁移（仍在 `Mohist.Server.SpecTests.Specs.Slack`），ws330 spec 未引用任何迁入 TestSupport 的 helper；build 0 错误证实。
-- 恢复了一个 obj 产物（TestSupport 新项目缺 `project.assets.json`，按 AGENTS.md 显式 `dotnet restore` 后继续 `--no-restore`）。
+- `git rebase origin/master`：**两次都干净，零冲突**。第一次（6/6）落在含 #354（TestSupport 迁移）+ #331（Workspace Web UI）+ #335 的 master；随后 master 又合入 #355（IntegrationApi 测试矩阵下沉），二次 rebase（7/7）同样零冲突——#355 与我们 7 个 commit 的文件重叠仅 `spec-file-size-baseline.json` 一处（#355 删 ProjectEventsApiSpecs 行、我们改 MohistIntegrationFixture 行，不同行自动合并）。
 
 ## 5. 风险 / 后续（non-goal，按 DECISIONS-330）
 
@@ -105,12 +102,12 @@ spec 均走 `[Collection("MohistIntegration")]` 共享 fixture（真 Orleans + S
 ## 6. 最终 commit 列表（`origin/master..HEAD`，自底向上）
 
 ```
-7a653a43c feat(workspace): 通用 CreateAsync/ArchiveByOriginAsync + InteractionWorkspaceProvisioner（#330 子任务 A）
-6d8597a04 feat(slack): channel/DM ingress 解析绑定 workspace + channel-archive 入口 hook（#330 子任务 B）
-38cb1911b feat(web): 新建 session 分支自动解析 web conversation workspace（#330 子任务 C）
-a32759275 feat(subagents): 子 session 继承父 session 的 workspace 绑定（#330 子任务 D）
-882cb8071 test(workspace): 拆分 slack/web interaction spec 至文件尺寸预算内（#330）
-8514b7a84 test(workspace-330): stabilize interaction specs via codegen warmup + budget allowlist
+cf2a85ec9 feat(workspace): 通用 CreateAsync/ArchiveByOriginAsync + InteractionWorkspaceProvisioner（#330 子任务 A）
+9f608641f feat(slack): channel/DM ingress 解析绑定 workspace + channel-archive 入口 hook（#330 子任务 B）
+dd5c1743c feat(web): 新建 session 分支自动解析 web conversation workspace（#330 子任务 C）
+ef969a18d feat(subagents): 子 session 继承父 session 的 workspace 绑定（#330 子任务 D）
+a4edc94de test(workspace): 拆分 slack/web interaction spec 至文件尺寸预算内（#330）
+674839a80 test(workspace-330): stabilize interaction specs via codegen warmup + budget allowlist
 ```
 
 分支 `impl/ws-330-slack-web` 已 `git push --force-with-lease` 到远端，0 commits behind master。
