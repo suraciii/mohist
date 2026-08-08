@@ -133,6 +133,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ScopesJson).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(256);
             entity.Property(e => e.Prefix).HasMaxLength(64);
+            entity.Property(e => e.ProjectId).HasMaxLength(256);
             entity.Property(e => e.ExpiresAt);
             entity.Property(e => e.RevokedAt);
             entity.Property(e => e.CreatedAt).IsRequired();

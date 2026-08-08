@@ -47,6 +47,7 @@ public static class AuthSessionRoutes
                 [Scope.Operator],
                 Name: null,
                 Prefix: null,
+                ProjectId: null,
                 ExpiresAt: now + SessionLifetime,
                 RevokedAt: null,
                 CreatedAt: now), ct);

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Hosting;
+using Mohist.Server.Project.Services;
 
 namespace Mohist.Server.Auth.Identity;
 
@@ -30,13 +31,16 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
 
     private readonly FileCredentialLoader _fileCredentials;
     private readonly ICredentialStore _credentials;
+    private readonly ProjectRefResolver _projects;
 
     public AuthResolutionMiddleware(
         FileCredentialLoader fileCredentials,
-        ICredentialStore credentials)
+        ICredentialStore credentials,
+        ProjectRefResolver projects)
     {
         _fileCredentials = fileCredentials;
         _credentials = credentials;
+        _projects = projects;
     }
 
     public async Task InvokeAsync(HttpContext context, RequestDelegate next)
@@ -56,7 +60,7 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         }
 
         var principal = _fileCredentials.TryResolve(token)
-            ?? await ResolveFromStoreAsync(token, context.RequestAborted);
+            ?? await ResolveFromStoreAsync(token, context, context.RequestAborted);
         if (principal is null)
         {
             await RejectAsync(context);
@@ -203,12 +207,36 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         }));
     }
 
-    private async Task<MohistPrincipal?> ResolveFromStoreAsync(string token, CancellationToken ct)
+    private async Task<MohistPrincipal?> ResolveFromStoreAsync(string token, HttpContext context, CancellationToken ct)
     {
         if (!CredentialToken.TryParse(token, out _))
             return null;
         var credential = await _credentials.FindActiveAsync(CredentialToken.Hash(token), ct);
-        return credential is null ? null : ToPrincipal(credential);
+        if (credential is null)
+            return null;
+
+        if (credential.Kind == CredentialKind.Integration)
+            await RecordIntegrationConstraintAsync(context, credential);
+
+        return ToPrincipal(credential);
+    }
+
+    /// <summary>
+    /// Integration credentials are narrowed to a project: resolves the
+    /// request's project (route value or query) and records the
+    /// constraint evaluation on the request. The per-project narrowing
+    /// judgment (denying a request outside the constrained project) is
+    /// the P2 scope gate, which reads
+    /// <see cref="IntegrationProjectConstraint.ItemKey"/>.
+    /// </summary>
+    private async Task RecordIntegrationConstraintAsync(HttpContext context, Credential credential)
+    {
+        var projectRef = IntegrationProjectConstraint.ExtractProjectRef(context.Request);
+        var requestProjectId = projectRef is null
+            ? null
+            : (await _projects.ResolveAsync(projectRef))?.Id;
+        context.Items[IntegrationProjectConstraint.ItemKey] =
+            new IntegrationProjectConstraint.Resolution(credential.ProjectId, requestProjectId);
     }
 
     private static MohistPrincipal ToPrincipal(Credential credential) =>
@@ -222,7 +250,8 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
             },
             credential.PrincipalId,
             credential.Scopes,
-            RunnerId: credential.Kind == CredentialKind.Runner ? credential.Name : null);
+            RunnerId: credential.Kind == CredentialKind.Runner ? credential.Name : null,
+            ProjectId: credential.ProjectId);
 
     private static bool IsAuthSurface(PathString path) =>
         path.StartsWithSegments("/api", StringComparison.Ordinal)
