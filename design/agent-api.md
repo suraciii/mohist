@@ -48,6 +48,14 @@ Agent API 对客户端提供六类能力：
 启动一次 Agent 会建立一项工作和一段会话。首次输入及其执行属于这项 AgentJob；首次执行
 结束后，AgentSession 仍可继续。follow-up 只增加会话输入和后续执行，不重开 AgentJob。
 
+每次 follow-up 都必须由调用方提供稳定的 `requestId`。它不是 Server 生成的 InputId，也不是
+可选的客户端 trace id；Server 以 `(sessionId, requestId)` 的唯一约束持久化请求到 Input/Turn
+的映射。相同 key 的 response loss 或重复提交返回同一 `InputId`、`TurnId` 和 canonical 状态，
+不会创建第二组记录或第二次 dispatch；相同 key 携带不同输入则返回
+`rejected(idempotency_key_reused)`。只有不同 key 才代表新的 Input，并重新经过安全准入和队列
+上限检查。首个 launch input 使用 `launchRequestId` 作为它的 `requestId`；launch operation
+映射仍然单独保留。
+
 因此：
 
 - AgentJob 完成不等于整段对话关闭，也不等于自然语言目标已经完成；
@@ -157,22 +165,22 @@ tombstone 负责后续先按 `launchRequestId` 找 operation、再按 `launchOpe
 
 Session activity 必须同时提供 `activity`、`currentContextActivity`、`contextGeneration`、
 `unresolvedPrevious`、`unresolvedPreviousCount`、`nextAction`、`revision` 和 `observedAt`。
-`unresolvedPrevious` 至少包含旧 operationId、旧 contextGeneration、outcome 和 nextAction；
+`unresolvedPrevious` 使用 conventions 的 `UnresolvedTargetRead`，至少包含旧 target kind/id、
+旧 operationId、旧 contextGeneration、outcome、superseding operationId 和 nextAction；
 当前 activity 只回答当前 logical context，旧 context 的 Unknown 不与当前 active 混合，且在
 force-reset 已确认并 supersede 后不阻止当前 generation 的新 Input/Turn。
 
-Input acceptance 必须提供 `state=accepted|rejected|unknown`、`acceptanceReason`、`turnId`
-（不存在时为 null+`turnIdReason`）、`turnRelation=new-turn|steer|none`、
-`contextGeneration`、`revision` 和 `observedAt`。Turn result 必须提供 `status`、`result`、
-`dispatchStatus`、`blockedReason`、`nextAction`、`contextGeneration`、`revision` 和
-`observedAt`。`blockedReason` 只有 dispatch 被 Server 明确阻塞时才填；未知事实不能被假装
-成 blocked 或 terminal。
+Input acceptance 与 Turn dispatch 使用 [`conventions.md`](conventions.md#canonical-sessioninput-and-dispatch-schema)
+中的唯一 `SessionInputRead` 与 `TurnDispatchRead` schema。它们必须同时返回 caller-provided
+`requestId`、稳定 Input/Turn mapping、`dispatchAttemptCount`、`dispatchDeadline`、当前
+`dispatchAttemptId`、`blockedReason`、`nextAction`、`revision` 和 `observedAt`。
 
-当 Input 已 `accepted` 但 enqueue 失败时，Turn projection 还必须返回 durable
-`dispatchAttemptCount`、`dispatchDeadline` 和该次 `dispatchAttemptId`。达到 attempt/deadline
-上限时返回 `status=terminal`、`dispatchStatus=blocked`、稳定 `blockedReason` 和可执行的
-`nextAction`；Input 仍为 accepted，InputId/TurnId 不变。response loss 只查询原 attempt，
-不能无限保持 pending 或创建新 Input/Turn。
+`dispatchStatus=blocked` 只表示当前 enqueue 结果是临时可重试的阻塞，Turn 仍非终态；客户端
+不能把它当作终态，Server durable coordinator 也不能因读到这个值就返回。它必须在下一次
+持久 retry signal 到期时回到 `retrying`。达到 attempt/deadline 上限后，Server 原子写入
+`dispatchStatus=terminal`、`status=terminal`、`outcome=blocked`、稳定 `blockedReason` 和
+可执行 `nextAction`；此后不再自动 retry。Input 仍为 accepted，InputId/TurnId 不变。响应
+丢失只查询原 `dispatchAttemptId`，不能创建新 attempt、Input 或 Turn。
 
 CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
 自行合并 Job/Session/Input/Turn 状态。
@@ -219,15 +227,22 @@ force-reset(
 ```
 
 它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
-要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，原子 supersede 旧 operation
-后才创建独立的 force-reset operation。候选 binding 与新 ContextBoundary 成功提交前，当前
-generation 仍不接受新的 Input/Turn；提交后 `currentContextActivity` 只表示新 generation，旧
-operation/input/turn/binding 事实仍保留为 Unknown，并进入 `unresolvedPrevious`。响应丢失时
-使用同一 force-reset operationId 查询或重试，返回同一结果，不创建第二个 context。Begin
-force-reset 在任何 Runtime effect 前持久化 target runner/runtime、candidateKey、完整
-expected binding 与空的 candidate binding；创建响应丢失时按 candidateKey reconcile。每个
-create、recordCandidate、CAS、cleanup 和 complete 都在 effect 前重新比较 operation/owner
-fence 与当前 binding，旧 fence 直接 fail closed。
+要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一事务中收集当前
+generation 的全部 unresolved targets：ActiveOperation（如有）、unknown Input/Turn、dispatch
+attempt 和其它已记录的 Runtime side effect。事务持久化新 operation 的
+`supersededTargets`，为每个 target 保留 `unresolvedPrevious` 映射；有 ActiveOperation 时
+同时写入 `supersededByOperationId`，没有 ActiveOperation 时也必须写入 durable unresolved-work
+record，不能把“没有 ActiveOperation”当作“没有旧副作用”。新 operation 与这些 superseding
+identities 原子建立后才可继续候选 binding。
+
+候选 binding 与新 ContextBoundary 成功提交前，当前 generation 仍不接受新的 Input/Turn；提交
+后 `currentContextActivity` 只表示新 generation，旧 operation/input/turn/binding 事实仍保留
+为 Unknown，并进入 `unresolvedPrevious`。响应丢失时使用同一 force-reset operationId 查询或
+重试，返回同一结果，不创建第二个 context。Begin force-reset 在任何 Runtime effect 前持久化
+target runner/runtime、candidateKey、完整 expected binding、空 candidate binding 和
+`safeAdmission=false` 的 pending boundary；创建响应丢失时按 candidateKey reconcile。每个
+create、recordCandidate、CAS、cleanup 和 complete 都使用 conventions 的完整 FenceToken，
+effect 前后都 recheck；旧 fence 直接 fail closed。
 
 CLI 的调用合同对应为：
 

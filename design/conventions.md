@@ -95,11 +95,11 @@ Concept ownership and origin rules are defined in
   fence, not a display-only revision.
 - A binding operation carries an operation fence. `ownerFence` and `claimGeneration` are
   independent monotonic values; an unqualified `generation` in an implementation means
-  `claimGeneration`, never `ContextGeneration`. Every phase write, candidate create/get/discard/
-  cleanup, binding CAS and completion compares the full fence and expected binding. Before any
-  external side effect, Server atomically rechecks that fence, the current owner lease, and the
-  current binding, then passes the same token to Runtime/provider. A stale owner fails closed
-  before create, submit, discard, cleanup, or complete.
+  `claimGeneration`, never `ContextGeneration`. The single `FenceToken` contract below is used
+  by every phase write, candidate create/get/discard/cleanup, binding CAS, completion, Compact,
+  and Cancel/stop. Before any external effect, Server atomically rechecks that token, the current
+  owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
+  owner fails closed before the effect and before its result is persisted.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
   incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
   Runner handoff is an explicit `handoff` operation and is not missing recovery. An adopted candidate
@@ -111,6 +111,142 @@ Concept ownership and origin rules are defined in
   the current binding while preserving `sessionId` and starts a new `ContextGeneration`. A work
   directory change requires a new logical Session identity.
 
+### Canonical SessionInput and dispatch schema
+
+All launch and follow-up inputs use the same input identity contract. The first launch input copies
+the caller's `launchRequestId` into `requestId`; a follow-up caller must provide its own stable
+`requestId`. Server never invents one after a response is lost.
+
+```text
+SessionInputRead {
+  sessionId
+  inputId
+  requestId                 # caller-provided idempotency identity
+  requestFingerprint        # canonical hash of the accepted input envelope
+  state = accepted | rejected | unknown
+  acceptanceReason
+  turnId                    # null unless state=accepted
+  turnRelation = new-turn | steer | none
+  contextGeneration
+  revision
+  observedAt
+}
+
+TurnDispatchRead {
+  inputId
+  turnId
+  dispatchStatus = queued | retrying | blocked | dispatched | unknown | terminal
+  dispatchAttemptCount
+  dispatchAttemptId         # current attempt, null when none is active
+  dispatchDeadline
+  blockedReason             # present for blocked or terminal/outcome=blocked only
+  nextAction
+}
+```
+
+The durable request map has a unique constraint on `(sessionId, requestId)` and stores the
+`requestFingerprint`, `inputId`, `turnId`, `turnRelation`, acceptance state and current revision.
+The Session accept transaction creates the map and the Input/Turn together. A duplicate key with
+the same fingerprint returns the stored mapping; a duplicate key with a different fingerprint is
+`rejected(idempotency_key_reused)` and creates nothing. A unique-key race rereads the winner.
+Different request IDs are different inputs and still pass the normal `safeAdmission` and queue
+capacity checks.
+
+Dispatch states are deliberately not interchangeable:
+
+| `dispatchStatus` | Meaning | Automatic transition |
+|---|---|---|
+| `queued` | accepted Turn has no active attempt, or waits for the Session's serialized predecessor | `retrying` when the durable coordinator claims an attempt |
+| `retrying` | one bounded attempt is owned and its result is being obtained | `dispatched`, `blocked`, `unknown`, or terminal `blocked` |
+| `blocked` | the last enqueue attempt was definitely refused temporarily; the Turn is still non-terminal | `retrying` while attempt/deadline budget remains |
+| `dispatched` | Runner durably accepted this dispatch identity | Turn execution states decide the next result |
+| `unknown` | the current attempt's acceptance cannot yet be confirmed | query the same `dispatchAttemptId`; never create a new attempt implicitly |
+| `terminal` | the Server stopped automatic dispatch at an attempt/deadline bound | no retry; Turn is `terminal` with `outcome=blocked` |
+
+`blocked` is therefore never a terminal return value. A handler seeing a non-terminal `blocked`
+record must resume reconciliation when its durable retry signal is due; it may not return merely
+because the stored value is `blocked`. At the fixed attempt/deadline bound, one atomic write sets
+`dispatchStatus=terminal`, `Turn.status=terminal`, `Turn.outcome=blocked`, a stable
+`blockedReason`, and an actionable `nextAction`. This is the only dispatch transition after which
+automatic retry is forbidden, so an accepted Input cannot remain queued forever.
+
+### Canonical effect fence
+
+`BindingTuple` is either `null` or the complete tuple below. `null` is explicit and is not the same
+as an omitted field.
+
+```text
+BindingTuple = {
+  runnerId,
+  runtime,
+  runtimeSessionId,
+  bindingEpoch
+}
+
+FenceToken = {
+  sessionId,
+  operationId,
+  ownerId,
+  ownerFence,
+  claimGeneration,
+  revision,
+  expectedBinding: BindingTuple | null,
+  candidateBinding: BindingTuple | null,
+  leaseUntil,
+  deadline,
+  currentBindingForEffect: BindingTuple | null
+}
+```
+
+`currentBindingForEffect` is the binding observed at the effect boundary; it is `expectedBinding`
+before adoption and the adopted `candidateBinding` only for an explicitly post-CAS effect. The
+following predicate is the only `fenceMatch` definition:
+
+```text
+fenceMatch(session, operationFence, token, now) =
+  session.id == token.sessionId
+  && operationFence.sessionId == token.sessionId
+  && operationFence.operationId == token.operationId
+  && operationFence.ownerId == token.ownerId
+  && operationFence.ownerFence == token.ownerFence
+  && operationFence.claimGeneration == token.claimGeneration
+  && operationFence.revision == token.revision
+  && operationFence.expectedBinding == token.expectedBinding
+  && operationFence.candidateBinding == token.candidateBinding
+  && operationFence.leaseUntil == token.leaseUntil
+  && operationFence.deadline == token.deadline
+  && operationFence.leaseUntil > now
+  && now <= operationFence.deadline
+  && session.revision == token.revision
+  && session.currentBinding == token.currentBindingForEffect
+```
+
+The comparison is atomic. `operationFence` may be an ActiveOperation, a cleanup fence, or a
+Turn stop fence, but all three use exactly this token and predicate. `recheckBeforeExternalEffect`
+loads the durable fence and Session, runs `fenceMatch`, persists the in-flight attempt identity,
+and returns the same token. If it fails, no effect is called. The caller must run the predicate
+again before recording the result or completing the operation.
+
+Every effect follows this shape, including `Runtime.resolve`, `Runtime.createOrGetEmpty`,
+`Runtime.submitInputExactlyOnce`, cleanup `Runtime.getByKey` and `Runtime.discardCandidate`,
+`recordCandidate`, binding CAS, `complete`, Compact, and Cancel/stop:
+
+```text
+effectWithFence(token, effect):
+  token = Server.recheckBeforeExternalEffect(token)
+  result = effect(token)
+  Server.recheckBeforePersistingEffectResult(token)
+  return Server.persistEffectResultIfFenceMatches(token, result)
+```
+
+An expired operation or a binding CAS change never renews the original fence. It creates an
+independent bounded cleanup fence with a new `operationId`, owner, ownerFence, claimGeneration,
+revision, expected/candidate binding, leaseUntil and cleanup `deadline`. Cleanup first fences
+`getByKey`, then fences `discardCandidate`; if the candidate is adopted or current binding changed,
+cleanup returns `already_adopted` and never discards it. If cleanup cannot decide before its own
+deadline, it remains a durable `cleanup-pending` unresolved target, while the original operation
+is terminal `blocked` and a new binding operation may proceed.
+
 ### Canonical SessionOperationRead
 
 `Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff` and `rebind` are durable
@@ -121,6 +257,7 @@ define another operation field list.
 
 ```text
 SessionOperationRead {
+  sessionId
   operationId
   kind = compact | reset | recovery | force-reset | handoff | rebind
   phase = claimed | resolving | candidate-created | cas-pending | rebound | completed |
@@ -139,8 +276,23 @@ SessionOperationRead {
   candidateState = none | created | adopted | orphan | cleanup-pending | discarded | unknown
   targetRunnerId
   targetRuntime
+  supersededTargets = [UnresolvedTargetRead]
   supersededByOperationId
+  cleanupFence = null | FenceToken
+  admission = blocked | ready
   nextAction
+}
+
+UnresolvedTargetRead {
+  targetKind = operation | input | turn | dispatch | runtime-effect
+  targetId
+  requestId
+  contextGeneration
+  originalOperationId
+  outcome = unknown | blocked
+  expectedBinding
+  nextAction
+  supersededByOperationId
 }
 ```
 
@@ -150,6 +302,12 @@ equivalent to `null`. `candidateKey`, `targetRunnerId` and `targetRuntime` are p
 any Runtime effect. `candidateState=orphan` means a candidate exists but was never adopted;
 `candidateState=cleanup-pending` belongs to an independent cleanup fence, not to a live recovery
 owner.
+
+`supersededTargets` is present on every operation read (an empty array when none were superseded).
+It is the durable target mapping for force-reset, including unknown Input, Turn, dispatch, Runtime
+effect, and ActiveOperation records. `unresolvedPrevious` in the Session read is the same
+`UnresolvedTargetRead` shape, not a second summary shape. When force-reset has no ActiveOperation,
+these targets still make the supersession and old facts queryable.
 
 The required/null rules are:
 
@@ -162,8 +320,9 @@ The required/null rules are:
 | `handoff` | `expectedBinding`, `candidateKey`, target runner/runtime, with target runner different from expected | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
 | `rebind` | `expectedBinding`, `candidateKey`, target runner equal to expected and target runtime | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
 
-`ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`, `contextGeneration`
-and `nextAction` are present on every operation read. `outcome=blocked` is terminal for the
+`sessionId`, `ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`,
+`contextGeneration`, `supersededTargets`, `cleanupFence`, `admission` and `nextAction` are present on every
+operation read. `outcome=blocked` is terminal for the
 operation that can no longer make progress under its original deadline. A `cleanup-pending`
 candidate may still have a separate cleanup fence; that fence never keeps a new binding operation
 from being claimed after the original operation is terminal.
