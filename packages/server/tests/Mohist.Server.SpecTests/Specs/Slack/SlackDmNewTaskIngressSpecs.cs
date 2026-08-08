@@ -249,6 +249,17 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 
     private async Task RegisterRunnerAsync(string projectId, string runnerId)
     {
+        // The MohistIntegration collection shares one silo and one runner
+        // registry across every class. A runner left behind by an earlier
+        // class (e.g. a silently-failed unregister) would win this job's
+        // admission — ListEligibleRunnersAsync returns every registered
+        // runner regardless of projectId — and this test's own runner would
+        // never receive the dispatch. Drain the registry so admission
+        // deterministically selects the runner registered here.
+        var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
+        foreach (var staleId in await registry.ListRunnerIdsAsync())
+            await registry.UnregisterAsync(staleId);
+
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
             capabilities = new[] { "spec/*" },
@@ -264,7 +275,21 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
+        var assignment = await TestWait.ForAsync(
+            () => job.GetRuntimeSnapshotAsync(),
+            snapshot => string.Equals(snapshot.RunnerId, runnerId, StringComparison.Ordinal)
+                || AgentJobConvergence.IsConverged(snapshot.Status),
+            TimeSpan.FromSeconds(15),
+            TimeSpan.FromMilliseconds(25),
+            $"AgentJob '{jobKey}' assigned to runner '{runnerId}'",
+            () => job.CheckTimeoutsAsync());
+        if (!string.Equals(assignment.RunnerId, runnerId, StringComparison.Ordinal))
+        {
+            var registry = await _fixture.DescribeRunnerRegistryAsync();
+            Assert.Fail(
+                $"AgentJob '{jobKey}' was not admitted to the expected runner '{runnerId}' "
+                + $"(assigned to '{assignment.RunnerId ?? "<none>"}', status {assignment.Status}). Runner registry:\n{registry}");
+        }
 
         // Assignment-prepared does not guarantee the dispatch has propagated
         // to the runner's poll endpoint, so a single fixed poll flakes on
