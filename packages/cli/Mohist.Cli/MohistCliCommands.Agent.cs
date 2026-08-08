@@ -258,7 +258,7 @@ internal static class AgentCommands
         var modelOpt = new Option<string?>("--model") { Description = "Model identifier, usually provider/model" };
         var variantOpt = new Option<string?>("--variant") { Description = "Runtime-specific model variant" };
         var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read the avatar URL or data URI from a UTF-8 file" };
-        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
+        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; include at least one non-empty name" };
         var allowedSubagentOpt = AllowedSubagentOption();
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs; positive integer, omit for no limit" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
@@ -318,6 +318,9 @@ internal static class AgentCommands
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
                         if (maxConcurrentRuns is <= 0)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--max-concurrent-runs must be a positive integer; omit it for no limit");
+                        var skillsError = ValidateSkills(skills);
+                        if (skillsError is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, skillsError);
 
                         var instructionsResult = await BodyInputResolver.ResolveAsync(
                             instructions,
@@ -511,7 +514,7 @@ internal static class AgentCommands
         var modelOpt = new Option<string?>("--model") { Description = "Set model (usually provider/model); mutually exclusive with --clear-model" };
         var variantOpt = new Option<string?>("--variant") { Description = "Set runtime-specific variant; mutually exclusive with --clear-variant" };
         var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read avatar URL or data URI from UTF-8 file; mutually exclusive with --clear-avatar" };
-        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; mutually exclusive with --clear-skills" };
+        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; include at least one non-empty name; use --clear-skills to clear" };
         var allowedSubagentOpt = AllowedSubagentOption();
         var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Set positive maximum; omit for no limit; mutually exclusive with --clear-max-concurrent-runs" };
         var clearDescriptionOpt = new Option<bool>("--clear-description") { Description = "Clear the agent description" };
@@ -595,6 +598,9 @@ internal static class AgentCommands
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
                         if (maxConcurrentRuns is <= 0)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--max-concurrent-runs must be a positive integer; omit it or use --clear-max-concurrent-runs");
+                        var skillsError = ValidateSkills(skills);
+                        if (skillsError is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, skillsError);
                         if (clearAgentConfig)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--clear-agent-config is retired; use --clear-runtime, --clear-model, and --clear-variant");
 
@@ -1035,6 +1041,11 @@ internal static class AgentCommands
     private static string[]? ParseSkills(string? value) => string.IsNullOrWhiteSpace(value)
         ? null
         : value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+    private static string? ValidateSkills(string? value) =>
+        value is null || ParseSkills(value) is { Length: > 0 }
+            ? null
+            : "--skills must contain at least one non-empty skill name; omit it or use --clear-skills to clear existing skills";
 
     private static Option<string[]?> AllowedSubagentOption() => new("--allowed-subagent")
     {

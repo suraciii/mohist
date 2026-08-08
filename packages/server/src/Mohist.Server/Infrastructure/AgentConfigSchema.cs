@@ -83,14 +83,29 @@ public static class AgentConfigSchema
     /// </summary>
     public static string? Validate(JsonElement? agentConfig)
     {
-        if (!agentConfig.HasValue || agentConfig.Value.ValueKind != JsonValueKind.Object)
+        if (!agentConfig.HasValue || agentConfig.Value.ValueKind == JsonValueKind.Null)
             return null;
+        if (agentConfig.Value.ValueKind != JsonValueKind.Object)
+            return "agentConfig must be a JSON object or null.";
 
         foreach (var property in agentConfig.Value.EnumerateObject())
         {
             if (ForbiddenKeys.Contains(property.Name) || !AllowedKeys.Contains(property.Name))
             {
                 return $"agentConfig.{property.Name} is not allowed; the agent config accepts only {string.Join(", ", AllowedKeys)}.";
+            }
+
+            if (property.Name is "model" or "variant"
+                && property.Value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            {
+                return $"agentConfig.{property.Name} must be a string or null.";
+            }
+
+            if (property.Name is "model" or "variant"
+                && property.Value.ValueKind == JsonValueKind.String
+                && string.IsNullOrWhiteSpace(property.Value.GetString()))
+            {
+                return $"agentConfig.{property.Name} must not be empty.";
             }
         }
 

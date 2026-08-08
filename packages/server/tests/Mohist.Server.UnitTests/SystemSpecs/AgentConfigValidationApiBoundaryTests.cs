@@ -110,11 +110,11 @@ public class AgentConfigValidationApiBoundaryTests
     }
 
     [Fact]
-    public void AgentConfigSchema_Validate_NullOrNonObject_ReturnsNull()
+    public void AgentConfigSchema_Validate_Null_IsValid_NonObject_IsRejected()
     {
         Assert.Null(AgentConfigSchema.Validate(null));
         Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("null").RootElement));
-        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("\"foo\"").RootElement));
-        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("[1,2,3]").RootElement));
+        Assert.Contains("JSON object or null", AgentConfigSchema.Validate(JsonDocument.Parse("\"foo\"").RootElement));
+        Assert.Contains("JSON object or null", AgentConfigSchema.Validate(JsonDocument.Parse("[1,2,3]").RootElement));
     }
 }

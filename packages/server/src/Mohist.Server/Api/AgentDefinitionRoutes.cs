@@ -23,6 +23,10 @@ public static class AgentDefinitionRoutes
             if (string.IsNullOrWhiteSpace(req.Name)) return ApiResults.BadRequest("name is required");
             if (string.IsNullOrWhiteSpace(req.Instructions)) return ApiResults.BadRequest("instructions is required");
 
+            var maxConcurrentRunsError = ValidateMaxConcurrentRuns(req.Raw);
+            if (maxConcurrentRunsError is not null)
+                return ApiResults.BadRequest(maxConcurrentRunsError, "invalid_max_concurrent_runs");
+
             var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
             if (agentConfigError is not null)
                 return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
@@ -89,10 +93,14 @@ public static class AgentDefinitionRoutes
 
             if (req.Fields.Contains(nameof(AgentUpdateRequest.AgentConfig)))
             {
-            var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
+                var agentConfigError = AgentConfigSchema.Validate(req.AgentConfig);
                 if (agentConfigError is not null)
                     return ApiResults.BadRequest(agentConfigError, "invalid_agent_config");
             }
+
+            var maxConcurrentRunsError = ValidateMaxConcurrentRuns(req.Raw);
+            if (maxConcurrentRunsError is not null)
+                return ApiResults.BadRequest(maxConcurrentRunsError, "invalid_max_concurrent_runs");
 
             var projectId = context.GetResolvedProject().Id;
             var existing = await query.GetByIdAsync(projectId, id);
@@ -161,6 +169,17 @@ public static class AgentDefinitionRoutes
             || raw.TryGetProperty("createdAt", out _);
     }
 
+    private static string? ValidateMaxConcurrentRuns(JsonElement raw)
+    {
+        if (raw.ValueKind != JsonValueKind.Object || !raw.TryGetProperty("maxConcurrentRuns", out var value))
+            return null;
+        if (value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out var maxConcurrentRuns) || maxConcurrentRuns <= 0)
+            return "maxConcurrentRuns must be a positive integer or null.";
+        return null;
+    }
+
     private static bool IsNameConflict(Exception ex) =>
         ex is AgentNameConflictException
         || ex is DbUpdateException { InnerException: SqliteException sqlite }
@@ -176,7 +195,24 @@ public sealed record AgentCreateRequest(
     IReadOnlyList<string>? Skills = null,
     int? MaxConcurrentRuns = null,
     IReadOnlyList<string>? AllowedSubagentAgentIds = null,
-    string? Avatar = null);
+    string? Avatar = null,
+    JsonElement Raw = default)
+{
+    public static async ValueTask<AgentCreateRequest?> BindAsync(HttpContext context)
+    {
+        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+        return new AgentCreateRequest(
+            AgentDefinitionRequestBinding.GetString(raw, "name") ?? string.Empty,
+            AgentDefinitionRequestBinding.GetString(raw, "instructions") ?? string.Empty,
+            AgentDefinitionRequestBinding.GetString(raw, "description"),
+            AgentDefinitionRequestBinding.GetElement(raw, "agentConfig"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "skills"),
+            AgentDefinitionRequestBinding.GetInt(raw, "maxConcurrentRuns"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
+            AgentDefinitionRequestBinding.GetString(raw, "avatar"),
+            raw);
+    }
+}
 
 public sealed record AgentUpdateRequest(
     string? Name,
@@ -194,16 +230,16 @@ public sealed record AgentUpdateRequest(
     {
         var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
         return new AgentUpdateRequest(
-            GetString(raw, "name"),
-            GetString(raw, "description"),
-            GetString(raw, "instructions"),
-            GetElement(raw, "agentConfig"),
-            GetStringList(raw, "skills"),
-            GetInt(raw, "maxConcurrentRuns"),
-            GetStringList(raw, "allowedSubagentAgentIds"),
+            AgentDefinitionRequestBinding.GetString(raw, "name"),
+            AgentDefinitionRequestBinding.GetString(raw, "description"),
+            AgentDefinitionRequestBinding.GetString(raw, "instructions"),
+            AgentDefinitionRequestBinding.GetElement(raw, "agentConfig"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "skills"),
+            AgentDefinitionRequestBinding.GetInt(raw, "maxConcurrentRuns"),
+            AgentDefinitionRequestBinding.GetStringList(raw, "allowedSubagentAgentIds"),
             GetFields(raw),
             raw,
-            GetString(raw, "avatar"));
+            AgentDefinitionRequestBinding.GetString(raw, "avatar"));
     }
 
     private static IReadOnlySet<string> GetFields(JsonElement raw)
@@ -221,24 +257,28 @@ public sealed record AgentUpdateRequest(
         return fields;
     }
 
-    private static string? GetString(JsonElement raw, string property) =>
+}
+
+internal static class AgentDefinitionRequestBinding
+{
+    public static string? GetString(JsonElement raw, string property) =>
         raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind != JsonValueKind.Null
             ? value.GetString()
             : null;
 
-    private static JsonElement? GetElement(JsonElement raw, string property) =>
+    public static JsonElement? GetElement(JsonElement raw, string property) =>
         raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind != JsonValueKind.Null
             ? value.Clone()
             : null;
 
-    private static IReadOnlyList<string>? GetStringList(JsonElement raw, string property) =>
+    public static IReadOnlyList<string>? GetStringList(JsonElement raw, string property) =>
         raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Select(item => item.GetString() ?? string.Empty).ToArray()
             : null;
 
-    private static int? GetInt(JsonElement raw, string property) =>
-        raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number
-            ? value.GetInt32()
+    public static int? GetInt(JsonElement raw, string property) =>
+        raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var result)
+            ? result
             : null;
 }
 

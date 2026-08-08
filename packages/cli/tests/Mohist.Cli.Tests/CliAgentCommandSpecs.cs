@@ -647,6 +647,8 @@ public class CliAgentCommandSpecs
         Assert.Contains("mutually exclusive", editOutput.ToString(), StringComparison.Ordinal);
         Assert.Contains("--clear-runtime", editOutput.ToString(), StringComparison.Ordinal);
         Assert.Contains("--clear-avatar", editOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("non-empty", createOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--clear-skills", editOutput.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -682,6 +684,26 @@ public class CliAgentCommandSpecs
         Assert.Equal("mohist", body["skills"]?[0]?.GetValue<string>());
         Assert.Equal("fsd", body["skills"]?[1]?.GetValue<string>());
         Assert.Equal(2, body["maxConcurrentRuns"]?.GetValue<int>());
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" , ")]
+    public async Task AgentCreate_EmptySkillsFailsBeforeHttp(string skills)
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review", "--skills", skills],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--skills must contain at least one non-empty skill name", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--clear-skills", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -1097,6 +1119,26 @@ public class CliAgentCommandSpecs
         Assert.Contains("--agent-config is retired", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" , ")]
+    public async Task AgentUpdate_EmptySkillsFailsBeforeHttp(string skills)
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "edit", "reviewer", "--skills", skills],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--skills must contain at least one non-empty skill name", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--clear-skills", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
     }
 
