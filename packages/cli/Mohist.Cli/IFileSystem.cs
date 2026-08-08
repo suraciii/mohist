@@ -16,6 +16,13 @@ internal interface IFileSystem
     Task<string> ReadAllTextAsync(string path);
     void WriteAllText(string path, string contents);
     Task WriteAllTextAsync(string path, string contents);
+
+    /// <summary>
+    /// Writes the file restricted to the owning user (0600 on Unix; the
+    /// user-profile directory already restricts on Windows). Used for
+    /// local session credentials whose exposure equals the session's.
+    /// </summary>
+    void WriteAllTextUserOnly(string path, string contents) => WriteAllText(path, contents);
     IEnumerable<string> EnumerateFiles(string path, string searchPattern, SearchOption searchOption);
     Stream OpenRead(string path);
     Stream OpenWrite(string path);
@@ -52,6 +59,15 @@ internal sealed class RealFileSystem : IFileSystem
     public Task<string> ReadAllTextAsync(string path) => File.ReadAllTextAsync(path, Encoding.UTF8);
 
     public void WriteAllText(string path, string contents) => File.WriteAllText(path, contents, new UTF8Encoding(false));
+
+    public void WriteAllTextUserOnly(string path, string contents)
+    {
+        File.WriteAllText(path, contents, new UTF8Encoding(false));
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+    }
 
     public async Task WriteAllTextAsync(string path, string contents)
     {

@@ -19,7 +19,7 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        var credential = await provider.TryResolveAsync();
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
 
         Assert.NotNull(credential);
         Assert.Equal(Token, credential.Token);
@@ -36,7 +36,7 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        var credential = await provider.TryResolveAsync();
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
 
         Assert.NotNull(credential);
         Assert.Equal(Token, credential.Token);
@@ -53,7 +53,7 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        var credential = await provider.TryResolveAsync();
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
 
         Assert.NotNull(credential);
         Assert.Equal(Token, credential.Token);
@@ -69,7 +69,7 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        var credential = await provider.TryResolveAsync();
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
 
         Assert.NotNull(credential);
         Assert.Equal(Token, credential.Token);
@@ -84,7 +84,7 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        Assert.Null(await provider.TryResolveAsync());
+        Assert.Null(await provider.TryResolveAsync(new Uri("http://localhost:3456")));
     }
 
     [Fact]
@@ -95,7 +95,7 @@ public sealed class CliCredentialProviderTests
         env["MOHIST_TOKEN"] = "short";
         var provider = new CliCredentialProvider(files, env);
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.TryResolveAsync());
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => provider.TryResolveAsync(new Uri("http://localhost:3456")));
 
         Assert.Contains("32", error.Message, StringComparison.Ordinal);
     }
@@ -109,8 +109,88 @@ public sealed class CliCredentialProviderTests
         env["HOME"] = "/home/test";
         var provider = new CliCredentialProvider(files, env);
 
-        var credential = await provider.TryResolveAsync();
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
 
         Assert.Equal(Token, credential!.Token);
+    }
+
+    [Fact]
+    public async Task StoredSession_MatchesTheDestinationServer()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("/home/test/.mohist/credentials.json", """
+            {"servers":[{"server":"http://localhost:3456","accessToken":"moh_session_0123456789abcdef0123456789abcdef","refreshToken":"moh_refresh_0123456789abcdef0123456789abcdef","accessExpiresAt":"2026-01-01T01:00:00+00:00","refreshExpiresAt":"2026-01-31T00:00:00+00:00"}]}
+            """);
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env["HOME"] = "/home/test";
+        var provider = new CliCredentialProvider(files, env);
+
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
+
+        Assert.NotNull(credential);
+        Assert.Equal("moh_session_0123456789abcdef0123456789abcdef", credential.Token);
+        Assert.False(credential.MachineLocal);
+        Assert.Equal(CliCredentialSource.CredentialFile, credential.Source);
+        Assert.NotNull(credential.Stored);
+    }
+
+    [Fact]
+    public async Task StoredSession_ForAnotherServer_DoesNotApply()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("/home/test/.mohist/credentials.json", """
+            {"servers":[{"server":"http://localhost:3456","accessToken":"moh_session_0123456789abcdef0123456789abcdef","refreshToken":"moh_refresh_0123456789abcdef0123456789abcdef","accessExpiresAt":"2026-01-01T01:00:00+00:00","refreshExpiresAt":"2026-01-31T00:00:00+00:00"}]}
+            """);
+        files.AddFile("/home/test/.mohist/admin-token", "file-token-0123456789abcdef0123456789");
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env["HOME"] = "/home/test";
+        var provider = new CliCredentialProvider(files, env);
+
+        // No session for that server; resolution falls back to the
+        // machine-local admin file, which is flagged machine-local so the
+        // handler never attaches it to a remote destination.
+        var credential = await provider.TryResolveAsync(new Uri("https://remote.example"));
+
+        Assert.NotNull(credential);
+        Assert.True(credential.MachineLocal);
+        Assert.Equal(CliCredentialSource.AdminFile, credential.Source);
+    }
+
+    [Fact]
+    public async Task MohistToken_TakesPrecedenceOverAStoredSession()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("/home/test/.mohist/credentials.json", """
+            {"servers":[{"server":"http://localhost:3456","accessToken":"moh_session_0123456789abcdef0123456789abcdef","refreshToken":"moh_refresh_0123456789abcdef0123456789abcdef","accessExpiresAt":"2026-01-01T01:00:00+00:00","refreshExpiresAt":"2026-01-31T00:00:00+00:00"}]}
+            """);
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env["MOHIST_TOKEN"] = Token;
+        env["HOME"] = "/home/test";
+        var provider = new CliCredentialProvider(files, env);
+
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
+
+        Assert.NotNull(credential);
+        Assert.Equal(Token, credential.Token);
+        Assert.Equal(CliCredentialSource.EnvironmentToken, credential.Source);
+    }
+
+    [Fact]
+    public async Task StoredSession_TakesPrecedenceOverTheAdminFile()
+    {
+        var files = new FakeFileSystem();
+        files.AddFile("/home/test/.mohist/credentials.json", """
+            {"servers":[{"server":"http://localhost:3456","accessToken":"moh_session_0123456789abcdef0123456789abcdef","refreshToken":"moh_refresh_0123456789abcdef0123456789abcdef","accessExpiresAt":"2026-01-01T01:00:00+00:00","refreshExpiresAt":"2026-01-31T00:00:00+00:00"}]}
+            """);
+        files.AddFile("/home/test/.mohist/admin-token", "file-token-0123456789abcdef");
+        var env = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
+        env["HOME"] = "/home/test";
+        var provider = new CliCredentialProvider(files, env);
+
+        var credential = await provider.TryResolveAsync(new Uri("http://localhost:3456"));
+
+        Assert.NotNull(credential);
+        Assert.Equal("moh_session_0123456789abcdef0123456789abcdef", credential.Token);
+        Assert.False(credential.MachineLocal);
     }
 }

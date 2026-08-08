@@ -31,6 +31,7 @@ internal sealed class MohistCliApi
     private readonly CliResponseReader _responseReader;
     private readonly ProjectReferenceResolver _projectReferenceResolver;
     private readonly TimeProvider _timeProvider;
+    private readonly Func<TimeSpan, CancellationToken, Task> _pollWait;
     internal CliInvocation Invocation { get; }
 
     internal TextWriter Output => _out;
@@ -42,6 +43,7 @@ internal sealed class MohistCliApi
     internal CliResponseReader ResponseReader => _responseReader;
     internal Func<string> GetUserHome => _getUserHome;
     internal TimeProvider TimeProvider => _timeProvider;
+    internal Func<TimeSpan, CancellationToken, Task> PollWait => _pollWait;
     internal string CurrentProjectStatePath => ProjectReferenceResolver.StatePath(_fileSystem.CurrentDirectory);
 
     public MohistCliApi(
@@ -56,6 +58,7 @@ internal sealed class MohistCliApi
         ICliTerminal? terminal = null,
         ICliEnvironment? cliEnvironment = null,
         TimeProvider? timeProvider = null,
+        Func<TimeSpan, CancellationToken, Task>? pollWait = null,
         CancellationToken cancellationToken = default)
     {
         _http = http;
@@ -70,6 +73,9 @@ internal sealed class MohistCliApi
         _responseReader = responseReader ?? new CliResponseReader(http);
         _projectReferenceResolver = new ProjectReferenceResolver(_fileSystem, _getUserHome);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        // Polling waits (mo auth login) are released by the HTTP responder
+        // sequence in tests; production sleeps the RFC 8628 interval.
+        _pollWait = pollWait ?? ((delay, ct) => Task.Delay(delay, _timeProvider, ct));
         Invocation = new CliInvocation(
             output,
             error,
