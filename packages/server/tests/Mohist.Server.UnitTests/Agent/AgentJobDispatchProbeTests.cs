@@ -1,4 +1,5 @@
 using Mohist.Server.TestSupport;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Agent;
@@ -37,14 +38,44 @@ public sealed class AgentJobDispatchProbeTests
             TimeSpan.FromSeconds(1),
             cancellation.Token);
 
+        await probe.WaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedSignalCount("job"));
         cancellation.Cancel();
         var error = await Record.ExceptionAsync(() => waiting);
 
         Assert.NotNull(error);
         Assert.Contains("Cancelled while waiting", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, probe.RetainedSignalCount("job"));
 
+        var nextWaiting = probe.WaitForAssignmentPreparedAsync("job", TimeSpan.FromSeconds(1));
+        await probe.WaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedSignalCount("job"));
         await probe.AssignmentPreparedAsync("job", "runner", "work");
-        await probe.WaitForAssignmentPreparedAsync("job", TimeSpan.FromSeconds(1));
+        await nextWaiting;
+    }
+
+    [Fact]
+    public async Task WaitForAssignmentPreparedAsync_RetiresTimedOutWaiter()
+    {
+        var time = new FakeTimeProvider(TestTime.UtcNow);
+        var probe = new AgentJobDispatchProbe(time);
+        var timeout = TimeSpan.FromMinutes(1);
+        var waiting = probe.WaitForAssignmentPreparedAsync("job", timeout);
+
+        await probe.WaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedSignalCount("job"));
+        time.Advance(timeout);
+        var error = await Record.ExceptionAsync(() => waiting);
+
+        Assert.NotNull(error);
+        Assert.Contains("Timed out waiting", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, probe.RetainedSignalCount("job"));
+
+        var nextWaiting = probe.WaitForAssignmentPreparedAsync("job", timeout);
+        await probe.WaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedSignalCount("job"));
+        await probe.AssignmentPreparedAsync("job", "runner", "work");
+        await nextWaiting;
     }
 
     [Fact]
