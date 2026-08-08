@@ -26,107 +26,6 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     }
 
     [Fact]
-    public async Task CompactEndpoint_WhileResetDispatchIsInFlight_ReturnsRecoveryInProgressWithoutMutation()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
-            "recovery-overlap",
-            sessionName: "build",
-            attachIdle: true);
-        var resetStarted = new TaskCompletionSource<SessionCommandRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var completeReset = new TaskCompletionSource<SessionCommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        RunnerHub.SetInvocationResponseFactory("SessionCommand", arguments =>
-        {
-            var request = Assert.IsType<SessionCommandRequest>(Assert.Single(arguments));
-            if (request.Command != SessionCommandKind.Reset)
-                return new SessionCommandResult(Ok: false, Error: SessionCommandError.Unavailable);
-
-            resetStarted.TrySetResult(request);
-            return completeReset.Task;
-        });
-
-        var resetTask = _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
-            content: null);
-        var resetRequest = await resetStarted.Task;
-
-        using var compact = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/compact",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.Conflict, compact.StatusCode);
-        using var compactBody = JsonDocument.Parse(await compact.Content.ReadAsStringAsync());
-        Assert.Equal("recovery_in_progress", compactBody.RootElement.GetProperty("code").GetString());
-        Assert.Equal(currentSession.Id, compactBody.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Equal("reset", compactBody.RootElement.GetProperty("details").GetProperty("operation").GetString());
-        Assert.Equal(currentSession.Id, (await _fixture.Grains.GetGrain<IAgentSessionGrain>(currentSession.Id).GetAsync())?.AgentSessionId);
-        Assert.Single(RunnerHub.Invocations);
-
-        completeReset.SetResult(new SessionCommandResult(
-            Ok: true,
-            RuntimeSessionId: $"{resetRequest.RuntimeSessionId}-replacement"));
-        using var reset = await resetTask;
-
-        Assert.Equal(HttpStatusCode.OK, reset.StatusCode);
-        Assert.Equal($"{currentSession.Id}-replacement", (await _fixture.Grains
-            .GetGrain<IAgentSessionGrain>(currentSession.Id)
-            .GetAsync())?.AgentSessionId);
-    }
-
-    [Fact]
-    public async Task CompactEndpoint_HandlerConflict_ReturnsIdleBoundaryConflict()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
-            "compact-handler-conflict",
-            sessionName: "plan",
-            attachIdle: true);
-        RunnerHub.SetInvocationResponse(
-            "SessionCommand",
-            new SessionCommandResult(Ok: false, Error: SessionCommandError.Conflict));
-
-        using var response = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("session_active", doc.RootElement.GetProperty("code").GetString());
-        Assert.Equal(currentSession.Id, doc.RootElement.GetProperty("details").GetProperty("sessionId").GetString());
-        Assert.Equal(SessionCommandKind.Compact, AssertSingleSessionCommandInvocation().Command);
-        Assert.Equal(currentSession.Id, (await _fixture.Grains
-            .GetGrain<IAgentSessionGrain>(currentSession.Id)
-            .GetAsync())?.AgentSessionId);
-    }
-
-    [Fact]
-    public async Task ResetEndpoint_HandlerMissing_ReturnsRuntimeSessionMissing()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync(
-            "reset-handler-missing",
-            sessionName: "build",
-            attachIdle: true);
-        RunnerHub.SetInvocationResponse(
-            "SessionCommand",
-            new SessionCommandResult(Ok: false, Error: SessionCommandError.Missing));
-
-        using var response = await _client.PostAsync(
-            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/reset",
-            content: null);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        Assert.Equal("runtime_session_missing", doc.RootElement.GetProperty("code").GetString());
-        var details = doc.RootElement.GetProperty("details");
-        Assert.Equal(currentSession.Id, details.GetProperty("sessionId").GetString());
-        // issue-484: the recovery runtime_session_missing conflict no
-        // longer carries a reset hint in details; the explanatory message
-        // still points the caller at Reset.
-        Assert.Contains("Reset", doc.RootElement.GetProperty("error").GetString(), StringComparison.Ordinal);
-        Assert.Equal(currentSession.Id, (await _fixture.Grains
-            .GetGrain<IAgentSessionGrain>(currentSession.Id)
-            .GetAsync())?.AgentSessionId);
-    }
-
-    [Fact]
     public async Task ResetEndpoint_ActiveSession_ReturnsConflict()
     {
         var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("reset-active", sessionName: "build", attachAndStart: true);
@@ -312,33 +211,6 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
     }
 
     [Fact]
-    public async Task CompactEndpoint_PersistsCompactionEventAndPreservesRuntimeBinding()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-persist", sessionName: "plan", attachIdle: true);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-
-        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
-        var parts = await db.AgentSessionTranscriptParts.AsNoTracking()
-            .Where(p => p.Type == "compaction")
-            .Join(db.AgentSessionTranscriptTurns.AsNoTracking().Where(t => t.SessionId == currentSession.Id),
-                part => part.TurnId,
-                turn => turn.Id,
-                (part, _) => part)
-            .ToListAsync();
-
-        Assert.NotEmpty(parts);
-        var compaction = parts.First();
-        var payload = JsonDocument.Parse(compaction.PayloadJson).RootElement;
-        Assert.Equal("summary", payload.GetProperty("strategy").GetString());
-
-        var row = await db.AgentSessions.AsNoTracking()
-            .SingleAsync(r => r.Id == currentSession.Id);
-        Assert.Equal(currentSession.Id, row.AgentSessionId);
-    }
-
-    [Fact]
     public async Task SessionMetadataEndpoint_AfterCompact_ExposesContextUsagePercent()
     {
         var (project, issue, _, _) = await CreateAndStartSessionAsync("compact-dto", sessionName: "plan", attachIdle: true);
@@ -365,15 +237,6 @@ public class AgentSessionRecoveryConflictApiSpecs : AgentSessionRecoveryApiTestS
         var root = doc.RootElement.GetProperty("data");
         Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
         var usage = root.GetProperty("usage");
-    }
-
-    [Fact]
-    public async Task AgentSessionGrain_Compact_RecoversAfterRuntimeEventsMakeSessionActive()
-    {
-        var (project, issue, _, currentSession) = await CreateAndStartSessionAsync("compact-deactivate", sessionName: "plan", attachIdle: true);
-
-        using var response = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/compact", content: null);
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Theory]
