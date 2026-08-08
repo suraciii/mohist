@@ -107,10 +107,10 @@ API 必须把下面几类事实分开呈现：
 |---|---|
 | Agent Readiness | Agent 的配置是否已知可执行、明确缺失，或暂时无法确认 |
 | Agent Availability | 当前是否有 Runner 和容量开始执行 |
-| AgentJob status | 这次启动工作是否排队、执行、成功、失败或取消 |
+| AgentJob status | 这次启动工作是否准备、排队、执行、成功、拒绝、失败或取消 |
 | Session activity | 这段会话当前是否正在处理输入 |
 | Input acceptance | 用户这条输入是否已经被 Mohist 持久接受 |
-| Turn result | Runtime 对这一轮输入的执行结果是什么 |
+| Turn result | Runtime 对这一轮输入的执行结果和派发状态是什么 |
 
 这些事实不能折叠成一个 `Connected`、`Running` 或 `Success`。例如，Connection 可以健康但
 Agent 仍需配置；Agent 可以已知可执行但暂时没有容量；Slack 回复发送失败也不能把已完成的
@@ -119,10 +119,95 @@ AgentJob 改成失败。
 `Unknown` 是正式状态，不等同于 Ready 或 Failed。Mohist 无法确定输入是否已交给 Runtime 时，
 应继续核对原输入，而不是复制一条新输入来“保险重试”。
 
+`outcome_pending` 表示 Mohist 已知输入和派发路径被接受，但最终结果尚未记录；它不是成功、
+失败或 idle，也不能用新输入绕过。
+
 Availability 回答现在能否开始一项新的执行；它不替代已有 AgentJob 的调度状态。Runner 或容量在
 一个 Pending Job 的退避期间恢复时，Availability 可以显示可启动，而该 Job 仍显示为等待调度，
 直到下一次持久化 dispatch retry 实际开始它。客户端必须呈现这两个 Server 结论，不能把等待调度
 误报为 Runner 离线或容量已满。
+
+## Canonical read model
+
+Server 是 Job、Session、Input 和 Turn 的唯一 canonical read model。CLI、Web 和 Agent Connection
+只适配这份模型，不能从本地日志、HTTP 状态、Runner 事件或 provider 响应重新推导状态。
+每个模型都必须带 Server 的 `revision` 与 `observedAt`。
+
+AgentJob 至少返回：
+
+```text
+jobId
+launchOperationId
+status = preparing | queued | running | unknown | terminal
+outcome = completed | rejected | failed | cancelled | null
+reason
+nextAction
+sessionId, sessionIdReason
+inputId, inputIdReason
+turnId, turnIdReason
+revision
+observedAt
+```
+
+`sessionId`、`inputId` 或 `turnId` 尚未存在时必须是 `null`，对应 reason 必须非空；reservation
+ID 不能冒充 live mapping。Session accept 成功时三个 mapping 一起出现；明确拒绝或不可恢复
+失败时 Job 进入 terminal `rejected`/`failed` outcome，mapping 保持 null+reason，launch
+operation 的 tombstone 负责后续同 key 查询。
+
+Session activity 必须同时提供 `activity`、`currentContextActivity`、`contextGeneration`、
+`unresolvedPreviousCount`、`nextAction`、`revision` 和 `observedAt`。当前 activity 只回答
+当前 logical context；旧 context 的 Unknown 单独计数，不与当前 active 混合。
+
+Input acceptance 必须提供 `state=accepted|rejected|unknown`、`acceptanceReason`、`turnId`
+（不存在时为 null+`turnIdReason`）、`turnRelation=new-turn|steer|none`、
+`contextGeneration`、`revision` 和 `observedAt`。Turn result 必须提供 `status`、`result`、
+`dispatchStatus`、`blockedReason`、`nextAction`、`contextGeneration`、`revision` 和
+`observedAt`。`blockedReason` 只有 dispatch 被 Server 明确阻塞时才填；未知事实不能被假装
+成 blocked 或 terminal。
+
+CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
+自行合并 Job/Session/Input/Turn 状态。
+
+## Launch response loss and force-reset
+
+启动调用在 `prepare-job` 阶段预分配 `launchOperationId` 与 Job/Session/Input/Turn reservation
+IDs。客户端必须保存并重用同一个 `launchOperationId`；响应丢失时，查询或 retry 原 operation
+返回同一 Job 和同一组 live mapping，不能生成第二个 launch。
+
+Session accept/reject 是 durable outcome。明确 reject 或不可恢复失败返回 terminal Job、
+稳定 `reason` 和 `nextAction`；临时不可用或无法确认 side effect 时返回 `unknown`，并要求
+查询/等待/人工核对原 operation，而不是一直创建新的 Job。客户端不把 reservation ID 当作
+可访问资源。
+
+普通 Compact、Reset 和 recovery 被 Unknown 或 operation response loss 阻挡时，客户端先查
+原 operation。需要越过 Unknown 的显式产品动作是 force-reset：
+
+```text
+force-reset(
+  sessionId,
+  operationId = new key,
+  expectedRevision,
+  confirmUnknownSideEffects = true
+)
+```
+
+它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
+在 expected revision 仍匹配时持久化独立的 force-reset operation，自行建立新的 context 和
+binding；旧 operation/旧 input/turn/binding 事实仍保留为 Unknown，不被伪造完成。响应丢失
+时使用同一 force-reset operationId 查询或重试，返回同一结果，不创建第二个 context。
+
+CLI 的调用合同对应为：
+
+```bash
+mo session force-reset <session-id> \
+  --operation-id <new-operation-key> \
+  --expected-revision <revision> \
+  --confirm-unknown-side-effects
+```
+
+CLI 必须先展示当前 Session、未决 Input/Turn、旧 operation 的 Unknown 和风险摘要；没有显式
+确认、operationId、当前 revision，或 Session 已变化时，Server 拒绝调用。force-reset 完成
+后 CLI/Web 只把新 context 的 activity 作为当前活动，同时显示旧未决数量和 nextAction。
 
 ## 可靠性契约
 
@@ -134,6 +219,9 @@ Availability 回答现在能否开始一项新的执行；它不替代已有 Age
 - 排队和背压是可见状态，不伪装成执行失败；
 - 终态和 transcript 由 Mohist 持久保存，provider 的投递状态不能覆盖它们；
 - 外部平台只能得到至少一次投递时，Connection 负责去重，Agent API 不假设平台只发一次。
+- launch 的 response loss、Session accept rejection 和不可恢复 failure 都通过原
+  `launchOperationId` 返回 durable outcome；不会留下可执行的 dangling reservation 或无限等待
+  的 pending Job。
 
 这里承诺的是“同一意图只产生一次 Mohist 领域效果”，不是网络上的 exactly-once。请求结果
 无法确认时，客户端应查询或以同一身份重试，不能生成新的调用身份。

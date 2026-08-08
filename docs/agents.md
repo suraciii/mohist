@@ -17,8 +17,9 @@ AgentJob 与 AgentSession。完整产品边界见[核心概念](concepts.md)。
   保存或覆盖另一份定义。
 - **入口不改变语义**：一次新的委托创建 AgentJob、AgentSession、首条 SessionInput 和首个
   AgentTurn；对已有会话继续输入会创建新的 SessionInput，但不创建第二个 AgentJob。
-- **执行状态可追溯**：AgentJob 回答首次 launch 是否成功，AgentSession 回答发生了什么、
-  每次后续输入的结果以及当前能否继续。Slack 消息或 Web 页面都不是状态裁判。
+- **执行状态可追溯**：AgentJob 回答首次 launch 是成功、被拒绝还是不可恢复地失败，
+  AgentSession 回答发生了什么、每次后续输入的结果以及当前能否继续。Slack 消息或 Web
+  页面都不是状态裁判。
 
 ## 概念层次
 
@@ -28,7 +29,7 @@ AgentJob 与 AgentSession。完整产品边界见[核心概念](concepts.md)。
 | Agent 定义引用 | Workflow task 用 `uses: mohist/agent` 引用 Mohist Agent 定义的用法 | 不是资源，没有 Agent ID；定义在 task 开始执行时固定 |
 | Mohist Agent | Project 内预先定义、按名称复用的 Agent 资源 | 有稳定 Agent ID、名称、指令、配置、Skills 和状态 |
 | Agent 接入 | 把一个 Mohist Agent 暴露到 Slack 等外部交互场所 | 有独立连接生命周期；只引用 Agent，不拥有或复制 Agent 配置 |
-| AgentJob | Mohist Agent 的一次 launch 执行 | 独立记录等待、执行、完成或失败，以及首次执行结果 |
+| AgentJob | Mohist Agent 的一次 launch 执行 | 独立记录等待、执行、完成、拒绝或失败，以及首次执行结果 |
 | SessionInput | AgentSession 接受的一条输入 | 有稳定 Input ID；记录内容、附件、来源、顺序和投递状态，一个 Turn 可以处理多条 Input |
 | AgentTurn | Runtime 连续处理一组有序 SessionInput 的过程 | 有稳定 Turn ID 和状态；由 AgentSession 拥有，不是新的顶层工作 |
 | AgentSession | Mohist 记录的一段持续会话 | 有稳定 Session ID；按顺序拥有 Input 与 Turn，并保存上下文、用量、活动状态和当前 Runtime Session |
@@ -152,10 +153,13 @@ mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Age
 ```
 
 `agent view` 显示 Readiness、Availability 与配置缺口；Needs setup 时按提示
-补齐再启动。`agent launch` 返回 AgentJob ID、AgentSession ID、首个 Input ID 与 Turn ID。
+补齐再启动。受理成功的 `agent launch` 返回 AgentJob ID、AgentSession ID、首个 Input ID 与
+Turn ID；如果启动被拒绝或不可恢复地失败，返回明确原因和下一步，未创建的会话、输入和
+轮次不会伪装成可访问资源。
 首次启动的工作结果和 composite observation 用返回的 observation URL 读取；连续对话用
 `mo session followup` 提交新的 SessionInput，完整记录用 `mo session transcript`。pending、queued
-和 executing 状态继续观察，terminal 状态读取结果或 transcript，Unknown 必须用原 key 重读或重试。
+和执行中、结果待确认的状态继续观察，terminal 状态读取结果或 transcript，Unknown 必须用原
+key 重读或重试。
 CLI 与 Web 调用的是同一组产品能力。
 
 ## 启动入口
@@ -216,11 +220,16 @@ AgentSession 的结构和用户心智模型靠近 OpenCode、Pi 等会话：它�
 - **有进行中的 Turn**：当前 Turn 可能正在排队，也可能由 Runtime 执行。Follow-up 按顺序创建
   SessionInput：后端支持时加入当前 Turn，否则等待后续 Turn。等待队列达到边界时新输入不会
   被接受，已接受的输入不会被丢弃。排队时可以取消，Runtime 开始后可以请求停止当前 Turn。
-- **空闲**：没有正在处理的 Turn；Follow-up 创建 SessionInput 和新的 Turn，可以 Compact 或 Reset。
-- **未知**：Mohist 暂时无法确认 Runtime 是否已经停止，或无法确认一次输入是否已被
-  接受；核对完成前不会把 Session 当作安全空闲，也不会自动重复投递输入。
+- **结果待确认**：Mohist 已知输入被接受并尝试推进，但最终结果还没有记录。这不是成功、失败
+  或空闲；用户应继续查看原记录，不能用新输入绕过它。
+- **空闲**：没有任何未完成或结果待确认的 Turn，也没有需要处理的会话操作；这是唯一可以
+  安全开始新输入、Compact 或 Reset 的状态。
+- **未知**：Mohist 暂时无法确认一次输入是否已被接受、执行是否已经停止，或外部动作是否已经
+  发生。核对完成前不会把 Session 当作安全空闲，也不会自动重复投递输入；页面会显示需要
+  查看、等待、人工确认或明确重置的下一步。
 
-一次 Turn 完成、失败或停止后，AgentSession 在没有后续 queued Turn 时回到空闲。执行结果保留在
+一次 Turn 只有在结果已经明确记录后才算完成、失败或停止；AgentSession 在没有后续 queued Turn
+或结果待确认的 Turn 时回到空闲。执行结果保留在
 对应的 TaskRun、AgentJob 或 AgentTurn 中，不会把 AgentSession 标记为完成、失败或关闭。Session 不需要
 `closed` 生命周期。
 
@@ -244,7 +253,7 @@ Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来�
 
 - `mo session view <session-id>` / `mo session transcript <session-id>` 都按稳定 Session ID
   读取，不再按来源分两套命令。
-- `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID。
+- `mo session followup` / `compact` / `reset` / `cancel` / `force-reset` 同样只接 Session ID。
 - `mo session list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，来源只是发现条件。
   `--agent` 会列出该 Agent 通过直接启动、Agent Connection 或其他受支持入口创建的会话。
 - `mo session cancel` 取消当前 queued 或 active AgentTurn。若它是 launch 的首个 Turn，AgentJob
@@ -256,10 +265,10 @@ AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是
 当前物理会话。AgentSession 只保存当前关联，不建立物理 Session 历史。
 
 通常所有后续输入都复用当前 Runtime Session：task 变化、retry、模型变化、Compact、
-执行结束或 Runner 重启都不能替换它。只有三种情况建立新的物理 Session——用户
-Reset、执行后端明确确认原 Session 已不存在（自动恢复）、明确切换执行后端。替换
-不改变 AgentSession ID、来源、工作目录或已记录的会话内容；新 Session 从空上下文
-开始，会话中以「上下文已重置」标注，旧消息不重放。
+执行结束或 Runner 重启都不能替换它。Reset、执行后端明确确认原 Session 已不存在，或
+明确切换执行后端时，会话会从一个新的逻辑上下文继续；AgentSession ID、来源、工作目录
+和已记录的会话内容不变，旧消息不重放。Compact 不开启新的逻辑上下文，但会在成功后留下
+一个可见的上下文边界；响应不明确时保持结果待确认或未知。
 
 复用不变量、自动恢复边界与并发规则见
 [Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
@@ -273,9 +282,12 @@ Workflow 来源和 Agent launch 来源的 AgentSession 使用同一组会话操�
 - **Compact**：要求当前执行后端压缩上下文，保持 AgentSession 和当前 Runtime Session。
 - **Reset**：在空闲时建立没有旧 Runtime 上下文的新物理 Session，保持 AgentSession
   身份和已有会话内容。
+- **Force-reset**：当未知状态持续阻止继续时，用户明确确认旧执行可能仍有副作用后，
+  开始新的逻辑上下文。旧的未知输入、结果和风险仍保留并可查看；它不是对旧任务的重试。
 
 这些操作改变会话，不改变工作所有权。Follow-up 不会把 TaskRun 变成 AgentJob；
-Compact 或 Reset 也不会重新启动 Mohist Agent。
+Compact、Reset 或 Force-reset 也不会重新启动 Mohist Agent。Force-reset 需要明确确认旧执行
+可能仍有副作用；响应丢失后继续查询同一次操作，不重复建立上下文。
 
 ## 当前范围
 

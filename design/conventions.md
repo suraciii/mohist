@@ -88,15 +88,26 @@ Concept ownership and origin rules are defined in
   they let Session commands survive Runner process restart. A Workflow adapter rejects a request
   whose authoritative workspace differs from the AgentSession workDir; it never silently reuses
   another directory.
-- Binding replacement compares the complete expected binding: `runnerId`, `runtime`,
-  and `runtimeSessionId`, while separately requiring the AgentSession workDir. Confirmed-missing
-  recovery stays on the bound Runner and only replaces `runtimeSessionId`; Runner handoff is not
-  missing recovery.
+- A complete current binding is `(runnerId, runtime, runtimeSessionId, bindingEpoch)`. Every binding
+  replacement compares that complete expected binding and the AgentSession workDir. `bindingEpoch`
+  is monotonic and changes whenever current binding is replaced; it is part of every command/event
+  fence, not a display-only revision.
+- A binding operation also carries the complete operation fence
+  `(operationId, ownerId, ownerFence, claimGeneration, expectedBinding, candidateBinding, phase,
+  leaseUntil, deadlineAt)`. `ownerFence` and `claimGeneration` are independent monotonic values;
+  an unqualified `generation` in an implementation means `claimGeneration`, never
+  `ContextGeneration`. Every phase write, candidate create/get/discard/cleanup, binding CAS and
+  completion must compare the full fence and expected binding. A stale owner fails closed.
+- Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
+  incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
+  Runner handoff is an explicit `handoff` operation and is not missing recovery. An adopted candidate
+  is current binding and cannot be removed by an old cleanup.
 - AgentSession stores only the current binding. It does not expose or persist a physical Session
   history model.
-- Compact does not change `runtimeSessionId`. Reset, runtime change, or confirmed missing recovery
-  replaces the current binding while preserving `sessionId`. A work directory change requires a
-  new logical Session identity.
+- Compact does not change `runtimeSessionId` or `ContextGeneration`; it persists a ContextBoundary
+  and operation result. Reset, runtime change, confirmed missing recovery, or force-reset replaces
+  the current binding while preserving `sessionId` and starts a new `ContextGeneration`. A work
+  directory change requires a new logical Session identity.
 
 ## WorkflowRun metadata
 

@@ -152,16 +152,29 @@ RuntimeBinding
 
 SessionOperationFence
   OperationId
-  Kind = recovery | compact | reset | force-reset
-  Generation
+  Kind = recovery | compact | reset | force-reset | handoff | rebind
   OwnerId
+  OwnerFence
+  ClaimGeneration
   LeaseUntil
   DeadlineAt
   ExpectedBinding?
   Phase
   CandidateKey?
-  CandidateRuntimeSessionId?
+  CandidateBinding?
+  SupersedesOperationId?
+  Outcome = pending | succeeded | rejected | failed | unknown
+
+ContextBoundary
+  Kind = compact | reset | runtime-change | missing-recovery | force-reset
+  ContextGeneration
+  OperationId
+  Result = pending | succeeded | failed | unknown
+  ObservedAt
 ```
+
+`ContextBoundary` 和 operation result 是 AgentSession 已有持久状态中的记录形状，不是新的
+业务实体；`SessionOperationFence` 的历史结果按 `operationId` 保留，以便 response loss 后查询。
 
 以下是不变量：
 
@@ -176,8 +189,12 @@ SessionOperationFence
   子实体拆分。
 - `Context` 描述当前 Runtime Session 的上下文；binding 替换后从空开始。`Transcript`
   与累计 `Usage` 不随 binding 替换清空。
-- `ContextGeneration` 标识当前逻辑上下文。普通 Compact/Reset 不改变 Session 身份；显式
-  `force-reset` 才递增它。旧 Input/Turn 保留创建时的 generation，不能被移动到新上下文。
+- `ContextGeneration` 标识当前逻辑上下文，和 operation fence 的 `ClaimGeneration` 完全不同。
+  `ContextGeneration` 从 1 开始；普通 Compact 不递增它，但必须持久化 ContextBoundary 与
+  operation result。普通 Reset、Runtime change、missing-recovery 和 force-reset 开始新的
+  logical context，并在同一个 Session 事务中递增它。旧 Input/Turn 保留创建时的
+  `ContextGeneration`，不能被移动到新上下文。本文任何未限定的 `generation` 只可理解为
+  `ClaimGeneration` 的简称，不能指代 `ContextGeneration`。
 - 同一 AgentSession 同时最多有一次 Runtime 执行；该串行约束使 transcript 的 Session
   内顺序足以表达会话。
 - 一个被接受的 Input 恰好关联一个 Turn；一个 Turn 可以包含多个 Input，但只有 Runtime
@@ -187,7 +204,8 @@ SessionOperationFence
   `new-turn` 输入。`#382` 负责跨 Session 的 capacity claim/release 与容量视图。
 - 同一 Session 的有界排队上限是本设计的受理不变量，具体数值是运行参数，不复制 `#382`
   的全局容量策略。
-- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset 或 force-reset 的
+- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset、force-reset、handoff
+  或 rebind 的
   持久 operation fence，不是新的业务实体；操作明确完成或拒绝后才能清除。
 - 用户输入必须包含可见文本或明确附件；attachment-only 输入不生成隐藏 prompt。
 - AgentSession 没有 `completed`、`failed`、`stopped` 或 `closed` 生命周期。
@@ -220,6 +238,11 @@ active + acceptance/side effect uncertain -> unknown
 unknown + authoritative evidence        -> active | idle | unknown
 unknown + explicit force-reset          -> unknown (old Turn remains unknown)
 ```
+
+`activity` 的计算只看当前 `ContextGeneration`：旧 `ContextGeneration` 的 unknown 不会与当前
+`ContextGeneration` 的 queued、running 或 `outcome_pending` 合并。它们仍通过 canonical read model 的
+`unresolvedPreviousCount` 与 `nextAction` 暴露；当前 `ContextGeneration` 若有未决事实，仍按当前事实
+返回 `active` 或 `unknown`。
 
 一次执行完成、失败或取消，只有在 Server 已持久化最终结果时才会让对应 Turn 进入
 `terminal`；Session 仍需检查是否还有其它非终结 Turn 或 operation。Runtime 进程退出、缓存
@@ -273,9 +296,12 @@ effect 或结果本身无法确认。两者都不能安全接受普通新 Turn �
 ```
 
 该事实只表达“后续 Runtime 上下文从空开始”，不携带旧或新物理 Session ID，也不建立
-binding 历史。首次从无 binding 建立物理 Session 时不写该事实。替换 binding、递增
-`contextGeneration` 与写入 `session.context_reset` 必须在 Session 聚合的一次事务中完成；
-该事实在替换后的下一条 `session.input` 之前。
+binding 历史。首次从无 binding 建立物理 Session 时不写该事实。Reset、Runtime change、
+missing-recovery 和 force-reset 必须在同一 Session 事务中递增 `ContextGeneration`、持久化
+ContextBoundary、替换 binding（如需要）并写入 `session.context_reset`；该事实在替换后的
+下一条 `session.input` 之前。普通 Compact 不替换 binding、不递增 `ContextGeneration`，但
+必须持久化同一 `ContextGeneration` 的 ContextBoundary 和 operation result；Compact 成功边界
+之后的输入仍记录该 `ContextGeneration`。
 
 `session.closed` 不属于目标 DSL：一次执行结束不关闭 Session。
 `session.followup_completed` / `session.followup_failed` 同样不属于目标 DSL：Input 与 Turn
@@ -376,11 +402,15 @@ AgentSession 只保存 `CurrentBinding`。旧 binding 不进入 aggregate、DTO 
 
 ```text
 replaceBinding(expected, candidate):
-  require safeAdmission(session)
+  require safeAdmission(session) unless operation kind is force-reset
   require currentBinding == expected
   require candidate was created for AgentSession.workDir
+  require fenceMatch(operationId, ownerId, ownerFence, claimGeneration, expected)
   increment bindingEpoch
   currentBinding = candidate
+  if boundary reason is reset | runtime-change | missing-recovery | force-reset:
+    increment ContextGeneration
+  persist ContextBoundary and binding atomically
 ```
 
 Runtime command/event 必须携带完整的 runner/runtime/runtimeSessionId/bindingEpoch tuple，以及
@@ -406,33 +436,67 @@ RecoveryWindow 不是内存窗口，而是 AgentSession 的一个持久 `Session
 | 字段 | 作用 |
 |---|---|
 | `operationId` | 调用意图的稳定身份，同一操作的查询和重试键 |
-| `generation` | Session recovery generation；防止旧操作覆盖新 binding |
+| `ownerFence` | 单调递增的 owner 世代；每次首次 claim 或 lease takeover 都递增 |
+| `claimGeneration` | 单调递增的 recovery claim 世代；和 `ContextGeneration` 不同，防止旧 claim 覆盖新 binding |
 | `ownerId` | 当前唯一执行 owner；其他 owner 只能观察或在租约过期后接管 |
+| `leaseUntil` | 当前 owner 的租约截止时间；过期后旧 owner 不能再写入、删除或完成 |
 | `expectedBinding` | 完整旧 binding tuple，包括 epoch |
-| `candidateKey` | Runtime create/get/discard 的幂等键 |
+| `candidateKey` | Runtime create/get/discard/cleanup 的幂等键 |
+| `candidateBinding` | 已创建候选的完整 binding；没有候选时为 null |
 | `phase` | claimed、candidate-created、cas-pending、rebound、cleanup-pending、expired 或 failed |
 | `deadlineAt` | 有界的操作截止时间 |
-| `leaseUntil` | owner 租约；保证同一时刻只有一个 owner 推进操作 |
+| `supersedesOperationId` | force-reset 或 takeover 取代的旧未知 operation；只作关联，不覆盖旧结果 |
+
+`claimGeneration` 是 recovery claim 的裸整数代数，不是 `ContextGeneration`、
+`bindingEpoch` 或 candidate 版本。任何实现或命令若只写 `generation`，其语义必须是
+`claimGeneration`；公共合同和持久字段使用完整名称。`ownerFence` 与 `claimGeneration`
+都只能递增，不能在重启、cleanup 或 operation result 写入时重置。
+
+Recovery 的每一个持久写入和 Runtime 副作用都使用同一个条件元组：
+
+```text
+fenceMatch =
+  ActiveOperation.operationId == operationId
+  && ActiveOperation.ownerId == ownerId
+  && ActiveOperation.ownerFence == ownerFence
+  && ActiveOperation.claimGeneration == claimGeneration
+  && ActiveOperation.expectedBinding == expectedBinding
+  && leaseUntil > serverNow
+  && serverNow <= deadlineAt
+```
+
+这里的 `expectedBinding` 是完整的 `(runnerId, runtime, runtimeSessionId, bindingEpoch)`；
+不存在 binding 时使用明确的 `null`，不能省略条件。`phase` write、candidate create/get、
+candidate discard、candidate cleanup、`replaceBinding` 和 `complete` 都必须满足
+`fenceMatch`，并在同一条命令中再次比较当前 binding。条件不匹配统一返回
+`stale_operation_fence`，不改变任何 Server 或 Runtime 状态。
 
 创建/claim fence 先于 candidate create：
 
 ```text
 BeginRecovery(expected, operationId, ownerId, deadline):
-  CAS Session.ActiveOperation from absent
-    to { operationId, generation, ownerId, expected, deadline }
-  if same operationId and generation:
+  if same operationId and leaseUntil > serverNow and deadlineAt >= serverNow:
     return the existing fence idempotently
-  if another live operation:
+  if same operationId and leaseUntil <= serverNow and deadlineAt >= serverNow:
+    atomically increment ownerFence and claimGeneration,
+      replace ownerId and leaseUntil, and retain operationId, expectedBinding, candidateKey
+  if current operation has another operationId and its lease is live:
     return recovery_in_progress
-  if the old owner lease expired:
-    atomically take over the same fence with a new owner lease
+  if current operation deadlineAt < serverNow:
+    reconcile candidate and mark expired or cleanup-pending
+    return recovery_expired
+  otherwise:
+    atomically create the fence with ownerFence and claimGeneration both incremented
 ```
 
-`deadlineAt` 是固定上界，不能靠无限轮询或客户端重试延长。进程或 Server 重启后，Session
-激活和 durable handler 读取该 fence：截止时间前按已保存的 phase 和 `candidateKey` 恢复；
-截止时间后先 reconcile candidate 与 binding，再将操作标记 `expired`。若 candidate 清理
-结果不确定，阶段保持 `cleanup-pending`，该 fence 继续阻止新的 recovery，直到同一个幂等
-清理达到确定结果。
+首次 claim、lease takeover、phase 变更、candidate 记录和 operation result 都与 fence
+一起持久化。`deadlineAt` 是固定上界，不能靠无限轮询、lease renew 或客户端重试延长。
+进程或 Server 重启后，Session 激活和 durable handler 读取已持久化的 operation、ownerFence、
+claimGeneration、phase、candidateKey 和 expectedBinding：未到 deadline 时只能用当前 tuple
+继续；owner lease 已过期时先 takeover，再继续；旧 owner 的重试即使携带同一 operationId
+也因旧 fence fail closed。到 deadline 后先 reconcile candidate 与 current binding，再将
+operation 标记 `expired`。若 candidate cleanup 结果不确定，阶段保持 `cleanup-pending`，
+该 fence 继续阻止新的 recovery，直到同一 candidateKey 的 cleanup 达到确定结果。
 
 ### 触发条件
 
@@ -457,29 +521,56 @@ fence = Session.beginRecovery(expected, operationId, ownerId, deadline)
 resolved = Runtime.resolve(expected)
 
 if resolved is ready:
+    Session.writePhase(fence, phase = rebound, expectedBinding = expected)
     selected = expected
 else if resolved is definitely-missing and fence is owned:
     candidate = Runtime.createOrGetEmpty(expected.runnerId, expected.runtime,
                                          AgentSession.workDir, fence.candidateKey)
-    Session.recordCandidate(fence, candidate)       # idempotent claim
-    selected = Session.replaceBinding(expected, candidate, fence.generation)
+    Session.recordCandidate(fence, candidate)
+    selected = Session.replaceBinding(
+      expectedBinding = expected,
+      candidateBinding = candidate,
+      operationId = fence.operationId,
+      ownerFence = fence.ownerFence,
+      claimGeneration = fence.claimGeneration)
 else:
     fail without changing the binding
 
-Session.recordInput(expectedBinding = selected, input)
+Session.writePhase(fence, phase = rebound, expectedBinding = expected)
+Session.recordInput(
+  fence = fence,
+  expectedBinding = expected,
+  candidateBinding = selected,
+  input = input)
 Runtime.submitInputExactlyOnce(selected, input)
-Session.completeOperation(fence)
+Session.completeOperation(fence, expectedBinding = expected, candidateBinding = selected)
 ```
 
 同一 `candidateKey` 的 create/get 必须返回同一候选或明确失败；创建响应丢失时按 key 查询，
 不能创建第二个候选。若 binding CAS 因 Reset、handoff 或另一已提交变化失败，Server 不采用
 candidate，改用同一 key 幂等 discard，并持久化 `cleanup-pending`，直到 Runtime 明确清理
-完成。清理响应丢失时仍按同 key 查询，不能只写日志或静默遗留。
+完成。每一次 create/get/discard/cleanup 都先以 `fenceMatch` 做 Server 条件检查，并把
+`candidateBinding` 和 phase 一起持久化；不能用 candidate key 单独授权操作。清理响应丢失时
+仍按同 key 查询，不能只写日志或静默遗留。
+
+candidate 一旦被 `replaceBinding` 采用，Server 在同一事务把 phase 置为 `rebound`，并把
+current binding 的完整 tuple（含新的 `bindingEpoch`）写入 `candidateBinding`。此后旧 owner
+的 cleanup 即使在 Runtime 侧仍能定位旧 candidate，也必须先发现 candidate 已 adopted 或
+current binding 已等于该 candidate；cleanup 只能返回 `already_adopted`，不得 discard、删除
+或回收 current binding。未被采用的 candidate 才能在匹配当前 owner fence 的
+`cleanup-pending` 中 discard。
+
+`replaceBinding` 之后，fence 中的 `expectedBinding` 仍是本次操作开始时固定的旧 tuple，不会
+被改写成新 binding。任何后续 phase、输入记录、结果归档或 `complete` 都必须同时携带该
+`expectedBinding` 和已采用的 `candidateBinding`，并要求当前 binding 等于 candidate；这样既
+保留旧 binding 的 CAS 条件，也不会把新 binding 误判成 stale。未采用 candidate 的 discard/
+cleanup 则要求当前 binding 仍不等于该 candidate。
 
 Runner 只报告 Runtime 的 resolve / create / get / discard 事实；`replaceBinding` 与
 `recordInput` 都由 Server 裁决。每个 command/event 带完整 runner/runtime/session/epoch
-tuple，且两次写入都比较 expected binding 和 operation generation，避免过期恢复覆盖
-Reset、Runtime 变化或另一轮恢复。只有输入持久化成功后 Runner 才能提交给 Runtime。
+tuple，且每次 phase write、candidate write、binding CAS、input write 和 complete 都比较
+operationId、ownerId、ownerFence、claimGeneration、expected binding 与 lease，避免过期恢复
+覆盖 Reset、Runtime 变化或另一轮恢复。只有输入持久化成功后 Runner 才能提交给 Runtime。
 
 ### 操作边界
 
@@ -498,25 +589,83 @@ Reset、Runtime 变化或另一轮恢复。只有输入持久化成功后 Runner
 ## Runtime 变化与 Reset
 
 Runtime 变化或普通 Reset 只在 `safeAdmission(session)` 时执行，并持有独立的
-`SessionOperationFence`、`operationId`、expected binding、generation 和 bounded deadline。
+`SessionOperationFence`。该 fence 必须持久化 `operationId`、`ownerId`、`ownerFence`、
+`claimGeneration`、`expectedBinding`、`candidateBinding`、`phase`、`leaseUntil` 和
+`deadlineAt`；它的每个 phase write、candidate write、CAS 和 complete 都使用 recovery
+相同的 `fenceMatch` 条件。
 Runner 先用 operation key 创建新的空物理 Session；Server 只在 expected binding 仍是 current
-时整体替换，并在同一 Session 事务写入 `session.context_reset`。新 Session 建立失败时保留
-原 binding；响应丢失或 provider 已执行但 Server 未确认时，operation 进入 `unknown`，调用方
-只能查询同一 operation 或显式使用同一幂等 key 重试，Server 不隐式重复调用。
+时整体替换，并在同一 Session 事务递增 `ContextGeneration`、持久化 ContextBoundary 和
+写入 `session.context_reset`。新 Session 建立失败时保留原 binding；响应丢失或 provider 已
+执行但 Server 未确认时，operation result 进入 `unknown`，调用方只能查询同一 operation 或
+显式使用同一幂等 key 重试，Server 不隐式重复调用。查询到已成功的 operation 必须返回原
+`ContextGeneration`、bindingEpoch 和 result，不得再次递增或创建物理 Session。
 
 Reset 不改变 Runtime；Runtime 变化可以改变 `runtime` 和 `runnerId`，但不能改变
 AgentSession 工作目录。两者都保留已有 transcript，不迁移或重放 Runtime 上下文，
-也不建立物理 Session 历史。
+也不建立物理 Session 历史。普通 Reset、Runtime change 和 confirmed missing recovery 都
+开始新的 `ContextGeneration`；普通 Compact 是唯一不递增 `ContextGeneration` 的上下文边界。
 
-Runner handoff/rebind 若改变 `runnerId` 是显式 operation，不是 missing recovery。每个 binding、
-command 和 event 都带 `runnerId`、`runtime`、`runtimeSessionId` 与 `bindingEpoch`；完整 tuple
-不匹配的迟到事实全部丢弃。
+`SessionOperationFence.Kind` 的含义固定如下：
+
+| Kind | 允许的 binding 变化 | 用途 |
+|---|---|---|
+| `recovery` | 只在同一 Runner 上从 confirmed missing 重建 Runtime Session | 不能迁移 Runner |
+| `rebind` | 同一 Runner 的显式 Runtime/binding 替换 | 不能改变 `runnerId`，也不能把未知事实当作 missing |
+| `handoff` | 从旧 Runner 切到明确指定的新 Runner | 只能由显式 handoff operation 发起，不能由 Runner 重启或事件推断 |
+
+`handoff` 与 same-runner missing recovery 是两条不同路径。handoff 必须在 fence 中记录
+完整 `candidateBinding`、目标 Runner、CAS 的 `expectedBinding`、owner、ownerFence、
+claimGeneration、phase、deadline 和 lease；只有完成该 operation 后 `runnerId` 才能变化。
+旧 Runner 的每个 command/event 必须携带完整 `(runnerId, runtime, runtimeSessionId,
+bindingEpoch)` tuple、适用的 `operationId` 与 `claimGeneration`；任一字段不匹配 current
+binding 或 operation fence 时 fail closed，不能更新 Turn、activity、transcript 或清理新
+binding。
 
 默认策略是保留原 Turn 的 `unknown` 事实，不自动 replay，也不把它改成成功、失败或 `idle`。
-用户明确确认风险并提供新的 `force-reset` operationId 后，Server 才可建立新 context boundary：
-旧 Turn、Input、transcript 和可能的 side effect 原样保留，新 binding 稳定选定后才可创建一条
-新的 Input/Turn。新 Turn 不重试、不替换旧 Turn；旧 binding 的迟到事实因完整 fence 丢弃。
-force-reset 可能导致旧 Runtime 之后继续产生副作用，风险和 next action 必须可见。
+用户明确确认风险并提供新的 `force-reset` operationId 后，Server 才可建立新的 context
+boundary。force-reset 是带风险确认的 supersede/takeover operation，不是普通 Reset：它
+有自己的 `operationId`、`ownerId`、`ownerFence`、`claimGeneration`、`deadlineAt`、lease、
+phase、`expectedBinding` 和 `candidateBinding`，并记录被取代的旧 operation ID（如有）。
+旧 provider operation 保留为 `unknown`；Server 不把它补写成成功、失败或已停止，也不伪造
+旧 binding 已消失。
+
+force-reset 只有同时满足以下条件才能 claim：
+
+1. 当前 Session 或 operation 的 canonical 状态确实是 `unknown`，且普通 admission 已被该
+   未决事实阻止；
+2. 调用方提供新的 force-reset operationId、明确的风险确认和失败/重复副作用仍可能发生的
+   acknowledgement；
+3. 请求携带当前 Session revision（以及同一读取中观察到的 context generation）；revision
+   或当前 binding 已变化时拒绝并要求重新读取，不能覆盖并发操作；
+4. Server 能保留旧 Input/Turn、旧 operation result 和旧 binding tuple，并为新 operation
+   选择新的 context/binding；旧 Input/Turn 不重写、不重放。
+
+force-reset 不调用普通 `BeginRecovery`，而是执行一次原子的 supersede/takeover：
+
+```text
+BeginForceReset(session, newOperationId, ownerId, expectedRevision, confirmation, deadline):
+  require session.revision == expectedRevision
+  require session or ActiveOperation is unknown
+  require confirmation acknowledges possible old side effects and duplicate work
+  old = ActiveOperation
+  atomically persist old operation outcome = unknown
+  and replace ActiveOperation with a new fence containing:
+    operationId = newOperationId
+    ownerId, ownerFence, claimGeneration, expectedBinding = currentBinding
+    deadlineAt, phase = claimed, supersedesOperationId = old.operationId
+  return the new fence
+```
+
+若旧 `ActiveOperation` 不存在，则 `old` 为空；若它仍是已知 pending 而非 unknown，普通
+force-reset 被拒绝。旧 operation 的 `unknown` 结果和旧 binding tuple 在其持久 operation
+记录中保留，新的 fence 只能在自己的完整条件元组下推进；它不能把旧 operation 标为完成，
+也不能把旧 binding 声称为已停止或已删除。
+
+新的 binding 稳定选定并新 ContextBoundary 提交后，才允许新的 Input/Turn 使用当前
+`ContextGeneration`。force-reset 响应丢失时，使用同一 operationId 查询或重试，返回同一
+新 context、bindingEpoch 和映射；不能再建第二个 context。旧 `ContextGeneration` 的 unknown、旧
+binding 的迟到事实和潜在副作用保持可查询，并通过 `unresolvedPreviousCount`、`nextAction`
+和风险提示暴露。
 
 ## 模块所有权
 
@@ -546,9 +695,13 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 - 停止或输入受理不确定时进入 `unknown`，不会自动重放；
 - Reset、Runtime 变化和 confirmed missing 在 safe admission 下用 operation identity 原子替换 current binding；
 - concurrent recovery 只有一个 owner，Server restart 能 reconcile、过期和清理 candidate；
-- candidate CAS failure 不采用候选并完成幂等 cleanup；创建/submit 响应丢失不隐式重放；
+- lease expiry takeover 递增 ownerFence/claimGeneration，旧 owner 的 phase/write/delete/complete
+  全部 fail closed；candidate CAS failure 不采用候选并完成幂等 cleanup，已采用 candidate 不被旧
+  cleanup 删除；创建/submit 响应丢失不隐式重放；
 - Runner handoff 与 same-runner missing recovery 分开，stale tuple event 被拒绝；
 - `force-reset` 保留旧 unknown，并能在新 context 明确创建新的 Input/Turn，风险和 next action 可查询；
+- launch Session rejection 和 permanent failure 都有 durable Job outcome、reason、nextAction、
+  null+reason mapping 与 tombstone；
 - stale expected binding 与旧 Runtime Session 事件被拒绝；
 - binding 替换不创建新 AgentSession、不保存物理 Session history，也不复制物理会话数据；
 - TaskRun / AgentJob 结果与 AgentSession activity 互不覆盖。
@@ -586,8 +739,10 @@ canonical 返回值。CLI 省略 Workspace 时，入口先解析当前 Project �
 
 ### 稳定身份与 canonical 投影
 
-Server 在受理事务中生成或确认 `AgentJobId`、`AgentSessionId`、`InputId` 和 `TurnId`。
-这些 ID 一经持久化不因排队、Runner 重启、binding 替换、重试、Compact 或 Reset 改变。
+Server 在受理事务中生成或确认 `launchOperationId`、`AgentJobId`、`AgentSessionId`、
+`InputId` 和 `TurnId`。`prepare-job` 会先持久化这些 ID 的 reservation；只有 Session
+accept 成功后，Session/Input/Turn ID 才成为可寻址的 live mapping。已 materialize 的 ID
+一经持久化不因排队、Runner 重启、binding 替换、重试、Compact、Reset 或 force-reset 改变。
 RuntimeSessionId 只标识当前物理 binding；它可以替换，不能作为公共逻辑 Session 的
 身份。重复提交通过同一请求身份命中原 Input/Turn，不能创建第二份输入或第二个副作用。
 
@@ -597,13 +752,26 @@ Server 是 canonical read model 与 command result 的权威来源。CLI、Web �
 是 Server 观察该事实的时间。外部续读 cursor 和认证/传输语义仍属于 #387，不在本 issue 新造
 endpoint。
 
-| canonical 事实 | 必须回答的问题 | 最小字段语义 |
+| canonical 事实 | 必须回答的问题 | 必须存在的字段 |
 |---|---|---|
-| AgentJob status | 这次 launch 工作排队、执行、成功、失败或取消了吗 | `jobId`、`status`、`result/error`、`revision`、`observedAt` |
-| Session activity | 这段会话现在能否继续、是否有未知事实 | `sessionId`、`activity`、`contextGeneration`、`revision`、`observedAt`、`nextAction`? |
-| Input acceptance | 这条输入是否已由 Mohist 持久接受 | `inputId`、`state=accepted|rejected|unknown`、`route`、`turnId`?、`revision`、`observedAt` |
-| Turn result | 这一轮的执行状态和结果是什么 | `turnId`、`status`、`result/error`、`nextAction`?、`contextGeneration`、`revision`、`observedAt` |
-| launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`revision`、`observedAt` |
+| AgentJob status | 这次 launch 工作排队、执行、成功、拒绝或失败了吗 | `jobId`、`launchOperationId`、`status`、`outcome`、`reason`、`nextAction`、`sessionId`、`sessionIdReason`、`inputId`、`inputIdReason`、`turnId`、`turnIdReason`、`revision`、`observedAt` |
+| Session activity | 这段会话当前 context 能否继续、过去是否仍有未知事实 | `sessionId`、`activity`、`currentContextActivity`、`contextGeneration`、`unresolvedPreviousCount`、`nextAction`、`revision`、`observedAt` |
+| Input acceptance | 这条输入是否已由 Mohist 持久接受，以及属于哪一轮 | `inputId`、`state`、`acceptanceReason`、`turnId`、`turnIdReason`、`turnRelation`、`contextGeneration`、`revision`、`observedAt` |
+| Turn result | 这一轮的执行状态、派发状态和结果是什么 | `turnId`、`status`、`result`、`reason`、`dispatchStatus`、`blockedReason`、`nextAction`、`contextGeneration`、`revision`、`observedAt` |
+| launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`launchOperationId`、`revision`、`observedAt` |
+
+Job 的 `sessionId`、`inputId`、`turnId` 是 canonical mapping 字段。它们不存在时必须为
+`null`，对应的 `...Reason` 必须是非空稳定值，例如 `session_rejected`、`input_not_accepted`
+或 `launch_failed_before_session`；不能返回 reservation ID 冒充 live mapping。Session accept
+一旦 durable 成功，三个 mapping 一起 materialize；不会出现只有 Session 或只有 Input 的
+半映射。
+
+Input 的 `state` 是 `accepted | rejected | unknown`，`turnRelation` 是
+`new-turn | steer | none`；被拒绝或未知时 `turnId=null` 并给出 `turnIdReason`。Turn 的
+`dispatchStatus` 至少区分 `not_started | queued | dispatched | blocked | unknown | terminal`；
+只有 `dispatchStatus=blocked` 时 `blockedReason` 可非空，未知派发不能伪造为 blocked 或 terminal。
+`nextAction` 是必需字段，安全空闲时为 `none`，Unknown、outcome_pending、blocked 或历史未决
+事实时给出可执行的查询、等待、重试原 operation、人工核对或 force-reset 动作。
 
 `accepted` 是 Input 的受理事实，不能替代 Job status、Session activity 或 Turn result。
 `result` 只有 `terminal` 且 Server 已持久最终结果时才填充；`queued`、`running`、
@@ -614,7 +782,8 @@ endpoint。
 `accepted` 是 Input 的受理事实，`status` 是 Turn 的观察事实。一个已接受的 Input 可以
 长期处于 `queued`，也可以因 Runner 不可用进入 `unknown`；只有执行已被 Runtime 确认
 开始时才是 `running`。Session 级 `activity` 仍可为 `idle`、`active` 或 `unknown`，但它
-不能替代 Turn status：`activity=idle` 要求没有任何非终结 Turn 和未完成 operation；它不
+不能替代 Turn status：当前 `ContextGeneration` 的 `activity=idle` 要求没有任何非终结 Turn
+和未完成 operation；它不
 表示最近一个 Runtime 进程空闲，也不能与未归档结果共存。
 
 Turn status 的定义如下：
@@ -633,6 +802,13 @@ recovery；它们的区别只在于 Server 已知的事实范围，不改变安�
 为公共 `running`；内部 Completed/Failed/Cancelled 只有在结果已持久化时才映射为 `terminal`，
 不能把内部枚举直接暴露给 CLI/Web。
 
+AgentJob 的 canonical 状态是 `preparing | queued | running | unknown | terminal`；
+`terminal` 的 `outcome` 是 `completed | rejected | failed | cancelled`。`rejected` 表示
+Server 确认本次 launch 没有被 Session 接受，`failed` 表示已确认不可恢复的 launch/执行
+失败；二者都必须是 terminal，并带稳定 `reason` 与 `nextAction`。只要 acceptance、dispatch
+或 Runtime side effect 仍无法确认，就保留 `unknown`，不能为了清除等待而伪造 `failed`；
+Unknown 不是 queued，也必须带查询原 operation、人工核对或 force-reset 等 next action。
+
 ### launch 与 follow-up 生命周期
 
 两类调用都经过同一条逻辑序列，差别只有 AgentJob 是否在 launch 时创建：
@@ -642,12 +818,18 @@ request -> prepare-job -> accept-session -> queue -> execute -> result
 ```
 
 1. `request` 校验 Agent execution-definition snapshot、Workspace、现有 target/context、
-   输入身份和当前 Session。这一步不承诺 Runtime 已可用。
-2. `prepare-job` 在 AgentJob 自己的事务中持久化 launch operation、JobId、SessionId、
-   首个 InputId/TurnId 和 durable outbox event；它不写 Session。
-3. `accept-session` 由 launch coordinator 发送 Session 的幂等命令。Session 自己的事务
-   持久化 Input、Turn 及其关联 ID，成功返回 `accepted=true` 和稳定 InputId/TurnId；此时
-   状态通常为 `queued`，不能写成 `running`。
+   输入身份和当前 Session。这一步不承诺 Runtime 已可用；launch 必须带调用方生成的
+   idempotency key，Server 将它与随后预分配的 `launchOperationId` 持久绑定。
+2. `prepare-job` 在 AgentJob 自己的事务中预分配并持久化 `launchOperationId`、JobId、
+   SessionId、首个 InputId/TurnId reservation、固定的 launch `deadlineAt`，以及
+   `sessionAcceptance=pending` 和 durable outbox event；它不写 Session。reservation 只是幂等
+   占位，不是可寻址的 Session、Input 或 Turn。
+3. `accept-session` 由 launch coordinator 发送带 `launchOperationId` 和 reservation IDs
+   的幂等命令。Session accept/reject 的结果必须持久化为 `pending | accepted | rejected`；
+   accept 时 Session 自己的事务一次性 materialize Session、Input、Turn 关系及 durable
+   dispatch event，并将 Job 的 acceptance 记录更新为 `accepted`。成功返回 `accepted=true`
+   和稳定 InputId/TurnId；此时状态通常为 `queued`，不能写成 `running`。rejected 也必须写
+   durable reason，不能只在同步响应里返回。
 4. `queue` 由 Session event/outbox 推进有序执行队列。相同 Session 严格只有一个被确认
    执行的 Turn；follow-up 在前一 Turn 未终结时排队，不插队、不合并、不覆盖。Session
    queue 上限属于本设计；跨 Session capacity claim/release 和视图属于 `#382`。
@@ -658,10 +840,39 @@ request -> prepare-job -> accept-session -> queue -> execute -> result
    `outcome_pending`，不能写成 `idle`。
 
 launch 为一次新的 AgentJob 创建首个 Input/Turn，并将 JobId、SessionId、InputId、TurnId
-一起返回。AgentJob、AgentSession、Input 和 Turn 不共享跨聚合事务：AgentJob 事件/outbox
-驱动 Session 的幂等命令，Session 事件再驱动首 Turn dispatch。follow-up 不创建 AgentJob，
-只追加 Input/Turn。Job 已创建但 Session response 丢失、Session 已创建但 dispatch 未送达、
-或 Runner 已接受但 response 丢失，都用原 operation 查询/重试收敛，不能隐式重复 submit。
+一起返回；若 Session 尚未接受，则这三个 mapping 字段返回 `null` 及各自 reason，不能返回
+reservation ID。AgentJob、AgentSession、Input 和 Turn 不共享跨聚合事务：AgentJob
+事件/outbox 驱动 Session 的幂等命令，Session 事件再驱动首 Turn dispatch。follow-up 不创建
+AgentJob，只追加 Input/Turn。
+
+launch coordinator 必须按以下结果收敛：
+
+| 事实 | Job 结果 | 映射与保留 |
+|---|---|---|
+| Session 明确拒绝 | `terminal / rejected` | `sessionId`、`inputId`、`turnId` 全为 null + reason；reservation 只留在 launch tombstone |
+| prepare/outbox/Session 的不可恢复失败，且确认没有 Session side effect | `terminal / failed` | 未 materialize 的映射全为 null + reason；保留 launch tombstone，不留可执行 outbox |
+| Session 已接受 | `queued` 或后续 `running/terminal` | 三个 live mapping 一起返回，后续只更新状态，不更换 ID |
+| response loss 或 acceptance/side effect 不确定 | `unknown` 或已知当前状态 | 用原 `launchOperationId` 查询/重试；不得新建 Job、Session、Input、Turn 或 submit |
+
+`reason` 和 `nextAction` 是 Server canonical 的稳定产品语义，例如
+`agent_archived`、`needs_setup`、`invalid_input`、`queue_full`、`session_conflict`、
+`launch_persistence_failed`；暂时不可用必须继续同一 operation，不得提前标为 permanent
+failure。若 deadline 到达，只有在 Server 已证明 Session 未接受且没有可能的 Runtime side
+effect 时才能转 `terminal / failed`；否则保持 `unknown` 并给出人工核对或 force-reset 的
+next action，不制造假终态。
+
+响应丢失或 Server 重启后的查询先按 `launchOperationId` 找 Job 的 durable acceptance
+记录：`accepted` 返回原三项 mapping，`rejected` 返回 terminal reason，`pending` 重投
+同一 accept command；若 Session 已保存同一 operation 的 accept 记录，则以 Session 记录
+补回 Job，若没有记录才允许同一 command 重试。这样原 launch operation 永远只对应一组
+reservation 和最多一组 live mapping，不产生 dangling live ID 或无限 pending。
+
+Rejected/failed Job、launch operation、reason、nextAction 和未 materialize reservation
+以最小 tombstone 形式永久保留；完整 transcript 或大 payload 可以按既有保留策略清理，但
+`launchOperationId`、JobId、三项 reservation/live mapping、terminal outcome、reason、
+nextAction 和 revision 不能删除。reservation IDs 永不回收复用，也不创建空
+Session/Input/Turn；旧 `launchOperationId` 永远只能返回原 outcome 或明确的永久 tombstone，
+不能被新 launch 重新解释为另一组 mapping。
 
 同一 Session 的串行约束是生命周期事实，不是全局容量策略：前一 Turn 处于 `queued`、
 `running`、`outcome_pending` 或 `unknown` 时，后续 Input 只能按 steer/queue 语义处理或被
@@ -691,11 +902,13 @@ RecoveryInProgress | RecoveryFailed | RecoveryExpired | CleanupPending
 - `ObservationUnknown`：断线、超时、Runner 不可达、权限错误、非 404 错误、格式错误或
   任何不能证明“不存在”的结果。保留原 binding，不创建候选，不 replay，不自动换绑。
 - `RecoveryClaimed`：Runner 已明确报告当前 Runtime Session 不存在，Server 先持久化唯一
-  operation owner、generation、deadline 和 candidate key，再为同一 AgentSession 创建空
-  Session 并用完整 expected binding 做 CAS。第二个 recovery 只得到 `recovery_in_progress`。
+  operation owner、ownerFence、claimGeneration、deadline 和 candidate key，再为同一
+  AgentSession 创建空 Session 并用完整 expected binding 做 CAS。第二个 recovery 只得到
+  `recovery_in_progress`。
 - `Rebound`：候选 Runtime Session 创建成功、binding 原子替换成功，并写入一次
-  `session.context_reset(reason=missing-recovery)`。AgentSession、Workspace、target、
-  Input/Turn ID 和公共 transcript 保持不变。
+  `session.context_reset(reason=missing-recovery)`，同时递增 `ContextGeneration`。旧
+  Input/Turn 的 mapping、Workspace、target 和公共 transcript 保持不变；后续新 Input/Turn
+  只使用新 `ContextGeneration`。
 - `RecoveryFailed` / `RecoveryExpired`：创建、Runner 路由、CAS、deadline 或持久化失败。
   原 binding 不被伪造替换；candidate 未绑定时必须按同一 key 幂等 discard。清理结果不确定
   时保留 `cleanup_pending`，不允许第二个 recovery。
@@ -718,7 +931,7 @@ RuntimeSessionId 不匹配被丢弃。恢复失败也不关闭 AgentSession，�
 missing-recovery 不是 Unknown Turn 的例外。若旧 Turn 已可能产生 side effect，Server
 保持 `unknown` 或 `outcome_pending`，不允许 recovery、Compact、普通 Reset 或新 Turn 通过
 旧 Turn 的空档进入 Runtime。只有用户明确选择 `force-reset`，才可建立新的 context boundary；
-原 Turn 与副作用风险保留，完整 binding/generation fence 仍保护迟到事件。
+原 Turn 与副作用风险保留，完整 binding tuple、ownerFence 和 claimGeneration 仍保护迟到事件。
 
 状态查询或相同请求身份的重试只做 observation：
 
@@ -736,8 +949,8 @@ missing-recovery 不是 Unknown Turn 的例外。若旧 Turn 已可能产生 sid
 | 不同身份再次提交相同文本 | 原记录与新请求身份不同 | 不推断等价，不自动去重 | 新请求按正常校验，必要时拒绝或产生新 Input |
 | Runner 重启 | current binding | Runner 重连 probe；存在则复用 | 不改变 Session/Input/Turn ID |
 | 连接断开/超时 | current binding 与可能的活动事实 | 保留 binding，进入 observation unknown | 活动中的 Turn 为 `unknown`，不当作 idle |
-| 明确确认 Runtime 缺失且无未决副作用 | Session 记录 | 创建空 Runtime、CAS 换绑 | 同一 Session，后续 Turn 可 `queued` |
-| 明确确认缺失但旧 Turn 可能已提交 | 旧 Turn 与其副作用不确定性 | 可为未来操作换绑，但不 replay 旧 Input | 旧 Turn `unknown`，给查询/Reset next action |
+| 明确确认 Runtime 缺失且无未决副作用 | Session 记录 | 创建空 Runtime、CAS 换绑并开始新 ContextGeneration | 同一 Session，后续 Turn 可 `queued` |
+| 明确确认缺失但旧 Turn 可能已提交 | 旧 Turn 与其副作用不确定性 | 不自动换绑；只允许显式 force-reset | 旧 Turn `unknown`，给查询/force-reset next action |
 | 恢复失败 | 原 binding 与原记录 | 不换绑、不关闭 Session | `recovery_failed`，原因具体且可行动 |
 
 恢复窗口不能靠墙钟轮询制造结论。若实现需要 deadline，必须注入 `TimeProvider` 或等价
@@ -759,19 +972,28 @@ fake，并把“窗口过期”作为持久化的恢复结果；测试不能用 
 Compact 与 Reset 都是 AgentSession 的上下文边界操作，不是 Workflow Action，也不创建
 新的 AgentSession、AgentJob、Input 或 Turn。两者保留已有公共 transcript、稳定 IDs、
 Workspace、target 和累计 usage；它们只改变后续 Runtime context 的边界，并各自持有
-`operationId`、expected binding、generation、owner 和 bounded deadline 的 operation fence。
+`operationId`、expected binding、owner、ownerFence、claimGeneration 和 bounded deadline 的
+operation fence。
 
 - Compact 在 Session 可安全进入边界时请求 Runtime 压缩当前上下文；成功后继续使用同一
-  binding，后续输入从新的上下文边界开始。
+  binding，不递增 `ContextGeneration`，但必须持久化同一 `ContextGeneration` 的 ContextBoundary
+  和 operation result。后续输入从该成功边界继续。
 - Reset 建立空上下文；必要时创建新的 Runtime Session 并整体替换 current binding，
-  但保留旧 transcript 和逻辑 Session 身份。
+  递增 `ContextGeneration`，但保留旧 transcript、旧 Input/Turn 映射和逻辑 Session 身份。
+- Runtime change 和 confirmed missing recovery 与 Reset 一样递增 `ContextGeneration`；
+  新 Input/Turn 只写新 `ContextGeneration`，旧 Input/Turn 的 `ContextGeneration`、TurnId 和
+  结果永不改写。
 - 运行中、`outcome_pending`、Unknown 或 recovery fence 内不能假装已经完成 Compact/Reset；
   返回当前状态和 next action。provider 已执行但响应丢失时 operation 为 `unknown`，只能
   查询同一 operation 或显式用同一幂等 key retry，不能隐式重复。
-- 默认保留 Unknown 原事实，不自动 replay。用户明确确认风险并提供 `force-reset` operationId
-  后，才可建立新的 context boundary；旧 Turn 仍为 `unknown`，新 context 可创建新的
-  Input/Turn，二者不能互相替换。旧 binding 的迟到事件按完整 runner/runtime/session/epoch
-  fence 丢弃，重复副作用风险和 next action 必须可见。
+- 默认保留 Unknown 原事实，不自动 replay。用户明确确认风险并提供新的 `force-reset`
+  operationId 后，才可递增 `ContextGeneration`、建立新的 context boundary 和新 binding；
+  旧 Turn 仍为 `unknown`，新 context 可创建新的 Input/Turn，二者不能互相替换。旧 binding
+  的迟到事件按完整 runner/runtime/session/epoch tuple 与 operation fence 丢弃，重复副作用
+  风险和 next action 必须可见。
+- Compact/Reset/force-reset 响应丢失时，按原 operationId 查询持久 operation result；已完成
+  的 operation 返回原 ContextGeneration、boundary、binding 与映射，未完成的 operation 继续
+  原 phase。查询不得因为客户端失联而再次递增 `ContextGeneration`。
 - 边界记录是公共领域事实，不把 provider 的 raw event、内部 session ID、tool 细节或
   重建诊断直接写入公共 transcript。公共 transcript 的默认投影由 #384 负责；历史和
   Session timeline 展示由 #385 负责，本设计只规定“旧记录保留、边界可观察、内部事件不
@@ -783,12 +1005,12 @@ Workspace、target 和累计 usage；它们只改变后续 Runtime context 的�
 
 | AC | 可观察验收标准 | 场景映射 | 实施批次 |
 |---|---|---|---|
-| AC1 稳定受理身份 | launch/follow-up 的 Job、Session、Input、Turn ID 持久且重试不重复；accepted 只表示 Input 已接受 | 正常 launch、duplicate submit、submit response loss | Batch 1 |
+| AC1 稳定受理身份 | launch/follow-up 的 Job、Session、Input、Turn ID 持久且重试不重复；accepted 只表示 Input 已接受 | 正常 launch、duplicate submit、submit response loss、accept rejection | Batch 1 |
 | AC2 Turn 与输入语义 | queued/running/outcome_pending/terminal/unknown 自洽；steer 关联 existing Turn；new-turn 有界排队；queue full 在受理前拒绝 | 正常 follow-up、steer、follow-up 排队、queue full、accepted 后入队失败 | Batch 2 |
-| AC3 Server canonical 事实 | Job status、Session activity、Input acceptance、Turn result 分开返回；CLI/Web 从同一 read model 适配；revision/observedAt 可追踪 | canonical read、stale event、Job/Session 结果分离 | Batch 3 |
+| AC3 Server canonical 事实 | Job status、Session activity、Input acceptance、Turn result 分开返回；Job 映射缺失时 null+reason；dispatch blocked、recovery nextAction、revision/observedAt 可追踪；CLI/Web 从同一 read model 适配 | canonical read、stale event、Job/Session 结果分离、force-reset 后 current activity | Batch 3 |
 | AC4 Launch 跨聚合收敛 | AgentJob/Session 不共享事务；durable coordinator/outbox 用幂等命令把部分失败收敛到唯一 Job/首 Input/Turn 映射 | launch partial failure、Server restart、Runner submit response loss | Batch 4 |
-| AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；deadline、重启 reconcile、candidate create/claim/cleanup、CAS 与完整 binding fence 均可观察；handoff 不伪装 missing | concurrent recovery、Server restart、candidate CAS failure、Runner handoff、旧事件 | Batch 5 |
-| AC6 Context operation 与 Unknown | Compact/Reset 有 operation fence；响应丢失不隐式重复；stop uncertain 保留 unknown；显式 force-reset 保留原事实并可建立新 Input/Turn | Compact/Reset response loss、provider already executed、stop uncertain、Unknown force-reset | Batch 6 |
+| AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；ownerFence/claimGeneration、deadline、重启 reconcile、candidate create/get/discard/cleanup、CAS 与完整 binding fence 均可观察；lease expiry 后旧 owner fail closed；handoff 不伪装 missing | concurrent recovery、lease expiry old owner、Server restart、candidate CAS failure、Runner handoff、旧事件 | Batch 5 |
+| AC6 Context operation 与 Unknown | Compact 成功只写同 `ContextGeneration` 的边界与结果；Reset/Runtime change/missing-recovery/force-reset 递增 `ContextGeneration`；响应丢失不隐式重复；显式 force-reset 保留原事实并可建立新 Input/Turn | Compact success boundary、Compact/Reset response loss、provider already executed、stop uncertain、active operation force-reset | Batch 6 |
 
 ### 可观察不变量与场景矩阵
 
@@ -805,16 +1027,21 @@ Workspace、target 和累计 usage；它们只改变后续 Runtime context 的�
    `#382` 的全局容量断言。
 7. confirmed missing 才能在同一 Runner/runtime 上换绑；handoff 有独立 operation；不确定
    错误保持 binding，side effect 不自动 replay。
-8. recovery/operation fence 的唯一 owner、generation、deadline 和 candidate cleanup 在
-   concurrent、restart、CAS failure 后仍可查询。
+8. recovery/operation fence 的唯一 owner、ownerFence、claimGeneration、deadline 和 candidate
+   cleanup 在 concurrent、lease expiry、restart、CAS failure 后仍可查询；裸 generation 不
+   与 ContextGeneration 混用。
 9. Launch partial failure、accepted 后 enqueue failure 和 response loss 都保留已提交事实，
    通过同一 command/outbox/operation 收敛，不能创建第二个 Input/Turn/side effect。
 10. Compact/Reset/force-reset 保留旧 transcript 与稳定 Session ID；force-reset 不改变旧
     unknown Turn，旧事件按 fence 丢弃，风险与 next action 可见。
-7. 换绑不改变 AgentSession、Input、Turn、Workspace、target 或既有 transcript。
-8. Compact/Reset 之后旧 transcript 可查询，内部 Runtime 事件不会直接成为公共消息。
-9. cancel/stop 的既有语义不变；停止结果不确定时保持 Unknown，不自动重投。
-10. 恢复失败包含具体 reason 与 next action，且 AgentSession 仍可查询和诊断。
+11. 换绑不改变 AgentSession、Input、Turn、Workspace、target 或既有 transcript；RunnerId 变化
+    只能由 handoff operation 完成。
+12. Compact 成功不递增 ContextGeneration 但有持久 ContextBoundary 和 operation result；
+    Reset、Runtime change、missing-recovery 和 force-reset 递增它，旧 Input/Turn 映射不变。
+13. Compact/Reset response loss、active operation force-reset 和旧 `ContextGeneration` unknown 都
+    可查询；内部 Runtime 事件不会直接成为公共消息，current activity 不混入旧 unknown。
+14. cancel/stop 的既有语义不变；停止结果不确定时保持 Unknown，不自动重投；恢复失败包含
+    具体 reason 与 next action，且 AgentSession 仍可查询和诊断。
 
 | 场景 | 初始条件 | 关键断言 |
 |---|---|---|
@@ -832,14 +1059,18 @@ Workspace、target 和累计 usage；它们只改变后续 Runtime context 的�
 | recovery failure | create/CAS/Runner 失败 | 保留原 binding，返回具体错误与 next action |
 | concurrent recovery | 同一 binding 同时收到两次 missing | 只有一个 durable owner/candidate；另一个得到 recovery_in_progress |
 | recovery restart/expiry | fence 在重启前未完成 | 按 phase reconcile；超 deadline 后 expire/cleanup-pending，不开第二个 recovery |
+| lease expiry old owner | lease 到期后旧 owner 仍提交 phase、discard 或 complete | takeover 递增 ownerFence/claimGeneration；旧写入全部 stale_operation_fence，不能删除 adopted candidate |
 | candidate CAS failure | candidate 已创建但 expected binding 已变化 | 不采用 candidate，幂等 discard，保留 stale/CAS 原因 |
 | launch partial failure | Job 已提交但 Session response 丢失 | 原 operation 重试返回同一映射；不创建第二个 Session/首 Turn |
+| accept rejection | prepare-job 已保留 reservation，Session 明确拒绝 | Job terminal/rejected；Session/Input/Turn null+reason；tombstone 保留，不留 dangling live ID |
 | submit response loss | Runner 可能已接受首 Turn | Turn 查询为 terminal 或 unknown；不隐式再次 submit |
 | Compact | 可安全边界 | transcript 保留，后续 context 有边界，无 raw Runtime event 外泄 |
+| Compact success boundary | Compact provider 成功且 response 可确认 | binding 与 ContextGeneration 不变；持久 ContextBoundary + operation result，后续输入沿用该 `ContextGeneration` |
 | Reset | 可安全边界 | 同一 Session/IDs，空 context；绑定替换按 operation/CAS |
 | Compact/Reset response loss | provider 可能已执行，Server 未确认 | operation unknown；查询/显式 retry 同一 operation，不隐式重复 |
 | cancel/stop 回归 | queued/running/unknown 各一例 | 不改变既有 cancel/stop 语义；不确定停止保持 unknown |
 | Unknown force-reset | 原 Turn unknown | 旧 Turn 保留 unknown；显式新 operation 建立 boundary，可创建新的 Input/Turn；风险和 next action 可见 |
+| active operation force-reset | Compact/Reset response loss 使 ActiveOperation unknown | 风险确认后用新 operation supersede；旧 operation 仍 unknown，新的 context/binding 由独立 fence 建立 |
 
 ### 架构、测试与实现分批
 
@@ -896,40 +1127,25 @@ actionable recovery failure 处理，而不是猜测成功。
 
 ## Current gap
 
-以下是基于当前 master `89f46a6d17fda766e2a127ffee7b326c2bc94c19` 的实现差距，不改变上文
-目标：
+当前实现已有 SessionInput、AgentTurn、部分 activity/Unknown、launch/follow-up 与
+Runtime binding 基础，但尚未让本文的目标契约成为所有入口共同的 canonical 行为：
 
-- `packages/server/src/Mohist.Server/Sessions/Domain/AgentSession.cs:574-630` 已有
-  Input/Turn 记录和内部状态枚举，但它们尚未完整成为本文规定的公共稳定子记录；
-  `packages/server/src/Mohist.Server/Agent/Services/AgentLaunchObservationAssembler.cs:171-178`
-  仍把内部 `Executing`、`Completed`、`Failed`、`Cancelled` 直接映射为公共字符串，尚未
-  统一为 `running`、`terminal` 和独立的 `idle` 语义。
-- `packages/server/src/Mohist.Server/Api/AgentSessionFollowupRoutes.cs:329-399` 已返回
-  follow-up 的 InputId、TurnId、accepted 和 TurnStatus，但 launch、follow-up、查询和
-  Web projection 仍需收敛到同一 canonical 字段、Unknown 语义和 actionable next action。
-  `packages/server/src/Mohist.Server/Agent/Services/AgentLauncher.cs:144-150` 的非
-  canonical 旧入口仍可能产生空的输入/Turn 身份，必须由 #378 实现收敛或明确隔离。
-- `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:632` 仍有本地
-  `maxQueuedTurns`，并在 `:943-1016` 参与并发 permit；容量 claim/release 和容量视图应
-  移交 #382，#378 只保留 Session 串行与生命周期事实。
-- Server 的缺失恢复入口在
-  `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:236-261`，
-  presence guard 在 `:1104-1130`，断线只在 `:1961-1968` 把 Active 标为 Unknown；这些
-  路径尚未覆盖本文统一的 confirmed-missing、recovery window、Unknown Turn 和恢复失败
-  next action。当前部分入口仍要求用户先 Reset。
-- Runner 已有可复用的事实分类：
-  `packages/runner/src/runtime/binding-recovery.ts:48-75` 只对确定的 `missing-session`
-  创建空 Session，其它失败保留 binding；`packages/runner/src/server/followup-handler.ts:156`
-  及 `packages/runner/src/runtime/binding-convergence.ts:67-110` 已有 follow-up/reconnect
-  拼接，但 Server canonical 状态和跨入口原子映射仍需按本文补齐。
-- Compact/Reset 当前实现集中在
-  `packages/server/src/Mohist.Server/Sessions/Grains/AgentSessionGrain.cs:264-320`，仍以
-  当前 Runtime 存在和 idle 条件为主要入口门槛；需要补齐本文的 context boundary、旧
-  transcript 保留和恢复窗口语义。默认 transcript 公共投影属于 #384，历史/Session
-  timeline 属于 #385，本 issue 不在这些差距中实现替代方案。
-- #484 已落地扁平 transcript 与独立 activity，但退役 `session.closed` 名称仍存在于
-  Server/Web 的兼容处理；该清理由既有后续工作负责，#378 不以重做 transcript 投影为
-  交付内容。
-- 命名 Agent 的 launch 与 `mohist/agent` attempt 已按 Agent 定义固定 Instructions、
-  Runtime、Model、Variant 和 Skills；客户端 task/context 输入不能覆盖这些字段。Agent
-  配置与启动产品体验仍属于 #377，不是本设计的实现范围。
+- launch 仍需把 `launchOperationId`、Job/Session/Input/Turn reservation、Session accept/reject
+  durable outcome、null+reason mapping 和 rejection/failed tombstone 收敛到同一持久流程；
+  response loss 不能依赖客户端猜测。
+- Input/Turn 的公共状态仍需统一为本文的 accepted、turn relation、dispatch status/blocked
+  reason、outcome_pending、terminal 与 Unknown 语义；Job、Session、Input、Turn 的 revision、
+  observedAt 和 nextAction 仍需由 Server canonical read model 一次给出。
+- Runtime missing recovery 仍需补齐 ownerFence/claimGeneration、lease takeover、完整
+  expected binding CAS、candidate create/get/discard/cleanup、adopted candidate 保护、重启
+  reconcile 和旧 owner fail-closed；same-runner recovery 与 Runner handoff 必须分开。
+- Compact、Reset、Runtime change、missing-recovery 和 force-reset 仍需统一为本文的
+  ContextGeneration/ContextBoundary 规则；Compact 不递增 generation，其他新 logical context
+  递增，force-reset 后旧 Unknown 不得混入当前 activity。
+- Web 与 CLI 仍需只适配 Server canonical 状态，并把 explicit force-reset 的风险确认和
+  原 operation 查询/重试暴露出来；不能从本地日志、HTTP 状态或 provider event 推导结果。
+
+这些是目标落地差距，不改变边界：#377 负责 Agent 配置与启动体验，不在本文新增配置模型；
+#382 负责跨 Session max-concurrent-runs、capacity claim/release 和容量视图；#384 负责默认
+transcript 公共投影；#385 负责历史/Session timeline 展示；#387 负责外部 API 的认证、幂等
+和断线续读。#378 只提供这些边界可复用的生命周期与 canonical 状态合同。
