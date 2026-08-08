@@ -101,7 +101,7 @@ public static partial class WorkflowRunExtensions
 
     extension(WorkflowRun run)
     {
-        public IReadOnlyList<WorkflowEvent> Approve(DateTimeOffset now, string? decidedBy = null)
+        public IReadOnlyList<WorkflowEvent> Approve(DateTimeOffset now, string? decidedBy = null, string? displayName = null)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -112,17 +112,18 @@ public static partial class WorkflowRunExtensions
                 "approved",
                 current.ApprovalStatus!.RequestedAt,
                 now.ToString("O"),
-                decidedBy);
+                decidedBy,
+                displayName);
             current.Status = StageRunStatus.Completed;
             var events = new List<WorkflowEvent>
             {
-                new StageApprovalResolved(stageId, ApprovalResult.Approved, DecidedBy: decidedBy)
+                new StageApprovalResolved(stageId, ApprovalResult.Approved, DecidedBy: decidedBy, DisplayName: displayName)
             };
             events.AddRange(run.Advance(now));
             return events;
         }
 
-        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now, string? decidedBy = null)
+        public IReadOnlyList<WorkflowEvent> Reject(string? reason, DateTimeOffset now, string? decidedBy = null, string? displayName = null)
         {
             var current = run.CurrentStage();
             if (!current.IsAwaitingApproval)
@@ -132,13 +133,14 @@ public static partial class WorkflowRunExtensions
                 "rejected",
                 current.ApprovalStatus!.RequestedAt,
                 now.ToString("O"),
-                decidedBy);
+                decidedBy,
+                displayName);
             current.Failure = new FailureDetails(FailureReason.ApprovalRejected, current.Id, Message: reason);
             run.Failure = current.Failure;
             current.Status = StageRunStatus.Failed;
             run.Status = WorkflowRunStatus.Failed;
             return [
-                new StageApprovalResolved(current.Id, ApprovalResult.Rejected, reason, decidedBy),
+                new StageApprovalResolved(current.Id, ApprovalResult.Rejected, reason, decidedBy, displayName),
                 new StageFailed(current.Id, reason),
                 new WorkflowRunFailed(reason)
             ];
@@ -149,7 +151,8 @@ public static partial class WorkflowRunExtensions
             string feedbackId,
             DateTimeOffset now,
             string? decidedBy = null,
-            IReadOnlyList<TaskDefinition>? feedbackTasks = null)
+            IReadOnlyList<TaskDefinition>? feedbackTasks = null,
+            string? displayName = null)
         {
             if (string.IsNullOrWhiteSpace(body))
                 throw new ArgumentException("Feedback body is required", nameof(body));
@@ -165,6 +168,7 @@ public static partial class WorkflowRunExtensions
             current.ApprovalStatus = existingApproval with
             {
                 DecidedBy = decidedBy,
+                DisplayName = displayName,
                 RespondedAt = now.ToString("O"),
             };
             current.Status = StageRunStatus.Running;
@@ -194,7 +198,7 @@ public static partial class WorkflowRunExtensions
             events.AddRange(runtimeEvents);
 
             events.Add(new FeedbackRequested(current.Id, feedbackId, body));
-            events.Add(new StageApprovalResolved(current.Id, ApprovalResult.Rejected, body, decidedBy));
+            events.Add(new StageApprovalResolved(current.Id, ApprovalResult.Rejected, body, decidedBy, displayName));
             return events;
         }
 

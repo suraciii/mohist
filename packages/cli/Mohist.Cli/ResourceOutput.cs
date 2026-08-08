@@ -68,7 +68,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.RepoList => ["name", "gitUrl", "baseBranch", "isDefault", "resolvedBaseBranch"],
             MohistCliApi.TableShape.FeedbackList or MohistCliApi.TableShape.FeedbackShow =>
                 ["id", "workflowRunId", "stage", "body", "status", "createdAt", "resolution", "issueNumber"],
-            MohistCliApi.TableShape.CommentShow => ["id", "projectId", "issueNumber", "body", "createdAt", "attachments", "author"],
+            MohistCliApi.TableShape.CommentShow => ["id", "projectId", "issueNumber", "body", "createdAt", "attachments", "author", "displayName"],
             MohistCliApi.TableShape.LabelList => ["key", "description", "supportedValues"],
             MohistCliApi.TableShape.AgentList or
             MohistCliApi.TableShape.AgentShow => AgentFields,

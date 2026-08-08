@@ -60,6 +60,24 @@ public class ApprovalDecidedByTests
     }
 
     [Fact]
+    public void Approve_StampsDisplayNameSeparatelyFromDecidedBy()
+    {
+        var run = BuildAwaitingApprovalRun();
+
+        var events = run.Approve(DateTimeOffset.UnixEpoch, Operator, "supervisor");
+
+        var current = run.CurrentStage();
+        Assert.Equal(Operator, current.ApprovalStatus!.DecidedBy);
+        Assert.Equal("supervisor", current.ApprovalStatus.DisplayName);
+        var resolved = events
+            .Select(WorkflowEventSerializer.Unwrap)
+            .OfType<StageApprovalResolved>()
+            .Single();
+        Assert.Equal(Operator, resolved.DecidedBy);
+        Assert.Equal("supervisor", resolved.DisplayName);
+    }
+
+    [Fact]
     public void Approve_WithoutOperator_RecordsDecisionWithoutAttribution()
     {
         var run = BuildAwaitingApprovalRun();

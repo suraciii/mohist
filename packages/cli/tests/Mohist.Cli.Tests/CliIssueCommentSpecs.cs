@@ -20,14 +20,14 @@ public class CliIssueCommentSpecs
                 : null!);
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "create", "42", "--author", "  Ada Lovelace  ", "--body", "Looks good"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--display-name", "  Ada Lovelace  ", "--body", "Looks good"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var postReq = handler.Requests.Last(r => r.Method == HttpMethod.Post);
         Assert.Equal("/api/projects/proj_abc/issues/42/comments", postReq.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(postReq.Body!)!;
         Assert.Equal("Looks good", body["body"]?.GetValue<string>());
-        Assert.Equal("Ada Lovelace", body["author"]?.GetValue<string>());
+        Assert.Equal("Ada Lovelace", body["displayName"]?.GetValue<string>());
         Assert.Contains("comment_42", output.ToString());
     }
 
@@ -45,12 +45,12 @@ public class CliIssueCommentSpecs
         fs.AddFile("/tmp/comment.md", "long comment...");
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "create", "42", "--author", "Grace Hopper", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--display-name", "Grace Hopper", "--body-file", "/tmp/comment.md"], output, error, fs, executor);
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests.Last(r => r.Method == HttpMethod.Post).Body!)!;
         Assert.Equal("long comment...", body["body"]?.GetValue<string>());
-        Assert.Equal("Grace Hopper", body["author"]?.GetValue<string>());
+        Assert.Equal("Grace Hopper", body["displayName"]?.GetValue<string>());
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public class CliIssueCommentSpecs
         var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync();
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["issue", "comment", "create", "42", "--author", "Ada"], output, error, fs, executor);
+            http, ["issue", "comment", "create", "42", "--display-name", "Ada"], output, error, fs, executor);
 
         Assert.Equal(2, exitCode);
         Assert.DoesNotContain(handler.Requests, r => r.Method == HttpMethod.Post);

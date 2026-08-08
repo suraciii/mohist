@@ -44,7 +44,7 @@ public class IssueCommentEventSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 1);
 
-        var result = await grain.AddCommentAsync("Ada Lovelace", "Looks good @supervisor");
+        var result = await grain.AddCommentAsync("Ada Lovelace", null, "Looks good @supervisor");
 
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
         var envelope = Assert.Single(stored);
@@ -60,7 +60,7 @@ public class IssueCommentEventSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 2);
 
-        var result = await grain.AddCommentAsync("  Ada Lovelace  ", "Looks good");
+        var result = await grain.AddCommentAsync("  Ada Lovelace  ", null, "Looks good");
 
         Assert.Equal("Ada Lovelace", result.Author);
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
@@ -74,7 +74,7 @@ public class IssueCommentEventSpecs
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 3);
         const string body = "Please review — http://example.test/?q=1&x=2 — @supervisor ping!";
 
-        var result = await grain.AddCommentAsync("Ada", body);
+        var result = await grain.AddCommentAsync("Ada", null, body);
 
         Assert.Equal(body, result.Body);
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
@@ -87,7 +87,7 @@ public class IssueCommentEventSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 4);
 
-        await grain.AddCommentAsync("Ada", "body");
+        await grain.AddCommentAsync("Ada", null, "body");
 
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
         var envelope = Assert.Single(stored);
@@ -102,7 +102,7 @@ public class IssueCommentEventSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 5, epicNumber: 7);
 
-        await grain.AddCommentAsync("Ada", "body");
+        await grain.AddCommentAsync("Ada", null, "body");
 
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
         var envelope = Assert.Single(stored);
@@ -114,7 +114,7 @@ public class IssueCommentEventSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 6);
 
-        await grain.AddCommentAsync("Ada", "body");
+        await grain.AddCommentAsync("Ada", null, "body");
 
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
         var envelope = Assert.Single(stored);
@@ -130,7 +130,7 @@ public class IssueCommentEventSpecs
         // comment row by commentId.
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 7);
 
-        var result = await grain.AddCommentAsync("Ada", "body");
+        var result = await grain.AddCommentAsync("Ada", null, "body");
 
         var stored = await ListCommentAddedEvents(projectId, issueNumber);
         Assert.Single(stored);
@@ -177,7 +177,7 @@ public class IssueCommentEventSpecs
         // pokes a no-op dispatcher (NullDispatchGrainFactory).
         var (projectId, issueNumber, grain) = await CreateIssueAsync(number: 11);
 
-        var result = await grain.AddCommentAsync("Ada", "ping");
+        var result = await grain.AddCommentAsync("Ada", null, "ping");
 
         Assert.NotNull(result.Id);
         var stored = await ListCommentAddedEvents(projectId, issueNumber);

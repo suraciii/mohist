@@ -58,34 +58,39 @@ describe('IssueCommentsSection', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true })
     fireEvent.keyDown(textarea, { key: 'Enter', metaKey: true, repeat: true })
     expect(mutate).toHaveBeenCalledTimes(1)
-    expect(mutate).toHaveBeenCalledWith({ author: 'Ada Lovelace', body: 'A useful comment' })
+    expect(mutate).toHaveBeenCalledWith({ displayName: 'Ada Lovelace', body: 'A useful comment' })
     expect(screen.getByText('Command+Enter')).toBeVisible()
   })
 
-  it.each([
-    { commentAuthor: '   ', commentText: 'A body' },
-    { commentAuthor: 'Ada', commentText: '   ' },
-  ])('requires both author and body before button or keyboard submission', ({ commentAuthor, commentText }) => {
-    const { mutate } = renderSection({ commentAuthor, commentText })
+  it('requires a body before button or keyboard submission; the display alias is optional', () => {
+    const { mutate } = renderSection({ commentText: '   ' })
 
     expect(screen.getByRole('button', { name: 'Comment' })).toBeDisabled()
     fireEvent.keyDown(screen.getByPlaceholderText('Add a comment...'), { key: 'Enter', metaKey: true })
     expect(mutate).not.toHaveBeenCalled()
   })
 
-  it('exposes a required bounded Author input', () => {
+  it('submits without a display alias when the body is present', () => {
+    const { mutate } = renderSection({ commentAuthor: '   ' })
+
+    expect(screen.getByRole('button', { name: 'Comment' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }))
+    expect(mutate).toHaveBeenCalledWith({ displayName: '   ', body: 'A useful comment' })
+  })
+
+  it('exposes an optional bounded display-name input', () => {
     const setCommentAuthor = vi.fn()
     renderSection({ setCommentAuthor })
 
-    const input = screen.getByRole('textbox', { name: 'Author' })
-    expect(input).toBeRequired()
+    const input = screen.getByRole('textbox', { name: 'Display name' })
+    expect(input).not.toBeRequired()
     expect(input).toHaveAttribute('maxlength', '100')
     fireEvent.change(input, { target: { value: 'New author' } })
     expect(setCommentAuthor).toHaveBeenCalledWith('New author')
   })
 
   it('renders the empty-comment submit button with an unmistakable disabled affordance', () => {
-    renderSection({ commentAuthor: '   ', commentText: 'A body' })
+    renderSection({ commentText: '   ' })
 
     const submit = screen.getByRole('button', { name: 'Comment' })
     expect(submit).toBeDisabled()

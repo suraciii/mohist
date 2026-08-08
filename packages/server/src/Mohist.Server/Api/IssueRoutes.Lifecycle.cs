@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Infrastructure.Workspace;
 using Mohist.Server.Issue.Domain;
@@ -65,7 +66,8 @@ public static partial class IssueRoutes
             int number,
             AddCommentRequest req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser) =>
         {
             var project = GetRequiredProject(ctx);
 
@@ -74,7 +76,7 @@ public static partial class IssueRoutes
             IssueCommentResult comment;
             try
             {
-                comment = await grain.AddCommentAsync(req.Author, req.Body, req.AttachmentIds);
+                comment = await grain.AddCommentAsync(currentUser.Principal.Id, req.DisplayName, req.Body, req.AttachmentIds);
             }
             catch (ArgumentException ex)
             {
@@ -88,7 +90,7 @@ public static partial class IssueRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_attachment");
             }
-            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body, author = comment.Author } });
+            return Results.Json(new { success = true, data = new { id = comment.Id, body = comment.Body, author = comment.Author, displayName = comment.DisplayName } });
         });
 
         group.MapPost("/{number:int}/done", async (

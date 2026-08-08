@@ -41,7 +41,8 @@ public sealed record StageApprovalResolved(
     string Stage,
     ApprovalResult Result,
     string? Reason = null,
-    string? DecidedBy = null);
+    string? DecidedBy = null,
+    string? DisplayName = null);
 
 public sealed record FeedbackRequested(string Stage, string FeedbackId, string? Reason = null);
 

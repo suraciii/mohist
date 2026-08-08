@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
@@ -16,7 +17,8 @@ public static partial class IssueRoutes
             int number,
             CreateFeedbackRequest req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser) =>
         {
             if (string.IsNullOrWhiteSpace(req.Stage))
                 return ApiResults.BadRequest("stage is required");
@@ -29,20 +31,17 @@ public static partial class IssueRoutes
 
             try
             {
-                string? decidedBy;
-                try
-                {
-                    decidedBy = ApprovalOperatorValidation.Normalize(req.Author);
-                }
-                catch (ArgumentException ex)
-                {
-                    return ApiResults.BadRequest(ex.Message);
-                }
-                var feedbackId = await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Body, decidedBy);
+                var displayName = ApprovalOperatorValidation.Normalize(req.DisplayName);
+                var feedbackId = await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(
+                    req.Body, currentUser.Principal.Id, displayName);
                 var feedback = await grains.GetGrain<IWorkflowGrain>(wrId).GetFeedbackAsync(feedbackId);
                 if (feedback is null)
                     return ApiResults.NotFound("Feedback was created but could not be read back");
                 return Results.Json(new { success = true, data = feedback }, statusCode: 201);
+            }
+            catch (ArgumentException ex)
+            {
+                return ApiResults.BadRequest(ex.Message);
             }
             catch (InvalidOperationException ex)
             {

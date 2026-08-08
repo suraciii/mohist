@@ -1,5 +1,6 @@
 using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Auth.Domain;
 using Mohist.Server.Infrastructure.Data;
 
 namespace Mohist.Server.Agent.Grains;
@@ -9,6 +10,7 @@ public class AgentGrain : Grain, IAgentGrain
     private readonly IStateStore<Domain.Agent> _agentStore;
     private readonly AgentQuerier _querier;
     private readonly TimeProvider _timeProvider;
+    private readonly IPrincipalStore _principals;
     private Domain.Agent? _agent;
 
     internal AgentGrain(
@@ -16,19 +18,22 @@ public class AgentGrain : Grain, IAgentGrain
         Orleans.Runtime.IGrainRuntime runtime,
         IStateStore<Domain.Agent> agentStore,
         AgentQuerier querier,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IPrincipalStore principals)
         : base(context, runtime)
     {
         _agentStore = agentStore;
         _querier = querier;
         _timeProvider = timeProvider;
+        _principals = principals;
     }
 
-    public AgentGrain(IStateStore<Domain.Agent> agentStore, AgentQuerier querier, TimeProvider timeProvider)
+    public AgentGrain(IStateStore<Domain.Agent> agentStore, AgentQuerier querier, TimeProvider timeProvider, IPrincipalStore principals)
     {
         _agentStore = agentStore;
         _querier = querier;
         _timeProvider = timeProvider;
+        _principals = principals;
     }
 
     private string GrainKey => this.GetPrimaryKeyString();
@@ -64,6 +69,11 @@ public class AgentGrain : Grain, IAgentGrain
         };
 
         await _agentStore.SaveAsync(CurrentKey(), _agent);
+        // The agent principal is the attribution anchor for everything the
+        // agent does; it is established at creation and never removed when
+        // the agent is archived (historical records keep pointing at it).
+        // Idempotent, so a retried create cannot duplicate the row.
+        await _principals.EnsureAgentPrincipalAsync(agentId, data.Name);
         return AgentQuerier.ToInfo(_agent);
     }
 

@@ -286,14 +286,14 @@ describe('useIssueDetailMutations', () => {
     expect(onStopSuccess).toHaveBeenCalledTimes(1)
   })
 
-  it('addComment: passes author, body, and extracted attachment ids, invalidates the issue on success, then fires onAddCommentSuccess', () => {
+  it('addComment: passes display name, body, and extracted attachment ids, invalidates the issue on success, then fires onAddCommentSuccess', () => {
     const onAddCommentSuccess = vi.fn()
     arrange({
       issueNumber: 7,
       projectId: 'proj-x',
       onAddCommentSuccess,
     })
-    const addComment = findMutationByApiCallWithArg(apiMocks.addComment, { author: 'Ada', body: 'look at att:abc-123' })
+    const addComment = findMutationByApiCallWithArg(apiMocks.addComment, { displayName: 'Ada', body: 'look at att:abc-123' })
 
     expect(apiMocks.extractAttachmentIds).toHaveBeenCalledWith('look at att:abc-123')
     expect(apiMocks.addComment).toHaveBeenCalledWith(7, 'Ada', 'look at att:abc-123', 'proj-x', ['att:abc-123'])

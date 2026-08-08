@@ -21,6 +21,7 @@ internal static partial class RunCommands
             "stage",
             "issueRef",
             "decidedBy",
+            "displayName",
         ]);
 
     public static Command Build(MohistCliApi api)
@@ -128,22 +129,22 @@ internal static partial class RunCommands
         var runIdArg = RunIdArg();
         var issueOpt = IssueOption();
         var projectOpt = ProjectOptions();
-        var authorOpt = new Option<string?>("--author")
+        var displayNameOpt = new Option<string?>("--display-name")
         {
-            Description = "Optional approval operator (1-100 characters)",
+            Description = "Optional display alias (1-100 characters); the approver is the authenticated identity",
         };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
-        cmd.Options.Add(authorOpt);
+        cmd.Options.Add(displayNameOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
             var runId = ctx.GetValue(runIdArg);
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
-            var author = ctx.GetValue(authorOpt);
+            var displayName = ctx.GetValue(displayNameOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -154,10 +155,10 @@ internal static partial class RunCommands
                 if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                     return api.WriteJsonSelectionResult(RunControlDescriptor, selection);
 
-                var normalizedAuthor = string.IsNullOrWhiteSpace(author) ? null : author.Trim();
-                if (normalizedAuthor?.Length > 100)
+                var normalizedDisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+                if (normalizedDisplayName?.Length > 100)
                 {
-                    api.Error.WriteLine("--author must be 100 characters or fewer.");
+                    api.Error.WriteLine("--display-name must be 100 characters or fewer.");
                     return 1;
                 }
 
@@ -169,7 +170,7 @@ internal static partial class RunCommands
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
                     WorkflowRunPath(resolvedRunId!, "/approve"),
-                    new { author = normalizedAuthor },
+                    new { displayName = normalizedDisplayName },
                     RunControlDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));
@@ -191,16 +192,16 @@ internal static partial class RunCommands
         {
             Description = "Reject reason / change request message (required, must not be empty)",
         };
-        var authorOpt = new Option<string?>("--author")
+        var displayNameOpt = new Option<string?>("--display-name")
         {
-            Description = "Optional rejection operator (1-100 characters)",
+            Description = "Optional display alias (1-100 characters); the approver is the authenticated identity",
         };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(RunControlDescriptor);
         cmd.Arguments.Add(runIdArg);
         cmd.Options.Add(issueOpt);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(messageOpt);
-        cmd.Options.Add(authorOpt);
+        cmd.Options.Add(displayNameOpt);
         cmd.Options.Add(jsonOpt);
         cmd.SetAction(ctx =>
         {
@@ -208,7 +209,7 @@ internal static partial class RunCommands
             var issue = ctx.GetValue(issueOpt);
             var project = ctx.GetValue(projectOpt);
             var message = ctx.GetValue(messageOpt);
-            var author = ctx.GetValue(authorOpt);
+            var displayName = ctx.GetValue(displayNameOpt);
             var jsonProvided = ctx.GetResult(jsonOpt) is not null;
             var json = ctx.GetValue(jsonOpt);
             var selection = JsonSelection.Parse(RunControlDescriptor, jsonProvided, json);
@@ -226,11 +227,11 @@ internal static partial class RunCommands
                     return CliExitCode.For(CliExitOutcome.OperationFailure);
                 }
 
-                var normalizedAuthor = string.IsNullOrWhiteSpace(author) ? null : author.Trim();
-                if (normalizedAuthor?.Length > 100)
+                var normalizedDisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+                if (normalizedDisplayName?.Length > 100)
                 {
                     await api.Error.WriteLineAsync(
-                        "--author must be 100 characters or fewer.").ConfigureAwait(false);
+                        "--display-name must be 100 characters or fewer.").ConfigureAwait(false);
                     return CliExitCode.For(CliExitOutcome.OperationFailure);
                 }
 
@@ -242,7 +243,7 @@ internal static partial class RunCommands
                 return await api.PrintMutationResourceAsync(
                     HttpMethod.Post,
                     WorkflowRunPath(resolvedRunId!, "/reject"),
-                    new { author = normalizedAuthor, message },
+                    new { displayName = normalizedDisplayName, message },
                     RunControlDescriptor,
                     selection,
                     data => api.RenderTableAsync(data, MohistCliApi.TableShape.WorkflowRunDetail));

@@ -8,6 +8,7 @@ using Mohist.Server.Agent.Domain;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.Auth;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.SpecTests.Support;
@@ -89,6 +90,42 @@ public class AgentGrainSpecs
 
         var archived = await first.ShowAsync();
         Assert.Equal(AgentStatus.Archived, archived!.Status);
+    }
+
+    [Fact]
+    public async Task Create_establishes_agent_principal_that_outlives_archive()
+    {
+        await using var database = CreateModelSchemaDatabase();
+        await using var context = database.CreateDbContext();
+        var factory = database.Factory;
+        var grain = CreateGrain(factory, "project_1", "agent_principal_1");
+
+        await grain.CreateAsync(NewCreate("project_1", "principal-agent"));
+        var principal = await factory.CreateDbContext().Principals.SingleAsync(row => row.Id == "agent_principal_1");
+        Assert.Equal("Agent", principal.Kind);
+        Assert.Equal("principal-agent", principal.Name);
+
+        // Archiving the agent must not remove the attribution anchor:
+        // historical activity keeps pointing at the principal.
+        await grain.ArchiveAsync();
+        var afterArchive = await factory.CreateDbContext().Principals.SingleAsync(row => row.Id == "agent_principal_1");
+        Assert.Equal("principal-agent", afterArchive.Name);
+    }
+
+    [Fact]
+    public async Task EnsureAgentPrincipal_is_idempotent_and_keeps_first_name()
+    {
+        await using var database = CreateModelSchemaDatabase();
+        await using var context = database.CreateDbContext();
+        var factory = database.Factory;
+        var store = new PrincipalStore(factory, new FakeTimeProvider(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero)));
+
+        await store.EnsureAgentPrincipalAsync("agent_x", "first-name");
+        await store.EnsureAgentPrincipalAsync("agent_x", "second-name");
+
+        await using var db = factory.CreateDbContext();
+        var principal = Assert.Single(db.Principals.Where(row => row.Id == "agent_x"));
+        Assert.Equal("first-name", principal.Name);
     }
 
     [Fact]
@@ -241,7 +278,8 @@ public class AgentGrainSpecs
             identity.Runtime,
             new AgentStore(factory),
             new AgentQuerier(factory),
-            timeProvider);
+            timeProvider,
+            new PrincipalStore(factory, timeProvider));
     }
 
     private static AgentCreateData NewCreate(string projectId, string name) => new(

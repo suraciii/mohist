@@ -76,7 +76,7 @@ mo github connect owner/repo
 | Comment | 不产生审批 |
 
 - 只有名单内的 GitHub 用户作出的 review 算数；名单为空即关闭此能力。
-- 审批留痕署名 GitHub 用户身份，与 `mo run approve --author` 等价。
+- 审批留痕署名 GitHub 用户身份；`mo run approve` 的归属则是调用者的认证身份。
 - 适用范围是 Check 门（代码审核）；Plan 门审的是计划，彼时还没有 PR，不适用。
 - 已知边界：按事件到达时的状态决策；之后 review 被 dismiss 或因新 push 过期，不追溯。
 

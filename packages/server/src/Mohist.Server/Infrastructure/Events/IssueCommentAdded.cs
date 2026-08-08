@@ -18,6 +18,7 @@ namespace Mohist.Server.Infrastructure.Events;
 public sealed record IssueCommentAdded(
     string CommentId,
     string Author,
+    string? DisplayName,
     string Body);
 
 internal static class IssueCommentAddedEventFactory

@@ -77,8 +77,11 @@ public static class MohistServiceRegistration
     public static IServiceCollection ConfigureMohistServices(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddMohistConventionalServices();
+        services.AddHttpContextAccessor();
         services.AddSingleton<IFileCredentialStore>(PhysicalFileCredentialStore.Instance);
         services.AddScoped<ICredentialStore>(sp => sp.GetRequiredService<CredentialStore>());
+        services.AddScoped<IPrincipalStore>(sp => sp.GetRequiredService<PrincipalStore>());
+        services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<HttpContextCurrentUser>());
         services.AddSingleton<IWorkflowRunDeserializer>(sp =>
             sp.GetRequiredService<WorkflowRunDeserializer>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();

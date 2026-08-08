@@ -280,17 +280,17 @@ public record UpdateIssueRequest
     }
 }
 
-public record CreateFeedbackRequest(string Stage, string Body, string? Author = null);
+public record CreateFeedbackRequest(string Stage, string Body, string? DisplayName = null);
 
 public sealed record RebaseRequest(string? BaseBranch = null);
 
 public record AddPrerequisiteRequest(int PrerequisiteNumber);
 
-public record AddCommentRequest(string Author, string Body, string[]? AttachmentIds = null);
+public record AddCommentRequest(string? DisplayName, string Body, string[]? AttachmentIds = null);
 
-public record ApproveRequest(string? Author = null);
+public record ApproveRequest(string? DisplayName = null);
 
-public record RejectWithAuthorRequest(string Message, string? Author = null);
+public record RejectWithAuthorRequest(string Message, string? DisplayName = null);
 
 public sealed record AttachmentUploadResponse(
     string Id,

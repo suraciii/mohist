@@ -187,7 +187,8 @@ public sealed class CommentMentionDispatchSpecs
             issueNumber: harness.IssueNumber,
             eventId: "evt-loop",
             commentId: "cmt-loop",
-            author: "supervisor",
+            author: "service",
+            displayName: "supervisor",
             body: "I tried @coder but it should not fire from my own comment.");
 
         await harness.MentionHandler.HandleAsync(evt, CancellationToken.None);
@@ -205,8 +206,30 @@ public sealed class CommentMentionDispatchSpecs
             issueNumber: harness.IssueNumber,
             eventId: "evt-loop-case",
             commentId: "cmt-loop-case",
-            author: "SuperVisor",
+            author: "service",
+            displayName: "SuperVisor",
             body: "@coder please");
+
+        await harness.MentionHandler.HandleAsync(evt, CancellationToken.None);
+
+        Assert.Empty(harness.Launcher.MentionLaunches);
+    }
+
+    [Fact]
+    public async Task CommentAuthoredByAgentPrincipalId_NeverScanned_LoopPrevention()
+    {
+        var harness = await SeedAsync("loop-principal-id");
+
+        // The supervisor Agent authored this comment: the actor is its
+        // principal id (the agent id), which is the loop-prevention signal
+        // even without a display alias.
+        var evt = RoutingDispatchTestSupport.BuildCommentAddedEvent(
+            projectId: harness.ProjectId,
+            issueNumber: harness.IssueNumber,
+            eventId: "evt-loop-principal",
+            commentId: "cmt-loop-principal",
+            author: harness.SupervisorId,
+            body: "I tried @coder but it should not fire from my own comment.");
 
         await harness.MentionHandler.HandleAsync(evt, CancellationToken.None);
 

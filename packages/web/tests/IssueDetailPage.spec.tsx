@@ -628,7 +628,6 @@ describe('IssueDetailPage Markdown rendering', () => {
       await waitFor(() => {
         expect(screen.getByPlaceholderText('Add a comment...')).toBeInTheDocument()
       })
-      fireEvent.change(screen.getByRole('textbox', { name: 'Author' }), { target: { value: 'Ada' } })
       const textarea = screen.getByPlaceholderText('Add a comment...')
       fireEvent.change(textarea, { target: { value: 'Test comment' } })
       const button = screen.getByRole('button', { name: 'Comment' })

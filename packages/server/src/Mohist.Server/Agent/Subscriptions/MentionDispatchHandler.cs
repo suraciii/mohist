@@ -86,10 +86,10 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
         var launcher = services.GetRequiredService<IAgentLauncher>();
         var activeAgents = await agentQuerier.ListAsync(issueContext.ProjectId);
 
-        if (IsAuthoredByActiveAgent(payload.Author, activeAgents))
+        if (IsAuthoredByActiveAgent(payload.Author, payload.DisplayName, activeAgents))
         {
             _log.LogDebug(
-                "Mention dispatch skipped: comment {CommentId} author '{Author}' matches an active Agent name in project {ProjectId} (loop prevention)",
+                "Mention dispatch skipped: comment {CommentId} author '{Author}' matches an active Agent in project {ProjectId} (loop prevention)",
                 payload.CommentId,
                 payload.Author,
                 issueContext.ProjectId);
@@ -158,18 +158,23 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
     }
 
     /// <summary>
-    /// Returns <c>true</c> when <paramref name="author"/> case-insensitively
-    /// matches the name of any active Agent in <paramref name="activeAgents"/>.
-    /// Used for the declaration-based loop-prevention check (design D5).
+    /// Returns <c>true</c> when the comment's attribution matches an active
+    /// Agent: the actor is the Agent's principal id, or the display alias
+    /// case-insensitively matches the Agent's name. Used for the
+    /// declaration-based loop-prevention check (design D5). Attribution is
+    /// the actor (principal id), so an agent-authored comment matches by id;
+    /// the display alias keeps the legacy name-based match working.
     /// </summary>
-    internal static bool IsAuthoredByActiveAgent(string author, IReadOnlyList<AgentInfo> activeAgents)
+    internal static bool IsAuthoredByActiveAgent(string? author, string? displayName, IReadOnlyList<AgentInfo> activeAgents)
     {
-        if (string.IsNullOrWhiteSpace(author))
+        if (string.IsNullOrWhiteSpace(author) && string.IsNullOrWhiteSpace(displayName))
             return false;
 
         foreach (var agent in activeAgents)
         {
-            if (string.Equals(agent.Name, author, StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrWhiteSpace(author) && string.Equals(agent.Id, author, StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (!string.IsNullOrWhiteSpace(displayName) && string.Equals(agent.Name, displayName, StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -204,6 +209,7 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
 
         string? commentId = null;
         string? author = null;
+        string? displayName = null;
         string? body = null;
         if (data.TryGetProperty("commentId", out var commentIdElement)
             && commentIdElement.ValueKind == JsonValueKind.String)
@@ -215,6 +221,11 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
         {
             author = authorElement.GetString();
         }
+        if (data.TryGetProperty("displayName", out var displayNameElement)
+            && displayNameElement.ValueKind == JsonValueKind.String)
+        {
+            displayName = displayNameElement.GetString();
+        }
         if (data.TryGetProperty("body", out var bodyElement)
             && bodyElement.ValueKind == JsonValueKind.String)
         {
@@ -224,8 +235,8 @@ public sealed class MentionDispatchHandler : ICloudEventHandler
         if (string.IsNullOrWhiteSpace(commentId) || author is null || body is null)
             return null;
 
-        return new CommentAddedPayload(commentId, author, body);
+        return new CommentAddedPayload(commentId, author, displayName, body);
     }
 
-    private sealed record CommentAddedPayload(string CommentId, string Author, string Body);
+    private sealed record CommentAddedPayload(string CommentId, string Author, string? DisplayName, string Body);
 }

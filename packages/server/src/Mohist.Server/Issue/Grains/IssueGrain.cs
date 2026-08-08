@@ -1470,23 +1470,28 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         }
     }
 
-    public async Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null)
+    public async Task<IssueCommentResult> AddCommentAsync(string actor, string? displayName, string body, string[]? attachmentIds = null)
     {
         RejectIfReloadRequired();
         if (_issue is null) throw new KeyNotFoundException($"Issue '{GrainKey}' not found");
-        if (string.IsNullOrWhiteSpace(author))
-            throw new ArgumentException("Comment author is required.", nameof(author));
+        if (string.IsNullOrWhiteSpace(actor))
+            throw new ArgumentException("Comment author is required.", nameof(actor));
 
-        var normalizedAuthor = author.Trim();
-        if (normalizedAuthor.Length > 100)
-            throw new ArgumentException("Comment author must be 100 characters or fewer.", nameof(author));
+        var normalizedActor = actor.Trim();
+        if (normalizedActor.Length > 100)
+            throw new ArgumentException("Comment author must be 100 characters or fewer.", nameof(actor));
+
+        var normalizedDisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        if (normalizedDisplayName?.Length > 100)
+            throw new ArgumentException("Comment display name must be 100 characters or fewer.", nameof(displayName));
 
         var comment = new IssueCommentRow
         {
             Id = $"cmt_{Guid.NewGuid():N}",
             ProjectId = _issue.ProjectId,
             IssueNumber = _issue.Number,
-            Author = normalizedAuthor,
+            Author = normalizedActor,
+            DisplayName = normalizedDisplayName,
             Body = body,
         };
 
@@ -1499,7 +1504,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
         // the commit succeeds; the reminder tick recovers if the poke is lost.
         var envelope = IssueCommentAddedEventFactory.Build(
             _issue,
-            new IssueCommentAdded(comment.Id, normalizedAuthor, body),
+            new IssueCommentAdded(comment.Id, normalizedActor, normalizedDisplayName, body),
             _timeProvider.GetUtcNow());
         await using var db = await _dbFactory.CreateDbContextAsync();
         db.IssueComments.Add(comment);
@@ -1509,7 +1514,7 @@ public class IssueGrain : Grain, IIssueGrain, Coordinator.IIssueBindingTarget
 
         await _attachmentService.BindCommentAsync(_issue.ProjectId, comment.Id, attachmentIds);
 
-        return new IssueCommentResult(comment.Id, comment.Body, comment.Author);
+        return new IssueCommentResult(comment.Id, comment.Body, comment.Author, comment.DisplayName);
     }
 
 }

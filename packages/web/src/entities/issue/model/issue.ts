@@ -43,6 +43,7 @@ export enum IssueHealth {
 export interface Comment {
   id: string
   author: string | null
+  displayName?: string | null
   body: string
   createdAt: string
   attachments?: AttachmentInfo[]

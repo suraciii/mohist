@@ -173,7 +173,8 @@ internal static class RoutingDispatchTestSupport
         string commentId,
         string author,
         string body,
-        int? epicNumber = null)
+        int? epicNumber = null,
+        string? displayName = null)
     {
         var extensions = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -186,7 +187,7 @@ internal static class RoutingDispatchTestSupport
         }
 
         var payload = System.Text.Json.JsonSerializer.SerializeToElement(
-            new { commentId, author, body },
+            new { commentId, author, displayName, body },
             Mohist.Server.Infrastructure.JSON.Options);
 
         return new CloudEvent(

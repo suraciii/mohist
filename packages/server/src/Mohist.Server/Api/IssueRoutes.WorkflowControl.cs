@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Project.Services;
-using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Services;
 
@@ -33,22 +33,18 @@ public static partial class IssueRoutes
             int number,
             ApproveRequest? req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser) =>
         {
             var project = GetRequiredProject(ctx);
-            string? decidedBy;
-            try
-            {
-                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
+            var decidedBy = currentUser.Principal.Id;
+            var displayName = NormalizeDisplayName(req?.DisplayName);
+            if (displayName.Failure is { } failure)
+                return failure;
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync(decidedBy);
+            await grains.GetGrain<IWorkflowGrain>(wrId).ApproveAsync(decidedBy, displayName.Value);
             return ApiResults.Ok();
         });
 
@@ -58,24 +54,20 @@ public static partial class IssueRoutes
             int number,
             RejectWithAuthorRequest? req,
             IGrainFactory grains,
-            IssueQuerier issuesQuery) =>
+            IssueQuerier issuesQuery,
+            ICurrentUser currentUser) =>
         {
             var project = GetRequiredProject(ctx);
-            string? decidedBy;
-            try
-            {
-                decidedBy = ApprovalOperatorValidation.Normalize(req?.Author);
-            }
-            catch (ArgumentException ex)
-            {
-                return ApiResults.BadRequest(ex.Message);
-            }
+            var decidedBy = currentUser.Principal.Id;
+            var displayName = NormalizeDisplayName(req?.DisplayName);
+            if (displayName.Failure is { } failure)
+                return failure;
             if (string.IsNullOrWhiteSpace(req?.Message))
                 return ApiResults.BadRequest("Reject reason is required");
             var control = await ResolveWorkflowControlAsync(project.Id, number, issuesQuery, grains, WorkflowControlAction.ActiveOnly);
             if (control.Result is not null) return control.Result;
             var wrId = control.WorkflowRunId!;
-            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message, decidedBy);
+            await grains.GetGrain<IWorkflowGrain>(wrId).RequestChangesAsync(req.Message, decidedBy, displayName.Value);
             return ApiResults.Ok();
         });
 
@@ -220,6 +212,20 @@ public static partial class IssueRoutes
         WorkflowControlGuard.IsWorkflowControllableForAction(workflowStatus, action);
 
     internal sealed record RerunFromStageRequest(string? Stage);
+
+    private static DisplayNameResult NormalizeDisplayName(string? raw)
+    {
+        try
+        {
+            return new DisplayNameResult(ApprovalOperatorValidation.Normalize(raw), null);
+        }
+        catch (ArgumentException ex)
+        {
+            return new DisplayNameResult(null, ApiResults.BadRequest(ex.Message));
+        }
+    }
+
+    private sealed record DisplayNameResult(string? Value, IResult? Failure);
 
     private sealed record WorkflowControlResolution(string? WorkflowRunId, IResult? Result);
 }

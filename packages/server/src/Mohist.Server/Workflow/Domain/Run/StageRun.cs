@@ -6,7 +6,8 @@ public sealed record ApprovalStatus(
     string? Result,
     string RequestedAt,
     string? RespondedAt,
-    string? DecidedBy = null);
+    string? DecidedBy = null,
+    string? DisplayName = null);
 
 public sealed class StageRun
 {
