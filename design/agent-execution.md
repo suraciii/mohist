@@ -118,7 +118,9 @@ AgentSession
   Source
   WorkDir
   Activity
+  ContextGeneration
   CurrentBinding?
+  ActiveOperation?
   Inputs
   Turns
   Transcript
@@ -129,7 +131,9 @@ SessionInput
   Id
   Sequence
   Text?
-  TurnId?
+  TurnId
+  Route = new-turn | steer
+  ContextGeneration
   Source
   Attachments
 
@@ -137,12 +141,26 @@ AgentTurn
   Id
   Sequence
   Status
+  ContextGeneration
   InputIds
 
 RuntimeBinding
   RunnerId
   Runtime
   RuntimeSessionId
+  BindingEpoch
+
+SessionOperationFence
+  OperationId
+  Kind = recovery | compact | reset | force-reset
+  Generation
+  OwnerId
+  LeaseUntil
+  DeadlineAt
+  ExpectedBinding?
+  Phase
+  CandidateKey?
+  CandidateRuntimeSessionId?
 ```
 
 以下是不变量：
@@ -152,20 +170,30 @@ RuntimeBinding
   It can only be established for a newly launched child Session and later detached; it never turns
   an Agent launch Source into another Source. The complete tree contract is
   [`subagents.md`](subagents.md).
-- `CurrentBinding` 是当前路由事实，可以整体替换；AgentSession 不保存物理 Session 历史。
+- `CurrentBinding` 是当前路由事实，包含完整的 `runnerId`、`runtime`、`runtimeSessionId`
+  与单调递增的 `bindingEpoch`；它可以整体替换，但 AgentSession 不保存物理 Session 历史。
 - `Transcript` 是一个按 AgentSession 顺序追加的会话记录，不按物理 Session 或其它
   子实体拆分。
 - `Context` 描述当前 Runtime Session 的上下文；binding 替换后从空开始。`Transcript`
   与累计 `Usage` 不随 binding 替换清空。
+- `ContextGeneration` 标识当前逻辑上下文。普通 Compact/Reset 不改变 Session 身份；显式
+  `force-reset` 才递增它。旧 Input/Turn 保留创建时的 generation，不能被移动到新上下文。
 - 同一 AgentSession 同时最多有一次 Runtime 执行；该串行约束使 transcript 的 Session
   内顺序足以表达会话。
-- Session 最多有一个 active Turn，等待执行的 Input 与 Turn 保持 Session 内顺序。
-- 已经接受的 Input 不会因容量限制被丢弃、覆盖或换 ID；容量不足时拒绝新的输入。
+- 一个被接受的 Input 恰好关联一个 Turn；一个 Turn 可以包含多个 Input，但只有 Runtime
+  明确支持 steer 时，后续 Input 才能关联已经 running 的当前 Turn。普通后续 Input 创建
+  新 Turn，不能改写已有 Input 的 `TurnId`。
+- 已经接受的 Input 不会因容量限制被丢弃、覆盖或换 ID；容量不足时在受理前拒绝新的
+  `new-turn` 输入。`#382` 负责跨 Session 的 capacity claim/release 与容量视图。
+- 同一 Session 的有界排队上限是本设计的受理不变量，具体数值是运行参数，不复制 `#382`
+  的全局容量策略。
+- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset 或 force-reset 的
+  持久 operation fence，不是新的业务实体；操作明确完成或拒绝后才能清除。
 - 用户输入必须包含可见文本或明确附件；attachment-only 输入不生成隐藏 prompt。
 - AgentSession 没有 `completed`、`failed`、`stopped` 或 `closed` 生命周期。
 
-`CurrentBinding` 允许初始为空。首次执行先创建物理 Session，再把 binding 持久化；只有
-binding 持久化成功后才能提交输入。
+`CurrentBinding` 允许初始为空。首次 launch 的绑定建立由 launch coordinator 推进；只有
+绑定和初始 Session 受理事实按各自聚合事务提交后，Runner 才能收到初始 dispatch。
 
 ## Activity 与 transcript
 
@@ -175,9 +203,9 @@ AgentSession 的活动状态只有：
 
 | 值 | 含义 |
 |---|---|
-| `idle` | 没有未终结 Turn，可以开始新的 Turn、Compact 或 Reset |
-| `active` | 至少有一个 queued 或 active Turn；Turn 状态区分等待与 Runtime 正在处理 |
-| `unknown` | 无法确认输入是否已被接受或执行是否已停止；不得当作安全空闲 |
+| `idle` | 没有任何非终结 Turn，且没有未完成或结果不确定的 Session operation；这是唯一安全空闲状态 |
+| `active` | 至少有一个 `queued`、`running` 或 `outcome_pending` Turn，或有已知仍在推进的 Session operation |
+| `unknown` | 任一 Turn、输入受理、Runtime side effect、binding 或 operation 的结果无法确认；不得当作安全空闲 |
 
 新 AgentSession 的初始 activity 是 `idle`，此时允许 `CurrentBinding` 为空。
 
@@ -185,16 +213,33 @@ AgentSession 的活动状态只有：
 
 ```text
 idle + input accepted                    -> active
-active + follow-up accepted              -> active
-active + all Turns confirmed terminal    -> idle
-active + stop result uncertain        -> unknown
-idle + input acceptance uncertain     -> unknown
-unknown + runtime evidence             -> active | idle
+active + known execution or operation ends
+  + all Turns terminal                   -> idle
+active + no runtime execution, no final result -> active (Turn = outcome_pending)
+active + acceptance/side effect uncertain -> unknown
+unknown + authoritative evidence        -> active | idle | unknown
+unknown + explicit force-reset          -> unknown (old Turn remains unknown)
 ```
 
-一次执行完成、失败或取消只让 activity 回到 `idle`。具体结果由 TaskRun、AgentJob 或
-transcript 中的 Runtime 诊断表达，不能成为 AgentSession 终态。Runtime 进程退出、缓存
-回收或持久化文件保留同样不能推导 Session 已关闭。
+一次执行完成、失败或取消，只有在 Server 已持久化最终结果时才会让对应 Turn 进入
+`terminal`；Session 仍需检查是否还有其它非终结 Turn 或 operation。Runtime 进程退出、缓存
+回收、HTTP 超时或持久化文件保留同样不能推导 Session 已关闭。
+
+所有会产生新副作用的普通命令先使用同一个安全准入谓词：
+
+```text
+safeAdmission(session) =
+  session.activity == idle
+  && every Turn is terminal
+  && no ActiveOperation
+  && no unresolved external side effect
+```
+
+`safeAdmission` 同时门控普通新 Turn、Compact、Reset 和 missing recovery。它禁止在
+`outcome_pending` 或 `unknown` 时用新 ID 掩盖未知副作用。已知 `running` Turn 上的 steer
+是唯一输入例外：只有当前 Runtime 明确支持 steer、完整 binding 仍匹配且没有未决 operation
+时才可受理；它不会把未知状态变成安全空闲。`force-reset` 是显式的产品逃生路径，不是普通
+Reset，规则在本文后面定义。
 
 ### Transcript 契约
 
@@ -203,13 +248,15 @@ Session 是输入顺序、Turn 归属和状态转换的唯一写入权威。Tran
 顺序追加的会话事实；Input 与 Turn ID 只提供稳定关联，不建立第二份消息树或物理 Session
 历史。
 
-每条被接受的输入都对应一个稳定 SessionInput，同一调用重试不能复制输入。AgentTurn 记录
-一段连续处理的排队、执行和结果；一个 Input 只属于一个 Turn。消息、reasoning、tool、usage、
-model、provider retry、compaction 和状态事实继续按发生顺序进入同一 transcript。
+每条被接受的输入都对应一个稳定 SessionInput，同一调用重试不能复制输入。Input 的 `Route`
+为 `new-turn` 或 `steer`：前者创建一个新的 Turn，后者关联当前已经 running 的 Turn。
+一个 Turn 可以有多个 steer Input，但每个 Input 只能有一个 TurnId；任何 Input 一旦持久化，
+就不能改绑到另一个 Turn。消息、reasoning、tool、usage、model、provider retry、compaction
+和状态事实继续按发生顺序进入同一 transcript。
 
-Input 是否已被 Runtime 接受、Turn 是否仍在执行，都由 Session 记录。结果不确定时保留
-`unknown` 并核对原记录，不能换一个新 ID 自动重投。Session activity 只表达当前是否仍有
-执行，不重复表达 TaskRun 或 AgentJob 结果。
+Input 是否已被 Server 接受、Turn 是否仍在执行、Runtime 是否已经产生副作用，都由 Server
+记录。`outcome_pending` 表示受理和提交路径已知，但没有最终结果；`unknown` 表示受理、side
+effect 或结果本身无法确认。两者都不能安全接受普通新 Turn 或执行上下文操作，也不能自动 replay。
 
 已有 binding 被替换时，`session.context_reset` 是 transcript 中的用户可见边界：
 
@@ -217,28 +264,44 @@ Input 是否已被 Runtime 接受、Turn 是否仍在执行，都由 Session 记
 {
   "type": "session.context_reset",
   "payload": {
-    "reason": "reset | runtime-change | missing-recovery",
+    "reason": "reset | runtime-change | missing-recovery | force-reset",
+    "contextGeneration": 2,
+    "operationId": "op_...",
     "observedAt": "2026-07-22T10:03:00Z"
   }
 }
 ```
 
 该事实只表达“后续 Runtime 上下文从空开始”，不携带旧或新物理 Session ID，也不建立
-binding 历史。首次从无 binding 建立物理 Session 时不写该事实。替换 binding 与写入
-`session.context_reset` 必须原子完成；该事实在替换后的下一条 `session.input` 之前。
+binding 历史。首次从无 binding 建立物理 Session 时不写该事实。替换 binding、递增
+`contextGeneration` 与写入 `session.context_reset` 必须在 Session 聚合的一次事务中完成；
+该事实在替换后的下一条 `session.input` 之前。
 
 `session.closed` 不属于目标 DSL：一次执行结束不关闭 Session。
 `session.followup_completed` / `session.followup_failed` 同样不属于目标 DSL：Input 与 Turn
 分别表达受理和执行，不能用一个 follow-up 事件混合两者。
 
-消费者不能从历史错误、完成或停止事实推导当前 activity。当前 activity 由 Session
-状态和最新 Runtime 证据决定。
+消费者不能从历史错误、完成或停止事实推导当前 activity。当前 activity 由 Session 状态、
+最新 Runtime 证据和 operation fence 决定。
 
 ## Follow-up 与 Cancel
 
-空闲 Session 收到 Follow-up 时开始新的 Turn。执行中的 Session 在 Runtime 支持时把输入加入
-当前 Turn，否则按顺序等待后续 Turn；`unknown` 时拒绝新输入并先核对状态。API 的同步结果
-只确认 Input 是否已被 Mohist 接受，不能假装 Runtime 已经完成处理。
+Follow-up 的产品语义保留两种路径。空闲 Session 收到 Follow-up 时，以 `Route=new-turn`
+受理并开始新的 Turn。已知 `running` Session 在 Runtime 明确支持 steer 时，以
+`Route=steer` 把 Input 加入当前 Turn；不支持 steer 时，以 `Route=new-turn` 按顺序放入
+后续 queued Turn。`outcome_pending`、`unknown` 或恢复/上下文 operation 期间拒绝普通
+Follow-up，不能猜测它属于旧 Turn 还是新 Turn。
+
+`new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时返回
+`rejected(queue_full)`，不持久化 Input。这个上限只约束单个 Session 的排队受理；`#382`
+负责跨 Session 的 max-concurrent-runs、capacity claim/release 和容量视图，不在本设计复制
+它的调度策略。
+
+受理事务先持久化 Input、Turn 关系和 durable dispatch event，再异步入队。若 event/outbox
+写入明确失败，整个 Session 受理事务失败，Input 不对外报告 accepted；若 Session 事务已
+提交但后续入队失败，Input 仍保持 `accepted=true`，Turn 保持 `queued`，并记录
+`dispatch=blocked` 与原因，由 durable handler 重试。它不能被删除、覆盖或假装 rejected。
+若入队调用的结果本身不确定，保留同一 InputId/TurnId 查询；不能换一个请求身份再投递。
 
 定时输入是到点才投递的一次性 follow-up：Server 在到期时经同一受理路径把一条普通
 `SessionInput` 追加给目标会话，不创建新输入类别、调度器或 Session 终态。完整契约见
@@ -254,15 +317,15 @@ Follow-up 命令只需要三种同步结果：
 把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
 产生重复副作用。
 
-Compact 与 Reset 这类 recovery 命令在调用方省略显式幂等键时，由 grain 每次生成唯一键
+Compact、Reset、force-reset 等 recovery 命令在调用方省略显式幂等键时，由 grain 每次生成唯一键
 （与 `operationId` 同格式），不再退化为固定值；显式提供幂等键时同键重放、异键 join
 同一 in-progress reservation 的语义不变；省略键的重试因此不再跨操作幂等——已完成
 reservation 不会被后续缺省调用误命中，缺省调用落入 `BeginSessionCommandAsync` 开启新
 操作。需要重试幂等的调用方必须显式提供键。
 
 Cancel 只针对当前未终结 Turn。等待中的 Turn 可以直接取消；正在执行的 Turn 请求 Runtime
-停止。无法确认停止结果时，Turn 与 Session activity 保持 `unknown`，不能伪造 idle。首个
-Turn 的结果由 AgentJob 裁定，后续 Turn 的取消不改写已经终结的 AgentJob。
+停止。无法确认停止结果时，Turn 进入 `unknown`，Session activity 也保持 `unknown`，不能伪造
+`idle`。首个 Turn 的结果由 AgentJob 裁定，后续 Turn 的取消不改写已经终结的 AgentJob。
 
 ## AgentSession 来源
 
@@ -294,13 +357,15 @@ AgentSession ID 是逻辑会话的稳定身份。Runtime Session 身份是外部
 {
   "runnerId": "runner-...",
   "runtime": "opencode",
-  "runtimeSessionId": "ses_..."
+  "runtimeSessionId": "ses_...",
+  "bindingEpoch": 7
 }
 ```
 
-正常执行、retry、Follow-up、Compact、model / variant 变化和 Runner 重启都复用当前
-binding。Reset、Runtime 变化和已确认的 Runtime Session 缺失恢复可以整体替换 binding，
-但不能改变 AgentSession 身份、来源或工作目录。
+正常执行、retry、Follow-up、Compact 和 Runner 重启都复用当前 binding。Reset、Runtime
+变化和已确认的 Runtime Session 缺失恢复可以整体替换 binding，但不能改变 AgentSession
+身份、来源或工作目录。每次替换递增 `bindingEpoch`，并以完整的 `runnerId`、`runtime`、
+`runtimeSessionId`、`bindingEpoch` 作为 fence。
 
 AgentSession 只保存 `CurrentBinding`。旧 binding 不进入 aggregate、DTO 或独立查询模型；
 已有 transcript 也不会按 binding 拆分。Reset、缺失恢复或 Runtime 变化只在 transcript
@@ -311,14 +376,17 @@ AgentSession 只保存 `CurrentBinding`。旧 binding 不进入 aggregate、DTO 
 
 ```text
 replaceBinding(expected, candidate):
-  require activity == idle
+  require safeAdmission(session)
   require currentBinding == expected
   require candidate was created for AgentSession.workDir
+  increment bindingEpoch
   currentBinding = candidate
 ```
 
-Runtime event 必须携带产生它的 `runtimeSessionId`。它不等于 current binding 时，Server
-拒绝该事件；旧物理 Session 的迟到事件不能改变当前 activity 或 transcript。
+Runtime command/event 必须携带完整的 runner/runtime/runtimeSessionId/bindingEpoch tuple，以及
+关联 InputId/TurnId 和适用时的 operationId。它不等于 current binding 时，Server 拒绝该
+事件；旧物理 Session、旧 Runner 或旧 operation 的迟到事件不能改变当前 activity、Turn 或
+transcript。
 
 物理 Session 的缓存、文件、进程资源与保留策略属于 Runtime adapter。binding 被替换
 不要求 Mohist 删除、关闭或继续查询旧物理 Session。
@@ -326,18 +394,56 @@ Runtime event 必须携带产生它的 `runtimeSessionId`。它不等于 current
 ## Runtime Session 缺失恢复
 
 缺失恢复是 Session 对当前 binding 的修复，不是 Prompt retry，也不是 Workflow
-recovery。它只在一条新的独立输入尚未被 Runtime 接受时发生。成功后，同一个工作
-attempt 继续执行，不消耗 Workflow recovery budget。
+recovery。它只能在 `safeAdmission(session)` 成立时启动。正在执行的 Turn 若因 Runtime
+消失而可能产生副作用，先变成 `unknown` 或 `outcome_pending`，然后保持 recovery blocked；
+不能用恢复建立的新 Session 掩盖旧 Turn。
+
+### Durable recovery operation
+
+RecoveryWindow 不是内存窗口，而是 AgentSession 的一个持久 `SessionOperationFence`，且
+同一 Session 同时最多一个 active fence。它至少保存：
+
+| 字段 | 作用 |
+|---|---|
+| `operationId` | 调用意图的稳定身份，同一操作的查询和重试键 |
+| `generation` | Session recovery generation；防止旧操作覆盖新 binding |
+| `ownerId` | 当前唯一执行 owner；其他 owner 只能观察或在租约过期后接管 |
+| `expectedBinding` | 完整旧 binding tuple，包括 epoch |
+| `candidateKey` | Runtime create/get/discard 的幂等键 |
+| `phase` | claimed、candidate-created、cas-pending、rebound、cleanup-pending、expired 或 failed |
+| `deadlineAt` | 有界的操作截止时间 |
+| `leaseUntil` | owner 租约；保证同一时刻只有一个 owner 推进操作 |
+
+创建/claim fence 先于 candidate create：
+
+```text
+BeginRecovery(expected, operationId, ownerId, deadline):
+  CAS Session.ActiveOperation from absent
+    to { operationId, generation, ownerId, expected, deadline }
+  if same operationId and generation:
+    return the existing fence idempotently
+  if another live operation:
+    return recovery_in_progress
+  if the old owner lease expired:
+    atomically take over the same fence with a new owner lease
+```
+
+`deadlineAt` 是固定上界，不能靠无限轮询或客户端重试延长。进程或 Server 重启后，Session
+激活和 durable handler 读取该 fence：截止时间前按已保存的 phase 和 `candidateKey` 恢复；
+截止时间后先 reconcile candidate 与 binding，再将操作标记 `expired`。若 candidate 清理
+结果不确定，阶段保持 `cleanup-pending`，该 fence 继续阻止新的 recovery，直到同一个幂等
+清理达到确定结果。
 
 ### 触发条件
 
 以下条件必须同时成立：
 
-1. AgentSession 的 `activity` 为 `idle`；
+1. `safeAdmission(session)` 成立；
 2. 执行位于当前 binding 的 `runnerId`，Runtime 与工作目录仍匹配；
 3. 该 Runner 上的 Runtime adapter 用确定性证据确认 `runtimeSessionId` 已不存在；
 4. 本次输入尚未写入 transcript，也尚未向 Runtime 提交；
-5. 替换 binding 和随后记录输入时，Server 看到的 expected binding 都仍是 current。
+5. 替换 binding 和随后记录输入时，Server 看到的 expected binding 都仍是 current；
+6. recovery operation fence 已在 candidate 创建前被唯一 owner 持久 claim。
 
 Runtime 不可用、超时、权限失败、响应不兼容、数据损坏或任何无法区分“暂时无法读取”
 和“确定不存在”的结果都不满足条件。请求落在另一个 Runner 也不是 missing；它必须
@@ -347,32 +453,33 @@ Runtime 不可用、超时、权限失败、响应不兼容、数据损坏或任
 
 ```text
 expected = AgentSession.currentBinding
+fence = Session.beginRecovery(expected, operationId, ownerId, deadline)
+resolved = Runtime.resolve(expected)
 
-if expected is absent:
-    candidate = Runtime.create(requiredRuntime, AgentSession.workDir, inputOptions)
-    selected = Session.replaceBinding(expected = absent, candidate)
+if resolved is ready:
+    selected = expected
+else if resolved is definitely-missing and fence is owned:
+    candidate = Runtime.createOrGetEmpty(expected.runnerId, expected.runtime,
+                                         AgentSession.workDir, fence.candidateKey)
+    Session.recordCandidate(fence, candidate)       # idempotent claim
+    selected = Session.replaceBinding(expected, candidate, fence.generation)
 else:
-    require currentRunnerId == expected.runnerId
-    resolved = Runtime.resolve(expected)
-
-    if resolved is ready:
-        selected = expected
-    else if resolved is definitely-missing:
-        candidate = Runtime.create(expected.runtime, AgentSession.workDir, inputOptions)
-        selected = Session.replaceBinding(expected, candidate)
-    else:
-        fail without changing the binding
+    fail without changing the binding
 
 Session.recordInput(expectedBinding = selected, input)
 Runtime.submitInputExactlyOnce(selected, input)
+Session.completeOperation(fence)
 ```
 
-自动恢复最多创建一个 candidate。新 candidate 创建或 binding 持久化失败时，不提交输入。
-已经创建但未能绑定的 candidate 只形成诊断，不引入补偿协议，也不复制物理会话数据。
+同一 `candidateKey` 的 create/get 必须返回同一候选或明确失败；创建响应丢失时按 key 查询，
+不能创建第二个候选。若 binding CAS 因 Reset、handoff 或另一已提交变化失败，Server 不采用
+candidate，改用同一 key 幂等 discard，并持久化 `cleanup-pending`，直到 Runtime 明确清理
+完成。清理响应丢失时仍按同 key 查询，不能只写日志或静默遗留。
 
-Runner 只报告 Runtime 的 resolve / create 事实；`replaceBinding` 与 `recordInput` 都由
-Server 裁决。两次写入都比较 expected binding，避免过期恢复覆盖 Reset、Runtime 变化
-或另一轮恢复。只有输入持久化成功后 Runner 才能提交给 Runtime。
+Runner 只报告 Runtime 的 resolve / create / get / discard 事实；`replaceBinding` 与
+`recordInput` 都由 Server 裁决。每个 command/event 带完整 runner/runtime/session/epoch
+tuple，且两次写入都比较 expected binding 和 operation generation，避免过期恢复覆盖
+Reset、Runtime 变化或另一轮恢复。只有输入持久化成功后 Runner 才能提交给 Runtime。
 
 ### 操作边界
 
@@ -383,19 +490,33 @@ Server 裁决。两次写入都比较 expected binding，避免过期恢复覆�
 | 执行中的 Follow-up | 否 | 输入目标是当前物理执行，替换后语义不同 |
 | Compact | 否 | 缺失的上下文无法压缩 |
 | Cancel | 否 | 新物理 Session 不是原执行目标 |
-| Reset | 不属于自动恢复 | 用户主动建立空上下文，旧 Session 缺失也不阻止 Reset |
+| Reset | 不属于自动恢复 | 普通 Reset 需要 safeAdmission；Unknown 只能显式 force-reset |
 
 自动恢复不从 Mohist transcript 重放消息、Prompt 或 tool call。Transcript 是审计与展示
 记录，不是重建 Runtime 上下文的命令来源。
 
 ## Runtime 变化与 Reset
 
-Runtime 变化或 Reset 只在 `idle` 时执行。Runner 先创建新的空物理 Session；Server
-只在 expected binding 仍是 current 时整体替换。新 Session 建立失败时保留原 binding。
+Runtime 变化或普通 Reset 只在 `safeAdmission(session)` 时执行，并持有独立的
+`SessionOperationFence`、`operationId`、expected binding、generation 和 bounded deadline。
+Runner 先用 operation key 创建新的空物理 Session；Server 只在 expected binding 仍是 current
+时整体替换，并在同一 Session 事务写入 `session.context_reset`。新 Session 建立失败时保留
+原 binding；响应丢失或 provider 已执行但 Server 未确认时，operation 进入 `unknown`，调用方
+只能查询同一 operation 或显式使用同一幂等 key 重试，Server 不隐式重复调用。
 
 Reset 不改变 Runtime；Runtime 变化可以改变 `runtime` 和 `runnerId`，但不能改变
 AgentSession 工作目录。两者都保留已有 transcript，不迁移或重放 Runtime 上下文，
 也不建立物理 Session 历史。
+
+Runner handoff/rebind 若改变 `runnerId` 是显式 operation，不是 missing recovery。每个 binding、
+command 和 event 都带 `runnerId`、`runtime`、`runtimeSessionId` 与 `bindingEpoch`；完整 tuple
+不匹配的迟到事实全部丢弃。
+
+默认策略是保留原 Turn 的 `unknown` 事实，不自动 replay，也不把它改成成功、失败或 `idle`。
+用户明确确认风险并提供新的 `force-reset` operationId 后，Server 才可建立新 context boundary：
+旧 Turn、Input、transcript 和可能的 side effect 原样保留，新 binding 稳定选定后才可创建一条
+新的 Input/Turn。新 Turn 不重试、不替换旧 Turn；旧 binding 的迟到事实因完整 fence 丢弃。
+force-reset 可能导致旧 Runtime 之后继续产生副作用，风险和 next action 必须可见。
 
 ## 模块所有权
 
@@ -416,12 +537,18 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 默认测试不访问真实 Runtime、网络、进程、文件系统 Session 或墙钟。至少覆盖：
 
 - 同一 AgentSession 跨 task、retry、Follow-up 与 Runner 重启复用 current binding；
-- SessionInput 与 AgentTurn 的身份、归属和顺序在进程重启后保持不变；
+- SessionInput 与 AgentTurn 的身份、route、归属和顺序在进程重启后保持不变，steer 不复制 Turn；
 - 相同输入重试不产生重复记录，已接受输入不会因背压丢失；
 - binding 替换与 `session.context_reset` 原子持久化，且事件不包含物理 Session 沿革；
-- 一次执行完成、失败或取消后 activity 回到 `idle`，没有 Session 终态；
+- `outcome_pending` 和 `unknown` 不被映射成 Turn `idle`；activity=idle 时没有任何未终结 Turn；
+- `safeAdmission` 阻止未知副作用时的新 Turn、Compact、Reset 和 recovery；
+- queue full 在受理前拒绝，accepted 后 enqueue failure 保留 queued 事实并由 durable handler 重试；
 - 停止或输入受理不确定时进入 `unknown`，不会自动重放；
-- Reset、Runtime 变化和 confirmed missing 在 `idle` 时原子替换 current binding；
+- Reset、Runtime 变化和 confirmed missing 在 safe admission 下用 operation identity 原子替换 current binding；
+- concurrent recovery 只有一个 owner，Server restart 能 reconcile、过期和清理 candidate；
+- candidate CAS failure 不采用候选并完成幂等 cleanup；创建/submit 响应丢失不隐式重放；
+- Runner handoff 与 same-runner missing recovery 分开，stale tuple event 被拒绝；
+- `force-reset` 保留旧 unknown，并能在新 context 明确创建新的 Input/Turn，风险和 next action 可查询；
 - stale expected binding 与旧 Runtime Session 事件被拒绝；
 - binding 替换不创建新 AgentSession、不保存物理 Session history，也不复制物理会话数据；
 - TaskRun / AgentJob 结果与 AgentSession activity 互不覆盖。
@@ -438,7 +565,6 @@ Server canonical 状态，Workflow 后续复用这份状态，不在客户端各
 | 对象 | 领域责任 | 与其它对象的关系 |
 |---|---|---|
 | Agent | 可长期复用的命名实体，保存定义与配置引用 | 一个 Agent 可产生多个 AgentJob 和 AgentSession |
-| Persona | Agent 使用的配置模板 | 被 Agent 解析并快照，不拥有执行记录 |
 | AgentJob | 一次 launch 工作的拥有者与结果裁判 | 关联一个首个 Input/Turn；不拥有 follow-up 的生命周期 |
 | AgentSession | 一个可继续交互的公共逻辑会话 | 稳定拥有 Inputs、Turns、transcript、context、usage 和 current binding |
 | Input | 一次用户或系统提交的执行意图 | 持有稳定 Input ID，恰好关联一个 Turn；重试不创建副本 |
@@ -448,7 +574,10 @@ Server canonical 状态，Workflow 后续复用这份状态，不在客户端各
 
 AgentSession 是公共逻辑身份，不是 Runtime Session 的别名，也不是 AgentJob 的别名。
 AgentJob 只代表 launch 的一次工作；follow-up 追加到原 AgentSession，不新建 AgentJob。
-Persona 的变更不回写已创建 Session 的执行快照。Runtime Session 的丢失、重建、Runner
+Agent 的 Instructions、Runtime、Model、Variant 与 Skills 在 launch 时解析并快照。Persona
+不是 #378 新造的领域对象；若 #377 以后定义该概念，本设计只消费已解析的 execution
+snapshot，不定义其字段或配置体验。`target` 只指现有 launch context 的目标引用，不在
+#378 新造 target 模型。快照的变更不回写已创建 Session。Runtime Session 的丢失、重建、Runner
 重启或换绑都必须映射回同一个 AgentSession、Input 和 Turn 记录。
 
 每次 launch 或 follow-up 都必须拥有明确的 Workspace 和 target，且它们进入持久记录与
@@ -462,72 +591,82 @@ Server 在受理事务中生成或确认 `AgentJobId`、`AgentSessionId`、`Inpu
 RuntimeSessionId 只标识当前物理 binding；它可以替换，不能作为公共逻辑 Session 的
 身份。重复提交通过同一请求身份命中原 Input/Turn，不能创建第二份输入或第二个副作用。
 
-CLI 和 Web 的最小 canonical 结果包含以下语义字段；具体 JSON 外壳仍由现有 API/CLI
-约定决定，本 spec 不发明新语法：
+Server 是 canonical read model 与 command result 的权威来源。CLI、Web 和其它入口都是适配器，
+不存在“先固化 CLI JSON、再由 Web 复用”的权威方向。每个返回的事实至少带 Server 产生的
+`revision` 和 `observedAt`；revision 在对应 Job/Session 权威状态变化时单调递增，observedAt
+是 Server 观察该事实的时间。外部续读 cursor 和认证/传输语义仍属于 #387，不在本 issue 新造
+endpoint。
 
-实现优先固化 CLI 的 canonical JSON，再由 Web 复用同一字段，随后才由 Workflow 接入；
-通用外部 API 的认证、幂等和断线续读留给 #387。
+| canonical 事实 | 必须回答的问题 | 最小字段语义 |
+|---|---|---|
+| AgentJob status | 这次 launch 工作排队、执行、成功、失败或取消了吗 | `jobId`、`status`、`result/error`、`revision`、`observedAt` |
+| Session activity | 这段会话现在能否继续、是否有未知事实 | `sessionId`、`activity`、`contextGeneration`、`revision`、`observedAt`、`nextAction`? |
+| Input acceptance | 这条输入是否已由 Mohist 持久接受 | `inputId`、`state=accepted|rejected|unknown`、`route`、`turnId`?、`revision`、`observedAt` |
+| Turn result | 这一轮的执行状态和结果是什么 | `turnId`、`status`、`result/error`、`nextAction`?、`contextGeneration`、`revision`、`observedAt` |
+| launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`revision`、`observedAt` |
 
-| 字段语义 | 规则 |
-|---|---|
-| AgentJobId / AgentSessionId | launch 返回 Job 与公共 Session；follow-up 只返回已有 Session |
-| InputId / TurnId | 每次接受的意图与其 Turn 的稳定身份，查询和后续状态沿用 |
-| accepted | 只表示 Server 已持久接受 Input；`accepted=true` 不表示已经 running |
-| status | 当前 Turn 的 canonical 状态，使用 `queued`、`running`、`idle`、`terminal`、`unknown` |
-| result | 只有已知结果才填充；`terminal` 之外不得伪造成功、失败或取消结果 |
-| error / next action | 失败或 Unknown 时给稳定的用户可理解原因和下一步；不暴露 provider 事件名 |
-| workspace / target | 返回实际绑定的 Workspace 与 target，供 CLI/Web 展示和复用 |
+`accepted` 是 Input 的受理事实，不能替代 Job status、Session activity 或 Turn result。
+`result` 只有 `terminal` 且 Server 已持久最终结果时才填充；`queued`、`running`、
+`outcome_pending` 和 `unknown` 不能伪造成功、失败或取消。`error` 与 `nextAction` 使用用户
+可理解的稳定语义，不暴露 provider event name。CLI/Web 只能把这些 canonical 事实翻译成各自
+呈现，不得根据本地日志、HTTP 状态或 Runtime 事件另算“完成”。
 
 `accepted` 是 Input 的受理事实，`status` 是 Turn 的观察事实。一个已接受的 Input 可以
 长期处于 `queued`，也可以因 Runner 不可用进入 `unknown`；只有执行已被 Runtime 确认
-开始时才是 `running`。Session 级 `activity` 仍可为 `idle`、`active` 或 `unknown`，但
-它不能替代 Turn status：`activity=idle` 仅表示当前没有被确认正在执行的工作，不表示
-最近一个 Turn 已有最终结果。
+开始时才是 `running`。Session 级 `activity` 仍可为 `idle`、`active` 或 `unknown`，但它
+不能替代 Turn status：`activity=idle` 要求没有任何非终结 Turn 和未完成 operation；它不
+表示最近一个 Runtime 进程空闲，也不能与未归档结果共存。
 
 Turn status 的定义如下：
 
 | 状态 | 进入条件 | 语义与允许转移 |
 |---|---|---|
-| `queued` | Input 已接受且 Turn 已持久化，尚未被 Runtime 确认开始 | 可转 `running` 或在受理/派发事实不确定时转 `unknown` |
-| `running` | 当前 binding 的 Runtime 已确认接收并执行该 Turn | 可转 `idle`、`terminal` 或因结果不确定转 `unknown` |
-| `idle` | 当前 Turn 暂无 Runtime 执行，但最终结果尚未被 Server 归档 | 可转 `terminal`；若观察窗口失去确定性则转 `unknown`，不能当作成功 |
+| `queued` | Input 已接受且 Turn 已持久化，尚未被 Runtime 确认开始 | 可转 `running`；若后续派发/side effect 事实不确定则转 `unknown` |
+| `running` | 当前完整 binding 的 Runtime 已确认接收并执行该 Turn | 可转 `outcome_pending`、`terminal` 或因结果不确定转 `unknown` |
+| `outcome_pending` | Server 知道 Input/submit 已受理，但 Runtime 暂无执行且最终结果尚未归档 | 只能由权威结果转 `terminal` 或在观察失去确定性时转 `unknown`；不能当作成功或空闲 |
 | `terminal` | Server 已持久化不可逆的成功、失败或取消结果 | 终态，不再重放、不再改变结果 |
-| `unknown` | 无法确认 Input/side effect/执行结果是否已发生 | 非终态；只能由权威观察转 `queued`、`running`、`idle` 或 `terminal`，不能自动重投 |
+| `unknown` | 无法确认 Input acceptance、side effect 或执行结果 | 非终态；只能由权威观察、人工确认或显式 force-reset 处理，不能自动重投 |
 
-`idle` 与 `terminal` 的分界是“有没有已知最终结果”，不是“Runtime 进程是否还活着”。
-没有当前执行的 Session 可以是 `activity=idle`，而某个尚未归档结果的 Turn 仍为 `idle`；
-公共 UI 不得把这两者显示成已完成。`unknown` 也不是 `idle`，因为它不能安全地接受
-会产生副作用的新输入。内部 `Executing` 映射为公共 `running`；内部 Completed/Failed/
-Cancelled 只有在结果已持久化时才映射为 `terminal`，不能把内部枚举直接暴露给 CLI/Web。
+Turn 没有 `idle` 状态。`activity=idle` 仅在 Session 没有任何非终结 Turn 且没有未完成
+operation 时成立。`outcome_pending` 与 `unknown` 都阻止普通新 Turn、Compact、Reset 和
+recovery；它们的区别只在于 Server 已知的事实范围，不改变安全门。内部 `Executing` 映射
+为公共 `running`；内部 Completed/Failed/Cancelled 只有在结果已持久化时才映射为 `terminal`，
+不能把内部枚举直接暴露给 CLI/Web。
 
 ### launch 与 follow-up 生命周期
 
 两类调用都经过同一条逻辑序列，差别只有 AgentJob 是否在 launch 时创建：
 
 ```text
-request -> accept -> queue -> execute -> result
+request -> prepare-job -> accept-session -> queue -> execute -> result
 ```
 
-1. `request` 校验 Agent、Persona 快照、Workspace、target、输入身份和当前 Session。
-   这一步不承诺 Runtime 已可用。
-2. `accept` 在 Session 事务内持久化 Input、Turn 及其关联 ID。成功返回 `accepted=true`
-   和稳定 InputId/TurnId；此时状态通常为 `queued`，不能写成 `running`。
-3. `queue` 将 Turn 放入该 Session 的有序执行队列。相同 Session 严格只有一个被确认
-   执行的 Turn；follow-up 在前一 Turn 未终结时排队，不插队、不合并、不覆盖。
-4. `execute` 由绑定 Runner 核对或恢复 Runtime。只有收到当前 binding 的开始事实后，
-   Turn 才转为 `running`。不同 AgentSession 可并行；本节不定义容量 claim/release、
-   队列容量或 capacity view。
-5. `result` 只由 Server 根据当前 binding、关联 InputId/TurnId 和权威结果归档。已知
-   最终结果使 Turn 进入 `terminal`；Runtime 先返回空闲而结果仍未确定时保持 `idle`。
+1. `request` 校验 Agent execution-definition snapshot、Workspace、现有 target/context、
+   输入身份和当前 Session。这一步不承诺 Runtime 已可用。
+2. `prepare-job` 在 AgentJob 自己的事务中持久化 launch operation、JobId、SessionId、
+   首个 InputId/TurnId 和 durable outbox event；它不写 Session。
+3. `accept-session` 由 launch coordinator 发送 Session 的幂等命令。Session 自己的事务
+   持久化 Input、Turn 及其关联 ID，成功返回 `accepted=true` 和稳定 InputId/TurnId；此时
+   状态通常为 `queued`，不能写成 `running`。
+4. `queue` 由 Session event/outbox 推进有序执行队列。相同 Session 严格只有一个被确认
+   执行的 Turn；follow-up 在前一 Turn 未终结时排队，不插队、不合并、不覆盖。Session
+   queue 上限属于本设计；跨 Session capacity claim/release 和视图属于 `#382`。
+5. `execute` 由绑定 Runner 核对或恢复 Runtime。只有收到当前完整 binding 的开始事实后，
+   Turn 才转为 `running`。不同 AgentSession 可并行。
+6. `result` 只由 Server 根据当前 binding、关联 InputId/TurnId 和权威结果归档。已知
+   最终结果使 Turn 进入 `terminal`；Runtime 先返回空闲而结果仍未确定时保持
+   `outcome_pending`，不能写成 `idle`。
 
 launch 为一次新的 AgentJob 创建首个 Input/Turn，并将 JobId、SessionId、InputId、TurnId
-一起返回。follow-up 不创建 AgentJob，只追加 Input/Turn。请求提交后断线，调用方只能用
-原请求身份查询同一记录；不能用新的请求身份猜测或重发。
+一起返回。AgentJob、AgentSession、Input 和 Turn 不共享跨聚合事务：AgentJob 事件/outbox
+驱动 Session 的幂等命令，Session 事件再驱动首 Turn dispatch。follow-up 不创建 AgentJob，
+只追加 Input/Turn。Job 已创建但 Session response 丢失、Session 已创建但 dispatch 未送达、
+或 Runner 已接受但 response 丢失，都用原 operation 查询/重试收敛，不能隐式重复 submit。
 
-同一 Session 的串行约束是生命周期事实，不是容量策略：前一 Turn 处于 `queued`、
-`running` 或 `unknown` 时，后续 Input 只能继续排队或被明确拒绝，不能并行提交到同一
-Runtime。#382 负责 max-concurrent-runs 的 capacity claim/release 与容量视图；#378
-只要求 Session 内顺序和状态事实，不实现、复制或固化 #382 的容量规则。
+同一 Session 的串行约束是生命周期事实，不是全局容量策略：前一 Turn 处于 `queued`、
+`running`、`outcome_pending` 或 `unknown` 时，后续 Input 只能按 steer/queue 语义处理或被
+明确拒绝，不能并行提交到同一 Runtime。#382 负责跨 Session 的 max-concurrent-runs、
+capacity claim/release 与容量视图；#378 只定义 Session queue 上限、顺序和状态事实。
 
 ### Runtime 恢复状态机
 
@@ -539,56 +678,51 @@ Bound
   | disconnect / runner restart / probe unavailable
   v
 ObservationUnknown -- authoritative present --> Bound
-  | authoritative definitely-missing
+  | authoritative definitely-missing + safeAdmission
   v
-RecoveryWindow
-  | CAS + create empty Runtime Session succeeds
+RecoveryClaimed -> CandidateCreated -> CAS Rebound
+  | concurrent claim / deadline / candidate cleanup failure
   v
-Rebound -> Bound
-  | create/CAS/runner failure
-  v
-RecoveryFailed
+RecoveryInProgress | RecoveryFailed | RecoveryExpired | CleanupPending
 ```
 
 - `Bound`：当前 binding 是唯一目标。正常 retry、follow-up、Compact、Reset 和 Runner
   重启都先复用它；Runner 重连后重新报告当前 physical session 的事实。
 - `ObservationUnknown`：断线、超时、Runner 不可达、权限错误、非 404 错误、格式错误或
   任何不能证明“不存在”的结果。保留原 binding，不创建候选，不 replay，不自动换绑。
-- `RecoveryWindow`：Runner 已明确报告当前 Runtime Session 不存在，Server 正在为同一
-  AgentSession 创建空 Session 并用完整 expected binding 做 CAS。窗口期间不允许第二个
-  recovery 操作覆盖第一个；查询返回恢复中和原稳定 IDs。
+- `RecoveryClaimed`：Runner 已明确报告当前 Runtime Session 不存在，Server 先持久化唯一
+  operation owner、generation、deadline 和 candidate key，再为同一 AgentSession 创建空
+  Session 并用完整 expected binding 做 CAS。第二个 recovery 只得到 `recovery_in_progress`。
 - `Rebound`：候选 Runtime Session 创建成功、binding 原子替换成功，并写入一次
   `session.context_reset(reason=missing-recovery)`。AgentSession、Workspace、target、
   Input/Turn ID 和公共 transcript 保持不变。
-- `RecoveryFailed`：创建、Runner 路由、CAS 或持久化失败。原 binding 不被伪造替换；
-  返回可行动的原因与下一步。下一步只能是继续查询恢复窗口、等待 Runner ready、使用
-  Reset 建立新上下文或联系管理员处理 Runner/Workspace，具体选择取决于失败事实。
+- `RecoveryFailed` / `RecoveryExpired`：创建、Runner 路由、CAS、deadline 或持久化失败。
+  原 binding 不被伪造替换；candidate 未绑定时必须按同一 key 幂等 discard。清理结果不确定
+  时保留 `cleanup_pending`，不允许第二个 recovery。
 
 恢复触发必须满足“权威确认缺失”。Runner 重启本身、连接断开本身和读超时都不满足；
 它们只进入 `ObservationUnknown`，待同一 Runner 的 probe 给出 `present` 或
 `definitely-missing`。物理 Session 存在时必须继续使用它，不能因重连而新建。
 
-若当前没有未决副作用（Session 空闲且无 queued/running Turn），确认缺失后可自动创建
-空 Runtime Session、换绑，并让后续输入继续执行。若当前 Turn 已经可能提交到旧 Runtime，
-该 Turn 的最终结果转为 `unknown`；恢复仍可为同一个 AgentSession 重建和换绑，但绝不把
-旧 Input、prompt、tool call 或 side effect 自动 replay 到新 Runtime。新的输入必须等
-恢复状态允许后才可接受，且不能借新 InputId 掩盖旧 Turn 的 Unknown。
+确认缺失、且 `safeAdmission(session)` 成立时，可自动创建空 Runtime Session、换绑，并让
+后续输入继续执行。若当前 Turn 已经可能提交到旧 Runtime，该 Turn 保持 `outcome_pending`
+或 `unknown`，recovery blocked；恢复仍可为同一个 AgentSession 重建和换绑，但绝不把旧
+Input、prompt、tool call 或 side effect 自动 replay 到新 Runtime。新的输入必须等 recovery
+和安全准入完成，不能借新 InputId 掩盖旧 Turn。
 
 恢复成功不等于原 Turn 成功。它只说明公共 AgentSession 获得了新的可用 Runtime 上下文。
 原 Turn 只有收到旧 binding 的权威终态才可进入 `terminal`；旧 binding 的迟到事件因
 RuntimeSessionId 不匹配被丢弃。恢复失败也不关闭 AgentSession，不生成新的 SessionId，
 不把错误压缩成 `Session failed`。
 
-missing-recovery 是 `replaceBinding` 的唯一例外边界：若旧 Turn 已可能产生 side effect，
-Server 先冻结该 Turn 为 `unknown`，再允许用完整 expected binding 换绑；这不等于把
-Session activity 变成安全 `idle`，也不允许新的 Input 通过旧 Turn 的空档进入 Runtime。
-Reset、Runtime 变化和无未决副作用的普通换绑仍要求 Session 可安全进入 `idle`。因此 CAS
-同时保护“不能覆盖新 binding”和“不能把 Unknown 当作空闲”的两个不变量。
+missing-recovery 不是 Unknown Turn 的例外。若旧 Turn 已可能产生 side effect，Server
+保持 `unknown` 或 `outcome_pending`，不允许 recovery、Compact、普通 Reset 或新 Turn 通过
+旧 Turn 的空档进入 Runtime。只有用户明确选择 `force-reset`，才可建立新的 context boundary；
+原 Turn 与副作用风险保留，完整 binding/generation fence 仍保护迟到事件。
 
 状态查询或相同请求身份的重试只做 observation：
 
-- queued 的重复请求可重新返回原 ID 和当前状态，但不得追加 Input；
-- running、idle、terminal、unknown 的重复请求只返回原记录，不重新 dispatch；
+- queued、running、outcome_pending、terminal、unknown 的重复请求只返回原记录，不重新 dispatch；
 - unknown 只能被权威事件或显式用户操作推进，不能因为客户端重试而变成 queued；
 - side effect 结果不确定时不自动 replay；用户应先查询，仍不确定时按 `next action` 选择
   Reset 或人工核对。
@@ -617,24 +751,44 @@ fake，并把“窗口过期”作为持久化的恢复结果；测试不能用 
 | `recovery_in_progress` | 同一 Session 已有恢复操作占用窗口 | 查询原 Session/Input/Turn，等待该操作给出结果，不重复提交 |
 | `runtime_unavailable` | Runner 或 Runtime 暂不可达，不能证明缺失 | 等待 Runner ready 后用原请求身份查询；不要新建请求 |
 | `runtime_missing_unconfirmed` | probe 结果不足以证明 physical session 不存在 | 继续查询或让 Runner 重连 probe；不要 Reset 代替事实判断 |
-| `recovery_failed` | 已确认缺失但 create/CAS/持久化失败 | 检查 Runner、Workspace 和权限；必要时显式 Reset，仍保留原 Session 诊断 |
-| `turn_outcome_unknown` | 原 Turn 可能已产生副作用但没有权威结果 | 查询原 Turn；仍 Unknown 时按产品流程人工核对或 Reset，绝不自动 replay |
+| `recovery_failed` | 已确认缺失但 create/CAS/持久化失败 | 检查 Runner、Workspace 和权限；在 safe admission 下显式 Reset，仍保留原 Session 诊断 |
+| `turn_outcome_unknown` | 原 Turn 可能已产生副作用但没有权威结果 | 查询原 Turn；仍 Unknown 时人工核对或显式 force-reset，绝不自动 replay |
 
 ### Compact、Reset 与公共上下文边界
 
 Compact 与 Reset 都是 AgentSession 的上下文边界操作，不是 Workflow Action，也不创建
 新的 AgentSession、AgentJob、Input 或 Turn。两者保留已有公共 transcript、稳定 IDs、
-Workspace、target 和累计 usage；它们只改变后续 Runtime context 的边界。
+Workspace、target 和累计 usage；它们只改变后续 Runtime context 的边界，并各自持有
+`operationId`、expected binding、generation、owner 和 bounded deadline 的 operation fence。
 
 - Compact 在 Session 可安全进入边界时请求 Runtime 压缩当前上下文；成功后继续使用同一
   binding，后续输入从新的上下文边界开始。
 - Reset 建立空上下文；必要时创建新的 Runtime Session 并整体替换 current binding，
   但保留旧 transcript 和逻辑 Session 身份。
-- 运行中、Unknown 或恢复窗口内不能假装已经完成 Compact/Reset；返回当前状态和下一步。
+- 运行中、`outcome_pending`、Unknown 或 recovery fence 内不能假装已经完成 Compact/Reset；
+  返回当前状态和 next action。provider 已执行但响应丢失时 operation 为 `unknown`，只能
+  查询同一 operation 或显式用同一幂等 key retry，不能隐式重复。
+- 默认保留 Unknown 原事实，不自动 replay。用户明确确认风险并提供 `force-reset` operationId
+  后，才可建立新的 context boundary；旧 Turn 仍为 `unknown`，新 context 可创建新的
+  Input/Turn，二者不能互相替换。旧 binding 的迟到事件按完整 runner/runtime/session/epoch
+  fence 丢弃，重复副作用风险和 next action 必须可见。
 - 边界记录是公共领域事实，不把 provider 的 raw event、内部 session ID、tool 细节或
   重建诊断直接写入公共 transcript。公共 transcript 的默认投影由 #384 负责；历史和
   Session timeline 展示由 #385 负责，本设计只规定“旧记录保留、边界可观察、内部事件不
   外泄”。
+
+### 六条验收标准与场景/实施映射
+
+六条 AC 不是六套实现；每条都对应可观察事实、失败场景和一个最小实施批次：
+
+| AC | 可观察验收标准 | 场景映射 | 实施批次 |
+|---|---|---|---|
+| AC1 稳定受理身份 | launch/follow-up 的 Job、Session、Input、Turn ID 持久且重试不重复；accepted 只表示 Input 已接受 | 正常 launch、duplicate submit、submit response loss | Batch 1 |
+| AC2 Turn 与输入语义 | queued/running/outcome_pending/terminal/unknown 自洽；steer 关联 existing Turn；new-turn 有界排队；queue full 在受理前拒绝 | 正常 follow-up、steer、follow-up 排队、queue full、accepted 后入队失败 | Batch 2 |
+| AC3 Server canonical 事实 | Job status、Session activity、Input acceptance、Turn result 分开返回；CLI/Web 从同一 read model 适配；revision/observedAt 可追踪 | canonical read、stale event、Job/Session 结果分离 | Batch 3 |
+| AC4 Launch 跨聚合收敛 | AgentJob/Session 不共享事务；durable coordinator/outbox 用幂等命令把部分失败收敛到唯一 Job/首 Input/Turn 映射 | launch partial failure、Server restart、Runner submit response loss | Batch 4 |
+| AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；deadline、重启 reconcile、candidate create/claim/cleanup、CAS 与完整 binding fence 均可观察；handoff 不伪装 missing | concurrent recovery、Server restart、candidate CAS failure、Runner handoff、旧事件 | Batch 5 |
+| AC6 Context operation 与 Unknown | Compact/Reset 有 operation fence；响应丢失不隐式重复；stop uncertain 保留 unknown；显式 force-reset 保留原事实并可建立新 Input/Turn | Compact/Reset response loss、provider already executed、stop uncertain、Unknown force-reset | Batch 6 |
 
 ### 可观察不变量与场景矩阵
 
@@ -643,9 +797,20 @@ Workspace、target 和累计 usage；它们只改变后续 Runtime context 的�
 1. `accepted=true` 必有持久 InputId/TurnId；同一请求身份永远指向同一对 ID。
 2. 一个 Input 恰好属于一个 Turn；一个 Session 内 Turn 的顺序持久且不可被重排。
 3. `running` 只来自当前 binding 的执行事实；旧 Runtime 事件不能改变当前状态。
-4. `terminal` 有持久最终结果；`idle` 没有最终结果，`unknown` 不能被误报为 idle。
-5. 一个 Session 同时最多一个 running Turn；不同 Session 可以并行；不出现容量策略断言。
-6. confirmed missing 才能换绑；不确定错误保持 binding，side effect 不自动 replay。
+4. Turn 不存在 `idle`；`outcome_pending` 与 `unknown` 都不能被误报为终态或安全空闲；
+   activity=idle 时没有未终结 Turn。
+5. `safeAdmission` 阻止未知副作用时的新 Turn、Compact、Reset 和 recovery；steer 只有在
+   已知 running 且 Runtime 明确支持时例外。
+6. 一个 Session 同时最多一个 confirmed Runtime execution；不同 Session 可以并行；不出现
+   `#382` 的全局容量断言。
+7. confirmed missing 才能在同一 Runner/runtime 上换绑；handoff 有独立 operation；不确定
+   错误保持 binding，side effect 不自动 replay。
+8. recovery/operation fence 的唯一 owner、generation、deadline 和 candidate cleanup 在
+   concurrent、restart、CAS failure 后仍可查询。
+9. Launch partial failure、accepted 后 enqueue failure 和 response loss 都保留已提交事实，
+   通过同一 command/outbox/operation 收敛，不能创建第二个 Input/Turn/side effect。
+10. Compact/Reset/force-reset 保留旧 transcript 与稳定 Session ID；force-reset 不改变旧
+    unknown Turn，旧事件按 fence 丢弃，风险与 next action 可见。
 7. 换绑不改变 AgentSession、Input、Turn、Workspace、target 或既有 transcript。
 8. Compact/Reset 之后旧 transcript 可查询，内部 Runtime 事件不会直接成为公共消息。
 9. cancel/stop 的既有语义不变；停止结果不确定时保持 Unknown，不自动重投。
@@ -655,44 +820,61 @@ Workspace、target 和累计 usage；它们只改变后续 Runtime context 的�
 |---|---|---|
 | 正常 launch | 无 binding、空 Session | 返回稳定 Job/Session/Input/Turn，accepted 后先 queued，再 running，最终 terminal |
 | 正常 follow-up | Session idle、已有 transcript | 不新建 Job；同一 Session 新 Input/Turn 串行执行 |
+| steer | 当前 Turn running，Runtime 明确支持 steer | 新 Input 关联 existing Turn，不创建第二个 Turn |
 | follow-up 排队 | 前一 Turn running | 后一 Turn 保持 queued；前一 Turn 终结后才可 running |
+| queue full | Session queued 上限已达 | rejected(queue_full)，不持久化新 Input |
+| accepted 后入队失败 | Session 事务已提交，outbox/queue 失败 | accepted 保留，Turn queued + dispatch=blocked，durable retry，不丢输入 |
 | 断线 | Turn running，Runner 不可达 | binding 保留，Turn unknown；恢复前不重发 |
 | duplicate submit | 相同请求身份重试 | 返回原 Input/Turn，无重复 transcript、Turn 或 Runtime submission |
 | Runtime disappear | probe 明确 missing | 空 Runtime 创建、CAS 换绑、同 Session context boundary |
 | ambiguous disappear | timeout/非 404/Runner restart | 不换绑、不 replay；进入 observation unknown |
 | recovery success | candidate 与 CAS 成功 | 公共 Session 可继续查询；原未决 Turn 仍按事实为 terminal 或 unknown |
 | recovery failure | create/CAS/Runner 失败 | 保留原 binding，返回具体错误与 next action |
+| concurrent recovery | 同一 binding 同时收到两次 missing | 只有一个 durable owner/candidate；另一个得到 recovery_in_progress |
+| recovery restart/expiry | fence 在重启前未完成 | 按 phase reconcile；超 deadline 后 expire/cleanup-pending，不开第二个 recovery |
+| candidate CAS failure | candidate 已创建但 expected binding 已变化 | 不采用 candidate，幂等 discard，保留 stale/CAS 原因 |
+| launch partial failure | Job 已提交但 Session response 丢失 | 原 operation 重试返回同一映射；不创建第二个 Session/首 Turn |
+| submit response loss | Runner 可能已接受首 Turn | Turn 查询为 terminal 或 unknown；不隐式再次 submit |
 | Compact | 可安全边界 | transcript 保留，后续 context 有边界，无 raw Runtime event 外泄 |
-| Reset | 可安全边界 | 同一 Session/IDs，空 context；绑定替换按 CAS |
-| cancel/stop 回归 | queued/running/unknown 各一例 | 不改变既有 cancel/stop 语义；不确定停止不变 idle |
+| Reset | 可安全边界 | 同一 Session/IDs，空 context；绑定替换按 operation/CAS |
+| Compact/Reset response loss | provider 可能已执行，Server 未确认 | operation unknown；查询/显式 retry 同一 operation，不隐式重复 |
+| cancel/stop 回归 | queued/running/unknown 各一例 | 不改变既有 cancel/stop 语义；不确定停止保持 unknown |
+| Unknown force-reset | 原 Turn unknown | 旧 Turn 保留 unknown；显式新 operation 建立 boundary，可创建新的 Input/Turn；风险和 next action 可见 |
 
 ### 架构、测试与实现分批
 
-Server 持有受理、ID、队列、binding CAS、状态投影和恢复裁判；Runner 只执行、probe、
-create、发出带 RuntimeSessionId 的事实；Runtime adapter 将 SDK/文件/协议错误归类为
-present、definitely-missing 或不确定失败。CLI/Web 不解析内部事件名，也不根据时间戳或
-本地轮询自行拼接生命周期。
+Server 持有受理、ID、Session queue 上限、binding/operation CAS、状态投影和恢复裁判；
+Launch coordinator 只推进跨 AgentJob/AgentSession 的 durable event/outbox 和幂等命令；
+Runner 只执行、probe、create/get/discard、submit，并发出带完整 binding tuple 的事实；
+Runtime adapter 将 SDK/文件/协议错误归类为 present、definitely-missing 或不确定失败。
+CLI/Web 不解析内部事件名，也不根据时间戳或本地轮询自行拼接生命周期。
 
-测试使用注入的 Server store、Runner registry、Runtime probe/create/submit seam、事件
-outbox、idempotency store 和 `TimeProvider` fake。禁止真实网络、进程、Runtime SDK、文件
-系统 Session、数据库或墙钟；每个场景都能固定输入事件顺序并断言持久状态、canonical
-投影和副作用调用次数。spec 测试覆盖跨组件行为，unit/architecture 测试覆盖状态机、
-binding CAS、投影映射和依赖边界；测试时长遵循 `design/testing.md`。
+测试使用注入的 Server store、Runner registry、Runtime probe/create/get/discard/submit seam、
+事件 outbox、idempotency store 和 `TimeProvider` fake。禁止真实网络、进程、Runtime SDK、
+文件系统 Session、数据库或墙钟；每个场景都能固定输入事件顺序并断言持久状态、canonical
+投影、revision/observedAt 和副作用调用次数。spec 测试覆盖跨组件行为，unit/architecture
+测试覆盖状态机、binding/operation CAS、投影映射和依赖边界；测试时长遵循 `design/testing.md`。
 
-建议按可独立验收的价值分批：
+建议按可独立验收的价值分六批，并与上面的 AC 一一对应：
 
-1. **稳定受理记录**：launch/follow-up 都能持久化并查询同一 Input/Turn ID、accepted、
-   Workspace、target 和 canonical 状态；这是 #378 必须先落地的最小用户价值。
-2. **串行 Turn 与公共投影**：实现 queued/running/idle/terminal/unknown 的映射、同 Session
-   顺序和 duplicate observation；CLI 与 Web 能展示同一事实。这不是 #382 的容量实现。
-3. **确定性 Runtime 恢复**：加入 present/missing/ambiguous 分类、recovery window、
-   current-binding CAS、同 Session 换绑和 Unknown/no-replay；覆盖 Runner 重启、断线和
-   恢复成功/失败。
-4. **上下文边界与回归**：实现 Compact/Reset 的边界事实、旧 transcript 保留、actionable
-   failure，并回归 cancel/stop；不改默认 transcript 投影。
+1. **Batch 1 / AC1 稳定受理记录**：实现 AgentJob launch intent、Session 幂等受理、稳定
+   Job/Session/Input/Turn 映射和 duplicate observation。
+2. **Batch 2 / AC2 串行 Turn 与 follow-up**：实现 queued/running/outcome_pending/terminal/
+   unknown、steer 与 new-turn 关系、Session queue 上限、accepted 后 durable enqueue failure。
+3. **Batch 3 / AC3 canonical projection**：Server 提供四类分离事实、revision/observedAt
+   和 next action；CLI/Web 只适配同一 read model。
+4. **Batch 4 / AC4 launch coordinator**：用 AgentJob 自己的事件和 durable outbox 驱动
+   Session 幂等命令、首 Turn dispatch 和部分失败/Server restart 收敛；不跨聚合共享事务。
+5. **Batch 5 / AC5 deterministic recovery**：加入完整 binding epoch、same-runner
+   confirmed-missing、唯一 owner/deadline/restart reconcile、candidate idempotency、
+   CAS failure cleanup 与 handoff fence。
+6. **Batch 6 / AC6 context boundary and Unknown**：实现 Compact/Reset operation fence、
+   response-loss unknown、stop uncertain 和显式 force-reset；保留旧 transcript/unknown，
+   不自动 replay。
 
-#378 依赖既有 Agent 配置与启动契约，但不包含 #377 的 Agent 配置/启动体验。#382 单独
-负责 max-concurrent-runs 的 capacity claim/release、容量排队视图和其策略测试；#384
+#378 依赖既有 Agent 配置与启动契约，但不包含 #377 的 Agent 配置/启动体验，也不定义
+Persona 或 target 新模型。#382 单独负责跨 Session max-concurrent-runs 的 capacity claim/release、
+容量排队视图和其策略测试；#384
 单独负责默认 transcript 公共投影；#385 负责历史/Session timeline 展示；#387 负责
 外部 API 的认证、幂等、断线续读。#378 只提供这些边界可复用的内部 canonical 状态，
 不提前设计它们的 endpoint 或 UI。
