@@ -45,6 +45,7 @@ public class MohistDbContext : DbContext
         value => value == null ? new List<string>() : new List<string>(value));
 
     public DbSet<CredentialRow> Credentials { get; set; } = null!;
+    public DbSet<EnrollmentTokenRow> EnrollmentTokens { get; set; } = null!;
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -139,6 +140,18 @@ public class MohistDbContext : DbContext
                 .IsUnique()
                 .HasFilter("\"RevokedAt\" IS NULL");
             entity.HasIndex(e => new { e.PrincipalId, e.Kind, e.RevokedAt });
+        });
+
+        modelBuilder.Entity<EnrollmentTokenRow>(entity =>
+        {
+            entity.ToTable("EnrollmentTokens");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.TokenHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ExpiresAt).IsRequired();
+            entity.Property(e => e.ConsumedAt);
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => e.TokenHash).IsUnique();
         });
 
         modelBuilder.Entity<ProjectRow>(entity =>

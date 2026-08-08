@@ -12,6 +12,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
     // own (the adapter presents the content as Authorization: Bearer).
     private const string AdapterTokenEnvironmentVariable = "MOHIST_OPERATOR_TOKEN";
     private const string AdapterTokenPathEnvironmentVariable = "MOHIST_OPERATOR_TOKEN_PATH";
+    private const string RunnerEnrollmentTokenEnvironmentVariable = "MOHIST_ENROLLMENT_TOKEN";
     private const string OperatorCredentialName = "operator-token";
     private const string DefaultOperatorCredentialSource = "%h/.mohist/operator-token";
 
@@ -64,6 +65,8 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
             environment["RUNNER_ROOT"] = options.RunnerRoot;
+        if (!string.IsNullOrWhiteSpace(options.EnrollmentToken))
+            environment[RunnerEnrollmentTokenEnvironmentVariable] = options.EnrollmentToken!;
 
         var unit = new SystemdUnit(
             Name: RunnerUnit,

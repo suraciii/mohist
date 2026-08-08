@@ -137,7 +137,12 @@ public class CliInstallUpdateSingleEntryTests
     [Fact]
     public async Task VerbRootInstallRunner_DefaultsAreUnchanged()
     {
-        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { token = "moh_enroll_defaults", expiresAt = "2026-08-21T00:15:00+00:00" },
+            })));
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "runner"], output, error, fs, executor,
@@ -150,6 +155,66 @@ public class CliInstallUpdateSingleEntryTests
         Assert.Null(call.RunnerRoot);
         Assert.False(call.DryRun);
         Assert.Null(call.UnitDir);
+        Assert.Equal("moh_enroll_defaults", call.EnrollmentToken);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallRunner_FetchesAnEnrollmentToken_AndPassesItToTheInstaller()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal(
+            (_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = new { token = "moh_enroll_abc123", expiresAt = "2026-08-21T00:15:00+00:00" },
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["install", "runner", "--repo-root", "/repo", "--server-url", "http://127.0.0.1:3456", "--runner-root", "/var/lib/runner", "--unit-dir", "/etc/systemd/system"],
+            output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        var request = Assert.Single(handler.Requests);
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal("/api/runners/enrollment-tokens", request.RequestUri!.AbsolutePath);
+        var call = Assert.Single(installer.InstallRunnerCalls);
+        Assert.Equal("/repo", call.RepoRoot);
+        Assert.Equal("http://127.0.0.1:3456", call.ServerUrl);
+        Assert.Equal("/var/lib/runner", call.RunnerRoot);
+        Assert.Equal("/etc/systemd/system", call.UnitDir);
+        Assert.Equal("moh_enroll_abc123", call.EnrollmentToken);
+    }
+
+    [Fact]
+    public async Task VerbRootInstallRunner_WhenTheServerIsUnavailable_FailsWithoutInstalling()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal(
+            (_, _) => throw new HttpRequestException("connection refused"));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["install", "runner"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Empty(installer.InstallRunnerCalls);
+        Assert.Contains("Server is not running", error.ToString());
+    }
+
+    [Fact]
+    public async Task VerbRootInstallRunner_DryRun_StaysOffline()
+    {
+        var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, ["install", "runner", "--dry-run"], output, error, fs, executor,
+            installer: installer);
+
+        Assert.Equal(0, exitCode);
+        Assert.Empty(handler.Requests);
+        var call = Assert.Single(installer.InstallRunnerCalls);
+        Assert.True(call.DryRun);
+        Assert.Null(call.EnrollmentToken);
     }
 
     [Fact]

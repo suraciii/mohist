@@ -55,7 +55,7 @@ describe("ServerConnection.uploadTaskLog", () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(url).toContain("/api/workflow-runs/wf-1/work/work-1/task-log")
     expect(init.method).toBe("POST")
-    expect((init.headers as Record<string, string>)["content-type"]).toBe("application/json")
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json")
 
     const body = JSON.parse(init.body as string)
     expect(body.truncated).toBe(false)
