@@ -1,12 +1,10 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import {
-  RunnerSignalRClient,
-  setRunnerSignalRExistsCheckerForTest,
-} from "../src/server/runner-signalr.js"
+import { describe, expect, it as vitestIt, vi } from "vitest"
+import { RunnerSignalRClient } from "../src/server/runner-signalr.js"
+import type { RunnerFileSystem, RunnerResourceContext } from "../src/system/filesystem.js"
 import { WorkspaceRegistry, defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { currentSignalRTestState, withSignalRTestResources } from "./support/signalr-test-resources.js"
 
 // End-to-end coverage of the server's ReceiveWorkflowRunStatus
 // SignalR method transitions the matching active registry entry to
@@ -18,16 +16,17 @@ interface CapturedBuilder {
   state: { connected: boolean }
 }
 
-const builders: CapturedBuilder[] = []
+type SignalRResources = {
+  fileSystem: RunnerFileSystem
+  signalRExistsChecker?: (path: string) => boolean
+}
 
-beforeEach(() => {
-  builders.length = 0
-  setRunnerSignalRExistsCheckerForTest(() => false)
-})
-
-afterEach(async () => {
-  setRunnerSignalRExistsCheckerForTest(null)
-})
+function it(name: string, body: (resources: SignalRResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: SignalRResources = { fileSystem: new MemoryFileSystem() }
+    await withSignalRTestResources(resources, async () => await body(resources))
+  })
+}
 
 vi.mock("@microsoft/signalr", () => {
   class FakeConnection {
@@ -44,7 +43,8 @@ vi.mock("@microsoft/signalr", () => {
     })
     invoke = vi.fn()
     on = vi.fn((event: string, handler: (...args: unknown[]) => unknown) => {
-      const builder = builders.at(-1)!
+      const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
+      if (!builder) throw new Error("no captured SignalR builder")
       builder.handlers.set(event, handler)
       return this
     })
@@ -56,7 +56,7 @@ vi.mock("@microsoft/signalr", () => {
       private _connection = new FakeConnection()
       withUrl() {
         const builder: CapturedBuilder = { handlers: new Map(), state: { connected: true } }
-        builders.push(builder)
+        currentSignalRTestState().builders.push(builder)
         return this
       }
       withAutomaticReconnect() { return this }
@@ -75,29 +75,23 @@ vi.mock("@microsoft/signalr", () => {
 })
 
 describe("RunnerSignalRClient receives workflow run status updates", () => {
-  let root: string
+  const root = "/virtual/runner"
 
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-signalr-push-"))
-  })
-
-  afterEach(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-
-  async function newClient(registry: WorkspaceRegistry): Promise<{ client: RunnerSignalRClient; handler: (payload: unknown) => Promise<unknown> }> {
-    const client = new RunnerSignalRClient("http://localhost:0", "runner-test", root, null, { registry })
-    const handler = builders.at(-1)!.handlers.get("ReceiveWorkflowRunStatus")
+  async function newClient(resources: SignalRResources, registry: WorkspaceRegistry): Promise<{ client: RunnerSignalRClient; handler: (payload: unknown) => Promise<unknown> }> {
+    resources.signalRExistsChecker = () => false
+    const client = new RunnerSignalRClient("https://runner.test", "runner-test", root, null, { registry })
+    const builder = currentSignalRTestState().builders.at(-1) as CapturedBuilder | undefined
+    const handler = builder?.handlers.get("ReceiveWorkflowRunStatus")
     if (!handler) throw new Error("ReceiveWorkflowRunStatus handler not registered")
     return { client, handler: handler as (payload: unknown) => Promise<unknown> }
   }
 
-  it("OnCompletedPush_TransitionsActiveEntryToEligible", async () => {
+  it("OnCompletedPush_TransitionsActiveEntryToEligible", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 42, workflowRunId: "wr-123", workspacePath: join(root, "wks") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-123", status: "Completed" })
 
     const entry = registry.get("wr-123")
@@ -105,18 +99,18 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     expect(entry?.terminalAt).toBeTruthy()
   })
 
-  it("OnStoppedPush_TransitionsActiveEntryToEligible", async () => {
+  it("OnStoppedPush_TransitionsActiveEntryToEligible", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-1", status: "Stopped" })
 
     expect(registry.get("wr-1")?.phase).toBe("eligible")
   })
 
-  it("OnFailedPush_LeavesEntryActive", async () => {
+  it("OnFailedPush_LeavesEntryActive", async (resources) => {
     // Failed is a recoverable mid-state (Retry/Rerun revive it), NOT
     // terminal: a push for Failed must not transition the workspace to
     // eligible — reclaims mid-retry lose the run branch.
@@ -124,14 +118,14 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-1", status: "Failed" })
 
     expect(registry.get("wr-1")?.phase).toBe("active")
     expect(registry.get("wr-1")?.terminalAt).toBeNull()
   })
 
-  it("OnRePushForAlreadyEligibleEntry_DoesNotReStampTerminalAt", async () => {
+  it("OnRePushForAlreadyEligibleEntry_DoesNotReStampTerminalAt", async (resources) => {
     // Stamp terminalAt via the registry directly at a known time,
     // then re-deliver a push at a later time. The handler's markEligible
     // is idempotent: it must NOT re-stamp an already-eligible entry.
@@ -148,7 +142,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     vi.useFakeTimers()
     vi.setSystemTime(later)
     try {
-      const { handler } = await newClient(registry)
+      const { handler } = await newClient(resources, registry)
       await handler({ workflowRunId: "wr-1", status: "Completed" })
     } finally {
       vi.useRealTimers()
@@ -159,12 +153,12 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     expect(after?.terminalAt).toBe(firstTerminal)
   })
 
-  it("OnNonTerminalPush_LeavesEntryActive", async () => {
+  it("OnNonTerminalPush_LeavesEntryActive", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     // Server only pushes terminal statuses today (per RunnerWorkflowStatusRouter),
     // but the handler must defensively tolerate anything that arrives.
     // The full new vocabulary (D1) is exercised here so a regression in
@@ -177,60 +171,60 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     }
   })
 
-  it("OnPushForUnknownRunId_DoesNotThrowAndLeavesRegistryUntouched", async () => {
+  it("OnPushForUnknownRunId_DoesNotThrowAndLeavesRegistryUntouched", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await expect(handler({ workflowRunId: "wr-other-runner", status: "Completed" })).resolves.toBeUndefined()
 
     expect(registry.list()).toHaveLength(0)
   })
 
-  it("OnNullPayload_DoesNotThrow", async () => {
+  it("OnNullPayload_DoesNotThrow", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await expect(handler(null)).resolves.toBeUndefined()
     await expect(handler(undefined)).resolves.toBeUndefined()
 
     expect(registry.get("wr-1")?.phase).toBe("active")
   })
 
-  it("OnPayloadWithMissingWorkflowRunId_DoesNotThrow", async () => {
+  it("OnPayloadWithMissingWorkflowRunId_DoesNotThrow", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await expect(handler({ status: "Completed" })).resolves.toBeUndefined()
     await expect(handler({ workflowRunId: "", status: "Completed" })).resolves.toBeUndefined()
 
     expect(registry.get("wr-1")?.phase).toBe("active")
   })
 
-  it("OnPush_PersistsRegistryOnDisk", async () => {
+  it("OnPush_PersistsRegistryOnDisk", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-persist", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-persist", status: "Completed" })
 
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    const onDisk = JSON.parse(await resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(root)))
     expect(onDisk.entries["wr-persist"]).toMatchObject({ phase: "eligible" })
     expect(onDisk.entries["wr-persist"].terminalAt).toBeTruthy()
   })
 
-  it("OnTerminalPush_TwoIndependentRuns_BothTransitionIndependently", async () => {
+  it("OnTerminalPush_TwoIndependentRuns_BothTransitionIndependently", async (resources) => {
     const registry = new WorkspaceRegistry(root)
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
     await registry.register({ issueNumber: 2, workflowRunId: "wr-2", workspacePath: join(root, "w2") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-1", status: "Completed" })
     await handler({ workflowRunId: "wr-2", status: "Stopped" })
 
@@ -238,7 +232,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     expect(registry.get("wr-2")?.phase).toBe("eligible")
   })
 
-  it("OnTerminalPush_TerminalAtReflectsPushTime", async () => {
+  it("OnTerminalPush_TerminalAtReflectsPushTime", async (resources) => {
     const at = new Date("2026-06-25T09:30:00.000Z")
     vi.useFakeTimers()
     vi.setSystemTime(at)
@@ -246,7 +240,7 @@ describe("RunnerSignalRClient receives workflow run status updates", () => {
     await registry.load()
     await registry.register({ issueNumber: 1, workflowRunId: "wr-1", workspacePath: join(root, "w1") })
 
-    const { handler } = await newClient(registry)
+    const { handler } = await newClient(resources, registry)
     await handler({ workflowRunId: "wr-1", status: "Completed" })
 
     expect(registry.get("wr-1")?.terminalAt).toBe(at.toISOString())

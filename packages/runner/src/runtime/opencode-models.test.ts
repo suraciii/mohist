@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import {
   createOpencodeModelsCommandAdapter,
   discoverOpencodeModels,
@@ -9,10 +9,13 @@ import {
   type OpencodeModelCatalog,
 } from "./opencode-models.js"
 import { capturedLogs } from "../../tests/support/logger-test.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
 
-afterEach(() => {
-  vi.unstubAllEnvs()
-})
+function it(name: string, body: () => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    await withTestRunnerResources(async () => await body())
+  })
+}
 
 describe("parseOpencodeModelsVerbose", () => {
   it("accepts only headers matching ^([^/\\s]+)/(\\S+)$ and supports flat lists", () => {
@@ -130,14 +133,15 @@ describe("parseOpencodeModelsVerbose", () => {
 
 describe("discoverOpencodeModels", () => {
   it("passes the complete command contract through the buffered process executor", async () => {
-    vi.stubEnv("MOHIST_AGENT_MODELS_COMMAND", "custom-models-opencode")
-    vi.stubEnv("MOHIST_AGENT_COMMAND", "general-opencode")
     const payload = largeCatalogPayload()
     const executor = vi.fn<ModelsProcessExecutor>(async () => ({ status: 0, stdout: payload }))
     const adapter = createOpencodeModelsCommandAdapter(executor)
     const signal = new AbortController().signal
 
-    const result = await discoverOpencodeModels(signal, adapter)
+    const result = await discoverOpencodeModels(signal, adapter, {
+      MOHIST_AGENT_MODELS_COMMAND: "custom-models-opencode",
+      MOHIST_AGENT_COMMAND: "general-opencode",
+    })
 
     expect(executor).toHaveBeenCalledOnce()
     expect(executor).toHaveBeenCalledWith("custom-models-opencode", ["models", "--verbose"], {
@@ -154,26 +158,25 @@ describe("discoverOpencodeModels", () => {
     })
   })
 
-  it.each([
+  vitestIt.each([
     ["models-opencode", "agent-opencode", "models-opencode"],
     [undefined, "agent-opencode", "agent-opencode"],
     [undefined, undefined, "opencode"],
   ])("selects command precedence from %s and %s", async (modelsCommand, agentCommand, expected) => {
-    vi.stubEnv("MOHIST_AGENT_MODELS_COMMAND", modelsCommand)
-    vi.stubEnv("MOHIST_AGENT_COMMAND", agentCommand)
-    const executor = vi.fn<ModelsProcessExecutor>(() => ({ status: 0, stdout: "openai/gpt-5\n" }))
+    await withTestRunnerResources(async () => {
+      const executor = vi.fn<ModelsProcessExecutor>(() => ({ status: 0, stdout: "openai/gpt-5\n" }))
 
-    await discoverOpencodeModels(
-      new AbortController().signal,
-      createOpencodeModelsCommandAdapter(executor),
-    )
+      await discoverOpencodeModels(
+        new AbortController().signal,
+        createOpencodeModelsCommandAdapter(executor),
+        { MOHIST_AGENT_MODELS_COMMAND: modelsCommand, MOHIST_AGENT_COMMAND: agentCommand },
+      )
 
-    expect(executor.mock.calls[0]?.[0]).toBe(expected)
+      expect(executor.mock.calls[0]?.[0]).toBe(expected)
+    })
   })
 
   it("executes consecutive discoveries independently without caching", async () => {
-    vi.stubEnv("MOHIST_AGENT_MODELS_COMMAND", undefined)
-    vi.stubEnv("MOHIST_AGENT_COMMAND", undefined)
     const outputs = [
       "openai/gpt-5\n" + JSON.stringify({ variants: { low: {} } }),
       "anthropic/claude-sonnet-4\n" + JSON.stringify({ variants: { max: {} } }),
@@ -181,12 +184,12 @@ describe("discoverOpencodeModels", () => {
     const executor = vi.fn<ModelsProcessExecutor>(() => ({ status: 0, stdout: outputs.shift() ?? "" }))
     const adapter = createOpencodeModelsCommandAdapter(executor)
 
-    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter, {})).resolves.toEqual({
       models: ["openai/gpt-5"],
       variants: { "openai/gpt-5": ["low"] },
       complete: true,
     })
-    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter, {})).resolves.toEqual({
       models: ["anthropic/claude-sonnet-4"],
       variants: { "anthropic/claude-sonnet-4": ["max"] },
       complete: true,
@@ -194,19 +197,22 @@ describe("discoverOpencodeModels", () => {
     expect(executor).toHaveBeenCalledTimes(2)
   })
 
-  it.each([
+  vitestIt.each([
     ["missing executable", { error: new Error("ENOENT"), status: null, stdout: "" }],
     ["abort", { error: Object.assign(new Error("aborted"), { name: "AbortError" }), status: null, stdout: "" }],
     ["non-zero exit", { status: 2, stdout: "openai/gpt-5\n" }],
   ])("logs and normalizes %s", async (_name, processResult) => {
-    const executor: ModelsProcessExecutor = () => processResult
-    await expect(discoverOpencodeModels(
-      new AbortController().signal,
-      createOpencodeModelsCommandAdapter(executor),
-    )).resolves.toEqual({ models: [], variants: {}, complete: false })
-    expect(capturedLogs()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
-    ]))
+    await withTestRunnerResources(async () => {
+      const executor: ModelsProcessExecutor = () => processResult
+      await expect(discoverOpencodeModels(
+        new AbortController().signal,
+        createOpencodeModelsCommandAdapter(executor),
+        {},
+      )).resolves.toEqual({ models: [], variants: {}, complete: false })
+      expect(capturedLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ level: "ERROR", message: "failed to discover opencode models", fields: expect.objectContaining({ exception: expect.any(Error) }) }),
+      ]))
+    })
   })
 
   it("keeps valid model output when the CLI times out after writing it", async () => {
@@ -219,6 +225,7 @@ describe("discoverOpencodeModels", () => {
     await expect(discoverOpencodeModels(
       new AbortController().signal,
       createOpencodeModelsCommandAdapter(executor),
+      {},
     )).resolves.toEqual({
       models: ["kimi-for-coding/kimi-for-coding-highspeed"],
       variants: {},
@@ -247,12 +254,12 @@ describe("discoverOpencodeModels", () => {
     ]
     const executor: ModelsProcessExecutor = () => processResults.shift()!
     const adapter = createOpencodeModelsCommandAdapter(executor)
-    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter, {})).resolves.toEqual({
       models: [],
       variants: {},
       complete: false,
     })
-    await expect(discoverOpencodeModels(new AbortController().signal, adapter)).resolves.toEqual({
+    await expect(discoverOpencodeModels(new AbortController().signal, adapter, {})).resolves.toEqual({
       models: ["openai/gpt-5"],
       variants: { "openai/gpt-5": ["high"] },
       complete: true,
@@ -274,7 +281,7 @@ describe("opencodeModelSetsEqual", () => {
     })).toBe(true)
   })
 
-  it.each([
+  vitestIt.each([
     ["added model", { ...base, models: [...base.models, "google/gemini-3"] }],
     ["removed model", { ...base, models: ["openai/gpt-5"] }],
     ["added variant-map key", { ...base, variants: { ...base.variants, "google/gemini-3": [] } }],

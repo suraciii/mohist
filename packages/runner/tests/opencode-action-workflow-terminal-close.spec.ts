@@ -6,8 +6,6 @@ import type { OpencodeServerHandle } from "../src/runtime/opencode/server-proces
 import type { RuntimeEventSubscription, RuntimeGlobalEvent } from "../src/runtime/opencode/event-subscription.js"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
-import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
-import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
 import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
 import type { RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
 import { callAction } from "./support/call-action.js"
@@ -107,8 +105,6 @@ function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
 }
 
 afterEach(() => {
-  setPromptLoaderRegistryForTest(null)
-  clearOpenCodeRuntimeFactoryForTest()
   vi.useRealTimers()
 })
 

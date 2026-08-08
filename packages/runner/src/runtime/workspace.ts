@@ -1,11 +1,11 @@
 import { constants } from "node:fs"
-import { lstat, mkdir, open, readdir, rename } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
 import type { JsonObject, DispatchWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
+import { currentRunnerFileSystem, type RunnerDirectoryHandle } from "../system/filesystem.js"
 import type { WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
 
@@ -189,7 +189,7 @@ export class WorkspaceManager {
     await ensureMarkerExcluded(preparationPath)
     await writeText(markerPath(preparationPath), JSON.stringify(expected, null, 2))
     await validateWorkspaceIdentity(preparationPath, expected, gitUrl, signal, log)
-    await rename(preparationPath, workspacePath)
+    await currentRunnerFileSystem().rename(preparationPath, workspacePath)
   }
 
   // True only when <path> is a git clone that already has <runBranch> —
@@ -388,7 +388,7 @@ export async function assertManagedWorkspacePath(runnerRoot: string, candidate: 
     throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside runner root ${root}`, target)
   }
   try {
-    if ((await lstat(root)).isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Runner root ${root} is symlinked`, target)
+    if ((await currentRunnerFileSystem().lstat(root)).isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Runner root ${root} is symlinked`, target)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
@@ -397,7 +397,7 @@ export async function assertManagedWorkspacePath(runnerRoot: string, candidate: 
   for (let i = 0; i < components.length; i++) {
     current = join(current, components[i]!)
     try {
-      const stat = await lstat(current)
+      const stat = await currentRunnerFileSystem().lstat(current)
       if (stat.isSymbolicLink()) throw new WorkspaceIdentityMismatchError(`Workspace path ${current} is symlinked`, target)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -426,22 +426,22 @@ export async function withManagedWorkspacePath<T>(
     throw new WorkspaceIdentityMismatchError(`Workspace path ${target} is outside managed workspace parent ${workspaceParent}`, target)
   }
 
-  if (process.platform !== "linux") {
+  const fileSystem = currentRunnerFileSystem()
+  if (process.platform !== "linux" || !fileSystem.supportsDirectoryHandles || !fileSystem.openDirectory) {
     await assertManagedWorkspacePath(root, target, requireFinal)
     return await operation(target)
   }
 
-  await mkdir(root, { recursive: true })
-  let rootHandle: Awaited<ReturnType<typeof open>> | undefined
-  let workspaceHandle: Awaited<ReturnType<typeof open>> | undefined
+  await currentRunnerFileSystem().ensureDir(root)
+  let rootHandle: RunnerDirectoryHandle | undefined
+  let workspaceHandle: RunnerDirectoryHandle | undefined
   let managedWorkspacePath: string
   try {
-    rootHandle = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-    const processFdRoot = `/proc/${process.pid}/fd`
-    const stableRoot = join(processFdRoot, String(rootHandle.fd))
-    await mkdir(join(stableRoot, "workspaces"), { recursive: true })
-    workspaceHandle = await open(join(stableRoot, "workspaces"), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
-    managedWorkspacePath = join(processFdRoot, String(workspaceHandle.fd), name)
+    rootHandle = await fileSystem.openDirectory(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    const stableRoot = rootHandle.path
+    await fileSystem.ensureDir(join(stableRoot, "workspaces"))
+    workspaceHandle = await fileSystem.openDirectory(join(stableRoot, "workspaces"), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
+    managedWorkspacePath = join(workspaceHandle.path, name)
     await assertManagedWorkspaceEntry(managedWorkspacePath, target, requireFinal)
   } catch (error) {
     await workspaceHandle?.close()
@@ -460,7 +460,7 @@ export async function withManagedWorkspacePath<T>(
 
 async function assertManagedWorkspaceEntry(managedWorkspacePath: string, workspacePath: string, requireFinal: boolean): Promise<void> {
   try {
-    if ((await lstat(managedWorkspacePath)).isSymbolicLink()) {
+    if ((await currentRunnerFileSystem().lstat(managedWorkspacePath)).isSymbolicLink()) {
       throw new WorkspaceIdentityMismatchError(`Workspace path ${workspacePath} is symlinked`, workspacePath)
     }
   } catch (error) {
@@ -471,7 +471,7 @@ async function assertManagedWorkspaceEntry(managedWorkspacePath: string, workspa
 
 async function assertNotSymlink(path: string): Promise<void> {
   try {
-    if ((await lstat(path)).isSymbolicLink()) {
+    if ((await currentRunnerFileSystem().lstat(path)).isSymbolicLink()) {
       throw new WorkspaceIdentityMismatchError(`Preparation path ${path} is symlinked`, path)
     }
   } catch (error) {
@@ -578,7 +578,7 @@ async function isCacheReferencedByActiveWorkspace(cachePath: string, projectRoot
 
   for (const dir of cloneRoots) {
     if (!exists(dir)) continue
-    const entries = await readdir(dir, { withFileTypes: true })
+    const entries = await currentRunnerFileSystem().readdir(dir)
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const gitDir = join(dir, entry.name, ".git")

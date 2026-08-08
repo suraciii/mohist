@@ -1,14 +1,16 @@
-import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
 import { issueWorkspacePath, WorkspaceManager, slugify } from "../src/runtime/workspace.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
 import { DefaultCleanupRunner } from "../src/runtime/cleanup-loop.js"
 import type { WorkspaceRegistryEntry } from "../src/runtime/workspace-registry.js"
-import * as processModule from "../src/system/process.js"
 import type { CommandLineOptions, CommandResult } from "../src/system/process.js"
+import { currentRunnerFileSystem } from "../src/system/filesystem.js"
 import { createTestTempDir } from "./support/temp-dir.js"
+import { MemoryDirectoryHandleFileSystem, MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 interface CommandCall {
   command: string
@@ -24,6 +26,7 @@ class FakeGitRunner {
   lsRemoteResult: CommandResult | null = null
   failedCheckouts = 0
   beforeClone: (() => Promise<void>) | null = null
+  beforeRemote: (() => Promise<void>) | null = null
   private readonly branches = new Map<string, Set<string>>()
 
   async run(
@@ -54,11 +57,11 @@ class FakeGitRunner {
       const workspacePath = args[2]
       if (!workspacePath) throw new Error("git clone needs a destination")
       if (this.cloneResult) {
-        await mkdir(workspacePath, { recursive: true })
+        await currentRunnerFileSystem().ensureDir(workspacePath)
         return this.cloneResult
       }
-      await mkdir(join(workspacePath, ".git", "info"), { recursive: true })
-      await writeFile(join(workspacePath, "README.md"), "base\n")
+      await currentRunnerFileSystem().ensureDir(join(workspacePath, ".git", "info"))
+      await currentRunnerFileSystem().writeText(join(workspacePath, "README.md"), "base\n")
       this.branches.set(workspacePath, new Set())
       return commandResult(0)
     }
@@ -68,12 +71,17 @@ class FakeGitRunner {
     const gitArgs = args.slice(2)
     let branches = this.branches.get(workspacePath)
     if (!branches) {
-      if (!processModule.exists(join(workspacePath, ".git"))) throw new Error(`Unknown fake workspace: ${workspacePath}`)
+      if (!currentRunnerFileSystem().exists(join(workspacePath, ".git"))) throw new Error(`Unknown fake workspace: ${workspacePath}`)
       branches = new Set<string>()
       this.branches.set(workspacePath, branches)
     }
 
     if (gitArgs[0] === "remote" && gitArgs[1] === "get-url" && gitArgs[2] === "origin") {
+      if (this.beforeRemote) {
+        const beforeRemote = this.beforeRemote
+        this.beforeRemote = null
+        await beforeRemote()
+      }
       return commandResult(0, `${this.remoteUrl}\n`)
     }
 
@@ -114,25 +122,69 @@ class FakeGitRunner {
   }
 }
 
+interface WorkspaceTestContext {
+  fileSystem: MemoryFileSystem
+  gitRunner: FakeGitRunner
+}
+
+const workspaceTestContext = new AsyncLocalStorage<WorkspaceTestContext>()
+
+function workspaceContext(): WorkspaceTestContext {
+  const context = workspaceTestContext.getStore()
+  if (!context) throw new Error("workspace test resource context is not active")
+  return context
+}
+
+const fileSystem = new Proxy({} as MemoryFileSystem, {
+  get(_target, property) {
+    const value = Reflect.get(workspaceContext().fileSystem, property, workspaceContext().fileSystem)
+    return typeof value === "function" ? value.bind(workspaceContext().fileSystem) : value
+  },
+})
+
+const gitRunner = new Proxy({} as FakeGitRunner, {
+  get(_target, property) {
+    const value = Reflect.get(workspaceContext().gitRunner, property, workspaceContext().gitRunner)
+    return typeof value === "function" ? value.bind(workspaceContext().gitRunner) : value
+  },
+  set(_target, property, value) {
+    const runner = workspaceContext().gitRunner
+    Reflect.set(runner, property, value, runner)
+    return true
+  },
+})
+
+async function withWorkspaceTestResources(body: () => unknown): Promise<void> {
+  const context: WorkspaceTestContext = {
+    fileSystem: new MemoryFileSystem(),
+    gitRunner: new FakeGitRunner(),
+  }
+  const commandRunner = {
+    run: (command: string, args: string[], cwd: string, signal: AbortSignal, env?: NodeJS.ProcessEnv, options?: unknown) => context.gitRunner.run(command, args, cwd, signal, env, options as CommandLineOptions | undefined),
+  }
+  await withTestRunnerResources(async () => {
+    await workspaceTestContext.run(context, async () => await body())
+  }, { commandRunner, fileSystem: context.fileSystem })
+}
+
+async function withWorkspaceFileSystem<T>(fileSystem: MemoryFileSystem, body: () => Promise<T>): Promise<T> {
+  const current = workspaceContext()
+  const commandRunner = {
+    run: (command: string, args: string[], cwd: string, signal: AbortSignal, env?: NodeJS.ProcessEnv, options?: unknown) => current.gitRunner.run(command, args, cwd, signal, env, options as CommandLineOptions | undefined),
+  }
+  return await withTestRunnerResources(async () =>
+    await workspaceTestContext.run({ fileSystem, gitRunner: current.gitRunner }, body),
+    { commandRunner, fileSystem })
+}
+
+const it = Object.assign(
+  (name: string, body: () => unknown) => vitestIt(name, () => withWorkspaceTestResources(body)),
+  { each: vitestIt.each.bind(vitestIt) },
+) as typeof vitestIt
+
 function commandResult(exitCode = 0, stdout = "", stderr = ""): CommandResult {
   return { exitCode, stdout, stderr }
 }
-
-let gitRunner: FakeGitRunner
-let restoreRunCommand: (() => void) | undefined
-
-beforeEach(() => {
-  gitRunner = new FakeGitRunner()
-  const spy = vi.spyOn(processModule, "runCommand").mockImplementation((command, args, cwd, signal, env, options) => {
-    return gitRunner.run(command, args, cwd, signal, env, options)
-  })
-  restoreRunCommand = () => spy.mockRestore()
-})
-
-afterEach(() => {
-  restoreRunCommand?.()
-  restoreRunCommand = undefined
-})
 
 describe("WorkspaceManager.prepare", () => {
   it("FreshRun_CreatesRunBranchAndWorkspaceMarker", async () => {
@@ -150,7 +202,7 @@ describe("WorkspaceManager.prepare", () => {
     expect(gitRunner.commandArgs()).toContainEqual(["ls-remote", "--heads", "https://example.test/mohist.git", "master"])
     expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${expectedPath}.preparing`)])
     expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(`${expectedPath}.preparing`), "checkout", "-B", "mohist/run-wr-1", "origin/master"])
-    expect(await readFile(join(workspace.path, ".mohist", "workspace.json"), "utf8")).toBe(JSON.stringify({
+    expect(await fileSystem.readText(join(workspace.path, ".mohist", "workspace.json"))).toBe(JSON.stringify({
       workflowRunId: "wr-1",
       runBranch: "mohist/run-wr-1",
     }, null, 2))
@@ -174,15 +226,15 @@ describe("WorkspaceManager.prepare", () => {
     ])
   })
 
-  it.runIf(process.platform === "linux")("ChildProcessPath_ReferencesTheRunnerProcessDirectoryHandle", async () => {
-    const root = await createTestTempDir("mohist-workspace-")
-    const runnerRoot = join(root, "runner")
+  it("DirectoryHandlePath_UsesTheInjectedDirectoryHandle", async () => {
+    await withWorkspaceFileSystem(new MemoryDirectoryHandleFileSystem(), async () => {
+      const root = await createTestTempDir("mohist-workspace-")
+      const runnerRoot = join(root, "runner")
+      await new WorkspaceManager(runnerRoot).prepare(work("wr-child-path"), new AbortController().signal)
 
-    await new WorkspaceManager(runnerRoot).prepare(work("wr-child-path"), new AbortController().signal)
-
-    const clone = gitRunner.commandArgs().find((args) => args[0] === "clone")
-    expect(clone?.[2]).toMatch(new RegExp(`^/proc/${process.pid}/fd/\\d+/`))
-    expect(clone?.[2]).not.toContain("/proc/self/fd")
+      const clone = gitRunner.commandArgs().find((args) => args[0] === "clone")
+      expect(clone?.[2]).toMatch(/\/memory-handle-\d+\/wr-child-path\.preparing$/)
+    })
   })
 
   it("SameRunReentry_ReusesWorkspaceWithoutRecloning", async () => {
@@ -191,13 +243,13 @@ describe("WorkspaceManager.prepare", () => {
     const item = work("wr-1")
 
     const first = await manager.prepare(item, new AbortController().signal)
-    await writeFile(join(first.path, "draft.txt"), "draft\n")
+    await fileSystem.writeText(join(first.path, "draft.txt"), "draft\n")
     gitRunner.calls.length = 0
 
     const second = await manager.prepare(item, new AbortController().signal)
 
     expect(second.path).toBe(first.path)
-    expect(await readFile(join(second.path, "draft.txt"), "utf8")).toBe("draft\n")
+    expect(await fileSystem.readText(join(second.path, "draft.txt"))).toBe("draft\n")
     expect(gitRunner.commandArgs()).not.toContainEqual(["clone", "https://example.test/mohist.git", first.path])
     expect(gitRunner.commandArgs()).toContainEqual(["-C", managedPath(first.path), "checkout", "mohist/run-wr-1"])
   })
@@ -207,13 +259,13 @@ describe("WorkspaceManager.prepare", () => {
     const manager = new WorkspaceManager(join(root, "runner"))
 
     const first = await manager.prepare(work("wr-old"), new AbortController().signal)
-    await writeFile(join(first.path, "stale.txt"), "old run data\n")
+    await fileSystem.writeText(join(first.path, "stale.txt"), "old run data\n")
     gitRunner.calls.length = 0
 
     const second = await manager.prepare(work("wr-new"), new AbortController().signal)
 
     expect(second.path).not.toBe(first.path)
-    expect(processModule.exists(join(first.path, "stale.txt"))).toBe(true)
+    expect(fileSystem.exists(join(first.path, "stale.txt"))).toBe(true)
     expect(second.branch).toBe("mohist/run-wr-new")
     expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${second.path}.preparing`)])
   })
@@ -226,7 +278,7 @@ describe("WorkspaceManager.prepare", () => {
     await expect(manager.prepare(item, new AbortController().signal)).rejects.toThrow(/cannot be resolved/)
 
     expect(gitRunner.commandArgs()).not.toContainEqual(expect.arrayContaining(["clone"]))
-    expect(processModule.exists(join(root, "runner", "workspaces"))).toBe(false)
+    expect(fileSystem.exists(join(root, "runner", "workspaces"))).toBe(false)
   })
 
   it("CloneFailure_IsFatalAndDropsPartialWorkspace", async () => {
@@ -237,7 +289,7 @@ describe("WorkspaceManager.prepare", () => {
 
     await expect(manager.prepare(work("wr-first"), new AbortController().signal)).rejects.toThrow(/git clone failed/)
 
-    expect(processModule.exists(issueWorkspacePath(runnerRoot, "wr-first"))).toBe(false)
+    expect(fileSystem.exists(issueWorkspacePath(runnerRoot, "wr-first"))).toBe(false)
   })
 
   it("BaseBranchLsRemoteTimeout_FailsBeforeCloneWithStructuredStep", async () => {
@@ -316,33 +368,36 @@ describe("WorkspaceManager.prepare", () => {
     const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const outside = join(root, "outside")
-    await mkdir(outside, { recursive: true })
-    await mkdir(runnerRoot, { recursive: true })
-    await symlink(outside, join(runnerRoot, "workspaces"))
+    await fileSystem.ensureDir(outside)
+    await fileSystem.ensureDir(runnerRoot)
+    await fileSystem.symlink(outside, join(runnerRoot, "workspaces"))
     const manager = new WorkspaceManager(runnerRoot)
 
     await expect(manager.prepare(work("wr-symlink", "issue-symlink"), new AbortController().signal)).rejects.toMatchObject({ kind: "workspace-identity-mismatch" })
     expect(gitRunner.commandArgs().some((args) => args[0] === "clone")).toBe(false)
   })
 
-  it.runIf(process.platform === "linux")("WorkspaceParentReplacement_CloneRemainsInsideVerifiedDirectory", async () => {
-    const root = await createTestTempDir("mohist-workspace-")
-    const runnerRoot = join(root, "runner")
-    const workspaces = join(runnerRoot, "workspaces")
-    const heldWorkspaces = join(runnerRoot, "workspaces-held")
-    const outside = join(root, "outside")
-    await mkdir(outside, { recursive: true })
-    gitRunner.beforeClone = async () => {
-      await rename(workspaces, heldWorkspaces)
-      await symlink(outside, workspaces)
-    }
+  it("WorkspaceParentReplacement_CloneRemainsInsideVerifiedDirectory", async () => {
+    await withWorkspaceFileSystem(new MemoryDirectoryHandleFileSystem(), async () => {
+      const root = await createTestTempDir("mohist-workspace-")
+      const runnerRoot = join(root, "runner")
+      const workspaces = join(runnerRoot, "workspaces")
+      const heldWorkspaces = join(runnerRoot, "workspaces-held")
+      const outside = join(root, "outside")
+      await fileSystem.ensureDir(outside)
+      gitRunner.beforeClone = async () => {
+        await fileSystem.rename(workspaces, heldWorkspaces)
+        await fileSystem.symlink(outside, workspaces)
+      }
 
-    await new WorkspaceManager(runnerRoot).prepare(work("wr-parent-swap", "issue-parent-swap"), new AbortController().signal)
+      await new WorkspaceManager(runnerRoot).prepare(work("wr-parent-swap", "issue-parent-swap"), new AbortController().signal)
 
-    const publicPath = issueWorkspacePath(runnerRoot, "wr-parent-swap")
-    expect(processModule.exists(join(outside, basename(publicPath)))).toBe(false)
-    expect(processModule.exists(join(heldWorkspaces, basename(publicPath)))).toBe(true)
-    expect(gitRunner.commandArgs()).toContainEqual(["clone", "https://example.test/mohist.git", managedPath(`${publicPath}.preparing`)])
+      const publicPath = issueWorkspacePath(runnerRoot, "wr-parent-swap")
+      expect(fileSystem.exists(join(outside, basename(publicPath)))).toBe(false)
+      expect(fileSystem.exists(join(heldWorkspaces, basename(publicPath)))).toBe(true)
+      const clone = gitRunner.commandArgs().find((args) => args[0] === "clone")
+      expect(clone?.[2]).toMatch(/\/memory-handle-\d+\/wr-parent-swap\.preparing$/)
+    })
   })
 
   it("ExistingMarkerMismatch_IsRejectedBeforeBranchMutation", async () => {
@@ -350,7 +405,7 @@ describe("WorkspaceManager.prepare", () => {
     const manager = new WorkspaceManager(join(root, "runner"))
     const item = work("wr-mismatch", "issue-mismatch")
     const first = await manager.prepare(item, new AbortController().signal)
-    await writeFile(join(first.path, ".mohist", "workspace.json"), "{}")
+    await fileSystem.writeText(join(first.path, ".mohist", "workspace.json"), "{}")
     gitRunner.calls.length = 0
 
     await expect(manager.prepare(item, new AbortController().signal)).rejects.toMatchObject({ kind: "workspace-identity-mismatch" })
@@ -376,7 +431,7 @@ describe("WorkspaceManager.prepare", () => {
 
     await expect(manager.prepare(item, new AbortController().signal)).rejects.toThrow("registry interrupted")
     const path = issueWorkspacePath(runnerRoot, item.workflowRunId)
-    expect(processModule.exists(path)).toBe(true)
+    expect(fileSystem.exists(path)).toBe(true)
 
     await manager.prepare(item, new AbortController().signal)
     expect(registry.get(item.workflowRunId)).toMatchObject({ workspacePath: path, workflowRunId: item.workflowRunId })
@@ -421,7 +476,7 @@ describe("WorkspaceManager.prepare recovery", () => {
 })
 
 describe("DefaultCleanupRunner", () => {
-  it.runIf(process.platform === "linux")("WorkspaceParentReplacement_ValidationAndDeleteRemainInsideVerifiedDirectory", async () => {
+  it("WorkspaceParentReplacement_ValidationAndDeleteRemainInsideVerifiedDirectory", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
     const workflowRunId = "wr-cleanup-parent-swap"
@@ -430,27 +485,27 @@ describe("DefaultCleanupRunner", () => {
     const heldWorkspaces = join(runnerRoot, "workspaces-held")
     const outside = join(root, "outside")
     const entry = cleanupEntry(workspacePath, workflowRunId)
-    await mkdir(join(workspacePath, ".mohist"), { recursive: true })
-    await writeFile(join(workspacePath, ".mohist", "workspace.json"), JSON.stringify({
+    await fileSystem.ensureDir(join(workspacePath, ".mohist"))
+    await fileSystem.ensureDir(join(workspacePath, ".git"))
+    await fileSystem.writeText(join(workspacePath, ".mohist", "workspace.json"), JSON.stringify({
       workflowRunId,
       runBranch: entry.runBranch,
     }))
-    await mkdir(outside, { recursive: true })
+    await fileSystem.ensureDir(outside)
     let swapped = false
-    vi.spyOn(processModule, "runCommand").mockImplementation(async () => {
+    gitRunner.beforeRemote = async () => {
       if (!swapped) {
         swapped = true
-        await rename(workspaces, heldWorkspaces)
-        await symlink(outside, workspaces)
+        await fileSystem.rename(workspaces, heldWorkspaces)
+        await fileSystem.symlink(outside, workspaces)
       }
-      return commandResult(0, "https://example.test/mohist.git\n")
-    })
+    }
 
     const removed = await new DefaultCleanupRunner(runnerRoot).validateAndDeleteWorkspace(entry)
 
     expect(removed).toBe(true)
-    expect(processModule.exists(join(outside, basename(workspacePath)))).toBe(false)
-    expect(processModule.exists(join(heldWorkspaces, basename(workspacePath)))).toBe(false)
+    expect(fileSystem.exists(join(outside, basename(workspacePath)))).toBe(false)
+    expect(fileSystem.exists(join(heldWorkspaces, basename(workspacePath)))).toBe(false)
   })
 })
 
@@ -482,11 +537,11 @@ function work(workflowRunId: string, baseBranch = "master") {
 }
 
 function managedPath(path: string) {
-  return process.platform === "linux" ? expect.stringMatching(new RegExp(`^${managedPathPattern(path)}$`)) : path
+  return path
 }
 
 function managedPathPattern(path: string) {
-  return process.platform === "linux" ? `/proc/${process.pid}/fd/\\d+/${basename(path)}` : path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
 function cleanupEntry(workspacePath: string, workflowRunId: string): WorkspaceRegistryEntry {

@@ -1,14 +1,7 @@
-import { afterEach } from "vitest"
 import type { JsonObject } from "../../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./action-test-context.js"
-import { setIssueFieldCommandRunnerForTest } from "../../src/actions/issue-fields.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../../src/actions/git.js"
-import {
-  setGitHubPrChecksTimingForTest,
-  setGitHubPrGhRunnerForTest,
-  setGitHubPrGitRunnerForTest,
-  setGitHubPrTransientRetryForTest,
-} from "../../src/actions/github-pr.js"
+import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from "../../src/system/filesystem.js"
 
 export type CommandResult = { exitCode: number; stdout: string; stderr: string; status?: "timeout"; timeoutMs?: number }
 export type GhCall = { command: string; timeoutMs: number | undefined }
@@ -16,6 +9,16 @@ export type GhCall = { command: string; timeoutMs: number | undefined }
 export const WORKSPACE_PATH = "/workspace"
 export const PROJECT_PATH = "/project"
 export const PR_CHECKS_COMMAND = "gh pr view 42 --json statusCheckRollup"
+
+export type MergeGhTestResources = {
+  fileSystem: RunnerFileSystem
+  ghCalls: GhCall[]
+  githubPrGitRunner?: RunnerGitRunner
+  githubPrGhRunner?: RunnerCommandRunner
+  issueFieldCommandRunner?: (command: string, args: string[], cwd: string, signal: AbortSignal) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+  githubPrChecksTiming?: { pollIntervalMs?: number; noChecksGraceMs?: number; unavailableRetryLimit?: number }
+  githubPrTransientRetry?: { limit?: number; backoffMs?: number }
+}
 
 export function ghOk(stdout: string, stderr = ""): CommandResult {
   return { exitCode: 0, stdout, stderr }
@@ -84,48 +87,36 @@ export function authoritativeRepository(gitUrl = "https://github.com/acme/repo.g
 }
 
 export interface MergeGhTestHarness {
-  readonly ghCalls: GhCall[]
-  installGit(respond: () => never): void
-  installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>): void
-  installMoIssueShow(title?: string, body?: string): string[]
+  installGit(resources: MergeGhTestResources, respond: () => never): void
+  installGh(resources: MergeGhTestResources, respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>): void
+  installMoIssueShow(resources: MergeGhTestResources, title?: string, body?: string): string[]
 }
 
 export function createMergeGhTestHarness(): MergeGhTestHarness {
-  const ghCalls: GhCall[] = []
-
-  afterEach(() => {
-    setGitHubPrGitRunnerForTest(null)
-    setGitHubPrGhRunnerForTest(null)
-    setGitHubPrChecksTimingForTest(null)
-    setGitHubPrTransientRetryForTest(null)
-    setIssueFieldCommandRunnerForTest(null)
-    ghCalls.length = 0
-  })
-
-  function installGit(respond: () => never) {
-    setGitHubPrGitRunnerForTest(async () => await respond())
+  function installGit(resources: MergeGhTestResources, respond: () => never) {
+    resources.githubPrGitRunner = async () => await respond()
   }
 
-  function installGh(respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
-    setGitHubPrGhRunnerForTest(async (cmd, args, cwd, _signal, _env, options) => {
+  function installGh(resources: MergeGhTestResources, respond: (command: string, args: string[], cwd: string) => CommandResult | Promise<CommandResult>) {
+    resources.githubPrGhRunner = async (cmd, args, cwd, _signal, _env, options) => {
       const visibleArgs = args.at(-2) === "--repo" ? args.slice(0, -2) : args
-      ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
+      resources.ghCalls.push({ command: [cmd, ...visibleArgs].join(" "), timeoutMs: options?.timeoutMs })
       return await respond(cmd, visibleArgs, cwd)
-    })
+    }
   }
 
-  function installMoIssueShow(title = "Use GitHub PR workflow", body = "body") {
+  function installMoIssueShow(resources: MergeGhTestResources, title = "Use GitHub PR workflow", body = "body") {
     const calls: string[] = []
-    setIssueFieldCommandRunnerForTest(async (cmd, args) => {
+    resources.issueFieldCommandRunner = async (cmd, args) => {
       calls.push([cmd, ...args].join(" "))
       return {
         exitCode: 0,
         stdout: JSON.stringify({ success: true, data: { title, body } }),
         stderr: "",
       }
-    })
+    }
     return calls
   }
 
-  return { ghCalls, installGit, installGh, installMoIssueShow }
+  return { installGit, installGh, installMoIssueShow }
 }

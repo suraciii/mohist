@@ -6,15 +6,10 @@ import { NETWORK_COMMAND_TIMEOUT_MS } from "./git.js"
 import { timeoutStepMetadata } from "./github-pr-types.js"
 import { parseGitHubRepository } from "./github-pr-repository.js"
 import { fail, succeed } from "./action-result.js"
+import { currentRunnerResources, type RunnerCommandRunner } from "../system/filesystem.js"
 
-type GhRunner = typeof runCommand
+type GhRunner = RunnerCommandRunner
 const ACTION_SOURCE = "action:github-pr-status"
-
-let gh: GhRunner = runCommand
-
-export function setGitHubPrStatusGhRunnerForTest(runner: GhRunner | null) {
-  gh = runner ?? runCommand
-}
 
 export type GitHubPrStatusExpectation =
   | "open"
@@ -136,6 +131,9 @@ export async function githubPrStatusAction(inputs: JsonObject, host: ActionHost)
   const recordStep = (name: string, command: string, exitCode: number, output: string, metadata?: Pick<GitHubPrStatusStep, "status" | "timeoutMs">) => {
     steps.push({ name, command, exitCode, output, ...metadata })
   }
+  const gh = currentRunnerResources()?.githubPrStatusGhRunner
+    ?? currentRunnerResources()?.githubPrGhRunner
+    ?? runCommand
   const prViewFields = buildPrViewFields(expect)
   const viewResult = await gh(
     "gh",

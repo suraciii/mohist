@@ -4,6 +4,7 @@ import { parseObject } from "../core/json.js"
 import { getSegments } from "../core/json-path.js"
 import type { TaskLogBatch } from "../runtime/task-log.js"
 import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
+import { currentRunnerTransport } from "../system/filesystem.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
@@ -21,7 +22,7 @@ export class ServerConnection {
     if (this.credential) {
       headers.set("authorization", `Bearer ${this.credential}`)
     }
-    return fetch(input, { ...init, headers })
+    return currentRunnerTransport()(input, { ...init, headers })
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {

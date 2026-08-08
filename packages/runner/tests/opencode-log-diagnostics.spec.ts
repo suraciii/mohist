@@ -1,24 +1,37 @@
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import {
   appendOpencodeDiagnostic,
   findFailFastOpencodeProviderErrorDiagnostic,
   findOpencodeProviderErrorDiagnostic,
   isFailFastOpencodeProviderError,
-  setOpencodeLogFileSystemForTest,
   type OpencodeLogFileSystem,
 } from "../src/runtime/opencode-log-diagnostics.js"
+import type { RunnerFileSystem } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-const LOG_DIR = "/fake/opencode/log"
+const LOG_DIR = "/virtual/opencode/log"
 
-afterEach(() => {
-  vi.unstubAllEnvs()
-  setOpencodeLogFileSystemForTest(null)
-})
+interface OpencodeLogTestResources {
+  fileSystem: RunnerFileSystem
+  environment: Readonly<Record<string, string | undefined>>
+  opencodeLogFileSystem?: OpencodeLogFileSystem
+}
+
+function it(name: string, body: (resources: OpencodeLogTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: OpencodeLogTestResources = {
+      fileSystem: new MemoryFileSystem(),
+      environment: { MOHIST_OPENCODE_LOG_DIR: LOG_DIR },
+    }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 describe("opencode log diagnostics", () => {
-  it("finds provider errors by ACP session id (legacy JSON format)", async () => {
-    useOpencodeLogs({
+  it("finds provider errors by ACP session id (legacy JSON format)", async (resources) => {
+    useOpencodeLogs(resources, {
       "2026-06-03T164901.log": [
         "INFO  2026-06-03T16:49:05 service=session id=ses_ok created",
         'ERROR 2026-06-03T16:49:06 service=llm providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_ok small=false agent=build mode=primary error={"error":{"name":"AI_APICallError","statusCode":429,"responseBody":"{\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"rate_limit_error\\",\\"message\\":\\"usage limit exceeded\\"}}","isRetryable":true}} stream error',
@@ -36,10 +49,10 @@ describe("opencode log diagnostics", () => {
     expect(diagnostic?.retryable).toBe(true)
   })
 
-  it("does not attribute errors from other sessions sharing the same run= id", async () => {
+  it("does not attribute errors from other sessions sharing the same run= id", async (resources) => {
     const trackedSession = "ses_13a627d5fffesOoW3p6ceeWkpu"
     const otherSession = "ses_13a61b7f2ffeqyUCDQE7AUFtS7"
-    useOpencodeLogs({
+    useOpencodeLogs(resources, {
       "opencode.log": [
         `timestamp=2026-06-14T10:11:34.688Z level=INFO run=cd59405c message=created id=${trackedSession} slug=witty-engine version=1.17.4 projectID=abc directory=/tmp agent=build model.id=k2p6 model.providerID=kimi-for-coding`,
         `timestamp=2026-06-14T10:12:25.229Z level=INFO run=cd59405c message=created id=${otherSession} slug=witty-comet version=1.17.4 projectID=abc directory=/tmp agent=build model.id=k2p6 model.providerID=kimi-for-coding`,
@@ -53,8 +66,8 @@ describe("opencode log diagnostics", () => {
     expect(diagnostic).toBeUndefined()
   })
 
-  it("finds provider errors by exact session id (logfmt format)", async () => {
-    useOpencodeLogs({
+  it("finds provider errors by exact session id (logfmt format)", async (resources) => {
+    useOpencodeLogs(resources, {
       "opencode.log": [
         `timestamp=2026-06-14T10:12:25.229Z level=INFO run=cd59405c message=created id=ses_direct slug=witty-comet version=1.17.4 agent=build`,
         `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=cd59405c message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=ses_direct small=false agent=build mode=primary error.error="AI_RetryError: Failed after 3 attempts. Last error: rate limited"`,
@@ -68,8 +81,8 @@ describe("opencode log diagnostics", () => {
     expect(diagnostic?.message).toContain("Failed after 3 attempts")
   })
 
-  it("finds fail-fast token plan errors after the prompt start time", async () => {
-    useOpencodeLogs({
+  it("finds fail-fast token plan errors after the prompt start time", async (resources) => {
+    useOpencodeLogs(resources, {
       "opencode.log": [
         `timestamp=2026-06-14T10:12:30.000Z level=ERROR run=old message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Cannot connect to API: The socket connection was closed unexpectedly."`,
         `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=new message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"`,
@@ -82,8 +95,8 @@ describe("opencode log diagnostics", () => {
     expect(diagnostic?.summary).toBe("Opencode provider error: AI_APICallError on minimax-coding-plan/MiniMax-M3 - Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)")
   })
 
-  it("ignores fail-fast provider errors from before the prompt start time", async () => {
-    useOpencodeLogs({
+  it("ignores fail-fast provider errors from before the prompt start time", async (resources) => {
+    useOpencodeLogs(resources, {
       "opencode.log": [
         `timestamp=2026-06-14T10:12:30.000Z level=ERROR run=old message="stream error" providerID=minimax-coding-plan modelID=MiniMax-M3 session.id=ses_limit small=false agent=build mode=primary error.error="AI_APICallError: Token Plan usage limit reached: Upgrade your Token Plan or purchase Credits for more usage. (2056)"`,
         "",
@@ -113,18 +126,18 @@ describe("opencode log diagnostics", () => {
     })).toBe(false)
   })
 
-  it("reads tail of large log files", async () => {
+  it("reads tail of large log files", async (resources) => {
     const largePrefix = `${"x".repeat(11 * 1024 * 1024)}\n`
     const errorLine = `timestamp=2026-06-14T10:12:32.370Z level=ERROR run=big message="stream error" providerID=kimi-for-coding modelID=k2p7 session.id=ses_big small=false agent=build mode=primary error.error="AI_APICallError: quota exceeded"\n`
-    useOpencodeLogs({ "opencode.log": largePrefix + errorLine })
+    useOpencodeLogs(resources, { "opencode.log": largePrefix + errorLine })
 
     const diagnostic = await findOpencodeProviderErrorDiagnostic("ses_big")
 
     expect(diagnostic?.message).toContain("quota exceeded")
   })
 
-  it("returns undefined when no provider errors exist", async () => {
-    useOpencodeLogs({
+  it("returns undefined when no provider errors exist", async (resources) => {
+    useOpencodeLogs(resources, {
       "opencode.log": [
         `timestamp=2026-06-14T10:11:34.688Z level=INFO run=cd59405c message=created id=ses_clean slug=witty-engine agent=build`,
         `timestamp=2026-06-14T10:12:23.285Z level=INFO run=cd59405c message="exiting loop" session.id=ses_clean`,
@@ -147,8 +160,7 @@ describe("opencode log diagnostics", () => {
   })
 })
 
-function useOpencodeLogs(files: Record<string, string>) {
-  vi.stubEnv("MOHIST_OPENCODE_LOG_DIR", LOG_DIR)
+function useOpencodeLogs(resources: OpencodeLogTestResources, files: Record<string, string>) {
   const entries = Object.entries(files)
   const fileSystem: OpencodeLogFileSystem = {
     async readdir(path) {
@@ -171,7 +183,7 @@ function useOpencodeLogs(files: Record<string, string>) {
       return fileText(path).slice(start, start + length)
     },
   }
-  setOpencodeLogFileSystemForTest(fileSystem)
+  resources.opencodeLogFileSystem = fileSystem
 
   function fileText(path: string) {
     const name = path.slice(LOG_DIR.length + 1)

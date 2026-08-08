@@ -2,6 +2,7 @@ import { execFile } from "node:child_process"
 import type { ExecFileException, ExecFileOptionsWithStringEncoding } from "node:child_process"
 import { assertExternalProcessAllowed } from "../system/process-policy.js"
 import { runnerLogger } from "../system/logger.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 
 const log = runnerLogger.child("models")
 
@@ -76,8 +77,9 @@ const productionCommandAdapter = createOpencodeModelsCommandAdapter(executeModel
 export async function discoverOpencodeModels(
   signal: AbortSignal,
   commandAdapter: OpencodeModelsCommandAdapter = productionCommandAdapter,
+  environment: Readonly<Record<string, string | undefined>> = currentRunnerResources()?.environment ?? process.env,
 ): Promise<DiscoveredOpencodeModels> {
-  const command = process.env.MOHIST_AGENT_MODELS_COMMAND || process.env.MOHIST_AGENT_COMMAND || "opencode"
+  const command = environment.MOHIST_AGENT_MODELS_COMMAND || environment.MOHIST_AGENT_COMMAND || "opencode"
   try {
     const output = await commandAdapter.execute(command, signal)
     const catalog = parseOpencodeModelsVerbose(output.stdout)
@@ -94,14 +96,8 @@ export async function discoverOpencodeModels(
   }
 }
 
-let opencodeModelDiscovery: OpencodeModelDiscovery = discoverOpencodeModels
-
 export function getOpencodeModelDiscovery(): OpencodeModelDiscovery {
-  return opencodeModelDiscovery
-}
-
-export function setOpencodeModelDiscoveryForTest(discovery: OpencodeModelDiscovery | null): void {
-  opencodeModelDiscovery = discovery ?? discoverOpencodeModels
+  return currentRunnerResources()?.opencodeModelDiscovery ?? discoverOpencodeModels
 }
 
 export function parseOpencodeModelsVerbose(stdout: string): OpencodeModelCatalog {

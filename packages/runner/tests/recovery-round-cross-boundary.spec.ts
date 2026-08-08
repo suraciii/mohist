@@ -1,13 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import type { JsonObject } from "../src/core/types.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import { ServerConnection } from "../src/server/connection.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import { defineTestActions } from "./support/action-registry-test.js"
+import { transportFetch, withFakeTransport } from "./support/fake-transport.js"
 
 // Cross-boundary recovery round. The executor/connection tests cover each
 // boundary in isolation; this spec composes the real production components
@@ -18,27 +16,13 @@ import { defineTestActions } from "./support/action-registry-test.js"
 //   -> reported follow-ups carry numeric continuation state
 //   -> redispatched self-retry preserves that state into the next decrement.
 
-const originalFetch = globalThis.fetch
-let fetchMock: ReturnType<typeof vi.fn>
-let workDir: string
+const fetchMock = transportFetch
+const nonGitRunner: GitRunner = async () => ({ success: false, exitCode: 128, stdout: "", stderr: "not a git repository", combinedOutput: "not a git repository" })
 
-beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-recovery-round-"))
-  fetchMock = vi.fn()
-  globalThis.fetch = fetchMock as unknown as typeof fetch
-  // The executor never reaches git in this spec (no branch stability path is
-  // exercised); stub it as a non-repo so any incidental probe is deterministic.
-  setExecutorGitRunnerForTest(async () => ({ success: false, exitCode: 128, stdout: "", stderr: "not a git repository", combinedOutput: "not a git repository" }))
-})
+const it = (name: string, body: (workDir: string) => Promise<void>) => vitestIt(name, () =>
+  withFakeTransport(async () => await body("/virtual/recovery-round"), { gitRunner: nonGitRunner }))
 
-afterEach(async () => {
-  globalThis.fetch = originalFetch
-  vi.restoreAllMocks()
-  setExecutorGitRunnerForTest(null)
-  await rm(workDir, { recursive: true, force: true })
-})
-
-function executor(): WorkExecutor {
+function executor(workDir: string): WorkExecutor {
   const invokedOptions: JsonObject[] = []
   const registry = defineTestActions({
     "test/matching": {
@@ -70,7 +54,7 @@ const recovery = {
   ],
 }
 
-function dispatch(workId: string, recoveryRemaining: number | null, model: string) {
+function dispatch(workDir: string, workId: string, recoveryRemaining: number | null, model: string) {
   // Wire shape: the server serializes object-typed fields (`with`, `variables`,
   // `recovery`) as JSON strings and keeps `recoveryRemaining` explicit (null or
   // numeric) so the runner can tell fresh from continuation and absent.
@@ -89,11 +73,11 @@ function dispatch(workId: string, recoveryRemaining: number | null, model: strin
 }
 
 describe("recovery round across poll -> execute -> report", () => {
-  it("authors numeric continuation state and preserves it on redispatch", async () => {
+  it("authors numeric continuation state and preserves it on redispatch", async (workDir) => {
     const connection = new ServerConnection({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-1",
-      runnerRoot: "/tmp",
+      runnerRoot: "/virtual/runner",
       pollIntervalMs: 100,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -105,7 +89,7 @@ describe("recovery round across poll -> execute -> report", () => {
 
     fetchMock.mockImplementation(async (url: string) => {
       if (url.endsWith("/poll") && !firstDispatch) {
-        firstDispatch = dispatch("review.1", null, "model-a")
+        firstDispatch = dispatch(workDir, "review.1", null, "model-a")
         return new Response(JSON.stringify({ dispatches: [firstDispatch] }), { status: 200, headers: { "content-type": "application/json" } })
       }
       if (url.endsWith("/report")) {
@@ -122,7 +106,7 @@ describe("recovery round across poll -> execute -> report", () => {
     expect(fresh.recoveryRemaining).toBeNull()
 
     // 2. Execute: the matching failure schedules a recovery round.
-    const firstExecutor = executor() as WorkExecutor & { invokedOptions: JsonObject[] }
+    const firstExecutor = executor(workDir) as WorkExecutor & { invokedOptions: JsonObject[] }
     const result = await firstExecutor.execute(fresh, new AbortController().signal)
     expect(result.addTasks).toBeDefined()
     const selfRetry = result.addTasks!.find((t) => t.id === "review")!
@@ -150,13 +134,13 @@ describe("recovery round across poll -> execute -> report", () => {
     // 4. The server redispatches the self-retry with the numeric state; the
     // next execution decrements again (0) while the declaration stays at 2.
     fetchMock.mockResolvedValueOnce(new Response(
-      JSON.stringify({ dispatches: [dispatch("review.2", 1, "model-b")] }),
+      JSON.stringify({ dispatches: [dispatch(workDir, "review.2", 1, "model-b")] }),
       { status: 200, headers: { "content-type": "application/json" } },
     ))
     const redispatched = (await connection.poll(new AbortController().signal))[0]!
     expect(redispatched.recoveryRemaining).toBe(1)
 
-    const nextExecutor = executor() as WorkExecutor & { invokedOptions: JsonObject[] }
+    const nextExecutor = executor(workDir) as WorkExecutor & { invokedOptions: JsonObject[] }
     const next = await nextExecutor.execute(redispatched, new AbortController().signal)
     const nextRetry = next.addTasks!.find((t) => t.id === "review")!
     expect(nextRetry.recovery?.budget).toBe(2)

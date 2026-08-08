@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
-import { mkdir, rename, writeFile } from "node:fs/promises"
 import { join, resolve } from "node:path"
 import { deleteDirectory, ensureDir, exists, readText, runCommand } from "../system/process.js"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import type { ServerConnection } from "../server/connection.js"
 import type { NamedWorkspaceRegistry } from "./workspace-registry.js"
@@ -94,17 +94,17 @@ export async function materializeNamedWorkspace(
   let created = false
   await withManagedWorkspacePath(options.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
     if (!exists(managedWorkspacePath)) {
-      await mkdir(managedWorkspacePath, { recursive: true })
+      await currentRunnerFileSystem().ensureDir(managedWorkspacePath)
       created = true
     }
     const markerDir = join(managedWorkspacePath, ".mohist")
-    await mkdir(markerDir, { recursive: true })
+    await currentRunnerFileSystem().ensureDir(markerDir)
     const marker: NamedWorkspaceMarker = {
       projectId: options.projectId,
       workspaceName: options.workspaceName,
       repositories: options.repositories ? [...options.repositories] : [],
     }
-    await writeFile(join(managedWorkspacePath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
+    await currentRunnerFileSystem().writeText(join(managedWorkspacePath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
   })
   await options.registry.register({
     projectId: options.projectId,
@@ -172,14 +172,14 @@ export async function materializeIssueWorkspace(
     }
 
     const markerDir = join(preparationPath, ".mohist")
-    await mkdir(markerDir, { recursive: true })
+    await currentRunnerFileSystem().ensureDir(markerDir)
     const marker: NamedWorkspaceMarker = {
       projectId: options.projectId,
       workspaceName: options.workspaceName,
       repositories: [{ name: options.gitUrl.split("/").pop()?.replace(".git", "") ?? "unknown", gitUrl: options.gitUrl }],
     }
-    await writeFile(join(preparationPath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
-    await rename(preparationPath, managedWorkspacePath)
+    await currentRunnerFileSystem().writeText(join(preparationPath, MARKER_RELATIVE_PATH), JSON.stringify(marker, null, 2))
+    await currentRunnerFileSystem().rename(preparationPath, managedWorkspacePath)
     created = true
   })
   await options.registry.register({

@@ -1,33 +1,29 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import {
   killProcess,
   runCommand,
-  setProcessKillerForTest,
-  setProcessSpawnerForTest,
 } from "../src/system/process.js"
 import { FakeChildProcess, FakeProcessSpawner } from "./support/fake-process.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 describe("runCommand timeout", () => {
-  let spawner: FakeProcessSpawner
-  let kills: Array<{ pid: number, signal: string | number | undefined }>
-
-  beforeEach(() => {
-    spawner = new FakeProcessSpawner()
-    kills = []
-    setProcessSpawnerForTest(spawner.spawn)
-    setProcessKillerForTest((pid, signal) => {
-      kills.push({ pid, signal })
-      return true
+  const it = (name: string, body: (spawner: FakeProcessSpawner, kills: Array<{ pid: number, signal: string | number | undefined }>) => unknown) =>
+    vitestIt(name, () => {
+      const spawner = new FakeProcessSpawner()
+      const kills: Array<{ pid: number, signal: string | number | undefined }> = []
+      return withTestRunnerResources(
+        async () => {
+          try {
+            return await body(spawner, kills)
+          } finally {
+            vi.useRealTimers()
+          }
+        },
+        { processSpawner: spawner.spawn, processKiller: (pid, signal) => { kills.push({ pid, signal }); return true } },
+      )
     })
-  })
 
-  afterEach(() => {
-    vi.useRealTimers()
-    setProcessSpawnerForTest(null)
-    setProcessKillerForTest(null)
-  })
-
-  it("OmitsTimeoutFieldsForDisabledTimeouts", async () => {
+  it("OmitsTimeoutFieldsForDisabledTimeouts", async (spawner) => {
     const zero = runCommand("command", [], "/workspace", new AbortController().signal, undefined, { timeoutMs: 0 })
     spawner.children[0]!.close(0)
     const negative = runCommand("command", [], "/workspace", new AbortController().signal, undefined, { timeoutMs: -1 })
@@ -37,7 +33,7 @@ describe("runCommand timeout", () => {
     await expect(negative).resolves.toEqual({ exitCode: 0, stdout: "", stderr: "" })
   })
 
-  it("CompletesBeforeItsTimeoutWithoutKilling", async () => {
+  it("CompletesBeforeItsTimeoutWithoutKilling", async (spawner, kills) => {
     vi.useFakeTimers({ toFake: ["setTimeout"] })
     const result = runCommand("command", [], "/workspace", new AbortController().signal, undefined, { timeoutMs: 100 })
     const child = spawner.children[0]!
@@ -49,7 +45,7 @@ describe("runCommand timeout", () => {
     expect(kills).toEqual([])
   })
 
-  it("TimeoutKillsTheProcessGroupAndReturnsStructuredResult", async () => {
+  it("TimeoutKillsTheProcessGroupAndReturnsStructuredResult", async (spawner, kills) => {
     vi.useFakeTimers({ toFake: ["setTimeout"] })
     const lines: string[] = []
     const result = runCommand("command", [], "/workspace", new AbortController().signal, undefined, {
@@ -78,7 +74,7 @@ describe("runCommand timeout", () => {
     expect(lines).toEqual(["partial-output"])
   })
 
-  it("ParentAbortRejectsInsteadOfProducingTimeout", async () => {
+  it("ParentAbortRejectsInsteadOfProducingTimeout", async (spawner) => {
     const controller = new AbortController()
     const result = runCommand("command", [], "/workspace", controller.signal)
     const child = spawner.children[0]!
@@ -91,12 +87,12 @@ describe("runCommand timeout", () => {
 
   it("FallsBackToDirectChildKillWhenGroupKillFails", () => {
     const child = new FakeChildProcess()
-    setProcessKillerForTest(() => {
-      throw new Error("no process group")
-    })
-
-    killProcess(child as never, "SIGKILL")
-
-    expect(child.killSignals).toEqual(["SIGKILL"])
+    return withTestRunnerResources(
+      async () => {
+        killProcess(child as never, "SIGKILL")
+        expect(child.killSignals).toEqual(["SIGKILL"])
+      },
+      { processKiller: () => { throw new Error("no process group") } },
+    )
   })
 })

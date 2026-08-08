@@ -1,27 +1,22 @@
 import { runCommand, type CommandLineOptions } from "../system/process.js"
 import { git as defaultGit } from "./git.js"
 import { combinedGhOutput } from "./github-pr-parse.js"
+import { currentRunnerResources, type RunnerCommandRunner, type RunnerGitRunner } from "../system/filesystem.js"
 
-type GitRunner = typeof defaultGit
-type GhRunner = typeof runCommand
-
-let git: GitRunner = defaultGit
-let gh: GhRunner = runCommand
+type GitRunner = RunnerGitRunner
+type GhRunner = RunnerCommandRunner
 
 export function getGitHubPrGit(): GitRunner {
-  return git
+  return currentRunnerResources()?.githubPrGitRunner ?? currentRunnerResources()?.gitRunner ?? defaultGit
 }
 
 export function getGitHubPrGh(): GhRunner {
-  return gh
-}
-
-export function setGitHubPrGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
-}
-
-export function setGitHubPrGhRunnerForTest(runner: GhRunner | null) {
-  gh = runner ?? runCommand
+  const resources = currentRunnerResources()
+  if (resources?.githubPrGhRunner) return resources.githubPrGhRunner
+  if (resources?.commandRunner) {
+    return (command, args, cwd, signal, env, options) => resources.commandRunner!.run(command, args, cwd, signal, env, options) as ReturnType<typeof runCommand>
+  }
+  return runCommand
 }
 
 export type GhPrecheckOk = { ok: true; output: string }

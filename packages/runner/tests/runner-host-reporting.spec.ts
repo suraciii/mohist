@@ -1,50 +1,93 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/server/session-target.js"
 import { deferred } from "./support/deferred.js"
 import { capturedLogs, onCapturedLog } from "./support/logger-test.js"
-import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
-
-const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
+import { withDefaultRunnerTestResources, type DefaultRunnerTestResources } from "./support/test-resources.js"
 
 const POLL_INTERVAL_MS = 10
 const QUIET_INTERVAL_MS = 60_000
 const AWAITING_ACK_RETRY_INTERVAL_MS = 5_000
 
-const mocks = vi.hoisted(() => ({
-  connect: vi.fn(),
-  heartbeat: vi.fn(),
-  disconnect: vi.fn(),
-  poll: vi.fn(),
-  report: vi.fn(),
-  uploadTaskLog: vi.fn(),
-  fetchConfig: vi.fn(async () => null),
-  startSignalR: vi.fn(),
-  stopSignalR: vi.fn(),
-  getConnectionId: vi.fn(() => "conn-1"),
-  probeLiveness: vi.fn(async () => true),
-  blockingAction: vi.fn(),
-  forceReconnect: vi.fn(async () => undefined),
-}))
+type ReportingMock = ReturnType<typeof vi.fn>
+type ReportingMocks = Record<
+  "connect" | "heartbeat" | "disconnect" | "poll" | "report" | "uploadTaskLog" | "fetchConfig" |
+  "startSignalR" | "stopSignalR" | "getConnectionId" | "probeLiveness" | "blockingAction" | "forceReconnect",
+  ReportingMock
+>
 
-const {
-  connect,
-  heartbeat,
-  disconnect,
-  poll,
-  report,
-  uploadTaskLog,
-  fetchConfig,
-  startSignalR,
-  stopSignalR,
-  getConnectionId,
-  probeLiveness,
-  blockingAction,
-  forceReconnect,
-} = mocks
+interface ReportingTestState {
+  readonly resources: DefaultRunnerTestResources
+  readonly mocks: ReportingMocks
+  onReconnected: ((connectionId: string) => void) | null
+  followupTargetResolver: ((target: SessionTarget) => { runtimeSessionId: string; workDir: string; projectId: string } | null) | null
+}
 
-let capturedOnReconnected: ((connectionId: string) => void) | null = null
-let capturedFollowupTargetResolver: ((target: SessionTarget) => { runtimeSessionId: string; workDir: string; projectId: string } | null) | null = null
+const reportingTestStorage = new AsyncLocalStorage<ReportingTestState>()
+
+function currentReportingTestState(): ReportingTestState {
+  const state = reportingTestStorage.getStore()
+  if (!state) throw new Error("runner host reporting test context is not active")
+  return state
+}
+
+function scopedMock(name: keyof ReportingMocks): ReportingMock {
+  const target = (() => undefined) as (...args: unknown[]) => unknown
+  Object.defineProperty(target, "_isMockFunction", { value: true })
+  return new Proxy(target, {
+    apply(_target, thisArg, args) {
+      return Reflect.apply(currentReportingTestState().mocks[name], thisArg, args)
+    },
+    get(_target, property) {
+      const value = Reflect.get(currentReportingTestState().mocks[name], property)
+      return typeof value === "function" ? value.bind(currentReportingTestState().mocks[name]) : value
+    },
+    set(_target, property, value) {
+      return Reflect.set(currentReportingTestState().mocks[name], property, value)
+    },
+  }) as unknown as ReportingMock
+}
+
+const connect = scopedMock("connect")
+const heartbeat = scopedMock("heartbeat")
+const disconnect = scopedMock("disconnect")
+const poll = scopedMock("poll")
+const report = scopedMock("report")
+const uploadTaskLog = scopedMock("uploadTaskLog")
+const fetchConfig = scopedMock("fetchConfig")
+const startSignalR = scopedMock("startSignalR")
+const stopSignalR = scopedMock("stopSignalR")
+const getConnectionId = scopedMock("getConnectionId")
+const probeLiveness = scopedMock("probeLiveness")
+const blockingAction = scopedMock("blockingAction")
+const forceReconnect = scopedMock("forceReconnect")
+
+function createReportingMocks(): ReportingMocks {
+  return {
+    connect: vi.fn(async () => undefined),
+    heartbeat: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    poll: vi.fn(async () => []),
+    report: vi.fn(async () => ({})),
+    uploadTaskLog: vi.fn(async () => ({ accepted: 0, truncated: false })),
+    fetchConfig: vi.fn(async () => null),
+    startSignalR: vi.fn(async () => undefined),
+    stopSignalR: vi.fn(async () => undefined),
+    getConnectionId: vi.fn(() => "conn-1"),
+    probeLiveness: vi.fn(async () => true),
+    blockingAction: vi.fn(async ({ signal }: { signal: AbortSignal }) => {
+      const aborted = deferred<{ error: { code: string; message: string } }>()
+      if (signal.aborted) {
+        aborted.resolve({ error: { code: "action-failed", message: "aborted" } })
+      } else {
+        signal.addEventListener("abort", () => aborted.resolve({ error: { code: "action-failed", message: "aborted" } }), { once: true })
+      }
+      return aborted.promise
+    }),
+    forceReconnect: vi.fn(async () => undefined),
+  }
+}
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -65,9 +108,9 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     getConnectionId = getConnectionId
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
-    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: typeof capturedFollowupTargetResolver } = {}) {
-      capturedOnReconnected = options.onReconnected ?? null
-      capturedFollowupTargetResolver = options.followupTargetResolver ?? null
+    constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void; followupTargetResolver?: (target: SessionTarget) => { runtimeSessionId: string; workDir: string; projectId: string } | null } = {}) {
+      currentReportingTestState().onReconnected = options.onReconnected ?? null
+      currentReportingTestState().followupTargetResolver = options.followupTargetResolver ?? null
     }
   },
 }))
@@ -83,35 +126,29 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
         outputs: [],
         errors: [{ code: "action-failed", description: "The test Action failed" }],
       },
-      run: blockingAction,
+      run: blockingAction as never,
     }]),
   }
 })
 
-beforeEach(() => {
-  vi.useFakeTimers()
-  installReadyRuntimeFactory()
-  capturedOnReconnected = null
-  capturedFollowupTargetResolver = null
-  uploadTaskLog.mockResolvedValue({ accepted: 0, truncated: false })
-  blockingAction.mockImplementation(async ({ signal }: { signal: AbortSignal }) => {
-    const aborted = deferred<{ error: { code: string; message: string } }>()
-    if (signal.aborted) {
-      aborted.resolve({ error: { code: "action-failed", message: "aborted" } })
-    } else {
-      signal.addEventListener("abort", () => aborted.resolve({ error: { code: "action-failed", message: "aborted" } }), { once: true })
-    }
-    return aborted.promise
+function it(name: string, body: () => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    await withDefaultRunnerTestResources(async (resources) => {
+      const state: ReportingTestState = { resources, mocks: createReportingMocks(), onReconnected: null, followupTargetResolver: null }
+      await reportingTestStorage.run(state, async () => {
+        vi.useFakeTimers()
+        try {
+          await body()
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+    })
   })
-})
-
-afterEach(() => {
-  clearOpenCodeRuntimeFactoryForTest()
-})
+}
 
 describe("RunnerHost", () => {
   it("PollBody_CarriesInFlightAndAwaitingAck_Keys", async () => {
-    vi.clearAllMocks()
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
     const secondPollStarted = deferred<void>()
@@ -135,7 +172,7 @@ describe("RunnerHost", () => {
       workType: "task",
       uses: "test/block",
       ownerKind: "workflow",
-      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+      variables: { workspace: { path: "/virtual/mohist-runner-test" } },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -146,10 +183,10 @@ describe("RunnerHost", () => {
     })
     blockingAction.mockResolvedValue({ output: { message: "ok" } })
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot: "/virtual/mohist-runner-test",
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -177,7 +214,6 @@ describe("RunnerHost", () => {
   })
 
   it("ReDispatchedWork_ReportedOnce_NotPerRedelivery", async () => {
-    vi.clearAllMocks()
     const reportStarted = deferred<void>()
     const reportRelease = deferred<void>()
     const pollCalls = [deferred<void>(), deferred<void>(), deferred<void>(), deferred<void>()]
@@ -201,7 +237,7 @@ describe("RunnerHost", () => {
       workType: "task",
       uses: "test/block",
       ownerKind: "workflow",
-      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+      variables: { workspace: { path: "/virtual/mohist-runner-test" } },
     }
     let pollIndex = 0
     poll.mockImplementation(async () => {
@@ -210,10 +246,10 @@ describe("RunnerHost", () => {
       return pollIndex <= 3 ? [same] : []
     })
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot: "/virtual/mohist-runner-test",
       pollIntervalMs: POLL_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
@@ -244,7 +280,6 @@ describe("RunnerHost", () => {
   })
 
   it("AwaitingAck_RetriesReportUntilAcked", async () => {
-    vi.clearAllMocks()
     const firstReport = deferred<void>()
     const secondReport = deferred<void>()
     const thirdReport = deferred<void>()
@@ -281,14 +316,14 @@ describe("RunnerHost", () => {
       workType: "task",
       uses: "test/block",
       ownerKind: "workflow",
-      variables: { workspace: { path: "/tmp/mohist-runner-test" } },
+      variables: { workspace: { path: "/virtual/mohist-runner-test" } },
     }
     poll.mockResolvedValueOnce([work]).mockResolvedValue([])
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: "/tmp/mohist-runner-test",
+      runnerRoot: "/virtual/mohist-runner-test",
       pollIntervalMs: QUIET_INTERVAL_MS,
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,

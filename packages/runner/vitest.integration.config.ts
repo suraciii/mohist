@@ -7,6 +7,6 @@ export default defineConfig({
     unstubGlobals: true,
     unstubEnvs: true,
     clearMocks: true,
-    setupFiles: ["./tests/setup.common.ts", "./tests/setup.default.ts"],
+    setupFiles: ["./tests/setup.common.ts"],
   },
 })

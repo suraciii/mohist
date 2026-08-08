@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { git } from "../src/actions/git.js"
 import { TaskLogCollector, TaskLogger } from "../src/runtime/task-log.js"
-import * as processModule from "../src/system/process.js"
 import type { CommandLineOptions, CommandResult } from "../src/system/process.js"
+import type { RunnerResourceContext } from "../src/system/filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 type GitCall = {
   command: string
@@ -11,25 +12,22 @@ type GitCall = {
   options: CommandLineOptions | undefined
 }
 
-let restoreGitRunner: (() => void) | null = null
+type GitTestResources = { commandRunner: NonNullable<RunnerResourceContext["commandRunner"]> }
 
-afterEach(() => {
-  restoreGitRunner?.()
-  restoreGitRunner = null
-})
-
-function installGitRunner(respond: (call: GitCall) => CommandResult) {
+function installGitRunner(resources: GitTestResources, respond: (call: GitCall) => CommandResult) {
   const calls: GitCall[] = []
-  const runner = vi.spyOn(processModule, "runCommand").mockImplementation(async (command, args, workDir, _signal, _env, options) => {
-    const call = { command, args: [...args], workDir, options }
-    calls.push(call)
-    const result = respond(call)
-    for (const line of outputLines(result.stdout)) options?.onLine?.(line)
-    for (const line of outputLines(result.stderr)) options?.onLine?.(line)
-    options?.onClose?.(result.exitCode)
-    return result
-  })
-  restoreGitRunner = () => runner.mockRestore()
+  resources.commandRunner = {
+    async run(command, args, workDir, _signal, _env, rawOptions) {
+      const options = rawOptions as CommandLineOptions | undefined
+      const call = { command, args: [...args], workDir, options }
+      calls.push(call)
+      const result = respond(call)
+      for (const line of outputLines(result.stdout)) options?.onLine?.(line)
+      for (const line of outputLines(result.stderr)) options?.onLine?.(line)
+      options?.onClose?.(result.exitCode)
+      return result
+    },
+  }
   return calls
 }
 
@@ -38,8 +36,15 @@ function outputLines(output: string) {
 }
 
 describe("git forwards command output to the task log", () => {
-  it("PreservesAggregateCommandResultWhenSinkIsProvided", async () => {
-    const calls = installGitRunner(() => ({
+  function it(name: string, body: (resources: GitTestResources) => Promise<void>): void {
+    vitestIt(name, async () => {
+      const resources: GitTestResources = { commandRunner: { run: async () => ({ exitCode: 1, stdout: "", stderr: "unconfigured" }) } }
+      await withTestRunnerResources(async () => await body(resources), resources)
+    })
+  }
+
+  it("PreservesAggregateCommandResultWhenSinkIsProvided", async (resources) => {
+    const calls = installGitRunner(resources, () => ({
       exitCode: 0,
       stdout: "git version 2.45.0\n",
       stderr: "",
@@ -63,8 +68,8 @@ describe("git forwards command output to the task log", () => {
     ])
   })
 
-  it("EmitsEveryLineWithTheConfiguredPhaseSourceTag", async () => {
-    installGitRunner(() => ({
+  it("EmitsEveryLineWithTheConfiguredPhaseSourceTag", async (resources) => {
+    installGitRunner(resources, () => ({
       exitCode: 0,
       stdout: "usage: git status\nstatus options\n",
       stderr: "",
@@ -84,8 +89,8 @@ describe("git forwards command output to the task log", () => {
     expect(flushed.entries.map((entry) => entry.text)).toEqual(["usage: git status", "status options"])
   })
 
-  it("ReturnsAggregateContractWhenNoSinkIsSupplied", async () => {
-    const calls = installGitRunner(() => ({
+  it("ReturnsAggregateContractWhenNoSinkIsSupplied", async (resources) => {
+    const calls = installGitRunner(resources, () => ({
       exitCode: 0,
       stdout: "git version 2.45.0\n",
       stderr: "",
@@ -98,8 +103,8 @@ describe("git forwards command output to the task log", () => {
     expect(calls[0]?.options?.onLine).toBeUndefined()
   })
 
-  it("ForwardsFailingOpsCommandOutputToTheCollectorBuffer", async () => {
-    installGitRunner(() => ({
+  it("ForwardsFailingOpsCommandOutputToTheCollectorBuffer", async (resources) => {
+    installGitRunner(resources, () => ({
       exitCode: 129,
       stdout: "",
       stderr: "git: 'bogus-subcommand-that-will-fail' is not a git command\n",

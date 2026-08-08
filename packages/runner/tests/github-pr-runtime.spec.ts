@@ -1,26 +1,32 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { runCommand } from "../src/system/process.js"
 import { git as defaultGit } from "../src/actions/git.js"
-import {
-  setGitHubPrGhRunnerForTest,
-  setGitHubPrGitRunnerForTest,
-} from "../src/actions/github-pr.js"
 import { combinedGhOutput } from "../src/actions/github-pr-parse.js"
 import {
   getGitHubPrGh,
   getGitHubPrGit,
   runGhPrecheck,
 } from "../src/actions/github-pr-runtime.js"
+import type { RunnerCommandRunner, RunnerFileSystem, RunnerGitRunner } from "../src/system/filesystem.js"
+import { MemoryFileSystem } from "./support/memory-filesystem.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 type CommandResult = { exitCode: number; stdout: string; stderr: string }
 type GitResult = CommandResult & { success: boolean; combinedOutput: string }
-type GitRunner = typeof defaultGit
-type GhRunner = typeof runCommand
+type GitRunner = RunnerGitRunner
+type GhRunner = RunnerCommandRunner
+type RuntimeTestResources = {
+  fileSystem: RunnerFileSystem
+  githubPrGitRunner?: RunnerGitRunner
+  githubPrGhRunner?: RunnerCommandRunner
+}
 
-afterEach(() => {
-  setGitHubPrGitRunnerForTest(null)
-  setGitHubPrGhRunnerForTest(null)
-})
+function it(name: string, body: (resources: RuntimeTestResources) => Promise<void> | void): void {
+  vitestIt(name, async () => {
+    const resources: RuntimeTestResources = { fileSystem: new MemoryFileSystem() }
+    await withTestRunnerResources(async () => await body(resources), resources)
+  })
+}
 
 function gitOk(): GitResult {
   return { exitCode: 0, stdout: "out", stderr: "", success: true, combinedOutput: "out" }
@@ -34,63 +40,61 @@ function ghFail(stderr: string, stdout = "", exitCode = 1): CommandResult {
   return { exitCode, stdout, stderr }
 }
 
-describe("github-pr-runtime: getGitHubPrGit / setGitHubPrGitRunnerForTest", () => {
+describe("github-pr-runtime: getGitHubPrGit", () => {
   it("returns the default git runner when no setter has been called", () => {
     expect(getGitHubPrGit()).toBe(defaultGit)
   })
 
-  it("returns a stub git runner after setGitHubPrGitRunnerForTest", async () => {
+  it("returns the scoped git runner", async (resources) => {
     const stub: GitRunner = async () => gitOk()
-    setGitHubPrGitRunnerForTest(stub)
+    resources.githubPrGitRunner = stub
     expect(getGitHubPrGit()).toBe(stub)
-    expect(await getGitHubPrGit()("/tmp", ["rev-parse", "HEAD"], new AbortController().signal)).toEqual(gitOk())
+    expect(await getGitHubPrGit()("/virtual", ["rev-parse", "HEAD"], new AbortController().signal)).toEqual(gitOk())
   })
 
-  it("setGitHubPrGitRunnerForTest(null) resets to the default git runner", () => {
-    setGitHubPrGitRunnerForTest(async () => gitOk())
+  it("uses the production git runner outside the scoped resource", async (resources) => {
+    resources.githubPrGitRunner = async () => gitOk()
     expect(getGitHubPrGit()).not.toBe(defaultGit)
-    setGitHubPrGitRunnerForTest(null)
-    expect(getGitHubPrGit()).toBe(defaultGit)
+    await withTestRunnerResources(async () => {
+      expect(getGitHubPrGit()).toBe(defaultGit)
+    }, { fileSystem: resources.fileSystem })
   })
 })
 
-describe("github-pr-runtime: getGitHubPrGh / setGitHubPrGhRunnerForTest", () => {
-  it("returns the default gh runner when no setter has been called", () => {
+describe("github-pr-runtime: getGitHubPrGh", () => {
+  it("returns the default gh runner when no resource is injected", () => {
     expect(getGitHubPrGh()).toBe(runCommand)
   })
 
-  it("returns a stub gh runner after setGitHubPrGhRunnerForTest", async () => {
+  it("returns the scoped gh runner", async (resources) => {
     const stub: GhRunner = async () => ghOk("ok")
-    setGitHubPrGhRunnerForTest(stub)
+    resources.githubPrGhRunner = stub
     expect(getGitHubPrGh()).toBe(stub)
-    expect(await getGitHubPrGh()("gh", ["--version"], "/tmp", new AbortController().signal)).toEqual(ghOk("ok"))
+    expect(await getGitHubPrGh()("gh", ["--version"], "/virtual", new AbortController().signal)).toEqual(ghOk("ok"))
   })
 
-  it("setGitHubPrGhRunnerForTest(null) resets to the default gh runner", () => {
-    setGitHubPrGhRunnerForTest(async () => ghOk("ok"))
+  it("uses the production gh runner outside the scoped resource", async (resources) => {
+    resources.githubPrGhRunner = async () => ghOk("ok")
     expect(getGitHubPrGh()).not.toBe(runCommand)
-    setGitHubPrGhRunnerForTest(null)
-    expect(getGitHubPrGh()).toBe(runCommand)
+    await withTestRunnerResources(async () => {
+      expect(getGitHubPrGh()).toBe(runCommand)
+    }, { fileSystem: resources.fileSystem })
   })
 
-  it("one setGitHubPrGhRunnerForTest call updates the single runner read by the next getter — no per-module duplicate setters", async () => {
+  it("keeps one injected runner visible to every reader in the same resource", async (resources) => {
     const calls: Array<{ command: string; args: string[] }> = []
-    const stub: GhRunner = async (command, args, _workDir, _signal) => {
+    const stub: GhRunner = async (command, args) => {
       calls.push({ command, args: [...args] })
       if (args[0] === "--version") return ghOk("gh version 2.0.0")
       return ghOk("logged in")
     }
 
-    setGitHubPrGhRunnerForTest(stub)
+    resources.githubPrGhRunner = stub
     const gh = getGitHubPrGh()
     expect(gh).toBe(stub)
+    expect(getGitHubPrGh()).toBe(gh)
 
-    // The same singleton is read by both the create-side precheck and any other consumer.
-    const fromAnotherReader = getGitHubPrGh()
-    expect(fromAnotherReader).toBe(stub)
-    expect(fromAnotherReader).toBe(gh)
-
-    const result = await stub("gh", ["--version"], "/tmp", new AbortController().signal)
+    const result = await stub("gh", ["--version"], "/virtual", new AbortController().signal)
     expect(calls).toEqual([{ command: "gh", args: ["--version"] }])
     expect(result.stdout).toBe("gh version 2.0.0")
   })
@@ -102,7 +106,7 @@ describe("github-pr-runtime: runGhPrecheck behavior (relocated from github-pr.ts
       if (args[0] === "--version") return ghOk("gh version 2.0.0 (2024-01-01)")
       return ghOk("Logged in to github.com as user")
     }
-    const result = await runGhPrecheck(stub, "/tmp", new AbortController().signal)
+    const result = await runGhPrecheck(stub, "/virtual", new AbortController().signal)
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.output).toContain("gh version 2.0.0")
@@ -112,7 +116,7 @@ describe("github-pr-runtime: runGhPrecheck behavior (relocated from github-pr.ts
 
   it("returns failure with a clear install message when gh --version exits non-zero", async () => {
     const stub: GhRunner = async () => ghFail("command not found: gh")
-    const result = await runGhPrecheck(stub, "/tmp", new AbortController().signal)
+    const result = await runGhPrecheck(stub, "/virtual", new AbortController().signal)
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.exitCode).toBe(1)
@@ -127,7 +131,7 @@ describe("github-pr-runtime: runGhPrecheck behavior (relocated from github-pr.ts
       if (args[0] === "--version") return ghOk("gh version 2.0.0 (2024-01-01)")
       return ghFail("You are not logged into any GitHub hosts.")
     }
-    const result = await runGhPrecheck(stub, "/tmp", new AbortController().signal)
+    const result = await runGhPrecheck(stub, "/virtual", new AbortController().signal)
     expect(result.ok).toBe(false)
     if (!result.ok) {
       expect(result.exitCode).toBe(1)
@@ -137,25 +141,15 @@ describe("github-pr-runtime: runGhPrecheck behavior (relocated from github-pr.ts
     }
   })
 
-  it("threads the provided gh runner param rather than reading module-scope state", async () => {
-    // Two distinct runners; the call must respect the param even when the
-    // module-scope singleton points elsewhere.
-    setGitHubPrGhRunnerForTest(async () => ghFail("module-scope runner must not be called"))
+  it("threads the provided gh runner parameter", async () => {
     const direct: GhRunner = async (_cmd, args) => {
       if (args[0] === "--version") return ghOk("gh version from direct param")
       return ghOk("ok")
     }
-    const result = await runGhPrecheck(direct, "/tmp", new AbortController().signal)
+    const result = await runGhPrecheck(direct, "/virtual", new AbortController().signal)
     expect(result.ok).toBe(true)
     if (result.ok) {
       expect(result.output).toContain("gh version from direct param")
     }
-  })
-})
-
-describe("github-pr-runtime: barrel re-export from github-pr.js", () => {
-  it("exposes the two runner setters via the barrel so the three specs keep injecting", () => {
-    expect(typeof setGitHubPrGitRunnerForTest).toBe("function")
-    expect(typeof setGitHubPrGhRunnerForTest).toBe("function")
   })
 })

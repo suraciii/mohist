@@ -2,7 +2,7 @@ export type { PiCatalog, PiCancelFacts, PiCancelRequest, PiCancelResult, PiCompa
 export { DEFAULT_PI_PROVIDER_ERROR_POLICY, isProviderFailure, parseProviderErrorPolicy } from "./policy.js"
 export { PiRuntime } from "./runtime.js"
 export type { PiClock, PiRuntimeDeps } from "./runtime.js"
-export { getPiRuntimeFactory, setPiRuntimeFactoryForTest } from "./factory.js"
+export { getPiRuntimeFactory } from "./factory.js"
 export type { PiRuntimeFactory } from "./factory.js"
 export { createPiProjector } from "./projector.js"
 export type { PiProjector } from "./projector.js"
