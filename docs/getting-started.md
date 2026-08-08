@@ -68,7 +68,7 @@ Mohist 支持三条互补路径。它们操作同一个 Project、Issue 与 Work
   查询、委托和操作 Mohist；它不是 Mohist Agent。
 - **直接使用 `mo`**：适合确定性的人工操作、脚本和排障。
 
-要直接试用 Mohist Agent，先按[Agent 与 AgentSession](agents.md)创建并启动一个 Agent。
+要直接试用 Mohist Agent，先按[Agent 与 AgentSession](agent-sessions.md)创建并启动一个 Agent。
 要让第三方外部 Agent 认识 Mohist，则把 Mohist Skill 安装到本机支持的 Agent：
 
 ```bash
@@ -202,7 +202,7 @@ Integrate 完成后，issue 进入 Done。这时：
 ## 下一步
 
 - [Skill 机制](skills.md) — 让外部 Agent 查询、委托和操作 Mohist
-- [Agent 与 AgentSession](agents.md) — 配置并直接使用一个 Mohist Agent
+- [Agent 与 AgentSession](agent-sessions.md) — 配置并直接使用一个 Mohist Agent
 - [Slack](slack.md) — 把已经测试好的 Agent 带到 Slack，用 Mohist App 对话式管理接入
 - [核心概念](concepts.md) — 理解你刚才用到的所有名词
 - [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等

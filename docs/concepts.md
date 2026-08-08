@@ -125,7 +125,7 @@ Mohist Agent launch 的首次执行；后续输入继续同一个 AgentSession�
 AgentSession 中每条被接受的输入是 SessionInput，一次连续的 Runtime 处理是 AgentTurn；一个
 Turn 可以按顺序处理多条 Input，因此消息、执行过程和工作结果不会被混成同一个状态。
 
-完整关系见 [Agent 与 AgentSession](agents.md)；Slack 使用方式见
+完整关系见 [Agent 与 AgentSession](agent-sessions.md)；Slack 使用方式见
 [Slack](slack.md)；OpenCode Action 配置见
 [`mohist/opencode` Action](actions/opencode.md)。
 

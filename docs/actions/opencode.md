@@ -4,7 +4,7 @@
 事实报告回来。Workflow 直接使用它时形成 Inline Agent，但 Action 本身不是 Agent，
 也不会查找或启动 Mohist Agent。
 
-Agent、AgentJob 和 AgentSession 的总体关系见 [Agent 与 AgentSession](../agents.md)。
+Agent、AgentJob 和 AgentSession 的总体关系见 [Agent 与 AgentSession](../agent-sessions.md)。
 
 ## 基本用法
 
