@@ -115,14 +115,15 @@ describe('issue list and parent candidate clients', () => {
 })
 
 describe('addComment', () => {
-  it('sends the declared author and returns the persisted author', async () => {
+  it('sends the display alias and returns the persisted author and alias', async () => {
     let requestBody: unknown
     server.use(
       http.post('*/api/projects/:projectId/issues/:number/comments', async ({ request }) => {
         requestBody = await request.json()
         return successResponse({
           id: 'cmt-1',
-          author: 'Ada Lovelace',
+          author: 'admin',
+          displayName: 'Ada Lovelace',
           body: 'Looks good',
           createdAt: '2026-07-21T08:00:00Z',
         })
@@ -131,8 +132,9 @@ describe('addComment', () => {
 
     const comment = await addComment(42, 'Ada Lovelace', 'Looks good', 'proj-1', ['att-1'])
 
-    expect(requestBody).toEqual({ author: 'Ada Lovelace', body: 'Looks good', attachmentIds: ['att-1'] })
-    expect(comment.author).toBe('Ada Lovelace')
+    expect(requestBody).toEqual({ displayName: 'Ada Lovelace', body: 'Looks good', attachmentIds: ['att-1'] })
+    expect(comment.author).toBe('admin')
+    expect(comment.displayName).toBe('Ada Lovelace')
   })
 })
 
@@ -173,12 +175,12 @@ describe('approval decisions', () => {
       }),
     )
 
-    await approveIssue(42, { author: 'Ada' }, 'proj-1')
-    const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.', author: 'Ada' }, 'proj-1')
+    await approveIssue(42, { displayName: 'Ada' }, 'proj-1')
+    const feedback = await requestChangesIssue(42, { stage: 'plan', body: 'Narrow the scope.', displayName: 'Ada' }, 'proj-1')
 
     expect(requestBodies).toEqual([
-      { author: 'Ada' },
-      { stage: 'plan', body: 'Narrow the scope.', author: 'Ada' },
+      { displayName: 'Ada' },
+      { stage: 'plan', body: 'Narrow the scope.', displayName: 'Ada' },
     ])
     expect(feedback).toEqual({ id: 'feedback-1' })
   })

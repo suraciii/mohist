@@ -46,6 +46,7 @@ public class MohistDbContext : DbContext
 
     public DbSet<CredentialRow> Credentials { get; set; } = null!;
     public DbSet<EnrollmentTokenRow> EnrollmentTokens { get; set; } = null!;
+    public DbSet<PrincipalRow> Principals { get; set; } = null!;
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -152,6 +153,16 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.ConsumedAt);
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.HasIndex(e => e.TokenHash).IsUnique();
+        });
+
+        modelBuilder.Entity<PrincipalRow>(entity =>
+        {
+            entity.ToTable("Principals");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(256);
+            entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
+            entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
         });
 
         modelBuilder.Entity<ProjectRow>(entity =>
@@ -448,6 +459,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Id).HasMaxLength(64);
             entity.Property(e => e.ProjectId).HasMaxLength(256).IsRequired();
             entity.Property(e => e.Author).HasMaxLength(100);
+            entity.Property(e => e.DisplayName).HasMaxLength(100);
             entity.Property(e => e.Body).IsRequired();
             entity.HasIndex(e => new { e.ProjectId, e.IssueNumber, e.CreatedAt });
         });

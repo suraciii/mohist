@@ -115,6 +115,12 @@ public sealed class AgentJobSubagentTerminalCallbackSpecs : AgentJobGrainTestSup
     [Fact]
     public async Task UnknownJobAndTurnTerminal_DoNotPersistSubagentTerminalEvent()
     {
+        // Shared collection registry may hold an unadmittable leftover runner
+        // (offline or at slot capacity); SubmitAsync would then enter the
+        // runner-unavailable terminal path and append a terminal event that
+        // this spec must prove stays absent. Clear it before submitting.
+        await ClearGlobalRunnerRegistryAsync();
+
         var suffix = Guid.NewGuid().ToString("N");
         var projectId = $"project-terminal-nontrigger-{suffix}";
         var childSessionId = $"child-session-terminal-nontrigger-{suffix}";

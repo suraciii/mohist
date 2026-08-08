@@ -31,14 +31,16 @@ public class IssueCommentAddedTests
     {
         var payload = new IssueCommentAdded(
             CommentId: "cmt_abc",
-            Author: "Ada Lovelace",
+            Author: "admin",
+            DisplayName: "Ada Lovelace",
             Body: "Looks good @supervisor");
 
         var data = IssueCommentAddedEventFactory.ToData(payload);
 
         Assert.Equal(JsonValueKind.Object, data.ValueKind);
         Assert.Equal("cmt_abc", data.GetProperty("commentId").GetString());
-        Assert.Equal("Ada Lovelace", data.GetProperty("author").GetString());
+        Assert.Equal("admin", data.GetProperty("author").GetString());
+        Assert.Equal("Ada Lovelace", data.GetProperty("displayName").GetString());
         Assert.Equal("Looks good @supervisor", data.GetProperty("body").GetString());
     }
 
@@ -46,7 +48,7 @@ public class IssueCommentAddedTests
     public void Payload_DoesNotIntroduceExtraFields()
     {
         var data = IssueCommentAddedEventFactory.ToData(
-            new IssueCommentAdded("cmt_abc", "Ada", "body"));
+            new IssueCommentAdded("cmt_abc", "Ada", null, "body"));
 
         var propertyNames = data.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal);
         Assert.Equal(
@@ -60,7 +62,7 @@ public class IssueCommentAddedTests
         var owner = NewIssue(projectId: "proj_e", number: 5, epicNumber: 7);
         var envelope = IssueCommentAddedEventFactory.Build(
             owner,
-            new IssueCommentAdded("cmt_1", "Ada", "body"),
+            new IssueCommentAdded("cmt_1", "Ada", null, "body"),
             new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero));
 
         Assert.Equal(EventCatalog.ReverseDns.IssueCommentAdded, envelope.Type);
@@ -77,7 +79,7 @@ public class IssueCommentAddedTests
         var owner = NewIssue(projectId: "proj_ne", number: 9);
         var envelope = IssueCommentAddedEventFactory.Build(
             owner,
-            new IssueCommentAdded("cmt_2", "Ada", "body"),
+            new IssueCommentAdded("cmt_2", "Ada", null, "body"),
             new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero));
 
         Assert.Equal("proj_ne", envelope.Extensions[EventCatalog.Lineage.ProjectId]);
@@ -91,7 +93,7 @@ public class IssueCommentAddedTests
         var owner = NewIssue(projectId: "proj_body", number: 1);
         var envelope = IssueCommentAddedEventFactory.Build(
             owner,
-            new IssueCommentAdded("cmt_3", "Ada", "@supervisor please push issue forward"),
+            new IssueCommentAdded("cmt_3", "Ada", null, "@supervisor please push issue forward"),
             new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero));
 
         var data = envelope.Data!.Value;
@@ -109,7 +111,7 @@ public class IssueCommentAddedTests
         var owner = NewIssue(projectId: "proj_norm", number: 1);
         var envelope = IssueCommentAddedEventFactory.Build(
             owner,
-            new IssueCommentAdded("cmt_4", "  Ada  ", "body"),
+            new IssueCommentAdded("cmt_4", "  Ada  ", null, "body"),
             new DateTimeOffset(2026, 6, 30, 12, 0, 0, TimeSpan.Zero));
 
         Assert.Equal("  Ada  ", envelope.Data!.Value.GetProperty("author").GetString());

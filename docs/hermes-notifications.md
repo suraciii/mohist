@@ -49,7 +49,7 @@ mo update server
 
 ## 和故障恢复的衔接
 
-失败通知的建议动作直接对应恢复命令：手机上看到「issue 42 失败」，回到任何一台终端（或让聊天里的 agent 代劳）执行 `mo run retry --issue 42` 即可原地重试。审批通知同理对应 `mo run approve --issue 42` / `mo run reject --issue 42 --message "说明需要修改的内容"`；Agent 代劳时应额外用 `--author` 署名。恢复手段的完整地图见[故障恢复](troubleshooting.md)。
+失败通知的建议动作直接对应恢复命令：手机上看到「issue 42 失败」，回到任何一台终端（或让聊天里的 agent 代劳）执行 `mo run retry --issue 42` 即可原地重试。审批通知同理对应 `mo run approve --issue 42` / `mo run reject --issue 42 --message "说明需要修改的内容"`。恢复手段的完整地图见[故障恢复](troubleshooting.md)。
 
 ## 微信的推送窗口限制
 

@@ -47,7 +47,7 @@ export interface IssueDetailMutations {
   resumeMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
   retryMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
   rerunMutation: UseMutationResult<{ issue: unknown; message: string }, Error, void, unknown>
-  addCommentMutation: UseMutationResult<unknown, Error, { author: string; body: string }, unknown>
+  addCommentMutation: UseMutationResult<unknown, Error, { displayName: string; body: string }, unknown>
   deleteCommentMutation: UseMutationResult<{ message: string }, Error, string, unknown>
 }
 
@@ -266,8 +266,8 @@ export function createIssueDetailMutationOptions(
   }
 
   const addCommentMutation = {
-    mutationFn: ({ author, body }: { author: string; body: string }) =>
-      addComment(issueNumber, author, body, projectId, extractAttachmentIds(body)),
+    mutationFn: ({ displayName, body }: { displayName: string; body: string }) =>
+      addComment(issueNumber, displayName, body, projectId, extractAttachmentIds(body)),
     onSuccess: () => {
       invalidateDetail()
       onAddCommentSuccess?.()

@@ -38,7 +38,7 @@ public class IssueFeedbackApiSpecs
 
         var response = await _client.PostAsJsonAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "build", body = "should fail", author = "supervisor" });
+            new { stage = "build", body = "should fail", displayName = "supervisor" });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
     }
@@ -77,7 +77,7 @@ public class IssueFeedbackApiSpecs
 
         var created = await _client.PostDataAsync<FeedbackApiFeedbackDto>(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback",
-            new { stage = "plan", body = "live server shape", author = "supervisor" });
+            new { stage = "plan", body = "live server shape", displayName = "supervisor" });
 
         var response = await _client.GetAsync(
             $"/api/projects/{project.Id}/issues/{issueNumber}/feedback/{created.Id}");

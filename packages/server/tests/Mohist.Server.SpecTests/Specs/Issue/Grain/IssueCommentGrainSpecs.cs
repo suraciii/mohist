@@ -24,7 +24,7 @@ public class IssueCommentGrainSpecs
     {
         var (projectId, issueNumber, grain) = await CreateIssueAsync();
 
-        var result = await grain.AddCommentAsync("  Ada Lovelace  ", "Looks good");
+        var result = await grain.AddCommentAsync("  Ada Lovelace  ", null, "Looks good");
 
         Assert.Equal("Ada Lovelace", result.Author);
         await using var scope = _fixture.Services.CreateAsyncScope();
@@ -46,9 +46,40 @@ public class IssueCommentGrainSpecs
         var (_, _, grain) = await CreateIssueAsync();
 
         var exception = await Assert.ThrowsAsync<ArgumentException>(
-            () => grain.AddCommentAsync(author, "Not persisted"));
+            () => grain.AddCommentAsync(author, null, "Not persisted"));
 
         Assert.Contains(author.Length > 100 ? "100" : "required", exception.Message, StringComparison.OrdinalIgnoreCase);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        Assert.False(await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
+            .AnyAsync(comment => comment.Body == "Not persisted"));
+    }
+
+    [Fact]
+    public async Task AddCommentAsync_StoresDisplayAliasSeparatelyFromAuthor()
+    {
+        var (projectId, issueNumber, grain) = await CreateIssueAsync();
+
+        var result = await grain.AddCommentAsync("service", "  Ada Lovelace  ", "Looks good");
+
+        Assert.Equal("service", result.Author);
+        Assert.Equal("Ada Lovelace", result.DisplayName);
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var row = await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
+            .AsNoTracking()
+            .SingleAsync(comment => comment.Id == result.Id);
+        Assert.Equal("service", row.Author);
+        Assert.Equal("Ada Lovelace", row.DisplayName);
+    }
+
+    [Fact]
+    public async Task AddCommentAsync_OverlongDisplayAlias_RejectedWithoutCreatingRow()
+    {
+        var (_, _, grain) = await CreateIssueAsync();
+
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => grain.AddCommentAsync("service", new string('x', 101), "Not persisted"));
+
+        Assert.Contains("100", exception.Message, StringComparison.OrdinalIgnoreCase);
         await using var scope = _fixture.Services.CreateAsyncScope();
         Assert.False(await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
             .AnyAsync(comment => comment.Body == "Not persisted"));

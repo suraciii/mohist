@@ -99,7 +99,7 @@ export function retryIssue(number: number, projectId?: string | null) {
 }
 
 export interface ApproveIssueInput {
-  author?: string | null
+  displayName?: string | null
 }
 
 export function approveIssue(number: number, data: ApproveIssueInput, projectId?: string | null) {
@@ -110,7 +110,7 @@ export function approveIssue(number: number, data: ApproveIssueInput, projectId?
 }
 
 export interface RejectIssueInput {
-  author?: string | null
+  displayName?: string | null
   message: string
 }
 
@@ -124,7 +124,7 @@ export function rejectIssue(number: number, data: RejectIssueInput, projectId?: 
 export interface CreateFeedbackRequest {
   stage: string
   body: string
-  author?: string | null
+  displayName?: string | null
 }
 
 export function requestChangesIssue(number: number, data: CreateFeedbackRequest, projectId?: string | null) {
@@ -165,10 +165,10 @@ export function getFileContent(number: number, filePath: string, projectId?: str
   return request<{ base: string; head: string }>(projectApiPath(projectId, `/issues/${number}/file-content?path=${encodeURIComponent(filePath)}`))
 }
 
-export function addComment(issueNumber: number, author: string, body: string, projectId?: string | null, attachmentIds?: string[]) {
+export function addComment(issueNumber: number, displayName: string, body: string, projectId?: string | null, attachmentIds?: string[]) {
   return request<Comment>(projectApiPath(projectId, `/issues/${issueNumber}/comments`), {
     method: 'POST',
-    body: JSON.stringify({ author, body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
+    body: JSON.stringify({ displayName, body, ...(attachmentIds?.length ? { attachmentIds } : {}) }),
   })
 }
 

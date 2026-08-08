@@ -88,7 +88,7 @@ internal sealed class RecordingIssueGrain : IIssueGrain
     public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
     public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
-    public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+    public Task<IssueCommentResult> AddCommentAsync(string actor, string? displayName, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
 
     public Task<bool> AssignEpicAsync(int epicNumber)
     {
@@ -160,7 +160,7 @@ internal sealed class ThrowingIssueGrain : IIssueGrain
     public Task<IssueStartReadiness> GetStartReadinessAsync() => throw new NotSupportedException();
     public Task RecomputeCompositeStatusAsync() => throw new NotSupportedException();
         public Task StartCompositeAsync() => throw new NotSupportedException();
-    public Task<IssueCommentResult> AddCommentAsync(string author, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
+    public Task<IssueCommentResult> AddCommentAsync(string actor, string? displayName, string body, string[]? attachmentIds = null) => throw new NotSupportedException();
     public Task<bool> AssignEpicAsync(int epicNumber) =>
         Task.FromException<bool>(new InvalidOperationException("simulated Issue command failure"));
     public Task<bool> RemoveEpicAsync(int expectedEpicNumber) =>
