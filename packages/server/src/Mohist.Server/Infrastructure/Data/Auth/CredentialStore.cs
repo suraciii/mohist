@@ -320,6 +320,7 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             row.Name,
             row.Prefix,
             row.ProjectId,
+            row.FamilyId,
             row.ExpiresAt,
             row.RevokedAt,
             row.CreatedAt);
@@ -336,6 +337,8 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             ScopesJson = SerializeScopes(credential.Scopes),
             Name = credential.Name,
             Prefix = credential.Prefix,
+            ProjectId = credential.ProjectId,
+            FamilyId = credential.FamilyId,
             ExpiresAt = credential.ExpiresAt,
             RevokedAt = credential.RevokedAt,
             CreatedAt = credential.CreatedAt,

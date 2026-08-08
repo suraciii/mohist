@@ -411,6 +411,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.Property<DateTimeOffset?>("ExpiresAt")
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("FamilyId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Kind")
                         .IsRequired()
                         .HasMaxLength(32)
@@ -447,6 +451,8 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FamilyId");
+
                     b.HasIndex("PrincipalId", "Kind", "RevokedAt");
 
                     b.HasIndex("PrincipalId", "Name")
@@ -457,6 +463,55 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Credentials", (string)null);
+                });
+
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.DeviceAuthorizationRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ClientName")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("DecidedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DeviceCodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PrincipalId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserCodeHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DeviceCodeHash")
+                        .IsUnique();
+
+                    b.HasIndex("UserCodeHash")
+                        .IsUnique();
+
+                    b.ToTable("DeviceAuthorizations", (string)null);
                 });
 
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.EnrollmentTokenRow", b =>

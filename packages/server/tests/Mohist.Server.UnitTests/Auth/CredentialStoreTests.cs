@@ -205,7 +205,7 @@ public sealed class CredentialStoreTests
         var now = setup.Time.GetUtcNow();
         var credential = new Credential(
             "cred_session", "admin", CredentialKind.Session, TokenHash,
-            [Scope.Operator], Name: null, Prefix: null, ProjectId: null, now + TimeSpan.FromDays(7), RevokedAt: null, now);
+            [Scope.Operator], Name: null, Prefix: null, ProjectId: null, FamilyId: null, now + TimeSpan.FromDays(7), RevokedAt: null, now);
 
         await setup.Store.CreateAsync(credential);
 
@@ -381,10 +381,11 @@ public sealed class CredentialStoreTests
             ScopesJson = reader.GetString(4),
             Name = reader.IsDBNull(5) ? null : reader.GetString(5),
             Prefix = reader.IsDBNull(6) ? null : reader.GetString(6),
-            ExpiresAt = reader.IsDBNull(7) ? null : DateTimeOffset.Parse(reader.GetString(7)),
-            RevokedAt = reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
-            CreatedAt = DateTimeOffset.Parse(reader.GetString(9)),
-            ProjectId = reader.IsDBNull(10) ? null : reader.GetString(10),
+            FamilyId = reader.IsDBNull(7) ? null : reader.GetString(7),
+            ExpiresAt = reader.IsDBNull(8) ? null : DateTimeOffset.Parse(reader.GetString(8)),
+            RevokedAt = reader.IsDBNull(9) ? null : DateTimeOffset.Parse(reader.GetString(9)),
+            CreatedAt = DateTimeOffset.Parse(reader.GetString(10)),
+            ProjectId = reader.IsDBNull(11) ? null : reader.GetString(11),
         };
     }
 
@@ -404,6 +405,7 @@ public sealed class CredentialStoreTests
                     "ScopesJson" TEXT NOT NULL,
                     "Name" TEXT NULL,
                     "Prefix" TEXT NULL,
+                    "FamilyId" TEXT NULL,
                     "ExpiresAt" TEXT NULL,
                     "RevokedAt" TEXT NULL,
                     "CreatedAt" TEXT NOT NULL,

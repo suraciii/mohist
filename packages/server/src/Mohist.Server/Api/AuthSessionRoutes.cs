@@ -49,6 +49,7 @@ public static class AuthSessionRoutes
                 Name: null,
                 Prefix: null,
                 ProjectId: null,
+                FamilyId: null,
                 ExpiresAt: now + SessionLifetime,
                 RevokedAt: null,
                 CreatedAt: now);

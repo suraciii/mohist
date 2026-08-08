@@ -173,7 +173,7 @@ internal static class MohistCliCommands
 
     internal static string Escape(string value) => Uri.EscapeDataString(value);
 
-    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null)
+    internal static async Task<int> RunAsync(HttpClient http, string[] args, TextWriter output, TextWriter error, IFileSystem fileSystem, ICommandExecutor commandExecutor, IEnvironmentVariableProvider? environment = null, TextReader? standardInput = null, IServiceInstaller? installer = null, SourceCodeUpdater? updater = null, Func<string>? getUserHome = null, CancellationToken cancellationToken = default, ICliTerminal? terminalOverride = null, TimeProvider? timeProvider = null, Func<TimeSpan, CancellationToken, Task>? pollWait = null)
     {
         OutputOptionState.Explicit = false;
         if (IsDirectSlackCredentialArgument(args))
@@ -182,15 +182,19 @@ internal static class MohistCliCommands
             return CliExitCode.For(CliExitOutcome.UsageFailure);
         }
         environment ??= SystemEnvironmentVariableProvider.Instance;
-        getUserHome ??= fileSystem is RealFileSystem
-            ? null
-            : () => "/mohist-tests/user";
+        // The machine-local home is resolved the same way for the provider,
+        // the handler and the api so all three agree on where the
+        // credentials file lives.
+        var effectiveUserHome = getUserHome
+            ?? (fileSystem is RealFileSystem
+                ? () => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+                : () => "/mohist-tests/user");
         // Single injection point for the command credential: every request
         // this client sends carries Authorization: Bearer when a credential
         // is resolvable (CliCredentialHandler), regardless of which command
         // originates it. The caller-supplied client remains the transport.
-        var credentials = new CliCredentialProvider(fileSystem, environment);
-        http = new HttpClient(new CliCredentialHandler(credentials, http))
+        var credentials = new CliCredentialProvider(fileSystem, environment, effectiveUserHome);
+        http = new HttpClient(new CliCredentialHandler(credentials, http, fileSystem, effectiveUserHome, error))
         {
             BaseAddress = http.BaseAddress,
             Timeout = http.Timeout,
@@ -206,10 +210,11 @@ internal static class MohistCliCommands
             fileSystem,
             commandExecutor,
             standardInput,
-            getUserHome,
+            effectiveUserHome,
             terminal: terminal,
             cliEnvironment: cliEnvironment,
             timeProvider: timeProvider,
+            pollWait: pollWait,
             cancellationToken: cancellationToken);
         var services = new ServiceCollection();
         services.AddSingleton(api);
