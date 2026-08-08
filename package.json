@@ -22,6 +22,7 @@
     "test:fast:wf": "dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-restore",
     "test:fast:cli": "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-restore",
     "verify": "npm run build && npm test",
+    "hooks": "git config --local core.hooksPath \"$(git rev-parse --path-format=absolute --git-common-dir)/../.githooks\"",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "test:archscripts": "tsx --test scripts/*.test.ts scripts/test-duration/*.test.ts",
     "test:budget": "tsx scripts/test-duration/guard.ts",
