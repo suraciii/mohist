@@ -126,6 +126,41 @@ public sealed class InteractionWorkspaceProvisionerTests
     }
 
     [Fact]
+    public async Task EnsureCliWorkspace_CreatesDeterministicCurrentProjectWorkspace()
+    {
+        var store = new FakeWorkspaceStore();
+        var grains = new FakeGrainFactory(store);
+        var provisioner = new InteractionWorkspaceProvisioner(store, grains);
+
+        var name = await provisioner.EnsureCliWorkspaceAsync("p1", Now);
+
+        Assert.Equal("cli-current", name);
+        var ws = Assert.Single(store.All);
+        Assert.Equal(new WorkspaceOrigin.Cli(), ws.Origin);
+        Assert.Equal("cli", WorkspaceRowJson.OriginKind(ws.Origin));
+    }
+
+    [Fact]
+    public async Task EnsureCliWorkspace_ReusesActiveWorkspaceAcrossLaunches()
+    {
+        var store = new FakeWorkspaceStore();
+        store.All.Add(new WorkspaceState
+        {
+            ProjectId = "p1",
+            Name = "cli-current",
+            Origin = new WorkspaceOrigin.Cli(),
+            Status = WorkspaceStatus.Active,
+        });
+        var grains = new FakeGrainFactory(store);
+        var provisioner = new InteractionWorkspaceProvisioner(store, grains);
+
+        var name = await provisioner.EnsureCliWorkspaceAsync("p1", Now);
+
+        Assert.Equal("cli-current", name);
+        Assert.Empty(grains.Created);
+    }
+
+    [Fact]
     public async Task ArchiveSlackChannel_NoActiveWorkspace_ReturnsFalse()
     {
         var store = new FakeWorkspaceStore();

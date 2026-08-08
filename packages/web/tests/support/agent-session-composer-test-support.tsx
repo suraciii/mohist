@@ -47,12 +47,13 @@ const dataHook: AgentSessionComposerDataHook = () => {
         throw Object.assign(new Error(state.launchError.error), { code: state.launchError.code })
       }
       return {
-        ...state.launchResponse,
         sessionId: 'sess-123',
         agentId: agentRef,
         agentName: 'Agent 1',
         status: 'running',
         transcriptUrl: '',
+        sessionUrl: '/Test/sessions/sess-123',
+        ...state.launchResponse,
       } as AgentSessionLaunchResponse
     },
   })

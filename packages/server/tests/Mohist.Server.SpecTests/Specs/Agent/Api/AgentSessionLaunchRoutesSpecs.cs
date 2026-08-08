@@ -46,6 +46,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
         var jobsBefore = await CountJobsAsync(projectId, agentId);
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
         using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
         Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
         var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
@@ -53,6 +54,15 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         Assert.Contains("model-reference-malformed", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().Select(g => g.GetProperty("code").GetString()));
         Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
         Assert.Equal(jobsBefore, await CountJobsAsync(projectId, agentId));
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    private async Task<int> CountWorkspacesAsync(string projectId)
+    {
+        using var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetArrayLength();
     }
 
     private async Task<int> CountJobsAsync(string projectId, string agentId)
@@ -92,6 +102,17 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.StartsWith("agent-job-launch-", jobId!, StringComparison.Ordinal);
             Assert.Equal(agent.Id, data.GetProperty("agentId").GetString());
             Assert.Equal("reviewer", data.GetProperty("agentName").GetString());
+            Assert.Equal(agent.Id, data.GetProperty("targetId").GetString());
+            Assert.Equal("web", data.GetProperty("origin").GetString());
+            var workspaceId = data.GetProperty("workspaceId").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(workspaceId));
+            using var workspacesResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
+            var workspacesPayload = await workspacesResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var persistedWorkspace = workspacesPayload.GetProperty("data")
+                .EnumerateArray()
+                .Single(workspace => string.Equals(workspace.GetProperty("name").GetString(), workspaceId, StringComparison.Ordinal));
+            Assert.Equal("web", persistedWorkspace.GetProperty("origin").GetProperty("kind").GetString());
+            Assert.Equal($"/launch-201/sessions/{sessionId}", data.GetProperty("sessionUrl").GetString());
             Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("status").GetString()));
             Assert.Equal(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}/transcript",
@@ -189,7 +210,9 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+            var data = payload.GetProperty("data");
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
+            Assert.Equal("pay", data.GetProperty("workspaceId").GetString());
 
             var query = await GetAgentSessionQueryAsync();
             var record = await query.FirstByLabelsAsync(
@@ -205,6 +228,8 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal("main", record.Session.Metadata.Label(GenericAgentSessionMetadata.Repository));
             Assert.Equal("/tmp/launch-ctx", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspacePath));
             Assert.Equal("pay", record.Session.Metadata.Label(GenericAgentSessionMetadata.WorkspaceName));
+            Assert.Equal("web", record.Session.Metadata.Label(GenericAgentSessionMetadata.Origin));
+            Assert.Equal(agent.Id, record.Session.Metadata.Label(GenericAgentSessionMetadata.TargetId));
 
             Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.WorkflowRunId));
             Assert.Null(record.Session.Metadata.Label(AgentSessionQueryMetadataKeys.SessionName));

@@ -124,7 +124,9 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(45)] bool ParentBindingReleased = false,
     [property: Id(46)] bool AbortParentBindingAcknowledged = false,
     [property: Id(47)] string? WorkspacePath = null,
-    [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
+    [property: Id(49)] string? Origin = null,
+    [property: Id(50)] string? TargetId = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -181,7 +183,9 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// repositories. Append-only Orleans field id (next free after
     /// <see cref="WorkspaceName"/>).
     /// </summary>
-    [property: Id(12)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(12)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
+    [property: Id(13)] string? Origin = null,
+    [property: Id(14)] string? TargetId = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -304,6 +308,8 @@ public static class AgentLaunchCoordinatorCodec
             request.EpicNumber?.ToString() ?? string.Empty,
             request.Repository?.Trim() ?? string.Empty,
             request.Title?.Trim() ?? string.Empty,
+            request.Origin?.Trim() ?? string.Empty,
+            request.TargetId?.Trim() ?? string.Empty,
             attachments,
             connectionOrigin?.ConnectionId ?? string.Empty,
             connectionOrigin?.WorkspaceTeamId ?? string.Empty,

@@ -924,7 +924,7 @@ public class CliAgentCommandSpecs
         Assert.DoesNotContain("parent session:", text, StringComparison.Ordinal);
         Assert.DoesNotContain("edge id:", text, StringComparison.Ordinal);
         Assert.Equal(
-            ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "status", "attachments", "rejectedAttachments", "transcriptUrl", "jobUrl", "observationUrl"],
+            ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "workspaceId", "targetId", "origin", "status", "attachments", "rejectedAttachments", "sessionUrl", "transcriptUrl", "jobUrl", "observationUrl"],
             ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentSessionLaunch)).Fields);
     }
 

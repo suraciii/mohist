@@ -26,7 +26,9 @@ public sealed record GenericAgentSessionContext(
     string? Repository = null,
     string? WorkspaceName = null,
     string? WorkspacePath = null,
-    string? Title = null);
+    string? Title = null,
+    string? Origin = null,
+    string? TargetId = null);
 
 public static class GenericAgentSessionMetadata
 {
@@ -73,6 +75,10 @@ public static class GenericAgentSessionMetadata
     /// Does not create scope/mount/supervisor lifecycle.
     /// </summary>
     public const string WorkspacePath = "mohist.io/agent-launch/workspace-path";
+
+    public const string Origin = "mohist.io/agent-launch/origin";
+
+    public const string TargetId = "mohist.io/agent-launch/target-id";
 
     /// <summary>
     /// Label key identifying the CloudEvent that triggered a subscription-driven
@@ -127,6 +133,10 @@ public static class GenericAgentSessionMetadata
             labels[WorkspaceName] = context.WorkspaceName!;
         if (!string.IsNullOrWhiteSpace(context.WorkspacePath))
             labels[WorkspacePath] = context.WorkspacePath!;
+        if (!string.IsNullOrWhiteSpace(context.Origin))
+            labels[Origin] = context.Origin!;
+        if (!string.IsNullOrWhiteSpace(context.TargetId))
+            labels[TargetId] = context.TargetId!;
         return labels;
     }
 

@@ -81,6 +81,8 @@ export interface UnifiedSessionSummaryDto {
   toolErrorCount: number | null
   agentId?: string | null
   agentName?: string | null
+  origin?: string | null
+  targetId?: string | null
   workflowRunId?: string | null
   sessionName?: string | null
   contextRefs: UnifiedSessionContextRefsDto | null
@@ -264,6 +266,7 @@ export interface SessionMetadata {
   sessionId: string
   sessionName?: string | null
   source?: string | null
+  origin?: string | null
   agentId?: string | null
   agentName?: string | null
   workflowRunId?: string | null

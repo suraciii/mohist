@@ -355,6 +355,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
                 WorkspaceOrigin.Manual => new { },
                 WorkspaceOrigin.Slack slack => new { teamId = slack.TeamId, channelId = slack.ChannelId },
                 WorkspaceOrigin.Web web => new { conversationId = web.ConversationId },
+                WorkspaceOrigin.Cli => new { },
                 _ => new { },
             },
             repositoryNames = state.RepositoryNames,

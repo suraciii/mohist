@@ -198,7 +198,9 @@ public sealed record AgentSessionListItemDto(
     string CreatedAt,
     string? LastActivityAt,
     string? ResolvedModel,
-    [property: JsonPropertyName("contextRefs")] AgentSessionListContextRefsDto? ContextRefs);
+    [property: JsonPropertyName("contextRefs")] AgentSessionListContextRefsDto? ContextRefs,
+    string? Origin = null,
+    string? TargetId = null);
 
 /// <summary>
 /// Optional envelope of context references recorded on a generic
@@ -255,7 +257,9 @@ public sealed record GenericAgentSessionSummaryDto(
     [property: JsonPropertyName("recoveryAvailable")] bool RecoveryAvailable,
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
-    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null);
+    [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
+    string? Origin = null,
+    string? TargetId = null);
 
 public sealed record AgentSessionInputObservationDto(
     string Id,
@@ -427,7 +431,9 @@ public sealed record UnifiedSessionSummaryDto(
     [property: JsonPropertyName("currentTurnId")] string? CurrentTurnId = null,
     [property: JsonPropertyName("inputs")] IReadOnlyList<AgentSessionInputObservationDto>? Inputs = null,
     [property: JsonPropertyName("turns")] IReadOnlyList<AgentTurnObservationDto>? Turns = null,
-    [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null);
+    [property: JsonPropertyName("recoveryHistory")] IReadOnlyList<AgentSessionRecoveryObservationDto>? RecoveryHistory = null,
+    string? Origin = null,
+    string? TargetId = null);
 
 /// <summary>
 /// Lightweight unified read shape for an AgentSession in the source-filtered
@@ -449,7 +455,9 @@ public sealed record UnifiedSessionListItemDto(
     string? AgentName,
     string? WorkflowRunId,
     string? SessionName,
-    [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs);
+    [property: JsonPropertyName("contextRefs")] UnifiedSessionContextRefsDto? ContextRefs,
+    string? Origin = null,
+    string? TargetId = null);
 
 /// <summary>
 /// Optional envelope of context references recorded on a session. Each field

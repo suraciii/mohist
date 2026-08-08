@@ -741,6 +741,7 @@ function SessionHeader({
           {meta.source === 'workflow' ? 'Workflow Session' : 'Agent Session'}
         </span>
         {meta.agentName && <span>Agent: {meta.agentName}</span>}
+        {meta.origin && <span data-testid="session-origin">Origin: {meta.origin}</span>}
         {meta.sessionName && meta.source === 'workflow' && <span>Work: {meta.sessionName}</span>}
         {meta.workflowRunId && <span>Workflow run: {meta.workflowRunId}</span>}
         {meta.workspace && (

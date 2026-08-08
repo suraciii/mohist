@@ -882,7 +882,11 @@ internal static class AgentCommands
                     ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
                     body,
                     printServerUnavailable: false,
-                    headers: new Dictionary<string, string> { ["Idempotency-Key"] = idempotencyKey! },
+                    headers: new Dictionary<string, string>
+                    {
+                        ["Idempotency-Key"] = idempotencyKey!,
+                        ["X-Mohist-Launch-Origin"] = "cli",
+                    },
                     retries: 1);
                 if (response is null)
                     return MohistCliApi.FailureExitCode(HttpStatusCode.ServiceUnavailable);
