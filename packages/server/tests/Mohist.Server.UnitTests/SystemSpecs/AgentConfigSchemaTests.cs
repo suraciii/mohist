@@ -7,12 +7,12 @@ namespace Mohist.Server.UnitTests.SystemSpecs;
 public class AgentConfigSchemaTests
 {
     [Fact]
-    public void Validate_NullOrNonObject_ReturnsNull()
+    public void Validate_Null_IsValid_NonObject_IsRejected()
     {
         Assert.Null(AgentConfigSchema.Validate(null));
         Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("null").RootElement));
-        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("\"foo\"").RootElement));
-        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("[1,2,3]").RootElement));
+        Assert.Contains("JSON object or null", AgentConfigSchema.Validate(JsonDocument.Parse("\"foo\"").RootElement));
+        Assert.Contains("JSON object or null", AgentConfigSchema.Validate(JsonDocument.Parse("[1,2,3]").RootElement));
     }
 
     [Fact]
@@ -89,6 +89,22 @@ public class AgentConfigSchemaTests
         var error = AgentConfigSchema.Validate(element);
         Assert.NotNull(error);
         Assert.Contains("agentConfig.runtime", error);
+    }
+
+    [Fact]
+    public void Validate_ModelNotString_ReturnsActionableError()
+    {
+        var element = JsonDocument.Parse("""{"model":42}""").RootElement;
+        var error = AgentConfigSchema.Validate(element);
+
+        Assert.Contains("agentConfig.model", error);
+        Assert.Contains("string", error);
+    }
+
+    [Fact]
+    public void Validate_ModelNull_IsValid()
+    {
+        Assert.Null(AgentConfigSchema.Validate(JsonDocument.Parse("""{"model":null}""").RootElement));
     }
 
     [Fact]

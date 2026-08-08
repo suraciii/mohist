@@ -246,6 +246,8 @@ mo workspace close payment-refactor
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
   `--instructions` 或 `--instructions-file`。`--runtime` 只接受 `opencode` 或 `pi`；
+  `--skills` 必须包含至少一个非空技能名；空字符串不会被当作清空，`edit` 要清空 Skills
+  必须显式使用 `--clear-skills`。
   `--avatar-file` 读取 UTF-8 的头像 URL 或 data URI。CLI 不要求调用方拼 Agent config JSON，
   `--agent-config` 透传入口退役；旧入口会返回迁移提示。`edit` 使用对应的
   `--clear-runtime`、`--clear-model`、`--clear-variant`、`--clear-avatar`、`--clear-skills`
