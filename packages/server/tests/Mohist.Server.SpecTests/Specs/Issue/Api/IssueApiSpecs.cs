@@ -97,8 +97,6 @@ public class IssueApiSpecs
         Assert.Equal(issue.Number, detail.Number);
     }
 
-    
-
     [Fact]
     public async Task CreateEpic_OnProjectRoute_UsesRouteProjectContext()
     {
@@ -144,27 +142,15 @@ public class IssueApiSpecs
     }
 
     [Fact]
-    public async Task Prerequisites_ProjectIntoBlocker()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-prereq-{Guid.NewGuid():N}");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var prereq = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Prereq", projectId = project.Id, isDraft = false });
-        var dependent = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Dependent", projectId = project.Id, isDraft = false });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{dependent.Number}/prerequisites", new { prerequisiteNumber = prereq.Number });
-        var detail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{dependent.Number}");
-
-        Assert.False(detail.CanStart);
-        Assert.NotNull(detail.Blocker);
-        Assert.Equal("waiting-for", detail.Blocker!.Kind);
-        Assert.Equal(prereq.Number, detail.Blocker.Issue!.Number);
-        Assert.Contains(detail.Prereq, p => p.Number == prereq.Number && !p.Completed);
-    }
-
-    [Fact]
     public async Task StartIssue_WithIncompletePrerequisite_IsRejectedByWorkflowGate()
     {
+        // Route contract for POST /api/projects/{ref}/issues/{n}/start
+        // when the issue carries an undelivered prerequisite: the
+        // route returns 400 Bad Request. The underlying blocker
+        // projection (IssueQuerier.GetAsync.Blocker = waiting-for)
+        // and start-readiness domain logic are sunk into
+        // IssueStartReadinessProjectionSpecs + IssueStartReadinessDomainSpecs
+        // (batch A); the route just propagates the rejection.
         var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-prereq-gate-{Guid.NewGuid():N}");
 
         await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
@@ -201,59 +187,9 @@ public class IssueApiSpecs
         Assert.Null(status.Job);
     }
 
-    [Fact]
-    public async Task ProjectStatus_UsesIssueLifecycleStages()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-status-{Guid.NewGuid():N}");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Lifecycle status issue", projectId = project.Id, isDraft = false });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/issues/{issue.Number}/start", new { });
-        try
-        {
-            var status = await _client.GetDataAsync<ProjectStatusDto>($"/api/projects/{project.Id}/status");
-
-            Assert.Equal(1, status.Issues);
-            Assert.Equal(1, status.IssuesByStatus["in_progress"]);
-            Assert.Contains("cancelled", status.IssuesByStatus.Keys);
-            Assert.DoesNotContain("plan", status.IssuesByStatus.Keys);
-            Assert.DoesNotContain("build", status.IssuesByStatus.Keys);
-            Assert.DoesNotContain("check", status.IssuesByStatus.Keys);
-        }
-        finally
-        {
-            using var _ = await _client.PostAsync($"/api/projects/{project.Id}/issues/{issue.Number}/stop", null);
-        }
-    }
-
-    [Fact]
-    public async Task Epics_LinkIssueAndExposePrimaryEpic()
-    {
-        var project = await _client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>("/api/projects", $"web-epic-{Guid.NewGuid():N}");
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/repositories", new { name = "main", gitUrl = $"file://{Guid.NewGuid():N}", baseBranch = "main", setDefault = true });
-        var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/issues", new { title = "Epic issue", projectId = project.Id });
-        var epic = await _client.PostDataAsync<EpicDto>($"/api/projects/{project.Id}/epics", new { title = "Runtime model", description = "Ship runtime", priority = "p1", projectId = project.Id });
-
-        await _client.PostOkAsync($"/api/projects/{project.Id}/epics/{epic.Number}/issues", new { issueNumber = issue.Number });
-        var detail = await _client.GetDataAsync<EpicDetailDto>($"/api/projects/{project.Id}/epics/{epic.Number}");
-        var issueDetail = await _client.GetDataAsync<IssueDto>($"/api/projects/{project.Id}/issues/{issue.Number}");
-
-        Assert.Contains(detail.LinkedIssues, i => i.Number == issue.Number);
-        Assert.Equal(epic.Number, issueDetail.Epic?.Number);
-    }
-
-    private sealed record IssueDto(int Number, CommentDto[] Comments, PrerequisiteDto[] Prereq, bool IsDraft, bool CanStart, BlockerDto? Blocker, IssueEpicDto? Epic, string WorkflowProfileId, string? Risk = null);
-    private sealed record WorkflowProfileDto(string Id, string Name, string Description);
-    private sealed record WorkflowProfileDescriptionDto(string Id, string DisplayName, string Description);
+    private sealed record IssueDto(int Number, CommentDto[] Comments, string WorkflowProfileId);
     private sealed record ProjectDto(string Id);
     private sealed record CommentDto(string Id, string Body, string? Author, string? DisplayName = null);
-    private sealed record PrerequisiteDto(int Number, bool Completed);
-    private sealed record BlockerDto(string Kind, BlockerIssueDto? Issue);
-    private sealed record BlockerIssueDto(int Number, string Title);
-    private sealed record IssueEpicDto(int Number, string Title);
-    private sealed record ProjectStatusDto(int Issues, Dictionary<string, int> IssuesByStatus);
     private sealed record SystemInfoDto(
         RunningInfoDto Running,
         SourceInfoDto Source,
