@@ -1,49 +1,75 @@
 ---
 name: Bug report
-about: Report a reproducible bug
+about: "Fix — functional bugs (wrong behavior) or non-functional bugs (performance/reliability/resource). Signal: behavior deviates from the correct state, i.e. an invariant is violated."
 labels: [bug]
 ---
 
 <!--
+Choose the template by external behavior:
+  changed in a user-perceivable way → Feature request
+  unchanged, but fixing something wrong → Bug report
+  unchanged, already correct, internal only → Refactor
 Fill in each section with the minimum the fixer needs. Concrete > thorough:
 an example beats a paragraph. Never write "it's slow" — give a number.
 -->
 
-## Symptom
+## Symptom & Evidence
 
-<What is wrong? What did you observe, with an example?>
+<!--
+Pick the mode first:
+  functional     = repro steps from a known state + Expected vs Actual (state
+                   what triggers it and the data/objects involved).
+  non-functional = current measured value + target + how it was measured (a
+                   number and a method, always).
+Forbidden: 'a bit slow', 'sometimes crashes', 'feels off' — anything
+unreproducible or unquantifiable. Do not jump to the root cause or the fix
+here — that belongs in Domain Context / Fix Shape.
+-->
 
-## Steps to reproduce
+<Functional: repro steps from a known state + Expected vs Actual.
+ Non-functional: current measured value + target + how it was measured.>
 
-1. Go to '...'
-2. Click on '...'
-3. See error
+## Domain Context
 
-## Expected vs actual
+<!--
+Required: state the violated invariant — 'the system should X, actually Y'.
+Name the domain concepts and their intended relationship; cite the code path
+only if it carries the concept. For a pure typo / copy bug: shrink to one
+line, or delete this whole section. Do NOT propose the fix here.
+-->
 
-| | |
-|---|---|
-| Expected | <What should have happened?> |
-| Actual | <What actually happened?> |
+<The invariant that should hold, and how the current state violates it.>
 
-## Environment
+## Fix Shape
 
-- Mohist version:
-- OS / browser:
-- Anything unusual about the setup (proxy, self-host, runner config)?
+<!--
+The correction direction + the blast boundary (what you touch / don't touch).
+Stay minimal: change only what restores the invariant, not what is 'more
+elegant'. Leave concrete files / functions / schemas to the Plan stage.
+Adjacent bugs you noticed go to a separate issue, not here.
+-->
 
-## Acceptance criteria
+<The correction direction and what is in/out of scope.>
 
-<!-- How will we know this is fixed? One observable [ ] per line. -->
+## Acceptance Criteria
 
-- [ ] <Observable condition that proves the fix>
+<!--
+Functional = the behavior is correct along the repro path; Non-functional =
+the metric meets the target (give the number). One [ ] per line. Forbidden:
+implementation-level checks ('unit tests pass').
+-->
+
+- [ ] <Functional: observable correct behavior; Non-functional: metric meets target>
+- [ ] <...>
 
 ## Non-Goals
 
-<!-- What is deliberately out of scope for this fix? -->
+<!--
+Adjacent bugs not fixed here, and boundaries deliberately not expanded.
+-->
 
-- <Explicitly out of scope>
+- <Explicit out-of-scope item>
 
 ---
 
-> 打上 `mohist` 标签即可将本 issue 接入 Mohist 产线；`p0`–`p4` 标签映射为优先级。
+> Add the `mohist` label to route this issue into the Mohist pipeline; `p0`–`p4` labels map to priority.
