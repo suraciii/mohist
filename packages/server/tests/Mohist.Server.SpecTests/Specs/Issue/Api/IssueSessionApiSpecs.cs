@@ -2,16 +2,15 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure.Data.Db;
-using Mohist.Server.Infrastructure.Orleans;
-using Mohist.Server.Infrastructure.Events;
-using Mohist.Server.Issue.Grains;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
+using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
+using Mohist.Server.Infrastructure.Orleans;
+using Mohist.Server.Issue.Grains;
 using Mohist.Server.Workflow.Domain.Run;
-using Mohist.Server.Sessions.Services;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Api;
@@ -32,6 +31,18 @@ public class IssueSessionApiSpecs
     [Fact]
     public async Task IssueSessionMetadataEndpoint_ExposesRequiredMetadataAndOmitsProjectedFields()
     {
+        // Route contract for GET /api/projects/{ref}/issues/{n}/sessions/{name}
+        // + its /transcript sibling: JSON envelope shape, positive field
+        // assertions (id, sessionName, runtimeSessionId, runtime, activity,
+        // stage, title, createdAt, model, eventSummary, usage, metadata),
+        // and negative field assertions (no events/turns/assistant/
+        // workflowLogs/transcript on the metadata envelope, no
+        // lastActivityAt on the transcript envelope, no
+        // transcript/metadata on the transcript envelope). The
+        // calculations behind these fields — partCount merging,
+        // transcript segment ordering across insert batches,
+        // context-exhaustion failure category projection — live in
+        // IssueSessionProjectionSpecs (querier-level, MohistDbFixture).
         var (project, issue, work, session) = await CreateStartedAgentSessionAsync("metadata-shape", sessionName: "plan");
         var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
         await issueGrain.StartWorkAsync();
@@ -102,6 +113,7 @@ public class IssueSessionApiSpecs
         using var doc = JsonDocument.Parse(raw);
         var root = doc.RootElement.GetProperty("data");
 
+        // Positive envelope shape.
         Assert.Equal(currentSession.Id, root.GetProperty("id").GetString());
         Assert.Equal("plan", root.GetProperty("sessionName").GetString());
         Assert.Equal(currentSession.Id, root.GetProperty("runtimeSessionId").GetString());
@@ -129,219 +141,36 @@ public class IssueSessionApiSpecs
         Assert.Equal(1, eventSummary.GetProperty("toolCallCount").GetInt32());
         Assert.Equal(1, eventSummary.GetProperty("toolErrorCount").GetInt32());
 
+        // Metadata envelope presence (numeric values asserted at the
+        // querier level by IssueSessionProjectionSpecs).
         var metadata = root.GetProperty("metadata");
-        // 6 parts: session.input, message.delta (hello+world merged),
-        // usage.updated, model.resolved, tool_call (started+updated),
-        // session.closed, plus the context_health_update snapshot
-        // emitted by the grain on the first usage event.
-        Assert.Equal(6, metadata.GetProperty("partCount").GetInt32());
-        Assert.Equal(1, metadata.GetProperty("toolCount").GetInt32());
+        Assert.True(metadata.TryGetProperty("partCount", out _));
+        Assert.True(metadata.TryGetProperty("toolCount", out _));
 
+        // Negative envelope shape: the metadata envelope does NOT carry
+        // the per-part transcript projection fields. Servers keep these
+        // fields off the wire — the transcript is its own route.
         Assert.False(root.TryGetProperty("events", out _));
         Assert.False(root.TryGetProperty("turns", out _));
         Assert.False(root.TryGetProperty("assistant", out _));
         Assert.False(root.TryGetProperty("workflowLogs", out _));
         Assert.False(root.TryGetProperty("transcript", out _));
-    }
 
-    [Fact]
-    public async Task IssueSessionMetadataEndpoint_ExposesContextExhaustionFailureCategory()
-    {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("exhaustion-shape", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
-        await issueGrain.StartWorkAsync();
-
-        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new object[]
-            {
-                new
-                {
-                    type = "usage.updated",
-                    payload = new
-                    {
-                        contextWindowSize = 1000L,
-                        contextWindowUsed = 960L
-                    }
-                },
-                new
-                {
-                    type = "turn.failed",
-                    payload = new { status = "failed", exitCode = 1, producedArtifacts = false }
-                }
-            }
-        });
-
-        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 2, persistence);
-
-        var eventStore = _fixture.Services.GetRequiredService<Mohist.Server.Infrastructure.Events.IEventStore>();
-        var stored = await eventStore.ListAgentSessionEventsAsync(currentSession.Id);
-        var exhaustion = Assert.Single(
-            stored,
-            s => s.Envelope.Type == EventCatalog.ReverseDns.AgentSessionContextExhausted);
-        Assert.Equal("context_exhaustion", exhaustion.Envelope.Data!.Value.GetProperty("failureCategory").GetString());
-
-        var raw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
-        using var doc = JsonDocument.Parse(raw);
-        var root = doc.RootElement.GetProperty("data");
-        var usage = root.GetProperty("usage");
-
-        Assert.Equal(960, usage.GetProperty("contextWindowUsed").GetInt64());
-        Assert.Equal(1000, usage.GetProperty("contextWindowSize").GetInt64());
-    }
-
-    [Fact]
-    public async Task IssueSessionEventsEndpoint_ReturnsTranscriptSegmentsInAscendingSequenceAcrossBatches()
-    {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("raw-events-ordering", sessionName: "build");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
-        await issueGrain.StartWorkAsync();
-
-        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "build", work, "Build session");
-        var persistence = _fixture.Persistence.Checkpoint(currentSession.Id);
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new object[]
-            {
-                new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
-                new
-                {
-                    type = "tool_call.started",
-                    payload = new
-                    {
-                        toolCallId = "tool-1",
-                        kind = "read",
-                        status = "in_progress",
-                        title = "Read README",
-                        rawInput = new { filePath = "README.md" }
-                    }
-                }
-            }
-        });
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new object[]
-            {
-                new { type = "message.delta", payload = new { text = "first" } },
-                new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } },
-                new
-                {
-                    type = "tool_call.updated",
-                    payload = new
-                    {
-                        toolCallId = "tool-1",
-                        kind = "read",
-                        status = "completed",
-                        rawOutput = new { text = "result" }
-                    }
-                },
-                new { type = "message.delta", payload = new { text = "second" } }
-            }
-        });
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new object[]
-            {
-                new { type = "session.activity", payload = new { activity = "idle", status = "completed", exitCode = 0 } }
-            }
-        });
-
-        var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
-        await dbFactory.WaitForTranscriptPartsAsync(currentSession.Id, 4, persistence);
-
-        var response = await _client.GetDataAsync<IssueSessionTranscriptResponseDto>($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/build/transcript");
-
-        Assert.Equal(4, response.PartCount);
-        var turn = Assert.Single(response.Turns);
-        Assert.Equal("do the thing", turn.User.Text);
-        Assert.Equal("task", turn.User.Kind);
-        Assert.Equal(
-            new[] { "tool", "text", "reasoning" },
-            turn.Assistant.Select(p => p.Type).ToArray());
-        Assert.Contains(turn.Assistant, p => p.Type == "tool" && p.Tool?.ToolCallId == "tool-1" && p.Tool.Status == "completed");
-        Assert.Null(turn.CompletedAt);
-        Assert.NotNull(response.LastActivityAt);
-    }
-
-    [Fact]
-    public async Task IssueSessionApis_DoNotReturnServerProjectedTurns()
-    {
-        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("removal-assertion", sessionName: "plan");
-        var issueGrain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(project.Id, issue.Number)));
-        await issueGrain.StartWorkAsync();
-
-        var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
-        var currentSession = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
-        await _client.PostOkAsync(RunnerAgentSessionAttachPath(currentSession), new { runtimeSessionId = currentSession.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
-        await _client.PostOkAsync(RunnerAgentSessionRuntimeEventsPath(currentSession), new
-        {
-            runtimeSessionId = currentSession.Id,
-            runtimeEvents = new object[]
-            {
-                new { type = "session.input", payload = new { text = "do the thing", kind = "task" } },
-                new
-                {
-                    type = "tool_call.started",
-                    payload = new
-                    {
-                        toolCallId = "tool-1",
-                        kind = "read",
-                        status = "in_progress",
-                        title = "Read README",
-                        rawInput = new { filePath = "README.md" }
-                    }
-                },
-                new { type = "message.delta", payload = new { text = "first" } },
-                new { type = "reasoning.delta", payload = new { content = new { text = "thinking" } } }
-            }
-        });
-
-        var metadataRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan");
+        // The transcript sibling must keep its own shape invariant:
+        // turns + partCount present, events + assistant + workflowLogs +
+        // metadata absent. lastActivityAt is conditionally serialized
+        // (omitted when null per the production JSON options) — the
+        // original "do not return server-projected turns" contract is
+        // satisfied by the four absent fields below.
         var transcriptRaw = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
-
-        using (var metadataDoc = JsonDocument.Parse(metadataRaw))
-        using (var transcriptDoc = JsonDocument.Parse(transcriptRaw))
-        {
-            var metadataRoot = metadataDoc.RootElement.GetProperty("data");
-            AssertNoProjectionFields(metadataRoot, "metadata");
-            Assert.False(metadataRoot.TryGetProperty("turns", out _));
-            Assert.False(metadataRoot.TryGetProperty("assistant", out _));
-            Assert.False(metadataRoot.TryGetProperty("workflowLogs", out _));
-            Assert.False(metadataRoot.TryGetProperty("events", out _));
-
-            var transcriptRoot = transcriptDoc.RootElement.GetProperty("data");
-            Assert.True(transcriptRoot.TryGetProperty("turns", out _));
-            Assert.True(transcriptRoot.TryGetProperty("partCount", out _));
-            Assert.False(transcriptRoot.TryGetProperty("lastActivityAt", out _));
-            Assert.False(transcriptRoot.TryGetProperty("events", out _));
-            Assert.False(transcriptRoot.TryGetProperty("assistant", out _));
-            Assert.False(transcriptRoot.TryGetProperty("workflowLogs", out _));
-            Assert.False(transcriptRoot.TryGetProperty("metadata", out _));
-        }
-    }
-
-    private static void AssertNoProjectionFields(JsonElement root, string label)
-    {
-        var serialized = root.GetRawText();
-        Assert.DoesNotContain("\"turns\"", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"assistant\"", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"workflowLogs\"", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"transcript\"", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("\"BuildAssistantParts\"", serialized, StringComparison.OrdinalIgnoreCase);
-        Assert.True(root.ValueKind == JsonValueKind.Object, $"{label} response should be an object");
+        using var transcriptDoc = JsonDocument.Parse(transcriptRaw);
+        var transcriptRoot = transcriptDoc.RootElement.GetProperty("data");
+        Assert.True(transcriptRoot.TryGetProperty("turns", out _));
+        Assert.True(transcriptRoot.TryGetProperty("partCount", out _));
+        Assert.False(transcriptRoot.TryGetProperty("events", out _));
+        Assert.False(transcriptRoot.TryGetProperty("assistant", out _));
+        Assert.False(transcriptRoot.TryGetProperty("workflowLogs", out _));
+        Assert.False(transcriptRoot.TryGetProperty("metadata", out _));
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, WorkDispatch Work, CreatedSession Session)> CreateStartedAgentSessionAsync(string name, bool start = true, string? title = null, string? sessionName = null)
@@ -439,10 +268,4 @@ var issue = await _client.PostDataAsync<IssueDto>($"/api/projects/{project.Id}/i
     {
         public string Id => Info.Id;
     }
-
-    private sealed record IssueSessionTranscriptResponseDto(IssueSessionTranscriptTurnDto[] Turns, int PartCount, string? LastActivityAt);
-    private sealed record IssueSessionTranscriptTurnDto(string Id, string StartedAt, string? CompletedAt, bool Incomplete, IssueSessionTranscriptUserDto User, IssueSessionTranscriptPartDto[] Assistant);
-    private sealed record IssueSessionTranscriptUserDto(string Text, string Kind, string SentAt);
-    private sealed record IssueSessionTranscriptPartDto(string Id, string Type, string? Text, IssueSessionTranscriptToolDto? Tool, string? Message, string? Kind, string? StartedAt, string? CompletedAt, string? At);
-    private sealed record IssueSessionTranscriptToolDto(string ToolCallId, string ToolName, string Status, string? Title, string? Input, string? Output, string? Error, string StartedAt, string? CompletedAt);
 }

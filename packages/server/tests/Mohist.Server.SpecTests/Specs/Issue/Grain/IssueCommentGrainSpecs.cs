@@ -6,18 +6,31 @@ using Mohist.Server.Issue.Domain;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Project.Domain;
 using Mohist.Server.Project.Grains;
-using Mohist.Server.SpecTests.Support;
+using Mohist.Server.SpecTests.Specs.Workflow;
 using Mohist.Server.TestSupport;
+using Orleans;
 using Xunit;
 
 namespace Mohist.Server.SpecTests.Specs.Issue.Grain;
 
-[Collection("IssueLifecycle")]
+/// <summary>
+/// Calculation specs for <see cref="IIssueGrain.AddCommentAsync"/>:
+/// the grain trims whitespace, persists the row in a single transaction,
+/// rejects invalid authors without leaking partial state, and keeps the
+/// service principal attribution separate from the user-supplied display
+/// alias. Migrated from <c>MohistIntegrationFixture</c> to
+/// <c>WorkflowGrainFixture</c> (#290 batch C item 18) — the spec already
+/// drove grains directly via <c>_fixture.Grains</c>, so this is a pure
+/// fixture swap with no behavioural change. Test logic is unchanged.
+/// </summary>
+[Collection("WorkflowGrain")]
 public class IssueCommentGrainSpecs
 {
-    private readonly MohistIntegrationFixture _fixture;
+    private readonly WorkflowGrainFixture _fixture;
 
-    public IssueCommentGrainSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
+    public IssueCommentGrainSpecs(WorkflowGrainFixture fixture) => _fixture = fixture;
+
+    private IGrainFactory Grains => _fixture.Grains;
 
     [Fact]
     public async Task AddCommentAsync_TrimsPersistsAndReturnsDeclaredAuthor()
@@ -27,7 +40,7 @@ public class IssueCommentGrainSpecs
         var result = await grain.AddCommentAsync("  Ada Lovelace  ", null, "Looks good");
 
         Assert.Equal("Ada Lovelace", result.Author);
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var row = await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
             .AsNoTracking()
             .SingleAsync(comment => comment.Id == result.Id);
@@ -49,7 +62,7 @@ public class IssueCommentGrainSpecs
             () => grain.AddCommentAsync(author, null, "Not persisted"));
 
         Assert.Contains(author.Length > 100 ? "100" : "required", exception.Message, StringComparison.OrdinalIgnoreCase);
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         Assert.False(await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
             .AnyAsync(comment => comment.Body == "Not persisted"));
     }
@@ -63,7 +76,7 @@ public class IssueCommentGrainSpecs
 
         Assert.Equal("service", result.Author);
         Assert.Equal("Ada Lovelace", result.DisplayName);
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         var row = await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
             .AsNoTracking()
             .SingleAsync(comment => comment.Id == result.Id);
@@ -80,7 +93,7 @@ public class IssueCommentGrainSpecs
             () => grain.AddCommentAsync("service", new string('x', 101), "Not persisted"));
 
         Assert.Contains("100", exception.Message, StringComparison.OrdinalIgnoreCase);
-        await using var scope = _fixture.Services.CreateAsyncScope();
+        await using var scope = _fixture.Cluster.GetSiloServiceProvider(null).CreateAsyncScope();
         Assert.False(await scope.ServiceProvider.GetRequiredService<MohistDbContext>().IssueComments
             .AnyAsync(comment => comment.Body == "Not persisted"));
     }
@@ -88,7 +101,7 @@ public class IssueCommentGrainSpecs
     private async Task<(string ProjectId, int IssueNumber, IIssueGrain Grain)> CreateIssueAsync()
     {
         var projectId = $"proj_{Guid.NewGuid():N}";
-        await _fixture.Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
+        await Grains.GetGrain<IProjectGrain>(projectId).CreateAsync(
             $"comment-{Guid.NewGuid():N}",
             new RepositoryInfo
             {
@@ -97,8 +110,8 @@ public class IssueCommentGrainSpecs
                 BaseBranch = "main",
                 IsDefault = true,
             });
-        var issueNumber = await _fixture.Grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
-        var grain = _fixture.Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
+        var issueNumber = await Grains.GetGrain<IIssueCounterGrain>(projectId).NextAsync();
+        var grain = Grains.GetGrain<IIssueGrain>(GrainKey.Issue(new IssueKey(projectId, issueNumber)));
         await grain.CreateAsync(projectId, issueNumber, "Commented issue", null, null, null, isDraft: false);
         return (projectId, issueNumber, grain);
     }

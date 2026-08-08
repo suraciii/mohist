@@ -1,10 +1,15 @@
+using Orleans;
+
 namespace Mohist.Server.Issue.Domain;
 
+[GenerateSerializer]
 public abstract record IssueStartBlocker
 {
+    [GenerateSerializer]
     public sealed record Draft : IssueStartBlocker;
 
-    public sealed record WaitingFor(int PrerequisiteNumber) : IssueStartBlocker;
+    [GenerateSerializer]
+    public sealed record WaitingFor([property: Id(0)] int PrerequisiteNumber) : IssueStartBlocker;
 
     private IssueStartBlocker() { }
 }
