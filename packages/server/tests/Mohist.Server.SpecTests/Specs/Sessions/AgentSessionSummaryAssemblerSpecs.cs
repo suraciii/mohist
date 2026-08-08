@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Time.Testing;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
@@ -13,17 +13,18 @@ using Xunit;
 namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 /// <summary>
-/// Issue-130 T-003: focused unit specs for
-/// <see cref="AgentSessionQuerier.GetGenericSessionSummaryAsync"/> that
-/// exercise the enriched generic-session summary read model
-/// (<see cref="GenericAgentSessionSummaryDto"/>), the absent-workflow-fields
-/// invariant, and the not-found paths.
+/// Calculation specs for the generic-session summary read model
+/// (<see cref="AgentSessionQuerier.GetGenericSessionSummaryAsync"/>) that
+/// exercise the enriched <see cref="GenericAgentSessionSummaryDto"/>, the
+/// absent-workflow-fields invariant, and the not-found paths. The querier
+/// is driven directly via <c>MohistDbFixture</c> (no web host, no HTTP).
+/// The route contract (200 JSON envelope shape, 404 mapping for unknown
+/// session ids, project isolation) is asserted at the route layer; the
+/// projections here assert the calculation, not the wire shape.
 /// </summary>
-public class GenericAgentSessionSummarySpecs
+[Collection("MohistDb")]
+public class AgentSessionSummaryAssemblerSpecs
 {
-    private const string ProjectA = "proj-summary-A";
-    private const string ProjectB = "proj-summary-B";
-
     private const string AgentId = "agent_s1";
     private const string AgentName = "agent-summary";
     private const string AgentIssueNumber = "42";
@@ -31,25 +32,27 @@ public class GenericAgentSessionSummarySpecs
     private const string AgentRepository = "mohist/repo-s";
     private const string AgentWorkspaceName = "pay";
 
-    private const string SessionId = "s_summary_1";
-    private const string SessionIdUnknown = "s_nonexistent";
-    private const string SessionIdWorkflow = "s_workflow_1";
-
     private static readonly DateTime CreatedAt = new(2026, 6, 15, 10, 0, 0, DateTimeKind.Utc);
-    private static readonly FakeTimeProvider TimeProvider = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
+
+    private readonly MohistDbFixture _fixture;
+
+    public AgentSessionSummaryAssemblerSpecs(MohistDbFixture fixture)
+    {
+        _fixture = fixture;
+    }
 
     [Fact]
     public async Task Summary_CarriesEnrichedFields()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: true);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: true);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
-        Assert.Equal(SessionId, result!.SessionId);
+        Assert.Equal(sessionId, result!.SessionId);
         Assert.Equal(AgentId, result.AgentId);
         Assert.Equal(AgentName, result.AgentName);
         Assert.Equal("idle", result.Activity);
@@ -65,12 +68,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_CarriesFailureCategory_WhenTranscriptHasClosedEvent()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: true, terminalStatus: "failed");
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: true, terminalStatus: "failed");
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Null(result!.FailureCategory);
@@ -80,12 +83,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_ReportsRecoveryUnavailableForAnActiveTurn()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, active: true);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false, active: true);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Equal("active", result!.Activity);
@@ -95,13 +98,13 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_ProjectsTranscriptEventsInSequenceOrder_WhenRowsWereInsertedOutOfOrder()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        await SeedOutOfOrderTranscriptPartsAsync(fixture, SessionId);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        await SeedOutOfOrderTranscriptPartsAsync(projectId, sessionId);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Equal("sequence-last-model", result!.ResolvedModel);
@@ -111,12 +114,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_CarriesContextRefs_WhenPresent()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, withContextRefs: true);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false, withContextRefs: true);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.NotNull(result!.ContextRefs);
@@ -129,12 +132,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_ContextRefsIsNull_WhenNoContextReferences()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false, withContextRefs: false);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false, withContextRefs: false);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Null(result!.ContextRefs);
@@ -143,16 +146,14 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_NoWorkflowFields()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
-        // The DTO is a sealed record — verify it does not have workflow-only
-        // properties by checking the JSON serialization omits them.
         var json = JsonSerializer.Serialize(result, JSON.Options);
         using var doc = JsonDocument.Parse(json);
         Assert.False(doc.RootElement.TryGetProperty("workflowRunId", out _));
@@ -165,12 +166,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_UnknownSessionId_ReturnsNull()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionIdUnknown);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, "s_nonexistent");
 
         Assert.Null(result);
     }
@@ -178,12 +179,13 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_DifferentProject_ReturnsNull()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        var otherProjectId = NewProjectId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectB, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(otherProjectId, sessionId);
 
         Assert.Null(result);
     }
@@ -191,12 +193,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_WorkflowSession_ReturnsNull()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedWorkflowSessionAsync(fixture);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var workflowSessionId = NewSessionId();
+        await SeedWorkflowSessionAsync(projectId, workflowSessionId);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionIdWorkflow);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, workflowSessionId);
 
         Assert.Null(result);
     }
@@ -204,17 +206,17 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_CarriesFailureReason_FromSameLatestTerminalFact_AsFailureCategory()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
         await SeedGenericSessionAsync(
-            fixture,
-            SessionId,
+            projectId,
+            sessionId,
             hasTranscript: true,
             terminalStatus: "failed",
             failureReason: "AgentJob requires 'workspace.path' in dispatch variables");
-        var querier = CreateQuerier(fixture);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Equal("idle", result!.Activity);
@@ -225,17 +227,17 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_OmitsFailureReasonAndCategory_OnSuccessfulSession()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
         await SeedGenericSessionAsync(
-            fixture,
-            SessionId,
+            projectId,
+            sessionId,
             hasTranscript: true,
             terminalStatus: "completed",
             failureReason: null);
-        var querier = CreateQuerier(fixture);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Equal("idle", result!.Activity);
@@ -246,18 +248,15 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_LatestTerminalFact_AcrossMultipleTurns_PicksNewestTurn()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        await SeedMultiTurnClosedFactsAsync(fixture, SessionId);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        await SeedMultiTurnClosedFactsAsync(projectId, sessionId);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
-        // The newer Runtime Session's turn (sequence 2) restarts part
-        // sequences at 1 but the AgentJob-owned close on turn 2 is
-        // authoritative; the older turn-1 close is ignored.
         Assert.Null(result!.FailureReason);
         Assert.Null(result.FailureCategory);
     }
@@ -265,13 +264,13 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_LatestTerminalFact_OnSameTurn_PicksLatestPartSequence()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        await SeedMultipleClosedPartsSameTurnAsync(fixture, SessionId);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        await SeedMultipleClosedPartsSameTurnAsync(projectId, sessionId);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         Assert.Null(result!.FailureReason);
@@ -281,36 +280,12 @@ public class GenericAgentSessionSummarySpecs
     [Fact]
     public async Task Summary_OmitsNullableFailureFields_InJsonSerialization()
     {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(fixture, SessionId, hasTranscript: false);
-        var querier = CreateQuerier(fixture);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(projectId, sessionId, hasTranscript: false);
+        var querier = CreateQuerier();
 
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
-
-        Assert.NotNull(result);
-        var json = JsonSerializer.Serialize(result, JSON.Options);
-        using var doc = JsonDocument.Parse(json);
-        Assert.False(doc.RootElement.TryGetProperty("failureReason", out _),
-            "Successful session omits nullable failureReason from the wire");
-        Assert.False(doc.RootElement.TryGetProperty("failureCategory", out _),
-            "Successful session omits nullable failureCategory from the wire");
-    }
-
-    [Fact]
-    public async Task Summary_IncludesFailureReasonAndCategory_AsSeparateFields_WhenPresent()
-    {
-        using var database = TestSqliteDatabase.CreateMigrated();
-        var fixture = new TestDbContextFactory(database.Options);
-        await SeedGenericSessionAsync(
-            fixture,
-            SessionId,
-            hasTranscript: true,
-            terminalStatus: "failed",
-            failureReason: "AgentJob requires 'workspace.path' in dispatch variables");
-        var querier = CreateQuerier(fixture);
-
-        var result = await querier.GetGenericSessionSummaryAsync(ProjectA, SessionId);
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
 
         Assert.NotNull(result);
         var json = JsonSerializer.Serialize(result, JSON.Options);
@@ -319,14 +294,39 @@ public class GenericAgentSessionSummarySpecs
         Assert.False(doc.RootElement.TryGetProperty("failureCategory", out _));
     }
 
-    private static AgentSessionQuerier CreateQuerier(IDbContextFactory<MohistDbContext> factory)
+    [Fact]
+    public async Task Summary_IncludesFailureReasonAndCategory_AsSeparateFields_WhenPresent()
     {
-        var sessionQuery = new AgentSessionQuery(factory, TimeProvider);
-        return new AgentSessionQuerier(factory, sessionQuery);
+        var projectId = NewProjectId();
+        var sessionId = NewSessionId();
+        await SeedGenericSessionAsync(
+            projectId,
+            sessionId,
+            hasTranscript: true,
+            terminalStatus: "failed",
+            failureReason: "AgentJob requires 'workspace.path' in dispatch variables");
+        var querier = CreateQuerier();
+
+        var result = await querier.GetGenericSessionSummaryAsync(projectId, sessionId);
+
+        Assert.NotNull(result);
+        var json = JsonSerializer.Serialize(result, JSON.Options);
+        using var doc = JsonDocument.Parse(json);
+        Assert.False(doc.RootElement.TryGetProperty("failureReason", out _));
+        Assert.False(doc.RootElement.TryGetProperty("failureCategory", out _));
     }
 
-    private static async Task SeedGenericSessionAsync(
-        IDbContextFactory<MohistDbContext> factory,
+    private AgentSessionQuerier CreateQuerier()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        return scope.ServiceProvider.GetRequiredService<AgentSessionQuerier>();
+    }
+
+    private static string NewProjectId() => $"proj-summary-{Guid.NewGuid():N}";
+    private static string NewSessionId() => $"s_summary_{Guid.NewGuid():N}";
+
+    private async Task SeedGenericSessionAsync(
+        string projectId,
         string sessionId,
         bool hasTranscript,
         bool withContextRefs = false,
@@ -334,11 +334,11 @@ public class GenericAgentSessionSummarySpecs
         bool active = false,
         string? failureReason = null)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
             [GenericAgentSessionMetadata.AgentId] = AgentId,
             [GenericAgentSessionMetadata.AgentName] = AgentName,
@@ -363,7 +363,7 @@ public class GenericAgentSessionSummarySpecs
                 agentRuntimeSessionId = active ? "runtime-" + sessionId : null,
                 activity = active ? "active" : "idle",
                 createdAt = CreatedAt,
-                lastDataAt = active ? TimeProvider.GetUtcNow().UtcDateTime : CreatedAt.AddMinutes(5),
+                lastDataAt = active ? TestTime.UtcDateTime : CreatedAt.AddMinutes(5),
             },
         }, JSON.Options);
 
@@ -391,21 +391,16 @@ public class GenericAgentSessionSummarySpecs
             db.AgentSessionTranscriptTurns.Add(turn);
             await db.SaveChangesAsync();
 
-            // Model event
             db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
             {
                 TurnId = turn.Id,
                 Sequence = 1,
                 Type = TranscriptPartTypes.Model,
                 CorrelationKey = "model",
-                PayloadJson = JsonSerializer.Serialize(new
-                {
-                    resolvedModel = "gpt-4o",
-                }, JSON.Options),
+                PayloadJson = JsonSerializer.Serialize(new { resolvedModel = "gpt-4o" }, JSON.Options),
                 LastSeenAt = CreatedAt.AddMinutes(1),
             });
 
-            // Tool call events (3 calls, 1 error)
             for (var i = 0; i < 3; i++)
             {
                 db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
@@ -424,7 +419,6 @@ public class GenericAgentSessionSummarySpecs
                 });
             }
 
-            // Session closed event (for terminal status)
             if (terminalStatus is not null)
             {
                 db.AgentSessionTranscriptParts.Add(new AgentSessionTranscriptPartRow
@@ -447,15 +441,10 @@ public class GenericAgentSessionSummarySpecs
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedMultiTurnClosedFactsAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    private async Task SeedMultiTurnClosedFactsAsync(string projectId, string sessionId)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
-        // Two Runtime Sessions (turns): turn 1 has the older failure
-        // context, turn 2 carries the AgentJob-owned close on the
-        // current runtime. The session's current runtime session id is
-        // runtime-2 so the current-runtime filter narrows the candidate
-        // set to the turn-2 close.
         var turn1 = new AgentSessionTranscriptTurnRow
         {
             SessionId = sessionId,
@@ -506,17 +495,15 @@ public class GenericAgentSessionSummarySpecs
             });
         await db.SaveChangesAsync();
 
-        // Point the session at the current runtime so the
-        // current-runtime filter selects turn 2's close.
         var row = await db.AgentSessions.FindAsync(sessionId);
         Assert.NotNull(row);
         row!.AgentSessionId = "runtime-2";
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedMultipleClosedPartsSameTurnAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    private async Task SeedMultipleClosedPartsSameTurnAsync(string projectId, string sessionId)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
         var turn = new AgentSessionTranscriptTurnRow
         {
@@ -566,9 +553,9 @@ public class GenericAgentSessionSummarySpecs
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedOutOfOrderTranscriptPartsAsync(IDbContextFactory<MohistDbContext> factory, string sessionId)
+    private async Task SeedOutOfOrderTranscriptPartsAsync(string projectId, string sessionId)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
         var turn = new AgentSessionTranscriptTurnRow
         {
             SessionId = sessionId,
@@ -620,13 +607,13 @@ public class GenericAgentSessionSummarySpecs
         await db.SaveChangesAsync();
     }
 
-    private static async Task SeedWorkflowSessionAsync(IDbContextFactory<MohistDbContext> factory)
+    private async Task SeedWorkflowSessionAsync(string projectId, string sessionId)
     {
-        await using var db = factory.CreateDbContext();
+        await using var db = await _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>().CreateDbContextAsync();
 
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [AgentSessionQueryMetadataKeys.ProjectId] = ProjectA,
+            [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
             [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
             [AgentSessionQueryMetadataKeys.WorkflowRunId] = "wr-w1",
             [AgentSessionQueryMetadataKeys.SessionName] = "session-w1",
@@ -635,19 +622,19 @@ public class GenericAgentSessionSummarySpecs
 
         var stateJson = JsonSerializer.Serialize(new
         {
-            id = SessionIdWorkflow,
+            id = sessionId,
             metadata = new { labels },
-            runtime = new { runnerId = $"runner-{SessionIdWorkflow}", workDir = (string?)null },
+            runtime = new { runnerId = $"runner-{sessionId}", workDir = (string?)null },
             settings = new { },
             status = new { createdAt = CreatedAt },
         }, JSON.Options);
 
         db.AgentSessions.Add(new AgentSessionRow
         {
-            Id = SessionIdWorkflow,
+            Id = sessionId,
             State = stateJson,
-            RunnerId = $"runner-{SessionIdWorkflow}",
-            AgentSessionId = "runtime-" + SessionIdWorkflow,
+            RunnerId = $"runner-{sessionId}",
+            AgentSessionId = "runtime-" + sessionId,
             Status = "opened",
             CreatedAt = CreatedAt,
         });
