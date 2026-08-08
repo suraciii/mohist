@@ -7,12 +7,12 @@ namespace Mohist.Server.UnitTests.Issue.Domain;
 
 public class IssueManualCompletionTests
 {
-    private static readonly DateTime Now = new(2026, 7, 20, 12, 0, 0, DateTimeKind.Utc);
+    private static readonly DateTime Now = new(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     [Fact]
-    public void MarkDone_InProgressIssue_RecordsManualCompletion()
+    public void MarkDone_OnInProgressIssueWithWorkflow_SetsStatusToDone()
     {
-        var issue = InProgressIssue();
+        var issue = NewInProgressIssue();
 
         var changed = issue.MarkDone(Now);
 
@@ -20,27 +20,28 @@ public class IssueManualCompletionTests
         Assert.Equal(IssueStatus.Done, issue.Status);
         Assert.Equal(Now, issue.CompletedAt);
         var completed = Assert.Single(CompletionEvents(issue));
-        Assert.Equal("wr_1", completed.WorkflowRunId);
+        Assert.Equal("wr_seed", completed.WorkflowRunId);
         Assert.Equal(IssueCompletionKinds.Manual, completed.CompletionKind);
     }
 
     [Fact]
-    public void MarkDone_AlreadyDone_IsIdempotent()
+    public void MarkDone_OnAlreadyDoneIssue_NoOp()
     {
-        var issue = InProgressIssue();
+        var issue = NewInProgressIssue();
         issue.MarkDone(Now);
 
         var changed = issue.MarkDone(Now.AddMinutes(1));
 
         Assert.False(changed);
+        Assert.Equal(IssueStatus.Done, issue.Status);
         Assert.Equal(Now, issue.CompletedAt);
         Assert.Single(CompletionEvents(issue));
     }
 
     [Fact]
-    public void MarkDone_BacklogIssue_Rejects()
+    public void MarkDone_OnBacklogIssue_Throws()
     {
-        var issue = DomainIssue.Create("project-1", 1, "Backlog", isDraft: false, repositoryRef: "main");
+        var issue = NewIssue();
 
         var error = Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now));
 
@@ -49,22 +50,69 @@ public class IssueManualCompletionTests
     }
 
     [Fact]
-    public void MarkDone_CancelledIssue_Rejects()
+    public void MarkDone_OnInProgressIssueWithoutWorkflow_Throws()
     {
-        var issue = InProgressIssue();
-        issue.Close(now: Now);
+        var issue = DomainIssue.Create(
+            projectId: "proj-manual",
+            number: 1,
+            title: "Bare",
+            repositoryRef: "main",
+            isDraft: false,
+            now: Now);
+        issue.StartWorkflow("wr_seed", Now);
 
-        var error = Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now.AddMinutes(1)));
+        // Wipe the workflow reference without setting status to Done;
+        // simulates an issue that has lost its workflow reference.
+        var field = typeof(DomainIssue).GetProperty("WorkflowRunId");
+        field?.SetValue(issue, null);
+
+        Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now));
+    }
+
+    [Fact]
+    public void MarkDone_OnCancelledIssue_Throws()
+    {
+        var issue = NewInProgressIssue();
+        issue.Close(reason: null, now: Now.AddDays(1));
+
+        var error = Assert.Throws<InvalidOperationException>(() => issue.MarkDone(Now.AddDays(1).AddMinutes(1)));
 
         Assert.Contains("only InProgress", error.Message);
         Assert.Equal(IssueStatus.Cancelled, issue.Status);
     }
 
-    private static DomainIssue InProgressIssue()
+    [Fact]
+    public void MarkDone_RecordsIssueCompletedEvent()
     {
-        var issue = DomainIssue.Create("project-1", 1, "Delivered", isDraft: false, repositoryRef: "main");
-        issue.StartWorkflow("wr_1", now: Now.AddMinutes(-1));
+        var issue = NewInProgressIssue();
+
+        issue.MarkDone(Now);
+
+        Assert.Contains(issue.PendingEvents, e => e is IssueCompleted);
+    }
+
+    private static DomainIssue NewInProgressIssue()
+    {
+        var issue = DomainIssue.Create(
+            projectId: "proj-manual",
+            number: 1,
+            title: "Manual done seed",
+            repositoryRef: "main",
+            isDraft: false,
+            now: Now);
+        issue.StartWorkflow("wr_seed", Now);
         return issue;
+    }
+
+    private static DomainIssue NewIssue()
+    {
+        return DomainIssue.Create(
+            projectId: "proj-manual",
+            number: 2,
+            title: "Backlog seed",
+            repositoryRef: "main",
+            isDraft: false,
+            now: Now);
     }
 
     private static IReadOnlyList<IssueCompleted> CompletionEvents(DomainIssue issue)
