@@ -140,7 +140,9 @@ public class AgentSessionQuerier : IScopedService
                 s.Status.CreatedAt.ToString("o"),
                 AgentSessionJsonHelper.LastActivityAt(s).ToString("o"),
                 summary?.ResolvedModel,
-                BuildAgentSessionListContextRefs(record));
+                BuildAgentSessionListContextRefs(record),
+                record.Label(GenericAgentSessionMetadata.Origin),
+                record.Label(GenericAgentSessionMetadata.TargetId));
         }).ToList();
 
         if (statusSet is { Count: > 0 })
@@ -196,7 +198,9 @@ public class AgentSessionQuerier : IScopedService
                 AgentName: record.Label(GenericAgentSessionMetadata.AgentName),
                 WorkflowRunId: null,
                 SessionName: null,
-                ContextRefs: BuildUnifiedContextRefs(record));
+                ContextRefs: BuildUnifiedContextRefs(record),
+                Origin: record.Label(GenericAgentSessionMetadata.Origin),
+                TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
         }).ToList();
     }
 
@@ -244,7 +248,9 @@ public class AgentSessionQuerier : IScopedService
                 AgentName: record.Label(GenericAgentSessionMetadata.AgentName),
                 WorkflowRunId: null,
                 SessionName: null,
-                ContextRefs: BuildUnifiedContextRefs(record));
+                ContextRefs: BuildUnifiedContextRefs(record),
+                Origin: record.Label(GenericAgentSessionMetadata.Origin),
+                TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
         }).ToList();
     }
 
@@ -619,7 +625,9 @@ public class AgentSessionQuerier : IScopedService
             session.Status.Activity == AgentSessionActivity.Idle,
             CurrentTurnId(session),
             AgentSessionObservationMapper.Inputs(session.Status),
-            AgentSessionObservationMapper.Turns(session.Status));
+            AgentSessionObservationMapper.Turns(session.Status),
+            Origin: record.Label(GenericAgentSessionMetadata.Origin),
+            TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
     }
 
     private static bool IsApplicableToCurrentRuntime(
@@ -735,7 +743,9 @@ public class AgentSessionQuerier : IScopedService
             CurrentTurnId: CurrentTurnId(session),
             Inputs: AgentSessionObservationMapper.Inputs(session.Status),
             Turns: AgentSessionObservationMapper.Turns(session.Status),
-            RecoveryHistory: transcriptSummary.RecoveryHistory);
+            RecoveryHistory: transcriptSummary.RecoveryHistory,
+            Origin: record.Label(GenericAgentSessionMetadata.Origin),
+            TargetId: record.Label(GenericAgentSessionMetadata.TargetId));
     }
 
     /// <summary>

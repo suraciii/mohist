@@ -281,6 +281,14 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
 
     expect(await screen.findByTestId('unified-session-page')).toHaveTextContent('Unified session')
   })
+
+  it('loads the canonical session deep link on a refresh-equivalent initial mount', async () => {
+    window.history.replaceState({}, '', '/demo/sessions/session-refresh')
+
+    renderApp({ sessionPage: () => <div data-testid="refreshed-unified-session-page">Unified session</div> })
+
+    expect(await screen.findByTestId('refreshed-unified-session-page')).toHaveTextContent('Unified session')
+  })
 })
 
 describe('App routing split for settings scopes', () => {

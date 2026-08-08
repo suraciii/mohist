@@ -135,7 +135,7 @@ describe('AgentSessionComposerPage', () => {
       agentRef: 'agent-1',
       body: {
         prompt: 'Analyze this',
-        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
+        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspace: '/workspace' },
         attachments: [],
       },
     })
@@ -172,6 +172,16 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
     })
+  })
+
+  it('uses the canonical session URL returned by launch', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchResponse = { sessionUrl: '/Test/sessions/canonical-1', sessionId: 'ignored-session' }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Open directly' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/canonical-1'))
   })
 
   it('retains one idempotency key when the first response is lost and the launch is retried', async () => {

@@ -234,7 +234,9 @@ public sealed record AgentLaunchContext(
     string? Repository = null,
     string? WorkspacePath = null,
     string? WorkspaceName = null,
-    string? Title = null);
+    string? Title = null,
+    string? Origin = null,
+    string? TargetId = null);
 
 [Orleans.GenerateSerializer]
 public sealed record ConnectionLaunchOrigin(

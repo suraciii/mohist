@@ -86,6 +86,14 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
 
         var (sessionId, jobKey) = ResolveSessionAndJobKeys(context.ProjectId, triggerLabels);
         var sessionContext = BuildContext(context, agent);
+        if (triggerLabels is { Count: > 0 })
+        {
+            sessionContext = sessionContext with
+            {
+                Origin = context.Origin ?? "event-router",
+                TargetId = context.TargetId ?? agent.Id,
+            };
+        }
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
         var durableMetadata = triggerLabels is null
             ? metadata
@@ -276,6 +284,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             EpicNumber: context.EpicNumber,
             Repository: context.Repository,
             Title: context.Title,
+            Origin: context.Origin,
+            TargetId: context.TargetId,
             Request: request,
             PreMintedSessionId: preMintedSessionId,
             PreMintedInputId: preMintedInputId,
@@ -629,7 +639,11 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         var sessionId = _sessions.CommentSessionId(context.ProjectId, commentId, agent.Id);
         var jobKey = _sessions.CommentJobKey(context.ProjectId, commentId, agent.Id);
 
-        var sessionContext = BuildContext(context, agent);
+        var sessionContext = BuildContext(context, agent) with
+        {
+            Origin = context.Origin ?? "event-router",
+            TargetId = context.TargetId ?? agent.Id,
+        };
         var metadata = GenericAgentSessionMetadata.Metadata(sessionContext);
         var triggerLabels = new Dictionary<string, string>(StringComparer.Ordinal)
         {

@@ -22,6 +22,9 @@ public abstract record WorkspaceOrigin
 
     [GenerateSerializer]
     public sealed record Web([property: Id(0)] string ConversationId) : WorkspaceOrigin;
+
+    [GenerateSerializer]
+    public sealed record Cli : WorkspaceOrigin;
 }
 
 [GenerateSerializer]

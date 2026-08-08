@@ -278,7 +278,7 @@ export function AgentSessionComposerPage({
         else context.epicNumber = number
       }
       else if (ref.type === 'repository') context.repository = ref.value
-      else if (ref.type === 'workspace') context.workspacePath = ref.value
+      else if (ref.type === 'workspace') context.workspace = ref.value
     }
     const hasContext = Object.keys(context).length > 0
 
@@ -292,8 +292,8 @@ export function AgentSessionComposerPage({
       },
       {
         onSuccess: (data) => {
-          const jobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath = `/sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`
+          const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+          const sessionPath = data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
           const accepted = data.attachments ?? []
           const rejected = data.rejectedAttachments ?? []
           launchKeyRef.current = null
@@ -301,7 +301,7 @@ export function AgentSessionComposerPage({
             setLaunchAttachmentResult({ accepted, rejected, sessionPath })
             return
           }
-          navigate(toProjectPath(sessionPath))
+          navigate(sessionPath)
         },
       },
     )

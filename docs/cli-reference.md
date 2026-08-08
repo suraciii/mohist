@@ -219,8 +219,9 @@ issue 与 Slack / Web 入口的 workspace 由对应动作自动创建与归档�
 - `mo workspace close <name>` 归档 workspace；存在活跃绑定 Session 时拒绝并给出
   下一步。issue 来源的 workspace 不接受手动 close，由 Issue 终态自动归档。
 - `mo agent launch <agent> --workspace <name>` 把新 Session 绑定到既有 workspace；
-  省略 `--workspace` 时不绑定任何 workspace，沿用 Runner 默认工作目录，也不创建
-  workspace 实体。
+  省略 `--workspace` 时绑定当前 Project 的默认 Workspace（必要时创建
+  `cli-current`），并在 JSON 与人类输出中返回实际 Workspace、target、Session 和 Turn
+  身份。
 - `mo session list --workspace <name>` 查看绑定到该 workspace 的 Session；
   `mo session view` 输出包含 workspace 字段。
 
@@ -240,8 +241,9 @@ mo workspace close payment-refactor
 解释为对话关闭或用户目标已经交付。
 
 - `mo agent launch <agent>` 创建 AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn，
-  并返回四个稳定 ID、transcript URL 和 composite observation URL；`--workspace <name>`
-  把新 Session 绑定到既有 Workspace，省略时不绑定（见 [Workspace](#workspace)）。命令接受
+  并返回稳定的 Agent、Job、Session、Input、Turn、Workspace、target 身份、canonical Session URL、
+  transcript URL 和 composite observation URL；`--workspace <name>`
+  把新 Session 绑定到既有 Workspace，省略时绑定当前 Project 默认 Workspace（见 [Workspace](#workspace)）。命令接受
   `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的

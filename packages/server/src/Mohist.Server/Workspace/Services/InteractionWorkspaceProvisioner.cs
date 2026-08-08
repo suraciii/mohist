@@ -24,6 +24,9 @@ public sealed class InteractionWorkspaceProvisioner(
     public Task<string> EnsureWebWorkspaceAsync(string projectId, string conversationId, DateTimeOffset now)
         => EnsureAsync(projectId, new WorkspaceOrigin.Web(conversationId), $"web-{conversationId}", now);
 
+    public Task<string> EnsureCliWorkspaceAsync(string projectId, DateTimeOffset now)
+        => EnsureAsync(projectId, new WorkspaceOrigin.Cli(), "cli-current", now);
+
     public async Task<bool> ArchiveSlackChannelAsync(string projectId, string teamId, string channelId, DateTimeOffset now)
         => await ArchiveAsync(projectId, new WorkspaceOrigin.Slack(teamId, channelId), now);
 

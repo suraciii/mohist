@@ -76,20 +76,20 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionMetadata => ["id", "sessionName", "runtimeSessionId", "runtime", "activity", "model", "stage", "title", "createdAt", "completedAt", "eventSummary", "usage", "metadata", "currentTurnId", "inputs", "turns"],
             MohistCliApi.TableShape.SessionTranscriptSummary => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.AgentSessionList =>
-                ["sessionId", "agentId", "agentName", "activity", "createdAt", "lastActivityAt", "resolvedModel", "contextRefs"],
+                ["sessionId", "agentId", "agentName", "activity", "createdAt", "lastActivityAt", "resolvedModel", "origin", "targetId", "contextRefs"],
             MohistCliApi.TableShape.AgentSessionShow =>
-                ["sessionId", "agentId", "agentName", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns"],
+                ["sessionId", "agentId", "agentName", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "origin", "targetId", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns"],
             MohistCliApi.TableShape.AgentSessionTranscript => ["turns", "partCount", "lastActivityAt"],
-            MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "status", "attachments", "rejectedAttachments", "transcriptUrl", "jobUrl", "observationUrl"],
+            MohistCliApi.TableShape.AgentSessionLaunch => ["jobId", "sessionId", "inputId", "turnId", "agentId", "agentName", "workspaceId", "targetId", "origin", "status", "attachments", "rejectedAttachments", "sessionUrl", "transcriptUrl", "jobUrl", "observationUrl"],
             MohistCliApi.TableShape.AgentSessionSpawn => ["jobId", "sessionId", "turnId", "parentSessionId", "edgeId"],
             MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
             MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
             MohistCliApi.TableShape.AgentSessionCancel => ["state", "interruptUnconfirmed"],
             MohistCliApi.TableShape.SessionList =>
-                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs"],
+                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs"],
             MohistCliApi.TableShape.SessionShow =>
-                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory"],
+                ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "resolvedModel", "failureCategory", "failureReason", "toolCallCount", "toolErrorCount", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs", "usage", "recoveryAvailable", "currentTurnId", "inputs", "turns", "recoveryHistory"],
             MohistCliApi.TableShape.SessionTree => ["root", "revision", "nodes", "edges", "continuation"],
             MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "lastActivityAt"],
             MohistCliApi.TableShape.SessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],

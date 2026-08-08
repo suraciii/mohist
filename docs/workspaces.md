@@ -27,8 +27,8 @@ issue 完成或取消时，workspace 随之归档。
   所有 Agent，都在同一个 workspace 里工作。
 - **Web**：一个对话一个 workspace。
 - **CLI**：`mo workspace create <name>` 显式创建，启动会话时用 `--workspace <name>`
-  绑定。不带 `--workspace` 的 `mo agent launch` 不绑定任何 workspace——沿用 runner
-  默认工作目录，没有跨会话连续性，也不产生 workspace 实体。
+  绑定。不带 `--workspace` 的 `mo agent launch` 绑定当前 Project 的默认 Workspace，必要时
+  创建 `cli-current`；CLI 输出会显示实际绑定，避免隐藏默认作用域。
 
 交互入口的 workspace 不做干净初始化：它持久累积。这正是跨会话复用的价值。
 

@@ -101,8 +101,12 @@ const composerDataHook: AgentSessionComposerDataHook = () => {
       sessionId: 'session-from-detail',
       agentId: agentRef,
       agentName: state.agent?.name ?? 'Test Agent',
+      workspaceId: 'cli-current',
+      targetId: agentRef,
+      origin: 'web',
       status: 'queued',
       transcriptUrl: '',
+      sessionUrl: '/Test/sessions/session-from-detail',
     }),
   })
   return {

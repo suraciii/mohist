@@ -102,6 +102,16 @@ public static class AgentSessionLaunchRoutes
             }
 
             var project = context.GetResolvedProject();
+            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
+            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
+            var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput");
+            var preMintedTurnId = Guid.NewGuid().ToString("N");
+            var launchOrigin = ReadLaunchOrigin(context.Request);
+            var workspaceName = body.Context?.Workspace?.Trim() is { Length: > 0 } explicitWorkspace
+                ? explicitWorkspace
+                : launchOrigin == "cli"
+                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
+                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
 
             // The fingerprint folds the caller-submitted attachment ids
             // (raw, in order) so a replay with a different attachment set
@@ -110,10 +120,10 @@ public static class AgentSessionLaunchRoutes
             // is established later via ValidateAndBindAgentInputAsync.
 
             IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
-            if (!string.IsNullOrWhiteSpace(body.Context?.Workspace))
+            if (!string.IsNullOrWhiteSpace(workspaceName))
             {
                 var wsGrain = grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
-                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, body.Context.Workspace.Trim()));
+                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, workspaceName));
                 var ws = await wsGrain.GetAsync();
                 if (ws is { RepositoryNames.Count: > 0 })
                 {
@@ -131,14 +141,18 @@ public static class AgentSessionLaunchRoutes
                 Prompt: prompt?.Trim() ?? string.Empty,
                 AgentRef: agentRef,
                 Runtime: null,
-                WorkspaceName: body.Context?.Workspace,
+                WorkspaceName: workspaceName,
                 WorkspacePath: body.Context?.WorkspacePath,
                 IssueNumber: body.Context?.IssueNumber,
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 Title: null,
                 AttachmentIds: body.Attachments?.ToArray(),
-                WorkspaceRepositories: workspaceRepositories);
+                WorkspaceRepositories: workspaceRepositories,
+                Origin: launchOrigin,
+                TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
+                    ? targetId
+                    : agentRef.Trim());
 
             // Resume first: a replay that conflicts on the existing
             // fingerprint (prompt, attachments, context) must surface as
@@ -151,7 +165,7 @@ public static class AgentSessionLaunchRoutes
                     launchRequest,
                     ct);
                 if (resumed is not null)
-                    return AcceptedLaunch(project.Id, resumed, attachmentResults: null);
+                    return AcceptedLaunch(project.Id, project.Name, resumed, workspaceName, launchOrigin, resumed.AgentId, attachmentResults: null);
             }
             catch (LaunchIdempotencyConflictException ex)
             {
@@ -204,11 +218,6 @@ public static class AgentSessionLaunchRoutes
             // The route mints every identity used by attachment ownership.
             // The coordinator persists and adopts them as its canonical plan,
             // so a scoped content read always names the durable SessionInput.
-            var ownershipIdentity = $"{project.Id}\n{idempotencyKey}";
-            var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
-            var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput");
-            var preMintedTurnId = Guid.NewGuid().ToString("N");
-
             AgentInputAttachmentAcceptanceBatch attachmentBatch;
             try
             {
@@ -247,17 +256,6 @@ public static class AgentSessionLaunchRoutes
                     });
             }
 
-            // Web conversations have no client-owned conversation id; the
-            // pre-minted session id is the stable conversation identity, so
-            // the first launch of a conversation creates and binds its
-            // workspace here (followups reuse the same session/workspace).
-            // An explicit caller-supplied workspace keeps its override
-            // semantics (the CLI-style explicit binding).
-            var workspaceName = body.Context?.Workspace?.Trim() is { Length: > 0 } explicitWorkspace
-                ? explicitWorkspace
-                : await provisioner.EnsureWebWorkspaceAsync(
-                    project.Id, preMintedSessionId, timeProvider.GetUtcNow());
-
             var launchContext = new AgentLaunchContext(
                 ProjectId: project.Id,
                 IssueNumber: body.Context?.IssueNumber,
@@ -265,7 +263,9 @@ public static class AgentSessionLaunchRoutes
                 Repository: body.Context?.Repository,
                 WorkspacePath: body.Context?.WorkspacePath,
                 WorkspaceName: workspaceName,
-                Title: null);
+                Title: null,
+                Origin: launchOrigin,
+                TargetId: agent.Id);
 
             AgentLaunchResult result;
             var retainNewlyBoundAttachments = false;
@@ -319,7 +319,7 @@ public static class AgentSessionLaunchRoutes
                     await RollbackNewlyBoundAttachmentsAsync();
             }
 
-            return AcceptedLaunch(project.Id, result, attachmentBatch.Results);
+            return AcceptedLaunch(project.Id, project.Name, result, workspaceName, launchOrigin, agent.Id, attachmentBatch.Results);
         });
 
         return app;
@@ -345,7 +345,11 @@ public static class AgentSessionLaunchRoutes
 
     private static IResult AcceptedLaunch(
         string projectId,
+        string projectName,
         AgentLaunchResult result,
+        string workspaceName,
+        string origin,
+        string targetId,
         IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null)
     {
         var acceptedAttachments = attachmentResults?
@@ -374,13 +378,31 @@ public static class AgentSessionLaunchRoutes
                         TurnId: result.TurnId,
                         AgentId: result.AgentId,
                         AgentName: result.AgentName,
+                        WorkspaceId: workspaceName,
+                        TargetId: targetId,
+                        Origin: origin,
                         Status: "queued",
                         Attachments: acceptedAttachments,
                         RejectedAttachments: rejectedAttachments,
+                        SessionUrl: $"/{Uri.EscapeDataString(projectName)}/sessions/{Uri.EscapeDataString(result.SessionId)}",
                         TranscriptUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-sessions/{Uri.EscapeDataString(result.SessionId)}/transcript",
                         JobUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}",
                         ObservationUrl: $"/api/projects/{Uri.EscapeDataString(projectId)}/agent-jobs/{Uri.EscapeDataString(result.JobKey)}/launch-observation")),
                 statusCode: 201);
+    }
+
+    private static string ReadLaunchOrigin(HttpRequest request)
+    {
+        if (request.Headers.TryGetValue("X-Mohist-Launch-Origin", out var values)
+            && values.Count > 0
+            && values[0] is { } supplied
+            && (string.Equals(supplied, "cli", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(supplied, "web", StringComparison.OrdinalIgnoreCase)))
+        {
+            return supplied.Trim().ToLowerInvariant();
+        }
+
+        return "web";
     }
 
     private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
@@ -508,7 +530,8 @@ public sealed record AgentSessionLaunchBody(
                 EpicNumber: TryReadPositiveInt(ctxElement, "epicNumber"),
                 Repository: TryReadString(ctxElement, "repository"),
                 Workspace: TryReadString(ctxElement, "workspace"),
-                WorkspacePath: TryReadString(ctxElement, "workspacePath"));
+                WorkspacePath: TryReadString(ctxElement, "workspacePath"),
+                TargetId: TryReadString(ctxElement, "targetId"));
         }
 
         var attachments = TryReadAttachments(raw);
@@ -574,7 +597,8 @@ public sealed record AgentSessionLaunchContextRef(
     int? EpicNumber = null,
     string? Repository = null,
     string? Workspace = null,
-    string? WorkspacePath = null);
+    string? WorkspacePath = null,
+    string? TargetId = null);
 
 /// <summary>
 /// Response body for a successful generic AgentSession launch. A launch
@@ -596,12 +620,16 @@ public sealed record AgentSessionLaunchResponse(
     string TurnId,
     string AgentId,
     string AgentName,
+    string WorkspaceId,
+    string TargetId,
+    string Origin,
     string Status,
     IReadOnlyList<AgentSessionLaunchAttachment>? Attachments,
     IReadOnlyList<AgentSessionLaunchAttachmentRejection>? RejectedAttachments,
     string TranscriptUrl,
     string JobUrl,
-    string ObservationUrl);
+    string ObservationUrl,
+    string SessionUrl);
 
 /// <summary>
 /// Accepted attachment descriptor the launch route surfaces in the

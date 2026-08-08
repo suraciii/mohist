@@ -53,6 +53,7 @@ const dataHook: AgentSessionComposerDataHook = () => {
         agentName: 'Agent 1',
         status: 'running',
         transcriptUrl: '',
+        sessionUrl: '/Test/sessions/sess-123',
       } as AgentSessionLaunchResponse
     },
   })
