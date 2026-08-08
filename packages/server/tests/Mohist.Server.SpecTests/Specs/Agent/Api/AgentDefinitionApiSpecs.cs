@@ -149,6 +149,94 @@ public class AgentDefinitionApiSpecs
         Assert.Null(patched.MaxConcurrentRuns);
     }
 
+    [Theory]
+    [InlineData("\"not-an-object\"", "agentConfig must be a JSON object or null")]
+    [InlineData("{\"model\":42}", "agentConfig.model")]
+    public async Task CreateAgent_WithMalformedAgentConfig_Returns400WithoutPersisting(string agentConfigJson, string expectedError)
+    {
+        var project = await CreateProjectAsync("agent-create-invalid-config");
+        using var document = JsonDocument.Parse($$"""
+            {
+              "name": "malformed-agent",
+              "instructions": "instructions",
+              "agentConfig": {{agentConfigJson}},
+              "maxConcurrentRuns": 1
+            }
+            """);
+
+        using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", document.RootElement);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var agents = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents?all=true");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+        Assert.Contains(expectedError, body.GetProperty("error").GetString());
+        Assert.DoesNotContain(agents, agent => agent.Name == "malformed-agent");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("\"two\"")]
+    public async Task CreateAgent_WithInvalidMaxConcurrentRuns_Returns400WithoutPersisting(string maxConcurrentRunsJson)
+    {
+        var project = await CreateProjectAsync("agent-create-invalid-max");
+        using var document = JsonDocument.Parse($$"""
+            {
+              "name": "invalid-max-agent",
+              "instructions": "instructions",
+              "agentConfig": { "model": "openai/gpt-5.6" },
+              "maxConcurrentRuns": {{maxConcurrentRunsJson}}
+            }
+            """);
+
+        using var response = await _client.PostAsJsonAsync($"/api/projects/{project.Id}/agents", document.RootElement);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var agents = await _client.GetDataAsync<AgentDto[]>($"/api/projects/{project.Id}/agents?all=true");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_max_concurrent_runs", body.GetProperty("code").GetString());
+        Assert.Contains("positive integer", body.GetProperty("error").GetString());
+        Assert.DoesNotContain(agents, agent => agent.Name == "invalid-max-agent");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("\"two\"")]
+    public async Task PatchAgent_WithInvalidMaxConcurrentRuns_Returns400WithoutClearingExistingValue(string maxConcurrentRunsJson)
+    {
+        var project = await CreateProjectAsync("agent-patch-invalid-max");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("max-target"));
+        using var document = JsonDocument.Parse($$"""{ "maxConcurrentRuns": {{maxConcurrentRunsJson}} }""");
+
+        using var response = await _client.PatchAsJsonAsync($"/api/projects/{project.Id}/agents/{created.Id}", document.RootElement);
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var shown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_max_concurrent_runs", body.GetProperty("code").GetString());
+        Assert.Equal(1, shown.MaxConcurrentRuns);
+    }
+
+    [Fact]
+    public async Task PatchAgent_WithMalformedAgentConfig_Returns400WithoutReplacingExistingConfig()
+    {
+        var project = await CreateProjectAsync("agent-patch-invalid-config");
+        var created = await _client.PostDataAsync<AgentDto>($"/api/projects/{project.Id}/agents", NewAgent("config-target"));
+        using var response = await _client.PatchAsJsonAsync(
+            $"/api/projects/{project.Id}/agents/{created.Id}",
+            new { agentConfig = new { model = 42 } });
+
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        var shown = await _client.GetDataAsync<AgentDto>($"/api/projects/{project.Id}/agents/{created.Id}");
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_agent_config", body.GetProperty("code").GetString());
+        Assert.Equal("openai/gpt-5.6", shown.AgentConfig!.Value.GetProperty("model").GetString());
+        Assert.Equal(1, shown.MaxConcurrentRuns);
+    }
+
     [Fact]
     public async Task Delete_ArchivesAndKeepsNameOccupiedWithProjectIsolation()
     {
