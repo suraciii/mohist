@@ -1,27 +1,18 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { describe, expect, it as vitestIt } from "vitest"
 import { succeed, fail, validateActionOutputShape } from "../src/actions/action-result.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
 import type { ActionResult, DispatchWorkItem } from "../src/core/types.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import { defineTestActions } from "./support/action-registry-test.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-let workDir: string
+const nonGitRunner: GitRunner = async () => ({ success: false, exitCode: 128, stdout: "", stderr: "not a git repository", combinedOutput: "not a git repository" })
 
-beforeEach(async () => {
-  workDir = await mkdtemp(join(tmpdir(), "mohist-executor-completion-"))
-  setExecutorGitRunnerForTest(async () => ({ success: false, exitCode: 128, stdout: "", stderr: "not a git repository", combinedOutput: "not a git repository" }))
-})
+const withExecutorResources = <T>(body: (workDir: string) => Promise<T>) =>
+  withTestRunnerResources(async () => await body("/virtual/executor-completion"), { gitRunner: nonGitRunner })
 
-afterEach(async () => {
-  setExecutorGitRunnerForTest(null)
-  await rm(workDir, { recursive: true, force: true })
-})
-
-function execute(result: ActionResult) {
+function execute(result: ActionResult, workDir: string) {
   const actions = defineTestActions({
     "test/action": async () => result,
   })
@@ -39,12 +30,17 @@ function execute(result: ActionResult) {
 }
 
 describe("Action result boundary", () => {
-  it("preserves successful output", async () => {
-    await expect(execute(succeed({ promise: "PASS" }))).resolves.toMatchObject({ status: "completed", output: { promise: "PASS" } })
+  const it = Object.assign(
+    (name: string, body: (workDir: string) => Promise<void> | void) => vitestIt(name, () => withExecutorResources(async (workDir) => await body(workDir))),
+    { each: vitestIt.each.bind(vitestIt) },
+  )
+
+  it("preserves successful output", async (workDir) => {
+    await expect(execute(succeed({ promise: "PASS" }), workDir)).resolves.toMatchObject({ status: "completed", output: { promise: "PASS" } })
   })
 
-  it("preserves an Action timeout without evaluating completion", async () => {
-    await expect(execute(fail("timeout", "OpenCode turn timed out after 60s"))).resolves.toMatchObject({
+  it("preserves an Action timeout without evaluating completion", async (workDir) => {
+    await expect(execute(fail("timeout", "OpenCode turn timed out after 60s"), workDir)).resolves.toMatchObject({
       status: "failed",
       error: { code: "timeout", message: "OpenCode turn timed out after 60s" },
     })
@@ -56,10 +52,10 @@ describe("Action result boundary", () => {
     ["number", 42],
     ["boolean", true],
   ])("rejects a successful %s output before task completion", async (_name, output) => {
-    await expect(execute({ output } as unknown as ActionResult)).resolves.toMatchObject({
+    await withExecutorResources(async (workDir) => await expect(execute({ output } as unknown as ActionResult, workDir)).resolves.toMatchObject({
       status: "failed",
       error: { code: "unexpected-error" },
-    })
+    }))
   })
 
   it("rejects non-JSON object values", () => {

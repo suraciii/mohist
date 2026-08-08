@@ -1,13 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
+import { AsyncLocalStorage } from "node:async_hooks"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost } from "../src/runtime/host.js"
 import { defaultWorkspaceRegistryFilePath } from "../src/runtime/workspace-registry.js"
-import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import type { DefaultRunnerTestResources } from "./support/test-resources.js"
+import { withDefaultRunnerTestResources } from "./support/test-resources.js"
 import { capturedLogs } from "./support/logger-test.js"
-
-const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 
 // Lifecycle coverage for the convergence backstop wiring:
 //   - On startup (after the first SignalR connect) the runner fires a
@@ -21,31 +19,18 @@ const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 // active registry entry on this runner — the queries must be sourced
 // exclusively from registry.list().filter(phase === "active").
 
-const connect = vi.fn()
-const heartbeat = vi.fn()
-const disconnect = vi.fn()
-const poll = vi.fn()
-const startSignalR = vi.fn()
-const stopSignalR = vi.fn()
-const getConnectionId = vi.fn(() => "conn-1")
-const probeLiveness = vi.fn(async () => true)
-const workflowRunsStatus = vi.fn()
-const listAgentSessionsForReconcile = vi.fn(async () => [])
-const reconcileMissingAgentSession = vi.fn()
-const reconcileAgentSessionRuntimeEvents = vi.fn(async () => [])
-const fetchConfig = vi.fn(async () => null)
 const FIXED_TIME = "2026-07-01T00:00:00.000Z"
 
 // Capture the onReconnected callback that RunnerHost passes into the
 // RunnerSignalRClient constructor. Each new RunnerSignalRClient instance
 // overwrites this slot with its most-recently registered callback.
-let capturedOnReconnected: ((connectionId: string) => void) | null = null
-
-const forceReconnect = vi.fn(async () => undefined)
-const registryTransitions = vi.hoisted(() => ({
-  markEligible: vi.fn(),
-  remove: vi.fn(),
-}))
+type ConvergenceMock = ReturnType<typeof vi.fn>
+type ConvergenceMocks = Record<
+  "connect" | "heartbeat" | "disconnect" | "poll" | "startSignalR" | "stopSignalR" |
+  "getConnectionId" | "probeLiveness" | "workflowRunsStatus" | "listAgentSessionsForReconcile" |
+  "reconcileMissingAgentSession" | "reconcileAgentSessionRuntimeEvents" | "fetchConfig" | "forceReconnect",
+  ConvergenceMock
+>
 
 interface EventQueue<T> {
   readonly count: number
@@ -88,7 +73,74 @@ interface RegistryEvents {
 
 type StatusResponder = (workflowRunIds: string[]) => Record<string, string> | Promise<Record<string, string>>
 
-let registryEvents: RegistryEvents
+interface ConvergenceTestState {
+  readonly resources: DefaultRunnerTestResources
+  readonly mocks: ConvergenceMocks
+  readonly root: string
+  readonly registryEvents: RegistryEvents
+  registryMarkEligible: (workflowRunId: string) => void
+  registryRemove: (workflowRunId: string) => void
+  capturedOnReconnected: ((connectionId: string) => void) | null
+}
+
+const convergenceTestStorage = new AsyncLocalStorage<ConvergenceTestState>()
+
+function currentConvergenceTestState(): ConvergenceTestState {
+  const state = convergenceTestStorage.getStore()
+  if (!state) throw new Error("convergence test resource context is not active")
+  return state
+}
+
+function scopedMock(name: keyof ConvergenceMocks): ConvergenceMock {
+  const target = (() => undefined) as (...args: unknown[]) => unknown
+  Object.defineProperty(target, "_isMockFunction", { value: true })
+  return new Proxy(target, {
+    apply(_target, thisArg, args) {
+      return Reflect.apply(currentConvergenceTestState().mocks[name], thisArg, args)
+    },
+    get(_target, property) {
+      const value = Reflect.get(currentConvergenceTestState().mocks[name], property)
+      return typeof value === "function" ? value.bind(currentConvergenceTestState().mocks[name]) : value
+    },
+    set(_target, property, value) {
+      return Reflect.set(currentConvergenceTestState().mocks[name], property, value)
+    },
+  }) as unknown as ConvergenceMock
+}
+
+const connect = scopedMock("connect")
+const heartbeat = scopedMock("heartbeat")
+const disconnect = scopedMock("disconnect")
+const poll = scopedMock("poll")
+const startSignalR = scopedMock("startSignalR")
+const stopSignalR = scopedMock("stopSignalR")
+const getConnectionId = scopedMock("getConnectionId")
+const probeLiveness = scopedMock("probeLiveness")
+const workflowRunsStatus = scopedMock("workflowRunsStatus")
+const listAgentSessionsForReconcile = scopedMock("listAgentSessionsForReconcile")
+const reconcileMissingAgentSession = scopedMock("reconcileMissingAgentSession")
+const reconcileAgentSessionRuntimeEvents = scopedMock("reconcileAgentSessionRuntimeEvents")
+const fetchConfig = scopedMock("fetchConfig")
+const forceReconnect = scopedMock("forceReconnect")
+
+function createConvergenceMocks(): ConvergenceMocks {
+  return {
+    connect: vi.fn(async () => undefined),
+    heartbeat: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    poll: vi.fn(async () => []),
+    startSignalR: vi.fn(async () => undefined),
+    stopSignalR: vi.fn(async () => undefined),
+    getConnectionId: vi.fn(() => "conn-1"),
+    probeLiveness: vi.fn(async () => true),
+    workflowRunsStatus: vi.fn(async () => ({})),
+    listAgentSessionsForReconcile: vi.fn(async () => []),
+    reconcileMissingAgentSession: vi.fn(async () => undefined),
+    reconcileAgentSessionRuntimeEvents: vi.fn(async () => []),
+    fetchConfig: vi.fn(async () => null),
+    forceReconnect: vi.fn(async () => undefined),
+  }
+}
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -112,7 +164,7 @@ vi.mock("../src/server/runner-signalr.js", () => ({
     probeLiveness = probeLiveness
     forceReconnect = forceReconnect
     constructor(_serverUrl: string, _runnerId: string, _runnerRoot: string, _buildGitHash: string | null, options: { onReconnected?: (id: string) => void } = {}) {
-      capturedOnReconnected = options.onReconnected ?? null
+      currentConvergenceTestState().capturedOnReconnected = options.onReconnected ?? null
     }
   },
 }))
@@ -125,28 +177,17 @@ vi.mock("../src/runtime/workspace-registry.js", async (importOriginal) => {
     WorkspaceRegistry: class extends actual.WorkspaceRegistry {
       async markEligible(workflowRunId: string) {
         const entry = await super.markEligible(workflowRunId)
-        registryTransitions.markEligible(workflowRunId)
+        currentConvergenceTestState().registryMarkEligible(workflowRunId)
         return entry
       }
 
       async remove(workflowRunId: string) {
         const removed = await super.remove(workflowRunId)
-        registryTransitions.remove(workflowRunId)
+        currentConvergenceTestState().registryRemove(workflowRunId)
         return removed
       }
     },
   }
-})
-
-
-beforeEach(() => {
-  installReadyRuntimeFactory()
-  registryEvents = {
-    eligible: eventQueue<string>(),
-    removed: eventQueue<string>(),
-  }
-  registryTransitions.markEligible.mockReset().mockImplementation((workflowRunId: string) => registryEvents.eligible.push(workflowRunId))
-  registryTransitions.remove.mockReset().mockImplementation((workflowRunId: string) => registryEvents.removed.push(workflowRunId))
 })
 
 function configureHost(statusResponder: StatusResponder = async () => ({})): HostEvents {
@@ -156,8 +197,9 @@ function configureHost(statusResponder: StatusResponder = async () => ({})): Hos
     polls: eventQueue<void>(),
   }
 
-  vi.clearAllMocks()
-  capturedOnReconnected = null
+  currentConvergenceTestState().capturedOnReconnected = null
+  currentConvergenceTestState().registryMarkEligible = (workflowRunId) => currentConvergenceTestState().registryEvents.eligible.push(workflowRunId)
+  currentConvergenceTestState().registryRemove = (workflowRunId) => currentConvergenceTestState().registryEvents.removed.push(workflowRunId)
   connect.mockReset().mockImplementation(async () => {
     events.connected.push()
   })
@@ -190,25 +232,43 @@ async function waitForActiveStartup(events: HostEvents): Promise<string[]> {
 }
 
 describe("RunnerHost converges active workflow runs", () => {
-  let root: string
+  function testRoot(): string {
+    return currentConvergenceTestState().root
+  }
 
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-host-convergence-"))
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
-  })
-
-  afterEach(async () => {
-    clearOpenCodeRuntimeFactoryForTest()
-    vi.useRealTimers()
-    await rm(root, { recursive: true, force: true })
-  })
+  function it(name: string, body: () => Promise<void>): void {
+    vitestIt(name, async () => {
+      await withDefaultRunnerTestResources(async (resources) => {
+        const state: ConvergenceTestState = {
+          resources,
+          mocks: createConvergenceMocks(),
+          root: "/virtual/runner-host-convergence",
+          registryEvents: {
+            eligible: eventQueue<string>(),
+            removed: eventQueue<string>(),
+          },
+          registryMarkEligible: () => {},
+          registryRemove: () => {},
+          capturedOnReconnected: null,
+        }
+        await convergenceTestStorage.run(state, async () => {
+          vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
+          try {
+            await body()
+          } finally {
+            vi.useRealTimers()
+          }
+        })
+      })
+    })
+  }
 
   function defaultOptions() {
     return {
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
       projectId: "project-1",
-      runnerRoot: root,
+      runnerRoot: testRoot(),
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -216,7 +276,7 @@ describe("RunnerHost converges active workflow runs", () => {
   }
 
   async function seedActiveEntry(workflowRunId: string, workspacePath: string) {
-    const filePath = defaultWorkspaceRegistryFilePath(root)
+    const filePath = defaultWorkspaceRegistryFilePath(testRoot())
     const file = {
         version: 2,
       entries: {
@@ -236,13 +296,12 @@ describe("RunnerHost converges active workflow runs", () => {
         },
       },
     }
-    const { mkdir } = await import("node:fs/promises")
-    await mkdir(join(root, ".mohist/runner-state"), { recursive: true })
-    await writeFile(filePath, JSON.stringify(file))
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), ".mohist/runner-state"))
+    await currentConvergenceTestState().resources.fileSystem.writeText(filePath, JSON.stringify(file))
   }
 
   it("Startup_RunsOneConvergencePass_WithActiveEntriesFromRegistry", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
     const events = configureHost(async () => ({ "wr-1": "Completed" }))
 
@@ -260,7 +319,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("Startup_ConvergenceTransitionsServerReportedTerminalToEligible", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
     const events = configureHost(async () => ({ "wr-1": "Completed" }))
 
@@ -271,8 +330,8 @@ describe("RunnerHost converges active workflow runs", () => {
     })
     const run = host.run(controller.signal)
     await waitForActiveStartup(events)
-    expect(await registryEvents.eligible.next()).toBe("wr-1")
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(await currentConvergenceTestState().registryEvents.eligible.next()).toBe("wr-1")
+    const onDisk = JSON.parse(await currentConvergenceTestState().resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(testRoot())))
     expect(onDisk.entries["wr-1"].phase).toBe("eligible")
 
     controller.abort()
@@ -280,13 +339,12 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("Startup_OnlyActiveEntriesAreQueried_NeverEligible", async () => {
-    const wsPathA = join(root, "mohist-local/workspaces/issue-1")
-    const wsPathB = join(root, "mohist-local/workspaces/issue-2")
+    const wsPathA = join(testRoot(), "mohist-local/workspaces/issue-1")
+    const wsPathB = join(testRoot(), "mohist-local/workspaces/issue-2")
     // Seed one active + one eligible directly via the file.
-    const filePath = defaultWorkspaceRegistryFilePath(root)
-    const { mkdir } = await import("node:fs/promises")
-    await mkdir(join(root, ".mohist/runner-state"), { recursive: true })
-    await writeFile(filePath, JSON.stringify({
+    const filePath = defaultWorkspaceRegistryFilePath(testRoot())
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), ".mohist/runner-state"))
+    await currentConvergenceTestState().resources.fileSystem.writeText(filePath, JSON.stringify({
       version: 2,
       entries: {
         "wr-active": {
@@ -326,15 +384,14 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("OnReconnected_RunsAnotherConvergencePass", async () => {
-    const wsPath1 = join(root, "mohist-local/workspaces/issue-1")
-    const wsPath2 = join(root, "mohist-local/workspaces/issue-2")
+    const wsPath1 = join(testRoot(), "mohist-local/workspaces/issue-1")
+    const wsPath2 = join(testRoot(), "mohist-local/workspaces/issue-2")
     // Seed TWO active entries. The startup convergence marks wr-1
     // eligible (server reports it terminal). wr-2 stays active so the
     // reconnect convergence has something to query and pick up.
-    const filePath = defaultWorkspaceRegistryFilePath(root)
-    const { mkdir } = await import("node:fs/promises")
-    await mkdir(join(root, ".mohist/runner-state"), { recursive: true })
-    await writeFile(filePath, JSON.stringify({
+    const filePath = defaultWorkspaceRegistryFilePath(testRoot())
+    await currentConvergenceTestState().resources.fileSystem.ensureDir(join(testRoot(), ".mohist/runner-state"))
+    await currentConvergenceTestState().resources.fileSystem.writeText(filePath, JSON.stringify({
       version: 2,
       entries: {
         "wr-1": {
@@ -369,18 +426,18 @@ describe("RunnerHost converges active workflow runs", () => {
     })
     const run = host.run(controller.signal)
     expect(await waitForActiveStartup(events)).toEqual(["wr-1", "wr-2"])
-    expect(await registryEvents.eligible.next()).toBe("wr-1")
+    expect(await currentConvergenceTestState().registryEvents.eligible.next()).toBe("wr-1")
 
     // Simulate a SignalR reconnect landing: by the time onreconnected
     // fires, getConnectionId() already returns the new id.
-    expect(capturedOnReconnected).toBeTypeOf("function")
-    expect(capturedOnReconnected).not.toBeNull()
+    expect(currentConvergenceTestState().capturedOnReconnected).toBeTypeOf("function")
+    expect(currentConvergenceTestState().capturedOnReconnected).not.toBeNull()
     getConnectionId.mockReturnValue("conn-AFTER")
-    capturedOnReconnected!("conn-AFTER")
+    currentConvergenceTestState().capturedOnReconnected!("conn-AFTER")
 
     expect(await events.statusQueries.next()).toEqual(["wr-2"])
-    expect(await registryEvents.eligible.next()).toBe("wr-2")
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(await currentConvergenceTestState().registryEvents.eligible.next()).toBe("wr-2")
+    const onDisk = JSON.parse(await currentConvergenceTestState().resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(testRoot())))
     expect(onDisk.entries["wr-1"].phase).toBe("eligible")
     expect(onDisk.entries["wr-2"].phase).toBe("eligible")
 
@@ -389,7 +446,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("PeriodicTimer_FiresConvergenceRepeatedly_AfterInterval", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
     const events = configureHost(async () => ({ "wr-1": "Running" }))
     const convergenceIntervalMs = 1_000
@@ -415,7 +472,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("PeriodicTimer_IsClearedOnShutdown_NoLeakAcrossReconnectLoops", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
     const events = configureHost(async () => ({ "wr-1": "Running" }))
     const convergenceIntervalMs = 1_000
@@ -438,7 +495,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("Convergence_NeverQueriesWorkflowRunsOutsideTheRegistry", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-mine", wsPath)
     const events = configureHost(async () => ({ "wr-mine": "Running" }))
 
@@ -459,7 +516,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("Convergence_ServerForgotRun_DropsRegistryEntry", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-forgotten", wsPath)
     const events = configureHost(async () => ({}))
 
@@ -470,8 +527,8 @@ describe("RunnerHost converges active workflow runs", () => {
     })
     const run = host.run(controller.signal)
     expect(await waitForActiveStartup(events)).toEqual(["wr-forgotten"])
-    expect(await registryEvents.removed.next()).toBe("wr-forgotten")
-    const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
+    expect(await currentConvergenceTestState().registryEvents.removed.next()).toBe("wr-forgotten")
+    const onDisk = JSON.parse(await currentConvergenceTestState().resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(testRoot())))
     expect(onDisk.entries["wr-forgotten"]).toBeUndefined()
 
     controller.abort()
@@ -479,7 +536,7 @@ describe("RunnerHost converges active workflow runs", () => {
   })
 
   it("Convergence_OnServerError_LogsAndContinues_DoesNotBlockWorkerPool", async () => {
-    const wsPath = join(root, "mohist-local/workspaces/issue-1")
+    const wsPath = join(testRoot(), "mohist-local/workspaces/issue-1")
     await seedActiveEntry("wr-1", wsPath)
     const failure = new Error("network blip")
     const events = configureHost(async () => {
@@ -491,21 +548,18 @@ describe("RunnerHost converges active workflow runs", () => {
       ...defaultOptions(),
       cleanupConvergenceIntervalMs: 5 * 60_000,
     })
-    try {
-      const run = host.run(controller.signal)
-      expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
+    const run = host.run(controller.signal)
+    expect(await waitForActiveStartup(events)).toEqual(["wr-1"])
 
-      // The registry entry is still active.
-      const onDisk = JSON.parse(await readFile(defaultWorkspaceRegistryFilePath(root), "utf8"))
-      expect(onDisk.entries["wr-1"].phase).toBe("active")
+    // The registry entry is still active.
+    const onDisk = JSON.parse(await currentConvergenceTestState().resources.fileSystem.readText(defaultWorkspaceRegistryFilePath(testRoot())))
+    expect(onDisk.entries["wr-1"].phase).toBe("active")
 
-      controller.abort()
-      await expect(run).resolves.toBeUndefined()
-      expect(capturedLogs()).toEqual(expect.arrayContaining([
-        expect.objectContaining({ level: "ERROR", message: "workspace cleanup convergence query failed", fields: { exception: failure } }),
-      ]))
-    } finally {
-    }
+    controller.abort()
+    await expect(run).resolves.toBeUndefined()
+    expect(capturedLogs()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ level: "ERROR", message: "workspace cleanup convergence query failed", fields: { exception: failure } }),
+    ]))
   })
 
   it("EmptyRegistry_StartupConvergence_DoesNotCallServer", async () => {

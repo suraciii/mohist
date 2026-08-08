@@ -1,11 +1,9 @@
 import { spawn } from "node:child_process"
 import type { ChildProcess, ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
-import { existsSync } from "node:fs"
-import { dirname } from "node:path"
 import { StringDecoder } from "node:string_decoder"
 import { assertExternalProcessAllowed, registerExternalProcess } from "./process-policy.js"
 import { createTimeoutSignal } from "./timeout-signal.js"
+import { currentRunnerFileSystem, currentRunnerResources } from "./filesystem.js"
 
 export interface CommandResult {
   exitCode: number
@@ -29,18 +27,7 @@ type ProcessKiller = typeof process.kill
 const realProcessSpawner: ProcessSpawner = (command, args, options) =>
   spawn(command, args, options) as ChildProcessWithoutNullStreams
 
-let processSpawner: ProcessSpawner = realProcessSpawner
-let processKiller: ProcessKiller = process.kill
-let usesExternalProcessSpawner = true
-
-export function setProcessSpawnerForTest(spawner: ProcessSpawner | null) {
-  processSpawner = spawner ?? realProcessSpawner
-  usesExternalProcessSpawner = spawner === null
-}
-
-export function setProcessKillerForTest(killer: ProcessKiller | null) {
-  processKiller = killer ?? process.kill
-}
+const processKillerDefault: ProcessKiller = process.kill
 
 /**
  * Optional callbacks for capturing child process output line-by-line.
@@ -77,33 +64,31 @@ export interface CommandLineOptions {
 const ABORT_FORCE_KILL_GRACE_MS = 5_000
 
 export async function ensureDir(path: string) {
-  await mkdir(path, { recursive: true })
+  await currentRunnerFileSystem().ensureDir(path)
 }
 
 export function exists(path: string) {
-  return existsSync(path)
+  return currentRunnerFileSystem().exists(path)
 }
 
 export async function readText(path: string) {
-  return await readFile(path, "utf8")
+  return await currentRunnerFileSystem().readText(path)
 }
 
 export async function writeText(path: string, content: string) {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, content)
+  await currentRunnerFileSystem().writeText(path, content)
 }
 
 export async function writeBinary(path: string, content: Uint8Array) {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, content)
+  await currentRunnerFileSystem().writeBinary(path, content)
 }
 
 export async function deleteFile(path: string) {
-  await rm(path, { force: true })
+  await currentRunnerFileSystem().deleteFile(path)
 }
 
 export async function deleteDirectory(path: string) {
-  await rm(path, { recursive: true, force: true })
+  await currentRunnerFileSystem().deleteDirectory(path)
 }
 
 export async function runCommand(
@@ -114,7 +99,10 @@ export async function runCommand(
   env?: NodeJS.ProcessEnv,
   options?: CommandLineOptions,
 ) {
-  if (usesExternalProcessSpawner) assertExternalProcessAllowed("system/process.runCommand")
+  const scopedRunner = currentRunnerResources()?.commandRunner
+  if (scopedRunner) {
+    return await scopedRunner.run(command, args, cwd, signal, env, options) as CommandResult
+  }
   const timeoutMs = options?.timeoutMs
   const onLine = options?.onLine
   const onClose = options?.onClose
@@ -128,8 +116,11 @@ export async function runCommand(
     // process.kill(-pid) and reap helper processes (git-remote-http, ...)
     // alongside the direct child. We do NOT unref(): the parent still
     // awaits pipe closure, otherwise we'd race output drain and spawn errors.
+    const scopedSpawner = currentRunnerResources()?.processSpawner
+    if (!scopedSpawner) assertExternalProcessAllowed("system/process.runCommand")
+    const processSpawner = scopedSpawner ?? realProcessSpawner
     const child = processSpawner(command, args, { cwd, env: { ...process.env, ...env }, signal: effectiveSignal, shell: false, detached: true })
-    if (usesExternalProcessSpawner) registerExternalProcess(child)
+    if (!scopedSpawner) registerExternalProcess(child)
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     const stdoutState: LineBufferState = { carry: "", decoder: new StringDecoder("utf8") }
@@ -256,9 +247,7 @@ function drainTail(state: LineBufferState, onLine: (line: string) => void) {
 }
 
 export async function copyDirectory(source: string, destination: string) {
-  await mkdir(destination, { recursive: true })
-  const { cp } = await import("node:fs/promises")
-  await cp(source, destination, { recursive: true, force: true })
+  await currentRunnerFileSystem().copyDirectory(source, destination)
 }
 
 /**
@@ -271,6 +260,7 @@ export async function copyDirectory(source: string, destination: string) {
 export function killProcess(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM") {
   if (child.pid !== undefined && process.platform !== "win32") {
     try {
+      const processKiller = currentRunnerResources()?.processKiller ?? processKillerDefault
       processKiller(-child.pid, signal)
       return
     } catch {

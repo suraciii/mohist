@@ -1,23 +1,11 @@
 import { git as defaultGit, type GitOptions } from "../actions/git.js"
+import { currentRunnerResources } from "../system/filesystem.js"
 
-export type GitRunner = (
-  workDir: string,
-  args: string[],
-  signal: AbortSignal,
-  options?: GitOptions,
-) => Promise<{
-  success: boolean
-  stdout: string
-  stderr: string
-  exitCode: number
-  combinedOutput: string
-}>
+export type GitRunner = import("../system/filesystem.js").RunnerGitRunner
 
-let git: GitRunner = defaultGit
-
-export function setExecutorGitRunnerForTest(runner: GitRunner | null) {
-  git = runner ?? defaultGit
+export async function git(workDir: string, args: string[], signal: AbortSignal, options?: GitOptions) {
+  const runner = currentRunnerResources()?.gitRunner ?? defaultGit
+  return await runner(workDir, args, signal, options)
 }
 
-export { git }
 export type { GitOptions }

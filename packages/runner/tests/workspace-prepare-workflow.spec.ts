@@ -1,10 +1,8 @@
-import { mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "vitest"
-import { workspacePrepareAction, setWorkspacePrepareExistsCheckerForTest, setWorkspacePrepareGitRunnerForTest } from "../src/actions/workspace-prepare.js"
+import { describe, expect, it as vitestIt } from "vitest"
+import { workspacePrepareAction } from "../src/actions/workspace-prepare.js"
 import { WorkExecutor } from "../src/runtime/executor.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
+import type { RunnerResourceContext } from "../src/system/filesystem.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
 import type { ActionResult, JsonObject, DispatchWorkItem } from "../src/core/types.js"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
@@ -12,22 +10,16 @@ import type { ActionHost } from "../src/actions/host.js"
 import type { ServerConnection } from "../src/server/connection.js"
 import { defineTestActions, type ActionRegistry } from "./support/action-registry-test.js"
 import { callAction } from "./support/call-action.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
 const WORKFLOW_RUN_ID = "wr-workspace-prepare-regression"
 const EXPECTED_BRANCH = "mohist/run-wr-workspace-prepare-regression"
 
-let workspacePath: string
+const workspacePath = "/virtual/workspace-prepare-regression"
 
-beforeEach(async () => {
-  workspacePath = await mkdtemp(join(tmpdir(), "mohist-workspace-prepare-regression-"))
-})
-
-afterEach(async () => {
-  setExecutorGitRunnerForTest(null)
-  setWorkspacePrepareGitRunnerForTest(null)
-  setWorkspacePrepareExistsCheckerForTest(null)
-  await rm(workspacePath, { recursive: true, force: true })
-})
+function withResources<T>(resources: Omit<RunnerResourceContext, "fileSystem">, body: () => Promise<T>): Promise<T> {
+  return withTestRunnerResources(async () => await body(), resources)
+}
 
 function ok(stdout: string) {
   return { success: true, stdout, stderr: "", exitCode: 0, combinedOutput: stdout.trim() }
@@ -37,8 +29,8 @@ function fail(stderr: string) {
   return { success: false, stdout: "", stderr, exitCode: 1, combinedOutput: stderr }
 }
 
-function installExecutorGitProbe() {
-  setExecutorGitRunnerForTest(async (_workDir, args) => {
+function installExecutorGitProbe(): GitRunner {
+  return async (_workDir, args) => {
     const command = args.join(" ")
     switch (command) {
       case "rev-parse --abbrev-ref HEAD":
@@ -52,12 +44,11 @@ function installExecutorGitProbe() {
       default:
         return fail(`unexpected executor git call: ${command}`)
     }
-  })
+  }
 }
 
-function installWorkspacePrepareGit(residual: { rebase: boolean }) {
-  setWorkspacePrepareExistsCheckerForTest((path) => path.endsWith("rebase-merge") && residual.rebase)
-  setWorkspacePrepareGitRunnerForTest(async (_workDir, args) => {
+function installWorkspacePrepareGit(residual: { rebase: boolean }): GitRunner {
+  return async (_workDir, args) => {
     const command = args.join(" ")
     switch (command) {
       case "rev-parse --git-path rebase-merge":
@@ -80,7 +71,7 @@ function installWorkspacePrepareGit(residual: { rebase: boolean }) {
       default:
         return fail(`unexpected workspace-prepare git call: ${command}`)
     }
-  })
+  }
 }
 
 function buildExecutor(registry: ActionRegistry): WorkExecutor {
@@ -119,86 +110,92 @@ function actionContext(item: DispatchWorkItem): ActionContext {
 }
 
 describe("workspace-prepare stage-boundary dispatch regression", () => {
-  it("RerunAfterRebaseFailure_DispatchesWorkspacePrepareFirstAndThenBusinessTask", async () => {
-    installExecutorGitProbe()
+  vitestIt("RerunAfterRebaseFailure_DispatchesWorkspacePrepareFirstAndThenBusinessTask", async () => {
     const residual = { rebase: false }
-    installWorkspacePrepareGit(residual)
-    const dispatched: string[] = []
+    const executorGitRunner = installExecutorGitProbe()
+    const workspacePrepareGitRunner = installWorkspacePrepareGit(residual)
 
-    const registry = defineTestActions({
-      "mohist/rebase": {
-        run: async (_inputs: JsonObject, _host: ActionHost): Promise<ActionResult> => {
-          dispatched.push("integrate:rebase")
-          residual.rebase = true
-          return { error: { code: "conflict", message: "rebase conflict" } }
+    await withResources({
+      gitRunner: executorGitRunner,
+      workspacePrepareGitRunner,
+      workspacePrepareExistsChecker: (path) => path.endsWith("rebase-merge") && residual.rebase,
+    }, async () => {
+      const dispatched: string[] = []
+      const registry = defineTestActions({
+        "mohist/rebase": {
+          run: async (_inputs: JsonObject, _host: ActionHost): Promise<ActionResult> => {
+            dispatched.push("integrate:rebase")
+            residual.rebase = true
+            return { error: { code: "conflict", message: "rebase conflict" } }
+          },
+          errors: [{ code: "conflict" }],
         },
-        errors: [{ code: "conflict" }],
-      },
-      "mohist/workspace-prepare": {
-        inputs: { expectedBranch: { types: ["string"], required: true } },
-        run: async (inputs: JsonObject, host: ActionHost) => {
-          dispatched.push("workspace-prepare")
-          return await workspacePrepareAction(inputs, host)
+        "mohist/workspace-prepare": {
+          inputs: { expectedBranch: { types: ["string"], required: true } },
+          run: async (inputs: JsonObject, host: ActionHost) => {
+            dispatched.push("workspace-prepare")
+            return await workspacePrepareAction(inputs, host)
+          },
         },
-      },
-      "core/business": async (_inputs: JsonObject, _host: ActionHost) => {
-        dispatched.push("integrate:push")
-        expect(residual.rebase).toBe(false)
-        return { output: { ran: "integrate:push" } }
-      },
+        "core/business": async (_inputs: JsonObject, _host: ActionHost) => {
+          dispatched.push("integrate:push")
+          expect(residual.rebase).toBe(false)
+          return { output: { ran: "integrate:push" } }
+        },
+      })
+
+      const executor = buildExecutor(registry)
+      const failedRebase = await executor.execute(work("integrate:rebase", "mohist/rebase"), new AbortController().signal)
+      expect(failedRebase.status).toBe("failed")
+      expect(residual.rebase).toBe(true)
+
+      const prepare = await executor.execute(work("workspace-prepare", "mohist/workspace-prepare"), new AbortController().signal)
+      expect(prepare.status).toBe("completed")
+      expect(residual.rebase).toBe(false)
+
+      const business = await executor.execute(work("integrate:push", "core/business"), new AbortController().signal)
+      expect(business.status).toBe("completed")
+      expect(dispatched).toEqual(["integrate:rebase", "workspace-prepare", "integrate:push"])
     })
-
-    const executor = buildExecutor(registry)
-    const failedRebase = await executor.execute(work("integrate:rebase", "mohist/rebase"), new AbortController().signal)
-    expect(failedRebase.status).toBe("failed")
-    expect(residual.rebase).toBe(true)
-
-    const prepare = await executor.execute(work("workspace-prepare", "mohist/workspace-prepare"), new AbortController().signal)
-    expect(prepare.status).toBe("completed")
-    expect(residual.rebase).toBe(false)
-
-    const business = await executor.execute(work("integrate:push", "core/business"), new AbortController().signal)
-    expect(business.status).toBe("completed")
-    expect(dispatched).toEqual(["integrate:rebase", "workspace-prepare", "integrate:push"])
   })
 
-  it("RecoveryScheduledTasks_AreReturnedWithoutFreshWorkspacePrepare", async () => {
-    installExecutorGitProbe()
-    const registry = defineTestActions({
-      "mohist/rebase": {
-        run: async (_inputs: JsonObject, _host: ActionHost) => ({ error: { code: "conflict", message: "rebase conflict" } }),
-        errors: [{ code: "conflict" }],
-      },
-    })
-    const executor = buildExecutor(registry)
-
-    const result = await executor.execute(
-      work("integrate:rebase", "mohist/rebase", {
-        recovery: {
-          budget: 1,
-          handlers: [
-            {
-              when: "error.code=conflict",
-              retrySelf: true,
-              tasks: [{ id: "resolve-rebase-conflicts", title: "Resolve rebase conflicts", uses: "mohist/opencode" }],
-            },
-          ],
+  vitestIt("RecoveryScheduledTasks_AreReturnedWithoutFreshWorkspacePrepare", async () => {
+    await withResources({ gitRunner: installExecutorGitProbe() }, async () => {
+      const registry = defineTestActions({
+        "mohist/rebase": {
+          run: async (_inputs: JsonObject, _host: ActionHost) => ({ error: { code: "conflict", message: "rebase conflict" } }),
+          errors: [{ code: "conflict" }],
         },
-        recoveryRemaining: null,
-      }),
-      new AbortController().signal,
-    )
-    expect(result.status).toBe("completed")
-    expect(result.addTasks?.map((task) => task.id)).toEqual(["resolve-rebase-conflicts", "integrate:rebase"])
-    expect(result.addTasks?.some((task) => task.id === "workspace-prepare" || task.uses === "mohist/workspace-prepare")).toBe(false)
+      })
+      const executor = buildExecutor(registry)
+
+      const result = await executor.execute(
+        work("integrate:rebase", "mohist/rebase", {
+          recovery: {
+            budget: 1,
+            handlers: [
+              {
+                when: "error.code=conflict",
+                retrySelf: true,
+                tasks: [{ id: "resolve-rebase-conflicts", title: "Resolve rebase conflicts", uses: "mohist/opencode" }],
+              },
+            ],
+          },
+          recoveryRemaining: null,
+        }),
+        new AbortController().signal,
+      )
+      expect(result.status).toBe("completed")
+      expect(result.addTasks?.map((task) => task.id)).toEqual(["resolve-rebase-conflicts", "integrate:rebase"])
+      expect(result.addTasks?.some((task) => task.id === "workspace-prepare" || task.uses === "mohist/workspace-prepare")).toBe(false)
+    })
   })
 
-  it("WorkspacePrepareProbes_AreLocalOnlyAndCarryNoCommandTimeout", async () => {
+  vitestIt("WorkspacePrepareProbes_AreLocalOnlyAndCarryNoCommandTimeout", async () => {
     type RecordingGitCall = { command: string; timeoutMs: number | undefined }
     const calls: RecordingGitCall[] = []
-    installExecutorGitProbe()
-    setWorkspacePrepareExistsCheckerForTest(() => false)
-    setWorkspacePrepareGitRunnerForTest(async (_workDir, args, _signal, options) => {
+    const executorGitRunner = installExecutorGitProbe()
+    const workspacePrepareGitRunner: GitRunner = async (_workDir, args, _signal, options) => {
       const command = args.join(" ")
       calls.push({ command, timeoutMs: options?.timeoutMs })
       switch (command) {
@@ -219,14 +216,19 @@ describe("workspace-prepare stage-boundary dispatch regression", () => {
         default:
           return fail(`unexpected workspace-prepare git call: ${command}`)
       }
-    })
-
-    await callAction(workspacePrepareAction, actionContext(work("workspace-prepare", "mohist/workspace-prepare")))
-
-    // Local-only probes — no network, no per-command timeout.
-    for (const call of calls) {
-      expect(call.timeoutMs, `git call ${call.command} should have no timeoutMs`).toBeUndefined()
     }
-    expect(calls.length).toBeGreaterThan(0)
+
+    await withResources({
+      gitRunner: executorGitRunner,
+      workspacePrepareGitRunner,
+      workspacePrepareExistsChecker: () => false,
+    }, async () => {
+      await callAction(workspacePrepareAction, actionContext(work("workspace-prepare", "mohist/workspace-prepare")))
+
+      for (const call of calls) {
+        expect(call.timeoutMs, `git call ${call.command} should have no timeoutMs`).toBeUndefined()
+      }
+      expect(calls.length).toBeGreaterThan(0)
+    })
   })
 })

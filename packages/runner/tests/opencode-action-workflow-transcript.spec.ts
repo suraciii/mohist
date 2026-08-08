@@ -8,8 +8,6 @@ import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import type { ActionTestContext as ActionContext } from "./support/action-test-context.js"
 import { WorkflowAgentSessionReporter } from "../src/actions/workflow-agent-session-reporter.js"
 import type { AgentSessionRuntimeEventOutbox, RuntimeEventRecord } from "../src/server/runtime-event-outbox.js"
-import { clearOpenCodeRuntimeFactoryForTest } from "./support/opencode-runtime-factory.js"
-import { setPromptLoaderRegistryForTest } from "../src/core/prompt.js"
 import { makeRecordingOutbox, type OutboxHandles } from "./support/outbox-test-helpers.js"
 import { callAction } from "./support/call-action.js"
 
@@ -137,8 +135,6 @@ function baseContext(overrides: Partial<ActionContext> = {}): ActionContext {
 }
 
 afterEach(() => {
-  setPromptLoaderRegistryForTest(null)
-  clearOpenCodeRuntimeFactoryForTest()
   vi.useRealTimers()
 })
 

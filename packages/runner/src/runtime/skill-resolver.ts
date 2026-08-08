@@ -1,6 +1,6 @@
-import { readFile, realpath } from "node:fs/promises"
 import { homedir } from "node:os"
 import { isAbsolute, join, relative, resolve } from "node:path"
+import { currentRunnerFileSystem } from "../system/filesystem.js"
 
 export interface ResolvedSkill {
   readonly name: string
@@ -55,13 +55,13 @@ export class SkillResolver {
     for (const root of roots) {
       let rootReal: string
       try {
-        rootReal = await realpath(resolve(root))
+        rootReal = await currentRunnerFileSystem().realpath(resolve(root))
       } catch {
         continue
       }
       let fileReal: string
       try {
-        fileReal = await realpath(join(rootReal, name, "SKILL.md"))
+        fileReal = await currentRunnerFileSystem().realpath(join(rootReal, name, "SKILL.md"))
       } catch {
         continue
       }
@@ -69,7 +69,7 @@ export class SkillResolver {
       if (rel.startsWith("..") || isAbsolute(rel)) return this.failure(name, "SKILL.md resolves outside its configured root")
       let body: string
       try {
-        body = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(fileReal))
+        body = new TextDecoder("utf-8", { fatal: true }).decode(await currentRunnerFileSystem().readBinary(fileReal))
       } catch {
         return this.failure(name, "SKILL.md is unreadable or is not valid UTF-8")
       }

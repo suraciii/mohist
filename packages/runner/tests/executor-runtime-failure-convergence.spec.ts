@@ -1,15 +1,14 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
-import { tmpdir } from "node:os"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import type { DispatchWorkItem } from "../src/core/types.js"
-import { setExecutorGitRunnerForTest } from "../src/runtime/git-probe.js"
+import { currentRunnerFileSystem } from "../src/system/filesystem.js"
 import { makeRecordingOutbox } from "./support/outbox-test-helpers.js"
 import { defineTestActions } from "./support/action-registry-test.js"
 import { verifyOnlyWorkspaceManager } from "./support/workspace-mock.js"
+import { withTestRunnerResources } from "./support/test-resources.js"
 
-const workDir = "/tmp/mohist-runtime-failure-convergence"
+const workDir = "/virtual/mohist-runtime-failure-convergence"
 
 const runtimeFailureErrors = [
   "runtime-unavailable",
@@ -91,19 +90,17 @@ function createExecutor(runtime: unknown, connection: unknown, outbox = makeReco
   return { executor, outbox }
 }
 
-beforeEach(() => {
-  setExecutorGitRunnerForTest(async () => ({
-    success: false,
-    exitCode: 128,
-    stdout: "",
-    stderr: "not a git repository",
-    combinedOutput: "not a git repository",
+function it(name: string, body: () => Promise<void>): void {
+  vitestIt(name, async () => await withTestRunnerResources(body, {
+    gitRunner: async () => ({
+      success: false,
+      exitCode: 128,
+      stdout: "",
+      stderr: "not a git repository",
+      combinedOutput: "not a git repository",
+    }),
   }))
-})
-
-afterEach(() => {
-  setExecutorGitRunnerForTest(null)
-})
+}
 
 describe("WorkExecutor runtime failure convergence", () => {
   it("turns runtime-unavailable into a failed WorkItemResult without a current session binding", async () => {
@@ -238,8 +235,7 @@ describe("WorkExecutor runtime failure convergence", () => {
   })
 
   it("creates a fresh physical session before retrying a failed binding and satisfies the task artifact", async () => {
-    const retryWorkDir = await mkdtemp(join(tmpdir(), "mohist-retry-session-"))
-    try {
+    const retryWorkDir = "/virtual/mohist-retry-session"
       const createSession = vi.fn(async () => ({
         ok: true as const,
         value: { runtimeSessionId: "runtime-new", workDir: retryWorkDir },
@@ -256,8 +252,8 @@ describe("WorkExecutor runtime failure convergence", () => {
           }
         }
         const proposalPath = join(request.target.workDir, "openspec/changes/issue-557/proposal.md")
-        await mkdir(join(request.target.workDir, "openspec/changes/issue-557"), { recursive: true })
-        await writeFile(proposalPath, "proposal", "utf8")
+        await currentRunnerFileSystem().ensureDir(join(request.target.workDir, "openspec/changes/issue-557"))
+        await currentRunnerFileSystem().writeText(proposalPath, "proposal")
         return {
           ok: true as const,
           value: {
@@ -299,9 +295,6 @@ describe("WorkExecutor runtime failure convergence", () => {
       })
       expect(runTurn.mock.calls.map((call) => call[0].target.runtimeSessionId)).toEqual(["runtime-new"])
       expect(outbox.eventsByType("session.input")[0]?.runtimeSessionId).toBe("runtime-new")
-    } finally {
-      await rm(retryWorkDir, { recursive: true, force: true })
-    }
   })
 
   it("fails closed when the bound workflow Runtime Session still has an active turn", async () => {

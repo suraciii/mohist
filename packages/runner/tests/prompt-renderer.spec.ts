@@ -1,15 +1,13 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   PromptLoaderRegistry,
   defaultPromptLoaderRegistry,
   renderStructuredPrompt,
   resolvePrompt,
-  setPromptLoaderRegistryForTest,
+  withPromptLoaderRegistry,
   type PromptLoader,
   type PromptLoaderContext,
 } from "../src/core/prompt.js"
-
-afterEach(() => setPromptLoaderRegistryForTest(null))
 
 describe("resolvePrompt - string identity", () => {
   it("PlainStringSpec_ResolvesByteForByteUnchanged", async () => {
@@ -237,9 +235,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
   it("LoaderReturningString_ResolvesToThatStringDirectly", async () => {
     const registry = new PromptLoaderRegistry()
     registry.register("fake/string-loader", async () => "loader produced text")
-    setPromptLoaderRegistryForTest(registry)
-
-    const result = await resolvePrompt({ uses: "fake/string-loader" }, baseLoaderContext())
+    const result = await withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/string-loader" }, baseLoaderContext()))
 
     expect(result).toBe("loader produced text")
   })
@@ -249,9 +245,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
     registry.register("fake/object-loader", async () => ({
       artifact: { task: "rendered from loader" },
     }))
-    setPromptLoaderRegistryForTest(registry)
-
-    const result = await resolvePrompt({ uses: "fake/object-loader" }, baseLoaderContext())
+    const result = await withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/object-loader" }, baseLoaderContext()))
 
     expect(result).toBe([
       `<artifact>`,
@@ -266,8 +260,6 @@ describe("resolvePrompt - loader-backed prompts", () => {
     const registry = new PromptLoaderRegistry()
     const loader = vi.fn<PromptLoader>(async () => "ok")
     registry.register("fake/echo-loader", loader)
-    setPromptLoaderRegistryForTest(registry)
-
     const ctx: PromptLoaderContext = {
       with: {},
       workDir: "/tmp/run",
@@ -276,10 +268,10 @@ describe("resolvePrompt - loader-backed prompts", () => {
       stage: "build",
     }
 
-    await resolvePrompt({
+    await withPromptLoaderRegistry(registry, async () => await resolvePrompt({
       uses: "fake/echo-loader",
       with: { file: "tasks.json", taskId: "T-001" },
-    }, ctx)
+    }, ctx))
 
     expect(loader).toHaveBeenCalledTimes(1)
     expect(loader.mock.calls[0][0]).toEqual({
@@ -295,9 +287,7 @@ describe("resolvePrompt - loader-backed prompts", () => {
     const registry = new PromptLoaderRegistry()
     const loader = vi.fn<PromptLoader>(async () => "ok")
     registry.register("fake/echo-loader", loader)
-    setPromptLoaderRegistryForTest(registry)
-
-    await resolvePrompt({ uses: "fake/echo-loader" }, baseLoaderContext())
+    await withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/echo-loader" }, baseLoaderContext()))
 
     expect(loader.mock.calls[0][0].with).toEqual({})
   })
@@ -305,18 +295,16 @@ describe("resolvePrompt - loader-backed prompts", () => {
   it("LoaderNameIsCaseInsensitive_ResolvesIgnoringCase", async () => {
     const registry = new PromptLoaderRegistry()
     registry.register("Fake/Mixed-Case", async () => "matched")
-    setPromptLoaderRegistryForTest(registry)
-
-    expect(await resolvePrompt({ uses: "fake/mixed-case" }, baseLoaderContext())).toBe("matched")
-    expect(await resolvePrompt({ uses: "FAKE/MIXED-CASE" }, baseLoaderContext())).toBe("matched")
+    await withPromptLoaderRegistry(registry, async () => {
+      expect(await resolvePrompt({ uses: "fake/mixed-case" }, baseLoaderContext())).toBe("matched")
+      expect(await resolvePrompt({ uses: "FAKE/MIXED-CASE" }, baseLoaderContext())).toBe("matched")
+    })
   })
 })
 
 describe("resolvePrompt - error handling", () => {
   it("UnknownLoaderName_FailsWithClearError", async () => {
-    setPromptLoaderRegistryForTest(new PromptLoaderRegistry())
-
-    await expect(resolvePrompt({ uses: "no/such-loader" }, baseLoaderContext()))
+    await expect(withPromptLoaderRegistry(new PromptLoaderRegistry(), async () => await resolvePrompt({ uses: "no/such-loader" }, baseLoaderContext())))
       .rejects.toThrow("Unknown prompt loader: 'no/such-loader'")
   })
 
@@ -333,27 +321,21 @@ describe("resolvePrompt - error handling", () => {
   it("LoaderSpecWithNonObjectWith_FailsWithClearError", async () => {
     const registry = new PromptLoaderRegistry()
     registry.register("fake/loader", async () => "ok")
-    setPromptLoaderRegistryForTest(registry)
-
-    await expect(resolvePrompt({ uses: "fake/loader", with: "not-object" } as never, baseLoaderContext()))
+    await expect(withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/loader", with: "not-object" } as never, baseLoaderContext())))
       .rejects.toThrow("Prompt loader 'fake/loader' spec 'with' must be an object")
   })
 
   it("LoaderReturningArray_FailsWithClearError", async () => {
     const registry = new PromptLoaderRegistry()
     registry.register("fake/array-loader", async () => ["nope"] as never)
-    setPromptLoaderRegistryForTest(registry)
-
-    await expect(resolvePrompt({ uses: "fake/array-loader" }, baseLoaderContext()))
+    await expect(withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/array-loader" }, baseLoaderContext())))
       .rejects.toThrow("Prompt loader 'fake/array-loader' returned an invalid value")
   })
 
   it("LoaderReturningPrimitive_FailsWithClearError", async () => {
     const registry = new PromptLoaderRegistry()
     registry.register("fake/number-loader", async () => 42 as never)
-    setPromptLoaderRegistryForTest(registry)
-
-    await expect(resolvePrompt({ uses: "fake/number-loader" }, baseLoaderContext()))
+    await expect(withPromptLoaderRegistry(registry, async () => await resolvePrompt({ uses: "fake/number-loader" }, baseLoaderContext())))
       .rejects.toThrow("Prompt loader 'fake/number-loader' returned an invalid value")
   })
 
@@ -412,10 +394,7 @@ describe("PromptLoaderRegistry and test hook", () => {
     try {
       const override = new PromptLoaderRegistry()
       override.register("temp/default", async () => "from-override")
-      setPromptLoaderRegistryForTest(override)
-      expect(await resolvePrompt({ uses: "temp/default" }, baseLoaderContext())).toBe("from-override")
-
-      setPromptLoaderRegistryForTest(null)
+      expect(await withPromptLoaderRegistry(override, async () => await resolvePrompt({ uses: "temp/default" }, baseLoaderContext()))).toBe("from-override")
       expect(await resolvePrompt({ uses: "temp/default" }, baseLoaderContext())).toBe("from-default")
     } finally {
       original.unregister("temp/default")

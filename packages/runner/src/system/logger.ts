@@ -1,6 +1,6 @@
-import { appendFile, mkdir, rename, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { currentRunnerFileSystem, currentRunnerResources } from "./filesystem.js"
 
 export const RUNNER_LOG_MAX_BYTES = 32 * 1024 * 1024
 
@@ -41,22 +41,22 @@ export interface RunnerLogger {
 
 const nodeFileWriter: LogFileWriter = {
   async ensureDirectory(directory) {
-    await mkdir(directory, { recursive: true })
+    await currentRunnerFileSystem().ensureDir(directory)
   },
   async size(path) {
     try {
-      return (await stat(path)).size
+      return (await currentRunnerFileSystem().stat(path)).size
     } catch (error) {
       if (isNotFound(error)) return 0
       throw error
     }
   },
   async append(path, content) {
-    await appendFile(path, content, "utf8")
+    await currentRunnerFileSystem().appendText(path, content)
   },
   async rename(source, destination) {
     try {
-      await rename(source, destination)
+      await currentRunnerFileSystem().rename(source, destination)
       return true
     } catch (error) {
       if (isNotFound(error)) return false
@@ -235,37 +235,33 @@ const noopLogger: RunnerLogger = {
 
 let activeLogger: RunnerLogger = noopLogger
 
+function currentRunnerLogger(): RunnerLogger {
+  return currentRunnerResources()?.logger ?? activeLogger
+}
+
 export function configureRunnerLogger(options: RunnerLoggerOptions = {}): RunnerLogger {
   activeLogger = createRunnerLogger(options)
   return activeLogger
 }
 
-export function setRunnerLoggerForTest(logger: RunnerLogger): () => void {
-  const previous = activeLogger
-  activeLogger = logger
-  return () => {
-    activeLogger = previous
-  }
-}
-
 export const runnerLogger: RunnerLogger = {
-  trace(message, fields) { activeLogger.trace(message, fields) },
-  debug(message, fields) { activeLogger.debug(message, fields) },
-  info(message, fields) { activeLogger.info(message, fields) },
-  warn(message, fields) { activeLogger.warn(message, fields) },
-  error(message, fields) { activeLogger.error(message, fields) },
-  fatal(message, fields) { activeLogger.fatal(message, fields) },
+  trace(message, fields) { currentRunnerLogger().trace(message, fields) },
+  debug(message, fields) { currentRunnerLogger().debug(message, fields) },
+  info(message, fields) { currentRunnerLogger().info(message, fields) },
+  warn(message, fields) { currentRunnerLogger().warn(message, fields) },
+  error(message, fields) { currentRunnerLogger().error(message, fields) },
+  fatal(message, fields) { currentRunnerLogger().fatal(message, fields) },
   child(component) {
     return {
-      trace(message, fields) { activeLogger.child(component).trace(message, fields) },
-      debug(message, fields) { activeLogger.child(component).debug(message, fields) },
-      info(message, fields) { activeLogger.child(component).info(message, fields) },
-      warn(message, fields) { activeLogger.child(component).warn(message, fields) },
-      error(message, fields) { activeLogger.child(component).error(message, fields) },
-      fatal(message, fields) { activeLogger.child(component).fatal(message, fields) },
+      trace(message, fields) { currentRunnerLogger().child(component).trace(message, fields) },
+      debug(message, fields) { currentRunnerLogger().child(component).debug(message, fields) },
+      info(message, fields) { currentRunnerLogger().child(component).info(message, fields) },
+      warn(message, fields) { currentRunnerLogger().child(component).warn(message, fields) },
+      error(message, fields) { currentRunnerLogger().child(component).error(message, fields) },
+      fatal(message, fields) { currentRunnerLogger().child(component).fatal(message, fields) },
       child(nestedComponent) { return runnerLogger.child(nestedComponent) },
-      flush() { return activeLogger.flush() },
+      flush() { return currentRunnerLogger().flush() },
     }
   },
-  flush() { return activeLogger.flush() },
+  flush() { return currentRunnerLogger().flush() },
 }

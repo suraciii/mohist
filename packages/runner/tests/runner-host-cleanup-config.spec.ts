@@ -1,14 +1,13 @@
-import { mkdtemp, mkdir, rm, stat, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { dirname, join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { join } from "node:path"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import type { CleanupLoopResult } from "../src/runtime/cleanup-loop.js"
 import type { CleanupPolicy } from "../src/core/types.js"
-import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import { installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
 import type { FakeRuntimeHandles } from "./support/opencode-runtime-factory.js"
 import { capturedLogs } from "./support/logger-test.js"
-
-const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
+import type { DefaultRunnerTestResources } from "./support/test-resources.js"
+import { withDefaultRunnerTestResources } from "./support/test-resources.js"
 
 // Idle-system cleanup scenario: when `poll` is continuously
 // returning 204 (no work dispatched), the runner's cleanup-loop tick
@@ -22,8 +21,7 @@ const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
 // We deliberately avoid:
 //   - real HTTP (a fake `ServerConnection` is injected via vi.mock);
 //   - real time (`vi.useFakeTimers` + `vi.advanceTimersByTimeAsync`);
-//   - real disk I/O for the runner root (a temp dir is used only so the
-//     host constructor succeeds).
+//   - real disk I/O for the runner root (the test uses a MemoryFileSystem).
 
 interface CleanupCall {
   policy: CleanupPolicy | null | undefined
@@ -31,6 +29,10 @@ interface CleanupCall {
 }
 
 interface CleanupTestState {
+  readonly resources: DefaultRunnerTestResources
+  readonly root: string
+  readonly runtimeHandles: FakeRuntimeHandles
+  hostEvents: HostEvents | null
   cleanupCalls: CleanupCall[]
   fetchConfigCalls: undefined[]
   fetchAttempts: number
@@ -43,8 +45,20 @@ interface CleanupTestState {
 
 const CLEANUP_INTERVAL_FLOOR_MS = 1000
 
-const mocks = vi.hoisted(() => {
-  const state: CleanupTestState = {
+const cleanupTestStorage = new AsyncLocalStorage<CleanupTestState>()
+
+function currentCleanupTestState(): CleanupTestState {
+  const state = cleanupTestStorage.getStore()
+  if (!state) throw new Error("cleanup test resource context is not active")
+  return state
+}
+
+function createCleanupTestState(resources: DefaultRunnerTestResources, runtimeHandles: FakeRuntimeHandles): CleanupTestState {
+  return {
+    resources,
+    root: "/virtual/runner-host-idle-cleanup",
+    runtimeHandles,
+    hostEvents: null,
     cleanupCalls: [],
     fetchConfigCalls: [],
     fetchAttempts: 0,
@@ -60,47 +74,52 @@ const mocks = vi.hoisted(() => {
     },
     blockedPaths: null,
   }
-  return {
-    state,
-    connect: vi.fn(async () => undefined),
-    heartbeat: vi.fn(async () => undefined),
-    disconnect: vi.fn(async () => undefined),
-    poll: vi.fn(async () => []),
-    report: vi.fn(async () => ({})),
-    startSignalR: vi.fn(async () => undefined),
-    stopSignalR: vi.fn(async () => undefined),
-    getConnectionId: vi.fn(() => "conn-1"),
-    probeLiveness: vi.fn(async () => true),
-    forceReconnect: vi.fn(async () => undefined),
-  }
-})
+}
+
+function testRoot(): string {
+  return currentCleanupTestState().root
+}
+
+function testState(): CleanupTestState {
+  return currentCleanupTestState()
+}
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
-    connect = mocks.connect
-    heartbeat = mocks.heartbeat
-    disconnect = mocks.disconnect
-    poll = mocks.poll
-    report = mocks.report
+    async connect() {
+      currentCleanupTestState().hostEvents?.connected.resolve()
+    }
+
+    async heartbeat() {}
+
+    async disconnect() {}
+
+    async poll() {
+      currentCleanupTestState().hostEvents?.polled.resolve()
+      return []
+    }
+
+    async report() {
+      return {}
+    }
+
     fetchConfig = async (_signal: AbortSignal) => {
-      mocks.state.fetchConfigCalls.push(undefined)
-      mocks.state.onFetchConfig?.()
-      if (!mocks.state.stubFetchConfigBehavior) return null
-      return mocks.state.stubFetchConfigBehavior()
+      const state = currentCleanupTestState()
+      state.fetchConfigCalls.push(undefined)
+      state.onFetchConfig?.()
+      if (!state.stubFetchConfigBehavior) return null
+      return state.stubFetchConfigBehavior()
     }
   },
 }))
 
 vi.mock("../src/server/runner-signalr.js", () => ({
   RunnerSignalRClient: class {
-    start = mocks.startSignalR
-    stop = mocks.stopSignalR
-    getConnectionId = mocks.getConnectionId
-    probeLiveness = mocks.probeLiveness
-    forceReconnect = mocks.forceReconnect
-    constructor() {
-      void this
-    }
+    async start() {}
+    async stop() {}
+    getConnectionId() { return "conn-1" }
+    async probeLiveness() { return true }
+    async forceReconnect() {}
   },
 }))
 
@@ -108,41 +127,16 @@ vi.mock("../src/runtime/cleanup-loop.js", () => {
   return {
     CleanupLoop: class {
       async runOnce(policy: CleanupPolicy | null | undefined, _signal: AbortSignal, blockedPaths: ReadonlySet<string>): Promise<CleanupLoopResult> {
-        mocks.state.blockedPaths = blockedPaths
-        const call = { policy: policy ?? null, tickIndex: mocks.state.cleanupCalls.length + 1 }
-        mocks.state.cleanupCalls.push(call)
-        mocks.state.onCleanupCall?.(call)
-        return mocks.state.stubRunOnceResult
+        const state = currentCleanupTestState()
+        state.blockedPaths = blockedPaths
+        const call = { policy: policy ?? null, tickIndex: state.cleanupCalls.length + 1 }
+        state.cleanupCalls.push(call)
+        state.onCleanupCall?.(call)
+        return state.stubRunOnceResult
       }
     },
     DefaultCleanupRunner: class {},
   }
-})
-
-
-function resetState() {
-  mocks.state.cleanupCalls.length = 0
-  mocks.state.fetchConfigCalls.length = 0
-  mocks.state.fetchAttempts = 0
-  mocks.state.onCleanupCall = null
-  mocks.state.onFetchConfig = null
-  mocks.state.stubFetchConfigBehavior = null
-  mocks.state.stubRunOnceResult = {
-    retentionRemoved: 0,
-    budgetRemoved: 0,
-    guardAborted: 0,
-    stuckResolved: 0,
-    workspaceUsageBytes: null,
-  }
-  mocks.state.blockedPaths = null
-}
-
-let runtimeHandles: FakeRuntimeHandles
-
-beforeEach(() => {
-  resetState()
-  runtimeHandles = installReadyRuntimeFactory()
-  vi.clearAllMocks()
 })
 
 async function importHost() {
@@ -203,22 +197,7 @@ function configureHost(): HostEvents {
     polled: deferred(),
   }
 
-  vi.clearAllMocks()
-  mocks.connect.mockReset().mockImplementation(async () => {
-    events.connected.resolve()
-  })
-  mocks.heartbeat.mockReset().mockResolvedValue(undefined)
-  mocks.disconnect.mockReset().mockResolvedValue(undefined)
-  mocks.poll.mockReset().mockImplementation(async () => {
-    events.polled.resolve()
-    return []
-  })
-  mocks.report.mockReset().mockResolvedValue({})
-  mocks.startSignalR.mockReset().mockResolvedValue(undefined)
-  mocks.stopSignalR.mockReset().mockResolvedValue(undefined)
-  mocks.getConnectionId.mockReset().mockReturnValue("conn-1")
-  mocks.probeLiveness.mockReset().mockResolvedValue(true)
-  mocks.forceReconnect.mockReset().mockResolvedValue(undefined)
+  testState().hostEvents = events
   return events
 }
 
@@ -227,8 +206,8 @@ function observeCleanupTicks(): CleanupEvents {
     cleanupCalls: eventQueue<CleanupCall>(),
     fetches: eventQueue<void>(),
   }
-  mocks.state.onFetchConfig = () => events.fetches.push()
-  mocks.state.onCleanupCall = (call) => events.cleanupCalls.push(call)
+  testState().onFetchConfig = () => events.fetches.push()
+  testState().onCleanupCall = (call) => events.cleanupCalls.push(call)
   return events
 }
 
@@ -250,24 +229,28 @@ async function advanceCleanupTick(events: CleanupEvents): Promise<CleanupCall> {
 }
 
 describe("RunnerHost idle-system cleanup", () => {
-  let root: string
-
-  beforeEach(async () => {
-    root = await mkdtemp(join(tmpdir(), "mohist-runner-host-idle-cleanup-"))
-  })
-
-  afterEach(async () => {
-    clearOpenCodeRuntimeFactoryForTest()
-    await rm(root, { recursive: true, force: true })
-    vi.useRealTimers()
-  })
+  function it(name: string, body: () => Promise<void>): void {
+    vitestIt(name, async () => {
+      await withDefaultRunnerTestResources(async (resources) => {
+        const runtimeHandles = installReadyOpenCodeRuntimeFactory(resources)
+        const state = createCleanupTestState(resources, runtimeHandles)
+        await cleanupTestStorage.run(state, async () => {
+          try {
+            await body()
+          } finally {
+            vi.useRealTimers()
+          }
+        })
+      })
+    })
+  }
 
   function defaultOptions() {
     return {
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-idle-cleanup",
       projectId: "project-1",
-      runnerRoot: root,
+      runnerRoot: testRoot(),
       pollIntervalMs: 60_000,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -281,8 +264,8 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
-    mocks.state.stubRunOnceResult = {
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubRunOnceResult = {
       retentionRemoved: 1,
       budgetRemoved: 0,
       guardAborted: 0,
@@ -302,12 +285,12 @@ describe("RunnerHost idle-system cleanup", () => {
     }
 
     // Each cleanup tick issued its own GET — no caching between ticks.
-    expect(mocks.state.fetchConfigCalls).toHaveLength(3)
+    expect(testState().fetchConfigCalls).toHaveLength(3)
     expect(cleanupCalls).toHaveLength(3)
     // The CleanupLoop received the policy from the latest fetch on
     // every tick (not a cached value from any dispatch — dispatch is
     // 204 with no body, no policy can leak through).
-    for (const call of mocks.state.cleanupCalls) {
+    for (const call of testState().cleanupCalls) {
       expect(call.policy).toEqual({ retentionDays: 7 })
     }
 
@@ -320,12 +303,12 @@ describe("RunnerHost idle-system cleanup", () => {
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
     // /config returns a policy with all-null fields — "null means do not evict".
-    mocks.state.stubFetchConfigBehavior = async () => ({
+    testState().stubFetchConfigBehavior = async () => ({
       retentionDays: null,
       storageBudgetBytes: null,
       storageTargetWatermarkBytes: null,
     })
-    mocks.state.stubRunOnceResult = {
+    testState().stubRunOnceResult = {
       retentionRemoved: 0,
       budgetRemoved: 0,
       guardAborted: 0,
@@ -345,9 +328,9 @@ describe("RunnerHost idle-system cleanup", () => {
     // The host still fetched config on every tick — that is the
     // channel-separation guarantee. Eviction is the loop's job (the
     // stub returns zeros); we only assert fetchConfig was awaited.
-    expect(mocks.state.fetchConfigCalls).toHaveLength(2)
-    expect(mocks.state.cleanupCalls).toHaveLength(2)
-    for (const call of mocks.state.cleanupCalls) {
+    expect(testState().fetchConfigCalls).toHaveLength(2)
+    expect(testState().cleanupCalls).toHaveLength(2)
+    for (const call of testState().cleanupCalls) {
       expect(call.policy).toEqual({
         retentionDays: null,
         storageBudgetBytes: null,
@@ -365,14 +348,14 @@ describe("RunnerHost idle-system cleanup", () => {
     const cleanupEvents = observeCleanupTicks()
     const failure = new Error("fetchConfig failed: 404")
 
-    mocks.state.stubFetchConfigBehavior = async () => {
-      mocks.state.fetchAttempts += 1
+    testState().stubFetchConfigBehavior = async () => {
+      testState().fetchAttempts += 1
       // First attempt throws (simulates 404 from old server, network blip, etc).
-      if (mocks.state.fetchAttempts === 1) throw failure
+      if (testState().fetchAttempts === 1) throw failure
       // Subsequent attempts return a configured policy.
       return { retentionDays: 7 }
     }
-    mocks.state.stubRunOnceResult = {
+    testState().stubRunOnceResult = {
       retentionRemoved: 1,
       budgetRemoved: 0,
       guardAborted: 0,
@@ -388,11 +371,11 @@ describe("RunnerHost idle-system cleanup", () => {
     {
       await waitForHostStartup(hostEvents)
       await advanceFetchTick(cleanupEvents)
-      expect(mocks.state.cleanupCalls).toHaveLength(0)
+      expect(testState().cleanupCalls).toHaveLength(0)
 
       const successfulCall = await advanceCleanupTick(cleanupEvents)
-      expect(mocks.state.fetchConfigCalls).toHaveLength(2)
-      expect(mocks.state.cleanupCalls).toEqual([successfulCall])
+      expect(testState().fetchConfigCalls).toHaveLength(2)
+      expect(testState().cleanupCalls).toEqual([successfulCall])
       expect(successfulCall.policy).toEqual({ retentionDays: 7 })
       expect(capturedLogs()).toEqual(expect.arrayContaining([
         expect.objectContaining({ level: "ERROR", message: "workspace cleanup loop failed", fields: { exception: failure } }),
@@ -407,14 +390,14 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     const order: string[] = []
     const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
-    const runtime = await runtimeHandles.runtimeCreated
+    const runtime = await testState().runtimeHandles.runtimeCreated
     vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
       order.push("reclaim")
       return {
@@ -427,13 +410,13 @@ describe("RunnerHost idle-system cleanup", () => {
         diagnostics: [],
       }
     })
-    const previousFetch = mocks.state.onFetchConfig
-    mocks.state.onFetchConfig = () => {
+    const previousFetch = testState().onFetchConfig
+    testState().onFetchConfig = () => {
       order.push("fetch")
       previousFetch?.()
     }
-    const previousCleanup = mocks.state.onCleanupCall
-    mocks.state.onCleanupCall = (call) => {
+    const previousCleanup = testState().onCleanupCall
+    testState().onCleanupCall = (call) => {
       order.push("cleanup")
       previousCleanup?.(call)
     }
@@ -441,7 +424,7 @@ describe("RunnerHost idle-system cleanup", () => {
     await advanceCleanupTick(cleanupEvents)
 
     expect(order).toEqual(["reclaim", "fetch", "cleanup"])
-    expect(mocks.state.blockedPaths).toEqual(new Set(["/blocked"]))
+    expect(testState().blockedPaths).toEqual(new Set(["/blocked"]))
     controller.abort()
     await expect(run).resolves.toBeUndefined()
   })
@@ -450,13 +433,13 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     const RunnerHost = await importHost()
     const controller = new AbortController()
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
-    const runtime = await runtimeHandles.runtimeCreated
+    const runtime = await testState().runtimeHandles.runtimeCreated
     const reclaim = vi.spyOn(runtime, "reclaimWhere")
       .mockResolvedValueOnce({ tracked: 2, candidates: 0, disposed: 0, busy: 0, failed: 0, blockedDirectories: [], diagnostics: [] })
       .mockResolvedValueOnce({
@@ -499,13 +482,13 @@ describe("RunnerHost idle-system cleanup", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
-    const runtime = await runtimeHandles.runtimeCreated
+    const runtime = await testState().runtimeHandles.runtimeCreated
     vi.spyOn(runtime, "reclaimWhere").mockRejectedValue(failure)
 
     await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_FLOOR_MS)
 
-    expect(mocks.state.fetchConfigCalls).toHaveLength(0)
-    expect(mocks.state.cleanupCalls).toHaveLength(0)
+    expect(testState().fetchConfigCalls).toHaveLength(0)
+    expect(testState().cleanupCalls).toHaveLength(0)
     expect(capturedLogs()).toEqual(expect.arrayContaining([
       expect.objectContaining({ level: "ERROR", message: "workspace cleanup runtime reclamation failed", fields: { exception: failure } }),
     ]))
@@ -517,7 +500,7 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
     const reclaimStarted = deferred()
     const reclaimGate = deferred()
     const RunnerHost = await importHost()
@@ -525,7 +508,7 @@ describe("RunnerHost idle-system cleanup", () => {
     const host = new RunnerHost(defaultOptions())
     const run = host.run(controller.signal)
     await waitForHostStartup(hostEvents)
-    const runtime = await runtimeHandles.runtimeCreated
+    const runtime = await testState().runtimeHandles.runtimeCreated
     const reclaim = vi.spyOn(runtime, "reclaimWhere").mockImplementation(async () => {
       reclaimStarted.resolve()
       await reclaimGate.promise
@@ -551,7 +534,7 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
     const RunnerHost = await importHost()
     const controller = new AbortController()
@@ -564,8 +547,8 @@ describe("RunnerHost idle-system cleanup", () => {
     }
 
     // Five consecutive ticks issue five independent GETs to /config.
-    expect(mocks.state.fetchConfigCalls).toHaveLength(5)
-    expect(mocks.state.cleanupCalls).toHaveLength(5)
+    expect(testState().fetchConfigCalls).toHaveLength(5)
+    expect(testState().cleanupCalls).toHaveLength(5)
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()
@@ -575,14 +558,14 @@ describe("RunnerHost idle-system cleanup", () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] })
     const hostEvents = configureHost()
     const cleanupEvents = observeCleanupTicks()
-    mocks.state.stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
+    testState().stubFetchConfigBehavior = async () => ({ retentionDays: 7 })
 
-    // The retired managed-worktree tree is pre-existing disk data under
+    // The retired managed-worktree tree is pre-existing data under
     // the runner root — the cleanup tick must sweep it whole.
-    const legacyWorkspaces = join(root, "agent-workspaces")
-    await mkdir(legacyWorkspaces)
-    await writeFile(join(legacyWorkspaces, "stale-worktree"), "retired")
-    await writeFile(join(legacyWorkspaces, "manifest.json"), "{}")
+    const legacyWorkspaces = join(testRoot(), "agent-workspaces")
+    await testState().resources.fileSystem.ensureDir(legacyWorkspaces)
+    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, "stale-worktree"), "retired")
+    await testState().resources.fileSystem.writeText(join(legacyWorkspaces, "manifest.json"), "{}")
 
     const RunnerHost = await importHost()
     const controller = new AbortController()
@@ -593,14 +576,14 @@ describe("RunnerHost idle-system cleanup", () => {
     await advanceCleanupTick(cleanupEvents)
 
     // First tick: the whole directory is gone as disk-policy cleanup.
-    await expect(stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
     expect(capturedLogs().filter((record) => record.message === "removed retired agent-workspaces directory")).toEqual([
       expect.objectContaining({ level: "INFO", fields: { path: legacyWorkspaces } }),
     ])
 
     // Second tick: nothing left to sweep — no error, directory stays gone.
     await advanceCleanupTick(cleanupEvents)
-    await expect(stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
+    await expect(testState().resources.fileSystem.stat(legacyWorkspaces)).rejects.toMatchObject({ code: "ENOENT" })
 
     controller.abort()
     await expect(run).resolves.toBeUndefined()

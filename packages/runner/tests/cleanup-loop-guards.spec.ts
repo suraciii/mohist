@@ -1,25 +1,20 @@
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCleanupLoopFixture, type CleanupLoopFixture } from "./support/cleanup-loop-fixture.js"
+import { describe, expect, it as vitestIt, vi } from "vitest"
+import { scopedCleanupLoopFixture, withCleanupLoopFixture } from "./support/cleanup-loop-fixture.js"
 import type { CleanupPolicy } from "../src/core/types.js"
 import { capturedLogs } from "./support/logger-test.js"
 
 describe("CleanupLoop", () => {
-  let fixture: CleanupLoopFixture
+  const fixture = scopedCleanupLoopFixture()
 
-  beforeEach(async () => {
-    fixture = await createCleanupLoopFixture()
-  })
-
-  afterEach(async () => {
-    await fixture.dispose()
-  })
+  function it(name: string, body: () => Promise<void>): void {
+    vitestIt(name, () => withCleanupLoopFixture(body))
+  }
 
   describe("resolution pass", () => {
     it("resolves an out-of-root eligible entry to stuck and leaves the directory intact", async () => {
       const past = new Date(fixture.now.getTime() - 10 * 24 * 60 * 60 * 1000)
-      const outPath = join(tmpdir(), "outside-workspace")
+      const outPath = "/virtual/outside-workspace"
       await fixture.registerEligible("wr-out", 1, past, outPath)
       fixture.runner.outOfRootPaths.add(outPath)
 
@@ -219,7 +214,7 @@ describe("CleanupLoop", () => {
     })
 
     it("out-of-root path aborts before any deletion", async () => {
-      const outPath = join(tmpdir(), "outside")
+      const outPath = "/virtual/outside"
       const entry = await fixture.registerActive("wr-outside", 1, outPath)
       fixture.runner.outOfRootPaths.add(outPath)
       fixture.runner.markerRunIds.set(outPath, "wr-outside")

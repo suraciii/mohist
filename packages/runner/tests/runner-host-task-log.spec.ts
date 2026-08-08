@@ -1,13 +1,14 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { AsyncLocalStorage } from "node:async_hooks"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { RunnerHost, startTaskLogFlushTrigger } from "../src/runtime/host.js"
 import type { SessionTarget } from "../src/server/session-target.js"
-import { setExecutorGitRunnerForTest, type GitRunner } from "../src/runtime/git-probe.js"
+import type { GitRunner } from "../src/runtime/git-probe.js"
 import { deferred, type Deferred } from "./support/deferred.js"
 import { capturedLogs } from "./support/logger-test.js"
 import { FakeTerminalTaskLogDeliveryStore } from "./support/terminal-task-log-delivery.js"
-import { clearOpenCodeRuntimeFactoryForTest, installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
-
-const installReadyRuntimeFactory = installReadyOpenCodeRuntimeFactory
+import { installReadyOpenCodeRuntimeFactory } from "./support/opencode-runtime-factory.js"
+import { createDefaultRunnerTestResources, withTestRunnerResources } from "./support/test-resources.js"
+import { taskLogWork as workWith } from "./support/runner-host-task-log-fixture.js"
 
 const nonGitRunner: GitRunner = async () => ({
   success: false,
@@ -17,37 +18,77 @@ const nonGitRunner: GitRunner = async () => ({
   combinedOutput: "not a git repository",
 })
 
-const mocks = vi.hoisted(() => ({
-  connect: vi.fn(),
-  heartbeat: vi.fn(),
-  disconnect: vi.fn(),
-  poll: vi.fn(),
-  report: vi.fn(),
-  uploadTaskLog: vi.fn(),
-  fetchConfig: vi.fn(async () => null),
-  startSignalR: vi.fn(),
-  stopSignalR: vi.fn(),
-  getConnectionId: vi.fn(() => "conn-1"),
-  probeLiveness: vi.fn(async () => true),
-  blockingAction: vi.fn(),
-  forceReconnect: vi.fn(async () => undefined),
-}))
+type TaskLogMock = ReturnType<typeof vi.fn>
+type TaskLogMocks = Record<
+  "connect" | "heartbeat" | "disconnect" | "poll" | "report" | "uploadTaskLog" | "fetchConfig" |
+  "startSignalR" | "stopSignalR" | "getConnectionId" | "probeLiveness" | "blockingAction" | "forceReconnect",
+  TaskLogMock
+>
 
-const {
-  connect,
-  heartbeat,
-  disconnect,
-  poll,
-  report,
-  uploadTaskLog,
-  fetchConfig,
-  startSignalR,
-  stopSignalR,
-  getConnectionId,
-  probeLiveness,
-  blockingAction,
-  forceReconnect,
-} = mocks
+interface TaskLogTestState {
+  readonly mocks: TaskLogMocks
+}
+
+const taskLogMockStorage = new AsyncLocalStorage<TaskLogTestState>()
+
+function currentTaskLogTestState(): TaskLogTestState {
+  const state = taskLogMockStorage.getStore()
+  if (!state) throw new Error("runner host task log test context is not active")
+  return state
+}
+
+function scopedMock(name: keyof TaskLogMocks): TaskLogMock {
+  const target = (() => undefined) as (...args: unknown[]) => unknown
+  Object.defineProperty(target, "_isMockFunction", { value: true })
+  return new Proxy(target, {
+    apply(_target, thisArg, args) {
+      return Reflect.apply(currentTaskLogTestState().mocks[name], thisArg, args)
+    },
+    get(_target, property) {
+      const value = Reflect.get(currentTaskLogTestState().mocks[name], property)
+      return typeof value === "function" ? value.bind(currentTaskLogTestState().mocks[name]) : value
+    },
+    set(_target, property, value) {
+      return Reflect.set(currentTaskLogTestState().mocks[name], property, value)
+    },
+  }) as unknown as TaskLogMock
+}
+
+const connect = scopedMock("connect")
+const heartbeat = scopedMock("heartbeat")
+const disconnect = scopedMock("disconnect")
+const poll = scopedMock("poll")
+const report = scopedMock("report")
+const uploadTaskLog = scopedMock("uploadTaskLog")
+const fetchConfig = scopedMock("fetchConfig")
+const startSignalR = scopedMock("startSignalR")
+const stopSignalR = scopedMock("stopSignalR")
+const getConnectionId = scopedMock("getConnectionId")
+const probeLiveness = scopedMock("probeLiveness")
+const blockingAction = scopedMock("blockingAction")
+const forceReconnect = scopedMock("forceReconnect")
+
+function createTaskLogMocks(): TaskLogMocks {
+  return {
+    connect: vi.fn(async () => undefined),
+    heartbeat: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    poll: vi.fn(async () => []),
+    report: vi.fn(async () => ({})),
+    uploadTaskLog: vi.fn(async () => ({ status: "changed", accepted: 0, truncated: false })),
+    fetchConfig: vi.fn(async () => null),
+    startSignalR: vi.fn(async () => undefined),
+    stopSignalR: vi.fn(async () => undefined),
+    getConnectionId: vi.fn(() => "conn-1"),
+    probeLiveness: vi.fn(async () => true),
+    blockingAction: vi.fn(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
+      log?.write("action:rebase", "rebasing commit a1b2c3")
+      log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
+      return { output: { rebase: "ok" } }
+    }),
+    forceReconnect: vi.fn(async () => undefined),
+  }
+}
 
 vi.mock("../src/server/connection.js", () => ({
   ServerConnection: class {
@@ -85,7 +126,7 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
       outputs: [],
       errors: [{ code: "action-failed", description: "The test Action failed" }],
     },
-    run: blockingAction,
+    run: blockingAction as never,
   })
   return {
     ...actual,
@@ -99,71 +140,42 @@ vi.mock("../src/actions/registry.js", async (importOriginal) => {
 vi.mock("../src/runtime/workspace.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/runtime/workspace.js")>()
   return { ...actual, WorkspaceManager: class {
-    async prepare() { return { path: "/tmp/mohist-runner-host-task-log", branch: "main", changeDir: null } }
-    async verify() { return { path: "/tmp/mohist-runner-host-task-log", branch: "main", changeDir: null } }
+    async prepare() { return { path: "/virtual/mohist-runner-host-task-log", branch: "main", changeDir: null } }
+    async verify() { return { path: "/virtual/mohist-runner-host-task-log", branch: "main", changeDir: null } }
   } }
-})
-beforeEach(() => {
-  installReadyRuntimeFactory()
-  // Default implementation: write two rebase-tagged lines and resolve
-  // with success — overridable per test.
-  blockingAction.mockReset()
-    blockingAction.mockImplementation(async (_inputs: unknown, { log }: { log?: { write: (source: string, text: string) => void } }) => {
-    log?.write("action:rebase", "rebasing commit a1b2c3")
-    log?.write("action:rebase", "Auto-merging src/lib/rebase.ts")
-    return { output: { rebase: "ok" } }
-  })
 })
 
 function buildHost() {
   return new RunnerHost({
-    serverUrl: "http://localhost:3456",
+    serverUrl: "https://runner.test",
     runnerId: "runner-test",
-    runnerRoot: "/tmp/mohist-runner-host-task-log",
+    runnerRoot: "/virtual/mohist-runner-host-task-log",
     pollIntervalMs: 1,
     heartbeatIntervalMs: 60_000,
     dispatchLivenessProbeIntervalMs: 60_000,
   })
 }
 
-function workWith(overrides: Partial<{ workflowRunId: string; workId: string; uses: string; ownerKind: string; agentJobId: string; actionWorkId: string }> = {}) {
-  const workflowRunId = overrides.workflowRunId ?? "wf-336"
-  // After #410 T-001 the AgentJob path drives the AgentJobExecutor
-  // and never reaches the action registry, so these specs use a
-  // Workflow dispatch through `test/log` to keep the action shim in
-  // play. The flush lifecycle is owner-id-keyed; Workflow + AgentJob
-  // share the same channel.
-  return {
-    workflowRunId,
-    workId: overrides.workId ?? "work-336",
-    workType: "task",
-    uses: overrides.uses ?? "test/log",
-    ownerKind: overrides.ownerKind ?? "workflow",
-    agentJobId: overrides.agentJobId ?? "aj-336",
-    ...(overrides.actionWorkId ? { with: { workId: overrides.actionWorkId } } : {}),
-    variables: {
-      workspace: { path: "/tmp/mohist-runner-host-task-log" },
-      repository: { gitUrl: "https://example.test/repository.git", baseBranch: "main", name: "master", remoteFingerprint: "fake-fingerprint", remoteIdentityVersion: "1" },
-      project: { id: "project-1", name: "Mohist Local" },
-      issue: { number: 1 },
-      mohist: { runId: workflowRunId },
-    },
-  }
+function it(name: string, body: () => Promise<void>): void {
+  vitestIt(name, async () => {
+    const resources = createDefaultRunnerTestResources()
+    resources.gitRunner = nonGitRunner
+    await taskLogMockStorage.run({ mocks: createTaskLogMocks() }, async () => {
+      await withTestRunnerResources(async () => {
+        installReadyOpenCodeRuntimeFactory(resources)
+        vi.useFakeTimers()
+        try {
+          await body()
+        } finally {
+          vi.useRealTimers()
+        }
+      }, resources)
+    })
+  })
 }
 
 describe("RunnerHost flushes task logs before reporting work", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-    setExecutorGitRunnerForTest(nonGitRunner)
-  })
-  afterEach(() => {
-    clearOpenCodeRuntimeFactoryForTest()
-    vi.useRealTimers()
-    setExecutorGitRunnerForTest(null)
-  })
-
   it("UploadsIncrementalLogBeforeWorkCompletes", async () => {
-    vi.clearAllMocks()
     const actionStarted = deferred<void>()
     const uploadStarted = deferred<void>()
     const reportStarted = deferred<void>()
@@ -191,9 +203,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-host-task-log-live",
+      runnerRoot: "/virtual/mohist-runner-host-task-log-live",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -213,7 +225,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
   })
 
   it("RoutesConcurrentIncrementalUploadsToEachWorkItemCollector", async () => {
-    vi.clearAllMocks()
     const actionsStarted = new Map<string, Deferred<void>>([
       ["work-A", deferred<void>()],
       ["work-B", deferred<void>()],
@@ -265,9 +276,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-host-task-log-concurrent",
+      runnerRoot: "/virtual/mohist-runner-host-task-log-concurrent",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -297,7 +308,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
   })
 
   it("FlushesCapturedLogViaUploadTaskLogBeforeReport", async () => {
-    vi.clearAllMocks()
     const uploadStarted = deferred<void>()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
@@ -362,9 +372,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-host-task-log-fail",
+      runnerRoot: "/virtual/mohist-runner-host-task-log-fail",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,
@@ -421,7 +431,6 @@ describe("RunnerHost flushes task logs before reporting work", () => {
   })
 
   it("ReportCarriesTheVerdict_WhenLogUploadSucceeds", async () => {
-    vi.clearAllMocks()
     const reportStarted = deferred<void>()
     getConnectionId.mockReturnValue("conn-1")
     probeLiveness.mockResolvedValue(true)
@@ -444,9 +453,9 @@ describe("RunnerHost flushes task logs before reporting work", () => {
 
     const controller = new AbortController()
     const host = new RunnerHost({
-      serverUrl: "http://localhost:3456",
+      serverUrl: "https://runner.test",
       runnerId: "runner-test",
-      runnerRoot: "/tmp/mohist-runner-host-task-log-verdict",
+      runnerRoot: "/virtual/mohist-runner-host-task-log-verdict",
       pollIntervalMs: 1,
       heartbeatIntervalMs: 60_000,
       dispatchLivenessProbeIntervalMs: 60_000,

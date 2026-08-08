@@ -1,20 +1,25 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it as vitestIt, vi } from "vitest"
 import { AgentJobExecutor } from "./agent-job-executor.js"
 import type { DispatchWorkItem } from "../core/types.js"
+import { MemoryFileSystem } from "../../tests/support/memory-filesystem.js"
+import { withTestRunnerResources } from "../../tests/support/test-resources.js"
+
+function it(name: string, body: (fileSystem: MemoryFileSystem) => Promise<void>): void {
+  vitestIt(name, async () => {
+    const fileSystem = new MemoryFileSystem()
+    try {
+      await withTestRunnerResources(async () => await body(fileSystem), { fileSystem })
+    } finally {
+      await fileSystem.deleteDirectory("/")
+      if (fileSystem.exists("/")) throw new Error("agent job test filesystem was not cleaned up")
+    }
+  })
+}
 
 describe("AgentJobExecutor attachment delivery", () => {
-  const workspaces: string[] = []
-
-  afterEach(async () => {
-    await Promise.all(workspaces.splice(0).map((path) => rm(path, { recursive: true, force: true })))
-  })
-
-  it("delivers an attachment-only input to the runtime as a readable workspace file", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-agent-job-attachment-"))
-    workspaces.push(workDir)
+  it("delivers an attachment-only input to the runtime as a readable workspace file", async (fileSystem) => {
+    const workDir = "/virtual/mohist-agent-job-attachment"
     const runTurn = vi.fn(async (request: { prompt: string; fileParts?: readonly unknown[] }) => ({
       ok: true as const,
       value: {
@@ -81,13 +86,12 @@ describe("AgentJobExecutor attachment delivery", () => {
     expect(request.prompt).toContain("notes.txt")
     expect(request.prompt).not.toContain("Please read")
     expect(request.fileParts).toBeUndefined()
-    expect(await readFile(join(workDir, ".mohist/attachments/input-1/attachment-1/notes.txt"), "utf8"))
+    expect(await fileSystem.readText(join(workDir, ".mohist/attachments/input-1/attachment-1/notes.txt")))
       .toBe("attachment contents")
   })
 
-  it("passes delivered images to the OpenCode runtime as native file parts", async () => {
-    const workDir = await mkdtemp(join(tmpdir(), "mohist-agent-job-image-"))
-    workspaces.push(workDir)
+  it("passes delivered images to the OpenCode runtime as native file parts", async (fileSystem) => {
+    const workDir = "/virtual/mohist-agent-job-image"
     const runTurn = vi.fn(async (request: { prompt: string; fileParts?: readonly unknown[] }) => ({
       ok: true as const,
       value: {
