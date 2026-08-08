@@ -57,6 +57,7 @@ public class AgentGrain : Grain, IAgentGrain
             Id = agentId,
             ProjectId = projectId,
             Name = data.Name,
+            Avatar = data.Avatar,
             Description = data.Description ?? string.Empty,
             Instructions = data.Instructions,
             AgentConfig = Clone(data.AgentConfig),
@@ -88,6 +89,7 @@ public class AgentGrain : Grain, IAgentGrain
             await EnsureNameAvailableAsync(_agent.ProjectId, data.Name, _agent.Id);
 
         if (data.Fields.Contains(nameof(data.Name))) _agent.Name = data.Name!;
+        if (data.Fields.Contains(nameof(data.Avatar))) _agent.Avatar = data.Avatar;
         if (data.Fields.Contains(nameof(data.Description))) _agent.Description = data.Description ?? string.Empty;
         if (data.Fields.Contains(nameof(data.Instructions))) _agent.Instructions = data.Instructions ?? string.Empty;
         if (data.Fields.Contains(nameof(data.AgentConfig))) _agent.AgentConfig = Clone(data.AgentConfig);

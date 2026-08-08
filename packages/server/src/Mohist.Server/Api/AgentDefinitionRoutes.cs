@@ -41,7 +41,8 @@ public static class AgentDefinitionRoutes
                     req.AgentConfig?.Clone(),
                     req.Skills,
                     req.MaxConcurrentRuns,
-                    req.AllowedSubagentAgentIds));
+                    req.AllowedSubagentAgentIds,
+                    req.Avatar));
                 return Results.Json(new ApiResponse<AgentInfo>(true, created), statusCode: 201);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -108,7 +109,8 @@ public static class AgentDefinitionRoutes
                     req.Skills,
                     req.MaxConcurrentRuns,
                     req.Fields,
-                    req.AllowedSubagentAgentIds));
+                    req.AllowedSubagentAgentIds,
+                    req.Avatar));
                 return updated is null ? ApiResults.NotFound($"Agent {id} not found") : ApiResults.Ok(updated);
             }
             catch (Exception ex) when (IsNameConflict(ex))
@@ -173,7 +175,8 @@ public sealed record AgentCreateRequest(
     JsonElement? AgentConfig = null,
     IReadOnlyList<string>? Skills = null,
     int? MaxConcurrentRuns = null,
-    IReadOnlyList<string>? AllowedSubagentAgentIds = null);
+    IReadOnlyList<string>? AllowedSubagentAgentIds = null,
+    string? Avatar = null);
 
 public sealed record AgentUpdateRequest(
     string? Name,
@@ -184,7 +187,8 @@ public sealed record AgentUpdateRequest(
     int? MaxConcurrentRuns,
     IReadOnlyList<string>? AllowedSubagentAgentIds,
     IReadOnlySet<string> Fields,
-    JsonElement Raw)
+    JsonElement Raw,
+    string? Avatar = null)
 {
     public static async ValueTask<AgentUpdateRequest?> BindAsync(HttpContext context)
     {
@@ -198,7 +202,8 @@ public sealed record AgentUpdateRequest(
             GetInt(raw, "maxConcurrentRuns"),
             GetStringList(raw, "allowedSubagentAgentIds"),
             GetFields(raw),
-            raw);
+            raw,
+            GetString(raw, "avatar"));
     }
 
     private static IReadOnlySet<string> GetFields(JsonElement raw)
@@ -206,6 +211,7 @@ public sealed record AgentUpdateRequest(
         var fields = new HashSet<string>(StringComparer.Ordinal);
         if (raw.ValueKind != JsonValueKind.Object) return fields;
         if (raw.TryGetProperty("name", out _)) fields.Add(nameof(Name));
+        if (raw.TryGetProperty("avatar", out _)) fields.Add(nameof(Avatar));
         if (raw.TryGetProperty("description", out _)) fields.Add(nameof(Description));
         if (raw.TryGetProperty("instructions", out _)) fields.Add(nameof(Instructions));
         if (raw.TryGetProperty("agentConfig", out _)) fields.Add(nameof(AgentConfig));

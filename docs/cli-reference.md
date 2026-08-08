@@ -245,8 +245,11 @@ mo workspace close payment-refactor
   `--idempotency-key`；省略时会在请求前打印生成的 key，响应丢失后必须用该 key 重试。
 - `mo agent create/edit` 使用类型化的 `--runtime`、`--model`、`--variant`、`--skills` 和
   `--max-concurrent-runs` 配置 Agent；头像使用 `--avatar-file`，Instructions 使用互斥的
-  `--instructions` 或 `--instructions-file`。CLI 不要求调用方拼 Agent config JSON，
-  `--agent-config` 透传入口退役。
+  `--instructions` 或 `--instructions-file`。`--runtime` 只接受 `opencode` 或 `pi`；
+  `--avatar-file` 读取 UTF-8 的头像 URL 或 data URI。CLI 不要求调用方拼 Agent config JSON，
+  `--agent-config` 透传入口退役；旧入口会返回迁移提示。`edit` 使用对应的
+  `--clear-runtime`、`--clear-model`、`--clear-variant`、`--clear-avatar`、`--clear-skills`
+  和 `--clear-max-concurrent-runs` 清除字段，set 与 clear 选项互斥。
   `mo agent view` 显示统一 Readiness、配置缺口与当前执行可用性；并发限制实时约束 launch
   和 follow-up，但不强停已在运行的执行。
 - `mo agent install <name>` 安装内置 Agent 预设（如 `supervisor`：监管 Agent 与审批、

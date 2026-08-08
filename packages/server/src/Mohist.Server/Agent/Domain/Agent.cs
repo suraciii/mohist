@@ -7,6 +7,7 @@ public class Agent
     public string Id { get; set; } = string.Empty;
     public string ProjectId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public string? Avatar { get; set; }
     public string Description { get; set; } = string.Empty;
     public string Instructions { get; set; } = string.Empty;
     public JsonElement? AgentConfig { get; set; }
