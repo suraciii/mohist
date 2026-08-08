@@ -151,6 +151,7 @@ describe('AgentSessionComposerPage', () => {
     state.launchResponse = {
       attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
       rejectedAttachments: [{ id: 'att-bad', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
+      sessionUrl: '/Test/sessions/attachment-canonical-1',
     }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
@@ -161,6 +162,10 @@ describe('AgentSessionComposerPage', () => {
     expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
     expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
     expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
+
+    fireEvent.click(screen.getByTestId('open-launched-session'))
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'))
+    expect(screen.getByTestId('current-path')).not.toHaveTextContent('/Test/Test/sessions/')
   })
 
   it('navigates to session detail on success', async () => {

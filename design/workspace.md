@@ -35,6 +35,7 @@ Origin 是 Workspace 的创建来源与唯一解析键：
 Origin = { kind: issue, issueNumber }
        | { kind: slack, teamId, channelId }
        | { kind: web,   conversationId }
+       | { kind: cli }
        | { kind: manual }
 ```
 

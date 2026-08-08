@@ -493,7 +493,7 @@ export function AgentSessionComposerPage({
             <Button
               type="button"
               data-testid="open-launched-session"
-              onClick={() => navigate(toProjectPath(launchAttachmentResult.sessionPath))}
+              onClick={() => navigate(launchAttachmentResult.sessionPath)}
             >
               Open Session
             </Button>

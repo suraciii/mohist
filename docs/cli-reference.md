@@ -207,9 +207,9 @@ WorkflowRun 的只读派生事实。`set` 必须且只能接收位置值或 `--v
 
 Workspace 是 Project 下持久存在的执行环境（产品语义见 [Workspace](workspaces.md)）。
 CLI 管理 manual 来源 workspace 的创建、成员与归档，以及所有 workspace 的读取；
-issue 与 Slack / Web 入口的 workspace 由对应动作自动创建与归档，不提供命令。
+issue 与 Slack / Web / CLI 入口的默认 workspace 由对应动作自动创建与归档。
 
-- `mo workspace list [--status active|archived] [--origin issue|slack|web|manual]`
+- `mo workspace list [--status active|archived] [--origin issue|slack|web|cli|manual]`
   列出当前 Project 的 workspace。
 - `mo workspace view <name>` 读取来源、仓库成员、当前绑定的 Session、物化位置与状态。
 - `mo workspace create <name> [--repo <repo>...]` 创建 manual workspace；名称在
@@ -221,7 +221,8 @@ issue 与 Slack / Web 入口的 workspace 由对应动作自动创建与归档�
 - `mo agent launch <agent> --workspace <name>` 把新 Session 绑定到既有 workspace；
   省略 `--workspace` 时绑定当前 Project 的默认 Workspace（必要时创建
   `cli-current`），并在 JSON 与人类输出中返回实际 Workspace、target、Session 和 Turn
-  身份。
+  身份。返回的 `WorkspaceId` 是当前 Project 内稳定的 Workspace Name，不是另一个全局
+  Workspace 实体 ID；`origin` 标识真实入口（`cli`、`web` 或事件路由来源）。
 - `mo session list --workspace <name>` 查看绑定到该 workspace 的 Session；
   `mo session view` 输出包含 workspace 字段。
 
