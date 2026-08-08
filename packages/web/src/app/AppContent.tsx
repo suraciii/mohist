@@ -18,6 +18,7 @@ const RunnersPage = lazy(() => import('../pages/runners').then(({ RunnersPage })
 const LogsPage = lazy(() => import('../pages/logs').then(({ LogsPage }) => ({ default: LogsPage })))
 const ArchivedPage = lazy(() => import('../pages/archived').then(({ ArchivedPage }) => ({ default: ArchivedPage })))
 const DashboardPage = lazy(() => import('../pages/dashboard').then(({ DashboardPage }) => ({ default: DashboardPage })))
+const DevicePage = lazy(() => import('../pages/device').then(({ DevicePage }) => ({ default: DevicePage })))
 const IssuesPage = lazy(() => import('../pages/issues').then(({ IssuesPage }) => ({ default: IssuesPage })))
 const EpicListPage = lazy(() => import('../pages/epics').then(({ EpicListPage }) => ({ default: EpicListPage })))
 const EpicDetailPage = lazy(() => import('../pages/epic-detail').then(({ EpicDetailPage }) => ({ default: EpicDetailPage })))
@@ -58,6 +59,7 @@ export function AppContent({ sessionPage: SessionPage = UnifiedSessionPage }: { 
         <div className="flex-1 min-h-0 min-w-0 flex flex-col pb-[calc(3.5rem+env(safe-area-inset-bottom))] md:pb-0">
           <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>}>
             <Routes>
+              <Route path="/device" element={<DevicePage />} />
               <Route path="/settings" element={<Navigate to="/settings/ai" replace />} />
               <Route path="/settings/:section" element={<ApplicationSettingsSection />} />
               <Route element={<ProjectGuard />}>

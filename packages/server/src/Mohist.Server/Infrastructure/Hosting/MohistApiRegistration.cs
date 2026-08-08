@@ -14,6 +14,7 @@ public static class MohistApiRegistration
         app.MapHealthRoutes();
         app.MapStatusRoutes();
         app.MapAuthSessionRoutes();
+        app.MapAuthDeviceRoutes();
         app.MapDeadLetterRoutes();
         app.MapProjectRoutes();
         app.MapProjectEventsRoutes();

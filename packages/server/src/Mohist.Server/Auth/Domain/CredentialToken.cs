@@ -23,6 +23,14 @@ public static class CredentialToken
     /// </summary>
     public static string GenerateEnrollmentToken() => $"moh_enroll_{NewSecret()}";
 
+    /// <summary>
+    /// Generates a one-time RFC 8628 device code. Not parseable as a
+    /// credential (<see cref="TryParse"/> only knows credential kinds),
+    /// so it can never be presented as a Bearer credential — the token
+    /// endpoint consumes it from the body.
+    /// </summary>
+    public static string GenerateDeviceCode() => $"moh_device_{NewSecret()}";
+
     private static string NewSecret() =>
         Convert.ToBase64String(RandomNumberGenerator.GetBytes(RandomByteCount))
             .TrimEnd('=')

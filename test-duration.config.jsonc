@@ -76,6 +76,7 @@
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.DbContexts_AreInInfrastructureData", "observedMs": 5085.2, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.ArchTests.CommentReferenceRules.ServerSourceComments_DoNotIntroduceNewIssueSpecDesignPathReferences_BeyondBaseline", "observedMs": 3336.9, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost", "owner": "arch", "deadline": "2026-10-31" },
           { "id": "Mohist.Server.ArchTests.ArchitectureRules.SpecClasses_MustBePublic", "observedMs": 641.8, "reason": "scans every Specs/ file for class modifiers; corpus grows with each spec file", "owner": "arch", "deadline": "2026-10-31" },
+          { "id": "Mohist.Server.ArchTests.ArchitectureRules.DomainModules_ShouldNotDependOnEachOther", "observedMs": 562.1, "reason": "architecture rule over 500ms (Roslyn structural analysis); expected structural cost; corpus grows with each auth device-flow domain type", "owner": "arch", "deadline": "2026-10-31" },
           { "pattern": "^Mohist\\.Server\\.ArchTests\\.BannedApiAnalyzerTests\\.CheckedInTestPolicy_RejectsForbiddenApi\\(source:.*in-memory filesystem", "observedMs": 511.3, "reason": "first theory case compiles a synthetic snippet and scans the full test corpus", "owner": "arch", "deadline": "2026-10-31" }
           ] }
       ]

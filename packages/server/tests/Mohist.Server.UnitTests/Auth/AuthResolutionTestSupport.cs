@@ -60,6 +60,7 @@ internal static class AuthResolutionTestSupport
             "spec",
             "moh_pat_ab",
             null,
+            null,
             new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -87,6 +88,7 @@ internal static class AuthResolutionTestSupport
             [Scope.Runner],
             "runner-a",
             "moh_runner_ab",
+            null,
             null,
             null,
             null,

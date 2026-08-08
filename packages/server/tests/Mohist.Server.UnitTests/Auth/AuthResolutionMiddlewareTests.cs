@@ -164,6 +164,7 @@ public sealed class AuthResolutionMiddlewareTests
             null,
             null,
             null,
+            null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         var middleware = NewMiddleware(db);
         var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
@@ -189,6 +190,7 @@ public sealed class AuthResolutionMiddlewareTests
             [Scope.Runner],
             "spec",
             "moh_pat_ab",
+            null,
             null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
@@ -239,6 +241,7 @@ public sealed class AuthResolutionMiddlewareTests
             "github-webhook",
             "moh_integration_ab",
             "proj_a",
+            null,
             null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -336,6 +339,7 @@ public sealed class AuthResolutionMiddlewareTests
             null,
             null,
             null,
+            null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         var middleware = NewMiddleware(db);
         var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
@@ -359,6 +363,7 @@ public sealed class AuthResolutionMiddlewareTests
             "github-webhook",
             "moh_integration_ab",
             projectId,
+            null,
             null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
