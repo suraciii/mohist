@@ -23,7 +23,7 @@ Active development — do not design for version compatibility.
 
 ## Architecture Constraints
 
-- Keep models minimal. Execution facts and state arbitration stay separate ([`design/architecture.md`](design/architecture.md)).
+- Keep models minimal. Execution facts and state arbitration stay separate.
 - No real external dependencies: network, processes, git, databases, system services — all through fakes (DI / factory hooks / mocks).
 - Time must be injectable (C# `TimeProvider`, TS `vi.useFakeTimers`); no wall clock, no `while(now<deadline)` assertions.
 - Explicit state machines for concurrent behavior; wait with queues / events / boundary signals, not polling.
@@ -37,6 +37,6 @@ Active development — do not design for version compatibility.
 
 ## Verification
 
-Before handoff, run the build and the tests: `npm run build` and `npm test` (tracks and commands in [`design/testing.md`](design/testing.md)).
+Before handoff, run the build and the tests: `npm run build` and `npm test`.
 
 Testing principles: tests must verify quickly — long-running, non-scalable, and flaky tests are defects, to be fixed. Report failed tests, missing tools, and environment limits. Do not hide them.
