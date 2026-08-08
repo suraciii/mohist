@@ -285,7 +285,8 @@ public sealed class DeviceAuthorizationStoreTests
                     "FamilyId" TEXT NULL,
                     "ExpiresAt" TEXT NULL,
                     "RevokedAt" TEXT NULL,
-                    "CreatedAt" TEXT NOT NULL
+                    "CreatedAt" TEXT NOT NULL,
+                    "ProjectId" TEXT NULL
                 );
                 CREATE UNIQUE INDEX "IX_Credentials_TokenHash" ON "Credentials" ("TokenHash");
                 CREATE UNIQUE INDEX "IX_Credentials_PrincipalId_Name" ON "Credentials" ("PrincipalId", "Name") WHERE "RevokedAt" IS NULL;
