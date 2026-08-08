@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Grains;
 using Mohist.Server.Issue.Services;
@@ -131,7 +133,7 @@ public static class AttachmentRoutes
             {
                 return ApiResults.Fail(ex.Message, 500, "attachment_storage_error");
             }
-        });
+        }).RequireScopes(Scope.Runner);
 
         projects.MapDelete("/issues/{number:int}/attachments/{attachmentId}", async (
             HttpContext ctx,

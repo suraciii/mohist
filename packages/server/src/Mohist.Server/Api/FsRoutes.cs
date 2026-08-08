@@ -1,3 +1,5 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.SystemInfo;
 
 namespace Mohist.Server.Api;
@@ -13,7 +15,7 @@ public static class FsRoutes
             var home = environment.GetEnvironmentVariable(HomeEnvironmentVariable)
                 ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             return ApiResults.Ok(home);
-        });
+        }).RequireScopes(Scope.Operator);
 
         app.MapGet("/api/fs/list", (string path) =>
         {
@@ -35,7 +37,7 @@ public static class FsRoutes
             {
                 return ApiResults.BadRequest($"Cannot list directory: {ex.Message}");
             }
-        });
+        }).RequireScopes(Scope.Operator);
 
         app.MapGet("/api/fs/search", (string query, int? limit, IEnvironmentVariableProvider environment) =>
         {
@@ -51,7 +53,7 @@ public static class FsRoutes
             catch { }
 
             return ApiResults.Ok(results.Take(searchLimit));
-        });
+        }).RequireScopes(Scope.Operator);
 
         return app;
     }

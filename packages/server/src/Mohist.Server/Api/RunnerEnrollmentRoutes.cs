@@ -19,9 +19,11 @@ public static class RunnerEnrollmentRoutes
     {
         var group = app.MapGroup("/api/runners");
 
-        group.MapPost("/enrollment-tokens", CreateEnrollmentTokenAsync);
+        group.MapPost("/enrollment-tokens", CreateEnrollmentTokenAsync)
+            .RequireScopes(Scope.Operator);
         group.MapPost("/register", RegisterAsync);
-        group.MapDelete("/{runnerId}/credentials", RevokeCredentialsAsync);
+        group.MapDelete("/{runnerId}/credentials", RevokeCredentialsAsync)
+            .RequireScopes(Scope.Operator);
 
         return app;
     }

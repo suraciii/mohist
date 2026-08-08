@@ -7,6 +7,8 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Otel;
 
@@ -55,12 +57,12 @@ public static class OtelQueryRoutes
         {
             var rows = await querier.ListAsync(limit, service, ct);
             return ApiResults.Ok(rows);
-        });
+        }).RequireScopes(Scope.Operator, Scope.Readonly);
 
         group.MapGet("/status", (RuntimeObservability runtime) =>
         {
             return ApiResults.Ok(OtelStatusDto.From(runtime.GetSnapshot()));
-        });
+        }).RequireScopes(Scope.Operator, Scope.Readonly);
 
         group.MapPost("/query", async (
             HttpRequest request,
