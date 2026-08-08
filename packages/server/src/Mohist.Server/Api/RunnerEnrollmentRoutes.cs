@@ -31,14 +31,18 @@ public static class RunnerEnrollmentRoutes
     private static async Task<IResult> CreateEnrollmentTokenAsync(
         HttpContext context,
         ICredentialStore store,
+        IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
     {
-        if (context.Items[MohistPrincipal.HttpContextItemKey] is not MohistPrincipal)
+        if (context.Items[MohistPrincipal.HttpContextItemKey] is not MohistPrincipal principal)
             return Unauthorized();
 
         var expiresAt = time.GetUtcNow().Add(EnrollmentTokenPolicy.Ttl);
         var result = await store.CreateEnrollmentTokenAsync(expiresAt, ct).ConfigureAwait(false);
+        await audit.RecordAsync(AuthAuditEvent.EnrollmentTokenIssued(
+            principal.Id, result.EnrollmentToken.TokenHash, time.GetUtcNow()), ct)
+            .ConfigureAwait(false);
         return Results.Json(
             new ApiResponse<EnrollmentCreatedResponse>(true, new EnrollmentCreatedResponse(
                 result.Token,
@@ -49,6 +53,7 @@ public static class RunnerEnrollmentRoutes
     private static async Task<IResult> RegisterAsync(
         RunnerEnrollmentRegisterRequest request,
         ICredentialStore store,
+        IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
     {
@@ -75,14 +80,29 @@ public static class RunnerEnrollmentRoutes
             return EnrollmentTokenInvalid();
         }
 
+        // The register endpoint is exempt from auth resolution (it
+        // carries the enrollment token to be consumed), so the events it
+        // emits attribute to the principal that owns the runner
+        // credential issued on this registration.
+        var principalId = MohistPrincipal.AdminPrincipalId;
+        var tokenHash = CredentialToken.Hash(token);
+        var consumedAt = time.GetUtcNow();
+        await audit.RecordAsync(AuthAuditEvent.EnrollmentTokenConsumed(
+            principalId, tokenHash, runnerId, consumedAt), ct)
+            .ConfigureAwait(false);
+
         var result = await store.CreateRunnerCredentialAsync(
-            MohistPrincipal.AdminPrincipalId, runnerId, ct).ConfigureAwait(false);
+            principalId, runnerId, ct).ConfigureAwait(false);
         if (result is null)
         {
             return ApiResults.Conflict(
                 "Another registration for this runner is in progress; re-run the install flow",
                 "runner_registration_conflict");
         }
+
+        await audit.RecordAsync(AuthAuditEvent.CredentialIssued(
+            principalId, result.Credential.Id, result.Credential.Kind, result.Credential.Name, result.Credential.CreatedAt), ct)
+            .ConfigureAwait(false);
 
         return Results.Json(
             new ApiResponse<RunnerCredentialCreatedResponse>(true, new RunnerCredentialCreatedResponse(
@@ -94,16 +114,24 @@ public static class RunnerEnrollmentRoutes
         HttpContext context,
         string runnerId,
         ICredentialStore store,
+        IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
     {
-        if (context.Items[MohistPrincipal.HttpContextItemKey] is not MohistPrincipal)
+        if (context.Items[MohistPrincipal.HttpContextItemKey] is not MohistPrincipal principal)
             return Unauthorized();
 
         var revokedAt = time.GetUtcNow();
         var revoked = await store.RevokeRunnerCredentialAsync(runnerId, revokedAt, ct).ConfigureAwait(false);
         if (!revoked)
             return ApiResults.NotFound($"No active credential for runner '{runnerId}'");
+
+        // The runner's credential id is opaque; the runnerId is the
+        // identifier the whole runner surface addresses the credential
+        // by, so it is the audit target.
+        await audit.RecordAsync(AuthAuditEvent.CredentialRevoked(
+            principal.Id, runnerId, CredentialKind.Runner, runnerId, revokedAt), ct)
+            .ConfigureAwait(false);
 
         return ApiResults.Ok(new RunnerCredentialRevokedResponse(runnerId, revokedAt));
     }

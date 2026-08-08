@@ -271,7 +271,10 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         // slower CI runners. Re-poll until the runner returns this job's
         // dispatch: ClaimAsync atomically marks the job accepted, so a
         // returned dispatch is the authoritative claim signal (the grain's
-        // in-memory snapshot can lag the committed claim under load).
+        // in-memory snapshot can lag the committed claim under load). The
+        // window is generous because the fast probes exhaust the nominal
+        // budget in about a second of wall time, which CI-load-induced
+        // convergence lag has exceeded.
         var workId = await TestWait.ForAsync(
             async () =>
             {
@@ -284,7 +287,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
                 return (string?)null;
             },
             candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
+            TimeSpan.FromSeconds(15),
             TimeSpan.FromMilliseconds(25),
             $"Runner '{runnerId}' to claim AgentJob '{jobKey}'");
 

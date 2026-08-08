@@ -13,6 +13,7 @@ internal static class MohistCliCommands
 
         root.Subcommands.Add(InfoCommands.Build(provider));
         root.Subcommands.Add(AuthCommands.Build(api));
+        root.Subcommands.Add(AuditCommands.Build(api));
         root.Subcommands.Add(ServerCommands.Build(api, provider));
         root.Subcommands.Add(RunnerCommands.Build(api, provider));
         root.Subcommands.Add(ServiceCommands.Build(provider));
