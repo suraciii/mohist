@@ -107,10 +107,10 @@ API 必须把下面几类事实分开呈现：
 |---|---|
 | Agent Readiness | Agent 的配置是否已知可执行、明确缺失，或暂时无法确认 |
 | Agent Availability | 当前是否有 Runner 和容量开始执行 |
-| AgentJob status | 这次启动工作是否排队、执行、成功、失败或取消 |
+| AgentJob status | 这次启动工作是否准备、排队、执行、成功、拒绝、失败或取消 |
 | Session activity | 这段会话当前是否正在处理输入 |
 | Input acceptance | 用户这条输入是否已经被 Mohist 持久接受 |
-| Turn result | Runtime 对这一轮输入的执行结果是什么 |
+| Turn result | Runtime 对这一轮输入的执行结果和派发状态是什么 |
 
 这些事实不能折叠成一个 `Connected`、`Running` 或 `Success`。例如，Connection 可以健康但
 Agent 仍需配置；Agent 可以已知可执行但暂时没有容量；Slack 回复发送失败也不能把已完成的
@@ -119,10 +119,141 @@ AgentJob 改成失败。
 `Unknown` 是正式状态，不等同于 Ready 或 Failed。Mohist 无法确定输入是否已交给 Runtime 时，
 应继续核对原输入，而不是复制一条新输入来“保险重试”。
 
+`outcome_pending` 表示 Mohist 已知输入和派发路径被接受，但最终结果尚未记录；它不是成功、
+失败或 idle，也不能用新输入绕过。
+
 Availability 回答现在能否开始一项新的执行；它不替代已有 AgentJob 的调度状态。Runner 或容量在
 一个 Pending Job 的退避期间恢复时，Availability 可以显示可启动，而该 Job 仍显示为等待调度，
 直到下一次持久化 dispatch retry 实际开始它。客户端必须呈现这两个 Server 结论，不能把等待调度
 误报为 Runner 离线或容量已满。
+
+## Canonical read model
+
+Server 是 Job、Session、Input 和 Turn 的唯一 canonical read model。CLI、Web 和 Agent Connection
+只适配这份模型，不能从本地日志、HTTP 状态、Runner 事件或 provider 响应重新推导状态。
+每个模型都必须带 Server 的 `revision` 与 `observedAt`。
+
+AgentJob 至少返回：
+
+```text
+jobId
+launchRequestId
+launchOperationId
+status = preparing | queued | running | unknown | terminal
+outcome = completed | rejected | failed | cancelled | null
+reason
+nextAction
+sessionId, sessionIdReason
+inputId, inputIdReason
+turnId, turnIdReason
+revision
+observedAt
+```
+
+`sessionId`、`inputId` 或 `turnId` 尚未存在时必须是 `null`，对应 reason 必须非空；reservation
+ID 不能冒充 live mapping。Session accept 成功时三个 mapping 一起出现；明确拒绝或不可恢复
+失败时 Job 进入 terminal `rejected`/`failed` outcome，mapping 保持 null+reason，launch
+tombstone 负责后续先按 `launchRequestId` 找 operation、再按 `launchOperationId` 查询。
+
+Session activity 必须同时提供 `activity`、`currentContextActivity`、`contextGeneration`、
+`unresolvedPrevious`、`unresolvedPreviousCount`、`nextAction`、`revision` 和 `observedAt`。
+`unresolvedPrevious` 至少包含旧 operationId、旧 contextGeneration、outcome 和 nextAction；
+当前 activity 只回答当前 logical context，旧 context 的 Unknown 不与当前 active 混合，且在
+force-reset 已确认并 supersede 后不阻止当前 generation 的新 Input/Turn。
+
+Input acceptance 必须提供 `state=accepted|rejected|unknown`、`acceptanceReason`、`turnId`
+（不存在时为 null+`turnIdReason`）、`turnRelation=new-turn|steer|none`、
+`contextGeneration`、`revision` 和 `observedAt`。Turn result 必须提供 `status`、`result`、
+`dispatchStatus`、`blockedReason`、`nextAction`、`contextGeneration`、`revision` 和
+`observedAt`。`blockedReason` 只有 dispatch 被 Server 明确阻塞时才填；未知事实不能被假装
+成 blocked 或 terminal。
+
+当 Input 已 `accepted` 但 enqueue 失败时，Turn projection 还必须返回 durable
+`dispatchAttemptCount`、`dispatchDeadline` 和该次 `dispatchAttemptId`。达到 attempt/deadline
+上限时返回 `status=terminal`、`dispatchStatus=blocked`、稳定 `blockedReason` 和可执行的
+`nextAction`；Input 仍为 accepted，InputId/TurnId 不变。response loss 只查询原 attempt，
+不能无限保持 pending 或创建新 Input/Turn。
+
+CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
+自行合并 Job/Session/Input/Turn 状态。
+
+Session operation 也是 canonical read model 的一部分。唯一权威 schema 在
+[`conventions.md#canonical-sessionoperationread`](conventions.md#canonical-sessionoperationread)。
+本文不重复它的字段列表；API 只定义客户端能看到的 projection 和查询保证。
+
+Operation projection 必须返回 conventions 规定的完整 `SessionOperationRead`，包括其中所有
+始终存在的字段和按 kind 规定的显式 null 值。
+Job、Session、Input 和 Turn projection 只能引用 `operationId` 或嵌入同一 projection，不能
+发明裁剪后含义不同的 operation schema。
+
+Compact、Reset、recovery、handoff、rebind 和 force-reset command 都必须由调用方提供
+`operationId`；没有 key 时 Server 拒绝，不生成客户端不可见的替代 key。Query 可以按
+`operationId` 读取当前或历史 operation；response loss 的 retry 必须重用同一个 key，并返回
+同一 phase/outcome/binding/context mapping。`launchRequestId` 只用于 launch 的第一层查找，
+不能当作 Session operationId。
+
+## Launch response loss and force-reset
+
+启动调用必须由客户端提供 `launchRequestId`（idempotency key）。Server 在第一次
+`prepare-job` 中按该 key 幂等创建并持久化唯一的 `launchOperationId` 与
+Job/Session/Input/Turn reservation IDs。客户端无需预先知道 Server 生成的
+`launchOperationId`；响应丢失时先用 `launchRequestId` 找到 operation，再查询或 retry 原
+`launchOperationId`，返回同一 Job 和同一组 live mapping，不能生成第二个 launch。
+
+Session accept/reject 是 durable outcome。明确 reject 或不可恢复失败返回 terminal Job、
+稳定 `reason` 和 `nextAction`；临时不可用或无法确认 side effect 时返回 `unknown`，并要求
+查询/等待/人工核对原 operation，而不是一直创建新的 Job。客户端不把 reservation ID 当作
+可访问资源。
+
+普通 Compact、Reset 和 recovery 被 Unknown 或 operation response loss 阻挡时，客户端先按
+调用方提供的原 `operationId` 查原 operation。需要越过 Unknown 的显式产品动作是 force-reset：
+
+```text
+force-reset(
+  sessionId,
+  operationId = new key,
+  expectedRevision,
+  expectedContextGeneration,
+  confirmUnknownSideEffects = true
+)
+```
+
+它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
+要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，原子 supersede 旧 operation
+后才创建独立的 force-reset operation。候选 binding 与新 ContextBoundary 成功提交前，当前
+generation 仍不接受新的 Input/Turn；提交后 `currentContextActivity` 只表示新 generation，旧
+operation/input/turn/binding 事实仍保留为 Unknown，并进入 `unresolvedPrevious`。响应丢失时
+使用同一 force-reset operationId 查询或重试，返回同一结果，不创建第二个 context。Begin
+force-reset 在任何 Runtime effect 前持久化 target runner/runtime、candidateKey、完整
+expected binding 与空的 candidate binding；创建响应丢失时按 candidateKey reconcile。每个
+create、recordCandidate、CAS、cleanup 和 complete 都在 effect 前重新比较 operation/owner
+fence 与当前 binding，旧 fence 直接 fail closed。
+
+CLI 的调用合同对应为：
+
+```bash
+mo session force-reset <session-id> \
+  --operation-id <new-operation-key> \
+  --expected-revision <revision> \
+  --confirm-unknown-side-effects
+```
+
+CLI 必须先展示当前 Session、未决 Input/Turn、旧 operation 的 Unknown 和风险摘要；没有显式
+确认、operationId、当前 revision，或 Session 已变化时，Server 拒绝调用。force-reset 完成
+后 CLI/Web 只把新 context 的 activity 作为当前活动，同时显示旧未决数量和 nextAction。
+
+`handoff` 与 `rebind` 遵循同一 command/query 合同：handoff 才能改变 Runner，rebind 只能在
+同一 Runner 上替换 Runtime binding；Runner 重连、超时或旧事件不能隐式触发任一操作。两者
+都必须带 `operationId`、当前 revision、expected binding 和 bounded deadline，并在当前
+generation 为 `idle` 且没有未决 side effect 时受理。当前 generation 为 `active`、
+`outcome_pending` 或 `unknown` 时拒绝；先完成查询或 force-reset。Server 以 candidate binding
+和完整 expected binding 做 CAS，成功后记录 `ContextBoundary.Kind=handoff|rebind` 并递增
+`ContextGeneration`；旧 binding 的事件按原 binding fence 拒绝。
+
+Response loss 的 query/retry 必须回同一 `operationId` 和 conventions 规定的完整 projection，
+不能返回只有状态或只有 mapping 的部分确认。Query 不得再次递增 `ContextGeneration`、重新
+创建 candidate 或生成新 operation。`outcome=blocked` 的 operation
+是终态，调用方必须执行 `nextAction`；它不能被客户端轮询无限保持 pending。
 
 ## 可靠性契约
 
@@ -134,6 +265,9 @@ Availability 回答现在能否开始一项新的执行；它不替代已有 Age
 - 排队和背压是可见状态，不伪装成执行失败；
 - 终态和 transcript 由 Mohist 持久保存，provider 的投递状态不能覆盖它们；
 - 外部平台只能得到至少一次投递时，Connection 负责去重，Agent API 不假设平台只发一次。
+- launch 的 response loss、Session accept rejection 和不可恢复 failure 都先通过原
+  `launchRequestId` 找到对应 `launchOperationId`，再返回 durable outcome；不会留下可执行的
+  dangling reservation 或无限等待的 pending Job。
 
 这里承诺的是“同一意图只产生一次 Mohist 领域效果”，不是网络上的 exactly-once。请求结果
 无法确认时，客户端应查询或以同一身份重试，不能生成新的调用身份。
