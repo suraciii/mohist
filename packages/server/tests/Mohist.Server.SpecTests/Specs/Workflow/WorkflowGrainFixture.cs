@@ -11,6 +11,7 @@ using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Mohist.Server.Workflow.Services;
 using Mohist.Server.Workflow.Services.Artifacts;
+using Mohist.Server.Workflow.Services.Prompts;
 using Mohist.Server.Workflow.Storage;
 using Orleans;
 using Orleans.TestingHost;
@@ -111,6 +112,48 @@ public class WorkflowGrainFixture : IAsyncLifetime
             siloBuilder.Services.AddSingleton<Mohist.Server.Workflow.Services.WorkflowRunDeserializer>();
             siloBuilder.Services.AddSingleton<IWorkflowRunDeserializer>(sp =>
                 sp.GetRequiredService<Mohist.Server.Workflow.Services.WorkflowRunDeserializer>());
+            // Batch C #290 item 17: IssueGrain.StartWorkAsync calls
+            // EnsurePromptsReferencesResolve against the workflow
+            // definition. The FakePromptLoader GrainTestConfig wires by
+            // default only registers a 7-prompt subset; the mohist/local
+            // profile references 12 prompts (apply-feedback,
+            // resolve-rebase-conflicts, fix-plan-review, fix-ci,
+            // auto-fix, …) so any IssueGrain.StartWorkAsync call from
+            // this fixture would throw MissingPromptsException. Swap in
+            // the production-shaped InMemoryPromptLoader so all prompt
+            // references resolve. The fake's existing users
+            // (WorkflowRetrySpecs, StatusSpecs, etc.) only read
+            // prompts.Load / LoadAll and never assert the count, so the
+            // extra keys are inert for them.
+            siloBuilder.Services.RemoveAll<IPromptLoader>();
+            siloBuilder.Services.AddSingleton<IPromptLoader>(_ => new InMemoryPromptLoader());
+            // Issue-318 / batch C #290 item 17: WorkspaceQuerier
+            // (which WorkflowQuerier.StartWorkflowAsync calls to mint
+            // the run workspace) depends on AgentSessionQuerier, which
+            // the workflow-only test registration in GrainTestConfig
+            // never wires up. Register it explicitly so IssueGrain
+            // .StartWorkAsync can mint the workspace grain.
+            siloBuilder.Services.AddScoped<Mohist.Server.Sessions.Services.AgentSessionQuerier>();
+            // Batch C #290 item 17: IssueQuerier is what the lifecycle
+            // grain-level specs (CompleteWorkAsync, CancelAsync, …) use
+            // to assert IssueInfo status transitions through the
+            // production projection path. GrainTestConfig does not
+            // register it (its workflow-only suite never asks for one),
+            // so register it here. It depends on IssueRepositoryResolver
+            // (already registered above) and the DbContextFactory.
+            siloBuilder.Services.AddScoped<Mohist.Server.Issue.Services.IssueQuerier>();
+            // IssueQuerier depends on IssueReadModelLoader
+            // (IScopedService — already covered by Scrutor) and the
+            // issue metrics querier infra the lifecycle tests don't
+            // touch. IssueReadModelLoader is registered automatically
+            // via the conventional scan, so no explicit registration is
+            // needed; the failure here is that GrainTestConfig does not
+            // expose IssueQuerier in the first place. The Scrutor
+            // IScopedService scan in MohistServiceRegistration handles
+            // IssueReadModelLoader when the production service graph is
+            // used, but GrainTestConfig bypasses that scan — register
+            // the loader explicitly so the querier resolves end-to-end.
+            siloBuilder.Services.AddScoped<Mohist.Server.Issue.Services.IssueReadModelLoader>();
             siloBuilder.Services.RemoveAll<IEnvironmentVariableProvider>();
             siloBuilder.Services.AddSingleton<IEnvironmentVariableProvider, MockEnvironmentVariableProvider>();
         });
