@@ -6,7 +6,7 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
 
 它是**定义引用，不是工作委托**：不启动 AgentJob，工作的成功失败仍由 TaskRun
 裁定，AgentSession 仍是 Workflow 来源。Agent、AgentJob 和 AgentSession 的总体
-关系见 [Agent 与 AgentSession](../agents.md)。
+关系见 [Agent 与 AgentSession](../agent-sessions.md)。
 
 ## 基本用法
 

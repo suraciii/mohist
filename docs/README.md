@@ -9,7 +9,7 @@
 - [产品愿景](vision.md) —— Mohist 要去哪里、独立 Agent 与外部交互场所如何配合
 - [快速上手](getting-started.md) —— 从零启动，通过 Mohist Agent、外部 Agent 或 `mo` 看一个 Issue 走完全流程
 - [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
-- [Agent 与 AgentSession](agents.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
+- [Agent 与 AgentSession](agent-sessions.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
 
 ## 板块 2：工作流
 

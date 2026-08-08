@@ -1,7 +1,7 @@
 # Agent 事件路由
 
 本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent**，
-不是 Workflow 直接调用的 Inline Agent。两者关系见 [Agent 与 AgentSession](agents.md)。
+不是 Workflow 直接调用的 Inline Agent。两者关系见 [Agent 与 AgentSession](agent-sessions.md)。
 
 ## 它解决什么问题
 
