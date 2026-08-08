@@ -139,6 +139,7 @@ describe('AgentSessionComposerPage', () => {
         attachments: [],
       },
     })
+    expect(state.launchCalls[0].body).not.toHaveProperty('context.workspace')
     expect(state.launchCalls[0].body).not.toHaveProperty('runtime')
     expect(state.launchCalls[0].body).not.toHaveProperty('model')
     expect(state.launchCalls[0].body).not.toHaveProperty('variant')
@@ -151,6 +152,7 @@ describe('AgentSessionComposerPage', () => {
     state.launchResponse = {
       attachments: [{ id: 'att-ok', name: 'accepted.txt', contentType: 'text/plain', size: 4 }],
       rejectedAttachments: [{ id: 'att-bad', reason: 'UnsupportedType', message: 'Archive files are not supported.' }],
+      sessionUrl: '/Test/sessions/attachment-canonical-1',
     }
     renderPage(['/agent-sessions/new?agent=agent-1'])
     const textarea = await screen.findByTestId('prompt-textarea')
@@ -161,6 +163,10 @@ describe('AgentSessionComposerPage', () => {
     expect(state.launchCalls[0].body).toMatchObject({ attachments: ['att-ok', 'att-bad'] })
     expect(screen.getByTestId('attachment-result-accepted-att-ok')).toHaveTextContent('accepted.txt')
     expect(screen.getByTestId('attachment-result-rejected-att-bad')).toHaveTextContent('Archive files are not supported.')
+
+    fireEvent.click(screen.getByTestId('open-launched-session'))
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/attachment-canonical-1'))
+    expect(screen.getByTestId('current-path')).not.toHaveTextContent('/Test/Test/sessions/')
   })
 
   it('navigates to session detail on success', async () => {
@@ -172,6 +178,16 @@ describe('AgentSessionComposerPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/sess-123')
     })
+  })
+
+  it('uses the canonical session URL returned by launch', async () => {
+    state.agentsData = [makeAgent('agent-1')]
+    state.launchResponse = { sessionUrl: '/Test/sessions/canonical-1', sessionId: 'ignored-session' }
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+    const textarea = await screen.findByTestId('prompt-textarea')
+    fireEvent.change(textarea, { target: { value: 'Open directly' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(screen.getByTestId('current-path')).toHaveTextContent('/Test/sessions/canonical-1'))
   })
 
   it('retains one idempotency key when the first response is lost and the launch is retried', async () => {

@@ -27,8 +27,8 @@ issue 完成或取消时，workspace 随之归档。
   所有 Agent，都在同一个 workspace 里工作。
 - **Web**：一个对话一个 workspace。
 - **CLI**：`mo workspace create <name>` 显式创建，启动会话时用 `--workspace <name>`
-  绑定。不带 `--workspace` 的 `mo agent launch` 不绑定任何 workspace——沿用 runner
-  默认工作目录，没有跨会话连续性，也不产生 workspace 实体。
+  绑定。不带 `--workspace` 的 `mo agent launch` 绑定当前 Project 的默认 Workspace，必要时
+  创建 `cli-current`（来源记录为 `cli`）；CLI 输出会显示实际绑定，避免隐藏默认作用域。
 
 交互入口的 workspace 不做干净初始化：它持久累积。这正是跨会话复用的价值。
 
@@ -81,7 +81,7 @@ Workspace 持有一组仓库引用（Project 已声明的仓库资源）。workf
 ## 事件
 
 Workspace 的创建与归档是平台事件（`workspace.created` / `workspace.archived`），
-携带 Project、Workspace 名称与来源（issue / manual / slack / web）。订阅方可以按
+携带 Project、Workspace 名称与来源（issue / manual / slack / web / cli）。订阅方可以按
 来源过滤——例如：渠道 Agent 在收到归档事件后收尾，创建事件触发依赖预装。
 事件路由见 [事件路由](event-routing.md)，订阅语法见[事件协议](event-protocol.md)。
 

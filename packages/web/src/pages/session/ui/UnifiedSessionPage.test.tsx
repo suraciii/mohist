@@ -27,6 +27,7 @@ const baseSummary = (overrides: Record<string, unknown> = {}) => ({
   toolErrorCount: 0,
   agentId: 'agent-1',
   agentName: 'Reviewer',
+  origin: 'web',
   contextRefs: null,
   usage: { contextWindowUsed: 100, contextWindowSize: 1000, contextUsagePercent: 10, healthStatus: 'healthy' },
   recoveryAvailable: true,
@@ -195,6 +196,7 @@ describe('UnifiedSessionPage — workspace context', () => {
     const link = screen.getByTestId('session-workspace-link')
     expect(link).toHaveTextContent('Workspace: issue-42')
     expect(link).toHaveAttribute('href', '/Test/workspaces/issue-42')
+    expect(screen.getByTestId('session-origin')).toHaveTextContent('Origin: web')
   })
 
   it('omits the workspace link when the session carries no workspace reference', () => {

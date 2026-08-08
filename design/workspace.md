@@ -35,6 +35,7 @@ Origin 是 Workspace 的创建来源与唯一解析键：
 Origin = { kind: issue, issueNumber }
        | { kind: slack, teamId, channelId }
        | { kind: web,   conversationId }
+       | { kind: cli }
        | { kind: manual }
 ```
 
@@ -81,8 +82,8 @@ Workspace 在 Origin 首次需要执行时被动态创建，没有独立的全�
   的 Agent 使用时，各 Project 持有各自独立的 workspace。
 - 被邀请或被委托产生的 session：继承父 session（或所在入口）的 workspace。
 - 显式覆盖：`mo agent launch <agent> --workspace <name>` 把新 session 绑定到既有
-  workspace（manual 场景的唯一显式入口）；省略 `--workspace` 时 session 不绑定任何
-  workspace，Runner 使用默认工作目录，无跨会话连续性，也不创建 workspace 实体。
+  workspace；省略 `--workspace` 时绑定当前 Project 的 CLI 默认 workspace（必要时动态创建），
+  其实际名称随 launch response 返回。
 
 ### 调度亲和与重新物化
 

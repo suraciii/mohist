@@ -327,12 +327,16 @@ public class CliWorkspaceCommandSpecs
                 turnId = "turn_1",
                 agentId = "agent_abc",
                 agentName = "test-agent",
+                workspaceId = "pay",
+                targetId = "agent_abc",
+                origin = "cli",
                 status = "running",
                 attachments = (object?)null,
                 rejectedAttachments = (object?)null,
                 transcriptUrl = "/transcript",
                 jobUrl = "/job",
                 observationUrl = "/obs",
+                sessionUrl = "/Test/sessions/sess_1",
             }));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -345,26 +349,35 @@ public class CliWorkspaceCommandSpecs
         Assert.NotNull(ctx);
         Assert.Equal("pay", ctx!["workspace"]?.GetValue<string>());
         Assert.False(ctx.AsObject().ContainsKey("workspacePath"));
+        Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
     }
 
     [Fact]
-    public async Task AgentLaunch_WithoutWorkspace_OmitsContextWorkspace()
+    public async Task AgentLaunch_WithoutWorkspace_UsesServerDefaultWorkspaceInResponse()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupSync(req =>
             RecordingHttpHandler.Json(new
             {
-                jobId = "job_1",
-                sessionId = "sess_1",
-                inputId = "input_1",
-                turnId = "turn_1",
-                agentId = "agent_abc",
-                agentName = "test-agent",
-                status = "running",
-                attachments = (object?)null,
-                rejectedAttachments = (object?)null,
-                transcriptUrl = "/transcript",
-                jobUrl = "/job",
-                observationUrl = "/obs",
+                success = true,
+                data = new
+                {
+                    jobId = "job_1",
+                    sessionId = "sess_1",
+                    inputId = "input_1",
+                    turnId = "turn_1",
+                    agentId = "agent_abc",
+                    agentName = "test-agent",
+                    workspaceId = "cli-current",
+                    targetId = "agent_abc",
+                    origin = "cli",
+                    status = "running",
+                    attachments = (object?)null,
+                    rejectedAttachments = (object?)null,
+                    transcriptUrl = "/transcript",
+                    jobUrl = "/job",
+                    observationUrl = "/obs",
+                    sessionUrl = "/Test/sessions/sess_1",
+                },
             }));
 
         var exitCode = await MohistCliCommands.RunAsync(
@@ -374,6 +387,8 @@ public class CliWorkspaceCommandSpecs
         var request = handler.Requests.Single();
         var body = JsonNode.Parse(request.Body!)!;
         Assert.False(body.AsObject().ContainsKey("context"));
+        Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
+        Assert.Contains("cli-current", output.ToString(), StringComparison.Ordinal);
     }
 
     // ----- session list --workspace -----

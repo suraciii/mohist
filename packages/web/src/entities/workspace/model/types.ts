@@ -1,7 +1,7 @@
 export type WorkspaceStatus = 'active' | 'archived'
 
 export interface WorkspaceOrigin {
-  kind: 'issue' | 'slack' | 'web' | 'manual' | 'unknown'
+  kind: 'issue' | 'slack' | 'web' | 'cli' | 'manual' | 'unknown'
   issueNumber?: number | null
   teamId?: string | null
   channelId?: string | null
@@ -26,6 +26,8 @@ export interface WorkspaceSession {
   agentName?: string | null
   workflowRunId?: string | null
   sessionName?: string | null
+  origin?: string | null
+  targetId?: string | null
 }
 
 export interface Workspace {

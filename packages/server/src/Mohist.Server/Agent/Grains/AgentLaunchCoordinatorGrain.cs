@@ -155,7 +155,9 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentLinkEdgeId: command.ParentLinkEdgeId,
                 SpawnRequestFingerprint: command.SpawnRequestFingerprint,
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
-                WorkspaceRepositories: command.WorkspaceRepositories);
+                WorkspaceRepositories: command.WorkspaceRepositories,
+                Origin: command.Origin ?? command.Request.Origin,
+                TargetId: command.TargetId ?? command.Request.TargetId);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -515,6 +517,10 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             labels[GenericAgentSessionMetadata.WorkspaceName] = plan.WorkspaceName!;
         if (!string.IsNullOrWhiteSpace(plan.Repository))
             labels[GenericAgentSessionMetadata.Repository] = plan.Repository!;
+        if (!string.IsNullOrWhiteSpace(plan.Origin))
+            labels[GenericAgentSessionMetadata.Origin] = plan.Origin!;
+        if (!string.IsNullOrWhiteSpace(plan.TargetId))
+            labels[GenericAgentSessionMetadata.TargetId] = plan.TargetId!;
         if (plan.ConnectionOrigin is { } origin)
         {
             labels[AgentSessionQueryMetadataKeys.ConnectionId] = origin.ConnectionId;
@@ -984,4 +990,6 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(32)] string? SpawnRequestFingerprint = null,
     [property: Id(33)] long? ParentExpectedBindingEpoch = null,
     [property: Id(34)] string? WorkspaceName = null,
-    [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null);
+    [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
+    [property: Id(36)] string? Origin = null,
+    [property: Id(37)] string? TargetId = null);

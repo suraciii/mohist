@@ -244,8 +244,12 @@ internal sealed partial class TableRenderer
         _out.WriteLine($"turn id:    {StringOf(data, "turnId")}");
         _out.WriteLine($"agent id:   {StringOf(data, "agentId")}");
         _out.WriteLine($"agent name: {StringOf(data, "agentName")}");
+        _out.WriteLine($"workspace:  {StringOf(data, "workspaceId")}");
+        _out.WriteLine($"target id:  {StringOf(data, "targetId")}");
+        _out.WriteLine($"origin:     {StringOf(data, "origin")}");
         _out.WriteLine($"status:     {StringOf(data, "status")}");
         RenderAttachmentResults(data);
+        _out.WriteLine($"session:    {StringOf(data, "sessionUrl")}");
         _out.WriteLine($"transcript: {StringOf(data, "transcriptUrl")}");
         _out.WriteLine($"job:        {StringOf(data, "jobUrl")}");
         _out.WriteLine($"observation: {StringOf(data, "observationUrl")}");

@@ -68,7 +68,7 @@ function SessionRow({ session }: { session: NonNullable<Workspace['sessions']>[n
     >
       <span className="font-medium text-foreground truncate">{label}</span>
       <span className="text-muted-foreground shrink-0">
-        {session.activity}{session.model ? ` · ${session.model}` : ''}
+        {session.activity}{session.origin ? ` · ${session.origin}` : ''}{session.model ? ` · ${session.model}` : ''}
       </span>
     </Link>
   )

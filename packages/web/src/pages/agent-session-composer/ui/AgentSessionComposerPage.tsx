@@ -292,8 +292,8 @@ export function AgentSessionComposerPage({
       },
       {
         onSuccess: (data) => {
-          const jobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
-          const sessionPath = `/sessions/${encodeURIComponent(data.sessionId)}${jobQuery}`
+          const fallbackJobQuery = data.jobId ? `?jobId=${encodeURIComponent(data.jobId)}` : ''
+          const sessionPath = data.sessionUrl ?? `${toProjectPath(`/sessions/${encodeURIComponent(data.sessionId)}`)}${fallbackJobQuery}`
           const accepted = data.attachments ?? []
           const rejected = data.rejectedAttachments ?? []
           launchKeyRef.current = null
@@ -301,7 +301,7 @@ export function AgentSessionComposerPage({
             setLaunchAttachmentResult({ accepted, rejected, sessionPath })
             return
           }
-          navigate(toProjectPath(sessionPath))
+          navigate(sessionPath)
         },
       },
     )
@@ -493,7 +493,7 @@ export function AgentSessionComposerPage({
             <Button
               type="button"
               data-testid="open-launched-session"
-              onClick={() => navigate(toProjectPath(launchAttachmentResult.sessionPath))}
+              onClick={() => navigate(launchAttachmentResult.sessionPath)}
             >
               Open Session
             </Button>

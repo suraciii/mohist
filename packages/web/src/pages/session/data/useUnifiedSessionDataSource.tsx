@@ -40,6 +40,7 @@ function buildMetadata(summary: UnifiedSessionSummaryDto, turnCount: number): Se
     sessionId: summary.id,
     sessionName: summary.sessionName ?? summary.agentName ?? null,
     source: summary.source,
+    origin: summary.origin ?? null,
     agentId: summary.agentId ?? null,
     agentName: summary.agentName ?? null,
     workflowRunId: summary.workflowRunId ?? null,

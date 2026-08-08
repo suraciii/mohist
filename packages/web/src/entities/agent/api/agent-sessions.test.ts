@@ -123,6 +123,26 @@ describe('launchAgentSession (client fn)', () => {
     ])
   })
 
+  it('preserves a project-local workspace name in the launch context', async () => {
+    let body: unknown
+    server.use(
+      http.post('*/api/projects/:projectId/agents/:agentRef/sessions', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ success: true, data: { sessionId: 's1' } })
+      }),
+    )
+
+    await launchAgentSession('proj-1', 'agent-foo', {
+      prompt: 'Use the existing workspace',
+      context: { workspace: 'pay' },
+    })
+
+    expect(body).toEqual({
+      prompt: 'Use the existing workspace',
+      context: { workspace: 'pay' },
+    })
+  })
+
   it('forwards the idempotency key as a request header', async () => {
     let key = ''
     server.use(

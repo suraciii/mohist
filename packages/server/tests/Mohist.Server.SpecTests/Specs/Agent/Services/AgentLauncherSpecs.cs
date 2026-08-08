@@ -306,6 +306,9 @@ public class AgentLauncherSpecs
         var info = await session.GetAsync();
         Assert.NotNull(info);
         Assert.Equal("pi", info!.Runtime);
+        var record = await LoadSessionByIdAsync(sessionId);
+        Assert.Equal("event-router", record?.Session.Metadata.Label(GenericAgentSessionMetadata.Origin));
+        Assert.Equal(agent.Id, record?.Session.Metadata.Label(GenericAgentSessionMetadata.TargetId));
     }
 
     [Fact]

@@ -502,6 +502,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             [GenericAgentSessionMetadata.AgentName] = plan.AgentName ?? string.Empty,
             [GenericAgentSessionMetadata.TriggerEventId] = plan.EventId,
             [GenericAgentSessionMetadata.TriggerRuleId] = plan.RuleId,
+            [GenericAgentSessionMetadata.Origin] = "event-router",
+            [GenericAgentSessionMetadata.TargetId] = plan.AgentId ?? string.Empty,
         };
         if (plan.IssueNumber is > 0)
             labels[GenericAgentSessionMetadata.IssueNumber] = plan.IssueNumber.Value.ToString();

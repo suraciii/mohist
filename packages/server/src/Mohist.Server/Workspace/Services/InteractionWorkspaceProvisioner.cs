@@ -24,6 +24,15 @@ public sealed class InteractionWorkspaceProvisioner(
     public Task<string> EnsureWebWorkspaceAsync(string projectId, string conversationId, DateTimeOffset now)
         => EnsureAsync(projectId, new WorkspaceOrigin.Web(conversationId), $"web-{conversationId}", now);
 
+    public Task<string> EnsureCliWorkspaceAsync(string projectId, DateTimeOffset now)
+        => EnsureAsync(projectId, new WorkspaceOrigin.Cli(), "cli-current", now);
+
+    public Task<string> ResolveWebWorkspaceNameAsync(string projectId, string conversationId)
+        => ResolveAsync(projectId, new WorkspaceOrigin.Web(conversationId), $"web-{conversationId}");
+
+    public Task<string> ResolveCliWorkspaceNameAsync(string projectId)
+        => ResolveAsync(projectId, new WorkspaceOrigin.Cli(), "cli-current");
+
     public async Task<bool> ArchiveSlackChannelAsync(string projectId, string teamId, string channelId, DateTimeOffset now)
         => await ArchiveAsync(projectId, new WorkspaceOrigin.Slack(teamId, channelId), now);
 
@@ -48,6 +57,12 @@ public sealed class InteractionWorkspaceProvisioner(
             if (winner is not null) return winner.Name;
             throw;
         }
+    }
+
+    private async Task<string> ResolveAsync(string projectId, WorkspaceOrigin origin, string baseName)
+    {
+        var active = await FindActiveAsync(projectId, origin);
+        return active?.Name ?? await DeriveUniqueNameAsync(projectId, baseName);
     }
 
     private async Task<string> DeriveUniqueNameAsync(string projectId, string baseName)

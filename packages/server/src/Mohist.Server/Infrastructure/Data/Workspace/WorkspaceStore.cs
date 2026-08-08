@@ -121,6 +121,7 @@ public static class WorkspaceRowJson
         WorkspaceOrigin.Issue => "issue",
         WorkspaceOrigin.Slack => "slack",
         WorkspaceOrigin.Web => "web",
+        WorkspaceOrigin.Cli => "cli",
         _ => throw new ArgumentOutOfRangeException(nameof(origin)),
     };
 
@@ -130,6 +131,7 @@ public static class WorkspaceRowJson
         WorkspaceOrigin.Issue issue => JSON.Serialize(new { issueNumber = issue.IssueNumber }),
         WorkspaceOrigin.Slack slack => JSON.Serialize(new { teamId = slack.TeamId, channelId = slack.ChannelId }),
         WorkspaceOrigin.Web web => JSON.Serialize(new { conversationId = web.ConversationId }),
+        WorkspaceOrigin.Cli => "{}",
         _ => throw new ArgumentOutOfRangeException(nameof(origin)),
     };
 
@@ -144,6 +146,7 @@ public static class WorkspaceRowJson
                 JSON.DeserializeOrThrow<OriginSlackPayload>(payload).TeamId,
                 JSON.DeserializeOrThrow<OriginSlackPayload>(payload).ChannelId),
             "web" => new WorkspaceOrigin.Web(JSON.DeserializeOrThrow<OriginWebPayload>(payload).ConversationId),
+            "cli" => new WorkspaceOrigin.Cli(),
             _ => null,
         };
     }

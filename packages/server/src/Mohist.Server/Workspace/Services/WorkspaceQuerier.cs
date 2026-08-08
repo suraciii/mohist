@@ -109,6 +109,7 @@ public sealed class WorkspaceQuerier : IScopedService
         WorkspaceOrigin.Issue issue => new WorkspaceOriginDto("issue", IssueNumber: issue.IssueNumber),
         WorkspaceOrigin.Slack slack => new WorkspaceOriginDto("slack", TeamId: slack.TeamId, ChannelId: slack.ChannelId),
         WorkspaceOrigin.Web web => new WorkspaceOriginDto("web", ConversationId: web.ConversationId),
+        WorkspaceOrigin.Cli => new WorkspaceOriginDto("cli"),
         _ => new WorkspaceOriginDto("unknown"),
     };
 }

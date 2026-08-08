@@ -20,6 +20,7 @@ export interface AgentSessionListContextRefsDto {
   epicNumber?: number | null
   repository?: string | null
   workspacePath?: string | null
+  workspaceName?: string | null
 }
 
 export interface AgentSessionListItemDto {
@@ -32,6 +33,8 @@ export interface AgentSessionListItemDto {
   lastActivityAt: string | null
   resolvedModel: string | null
   contextRefs?: AgentSessionListContextRefsDto | null
+  origin?: string | null
+  targetId?: string | null
 }
 
 export interface GenericAgentSessionSummaryDto {
@@ -54,6 +57,8 @@ export interface GenericAgentSessionSummaryDto {
   currentTurnId?: string | null
   inputs?: SessionInputObservation[] | null
   turns?: AgentTurnObservation[] | null
+  origin?: string | null
+  targetId?: string | null
 }
 
 export interface AgentSessionLaunchResponse {
@@ -63,12 +68,16 @@ export interface AgentSessionLaunchResponse {
   turnId?: string | null
   agentId: string
   agentName: string
+  workspaceId: string
+  targetId: string
+  origin: string
   status: string
   attachments?: AgentSessionAttachment[] | null
   rejectedAttachments?: AgentSessionAttachmentRejection[] | null
   transcriptUrl: string
   jobUrl?: string | null
   observationUrl?: string | null
+  sessionUrl?: string | null
 }
 
 export interface AgentSessionAttachment {
@@ -88,6 +97,7 @@ export interface AgentSessionLaunchContext {
   issueNumber?: number | null
   epicNumber?: number | null
   repository?: string | null
+  workspace?: string | null
   workspacePath?: string | null
 }
 
@@ -192,7 +202,10 @@ export function launchAgentSession(projectId: string, agentRef: string, input: A
     {
       method: 'POST',
       body: JSON.stringify(input),
-      headers: idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined,
+      headers: {
+        'X-Mohist-Launch-Origin': 'web',
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+      },
     },
   )
 }

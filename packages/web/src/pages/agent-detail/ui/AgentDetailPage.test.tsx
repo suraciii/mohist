@@ -101,8 +101,12 @@ const composerDataHook: AgentSessionComposerDataHook = () => {
       sessionId: 'session-from-detail',
       agentId: agentRef,
       agentName: state.agent?.name ?? 'Test Agent',
+      workspaceId: 'cli-current',
+      targetId: agentRef,
+      origin: 'web',
       status: 'queued',
       transcriptUrl: '',
+      sessionUrl: '/Test/sessions/session-from-detail',
     }),
   })
   return {
@@ -203,8 +207,6 @@ function makeSession(overrides: Partial<AgentSessionListItemDto> = {}): AgentSes
     sessionId: 'sess-1',
     agentId: 'agent-1',
     agentName: 'Test Agent',
-    // Issue 484: sessions are grouped by `activity` (active/unknown/idle),
-    // not `status`. Default to idle (an ended/awaiting-followup session).
     activity: 'idle',
     createdAt: '2026-06-10T00:00:00Z',
     lastActivityAt: '2026-06-10T01:00:00Z',
@@ -281,10 +283,6 @@ describe('AgentDetailPage', () => {
     })
 
     it('does not render an agent-type field (no "opencode" string anywhere on the surface)', async () => {
-      // Per #410 T-002 design D5: the agent-detail page must not read or
-      // display the legacy `type` key from agentConfig. Earlier behaviour
-      // rendered `<type> · <model> · <variant>` on the title row; the
-      // converged surface shows model/variant only.
       mockAgent(
         makeAgent({
           agentConfig: {
@@ -296,9 +294,6 @@ describe('AgentDetailPage', () => {
       )
       renderPage()
       const page = await screen.findByTestId('agent-detail-page')
-      // The agent-type chip lives on the subtitle row inside the page
-      // header; assert the page-level text never contains the legacy
-      // "opencode" value, while model/variant remain visible.
       const pageText = page.textContent ?? ''
       expect(pageText).toMatch(/gpt-4/)
       expect(pageText).toMatch(/high/)

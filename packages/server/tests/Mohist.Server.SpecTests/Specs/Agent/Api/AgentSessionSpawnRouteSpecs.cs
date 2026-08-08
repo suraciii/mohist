@@ -70,6 +70,27 @@ public sealed class AgentSessionSpawnRouteSpecs
     {
         var projectId = await CreateProjectAsync();
         var rootSessionId = $"tree-route-root-{Guid.NewGuid():N}";
+        const string workspaceName = "tree-workspace";
+        using var workspaceCreate = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/workspaces",
+            new { name = workspaceName, repos = Array.Empty<string>() });
+        Assert.Equal(HttpStatusCode.OK, workspaceCreate.StatusCode);
+
+        using var workspaceList = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
+        Assert.Equal(HttpStatusCode.OK, workspaceList.StatusCode);
+        using var workspaceListDocument = JsonDocument.Parse(await workspaceList.Content.ReadAsStringAsync());
+        var listedWorkspace = workspaceListDocument.RootElement.GetProperty("data")
+            .EnumerateArray()
+            .Single(item => item.GetProperty("name").GetString() == workspaceName);
+
+        using var workspaceDetail = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/workspaces/{workspaceName}");
+        Assert.Equal(HttpStatusCode.OK, workspaceDetail.StatusCode);
+        using var workspaceDetailDocument = JsonDocument.Parse(await workspaceDetail.Content.ReadAsStringAsync());
+        Assert.Equal(
+            listedWorkspace.GetProperty("name").GetString(),
+            workspaceDetailDocument.RootElement.GetProperty("data").GetProperty("name").GetString());
+
         await _fixture.Grains.GetGrain<IAgentSessionGrain>(rootSessionId).OpenAsync(
             new OpenAgentSessionCommand(
                 RunnerId: string.Empty,
@@ -81,6 +102,7 @@ public sealed class AgentSessionSpawnRouteSpecs
                     [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
                     [GenericAgentSessionMetadata.AgentId] = "agent-tree-root",
                     [GenericAgentSessionMetadata.AgentName] = "agent-tree-root",
+                    [GenericAgentSessionMetadata.WorkspaceName] = workspaceName,
                 })));
 
         using var response = await _fixture.Client.GetAsync(
@@ -99,6 +121,7 @@ public sealed class AgentSessionSpawnRouteSpecs
         Assert.Equal(JsonValueKind.Array, data.GetProperty("nodes").ValueKind);
         Assert.Equal(JsonValueKind.Array, data.GetProperty("edges").ValueKind);
         Assert.Equal(JsonValueKind.Null, data.GetProperty("continuation").ValueKind);
+        Assert.Equal(workspaceName, data.GetProperty("nodes")[0].GetProperty("workspaceName").GetString());
     }
 
     private async Task<string> CreateProjectAsync()
