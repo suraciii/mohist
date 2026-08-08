@@ -93,15 +93,13 @@ Concept ownership and origin rules are defined in
   replacement compares that complete expected binding and the AgentSession workDir. `bindingEpoch`
   is monotonic and changes whenever current binding is replaced; it is part of every command/event
   fence, not a display-only revision.
-- A binding operation also carries the complete operation fence
-  `(operationId, ownerId, ownerFence, claimGeneration, expectedBinding, candidateBinding, phase,
-  leaseUntil, deadlineAt)`. `ownerFence` and `claimGeneration` are independent monotonic values;
-  an unqualified `generation` in an implementation means `claimGeneration`, never
-  `ContextGeneration`. Every phase write, candidate create/get/discard/cleanup, binding CAS and
-  completion must compare the full fence and expected binding. Before any external side effect,
-  Server atomically rechecks that fence, the current owner lease, and the current binding, then
-  passes the same token to Runtime/provider. A stale owner fails closed before create, submit,
-  discard, or complete.
+- A binding operation carries an operation fence. `ownerFence` and `claimGeneration` are
+  independent monotonic values; an unqualified `generation` in an implementation means
+  `claimGeneration`, never `ContextGeneration`. Every phase write, candidate create/get/discard/
+  cleanup, binding CAS and completion compares the full fence and expected binding. Before any
+  external side effect, Server atomically rechecks that fence, the current owner lease, and the
+  current binding, then passes the same token to Runtime/provider. A stale owner fails closed
+  before create, submit, discard, cleanup, or complete.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
   incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
   Runner handoff is an explicit `handoff` operation and is not missing recovery. An adopted candidate
@@ -113,29 +111,73 @@ Concept ownership and origin rules are defined in
   the current binding while preserving `sessionId` and starts a new `ContextGeneration`. A work
   directory change requires a new logical Session identity.
 
-### Session operation contract
+### Canonical SessionOperationRead
 
 `Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff` and `rebind` are durable
 Session operations. Their caller supplies a reusable `operationId`; Server never creates an
-unqueryable operation key for a command response. The canonical operation read contains:
+unqueryable operation key for a command response. This is the only authoritative
+`SessionOperationRead` schema. `agent-api.md` and `agent-execution.md` link to it; they do not
+define another operation field list.
 
 ```text
-operationId
-kind = compact | reset | recovery | force-reset | handoff | rebind
-phase
-outcome = pending | succeeded | rejected | failed | unknown
-ownerId
-ownerFence
-claimGeneration
-revision
-deadlineAt
-nextAction
+SessionOperationRead {
+  operationId
+  kind = compact | reset | recovery | force-reset | handoff | rebind
+  phase = claimed | resolving | candidate-created | cas-pending | rebound | completed |
+          superseded | expired | failed | cleanup-pending
+  outcome = pending | succeeded | rejected | failed | unknown | blocked
+  ownerId
+  ownerFence
+  claimGeneration
+  leaseUntil
+  revision
+  deadline
+  contextGeneration
+  expectedBinding
+  candidateBinding
+  candidateKey
+  candidateState = none | created | adopted | orphan | cleanup-pending | discarded | unknown
+  targetRunnerId
+  targetRuntime
+  supersededByOperationId
+  nextAction
+}
 ```
 
-`launchRequestId` is a different, client-supplied launch identity. Server creates
-`launchOperationId` exactly once when first preparing that request and durably maps
-`launchRequestId -> launchOperationId`; it is never the client key and is never required to
-discover a launch after response loss.
+`expectedBinding` and `candidateBinding` are always present in a read. They are either `null` or
+the complete `(runnerId, runtime, runtimeSessionId, bindingEpoch)` tuple; omitted identity is not
+equivalent to `null`. `candidateKey`, `targetRunnerId` and `targetRuntime` are persisted before
+any Runtime effect. `candidateState=orphan` means a candidate exists but was never adopted;
+`candidateState=cleanup-pending` belongs to an independent cleanup fence, not to a live recovery
+owner.
+
+The required/null rules are:
+
+| kind | required values | explicitly null before completion |
+|---|---|---|
+| `compact` | `expectedBinding`, `contextGeneration`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction` | `candidateBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `supersededByOperationId` |
+| `reset` | `expectedBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `contextGeneration` | `candidateBinding` until recorded; `supersededByOperationId` unless it supersedes an operation |
+| `recovery` | `expectedBinding`, `candidateKey`, target runner/runtime equal to the expected binding, `contextGeneration` | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
+| `force-reset` | `expectedBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `contextGeneration` and a new `operationId` | `candidateBinding` until recorded; `supersededByOperationId` when no old operation was superseded |
+| `handoff` | `expectedBinding`, `candidateKey`, target runner/runtime, with target runner different from expected | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
+| `rebind` | `expectedBinding`, `candidateKey`, target runner equal to expected and target runtime | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
+
+`ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`, `contextGeneration`
+and `nextAction` are present on every operation read. `outcome=blocked` is terminal for the
+operation that can no longer make progress under its original deadline. A `cleanup-pending`
+candidate may still have a separate cleanup fence; that fence never keeps a new binding operation
+from being claimed after the original operation is terminal.
+
+The launch identities are separate. The caller provides `launchRequestId`; Server creates
+`launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither
+identity is a Session operation ID.
+
+Every operation projection returns all fields above, plus the current Server `revision` and
+`observedAt` used to read it. Job, Session, Input and Turn projections may reference an operation
+by `operationId`, but must not invent a second operation shape. A response-loss query or retry must
+return the same `operationId`, `kind`, `phase`, `outcome`, `ownerFence`, `claimGeneration`,
+`revision`, `deadline`, `contextGeneration`, expected/candidate bindings, supersession link and
+`nextAction`; a missing response never creates a new operation or a partial acknowledgement.
 
 `ContextBoundary.Kind` is `compact | reset | runtime-change | missing-recovery | force-reset |
 handoff | rebind`. Compact keeps `ContextGeneration`; reset, runtime change, missing recovery,

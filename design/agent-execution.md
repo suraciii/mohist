@@ -150,37 +150,6 @@ RuntimeBinding
   RuntimeSessionId
   BindingEpoch
 
-SessionOperationFence
-  SessionId
-  OperationId
-  Kind = recovery | compact | reset | force-reset | handoff | rebind
-  ContextGeneration
-  OwnerId
-  OwnerFence
-  ClaimGeneration
-  LeaseUntil
-  DeadlineAt
-  Revision
-  ExpectedBinding?
-  Phase
-  CandidateKey?
-  CandidateBinding?
-  SupersedesOperationId?
-  Outcome = pending | succeeded | rejected | failed | unknown
-  NextAction
-
-SessionOperationRead
-  OperationId
-  Kind
-  Phase
-  Outcome
-  OwnerId
-  OwnerFence
-  ClaimGeneration
-  Revision
-  DeadlineAt
-  NextAction
-
 ContextBoundary
   Kind = compact | reset | runtime-change | missing-recovery | force-reset | handoff | rebind
   ContextGeneration
@@ -189,29 +158,12 @@ ContextBoundary
   ObservedAt
 ```
 
+`SessionOperationFence` 是写侧的内部 fencing 记录；它只能持久化足以生成
+[`SessionOperationRead`](conventions.md#canonical-sessionoperationread) 的数据，以及
+`SessionId`、候选创建键和外部调用所需的 target runner/runtime。它不是第二个 read schema。
 `ContextBoundary` 和 operation result 是 AgentSession 已有持久状态中的记录形状，不是新的
-业务实体；`SessionOperationFence` 的当前投影是 canonical `SessionOperationRead`，历史结果
-按 `operationId` 保留，以便 response loss 后用原 operation 查询。`operationId` 必须由调用方
-提供并可重用，Server 不生成客户端不可见的 operation key。
-
-`ActiveOperation` 的 canonical read model 是所有入口共享的 operation 观察结果，不是只给
-协调器看的内部状态：
-
-```text
-SessionOperation
-  operationId
-  kind = recovery | compact | reset | force-reset | handoff | rebind
-  phase
-  outcome = pending | succeeded | rejected | failed | unknown
-  owner = { ownerId, ownerFence, claimGeneration, leaseUntil }
-  revision
-  deadline
-  nextAction
-  contextGeneration
-  expectedBinding?
-  candidateBinding?
-  supersedesOperationId?
-```
+业务实体。历史 operation 按 `operationId` 保留，以便 response loss 后查询原 operation。
+`operationId` 必须由调用方提供并可重用，Server 不生成客户端不可见的 operation key。
 
 Compact、Reset、recovery、handoff、rebind 和 force-reset 的 command 都必须带调用方持有的
 `operationId`；同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
@@ -498,21 +450,11 @@ recovery。它只能在 `safeAdmission(session)` 成立时启动。正在执行�
 ### Durable recovery operation
 
 RecoveryWindow 不是内存窗口，而是 AgentSession 的一个持久 `SessionOperationFence`，且
-同一 Session 同时最多一个 active fence。它至少保存：
-
-| 字段 | 作用 |
-|---|---|
-| `operationId` | 调用意图的稳定身份，同一操作的查询和重试键 |
-| `ownerFence` | 单调递增的 owner 世代；每次首次 claim 或 lease takeover 都递增 |
-| `claimGeneration` | 单调递增的 recovery claim 世代；和 `ContextGeneration` 不同，防止旧 claim 覆盖新 binding |
-| `ownerId` | 当前唯一执行 owner；其他 owner 只能观察或在租约过期后接管 |
-| `leaseUntil` | 当前 owner 的租约截止时间；过期后旧 owner 不能再写入、删除或完成 |
-| `expectedBinding` | 完整旧 binding tuple，包括 epoch |
-| `candidateKey` | Runtime create/get/discard/cleanup 的幂等键 |
-| `candidateBinding` | 已创建候选的完整 binding；没有候选时为 null |
-| `phase` | claimed、candidate-created、cas-pending、rebound、cleanup-pending、superseded、expired 或 failed |
-| `deadlineAt` | 有界的操作截止时间 |
-| `supersedesOperationId` | force-reset 或 takeover 取代的旧未知 operation；只作关联，不覆盖旧结果 |
+同一 Session 同时最多一个 active fence。它的公共字段和按 kind 的 null/required 规则只见
+[`conventions.md#canonical-sessionoperationread`](conventions.md#canonical-sessionoperationread)。
+写侧另外持久化 `SessionId`、candidate identity、target runner/runtime 和 cleanup fence
+关联；这些值用于 fencing，不形成第二个 read schema。`ownerFence`、`claimGeneration`、
+`expectedBinding`、`candidateKey`、lease 和 deadline 必须能在重启后恢复。
 
 `claimGeneration` 是 recovery claim 的裸整数代数，不是 `ContextGeneration`、
 `bindingEpoch` 或 candidate 版本。任何实现或命令若只写 `generation`，其语义必须是
@@ -580,11 +522,20 @@ BeginRecovery(expected, operationId, ownerId, deadline):
       replace ownerId and leaseUntil, and retain operationId, expectedBinding, candidateKey
   if current operation has another operationId and its lease is live:
     return recovery_in_progress
+  if the only remaining work is a cleanup fence with a terminal original operation:
+    allow a new binding operation; cleanup continues under its own bounded fence
   if current operation deadlineAt < serverNow:
-    reconcile candidate and mark expired or cleanup-pending
+    reconcile candidate; if it is not adopted, transfer cleanup to an independent cleanup fence
     return recovery_expired
   otherwise:
-    atomically create the fence with ownerFence and claimGeneration both incremented
+    atomically create the fence with:
+      candidateKey = stableCandidateKey(operationId, recovery)
+      targetRunnerId = expected.runnerId
+      targetRuntime = expected.runtime
+      expectedBinding = expected
+      candidateBinding = null
+      ownerFence and claimGeneration both incremented
+    persist the complete operation fence before Runtime.resolve
 ```
 
 首次 claim、lease takeover、phase 变更、candidate 记录和 operation result 都与 fence
@@ -592,9 +543,11 @@ BeginRecovery(expected, operationId, ownerId, deadline):
 进程或 Server 重启后，Session 激活和 durable handler 读取已持久化的 operation、ownerFence、
 claimGeneration、phase、candidateKey 和 expectedBinding：未到 deadline 时只能用当前 tuple
 继续；owner lease 已过期时先 takeover，再继续；旧 owner 的重试即使携带同一 operationId
-也因旧 fence fail closed。到 deadline 后先 reconcile candidate 与 current binding，再将
-operation 标记 `expired`。若 candidate cleanup 结果不确定，阶段保持 `cleanup-pending`，
-该 fence 继续阻止新的 recovery，直到同一 candidateKey 的 cleanup 达到确定结果。
+也因旧 fence fail closed。到 deadline 后先 reconcile candidate 与 current binding。没有候选或
+已确认采用时 operation 可进入 `succeeded`，已确认不能采用时进入 `failed`；候选仍存在但
+清理结果不确定时，原 operation 进入终态 `outcome=blocked`、`phase=cleanup-pending`。
+这只终止原 operation，不永久占住 Session 的 binding admission。候选清理由独立、有限的
+cleanup fence 接管；新的 binding operation 可以在 current binding 未等于该候选时开始。
 
 ### 触发条件
 
@@ -651,7 +604,10 @@ else if resolved is definitely-missing and fence is owned:
       expectedBinding = createToken.expectedBinding,
       candidateBinding = createToken.candidateBinding,
       deadline = createToken.deadline)
-    Session.recordCandidate(fence, candidate)
+    if create response is lost:
+      candidate = Runtime.getByKey(fence.candidateKey) using createToken
+      if response is still unknown: reconcileBindingOperation(fence)
+    recordCandidate(fence, candidate)
     selected = Session.replaceBinding(
       expectedBinding = expected,
       candidateBinding = candidate,
@@ -660,6 +616,8 @@ else if resolved is definitely-missing and fence is owned:
       ownerFence = fence.ownerFence,
       claimGeneration = fence.claimGeneration,
       deadline = fence.deadlineAt)
+    if selected is CAS failure:
+      beginCleanupFence(fence, candidate)
 else:
     fail without changing the binding
 
@@ -700,40 +658,122 @@ Session.completeOperation(
 ```
 
 同一 `candidateKey` 的 create/get 必须返回同一候选或明确失败；创建响应丢失时按 key 查询，
-不能创建第二个候选。若 binding CAS 因 Reset、handoff 或另一已提交变化失败，Server 不采用
-candidate，改用同一 key 幂等 discard，并持久化 `cleanup-pending`，直到 Runtime 明确清理
-完成。每一次 create/get/discard/cleanup 都先以 `fenceMatch` 做 Server 条件检查，并把
-`candidateBinding` 和 phase 一起持久化；不能用 candidate key 单独授权操作。清理调用必须
-带同一个 `operationId`、`ownerFence`、`claimGeneration`、`expectedBinding`、
-`candidateBinding` 和 `deadline`，并先原子 recheck：
+不能创建第二个候选。若 binding CAS 因 Reset、handoff 或另一已提交变化失败，candidate
+成为 `orphan`，Server 不采用它，并把清理转交给独立 cleanup fence。每一次 create/get 都先
+以原 operation 的 `fenceMatch` 做 Server 条件检查，并把 `candidateBinding` 一起持久化；
+不能用 candidate key 单独授权操作。
 
 ```text
-discardCandidate(fence, candidate):
-  token = fenceToken(fence, fence.expectedBinding, candidate, fence.expectedBinding)
-  token = Server.recheckBeforeExternalEffect(token)
+recordCandidate(operation, candidate):
+  atomically:
+    require operation is still owned and currentBinding == operation.expectedBinding
+    require operation.candidateBinding == null
+    require candidate.key == operation.candidateKey
+    persist candidateBinding = candidate.binding
+    persist candidateState = created
+    persist phase = candidate-created and advance revision
+
+reconcileBindingOperation(operation):
+  if currentBinding.adoptedCandidateKey == operation.candidateKey:
+    mark operation succeeded, candidateState = adopted, phase = completed
+    return adopted
+  if currentBinding is not operation.expectedBinding:
+    beginCleanupFence(operation, candidate = operation.candidateBinding or unknown)
+    return orphaned
+  if operation.deadline is expired:
+    beginCleanupFence(operation, candidate = operation.candidateBinding or unknown)
+    return expired
+  if operation.candidateBinding == null:
+    candidate = Runtime.getByKey(operation.candidateKey) using an unexpired operation fence
+    if candidate is found: recordCandidate(operation, candidate)
+    if candidate is definitely absent: mark failed with nextAction = retry_binding_operation
+    if response is unknown: beginCleanupFence(operation, candidate = unknown)
+  if operation.candidateBinding exists:
+    cas = replaceBinding(operation.expectedBinding, operation.candidateBinding, operation)
+    if cas succeeds: mark adopted and complete operation
+    else: beginCleanupFence(operation, candidate = operation.candidateBinding)
+
+beginCleanupFence(operation, candidate):
+  atomically:
+    if candidate is known and currentBinding.adoptedCandidateKey == candidate.key:
+      mark operation succeeded, candidateState = adopted, phase = completed
+      return already_adopted
+    persist a distinct cleanup fence with cleanupId, candidateKey, candidate identity,
+      expectedBinding, currentBinding observed at handoff, ownerFence, claimGeneration,
+      attempts = 0, cleanupDeadline = min(serverNow + cleanupBudget, operation.deadline + grace)
+    mark operation outcome = blocked, phase = cleanup-pending,
+      candidateState = orphan or cleanup-pending,
+      nextAction = retry_candidate_cleanup or operator_reconcile_candidate
+    release the operation's Session admission slot
+```
+
+The cleanup fence has its own owner and monotonic `ownerFence`/`claimGeneration`; it is not a
+renewal of the expired operation. Its `attempts` and `cleanupDeadline` are durable and bounded.
+It may be claimed after a process restart or lease takeover, but it cannot be renewed past its
+fixed deadline. `candidateState=orphan` means the candidate was found and was never adopted;
+`candidateState=cleanup-pending` means the cleanup result is not yet authoritative.
+
+Cleanup calls use the independent fence and compare the candidate identity, not only the key:
+
+```text
+cleanupCandidate(cleanupFence):
+  atomically:
+    require cleanupFence is current owner and serverNow <= cleanupFence.cleanupDeadline
+    require cleanupFence.attempts < cleanupFence.maxAttempts
+    increment attempts and persist cleanup phase before any Runtime effect
+    if currentBinding.adoptedCandidateKey == cleanupFence.candidateKey:
+      mark cleanup fence succeeded and candidateState = adopted
+      return already_adopted
+    if cleanupFence.candidateIdentity is unknown:
+      candidate = Runtime.getByKey(cleanupFence.candidateKey) using this cleanup fence
+      if candidate is definitely absent:
+        mark cleanup fence succeeded and candidateState = discarded
+        return already_discarded
+      if candidate is found:
+        persist candidateIdentity = candidate.identity
+      if response is unknown:
+        persist cleanup-pending and nextAction = retry_candidate_cleanup
+        return unknown
+    token = cleanupToken(cleanupFence, candidateIdentity = cleanupFence.candidateIdentity,
+                        currentBinding = currentBinding)
   Runtime.discardCandidate(
-    candidateKey = fence.candidateKey,
+    candidateKey = cleanupFence.candidateKey,
     fenceToken = token,
-    operationId = token.operationId,
+    cleanupId = token.cleanupId,
     ownerId = token.ownerId,
     ownerFence = token.ownerFence,
     claimGeneration = token.claimGeneration,
-    expectedBinding = token.expectedBinding,
-    candidateBinding = token.candidateBinding,
-    deadline = token.deadline)
+    candidateIdentity = token.candidateIdentity,
+    deadline = token.cleanupDeadline)
+  reconcile cleanup response by the same cleanupId and candidateKey
+  if discarded: mark cleanup succeeded and original candidateState = discarded
+  if response is unknown and attempts < maxAttempts and now < cleanupDeadline:
+    persist cleanup-pending and nextAction = retry_candidate_cleanup
+  else if response is unknown or attempts >= maxAttempts or now >= cleanupDeadline:
+    mark cleanup outcome = blocked and candidateState = cleanup-pending,
+      nextAction = operator_reconcile_candidate
 ```
+
+Before the discard effect, the cleanup fence rechecks its owner fence, its candidate identity, and
+the current binding. `currentBinding` may have changed since the original CAS: if it is a different
+binding and is not the cleanup candidate, the orphan is safe to discard. If it is the candidate, or
+the stored adopted-candidate key matches, cleanup returns `already_adopted` and never deletes it.
+An old cleanup therefore cannot delete an adopted binding or a newer binding that reused the same
+runtime session. A cleanup response loss is reconciled by the same cleanup identity; it is never
+converted into an unbounded retry.
 
 Lease takeover increments `ownerFence` and `claimGeneration` before issuing a new token. An old
 owner's create, submit, discard, cleanup, phase write, binding CAS or complete therefore fails the
 Server recheck and the Runtime/provider token check, even when it reuses the same `operationId`.
-清理响应丢失时仍按同 key 查询，不能只写日志或静默遗留。
+旧 operation 的 cleanup 也不能绕过独立 cleanup fence；清理响应丢失时仍按同 cleanup identity
+查询，不能只写日志或静默遗留。
 
 candidate 一旦被 `replaceBinding` 采用，Server 在同一事务把 phase 置为 `rebound`，并把
-current binding 的完整 tuple（含新的 `bindingEpoch`）写入 `candidateBinding`。此后旧 owner
-的 cleanup 即使在 Runtime 侧仍能定位旧 candidate，也必须先发现 candidate 已 adopted 或
-current binding 已等于该 candidate；cleanup 只能返回 `already_adopted`，不得 discard、删除
-或回收 current binding。未被采用的 candidate 才能在匹配当前 owner fence 的
-`cleanup-pending` 中 discard。
+current binding 的完整 tuple（含新的 `bindingEpoch`）写入 `candidateBinding`，并记录
+`adoptedCandidateKey`。此后旧 owner 的 cleanup 即使在 Runtime 侧仍能定位旧 candidate，也
+必须先发现 candidate 已 adopted、adopted key 相同或 current binding 已等于该 candidate；
+cleanup 只能返回 `already_adopted`，不得 discard、删除或回收 current binding。未被采用的
+candidate 只能在匹配其独立 cleanup fence 的 `cleanup-pending` 中 discard。
 
 `replaceBinding` 之后，fence 中的 `expectedBinding` 仍是本次操作开始时固定的旧 tuple，不会
 被改写成新 binding。任何后续 phase、输入记录、结果归档或 `complete` 都必须同时携带该
@@ -769,21 +809,24 @@ Runtime change、普通 Reset、handoff 和 rebind 只在当前 generation 的 `
 或显式 force-reset，不能用 handoff/rebind 绕过未决副作用。旧 generation 已被 supersede 的
 unknown 只进入 `unresolvedPrevious`，不阻止新 generation 的安全准入。
 
-该 fence 必须持久化 `operationId`、`ContextGeneration`、`ownerId`、`ownerFence`、
-`claimGeneration`、`revision`、`expectedBinding`、`candidateBinding`、`phase`、`leaseUntil`、
-`deadlineAt` 和 `nextAction`；它的每个 phase write、candidate write、CAS 和 complete 都使用
-recovery 相同的 `fenceMatch` 与外部 effect recheck。Runner/provider 创建候选前必须携带同一个
-token：
+该 fence 必须在任何 Runtime/provider effect 前持久化 canonical
+[`SessionOperationRead`](conventions.md#canonical-sessionoperationread) 所需的字段，并额外
+持久化 `SessionId`、`candidateKey`、`targetRunnerId` 和 `targetRuntime`。`expectedBinding`、
+`candidateBinding`、target 和 candidate key 的 null/required 语义按 canonical schema 执行。
+它的每个 phase write、candidate write、CAS 和 complete 都使用 recovery 相同的 `fenceMatch`
+与外部 effect recheck。Runner/provider 创建候选前必须携带同一个 token：
 
 ```text
-BeginBindingOperation(session, kind, operationId, ownerId, expectedRevision, deadline):
+BeginBindingOperation(session, kind, operationId, ownerId, expectedRevision,
+                      requestedRunnerId, requestedRuntime, deadline):
   atomically:
     require session.revision == expectedRevision
     require safeAdmission(session)
     expected = session.currentBinding
     require expected != null
-    require (kind == handoff && requestedRunnerId != expected.runnerId)
-            || (kind == rebind && requestedRunnerId == expected.runnerId)
+    require kind in {reset, recovery, force-reset, handoff, rebind}
+    require targetRule(kind, expected, requestedRunnerId, requestedRuntime)
+    candidateKey = stableCandidateKey(operationId, kind)
     fence = create ActiveOperation(
       operationId = operationId,
       kind = kind,
@@ -794,10 +837,16 @@ BeginBindingOperation(session, kind, operationId, ownerId, expectedRevision, dea
       revision = nextRevision(),
       expectedBinding = expected,
       candidateBinding = null,
+      candidateKey = candidateKey,
+      targetRunnerId = requestedRunnerId,
+      targetRuntime = requestedRuntime,
+      candidateState = none,
       leaseUntil = leaseFor(deadline),
       deadlineAt = deadline,
       phase = claimed,
       outcome = pending)
+
+  persist fence before calling Runtime/provider
 
 candidateToken = fenceToken(fence, expectedBinding = expected,
                             candidateBinding = null,
@@ -827,6 +876,13 @@ Session.replaceBinding(
   deadline = fence.deadlineAt,
   boundaryKind = kind)
 ```
+
+`targetRule` is checked and persisted before the external call: `reset` keeps the current
+runner/runtime, `recovery` keeps the current runner/runtime after a confirmed missing result,
+`rebind` keeps the runner but may change runtime, and `handoff` changes runner only through the
+explicit target. `candidateKey = stableCandidateKey(operationId, kind)` is unique to that
+operation. A create response loss is reconciled with `Runtime.getByKey(candidateKey)` and
+`recordCandidate`; it never calls create with a new key.
 
 `replaceBinding` 的最后一步在同一 Session 事务重新比较完整 `expectedBinding`、当前 owner
 lease/generation、`candidateBinding`、revision 和 operationId；成功才递增 `bindingEpoch` 与
@@ -906,11 +962,15 @@ BeginForceReset(session, newOperationId, ownerId, expectedRevision,
       revision = nextRevision()
       expectedBinding = session.currentBinding
       candidateBinding = null
+      candidateKey = stableCandidateKey(newOperationId, force-reset)
+      targetRunnerId = session.currentBinding.runnerId
+      targetRuntime = session.currentBinding.runtime
+      candidateState = none
       deadlineAt = deadline
       phase = claimed
       outcome = pending
-    persist ContextBoundary(kind = force-reset, result = pending) only as the
-      operation reservation; do not admit new Input/Turn yet
+    persist the complete operation fence and ContextBoundary(kind = force-reset,
+      result = pending) before any Runtime effect; do not admit new Input/Turn yet
   return the new fence
 
 candidateToken = fenceToken(newFence,
@@ -931,6 +991,7 @@ candidate = Runtime.createOrGetEmpty(
   expectedBinding = candidateToken.expectedBinding,
   candidateBinding = candidateToken.candidateBinding,
   deadline = candidateToken.deadline)
+recordCandidate(newFence, candidate)
 
 atomically finalize force-reset only if fenceMatch(candidateToken) and
   session.currentBinding == candidateToken.expectedBinding:
@@ -939,6 +1000,8 @@ atomically finalize force-reset only if fenceMatch(candidateToken) and
   persist ContextBoundary(kind = force-reset, result = succeeded),
     session.context_reset, new currentContextActivity and operation outcome
   clear ActiveOperation
+else:
+  beginCleanupFence(newFence, candidate)
 ```
 
 若旧 `ActiveOperation` 不存在，则 `old` 为空；若它仍是已知 pending 而非 unknown，普通
@@ -1047,7 +1110,7 @@ endpoint。
 | Session activity | 这段会话当前 context 能否继续、过去是否仍有未知事实 | `sessionId`、`activity`、`currentContextActivity`、`contextGeneration`、`unresolvedPrevious`、`unresolvedPreviousCount`、`nextAction`、`revision`、`observedAt` |
 | Input acceptance | 这条输入是否已由 Mohist 持久接受，以及属于哪一轮 | `inputId`、`state`、`acceptanceReason`、`turnId`、`turnIdReason`、`turnRelation`、`contextGeneration`、`revision`、`observedAt` |
 | Turn result | 这一轮的执行状态、派发状态和结果是什么 | `turnId`、`status`、`result`、`reason`、`dispatchStatus`、`blockedReason`、`nextAction`、`contextGeneration`、`revision`、`observedAt` |
-| Session operation | Compact/Reset/recovery/handoff/rebind/force-reset 当前或历史如何收敛 | `operationId`、`kind`、`phase`、`outcome`、`owner`、`revision`、`deadline`、`nextAction`、`contextGeneration`、`expectedBinding`、`candidateBinding` |
+| Session operation | Compact/Reset/recovery/handoff/rebind/force-reset 当前或历史如何收敛 | 完整 [`SessionOperationRead`](conventions.md#canonical-sessionoperationread)，不在此处复制字段列表 |
 | launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`launchRequestId`、`launchOperationId`、`revision`、`observedAt` |
 
 `unresolvedPrevious` 是旧 `ContextGeneration` 中仍未知的 operation/Input/Turn/side effect
@@ -1160,6 +1223,56 @@ next action，不制造假终态。
 operation 的 accept 记录，则以 Session 记录补回 Job，若没有记录才允许同一 command 重试。
 这样原 launch operation 永远只对应一组 reservation 和最多一组 live mapping，不产生 dangling
 live ID 或无限 pending；客户端不需要猜测或预先知道 `launchOperationId`。
+
+### accepted 后的 durable dispatch retry
+
+`accept-session` 提交 Input/Turn 后，入队不是瞬时副作用。Session 同一事务必须创建一个持久
+dispatch record：
+
+```text
+DispatchRecord {
+  inputId
+  turnId
+  dispatchAttemptCount
+  dispatchDeadline
+  dispatchAttemptId = null before the first attempt
+  dispatchStatus = queued | dispatched | blocked | unknown | terminal
+  blockedReason
+  nextAction
+}
+```
+
+`dispatchAttemptCount=0`、固定的 `dispatchDeadline`、`dispatchAttemptId` 和 durable outbox
+event 与 `accepted` Input、Turn 一起提交。每次 retry 先在 Server 原子递增
+`dispatchAttemptCount` 并生成该次唯一 `dispatchAttemptId`，再以当前 binding fence 调用 Runner；
+response loss 只按同一个 `dispatchAttemptId` 查询，不创建第二次 attempt。
+
+```text
+reconcileAcceptedDispatch(record):
+  if record.dispatchStatus in {dispatched, blocked, terminal}:
+    return the stored result
+  if now >= record.dispatchDeadline or
+     record.dispatchAttemptCount >= maxDispatchAttempts:
+    atomically:
+      require Input.acceptance == accepted
+      persist dispatchStatus = blocked
+      persist Turn.status = terminal, Turn.outcome = blocked
+      persist blockedReason = dispatch_retry_exhausted
+      persist nextAction = inspect_or_explicit_requeue
+    return terminal_blocked
+  atomically increment dispatchAttemptCount and persist dispatchAttemptId
+  token = Server.recheckBeforeExternalEffect(currentBindingFence(record))
+  result = Runner.enqueue(record.inputId, record.turnId, record.dispatchAttemptId, token)
+  if result is accepted: persist dispatched and continue Turn
+  if result is definitely rejected: retry while bounded, or terminal_blocked at the bound
+  if result is unknown: query the same dispatchAttemptId before another attempt
+```
+
+The accepted Input and its Turn are never deleted, replaced, or changed to `rejected` by this
+path. A permanent enqueue failure is a terminal `blocked` outcome, not infinite `pending`; its
+projection must retain InputId, TurnId, accepted state, attempt count, deadline, blockedReason and
+`nextAction`. A later explicit requeue is a new bounded operation that references the same Input
+and Turn, and cannot silently create another Input, Turn, or launch.
 
 Rejected/failed Job、`launchRequestId`、launch operation、reason、nextAction 和未 materialize reservation
 以最小 tombstone 形式永久保留；完整 transcript 或大 payload 可以按既有保留策略清理，但
@@ -1299,8 +1412,8 @@ operation fence。
 
 | AC | 可观察验收标准 | 场景映射 | 实施批次 |
 |---|---|---|---|
-| AC1 稳定受理身份 | launch/follow-up 的 Job、Session、Input、Turn ID 持久且重试不重复；accepted 只表示 Input 已接受 | 正常 launch、duplicate submit、submit response loss、accept rejection | Batch 1 |
-| AC2 Turn 与输入语义 | queued/running/outcome_pending/terminal/unknown 自洽；steer 关联 existing Turn；new-turn 有界排队；queue full 在受理前拒绝 | 正常 follow-up、steer、follow-up 排队、queue full、accepted 后入队失败 | Batch 2 |
+| AC1 稳定受理身份 | launch/follow-up 的 Job、Session、Input、Turn ID 持久且重试不重复；accepted 只表示 Input 已接受 | harness、正常 launch、duplicate submit、submit response loss、accept rejection | Batch 1 |
+| AC2 Turn 与输入语义 | queued/running/outcome_pending/terminal/unknown 自洽；steer 关联 existing Turn；new-turn 有界排队；queue full 在受理前拒绝；accepted 后 dispatch retry 有界 | 正常 follow-up、steer、follow-up 排队、queue full、accepted 后入队失败、permanent dispatch failure | Batch 2 |
 | AC3 Server canonical 事实 | Job status、Session activity、Input acceptance、Turn result 分开返回；Job 映射缺失时 null+reason；dispatch blocked、recovery nextAction、revision/observedAt 可追踪；CLI/Web 从同一 read model 适配 | canonical read、stale event、Job/Session 结果分离、force-reset 后 current activity | Batch 3 |
 | AC4 Launch 跨聚合收敛 | AgentJob/Session 不共享事务；durable coordinator/outbox 用幂等命令把部分失败收敛到唯一 Job/首 Input/Turn 映射 | launch partial failure、Server restart、Runner submit response loss | Batch 4 |
 | AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；ownerFence/claimGeneration、deadline、重启 reconcile、candidate create/get/discard/cleanup、CAS 与完整 binding fence 均可观察；lease expiry 后旧 owner fail closed；handoff 不伪装 missing | concurrent recovery、lease expiry old owner、Server restart、candidate CAS failure、Runner handoff、旧事件 | Batch 5 |
@@ -1344,7 +1457,9 @@ operation fence。
 | steer | 当前 Turn running，Runtime 明确支持 steer | 新 Input 关联 existing Turn，不创建第二个 Turn |
 | follow-up 排队 | 前一 Turn running | 后一 Turn 保持 queued；前一 Turn 终结后才可 running |
 | queue full | Session queued 上限已达 | rejected(queue_full)，不持久化新 Input |
+| harness | Server store、Runner/Runtime fake、outbox 和可注入时间按固定事件顺序运行 | 不访问真实网络、进程、Runtime、DB 或墙钟；每个断言能观察持久状态和副作用次数 |
 | accepted 后入队失败 | Session 事务已提交，outbox/queue 失败 | accepted 保留，Turn queued + dispatch=blocked，durable retry，不丢输入 |
+| permanent dispatch failure | dispatch attempt 达到最大次数或 deadline | Input/Turn 保留；Turn terminal + outcome=blocked，attempt count/deadline/reason/nextAction 持久化，不再无限 pending |
 | 断线 | Turn running，Runner 不可达 | binding 保留，Turn unknown；恢复前不重发 |
 | duplicate submit | 相同请求身份重试 | 返回原 Input/Turn，无重复 transcript、Turn 或 Runtime submission |
 | Runtime disappear | probe 明确 missing | 空 Runtime 创建、CAS 换绑、同 Session context boundary |
@@ -1352,9 +1467,9 @@ operation fence。
 | recovery success | candidate 与 CAS 成功 | 公共 Session 可继续查询；原未决 Turn 仍按事实为 terminal 或 unknown |
 | recovery failure | create/CAS/Runner 失败 | 保留原 binding，返回具体错误与 next action |
 | concurrent recovery | 同一 binding 同时收到两次 missing | 只有一个 durable owner/candidate；另一个得到 recovery_in_progress |
-| recovery restart/expiry | fence 在重启前未完成 | 按 phase reconcile；超 deadline 后 expire/cleanup-pending，不开第二个 recovery |
+| recovery restart/expiry | fence 在重启前未完成 | 按 phase reconcile；超 deadline 后原 operation terminal blocked/cleanup-pending，独立 cleanup fence 有界推进，新 recovery 不被永久阻塞 |
 | lease expiry old owner | lease 到期后旧 owner 仍提交 phase、discard 或 complete | takeover 递增 ownerFence/claimGeneration；旧写入全部 stale_operation_fence，不能删除 adopted candidate |
-| candidate CAS failure | candidate 已创建但 expected binding 已变化 | 不采用 candidate，幂等 discard，保留 stale/CAS 原因 |
+| candidate CAS failure | candidate 已创建但 expected binding 已变化 | candidate 标为 orphan；独立 cleanup fence 比较 candidate identity 与 adopted/current binding，安全 discard 或进入 terminal cleanup-pending |
 | launch partial failure | Job 已提交但 Session response 丢失 | 原 operation 重试返回同一映射；不创建第二个 Session/首 Turn |
 | accept rejection | prepare-job 已保留 reservation，Session 明确拒绝 | Job terminal/rejected；Session/Input/Turn null+reason；tombstone 保留，不留 dangling live ID |
 | submit response loss | Runner 可能已接受首 Turn | Turn 查询为 terminal 或 unknown；不隐式再次 submit |
@@ -1365,6 +1480,8 @@ operation fence。
 | cancel/stop 回归 | queued/running/unknown 各一例 | 不改变既有 cancel/stop 语义；不确定停止保持 unknown |
 | Unknown force-reset | 原 Turn unknown | 旧 Turn 保留 unknown；显式新 operation 建立 boundary，可创建新的 Input/Turn；风险和 next action 可见 |
 | active operation force-reset | Compact/Reset response loss 使 ActiveOperation unknown | 风险确认后用新 operation supersede；旧 operation 仍 unknown，新的 context/binding 由独立 fence 建立 |
+| handoff | Session safe idle，用户指定新 Runner | 只有显式 handoff operation 能改变 Runner；target、candidate、expected binding 先持久化，旧事件被拒绝 |
+| rebind | Session safe idle，同一 Runner | 只替换同 Runner 的 Runtime binding；未知或跨 Runner 请求被拒绝 |
 
 ### 架构、测试与实现分批
 

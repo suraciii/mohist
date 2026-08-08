@@ -168,25 +168,23 @@ Input acceptance 必须提供 `state=accepted|rejected|unknown`、`acceptanceRea
 `observedAt`。`blockedReason` 只有 dispatch 被 Server 明确阻塞时才填；未知事实不能被假装
 成 blocked 或 terminal。
 
+当 Input 已 `accepted` 但 enqueue 失败时，Turn projection 还必须返回 durable
+`dispatchAttemptCount`、`dispatchDeadline` 和该次 `dispatchAttemptId`。达到 attempt/deadline
+上限时返回 `status=terminal`、`dispatchStatus=blocked`、稳定 `blockedReason` 和可执行的
+`nextAction`；Input 仍为 accepted，InputId/TurnId 不变。response loss 只查询原 attempt，
+不能无限保持 pending 或创建新 Input/Turn。
+
 CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
 自行合并 Job/Session/Input/Turn 状态。
 
-Session operation 也是 canonical read model 的一部分：
+Session operation 也是 canonical read model 的一部分。唯一权威 schema 在
+[`conventions.md#canonical-sessionoperationread`](conventions.md#canonical-sessionoperationread)。
+本文不重复它的字段列表；API 只定义客户端能看到的 projection 和查询保证。
 
-```text
-operationId
-kind = compact | reset | recovery | force-reset | handoff | rebind
-phase
-outcome = pending | succeeded | rejected | failed | unknown
-owner = { ownerId, ownerFence, claimGeneration, leaseUntil }
-revision
-deadline
-nextAction
-contextGeneration
-expectedBinding?
-candidateBinding?
-supersedesOperationId?
-```
+Operation projection 必须返回 conventions 规定的完整 `SessionOperationRead`，包括其中所有
+始终存在的字段和按 kind 规定的显式 null 值。
+Job、Session、Input 和 Turn projection 只能引用 `operationId` 或嵌入同一 projection，不能
+发明裁剪后含义不同的 operation schema。
 
 Compact、Reset、recovery、handoff、rebind 和 force-reset command 都必须由调用方提供
 `operationId`；没有 key 时 Server 拒绝，不生成客户端不可见的替代 key。Query 可以按
@@ -225,7 +223,11 @@ force-reset(
 后才创建独立的 force-reset operation。候选 binding 与新 ContextBoundary 成功提交前，当前
 generation 仍不接受新的 Input/Turn；提交后 `currentContextActivity` 只表示新 generation，旧
 operation/input/turn/binding 事实仍保留为 Unknown，并进入 `unresolvedPrevious`。响应丢失时
-使用同一 force-reset operationId 查询或重试，返回同一结果，不创建第二个 context。
+使用同一 force-reset operationId 查询或重试，返回同一结果，不创建第二个 context。Begin
+force-reset 在任何 Runtime effect 前持久化 target runner/runtime、candidateKey、完整
+expected binding 与空的 candidate binding；创建响应丢失时按 candidateKey reconcile。每个
+create、recordCandidate、CAS、cleanup 和 complete 都在 effect 前重新比较 operation/owner
+fence 与当前 binding，旧 fence 直接 fail closed。
 
 CLI 的调用合同对应为：
 
@@ -247,6 +249,11 @@ generation 为 `idle` 且没有未决 side effect 时受理。当前 generation 
 `outcome_pending` 或 `unknown` 时拒绝；先完成查询或 force-reset。Server 以 candidate binding
 和完整 expected binding 做 CAS，成功后记录 `ContextBoundary.Kind=handoff|rebind` 并递增
 `ContextGeneration`；旧 binding 的事件按原 binding fence 拒绝。
+
+Response loss 的 query/retry 必须回同一 `operationId` 和 conventions 规定的完整 projection，
+不能返回只有状态或只有 mapping 的部分确认。Query 不得再次递增 `ContextGeneration`、重新
+创建 candidate 或生成新 operation。`outcome=blocked` 的 operation
+是终态，调用方必须执行 `nextAction`；它不能被客户端轮询无限保持 pending。
 
 ## 可靠性契约
 
