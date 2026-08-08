@@ -252,10 +252,15 @@ internal static class AgentCommands
         var instructionsOpt = new Option<string?>("--instructions") { Description = "Agent instructions as literal text" };
         var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read Agent instructions from a UTF-8 file path, or - for stdin" };
         var descriptionOpt = new Option<string?>("--description") { Description = "Agent description" };
-        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Agent config as inline JSON" };
+        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Retired: use typed Agent configuration options" };
+        agentConfigOpt.Hidden = true;
+        var runtimeOpt = new Option<string?>("--runtime") { Description = "Execution runtime: opencode or pi" };
+        var modelOpt = new Option<string?>("--model") { Description = "Model identifier, usually provider/model" };
+        var variantOpt = new Option<string?>("--variant") { Description = "Runtime-specific model variant" };
+        var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read the avatar URL or data URI from a UTF-8 file" };
         var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
         var allowedSubagentOpt = AllowedSubagentOption();
-        var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
+        var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs; positive integer, omit for no limit" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
         var projectOpt = MohistCliCommands.ProjectRefOption();
 
@@ -264,6 +269,10 @@ internal static class AgentCommands
         cmd.Options.Add(instructionsFileOpt);
         cmd.Options.Add(descriptionOpt);
         cmd.Options.Add(agentConfigOpt);
+        cmd.Options.Add(runtimeOpt);
+        cmd.Options.Add(modelOpt);
+        cmd.Options.Add(variantOpt);
+        cmd.Options.Add(avatarFileOpt);
         cmd.Options.Add(skillsOpt);
         cmd.Options.Add(allowedSubagentOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
@@ -276,6 +285,10 @@ internal static class AgentCommands
                     var instructionsFile = ctx.GetValue(instructionsFileOpt);
                     var description = ctx.GetValue(descriptionOpt);
                     var agentConfig = ctx.GetValue(agentConfigOpt);
+                    var runtime = ctx.GetValue(runtimeOpt);
+                    var model = ctx.GetValue(modelOpt);
+                    var variant = ctx.GetValue(variantOpt);
+                    var avatarFile = ctx.GetValue(avatarFileOpt);
                     var skills = ctx.GetValue(skillsOpt);
                     var allowedSubagentAgentIds = ctx.GetValue(allowedSubagentOpt);
                     var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
@@ -292,6 +305,20 @@ internal static class AgentCommands
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--name is required");
                         }
 
+                        var config = ResolveTypedAgentConfig(
+                            current: null,
+                            agentConfig,
+                            runtime,
+                            model,
+                            variant,
+                            clearRuntime: false,
+                            clearModel: false,
+                            clearVariant: false);
+                        if (config.Error is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
+                        if (maxConcurrentRuns is <= 0)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--max-concurrent-runs must be a positive integer; omit it for no limit");
+
                         var instructionsResult = await BodyInputResolver.ResolveAsync(
                             instructions,
                             instructionsFile,
@@ -302,9 +329,19 @@ internal static class AgentCommands
                         if (instructionsResult is BodyInputResolver.Result.Failure instructionsFailure)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
 
-                        var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
-                        if (config is ResolveJsonResult.Invalid configFailure)
-                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+                        BodyInputResolver.Result? avatarResult = null;
+                        if (avatarFile is not null)
+                        {
+                            avatarResult = await BodyInputResolver.ResolveAsync(
+                                null,
+                                avatarFile,
+                                new BodyInputResolver.SourceFlags("--avatar-file", "--avatar-file", "avatar value"),
+                                api.FileSystem,
+                                api.StandardInput,
+                                TextWriter.Null);
+                            if (avatarResult is BodyInputResolver.Result.Failure avatarFailure)
+                                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, avatarFailure.Message);
+                        }
 
                         var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                         if (resolveExit != 0) return resolveExit;
@@ -317,7 +354,8 @@ internal static class AgentCommands
                             name,
                             description,
                             instructions = resolvedInstructions,
-                            agentConfig = ((ResolveJsonResult.Valid)config).Value,
+                            agentConfig = config.Config,
+                            avatar = avatarResult is BodyInputResolver.Result.Success avatarSuccess ? avatarSuccess.Body : null,
                             skills = ParseSkills(skills),
                             allowedSubagentAgentIds,
                             maxConcurrentRuns,
@@ -467,15 +505,25 @@ internal static class AgentCommands
         var descriptionOpt = new Option<string?>("--description") { Description = "New agent description" };
         var instructionsOpt = new Option<string?>("--instructions") { Description = "New Agent instructions as literal text" };
         var instructionsFileOpt = new Option<string?>("--instructions-file") { Description = "Read new Agent instructions from a UTF-8 file path, or - for stdin" };
-        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "New agent config as inline JSON" };
-        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names" };
+        var agentConfigOpt = new Option<string?>("--agent-config") { Description = "Retired: use typed Agent configuration options" };
+        agentConfigOpt.Hidden = true;
+        var runtimeOpt = new Option<string?>("--runtime") { Description = "Set runtime: opencode or pi; mutually exclusive with --clear-runtime" };
+        var modelOpt = new Option<string?>("--model") { Description = "Set model (usually provider/model); mutually exclusive with --clear-model" };
+        var variantOpt = new Option<string?>("--variant") { Description = "Set runtime-specific variant; mutually exclusive with --clear-variant" };
+        var avatarFileOpt = new Option<string?>("--avatar-file") { Description = "Read avatar URL or data URI from UTF-8 file; mutually exclusive with --clear-avatar" };
+        var skillsOpt = new Option<string?>("--skills") { Description = "Comma-separated skill names; mutually exclusive with --clear-skills" };
         var allowedSubagentOpt = AllowedSubagentOption();
-        var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Maximum concurrent runs" };
+        var maxConcurrentRunsOpt = new Option<int?>("--max-concurrent-runs") { Description = "Set positive maximum; omit for no limit; mutually exclusive with --clear-max-concurrent-runs" };
         var clearDescriptionOpt = new Option<bool>("--clear-description") { Description = "Clear the agent description" };
-        var clearAgentConfigOpt = new Option<bool>("--clear-agent-config") { Description = "Clear the agent config" };
-        var clearSkillsOpt = new Option<bool>("--clear-skills") { Description = "Clear the agent skills" };
+        var clearAgentConfigOpt = new Option<bool>("--clear-agent-config") { Description = "Retired: use the typed clear options" };
+        clearAgentConfigOpt.Hidden = true;
+        var clearRuntimeOpt = new Option<bool>("--clear-runtime") { Description = "Clear runtime; mutually exclusive with --runtime" };
+        var clearModelOpt = new Option<bool>("--clear-model") { Description = "Clear model; mutually exclusive with --model" };
+        var clearVariantOpt = new Option<bool>("--clear-variant") { Description = "Clear variant; mutually exclusive with --variant" };
+        var clearAvatarOpt = new Option<bool>("--clear-avatar") { Description = "Clear avatar; mutually exclusive with --avatar-file" };
+        var clearSkillsOpt = new Option<bool>("--clear-skills") { Description = "Clear skills; mutually exclusive with --skills" };
         var clearAllowedSubagentOpt = new Option<bool>("--clear-allowed-subagents") { Description = "Clear the allowed subagent agent ids" };
-        var clearMaxConcurrentRunsOpt = new Option<bool>("--clear-max-concurrent-runs") { Description = "Clear the maximum concurrent runs" };
+        var clearMaxConcurrentRunsOpt = new Option<bool>("--clear-max-concurrent-runs") { Description = "Clear maximum concurrent runs; mutually exclusive with --max-concurrent-runs" };
         var jsonOpt = MohistCliCommands.JsonSelectionOption(AgentDescriptor);
         var projectOpt = MohistCliCommands.ProjectRefOption();
 
@@ -485,11 +533,19 @@ internal static class AgentCommands
         cmd.Options.Add(instructionsOpt);
         cmd.Options.Add(instructionsFileOpt);
         cmd.Options.Add(agentConfigOpt);
+        cmd.Options.Add(runtimeOpt);
+        cmd.Options.Add(modelOpt);
+        cmd.Options.Add(variantOpt);
+        cmd.Options.Add(avatarFileOpt);
         cmd.Options.Add(skillsOpt);
         cmd.Options.Add(allowedSubagentOpt);
         cmd.Options.Add(maxConcurrentRunsOpt);
         cmd.Options.Add(clearDescriptionOpt);
         cmd.Options.Add(clearAgentConfigOpt);
+        cmd.Options.Add(clearRuntimeOpt);
+        cmd.Options.Add(clearModelOpt);
+        cmd.Options.Add(clearVariantOpt);
+        cmd.Options.Add(clearAvatarOpt);
         cmd.Options.Add(clearSkillsOpt);
         cmd.Options.Add(clearAllowedSubagentOpt);
         cmd.Options.Add(clearMaxConcurrentRunsOpt);
@@ -503,11 +559,19 @@ internal static class AgentCommands
                     var instructions = ctx.GetValue(instructionsOpt);
                     var instructionsFile = ctx.GetValue(instructionsFileOpt);
                     var agentConfig = ctx.GetValue(agentConfigOpt);
+                    var runtime = ctx.GetValue(runtimeOpt);
+                    var model = ctx.GetValue(modelOpt);
+                    var variant = ctx.GetValue(variantOpt);
+                    var avatarFile = ctx.GetValue(avatarFileOpt);
                     var skills = ctx.GetValue(skillsOpt);
                     var allowedSubagentAgentIds = ctx.GetValue(allowedSubagentOpt);
                     var maxConcurrentRuns = ctx.GetValue(maxConcurrentRunsOpt);
                     var clearDescription = ctx.GetValue(clearDescriptionOpt);
                     var clearAgentConfig = ctx.GetValue(clearAgentConfigOpt);
+                    var clearRuntime = ctx.GetValue(clearRuntimeOpt);
+                    var clearModel = ctx.GetValue(clearModelOpt);
+                    var clearVariant = ctx.GetValue(clearVariantOpt);
+                    var clearAvatar = ctx.GetValue(clearAvatarOpt);
                     var clearSkills = ctx.GetValue(clearSkillsOpt);
                     var clearAllowedSubagents = ctx.GetValue(clearAllowedSubagentOpt);
                     var clearMaxConcurrentRuns = ctx.GetValue(clearMaxConcurrentRunsOpt);
@@ -520,12 +584,19 @@ internal static class AgentCommands
                         if (selection.Kind is JsonSelectionKind.Discovery or JsonSelectionKind.Invalid)
                             return api.WriteJsonSelectionResult(AgentDescriptor, selection);
                         var clearSetConflict = ValidateClearSetPair("--description", description is not null, "--clear-description", clearDescription)
-                            ?? ValidateClearSetPair("--agent-config", agentConfig is not null, "--clear-agent-config", clearAgentConfig)
+                            ?? ValidateClearSetPair("--runtime", runtime is not null, "--clear-runtime", clearRuntime)
+                            ?? ValidateClearSetPair("--model", model is not null, "--clear-model", clearModel)
+                            ?? ValidateClearSetPair("--variant", variant is not null, "--clear-variant", clearVariant)
+                            ?? ValidateClearSetPair("--avatar-file", avatarFile is not null, "--clear-avatar", clearAvatar)
                             ?? ValidateClearSetPair("--skills", skills is not null, "--clear-skills", clearSkills)
                             ?? ValidateClearSetPair("--allowed-subagent", allowedSubagentAgentIds is not null, "--clear-allowed-subagents", clearAllowedSubagents)
                             ?? ValidateClearSetPair("--max-concurrent-runs", maxConcurrentRuns is not null, "--clear-max-concurrent-runs", clearMaxConcurrentRuns);
                         if (clearSetConflict is not null)
                             return CommandHelpHook.RenderUsageFailure(ctx, api.Error, clearSetConflict);
+                        if (maxConcurrentRuns is <= 0)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--max-concurrent-runs must be a positive integer; omit it or use --clear-max-concurrent-runs");
+                        if (clearAgentConfig)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--clear-agent-config is retired; use --clear-runtime, --clear-model, and --clear-variant");
 
                         BodyInputResolver.Result? instructionsResult = null;
                         if (instructions is not null || instructionsFile is not null)
@@ -541,9 +612,8 @@ internal static class AgentCommands
                                 return CommandHelpHook.RenderUsageFailure(ctx, api.Error, instructionsFailure.Message);
                         }
 
-                        var config = await ResolveJsonAsync(agentConfig, api, TextWriter.Null);
-                        if (config is ResolveJsonResult.Invalid configFailure)
-                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, configFailure.Message);
+                        if (agentConfig is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, "--agent-config is retired; use --runtime, --model, and --variant");
 
                         var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                         if (resolveExit != 0) return resolveExit;
@@ -551,6 +621,32 @@ internal static class AgentCommands
                         var agent = await ResolveAgentAsync(api, resolvedProjectId, nameOrId!);
                         if (agent is null)
                             return 1;
+
+                        var config = ResolveTypedAgentConfig(
+                            agent.AgentConfig,
+                            agentConfig,
+                            runtime,
+                            model,
+                            variant,
+                            clearRuntime,
+                            clearModel,
+                            clearVariant);
+                        if (config.Error is not null)
+                            return CommandHelpHook.RenderUsageFailure(ctx, api.Error, config.Error);
+
+                        BodyInputResolver.Result? avatarResult = null;
+                        if (avatarFile is not null)
+                        {
+                            avatarResult = await BodyInputResolver.ResolveAsync(
+                                null,
+                                avatarFile,
+                                new BodyInputResolver.SourceFlags("--avatar-file", "--avatar-file", "avatar value"),
+                                api.FileSystem,
+                                api.StandardInput,
+                                TextWriter.Null);
+                            if (avatarResult is BodyInputResolver.Result.Failure avatarFailure)
+                                return CommandHelpHook.RenderUsageFailure(ctx, api.Error, avatarFailure.Message);
+                        }
 
                         var resolvedInstructions = instructionsResult is BodyInputResolver.Result.Success instructionsSuccess
                             ? instructionsSuccess.Body
@@ -560,7 +656,8 @@ internal static class AgentCommands
                         AddIfProvided(body, "name", name, name is not null);
                         AddIfProvided(body, "description", clearDescription ? null : description, clearDescription || description is not null);
                         AddIfProvided(body, "instructions", resolvedInstructions, instructionsResult is BodyInputResolver.Result.Success);
-                        AddIfProvided(body, "agentConfig", clearAgentConfig ? null : ((ResolveJsonResult.Valid)config).Value, clearAgentConfig || agentConfig is not null);
+                        AddIfProvided(body, "agentConfig", config.Config, config.Config is not null || runtime is not null || model is not null || variant is not null || clearRuntime || clearModel || clearVariant);
+                        AddIfProvided(body, "avatar", clearAvatar ? null : avatarResult is BodyInputResolver.Result.Success avatarSuccess ? avatarSuccess.Body : null, clearAvatar || avatarResult is BodyInputResolver.Result.Success);
                         AddIfProvided(body, "skills", clearSkills ? null : JsonSerializer.SerializeToNode(ParseSkills(skills), JsonOptions), clearSkills || skills is not null);
                         AddIfProvided(body, "allowedSubagentAgentIds", clearAllowedSubagents ? null : JsonSerializer.SerializeToNode(allowedSubagentAgentIds, JsonOptions), clearAllowedSubagents || allowedSubagentAgentIds is not null);
                         AddIfProvided(body, "maxConcurrentRuns", clearMaxConcurrentRuns ? null : maxConcurrentRuns, clearMaxConcurrentRuns || maxConcurrentRuns is not null);
@@ -580,6 +677,51 @@ internal static class AgentCommands
         return setProvided && clearProvided
             ? $"{setFlag} cannot be used with {clearFlag}"
             : null;
+    }
+
+    private static (JsonNode? Config, string? Error) ResolveTypedAgentConfig(
+        JsonNode? current,
+        string? legacy,
+        string? runtime,
+        string? model,
+        string? variant,
+        bool clearRuntime,
+        bool clearModel,
+        bool clearVariant)
+    {
+        if (legacy is not null)
+            return (null, "--agent-config is retired; use --runtime, --model, and --variant");
+
+        if (runtime is not null && runtime is not ("opencode" or "pi"))
+            return (null, $"--runtime '{runtime}' is invalid; use opencode or pi");
+        if (model is not null && string.IsNullOrWhiteSpace(model))
+            return (null, "--model must not be empty; use provider/model");
+        if (variant is not null && string.IsNullOrWhiteSpace(variant))
+            return (null, "--variant must not be empty; use the variant supported by the selected runtime");
+
+        var supplied = runtime is not null || model is not null || variant is not null
+            || clearRuntime || clearModel || clearVariant;
+        if (!supplied)
+            return (null, null);
+
+        var config = new JsonObject();
+        if (current is JsonObject existing)
+        {
+            foreach (var key in new[] { "runtime", "model", "variant" })
+            {
+                if (existing[key] is JsonNode value)
+                    config[key] = value.DeepClone();
+            }
+        }
+
+        if (clearRuntime) config.Remove("runtime");
+        if (clearModel) config.Remove("model");
+        if (clearVariant) config.Remove("variant");
+        if (runtime is not null) config["runtime"] = runtime;
+        if (model is not null) config["model"] = model;
+        if (variant is not null) config["variant"] = variant;
+
+        return (config.Count == 0 ? null : config, null);
     }
 
     private static void AddIfProvided(JsonObject body, string property, string? value, bool provided = true)
@@ -890,27 +1032,6 @@ internal static class AgentCommands
         });
     }
 
-    private static async Task<ResolveJsonResult> ResolveJsonAsync(
-        string? value,
-        MohistCliApi api,
-        TextWriter? error = null)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return new ResolveJsonResult.Valid(null);
-
-        error ??= api.Error;
-        try
-        {
-            return new ResolveJsonResult.Valid(JsonNode.Parse(value));
-        }
-        catch (JsonException ex)
-        {
-            var message = $"--agent-config must be valid JSON ({ex.Message})";
-            error.WriteLine(message);
-            return new ResolveJsonResult.Invalid(message);
-        }
-    }
-
     private static string[]? ParseSkills(string? value) => string.IsNullOrWhiteSpace(value)
         ? null
         : value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
@@ -1121,22 +1242,15 @@ internal static class AgentCommands
         return null;
     }
 
-    private abstract record ResolveJsonResult
-    {
-        private ResolveJsonResult() { }
-
-        public sealed record Valid(JsonNode? Value) : ResolveJsonResult;
-
-        public sealed record Invalid(string Message) : ResolveJsonResult;
-    }
-
-    internal sealed record AgentRef(string Id, string Name)
+    internal sealed record AgentRef(string Id, string Name, JsonNode? AgentConfig = null, string? Avatar = null)
     {
         public static AgentRef? From(JsonNode? node)
         {
             var id = node?["id"]?.GetValue<string>();
             var name = node?["name"]?.GetValue<string>();
-            return string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) ? null : new AgentRef(id, name);
+            return string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name)
+                ? null
+                : new AgentRef(id, name, node?["agentConfig"]?.DeepClone(), node?["avatar"]?.GetValue<string>());
         }
     }
 }

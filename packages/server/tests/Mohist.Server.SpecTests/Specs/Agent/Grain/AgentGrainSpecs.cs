@@ -36,12 +36,14 @@ public class AgentGrainSpecs
             instructions,
             config,
             ["debugging-code", "software-design"],
-            2));
+            2,
+            Avatar: "https://example.test/avatar.svg"));
 
         Assert.Equal("agent_1", created.Id);
         Assert.Equal("project_1", created.ProjectId);
         Assert.Equal("active", created.Status);
         Assert.Equal(instructions, created.Instructions);
+        Assert.Equal("https://example.test/avatar.svg", created.Avatar);
         Assert.Equal("openai/gpt-5.5", created.AgentConfig!.Value.GetProperty("model").GetString());
         Assert.Equal(["debugging-code", "software-design"], created.Skills);
         Assert.Equal(2, created.MaxConcurrentRuns);
@@ -58,11 +60,13 @@ public class AgentGrainSpecs
             JsonDocument.Parse("{\"type\":\"opencode\",\"temperature\":0}").RootElement.Clone(),
             ["fsd"],
             3,
-            UpdateFields));
+            UpdateFields,
+            Avatar: "https://example.test/avatar-new.svg"));
 
         Assert.NotNull(updated);
         Assert.Equal("principal-reviewer", updated.Name);
         Assert.Equal(updatedInstructions, updated.Instructions);
+        Assert.Equal("https://example.test/avatar-new.svg", updated.Avatar);
         Assert.Equal(0, updated.AgentConfig!.Value.GetProperty("temperature").GetInt32());
         Assert.Equal(["fsd"], updated.Skills);
         Assert.Equal(3, updated.MaxConcurrentRuns);
@@ -299,6 +303,7 @@ public class AgentGrainSpecs
         nameof(AgentUpdateData.AgentConfig),
         nameof(AgentUpdateData.Skills),
         nameof(AgentUpdateData.MaxConcurrentRuns),
+        nameof(AgentUpdateData.Avatar),
     ];
 
     private static async Task<bool> TableExistsAsync(MohistDbContext context, string tableName)
