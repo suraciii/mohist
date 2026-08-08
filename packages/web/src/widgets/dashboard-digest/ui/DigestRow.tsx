@@ -6,12 +6,13 @@ import type { Issue } from '../../../entities/issue'
 interface DigestRowProps {
   issue: Issue
   timestamp: string
+  now?: number
 }
 
-export function DigestRow({ issue, timestamp }: DigestRowProps) {
+export function DigestRow({ issue, timestamp, now }: DigestRowProps) {
   const toProjectPath = useProjectPath()
   const date = new Date(timestamp)
-  const relative = Number.isNaN(date.getTime()) ? 'Unknown time' : formatTimeAgo(date)
+  const relative = Number.isNaN(date.getTime()) ? 'Unknown time' : formatTimeAgo(date, now)
 
   return (
     <Link
