@@ -622,6 +622,34 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentCreateAndEditHelp_ListsTypedConfigurationAndHidesJsonEntry()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+        var createOutput = new StringWriter();
+        var editOutput = new StringWriter();
+
+        Assert.Equal(0, await RunAsync(handler, ["agent", "create", "--help"], createOutput));
+        Assert.Equal(0, await RunAsync(handler, ["agent", "edit", "--help"], editOutput));
+
+        foreach (var text in new[] { createOutput.ToString(), editOutput.ToString() })
+        {
+            Assert.Contains("--runtime", text, StringComparison.Ordinal);
+            Assert.Contains("opencode", text, StringComparison.Ordinal);
+            Assert.Contains("--model", text, StringComparison.Ordinal);
+            Assert.Contains("--variant", text, StringComparison.Ordinal);
+            Assert.Contains("--avatar-file", text, StringComparison.Ordinal);
+            Assert.Contains("--skills", text, StringComparison.Ordinal);
+            Assert.Contains("--max-concurrent-runs", text, StringComparison.Ordinal);
+            Assert.DoesNotContain("--agent-config", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("positive integer", createOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("mutually exclusive", editOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--clear-runtime", editOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--clear-avatar", editOutput.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AgentCreate_SendsRequiredAndOptionalFieldsAndPrintsId()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
@@ -634,7 +662,7 @@ public class CliAgentCommandSpecs
         var fileSystem = FileSystemWithProject();
 
         var exitCode = await RunAsync(handler,
-            ["agent", "create", "--name", "reviewer", "--instructions", "Review strictly", "--description", "Senior reviewer", "--agent-config", "{\"model\":\"openai/gpt-5.5\"}", "--skills", "mohist,fsd", "--max-concurrent-runs", "2"],
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review strictly", "--description", "Senior reviewer", "--runtime", "opencode", "--model", "openai/gpt-5.5", "--variant", "high", "--skills", "mohist,fsd", "--max-concurrent-runs", "2"],
             output,
             error,
             fileSystem);
@@ -648,10 +676,71 @@ public class CliAgentCommandSpecs
         Assert.Equal("reviewer", body["name"]?.GetValue<string>());
         Assert.Equal("Review strictly", body["instructions"]?.GetValue<string>());
         Assert.Equal("Senior reviewer", body["description"]?.GetValue<string>());
+        Assert.Equal("opencode", body["agentConfig"]?["runtime"]?.GetValue<string>());
         Assert.Equal("openai/gpt-5.5", body["agentConfig"]?["model"]?.GetValue<string>());
+        Assert.Equal("high", body["agentConfig"]?["variant"]?.GetValue<string>());
         Assert.Equal("mohist", body["skills"]?[0]?.GetValue<string>());
         Assert.Equal("fsd", body["skills"]?[1]?.GetValue<string>());
         Assert.Equal(2, body["maxConcurrentRuns"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task AgentCreate_ReadsAvatarFileIntoStableProfileField()
+    {
+        var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new
+        {
+            success = true,
+            data = Agent("agent_123", "reviewer"),
+        }, HttpStatusCode.Created)));
+        var fileSystem = FileSystemWithProject();
+        fileSystem.AddFile("/repo/avatar.txt", "data:image/svg+xml;base64,AAAA");
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review", "--avatar-file", "/repo/avatar.txt"],
+            fileSystem: fileSystem);
+
+        Assert.Equal(0, exitCode);
+        var body = JsonNode.Parse(handler.Requests.Single().Body!)!;
+        Assert.Equal("data:image/svg+xml;base64,AAAA", body["avatar"]?.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task AgentCreate_InvalidRuntimeFailsWithTypedRepairBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review", "--runtime", "unknown"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--runtime 'unknown' is invalid", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("use opencode or pi", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task AgentCreate_LegacyJsonEntryReturnsMigrationHintBeforeHttp()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("API must not be called"));
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "create", "--name", "reviewer", "--instructions", "Review", "--agent-config", "{\"model\":\"openai/gpt-5.5\"}"],
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains("--agent-config is retired", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("use --runtime, --model, and --variant", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
@@ -1005,7 +1094,7 @@ public class CliAgentCommandSpecs
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(2, exitCode);
-        Assert.Contains("--agent-config must be valid JSON", error.ToString(), StringComparison.Ordinal);
+        Assert.Contains("--agent-config is retired", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("USAGE", error.ToString(), StringComparison.Ordinal);
         Assert.Contains("mo agent edit <name-or-id> [flags]", error.ToString(), StringComparison.Ordinal);
         Assert.Empty(handler.Requests);
@@ -1049,6 +1138,9 @@ public class CliAgentCommandSpecs
         Assert.Equal("/api/projects/proj_123/agents/agent_123", handler.Requests[1].RequestUri?.PathAndQuery);
         Assert.Contains("createdAt:", output.ToString());
         Assert.Contains("updatedAt:", output.ToString());
+        Assert.Contains("runtime:             opencode", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("variant:             high", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("avatar:              https://example.test/avatar.svg", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1207,9 +1299,11 @@ public class CliAgentCommandSpecs
                 : Agent("agent_123", "reviewer-v2", updatedAt: "2026-06-18T02:00:00Z"),
         })));
 
+        var fileSystem = FileSystemWithProject();
+        fileSystem.AddFile("/repo/avatar.txt", "https://example.test/new-avatar.svg");
         var exitCode = await RunAsync(handler,
-            ["agent", "edit", "reviewer", "--name", "reviewer-v2", "--instructions", "new prompt", "--agent-config", "{\"model\":\"zhipu/glm\"}", "--skills", "mohist", "--max-concurrent-runs", "3"],
-            fileSystem: FileSystemWithProject());
+            ["agent", "edit", "reviewer", "--name", "reviewer-v2", "--instructions", "new prompt", "--runtime", "pi", "--model", "zhipu/glm", "--variant", "medium", "--avatar-file", "/repo/avatar.txt", "--skills", "mohist", "--max-concurrent-runs", "3"],
+            fileSystem: fileSystem);
 
         Assert.Equal(0, exitCode);
         Assert.Equal(HttpMethod.Patch, handler.Requests[1].Method);
@@ -1217,7 +1311,10 @@ public class CliAgentCommandSpecs
         var body = JsonNode.Parse(handler.Requests[1].Body!)!;
         Assert.Equal("reviewer-v2", body["name"]?.GetValue<string>());
         Assert.Equal("new prompt", body["instructions"]?.GetValue<string>());
+        Assert.Equal("pi", body["agentConfig"]?["runtime"]?.GetValue<string>());
         Assert.Equal("zhipu/glm", body["agentConfig"]?["model"]?.GetValue<string>());
+        Assert.Equal("medium", body["agentConfig"]?["variant"]?.GetValue<string>());
+        Assert.Equal("https://example.test/new-avatar.svg", body["avatar"]?.GetValue<string>());
         Assert.Equal("mohist", body["skills"]?[0]?.GetValue<string>());
         Assert.Equal(3, body["maxConcurrentRuns"]?.GetValue<int>());
     }
@@ -1235,13 +1332,14 @@ public class CliAgentCommandSpecs
 
         var exitCode = await RunAsync(
             handler,
-            ["agent", "edit", "reviewer", "--agent-config", "{\"runtime\":\"opencode\",\"model\":\"openai/gpt-5.6\"}"],
+            ["agent", "edit", "reviewer", "--runtime", "opencode", "--model", "openai/gpt-5.6"],
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
         var body = JsonNode.Parse(handler.Requests[1].Body!)!.AsObject();
         Assert.Equal("opencode", body["agentConfig"]?["runtime"]?.GetValue<string>());
         Assert.Equal("openai/gpt-5.6", body["agentConfig"]?["model"]?.GetValue<string>());
+        Assert.Equal("high", body["agentConfig"]?["variant"]?.GetValue<string>());
         Assert.False(body.ContainsKey("name"));
         Assert.False(body.ContainsKey("instructions"));
     }
@@ -1258,7 +1356,7 @@ public class CliAgentCommandSpecs
         })));
 
         var exitCode = await RunAsync(handler,
-            ["agent", "edit", "reviewer", "--clear-description", "--clear-agent-config", "--clear-skills", "--clear-max-concurrent-runs"],
+            ["agent", "edit", "reviewer", "--clear-description", "--clear-runtime", "--clear-model", "--clear-variant", "--clear-skills", "--clear-max-concurrent-runs"],
             fileSystem: FileSystemWithProject());
 
         Assert.Equal(0, exitCode);
@@ -1275,7 +1373,7 @@ public class CliAgentCommandSpecs
 
     [Theory]
     [InlineData("--description", "new description", "--clear-description")]
-    [InlineData("--agent-config", "{\"model\":\"zhipu/glm\"}", "--clear-agent-config")]
+    [InlineData("--model", "zhipu/glm", "--clear-model")]
     [InlineData("--skills", "mohist", "--clear-skills")]
     [InlineData("--max-concurrent-runs", "3", "--clear-max-concurrent-runs")]
     public async Task AgentUpdate_ClearFlagsRejectMatchingSetFlags(string setFlag, string setValue, string clearFlag)
@@ -1473,7 +1571,8 @@ public class CliAgentCommandSpecs
         name,
         description = "desc",
         instructions = "prompt",
-        agentConfig = new { model = "openai/gpt-5.5" },
+        avatar = "https://example.test/avatar.svg",
+        agentConfig = new { runtime = "opencode", model = "openai/gpt-5.5", variant = "high" },
         skills = new[] { "mohist" },
         maxConcurrentRuns = 2,
         status,

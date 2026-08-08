@@ -122,5 +122,6 @@ public class AgentQuerier : IScopedService
         agent.Status,
         agent.CreatedAt.ToString("o"),
         agent.UpdatedAt.ToString("o"),
-        AllowedSubagentAgentIds: agent.AllowedSubagentAgentIds);
+        AllowedSubagentAgentIds: agent.AllowedSubagentAgentIds,
+        Avatar: agent.Avatar);
 }
