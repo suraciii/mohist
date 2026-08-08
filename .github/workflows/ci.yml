@@ -16,13 +16,13 @@ permissions:
 # running `dotnet test Mohist.sln` (which launches every test project at
 # once: 4 projects x 4 threads on a 2-vCPU runner oversubscribes 8x and
 # drags the 3819-case SpecTests suite past its 6-minute step timeout).
-# Splitting keeps each job's timeout unchanged and lets the SpecTests job
-# own the runner.
+# Splitting keeps normal coverage while the default workflow enforces a
+# five-minute hard limit at job, step, and command boundaries.
 jobs:
   dotnet-spec:
     name: .NET spec tests
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -51,14 +51,14 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore
-        run: timeout --signal=TERM --kill-after=30s 480s dotnet restore Mohist.sln
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
 
       - name: Build
-        run: timeout --signal=TERM --kill-after=30s 480s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
 
       - name: Test
-        run: timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-build
-        timeout-minutes: 6
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-build
+        timeout-minutes: 5
 
       - name: Upload failed test results
         if: failure()
@@ -72,7 +72,7 @@ jobs:
   dotnet-core:
     name: .NET build and test
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 5
     env:
       DOTNET_NOLOGO: true
       DOTNET_CLI_TELEMETRY: false
@@ -96,18 +96,18 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore
-        run: timeout --signal=TERM --kill-after=30s 480s dotnet restore Mohist.sln
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet restore Mohist.sln
 
       - name: Build
-        run: timeout --signal=TERM --kill-after=30s 480s dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
+        run: timeout --signal=TERM --kill-after=30s 300s dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
 
       - name: Test
         run: |
-          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
-          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
-        timeout-minutes: 6
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 300s dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
+        timeout-minutes: 5
 
       - name: Upload failed test results
         if: failure()
@@ -137,7 +137,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: timeout --signal=TERM --kill-after=30s 480s npm ci
+        run: timeout --signal=TERM --kill-after=30s 300s npm ci
 
       - name: Resolve Node test budget base
         shell: bash
@@ -164,7 +164,7 @@ jobs:
           timeout --signal=TERM --kill-after=30s 180s npm run archtest
 
       - name: Build
-        run: timeout --signal=TERM --kill-after=30s 480s npm run build --workspaces --if-present
+        run: timeout --signal=TERM --kill-after=30s 300s npm run build --workspaces --if-present
 
       - name: Test runner
         run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/runner
