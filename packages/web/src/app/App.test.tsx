@@ -7,6 +7,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { http, HttpResponse } from 'msw'
 import { useMswServer } from '../../tests/support/msw'
 import { ProjectProvider } from '../entities/project'
+import { UnifiedSessionPage } from '../pages/session'
 import { AppContent } from './App'
 
 const TEST_PROJECT = {
@@ -24,6 +25,42 @@ let projectsData = [TEST_PROJECT]
 useMswServer(
   http.get('*/api/projects', () =>
     HttpResponse.json({ success: true, data: projectsData }),
+  ),
+  http.get('*/api/projects/:projectId/sessions/:sessionId', ({ params }) =>
+    HttpResponse.json({
+      success: true,
+      data: {
+        id: String(params.sessionId),
+        source: 'agent-launch',
+        runtimeSessionId: 'runtime-session',
+        runtime: 'opencode',
+        activity: 'idle',
+        createdAt: '2026-01-01T00:00:00.000Z',
+        lastActivityAt: '2026-01-01T00:00:00.000Z',
+        model: 'openai/gpt-5.6',
+        resolvedModel: 'openai/gpt-5.6',
+        failureCategory: null,
+        failureReason: null,
+        toolCallCount: 0,
+        toolErrorCount: 0,
+        agentId: 'agent-1',
+        agentName: 'reviewer',
+        origin: 'web',
+        targetId: 'agent-1',
+        contextRefs: { workspaceName: 'cli-current' },
+        usage: {},
+        recoveryAvailable: false,
+        inputs: [],
+        turns: [],
+        recoveryHistory: [],
+      },
+    }),
+  ),
+  http.get('*/api/projects/:projectId/sessions/:sessionId/transcript', () =>
+    HttpResponse.json({
+      success: true,
+      data: { turns: [], partCount: 0, lastActivityAt: '2026-01-01T00:00:00.000Z' },
+    }),
   ),
   http.get('*/api/projects/:projectId/inbox', () => {
     inboxRequests++
@@ -277,17 +314,21 @@ describe('App shell bottom spacing for mobile bottom nav', () => {
   it('routes /:projectName/sessions/:sessionId to UnifiedSessionPage', async () => {
     window.history.replaceState({}, '', '/demo/sessions/session-1')
 
-    renderApp({ sessionPage: () => <div data-testid="unified-session-page">Unified session</div> })
+    renderApp({ sessionPage: UnifiedSessionPage })
 
-    expect(await screen.findByTestId('unified-session-page')).toHaveTextContent('Unified session')
+    expect(await screen.findByTestId('session-header')).toBeInTheDocument()
+    expect(screen.getByTestId('session-header-session-id')).toHaveAttribute('data-session-id', 'session-1')
+    expect(screen.getByTestId('session-workspace-link')).toHaveTextContent('Workspace: cli-current')
   })
 
   it('loads the canonical session deep link on a refresh-equivalent initial mount', async () => {
     window.history.replaceState({}, '', '/demo/sessions/session-refresh')
 
-    renderApp({ sessionPage: () => <div data-testid="refreshed-unified-session-page">Unified session</div> })
+    renderApp({ sessionPage: UnifiedSessionPage })
 
-    expect(await screen.findByTestId('refreshed-unified-session-page')).toHaveTextContent('Unified session')
+    expect(await screen.findByTestId('session-header')).toBeInTheDocument()
+    expect(screen.getByTestId('session-header-session-id')).toHaveAttribute('data-session-id', 'session-refresh')
+    expect(screen.getByTestId('session-origin')).toHaveTextContent('Origin: web')
   })
 })
 

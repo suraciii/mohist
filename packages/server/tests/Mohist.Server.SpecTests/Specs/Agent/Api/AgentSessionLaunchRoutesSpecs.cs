@@ -46,6 +46,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
         var jobsBefore = await CountJobsAsync(projectId, agentId);
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
         using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
         Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
         var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
@@ -53,6 +54,15 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         Assert.Contains("model-reference-malformed", launchBody.GetProperty("details").GetProperty("gaps").EnumerateArray().Select(g => g.GetProperty("code").GetString()));
         Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
         Assert.Equal(jobsBefore, await CountJobsAsync(projectId, agentId));
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    private async Task<int> CountWorkspacesAsync(string projectId)
+    {
+        using var response = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetArrayLength();
     }
 
     private async Task<int> CountJobsAsync(string projectId, string agentId)

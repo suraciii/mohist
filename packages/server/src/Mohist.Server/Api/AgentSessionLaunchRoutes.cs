@@ -107,11 +107,13 @@ public static class AgentSessionLaunchRoutes
             var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput");
             var preMintedTurnId = Guid.NewGuid().ToString("N");
             var launchOrigin = ReadLaunchOrigin(context.Request);
-            var workspaceName = body.Context?.Workspace?.Trim() is { Length: > 0 } explicitWorkspace
-                ? explicitWorkspace
+            var suppliedWorkspace = body.Context?.Workspace?.Trim();
+            var hasExplicitWorkspace = suppliedWorkspace is { Length: > 0 };
+            var workspaceName = hasExplicitWorkspace
+                ? suppliedWorkspace!
                 : launchOrigin == "cli"
-                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
-                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
+                    ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
+                    : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
 
             // The fingerprint folds the caller-submitted attachment ids
             // (raw, in order) so a replay with a different attachment set
@@ -254,6 +256,14 @@ public static class AgentSessionLaunchRoutes
                             .Select(BuildAttachmentResultDto)
                             .ToArray(),
                     });
+            }
+
+            if (!hasExplicitWorkspace)
+            {
+                workspaceName = launchOrigin == "cli"
+                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
+                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
+                launchRequest = launchRequest with { WorkspaceName = workspaceName };
             }
 
             var launchContext = new AgentLaunchContext(
