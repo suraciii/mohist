@@ -271,60 +271,28 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         _runnerIds.Add(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
-
-        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await TestWait.ForAsync(
-            () => runner.GetRuntimeStateAsync(),
-            state => state.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
     }
 
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        var assignment = await TestWait.ForAsync(
-            () => job.GetRuntimeSnapshotAsync(),
-            snapshot => string.Equals(snapshot.RunnerId, runnerId, StringComparison.Ordinal)
-                || AgentJobConvergence.IsConverged(snapshot.Status),
-            TimeSpan.FromSeconds(15),
-            TimeSpan.FromMilliseconds(25),
-            $"AgentJob '{jobKey}' assigned to runner '{runnerId}'",
-            () => job.CheckTimeoutsAsync());
-        if (!string.Equals(assignment.RunnerId, runnerId, StringComparison.Ordinal))
-        {
-            var registry = await _fixture.DescribeRunnerRegistryAsync();
-            Assert.Fail(
-                $"AgentJob '{jobKey}' was not admitted to the expected runner '{runnerId}' "
-                + $"(assigned to '{assignment.RunnerId ?? "<none>"}', status {assignment.Status}). Runner registry:\n{registry}");
-        }
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            jobKey,
+            TimeSpan.FromSeconds(5));
 
-        // Assignment-prepared does not guarantee the dispatch has propagated
-        // to the runner's poll endpoint, so a single fixed poll flakes on
-        // slower CI runners. Re-poll until the runner returns this job's
-        // dispatch: ClaimAsync atomically marks the job accepted, so a
-        // returned dispatch is the authoritative claim signal (the grain's
-        // in-memory snapshot can lag the committed claim under load). The
-        // window is generous because the fast probes exhaust the nominal
-        // budget in about a second of wall time, which CI-load-induced
-        // convergence lag has exceeded.
-        var workId = await TestWait.ForAsync(
-            async () =>
-            {
-                using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
-                foreach (var element in await poll.ReadDispatchElementsAsync())
-                {
-                    if (string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal))
-                        return element.GetProperty("workId").GetString();
-                }
-                return (string?)null;
-            },
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(15),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to claim AgentJob '{jobKey}'");
+        var assignment = await job.GetRuntimeSnapshotAsync();
+        Assert.Equal(runnerId, assignment.RunnerId);
+        Assert.Equal(AgentJobStatus.Pending, assignment.Status);
 
+        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+        var dispatches = await poll.ReadDispatchElementsAsync();
+        Assert.Contains(dispatches, element =>
+            string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal));
+        var dispatch = dispatches.Single(element =>
+            string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal));
+        var workId = dispatch.GetProperty("workId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(workId));
+        Assert.Equal(assignment.CurrentWorkId, workId);
         return (runnerId, workId!);
     }
 
