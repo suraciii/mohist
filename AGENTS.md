@@ -37,6 +37,7 @@ Active development — do not design for version compatibility.
 
 ## Verification
 
-Before handoff, run the build and the tests: `npm run build` and `npm test`.
+Before handoff, run the full local gate: `npm run verify` (build + all tests).
+During development, run `npm run test:fast` for the quick tier.
 
 Testing principles: tests must verify quickly — long-running, non-scalable, and flaky tests are defects, to be fixed. Report failed tests, missing tools, and environment limits. Do not hide them.
