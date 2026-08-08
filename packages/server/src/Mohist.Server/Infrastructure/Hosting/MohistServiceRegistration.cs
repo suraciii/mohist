@@ -82,6 +82,8 @@ public static class MohistServiceRegistration
         services.AddScoped<ICredentialStore>(sp => sp.GetRequiredService<CredentialStore>());
         services.AddScoped<IPrincipalStore>(sp => sp.GetRequiredService<PrincipalStore>());
         services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<HttpContextCurrentUser>());
+        services.AddScoped<IAuthAuditEventStore>(sp => sp.GetRequiredService<AuthAuditEventStore>());
+        services.AddScoped<IAuthAuditRecorder>(sp => sp.GetRequiredService<AuthAuditRecorder>());
         services.AddSingleton<IWorkflowRunDeserializer>(sp =>
             sp.GetRequiredService<WorkflowRunDeserializer>());
         services.TryAddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
