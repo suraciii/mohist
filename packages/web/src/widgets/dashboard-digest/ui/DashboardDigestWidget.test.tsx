@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -22,6 +22,8 @@ let digest: UseRecentDigestResult = {
   archived: [],
   isLoading: false,
 }
+
+const DIGEST_NOW = new Date('2026-07-10T00:00:00Z')
 
 function mockIssuesResponse(issues: Issue[]) {
   digest = { ...deriveRecentDigest(issues, issues), isLoading: false }
@@ -62,11 +64,13 @@ function makeWrapper() {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: DIGEST_NOW })
   mockIssuesResponse([])
 })
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
 })
 
 describe('DashboardDigestWidget', () => {
@@ -199,7 +203,7 @@ describe('DigestRow', () => {
     const row = screen.getByTestId('digest-row')
     expect(row).toHaveTextContent('#7')
     expect(row).toHaveTextContent('Row title')
-    expect(row).toHaveTextContent(/ago|just now|date/i)
+    expect(row).toHaveTextContent('17h ago')
   })
 
   it('renders a neutral timestamp label when the timestamp is invalid', () => {
