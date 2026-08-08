@@ -147,9 +147,9 @@ Availability 说明现在能否开始一项新的执行。已经排队的 AgentJ
 ```bash
 mo agent create --name explorer --description "Explore product needs" --instructions "Clarify the request, identify missing decisions, and produce actionable issues." --runtime opencode --skills mohist,mohist-explore --max-concurrent-runs 1
 mo agent view explorer
-mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案"
-# 响应丢失后使用启动前打印的 key 重试，不要生成新的启动
-mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案" --idempotency-key <key>
+mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案" --idempotency-key <launch-request-id>
+# 响应丢失后重用同一个 launch-request-id，不要生成新的启动
+mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案" --idempotency-key <launch-request-id>
 ```
 
 `agent view` 显示 Readiness、Availability 与配置缺口；Needs setup 时按提示
@@ -159,7 +159,9 @@ Turn ID；如果启动被拒绝或不可恢复地失败，返回明确原因和�
 首次启动的工作结果和 composite observation 用返回的 observation URL 读取；连续对话用
 `mo session followup` 提交新的 SessionInput，完整记录用 `mo session transcript`。pending、queued
 和执行中、结果待确认的状态继续观察，terminal 状态读取结果或 transcript，Unknown 必须用原
-key 重读或重试。
+`launchRequestId` 重读或重试。Server 会把第一次受理时生成的 `launchOperationId` 映射到该
+请求；客户端不需要预先知道或自行生成它。launch response loss 的查找顺序永远是
+`launchRequestId -> launchOperationId -> Job/Session/Input/Turn mapping`。
 CLI 与 Web 调用的是同一组产品能力。
 
 ## 启动入口
@@ -265,10 +267,17 @@ AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是
 当前物理会话。AgentSession 只保存当前关联，不建立物理 Session 历史。
 
 通常所有后续输入都复用当前 Runtime Session：task 变化、retry、模型变化、Compact、
-执行结束或 Runner 重启都不能替换它。Reset、执行后端明确确认原 Session 已不存在，或
-明确切换执行后端时，会话会从一个新的逻辑上下文继续；AgentSession ID、来源、工作目录
-和已记录的会话内容不变，旧消息不重放。Compact 不开启新的逻辑上下文，但会在成功后留下
-一个可见的上下文边界；响应不明确时保持结果待确认或未知。
+执行结束或 Runner 重启都不能替换它。Reset、执行后端明确确认原 Session 已不存在、明确
+切换执行后端，或明确把工作交给另一个 Runner 时，会话会从一个新的逻辑上下文继续；
+AgentSession ID、来源、工作目录和已记录的会话内容不变，旧消息不重放。Compact 不开启
+新的逻辑上下文，但会在成功后留下一个可见的上下文边界；响应不明确时保持结果待确认或未知。
+
+Runner 变化只能通过可查询的 `handoff` 操作完成；同一 Runner 上替换执行后端或物理会话
+只能通过 `rebind` 操作完成。两者都要求当前 generation 安全空闲，不能在 active、
+`outcome_pending` 或 unknown 时绕过普通准入；unknown 必须先查询，或由用户明确确认风险并
+force-reset。Server 会比较完整的当前绑定与候选绑定，并在成功边界记录 `ContextBoundary.Kind`
+为 `handoff` 或 `rebind`、递增 `ContextGeneration`。旧 Runner 的迟到事件不改变当前会话，
+因为它们仍属于被替换的旧绑定。
 
 复用不变量、自动恢复边界与并发规则见
 [Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
@@ -285,9 +294,17 @@ Workflow 来源和 Agent launch 来源的 AgentSession 使用同一组会话操�
 - **Force-reset**：当未知状态持续阻止继续时，用户明确确认旧执行可能仍有副作用后，
   开始新的逻辑上下文。旧的未知输入、结果和风险仍保留并可查看；它不是对旧任务的重试。
 
+Compact、Reset、recovery、handoff、rebind 和 Force-reset 都是可查询的会话操作。每项操作
+都使用调用方提供且可重用的 `operationId`；查询和 response loss 重试都使用同一个 ID，Server
+不会用调用方看不见的新 ID 替代它。操作观察至少显示 `operationId`、`kind`、`phase`、
+`outcome`、`owner`、`revision`、`deadline` 和 `nextAction`。Compact、Reset、recovery、
+handoff、rebind 与 Force-reset 的命令缺少 `operationId` 时不会被受理。
+
 这些操作改变会话，不改变工作所有权。Follow-up 不会把 TaskRun 变成 AgentJob；
 Compact、Reset 或 Force-reset 也不会重新启动 Mohist Agent。Force-reset 需要明确确认旧执行
-可能仍有副作用；响应丢失后继续查询同一次操作，不重复建立上下文。
+可能仍有副作用；旧 generation 被确认并 supersede 后，旧事实仍出现在
+`unresolvedPrevious`，但不阻止当前 generation 的新 Input/Turn。当前 generation 的
+`outcome_pending` 或 `unknown` 仍阻止普通操作。响应丢失后继续查询同一次操作，不重复建立上下文。
 
 ## 当前范围
 

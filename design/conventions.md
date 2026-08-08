@@ -13,6 +13,7 @@
 | WorkflowRun | `WorkflowRunId` | `wr_123` |
 | Runner | `RunnerId` | `runner_123` |
 | AgentSession | `SessionId` | `session_123` |
+| SessionOperation | `operationId` | `op_123` |
 | Event | `EventId` | `evt_123` |
 | Principal | `PrincipalId` | `prin_123` |
 | Credential | `CredentialId` | `cred_123` |
@@ -97,7 +98,10 @@ Concept ownership and origin rules are defined in
   leaseUntil, deadlineAt)`. `ownerFence` and `claimGeneration` are independent monotonic values;
   an unqualified `generation` in an implementation means `claimGeneration`, never
   `ContextGeneration`. Every phase write, candidate create/get/discard/cleanup, binding CAS and
-  completion must compare the full fence and expected binding. A stale owner fails closed.
+  completion must compare the full fence and expected binding. Before any external side effect,
+  Server atomically rechecks that fence, the current owner lease, and the current binding, then
+  passes the same token to Runtime/provider. A stale owner fails closed before create, submit,
+  discard, or complete.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
   incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
   Runner handoff is an explicit `handoff` operation and is not missing recovery. An adopted candidate
@@ -108,6 +112,36 @@ Concept ownership and origin rules are defined in
   and operation result. Reset, runtime change, confirmed missing recovery, or force-reset replaces
   the current binding while preserving `sessionId` and starts a new `ContextGeneration`. A work
   directory change requires a new logical Session identity.
+
+### Session operation contract
+
+`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff` and `rebind` are durable
+Session operations. Their caller supplies a reusable `operationId`; Server never creates an
+unqueryable operation key for a command response. The canonical operation read contains:
+
+```text
+operationId
+kind = compact | reset | recovery | force-reset | handoff | rebind
+phase
+outcome = pending | succeeded | rejected | failed | unknown
+ownerId
+ownerFence
+claimGeneration
+revision
+deadlineAt
+nextAction
+```
+
+`launchRequestId` is a different, client-supplied launch identity. Server creates
+`launchOperationId` exactly once when first preparing that request and durably maps
+`launchRequestId -> launchOperationId`; it is never the client key and is never required to
+discover a launch after response loss.
+
+`ContextBoundary.Kind` is `compact | reset | runtime-change | missing-recovery | force-reset |
+handoff | rebind`. Compact keeps `ContextGeneration`; reset, runtime change, missing recovery,
+force-reset, handoff and rebind increment it after their binding/context commit. A RunnerId change
+requires a durable `handoff` operation; same-Runner replacement requires `rebind` or confirmed
+missing `recovery`. Reconnect, timeout, or a stale event cannot infer either operation.
 
 ## WorkflowRun metadata
 
