@@ -1,5 +1,7 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
+using EnvironmentAbstractions.TestHelpers;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -18,13 +20,6 @@ public sealed class AuthResolutionMiddlewareTests
 {
     private const string AdminToken = AuthResolutionTestSupport.AdminToken;
     private const string ServiceToken = AuthResolutionTestSupport.ServiceToken;
-
-    // A read-only in-memory project catalog shared by the tests that
-    // exercise the integration project constraint; the resolver only
-    // ever SELECTs, so the shared connection cannot leak state between
-    // tests.
-    private static readonly ProjectResolverSetup Projects =
-        CreateProjectResolver(("proj_a", "alpha"), ("proj_b", "beta"));
 
     [Fact]
     public async Task BearerAdminToken_ResolvesTheAdminPrincipal()
@@ -385,83 +380,6 @@ public sealed class AuthResolutionMiddlewareTests
         return reader.ReadToEnd();
     }
 
-    private static AuthResolutionMiddleware NewMiddleware(
-        FakeCredentialStore? db = null,
-        ProjectRefResolver? projects = null)
-    {
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Mohist:AdminToken"] = AdminToken,
-                ["Mohist:OperatorToken"] = ServiceToken,
-            })
-            .Build();
-        var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
-        var loader = new FileCredentialLoader(configuration, environment, new FakeFileStore());
-        return new AuthResolutionMiddleware(
-            loader,
-            db ?? new FakeCredentialStore(),
-            projects ?? Projects.Resolver);
-    }
-
-    private static ProjectResolverSetup CreateProjectResolver(params (string Id, string Name)[] projects)
-    {
-        var connection = new SqliteConnection($"Data Source=auth-middleware-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-        connection.Open();
-        using (var command = connection.CreateCommand())
-        {
-            command.CommandText = """
-                CREATE TABLE "Projects" (
-                    "Id" TEXT NOT NULL CONSTRAINT "PK_Projects" PRIMARY KEY,
-                    "Name" TEXT NOT NULL,
-                    "RepositoriesJson" TEXT NOT NULL,
-                    "CreatedAt" TEXT NOT NULL,
-                    "UpdatedAt" TEXT NOT NULL,
-                    "RepositoryRevision" INTEGER NOT NULL,
-                    "LastRepositoryCommandJson" TEXT NULL
-                );
-                CREATE TABLE "ProjectWorkflowProfiles" (
-                    "ProjectId" TEXT NOT NULL CONSTRAINT "PK_ProjectWorkflowProfiles" PRIMARY KEY,
-                    "Variables" TEXT NOT NULL
-                );
-                """;
-            command.ExecuteNonQuery();
-        }
-
-        foreach (var (id, name) in projects)
-        {
-            using var command = connection.CreateCommand();
-            command.CommandText = """
-                INSERT INTO "Projects" ("Id", "Name", "RepositoriesJson", "CreatedAt", "UpdatedAt", "RepositoryRevision", "LastRepositoryCommandJson")
-                VALUES ($id, $name, '[]', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', 0, NULL);
-                """;
-            command.Parameters.AddWithValue("$id", id);
-            command.Parameters.AddWithValue("$name", name);
-            command.ExecuteNonQuery();
-        }
-
-        var services = new ServiceCollection();
-        services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connection));
-        var provider = services.BuildServiceProvider();
-        return new ProjectResolverSetup(
-            new ProjectRefResolver(new ProjectQuerier(
-                provider.GetRequiredService<IDbContextFactory<MohistDbContext>>())),
-            provider,
-            connection);
-    }
-
-    private sealed record ProjectResolverSetup(
-        ProjectRefResolver Resolver,
-        ServiceProvider Provider,
-        SqliteConnection Connection) : IDisposable
-    {
-        public void Dispose()
-        {
-            Provider.Dispose();
-            Connection.Dispose();
-        }
-    }
-
     private static DefaultHttpContext NewContext(
         Action<HttpRequest>? configure = null,
         string path = "/api/projects")
@@ -490,117 +408,4 @@ public sealed class AuthResolutionMiddlewareTests
             throw new InvalidOperationException("Tokens are always configured in these tests.");
     }
 
-    private sealed class FakeCredentialStore : ICredentialStore
-    {
-        // Models the documented ICredentialStore contract: rows that are
-        // missing, revoked, or expired are read as not-found.
-        private static readonly DateTimeOffset Now = new(2026, 6, 30, 0, 0, 0, TimeSpan.Zero);
-        private readonly Dictionary<string, Credential> _byHash = new(StringComparer.Ordinal);
-
-        public void Add(Credential credential) => _byHash[credential.TokenHash] = credential;
-
-        public Task<Credential?> FindActiveAsync(string tokenHash, CancellationToken ct = default)
-        {
-            if (!_byHash.TryGetValue(tokenHash, out var credential)
-                || credential.RevokedAt is not null
-                || credential.ExpiresAt is { } expiresAt && expiresAt <= Now)
-            {
-                return Task.FromResult<Credential?>(null);
-            }
-
-            return Task.FromResult<Credential?>(credential);
-        }
-
-        public Task<PatCreateResult> CreatePatAsync(
-            string principalId,
-            string name,
-            IReadOnlyList<Scope> scopes,
-            DateTimeOffset expiresAt,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<IReadOnlyList<Credential>> ListPatAsync(
-            string principalId,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<bool> RevokePatAsync(
-            string principalId,
-            string name,
-            DateTimeOffset revokedAt,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task CreateAsync(Credential credential, CancellationToken ct = default)
-        {
-            _byHash[credential.TokenHash] = credential;
-            return Task.CompletedTask;
-        }
-
-        public Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default)
-        {
-            if (_byHash.TryGetValue(tokenHash, out var credential) && credential.RevokedAt is null)
-            {
-                _byHash[tokenHash] = credential with { RevokedAt = revokedAt };
-                return Task.FromResult(true);
-            }
-
-            return Task.FromResult(false);
-        }
-
-        public Task<EnrollmentTokenCreateResult> CreateEnrollmentTokenAsync(
-            DateTimeOffset expiresAt,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<EnrollmentTokenConsumeStatus> ConsumeEnrollmentTokenAsync(
-            string tokenHash,
-            DateTimeOffset now,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<RunnerCredentialCreateResult?> CreateRunnerCredentialAsync(
-            string principalId,
-            string runnerId,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<bool> RevokeRunnerCredentialAsync(
-            string runnerId,
-            DateTimeOffset revokedAt,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<IntegrationCreateResult> CreateIntegrationAsync(
-            string principalId,
-            string name,
-            string projectId,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-
-        public Task<bool> RevokeIntegrationAsync(
-            string principalId,
-            string id,
-            DateTimeOffset revokedAt,
-            CancellationToken ct = default)
-        {
-            throw new NotSupportedException();
-        }
-    }
 }

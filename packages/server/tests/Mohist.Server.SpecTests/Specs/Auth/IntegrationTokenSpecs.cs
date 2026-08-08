@@ -46,12 +46,16 @@ public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
         Assert.Equal(project.Id, data.GetProperty("projectId").GetString());
         Assert.Equal("github-webhook", data.GetProperty("name").GetString());
 
-        // The issued token works as a Bearer credential against the base
-        // resolution, and the constraint is recorded in the store.
+        // The issued token authenticates through the unified bearer
+        // resolution (a 403, not 401, proves the credential was accepted
+        // and rejected on scope grounds), and the constraint is recorded
+        // in the store. The business observation surface requires
+        // operator-or-readonly (#325); a webhook-scoped integration
+        // credential is denied there.
         using var client = fixture.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         using var projects = await client.GetAsync("/api/projects");
-        Assert.Equal(HttpStatusCode.OK, projects.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, projects.StatusCode);
 
         var store = fixture.Services.GetRequiredService<ICredentialStore>();
         var resolved = await store.FindActiveAsync(CredentialToken.Hash(token));
@@ -155,7 +159,7 @@ public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
         using var survivorClient = fixture.CreateClient();
         survivorClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", survivor.Token);
         using var survivorCall = await survivorClient.GetAsync("/api/projects");
-        Assert.Equal(HttpStatusCode.OK, survivorCall.StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, survivorCall.StatusCode);
     }
 
     [Fact]
@@ -167,7 +171,7 @@ public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
-    public async Task Token_AuthenticatesOnItsOwnProjectsSurface()
+    public async Task Token_AuthenticatesButIsForbiddenOnTheBusinessObservationSurface()
     {
         var project = await CreateProjectAsync("itok-surface");
         var issued = await CreateTokenAsync("surface", project.Id);
@@ -176,7 +180,11 @@ public sealed class IntegrationTokenSpecs(MohistIntegrationFixture fixture)
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", issued.Token);
         using var detail = await client.GetAsync($"/api/projects/{project.Id}");
 
-        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        // Authentication succeeds (403, not 401); the webhook scope is
+        // denied on the operator-or-readonly business surface (#325).
+        // The per-project narrowing judgment on webhook surfaces is the
+        // P2 scope gate.
+        Assert.Equal(HttpStatusCode.Forbidden, detail.StatusCode);
     }
 
     private HttpClient AdminClient()
