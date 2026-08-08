@@ -56,6 +56,12 @@ Agent API 对客户端提供六类能力：
 上限检查。首个 launch input 使用 `launchRequestId` 作为它的 `requestId`；launch operation
 映射仍然单独保留。
 
+如果 queue capacity 已满，Session 在返回 `rejected(queue_full)` 前持久化同一 request map 的
+fingerprint tombstone（`inputId=null`、`turnId=null`、稳定 reason/nextAction）。同 requestId
+同 fingerprint 的 response-loss retry 永远返回该 rejection；改 payload 永远是
+`rejected(idempotency_key_reused)`，不会因容量稍后恢复而被同 key 接受。调用方只能用新
+requestId 重试。
+
 因此：
 
 - AgentJob 完成不等于整段对话关闭，也不等于自然语言目标已经完成；
@@ -130,6 +136,13 @@ AgentJob 改成失败。
 `outcome_pending` 表示 Mohist 已知输入和派发路径被接受，但最终结果尚未记录；它不是成功、
 失败或 idle，也不能用新输入绕过。
 
+`cancel`/`stop` 保留现有产品意图，但它不是一个内存标志。调用方必须提供稳定的
+`operationId`；Server 用唯一 canonical `SessionOperationRead` 的 `kind=stop` 持久化目标
+Turn、完整 `FenceToken`、claim/takeover lease、bounded deadline、reason 和 nextAction。
+queued Turn 可以在 Session 事务中取消；running Turn 必须在 `Runtime.stop` 前后重检同一
+fence。响应丢失或停止结果未知时，客户端查询或以同一 operationId 做有界 retry，不能创建
+第二个 stop，也不能把 unknown 当成 idle 或 cancelled。
+
 Availability 回答现在能否开始一项新的执行；它不替代已有 AgentJob 的调度状态。Runner 或容量在
 一个 Pending Job 的退避期间恢复时，Availability 可以显示可启动，而该 Job 仍显示为等待调度，
 直到下一次持久化 dispatch retry 实际开始它。客户端必须呈现这两个 Server 结论，不能把等待调度
@@ -148,7 +161,7 @@ jobId
 launchRequestId
 launchOperationId
 status = preparing | queued | running | unknown | terminal
-outcome = completed | rejected | failed | cancelled | null
+outcome = completed | rejected | failed | cancelled | blocked | null
 reason
 nextAction
 sessionId, sessionIdReason
@@ -162,6 +175,9 @@ observedAt
 ID 不能冒充 live mapping。Session accept 成功时三个 mapping 一起出现；明确拒绝或不可恢复
 失败时 Job 进入 terminal `rejected`/`failed` outcome，mapping 保持 null+reason，launch
 tombstone 负责后续先按 `launchRequestId` 找 operation、再按 `launchOperationId` 查询。
+若首个 accepted Turn 的 dispatch 达到 attempt/deadline 上限，Job 仍保留同一 live mapping，
+但其 launch outcome 收敛为 terminal `blocked`，并使用同一稳定 reason/nextAction；这不改变
+Input 的 `accepted` 或 Turn 的 `outcome=blocked`。
 
 Session activity 必须同时提供 `activity`、`currentContextActivity`、`contextGeneration`、
 `unresolvedPrevious`、`unresolvedPreviousCount`、`nextAction`、`revision` 和 `observedAt`。
@@ -173,14 +189,23 @@ force-reset 已确认并 supersede 后不阻止当前 generation 的新 Input/Tu
 Input acceptance 与 Turn dispatch 使用 [`conventions.md`](conventions.md#canonical-sessioninput-and-dispatch-schema)
 中的唯一 `SessionInputRead` 与 `TurnDispatchRead` schema。它们必须同时返回 caller-provided
 `requestId`、稳定 Input/Turn mapping、`dispatchAttemptCount`、`dispatchDeadline`、当前
-`dispatchAttemptId`、`blockedReason`、`nextAction`、`revision` 和 `observedAt`。
+`dispatchAttemptId`、`dispatchRetryId`、`dispatchRetryKind`、`dispatchRetryDueAt`、
+`dispatchRetryState`、`dispatchRetryOwnerId`、`dispatchRetryClaimGeneration`、
+`dispatchRetryLeaseUntil`、`blockedReason`、`nextAction`、`revision` 和 `observedAt`。
 
 `dispatchStatus=blocked` 只表示当前 enqueue 结果是临时可重试的阻塞，Turn 仍非终态；客户端
 不能把它当作终态，Server durable coordinator 也不能因读到这个值就返回。它必须在下一次
 持久 retry signal 到期时回到 `retrying`。达到 attempt/deadline 上限后，Server 原子写入
-`dispatchStatus=terminal`、`status=terminal`、`outcome=blocked`、稳定 `blockedReason` 和
-可执行 `nextAction`；此后不再自动 retry。Input 仍为 accepted，InputId/TurnId 不变。响应
+`dispatchStatus=terminal`、`Turn.status=terminal`、`Turn.outcome=blocked`、稳定 `blockedReason` 和
+可执行 `nextAction`，并取消同一 `dispatchRetryId` 的 durable retry work；此后不再自动
+retry。Input 仍为 accepted，InputId/TurnId 不变。`dispatchStatus=blocked` 的写入必须与
+唯一 `dispatchRetryId`、outbox/command/timer 的同一 identity、`dispatchRetryDueAt`、当前
+attempt、固定 deadline 和 claim state 原子提交。Server 重启后 coordinator 扫描这些记录，
+按 due signal claim；重复 signal 只消费一次，过期 lease 由新 claim generation 接管。响应
 丢失只查询原 `dispatchAttemptId`，不能创建新 attempt、Input 或 Turn。
+
+`Turn.reason` 与 `Turn.nextAction` 是 Turn result 的字段；`TurnDispatchRead.blockedReason` 只
+表达派发阻塞原因。它们都由 Server 持久返回，客户端不能用本地错误文本替代。
 
 CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
 自行合并 Job/Session/Input/Turn 状态。
@@ -194,7 +219,7 @@ Operation projection 必须返回 conventions 规定的完整 `SessionOperationR
 Job、Session、Input 和 Turn projection 只能引用 `operationId` 或嵌入同一 projection，不能
 发明裁剪后含义不同的 operation schema。
 
-Compact、Reset、recovery、handoff、rebind 和 force-reset command 都必须由调用方提供
+Compact、Reset、recovery、handoff、rebind、stop 和 force-reset command 都必须由调用方提供
 `operationId`；没有 key 时 Server 拒绝，不生成客户端不可见的替代 key。Query 可以按
 `operationId` 读取当前或历史 operation；response loss 的 retry 必须重用同一个 key，并返回
 同一 phase/outcome/binding/context mapping。`launchRequestId` 只用于 launch 的第一层查找，
@@ -203,15 +228,24 @@ Compact、Reset、recovery、handoff、rebind 和 force-reset command 都必须�
 ## Launch response loss and force-reset
 
 启动调用必须由客户端提供 `launchRequestId`（idempotency key）。Server 在第一次
-`prepare-job` 中按该 key 幂等创建并持久化唯一的 `launchOperationId` 与
-Job/Session/Input/Turn reservation IDs。客户端无需预先知道 Server 生成的
-`launchOperationId`；响应丢失时先用 `launchRequestId` 找到 operation，再查询或 retry 原
-`launchOperationId`，返回同一 Job 和同一组 live mapping，不能生成第二个 launch。
+`prepare-job` 中只在 AgentJob 事务内按该 key 幂等创建唯一的 `launchOperationId`、Job 和
+内部 reservation IDs，并写入唯一的 `accept-session` durable command/outbox；reservation
+不是可访问的 Session、Input 或 Turn。Session 事务只提交自己的 Session、Input、Turn、
+request map、dispatch record 和 durable `SessionLaunchAccepted`/`SessionLaunchRejected`
+event/outbox；明确拒绝时只保留以 `launchOperationId` 为 key 的 Session-side admission tombstone，
+不创建可访问 Session/Input/Turn，也不同时更新 AgentJob。协调者随后以 `launchOperationId` 幂等消费该事件，在
+另一个 AgentJob 事务中 materialize 三项 live mapping 或写入 terminal rejection。
+客户端无需预先知道 Server 生成的 `launchOperationId`；响应丢失时先用 `launchRequestId`
+找到 operation，再查询或 retry 原 `launchOperationId`，返回同一 Job 和同一组 live mapping，
+不能生成第二个 launch。
 
 Session accept/reject 是 durable outcome。明确 reject 或不可恢复失败返回 terminal Job、
 稳定 `reason` 和 `nextAction`；临时不可用或无法确认 side effect 时返回 `unknown`，并要求
-查询/等待/人工核对原 operation，而不是一直创建新的 Job。客户端不把 reservation ID 当作
-可访问资源。
+查询/等待/人工核对原 operation，而不是一直创建新的 Job。若 Session accept 已成功而 Job
+回写失败，Job 暂时仍返回 `sessionId/inputId/turnId=null` 与 `mapping_pending` reason；协调者
+按同一 `launchOperationId` 重试回写后才公开 live mapping。reservation ID 永远不能填入这些
+字段。协调者重启会扫描 pending command，重复消费、响应丢失、明确拒绝和 unknown 都只
+推进同一 operation，最终收敛到一组 mapping 或一个永久 tombstone。
 
 普通 Compact、Reset 和 recovery 被 Unknown 或 operation response loss 阻挡时，客户端先按
 调用方提供的原 `operationId` 查原 operation。需要越过 Unknown 的显式产品动作是 force-reset：
@@ -227,13 +261,17 @@ force-reset(
 ```
 
 它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
-要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一事务中收集当前
-generation 的全部 unresolved targets：ActiveOperation（如有）、unknown Input/Turn、dispatch
-attempt 和其它已记录的 Runtime side effect。事务持久化新 operation 的
-`supersededTargets`，为每个 target 保留 `unresolvedPrevious` 映射；有 ActiveOperation 时
-同时写入 `supersededByOperationId`，没有 ActiveOperation 时也必须写入 durable unresolved-work
-record，不能把“没有 ActiveOperation”当作“没有旧副作用”。新 operation 与这些 superseding
-identities 原子建立后才可继续候选 binding。
+要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一 Session 事务中
+运行唯一 unresolved-target collector。collector 覆盖当前 generation 的 ActiveOperation
+（如有）、unknown Input、unknown Turn、unknown dispatch attempt 和每个已记录的 unknown
+Runtime side effect；ActiveOperation 进入同一个 `supersededTargets` 数组，不使用第二个数组。
+每个 target 必须使用 conventions 的 `UnresolvedTargetRead` 字段：`targetKind`、稳定
+`targetId`、`requestId`、`contextGeneration`、`originalOperationId`、完整或显式 null 的
+`expectedBinding`、`nextAction` 和 `supersededByOperationId`。`targetKind=operation` 的
+ActiveOperation 使用 `targetId=operationId`、`requestId=null`、`originalOperationId=targetId`；
+其它 target 只有已知来源时填写 `originalOperationId`，否则为 null。collector、旧 operation
+supersede 标记、新 operation 的完整 fence、`supersededTargets`、`unresolvedPrevious` 和
+`admission=blocked` 必须同一事务提交；没有 ActiveOperation 也必须留下这些 durable target。
 
 候选 binding 与新 ContextBoundary 成功提交前，当前 generation 仍不接受新的 Input/Turn；提交
 后 `currentContextActivity` 只表示新 generation，旧 operation/input/turn/binding 事实仍保留
@@ -269,6 +307,46 @@ Response loss 的 query/retry 必须回同一 `operationId` 和 conventions 规�
 不能返回只有状态或只有 mapping 的部分确认。Query 不得再次递增 `ContextGeneration`、重新
 创建 candidate 或生成新 operation。`outcome=blocked` 的 operation
 是终态，调用方必须执行 `nextAction`；它不能被客户端轮询无限保持 pending。
+
+### Stop operation
+
+`mo session cancel`/`stop` 的既有产品语义保持不变：它只针对当前未终结 Turn，queued
+Turn 可以取消，running Turn 请求 Runtime 停止，首个 Turn 的取消仍由 AgentJob 裁定，后续
+Turn 不改写已终结的 Job。实现统一使用 `SessionOperationRead.kind=stop`，而不是内存
+`stopFence`：
+
+```text
+BeginStop(sessionId, operationId, turnId, expectedRevision, expectedBinding, ownerId, deadline):
+  atomically:
+    require caller operationId is stable and reusable
+    require session.revision == expectedRevision
+    require current Turn == turnId and Turn is not terminal
+    existing = read operationId
+    if existing != null:
+      require existing.kind == stop and existing.targetTurnId == turnId
+      return existing
+    create SessionOperationRead(kind = stop, targetTurnId = turnId,
+      expectedBinding = expectedBinding, ownerId, ownerFence, claimGeneration,
+      leaseUntil, deadline, phase = claimed, outcome = pending,
+      reason = null, nextAction = stop_turn)
+    if Turn is queued:
+      cancel its durable dispatch retry work
+      persist Turn.status = terminal, Turn.outcome = cancelled
+      complete the same stop operation in this Session transaction
+
+  if Turn is running:
+    claim or takeover the operation when its lease expires
+    token = Server.recheckBeforeExternalEffect(full FenceToken)
+    result = Runtime.stop(turnId, fenceToken = token)
+    Server.recheckBeforePersistingEffectResult(token)
+    persist Turn terminal/cancelled only if the same fence still matches
+```
+
+`Runtime.stop` response loss keeps the operation and Turn `unknown`; the durable coordinator
+reconciles the same operation by query or bounded retry before its deadline. At an unresolved
+deadline it records a stable `reason` and actionable `nextAction` for query/manual verification,
+never a false cancelled or idle result. Every response-loss retry returns the complete canonical
+operation projection with the same `operationId`, target Turn and binding.
 
 ## 可靠性契约
 

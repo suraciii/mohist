@@ -146,9 +146,12 @@ SessionInputRequestMap
   SessionId
   RequestId
   RequestFingerprint
-  InputId
-  TurnId
+  InputId?                 # null for a durable rejection tombstone
+  TurnId?                  # null for a durable rejection tombstone
   State
+  AcceptanceReason
+  NextAction
+  ContextGeneration
   Revision
 
 TurnDispatch
@@ -158,6 +161,9 @@ AgentTurn
   Id
   Sequence
   Status
+  Outcome = completed | failed | cancelled | blocked | null
+  Reason?
+  NextAction
   ContextGeneration
   InputIds
 
@@ -182,7 +188,7 @@ ContextBoundary
 业务实体。历史 operation 按 `operationId` 保留，以便 response loss 后查询原 operation。
 `operationId` 必须由调用方提供并可重用，Server 不生成客户端不可见的 operation key。
 
-Compact、Reset、recovery、handoff、rebind 和 force-reset 的 command 都必须带调用方持有的
+Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的 command 都必须带调用方持有的
 `operationId`；同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
 coordinator 也必须在发出 command 前持有并持久化这个身份，不能让客户端只能等待一个
 不可见的 Server key。只有 launch 使用不同的两级身份：客户端提供 `launchRequestId`，Server
@@ -222,7 +228,7 @@ model 中，不能混用。
   `new-turn` 输入。`#382` 负责跨 Session 的 capacity claim/release 与容量视图。
 - 同一 Session 的有界排队上限是本设计的受理不变量，具体数值是运行参数，不复制 `#382`
   的全局容量策略。
-- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset、force-reset、handoff
+- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset、force-reset、handoff、stop
   或 rebind 的
   持久 operation fence，不是新的业务实体；操作明确完成或拒绝后才能清除。
 - 用户输入必须包含可见文本或明确附件；attachment-only 输入不生成隐藏 prompt。
@@ -355,12 +361,21 @@ acceptFollowUp(session, requestId, inputEnvelope):
   if existing != null:
     if existing.requestFingerprint != fingerprint:
       return rejected(idempotency_key_reused)
+    if existing.State == rejected:
+      return readStoredRejection(existing)
+    if existing.State == unknown:
+      return readStoredAcceptanceUnknown(existing)
     return readInputAndTurn(existing.inputId, existing.turnId)
 
   require safeAdmission(session) or supportedRunningSteer(session)
   atomically:
     insert RequestMap(session.id, requestId, fingerprint)
       with unique(session.id, requestId)
+    if queuedTurnCount(session) >= session.queueLimit:
+      persist RequestMap(state = rejected, InputId = null, TurnId = null,
+                         AcceptanceReason = queue_full,
+                         NextAction = retry_with_new_request_id_after_capacity)
+      return rejected(queue_full)
     materialize one SessionInput and one Turn
     persist the mapping, Input, Turn and dispatch record together
   if unique constraint loses a concurrent race:
@@ -371,17 +386,22 @@ acceptFollowUp(session, requestId, inputEnvelope):
 The first launch uses `requestId=launchRequestId` when materializing its first Input; its
 `launchOperationId` remains a separate cross-aggregate identity.
 
-`new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时返回
-`rejected(queue_full)`，不持久化 Input。这个上限只约束单个 Session 的排队受理；`#382`
+`new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时在同一个 Session
+事务持久化 definitive rejection tombstone 后返回 `rejected(queue_full)`，不持久化 Input。
+后续相同 `(SessionId, requestId)` 先命中这个 tombstone：同 fingerprint 永远返回相同
+rejection，改 payload 永远返回 `rejected(idempotency_key_reused)`，不能趁容量恢复窗口接受。
+只有使用新 requestId 才能在容量可用时重新提交。这个上限只约束单个 Session 的排队受理；`#382`
 负责跨 Session 的 max-concurrent-runs、capacity claim/release 和容量视图，不在本设计复制
 它的调度策略。
 
 受理事务先持久化 Input、Turn 关系和 canonical dispatch record，再异步入队。若 event/outbox
 写入明确失败，整个 Session 受理事务失败，Input 不对外报告 accepted；若 Session 事务已
 提交但后续入队失败，Input 仍保持 `accepted=true`，Turn 保持非终态 `queued`，并记录
-`dispatchStatus=blocked` 与原因。这个 blocked 值表示临时可重试，durable handler 必须按
-attempt/deadline signal 继续协调，不能看到 blocked 就返回或让 Turn 永久 queued。入队结果
-不确定时保留同一 `dispatchAttemptId` 查询；不能换一个请求身份或 attempt 再投递。
+`dispatchStatus=blocked` 与原因。这个 blocked 值表示临时可重试，且这次写入必须原子包含
+唯一 `dispatchRetryId`、`dispatchRetryKind`、`dispatchRetryDueAt`、`dispatchRetryState`、
+当前 attempt、固定 deadline 和 retry outbox/command/timer。durable handler 必须按 due signal
+继续协调，不能看到 blocked 就返回或让 Turn 永久 queued。入队结果不确定时保留同一
+`dispatchAttemptId` 查询；不能换一个请求身份或 attempt 再投递。
 
 定时输入是到点才投递的一次性 follow-up：Server 在到期时经同一受理路径把一条普通
 `SessionInput` 追加给目标会话，不创建新输入类别、调度器或 Session 终态。完整契约见
@@ -397,25 +417,61 @@ Follow-up 命令只需要三种同步结果：
 把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
 产生重复副作用。
 
-Compact、Reset、recovery、handoff、rebind 和 force-reset 的调用方必须显式提供
+Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的调用方必须显式提供
 `operationId`；没有 key 的 command 在受理前拒绝，不由 grain 生成客户端不可见的替代 key。
 同一 `operationId` 重放返回同一 operation，异 key 不能 join 或覆盖另一个 active operation；
 已完成 operation 仍可按同一 key 查询，response loss 不会开启第二个 operation。
 
-Cancel 只针对当前未终结 Turn。等待中的 Turn 可以在 Session 事务中取消；正在执行的 Turn
-必须先建立带完整 `FenceToken` 的 Turn stop fence，再请求 Runtime 停止。无法确认停止结果
-时，Turn 进入 `unknown`，Session activity 也保持 `unknown`，不能伪造 `idle`。首个 Turn 的
-结果由 AgentJob 裁定，后续 Turn 的取消不改写已经终结的 AgentJob。
+Cancel/stop 只针对当前未终结 Turn，且使用唯一 `SessionOperationRead.kind=stop` 作为持久
+Turn-stop fence。等待中的 Turn 在建立该 operation 的同一 Session 事务中取消；正在执行的
+Turn 由 durable owner claim 后请求 Runtime 停止。无法确认停止结果时，Turn 进入 `unknown`，
+Session activity 也保持 `unknown`，不能伪造 `idle`。首个 Turn 的结果由 AgentJob 裁定，后续
+Turn 的取消不改写已经终结的 AgentJob。
 
 ```text
-stopTurn(stopFence, turnId):
-  require stopFence targets the current Turn and binding
-  token = Server.recheckBeforeExternalEffect(stopFence.token)
-  result = Runtime.stop(turnId, fenceToken = token)
-  Server.recheckBeforePersistingEffectResult(token)
-  persist stop result only if fenceMatch(stopFence, token)
-  if result is unknown: persist Turn.status = unknown
+BeginStop(session, operationId, turnId, expectedRevision, expectedBinding, ownerId, deadline):
+  atomically:
+    require session.revision == expectedRevision
+    require current Turn == turnId and Turn is not terminal
+    existing = Session.operation(operationId)
+    if existing != null:
+      require existing.kind == stop and existing.targetTurnId == turnId
+      return existing
+    fence = create durable ActiveOperation(
+      kind = stop, operationId, targetTurnId = turnId,
+      expectedBinding = expectedBinding, ownerId,
+      ownerFence = nextOwnerFence(), claimGeneration = nextClaimGeneration(),
+      leaseUntil = leaseFor(deadline), deadline,
+      phase = claimed, outcome = pending, reason = null,
+      nextAction = stop_turn)
+    if Turn is queued:
+      cancel its dispatch retry work
+      persist Turn.status = terminal, Turn.outcome = cancelled
+      complete fence with outcome = succeeded, reason = null,
+        nextAction = inspect_turn
+      return cancelled
+
+  if Turn is running:
+    fence = claimOrTakeOver(fence, before = deadline)
+    token = Server.recheckBeforeExternalEffect(fullFenceToken(fence))
+    result = Runtime.stop(turnId, fenceToken = token)
+    Server.recheckBeforePersistingEffectResult(token)
+    persist stop result only if fenceMatch(fence, token)
+    if result is accepted:
+      persist Turn.status = terminal, Turn.outcome = cancelled,
+        operation.phase = completed, operation.outcome = succeeded,
+        operation.reason = null, nextAction = inspect_turn
+    if result is unknown:
+      persist Turn.status = unknown, operation.outcome = unknown,
+        operation.reason = stop_result_unknown,
+        nextAction = query_same_stop_operation
 ```
+
+The durable coordinator scans pending/unknown stop operations after restart, takes over an expired
+lease by incrementing `ownerFence` and `claimGeneration`, and rechecks the complete `FenceToken`
+both before and after `Runtime.stop`. Response-loss query/retry uses the same `operationId`, target
+Turn and binding, is bounded by the persisted deadline, and never creates an in-memory replacement
+fence or a second stop effect.
 
 Compact uses the same before/after fence gates around `Runtime.compact`; neither Runtime effect
 may run after lease expiry, binding change, or operation takeover.
@@ -984,6 +1040,7 @@ AgentSession 工作目录。两者都保留已有 transcript，不迁移或重�
 | `recovery` | 只在同一 Runner 上从 confirmed missing 重建 Runtime Session | 不能迁移 Runner |
 | `rebind` | 同一 Runner 的显式 Runtime/binding 替换 | 不能改变 `runnerId`，也不能把未知事实当作 missing |
 | `handoff` | 从旧 Runner 切到明确指定的新 Runner | 只能由显式 handoff operation 发起，不能由 Runner 重启或事件推断 |
+| `stop` | 不替换 binding；停止指定 Turn | 由持久 operation fence 保护 queued cancel 或 Runtime.stop，不把 unknown 当作 cancelled |
 
 `handoff` 与 same-runner missing recovery 是两条不同路径。handoff 必须在 fence 中记录
 完整 `candidateBinding`、目标 Runner、CAS 的 `expectedBinding`、owner、ownerFence、
@@ -1013,14 +1070,82 @@ force-reset 只有同时满足以下条件才能 claim：
 4. Server 能保留旧 Input/Turn、旧 operation result 和旧 binding tuple，并为新 operation
    选择新的 context/binding；旧 Input/Turn 不重写、不重放。
 
-force-reset 不调用普通 `BeginRecovery`，而是执行一次原子的 supersede/takeover：
+force-reset 不调用普通 `BeginRecovery`，而是先由唯一 collector 收集未决事实，再执行一次
+原子的 supersede/takeover。collector 是唯一入口，覆盖当前 generation 的 unknown
+`SessionInput`、`AgentTurn`、dispatch attempt、Runtime side effect，以及 unknown 的
+`ActiveOperation`（如果有）：
+
+```text
+collectUnresolvedTargets(session, generation):
+  candidates = []
+  if session.ActiveOperation != null
+     and session.ActiveOperation.ContextGeneration == generation
+     and session.ActiveOperation.outcome == unknown:
+    candidates += UnresolvedTargetRead(
+      targetKind = operation,
+      targetId = session.ActiveOperation.operationId,
+      requestId = null,
+      contextGeneration = generation,
+      originalOperationId = session.ActiveOperation.operationId,
+      expectedBinding = session.ActiveOperation.expectedBinding,
+      nextAction = inspect_same_operation,
+      supersededByOperationId = null,
+      outcome = unknown)
+  for request in session.requestMaps where request.ContextGeneration == generation
+                              and request.State == unknown:
+    inputId = request.InputId or stableUnknownInputTargetId(session.id, request.RequestId)
+    candidates += target(
+      targetKind = input, targetId = inputId,
+      requestId = request.RequestId,
+      originalOperationId = operationOriginForInput(inputId) or null,
+      contextGeneration = generation,
+      expectedBinding = bindingObservedForInput(inputId) or null,
+      nextAction = inspect_input, outcome = unknown)
+  for turn in session.turns where turn.ContextGeneration == generation
+                        and turn.status == unknown:
+    primaryInput = firstInputForTurn(turn.turnId)
+    candidates += target(
+      targetKind = turn, targetId = turn.turnId,
+      requestId = primaryInput?.requestId or null,
+      originalOperationId = operationOriginForInput(primaryInput?.inputId) or null,
+      contextGeneration = generation,
+      expectedBinding = bindingObservedForTurn(turn.turnId) or null,
+      nextAction = inspect_turn, outcome = unknown)
+  for attempt in session.dispatchAttempts where attempt.ContextGeneration == generation
+                               and attempt.dispatchStatus == unknown:
+    input = session.inputForDispatchAttempt(attempt.dispatchAttemptId)
+    candidates += target(
+      targetKind = dispatch-attempt, targetId = attempt.dispatchAttemptId,
+      requestId = input?.requestId or null,
+      originalOperationId = operationOriginForInput(input?.inputId) or null,
+      contextGeneration = generation,
+      expectedBinding = bindingObservedForDispatch(attempt.dispatchAttemptId) or null,
+      nextAction = query_same_dispatch_attempt, outcome = unknown)
+  for effect in session.runtimeEffects where effect.ContextGeneration == generation
+                             and effect.outcome == unknown:
+    candidates += target(
+      targetKind = runtime-effect, targetId = effect.effectId,
+      requestId = effect.requestId or null,
+      originalOperationId = effect.originalOperationId or null,
+      contextGeneration = generation, expectedBinding = effect.expectedBinding or null,
+      nextAction = inspect_runtime_effect, outcome = unknown)
+  return deduplicateAndStableSort(candidates, key = (targetKind, targetId))
+```
+
+For `input`, `turn` and `dispatch-attempt`, `requestId` is required when the child record has one;
+for `operation` it is always null; `runtime-effect` may be null when no caller request was recorded.
+`originalOperationId` is null only when the target has no durable originating operation. The
+collector resolves the optional origin and binding through the existing durable Input/Turn/dispatch
+records; it never invents either value. `targetId` and `originalOperationId` are separate fields.
+A target's `expectedBinding` is the complete observed tuple or explicit null.
 
 ```text
 BeginForceReset(session, newOperationId, ownerId, expectedRevision,
                 expectedContextGeneration, confirmation, deadline):
   require session.revision == expectedRevision
   require session.ContextGeneration == expectedContextGeneration
-  targets = unresolvedTargets(session, contextGeneration = expectedContextGeneration)
+  require session.currentBinding != null
+  targets = collectUnresolvedTargets(session, expectedContextGeneration)
   require targets is not empty
   require every target.outcome == unknown
   require ActiveOperation == null
@@ -1029,19 +1154,14 @@ BeginForceReset(session, newOperationId, ownerId, expectedRevision,
   require confirmation acknowledges possible old side effects and duplicate work
 
   atomically:
+    for target in targets:
+      target.supersededByOperationId = newOperationId
+      persist target in Session.unresolvedPrevious
     old = ActiveOperation targeting expectedContextGeneration
     if old != null:
-      persist old.operationId with outcome = unknown, phase = superseded,
-        supersededByOperationId = newOperationId
-    for target in targets:
-      persist UnresolvedPrevious(targetId = target.id,
-        targetKind = target.kind,
-        originalOperationId = target.operationId,
-        contextGeneration = target.contextGeneration,
-        outcome = target.outcome,
-        expectedBinding = target.expectedBinding,
-        supersededByOperationId = newOperationId,
-        nextAction = inspect_or_explicit_requeue)
+      require targets contains (targetKind = operation, targetId = old.operationId)
+      persist old.phase = superseded, old.outcome = unknown,
+        old.supersededByOperationId = newOperationId
     create new ActiveOperation with:
       sessionId = session.id
       operationId = newOperationId
@@ -1060,9 +1180,11 @@ BeginForceReset(session, newOperationId, ownerId, expectedRevision,
       supersededTargets = targets
       admission = blocked
       phase = claimed
-      outcome = pending
+      outcome = pending, reason = null, nextAction = create_force_reset_binding
+      targetTurnId = null
+      observedAt = now
     persist the complete operation fence and ContextBoundary(kind = force-reset,
-      result = pending) before any Runtime effect
+      result = pending), and persist Session.admission = blocked before any Runtime effect
     mark session.safeAdmission = false until force-reset binding commit
   return the new fence
 
@@ -1098,7 +1220,11 @@ finalized = runFenced(finalizeToken,
     adopt candidate as current binding with next bindingEpoch
     increment ContextGeneration exactly once
     persist ContextBoundary(kind = force-reset, result = succeeded),
-      session.context_reset, new currentContextActivity and operation outcome
+      session.context_reset, operation.phase = completed,
+      operation.outcome = succeeded, operation.reason = null,
+      operation.nextAction = inspect_session,
+      session.unresolvedPrevious = the same target array,
+      new currentContextActivity
     set operation.admission = ready
     clear ActiveOperation
     set safeAdmission = true)
@@ -1215,7 +1341,7 @@ endpoint。
 | Session activity | 这段会话当前 context 能否继续、过去是否仍有未知事实 | `sessionId`、`activity`、`currentContextActivity`、`contextGeneration`、`unresolvedPrevious`、`unresolvedPreviousCount`、`nextAction`、`revision`、`observedAt` |
 | Input acceptance | 这条输入是否已由 Mohist 持久接受，以及属于哪一轮 | canonical `SessionInputRead`：`sessionId`、`inputId`、`requestId`、`requestFingerprint`、`state`、`acceptanceReason`、`turnId`、`turnRelation`、`contextGeneration`、`revision`、`observedAt` |
 | Turn result | 这一轮的执行状态、派发状态和结果是什么 | `turnId`、`status`、`result`、canonical `TurnDispatchRead`、`contextGeneration`、`revision`、`observedAt` |
-| Session operation | Compact/Reset/recovery/handoff/rebind/force-reset 当前或历史如何收敛 | 完整 [`SessionOperationRead`](conventions.md#canonical-sessionoperationread)，不在此处复制字段列表 |
+| Session operation | Compact/Reset/recovery/handoff/rebind/stop/force-reset 当前或历史如何收敛 | 完整 [`SessionOperationRead`](conventions.md#canonical-sessionoperationread)，不在此处复制字段列表 |
 | launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`launchRequestId`、`launchOperationId`、`revision`、`observedAt` |
 
 `unresolvedPrevious` 是旧 `ContextGeneration` 中仍未知的 operation/Input/Turn/side effect
@@ -1266,7 +1392,7 @@ recovery；它们的区别只在于 Server 已知的事实范围，不改变安�
 不能把内部枚举直接暴露给 CLI/Web。
 
 AgentJob 的 canonical 状态是 `preparing | queued | running | unknown | terminal`；
-`terminal` 的 `outcome` 是 `completed | rejected | failed | cancelled`。`rejected` 表示
+`terminal` 的 `outcome` 是 `completed | rejected | failed | cancelled | blocked`。`rejected` 表示
 Server 确认本次 launch 没有被 Session 接受，`failed` 表示已确认不可恢复的 launch/执行
 失败；二者都必须是 terminal，并带稳定 `reason` 与 `nextAction`。只要 acceptance、dispatch
 或 Runtime side effect 仍无法确认，就保留 `unknown`，不能为了清除等待而伪造 `failed`；
@@ -1284,16 +1410,19 @@ request -> prepare-job -> accept-session -> queue -> execute -> result
    输入身份和当前 Session。这一步不承诺 Runtime 已可用；launch 必须带调用方生成的
    `launchRequestId`。它是客户端在首次请求和所有 retry 中保存的唯一 idempotency key。
 2. `prepare-job` 在 AgentJob 自己的事务中按 `launchRequestId` 幂等查找；首次请求才生成并
-   持久化 `launchOperationId`、JobId、
-   SessionId、首个 InputId/TurnId reservation、固定的 launch `deadline`，以及
-   `sessionAcceptance=pending` 和 durable outbox event；它不写 Session。reservation 只是幂等
-   占位，不是可寻址的 Session、Input 或 Turn。
-3. `accept-session` 由 launch coordinator 发送带 `launchOperationId` 和 reservation IDs
-   的幂等命令。Session accept/reject 的结果必须持久化为 `pending | accepted | rejected`；
-   accept 时 Session 自己的事务一次性 materialize Session、Input、Turn 关系及 durable
-   dispatch event，并将 Job 的 acceptance 记录更新为 `accepted`。成功返回 `accepted=true`
-   和稳定 InputId/TurnId；此时状态通常为 `queued`，不能写成 `running`。rejected 也必须写
-   durable reason，不能只在同步响应里返回。
+   持久化 `launchOperationId`、JobId、内部 Session/Input/Turn reservation、固定的 launch
+   `deadline`、`sessionAcceptance=pending` 和唯一 `accept-session` durable outbox command；
+   它不写 Session。reservation 只是 coordinator 的幂等占位，不是可寻址的 Session、Input
+   或 Turn，Job read 在 accept 成功前必须对三项 mapping 返回 `null + reason`。
+3. `accept-session` 由 durable launch coordinator 发送带 `launchOperationId` 和 reservation
+   IDs 的幂等命令。Session 参与者事务只写自己的 Session、Input、Turn request map、dispatch
+   record 及 `SessionLaunchAccepted`/`SessionLaunchRejected` durable event/outbox；它不能在
+   同一事务更新 AgentJob。Session accept/reject 的结果必须在 Session 侧按
+   `pending | accepted | rejected` 可查询。accept 时一次性 materialize Session、Input、Turn
+   关系及 initial dispatch event；成功返回 `accepted=true` 和稳定 InputId/TurnId，此时状态
+   通常为 `queued`，不能写成 `running`。rejected 也必须持久化稳定 `reason`，不能只在同步
+   响应里返回；明确拒绝时 Session 侧保留以 `launchOperationId` 为 key 的 admission tombstone，
+   但不创建可寻址的 Session/Input/Turn。
 4. `queue` 由 Session event/outbox 推进有序执行队列。相同 Session 严格只有一个被确认
    执行的 Turn；follow-up 在前一 Turn 未终结时排队，不插队、不合并、不覆盖。Session
    queue 上限属于本设计；跨 Session capacity claim/release 和视图属于 `#382`。
@@ -1303,11 +1432,18 @@ request -> prepare-job -> accept-session -> queue -> execute -> result
    最终结果使 Turn 进入 `terminal`；Runtime 先返回空闲而结果仍未确定时保持
    `outcome_pending`，不能写成 `idle`。
 
-launch 为一次新的 AgentJob 创建首个 Input/Turn，并将 JobId、SessionId、InputId、TurnId
-一起返回；若 Session 尚未接受，则这三个 mapping 字段返回 `null` 及各自 reason，不能返回
-reservation ID。AgentJob、AgentSession、Input 和 Turn 不共享跨聚合事务：AgentJob
-事件/outbox 驱动 Session 的幂等命令，Session 事件再驱动首 Turn dispatch。follow-up 不创建
-AgentJob，只追加 Input/Turn。
+launch 为一次新的 AgentJob 创建首个 Input/Turn，并在 Session accept 事件被 Job coordinator
+确认后返回 JobId、SessionId、InputId、TurnId；若 Session 尚未接受，则这三个 mapping 字段
+返回 `null` 及各自 reason，不能返回 reservation ID。AgentJob、AgentSession、Input 和 Turn
+不共享跨聚合事务：AgentJob 事件/outbox 驱动 Session 的幂等命令，Session 事件再驱动 Job
+mapping 回写和首 Turn dispatch。follow-up 不创建 AgentJob，只追加 Input/Turn。
+
+`LaunchCoordinator` 以 `launchOperationId` 为唯一 durable identity，只保存 command delivery
+fence、owner/claim lease、deadline 和当前 phase，不复制 AgentJob 或 AgentSession 业务事实。
+它在进程重启后扫描 `sessionAcceptance=pending` 的 Job，claim 未过期 work，过期 lease 则递增
+owner fence 后 takeover；每次发送、查询和 Job 回写都重用同一 `launchOperationId`。重试或
+response loss 先查询 Session 的 durable launch result，未知时才重投同一 accept command，
+不得生成新的 Job、Session、Input、Turn 或 launch identity。
 
 launch coordinator 必须按以下结果收敛：
 
@@ -1315,7 +1451,7 @@ launch coordinator 必须按以下结果收敛：
 |---|---|---|
 | Session 明确拒绝 | `terminal / rejected` | `sessionId`、`inputId`、`turnId` 全为 null + reason；reservation 只留在 launch tombstone |
 | prepare/outbox/Session 的不可恢复失败，且确认没有 Session side effect | `terminal / failed` | 未 materialize 的映射全为 null + reason；保留 launch tombstone，不留可执行 outbox |
-| Session 已接受 | `queued` 或后续 `running/terminal` | 三个 live mapping 一起返回，后续只更新状态，不更换 ID |
+| Session 已接受 | `queued` 或后续 `running/terminal`（首 Turn dispatch terminal blocked 时 Job outcome=blocked） | 三个 live mapping 一起返回，后续只更新状态，不更换 ID |
 | response loss 或 acceptance/side effect 不确定 | `unknown` 或已知当前状态 | 先用原 `launchRequestId` 找到 `launchOperationId`，再查询/重试原 operation；不得新建 Job、Session、Input、Turn 或 submit |
 
 `reason` 和 `nextAction` 是 Server canonical 的稳定产品语义，例如
@@ -1326,72 +1462,162 @@ effect 时才能转 `terminal / failed`；否则保持 `unknown` 并给出人工
 next action，不制造假终态。
 
 响应丢失或 Server 重启后的查询必须先按 `launchRequestId` 找到唯一
-`launchOperationId`，再读取 Job 的 durable acceptance 记录：`accepted` 返回原三项 mapping，
-`rejected` 返回 terminal reason，`pending` 重投同一 accept command。若 Session 已保存同一
-operation 的 accept 记录，则以 Session 记录补回 Job，若没有记录才允许同一 command 重试。
-这样原 launch operation 永远只对应一组 reservation 和最多一组 live mapping，不产生 dangling
-live ID 或无限 pending；客户端不需要猜测或预先知道 `launchOperationId`。
+`launchOperationId`，再读取 Job 和 Session 的 durable acceptance 记录：Session `accepted`
+返回原三项 mapping，`rejected` 返回 terminal reason，`pending` 重投同一 accept command。
+若 Session 已保存同一 operation 的 accept 记录而 Job 回写失败，coordinator 只在 AgentJob
+事务补写同一 mapping；如果 Session 没有记录才允许同一 command 重试。这样原 launch operation
+永远只对应一组 reservation 和最多一组 live mapping，不产生 dangling live ID 或无限 pending；
+客户端不需要猜测或预先知道 `launchOperationId`。
 
 ### accepted 后的 durable dispatch retry
 
 `accept-session` 提交 Input/Turn 后，入队不是瞬时副作用。Session 同一事务必须创建
 [`conventions.md#canonical-sessioninput-and-dispatch-schema`](conventions.md#canonical-sessioninput-and-dispatch-schema)
-中的 `TurnDispatchRead`，固定 `dispatchDeadline`，并写入 durable outbox event。每次 retry
-先在 Server 原子递增 `dispatchAttemptCount`、生成唯一 `dispatchAttemptId` 并将状态置为
-`retrying`，再使用完整 `FenceToken` 调用 Runner；response loss 只按同一
-`dispatchAttemptId` 查询，不创建第二次 attempt。
+中的 `TurnDispatchRead`，固定 `dispatchDeadline`，并写入 durable retry work/outbox。这个
+retry work 的唯一 key 是 `dispatchRetryId`；outbox command、timer 和 coordinator claim 都
+使用它，不各自生成 identity。每次 retry 先在 Server 原子 claim due work、递增
+`dispatchAttemptCount`、生成唯一 `dispatchAttemptId` 并将状态置为 `retrying`，再使用完整
+`FenceToken` 调用 Runner；response loss 只按同一 `dispatchAttemptId` 查询，不创建第二次
+attempt。
 
 ```text
+persistInitialDispatch(turn, input, deadline):
+  atomically:
+    retryId = stableRetryId(turn.id, retrySequence = 0)
+    persist TurnDispatch(
+      dispatchStatus = queued, dispatchAttemptCount = 0,
+      dispatchAttemptId = null, dispatchDeadline = deadline,
+      dispatchRetryId = retryId, dispatchRetryKind = outbox,
+      dispatchRetryDueAt = now, dispatchRetryState = pending,
+      dispatchRetryOwnerId = null, dispatchRetryClaimGeneration = null,
+      dispatchRetryLeaseUntil = null)
+    append unique DispatchRetryWork(
+      dispatchRetryId = retryId, inputId = input.id, turnId = turn.id,
+      dueAt = now, attemptCount = 0, deadline = deadline)
+
 reconcileAcceptedDispatch(record):
   if record.dispatchStatus in {dispatched, terminal}:
     return the stored result
-  if record.dispatchStatus == blocked:
-    if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
-      return terminalizeDispatchBlocked(record, reason = dispatch_retry_exhausted)
-    atomically persist dispatchStatus = retrying and nextAction = dispatch_now
+
+  work = loadDurableRetryWork(record.dispatchRetryId)
+  if work is missing and record.dispatchStatus in {queued, blocked, unknown}:
+    # Repair only from the canonical record, preserving its existing identity.
+    atomically recreate DispatchRetryWork from record.dispatchRetryId,
+      record.dispatchRetryDueAt, record.dispatchAttemptCount, record.dispatchDeadline
+  work = atomically claimDueOrTakeOver(work, now,
+    ownerId = coordinatorId,
+    claimGeneration = nextClaimGenerationAfterExpiredLease)
+  if work is already claimed by a live owner or not due:
+    return retry_waiting
+
   if record.dispatchStatus == unknown:
     result = effectWithFence(record.dispatchFence,
       token => queryRunnerDispatch(record.dispatchAttemptId, fenceToken = token))
-    if result is unknown and bounds remain:
+    if result is unknown:
+      if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
+        return retainUnknownWithoutRetry(record, reason = dispatch_outcome_unknown)
+      atomically reschedule the same DispatchRetryWork(
+        dispatchRetryId = record.dispatchRetryId,
+        dueAt = nextDueAt(record), state = pending, ownerId = null,
+        claimGeneration = work.claimGeneration, leaseUntil = null)
       persist dispatchStatus = unknown, nextAction = query_same_dispatch_attempt
       return retry_scheduled
     if result is accepted:
       return persistDispatchedIfFenceMatches(record, result)
     if result is definitely_rejected:
-      persist dispatchStatus = blocked and schedule durable retry
+      if now < record.dispatchDeadline and record.dispatchAttemptCount < maxDispatchAttempts:
+        return persistBlockedAndSchedule(record, temporary_enqueue_blocked)
+      return terminalizeDispatchBlocked(record, reason = dispatch_retry_exhausted)
+
   if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
     return terminalizeDispatchBlocked(record, reason = dispatch_retry_exhausted)
+
   atomically:
     require Input.acceptance == accepted
+    require record.dispatchStatus in {queued, blocked}
+    require work.dispatchRetryId == record.dispatchRetryId
     increment dispatchAttemptCount
-    dispatchAttemptId = stableAttemptId(record.turnId, dispatchAttemptCount)
+    dispatchAttemptId = stableAttemptId(record.turnId, record.dispatchAttemptCount)
     dispatchFence = claimTurnDispatchFence(record, dispatchAttemptId,
       deadline = record.dispatchDeadline)
-    persist dispatchStatus = retrying, dispatchAttemptId, dispatchFence
+    persist dispatchStatus = retrying, dispatchAttemptId, dispatchFence,
+      dispatchRetryState = claimed, dispatchRetryOwnerId = work.ownerId,
+      dispatchRetryClaimGeneration = work.claimGeneration,
+      dispatchRetryLeaseUntil = work.leaseUntil
+
   result = effectWithFence(dispatchFence,
     token => Runner.enqueue(record.inputId, record.turnId,
                             record.dispatchAttemptId, token))
   if result is accepted:
-    persistDispatchedIfFenceMatches(record, result)
+    atomically:
+      persistDispatchedIfFenceMatches(record, result)
+      mark DispatchRetryWork(dispatchRetryId) = consumed
+      clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
+        dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
+        dispatchRetryLeaseUntil
     return dispatched
   if result is definitely_rejected:
-    if now < record.dispatchDeadline && record.dispatchAttemptCount < maxDispatchAttempts:
-      atomically persist dispatchStatus = blocked,
-        blockedReason = temporary_enqueue_blocked,
-        nextAction = retry_dispatch_at_durable_signal
-      return retry_scheduled
+    if now < record.dispatchDeadline and record.dispatchAttemptCount < maxDispatchAttempts:
+      return persistBlockedAndSchedule(record, temporary_enqueue_blocked)
     return terminalizeDispatchBlocked(record, reason = dispatch_retry_exhausted)
+  if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
+    return retainUnknownWithoutRetry(record, reason = dispatch_outcome_unknown)
+  atomically reschedule the same DispatchRetryWork(
+    dispatchRetryId = record.dispatchRetryId, dueAt = nextDueAt(record), state = pending,
+    ownerId = null, leaseUntil = null)
   persist dispatchStatus = unknown, nextAction = query_same_dispatch_attempt
   return reconcile_same_attempt
+
+persistBlockedAndSchedule(record, reason):
+  atomically:
+    require Input.acceptance == accepted
+    require record.dispatchStatus != terminal
+    require result for record.dispatchAttemptId is not already persisted
+    retryId = stableRetryId(record.turnId, retrySequence = nextRetrySequence(record))
+    dueAt = calculateDueAt(record.dispatchAttemptCount, record.dispatchDeadline)
+    mark DispatchRetryWork(record.dispatchRetryId) = consumed
+    persist dispatchStatus = blocked, blockedReason = reason,
+      Turn.reason = reason, Turn.nextAction = retry_dispatch_at_durable_signal,
+      dispatchAttemptCount = record.dispatchAttemptCount,
+      dispatchAttemptId = record.dispatchAttemptId,
+      dispatchDeadline = record.dispatchDeadline,
+      dispatchRetryId = retryId, dispatchRetryKind = timer,
+      dispatchRetryDueAt = dueAt, dispatchRetryState = pending,
+      dispatchRetryOwnerId = null, dispatchRetryClaimGeneration = null,
+      dispatchRetryLeaseUntil = null, nextAction = retry_dispatch_at_durable_signal
+    append unique DispatchRetryWork(
+      dispatchRetryId = retryId, inputId = record.inputId, turnId = record.turnId,
+      dueAt = dueAt, attemptCount = record.dispatchAttemptCount,
+      deadline = record.dispatchDeadline)
+  return retry_scheduled
+
+retainUnknownWithoutRetry(record, reason):
+  atomically:
+    require record.dispatchStatus == unknown
+    persist dispatchStatus = unknown,
+      Turn.reason = reason,
+      Turn.nextAction = query_same_dispatch_attempt_or_manual_reconcile,
+      nextAction = query_same_dispatch_attempt_or_manual_reconcile
+    mark DispatchRetryWork(record.dispatchRetryId) = cancelled
+    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
+      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
+      dispatchRetryLeaseUntil
+  return unknown
 
 terminalizeDispatchBlocked(record, reason):
   atomically:
     require Input.acceptance == accepted
-    require record.dispatchStatus != terminal
+    if record.dispatchStatus == terminal:
+      return the stored terminal result
     persist dispatchStatus = terminal
     persist Turn.status = terminal, Turn.outcome = blocked
+    persist Turn.reason = reason, Turn.nextAction = inspect_or_explicit_requeue
     persist blockedReason = reason
     persist nextAction = inspect_or_explicit_requeue
+    mark DispatchRetryWork(record.dispatchRetryId) = cancelled
+    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
+      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
+      dispatchRetryLeaseUntil
   return terminal_blocked
 ```
 
@@ -1400,6 +1626,10 @@ path. A temporary `blocked` record is non-terminal and must schedule another coo
 the coordinator cannot return just because it read `blocked`. A permanent enqueue failure is
 `dispatchStatus=terminal` with Turn `status=terminal`, `outcome=blocked`, a durable
 `blockedReason`, fixed attempt/deadline evidence and `nextAction`; no automatic retry follows.
+A coordinator restart scans durable `DispatchRetryWork`, claims due work, and takes over only after
+its persisted lease expires. Duplicate outbox delivery, timer firing or command consumption uses
+the same `dispatchRetryId` and is idempotent. `nextAction` is only a client instruction; it is never
+the durable wake-up and cannot replace the retry work.
 A later explicit requeue is a new bounded operation that references the same Input and Turn, and
 cannot silently create another Input, Turn, or launch.
 
@@ -1587,9 +1817,9 @@ operation fence。
 | 正常 follow-up | Session idle、已有 transcript | 不新建 Job；同一 Session 新 Input/Turn 串行执行 |
 | steer | 当前 Turn running，Runtime 明确支持 steer | 新 Input 关联 existing Turn，不创建第二个 Turn |
 | follow-up 排队 | 前一 Turn running | 后一 Turn 保持 queued；前一 Turn 终结后才可 running |
-| queue full | Session queued 上限已达 | rejected(queue_full)，不持久化新 Input |
+| queue full | Session queued 上限已达 | rejected(queue_full)，持久化 fingerprint tombstone，不持久化新 Input；同 key 改 payload 永远拒绝 |
 | harness | Server store、Runner/Runtime fake、outbox 和可注入时间按固定事件顺序运行 | 不访问真实网络、进程、Runtime、DB 或墙钟；每个断言能观察持久状态和副作用次数 |
-| accepted 后入队失败 | Session 事务已提交，outbox/queue 失败 | accepted 保留，Turn queued + `dispatchStatus=blocked`（非终态），durable retry signal 推进到 retrying，不丢输入 |
+| accepted 后入队失败 | Session 事务已提交，outbox/queue 失败 | accepted 保留，Turn queued + `dispatchStatus=blocked`（非终态），同一 retry identity/due signal 推进到 retrying，不丢输入 |
 | permanent dispatch failure | dispatch attempt 达到最大次数或 deadline | Input/Turn 保留；`dispatchStatus=terminal`、Turn terminal + outcome=blocked、attempt count/deadline/reason/nextAction 持久化，之后不再 retry |
 | 断线 | Turn running，Runner 不可达 | binding 保留，Turn unknown；恢复前不重发 |
 | duplicate submit | 相同 `(SessionId, requestId)` response loss/重复提交，及不同 key | 相同 key 返回原 Input/Turn 且不重复 dispatch；不同 key 才创建新 Input；payload 改变的相同 key 被拒绝 |

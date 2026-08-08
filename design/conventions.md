@@ -120,7 +120,7 @@ the caller's `launchRequestId` into `requestId`; a follow-up caller must provide
 ```text
 SessionInputRead {
   sessionId
-  inputId
+  inputId                   # null unless state=accepted
   requestId                 # caller-provided idempotency identity
   requestFingerprint        # canonical hash of the accepted input envelope
   state = accepted | rejected | unknown
@@ -139,18 +139,31 @@ TurnDispatchRead {
   dispatchAttemptCount
   dispatchAttemptId         # current attempt, null when none is active
   dispatchDeadline
+  dispatchRetryId           # current durable retry work identity; null when no wake-up exists
+  dispatchRetryKind = none | outbox | command | timer
+  dispatchRetryDueAt        # due time for the current durable retry signal; null when none
+  dispatchRetryState = none | pending | claimed
+  dispatchRetryOwnerId      # null unless dispatchRetryState=claimed
+  dispatchRetryClaimGeneration # null unless dispatchRetryState=claimed
+  dispatchRetryLeaseUntil   # null unless dispatchRetryState=claimed
   blockedReason             # present for blocked or terminal/outcome=blocked only
   nextAction
 }
 ```
 
 The durable request map has a unique constraint on `(sessionId, requestId)` and stores the
-`requestFingerprint`, `inputId`, `turnId`, `turnRelation`, acceptance state and current revision.
-The Session accept transaction creates the map and the Input/Turn together. A duplicate key with
-the same fingerprint returns the stored mapping; a duplicate key with a different fingerprint is
+`requestFingerprint`, nullable `inputId`, nullable `turnId`, `turnRelation`, acceptance state,
+`acceptanceReason`, `nextAction` and current revision. The Session accept transaction creates the
+map and the Input/Turn together. A duplicate key with the same fingerprint returns the stored
+mapping or stored rejection tombstone; a duplicate key with a different fingerprint is
 `rejected(idempotency_key_reused)` and creates nothing. A unique-key race rereads the winner.
-Different request IDs are different inputs and still pass the normal `safeAdmission` and queue
-capacity checks.
+When queue capacity is full, this design makes the rejection definitive: before returning
+`rejected(queue_full)`, the Session transaction inserts a durable map tombstone with the caller's
+fingerprint, `inputId=null`, `turnId=null`, `acceptanceReason=queue_full` and an actionable
+`nextAction`. The same request ID and fingerprint therefore always returns the same rejection,
+including after response loss; a changed payload can never pass the same key. The caller must use a
+new request ID after capacity is available. Different request IDs are different inputs and still
+pass the normal `safeAdmission` and queue capacity checks.
 
 Dispatch states are deliberately not interchangeable:
 
@@ -161,7 +174,7 @@ Dispatch states are deliberately not interchangeable:
 | `blocked` | the last enqueue attempt was definitely refused temporarily; the Turn is still non-terminal | `retrying` while attempt/deadline budget remains |
 | `dispatched` | Runner durably accepted this dispatch identity | Turn execution states decide the next result |
 | `unknown` | the current attempt's acceptance cannot yet be confirmed | query the same `dispatchAttemptId`; never create a new attempt implicitly |
-| `terminal` | the Server stopped automatic dispatch at an attempt/deadline bound | no retry; Turn is `terminal` with `outcome=blocked` |
+| `terminal` | the Server stopped automatic dispatch permanently (normally at an attempt/deadline bound, or because a stop operation cancelled a queued Turn) | no retry; Turn is `terminal` with its persisted terminal outcome |
 
 `blocked` is therefore never a terminal return value. A handler seeing a non-terminal `blocked`
 record must resume reconciliation when its durable retry signal is due; it may not return merely
@@ -169,6 +182,20 @@ because the stored value is `blocked`. At the fixed attempt/deadline bound, one 
 `dispatchStatus=terminal`, `Turn.status=terminal`, `Turn.outcome=blocked`, a stable
 `blockedReason`, and an actionable `nextAction`. This is the only dispatch transition after which
 automatic retry is forbidden, so an accepted Input cannot remain queued forever.
+
+`dispatchRetryId` is the unique identity of the current durable retry work. The outbox command,
+durable timer and coordinator claim all carry this same identity; none may derive a replacement
+identity from a delivery attempt. `dispatchRetryDueAt`, `dispatchAttemptCount`, the current
+`dispatchAttemptId`, fixed `dispatchDeadline` and claim fields are persisted in the same Session
+transaction as every transition to `blocked` or `retrying`. Consuming the same retry signal twice is
+an idempotent no-op after the first claim; an expired lease is taken over by incrementing
+`dispatchRetryClaimGeneration` before another effect. Terminalization atomically marks the dispatch
+terminal, terminalizes the Turn, records `outcome=blocked`, `blockedReason` and `nextAction`, and
+cancels the retry work, so no later due signal can retry it.
+
+The Turn result projection carries the persisted `Turn.reason` and `Turn.nextAction`; these are
+distinct from `TurnDispatchRead.blockedReason`, which is only the dispatch-specific reason. No
+client invents a second reason schema.
 
 ### Canonical effect fence
 
@@ -249,7 +276,7 @@ is terminal `blocked` and a new binding operation may proceed.
 
 ### Canonical SessionOperationRead
 
-`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff` and `rebind` are durable
+`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind` and `stop` are durable
 Session operations. Their caller supplies a reusable `operationId`; Server never creates an
 unqueryable operation key for a command response. This is the only authoritative
 `SessionOperationRead` schema. `agent-api.md` and `agent-execution.md` link to it; they do not
@@ -259,10 +286,11 @@ define another operation field list.
 SessionOperationRead {
   sessionId
   operationId
-  kind = compact | reset | recovery | force-reset | handoff | rebind
-  phase = claimed | resolving | candidate-created | cas-pending | rebound | completed |
+  kind = compact | reset | recovery | force-reset | handoff | rebind | stop
+  phase = claimed | resolving | candidate-created | cas-pending | stopping | rebound | completed |
           superseded | expired | failed | cleanup-pending
   outcome = pending | succeeded | rejected | failed | unknown | blocked
+  reason                    # explicit null while no stable reason is known
   ownerId
   ownerFence
   claimGeneration
@@ -276,19 +304,21 @@ SessionOperationRead {
   candidateState = none | created | adopted | orphan | cleanup-pending | discarded | unknown
   targetRunnerId
   targetRuntime
+  targetTurnId              # required for kind=stop, otherwise explicit null
   supersededTargets = [UnresolvedTargetRead]
   supersededByOperationId
   cleanupFence = null | FenceToken
   admission = blocked | ready
   nextAction
+  observedAt
 }
 
 UnresolvedTargetRead {
-  targetKind = operation | input | turn | dispatch | runtime-effect
+  targetKind = operation | input | turn | dispatch-attempt | runtime-effect
   targetId
-  requestId
+  requestId                 # required for input/turn/dispatch when known; null for operation
   contextGeneration
-  originalOperationId
+  originalOperationId       # operation target points to itself; null only when no origin is known
   outcome = unknown | blocked
   expectedBinding
   nextAction
@@ -305,7 +335,9 @@ owner.
 
 `supersededTargets` is present on every operation read (an empty array when none were superseded).
 It is the durable target mapping for force-reset, including unknown Input, Turn, dispatch, Runtime
-effect, and ActiveOperation records. `unresolvedPrevious` in the Session read is the same
+effect, and ActiveOperation records. ActiveOperation is included in this same array as
+`targetKind=operation`, `targetId=ActiveOperation.operationId`, `requestId=null`, and
+`originalOperationId=targetId`; it is not a separate supersession field. `unresolvedPrevious` in the Session read is the same
 `UnresolvedTargetRead` shape, not a second summary shape. When force-reset has no ActiveOperation,
 these targets still make the supersession and old facts queryable.
 
@@ -319,13 +351,24 @@ The required/null rules are:
 | `force-reset` | `expectedBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `contextGeneration` and a new `operationId` | `candidateBinding` until recorded; `supersededByOperationId` when no old operation was superseded |
 | `handoff` | `expectedBinding`, `candidateKey`, target runner/runtime, with target runner different from expected | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
 | `rebind` | `expectedBinding`, `candidateKey`, target runner equal to expected and target runtime | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
+| `stop` | `targetTurnId`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction`; `expectedBinding` and target runner/runtime when a binding exists | `expectedBinding`, `targetRunnerId`, `targetRuntime` when the queued Turn has no binding, `candidateBinding`, `candidateKey`, `supersededByOperationId` unless explicitly superseded |
 
 `sessionId`, `ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`,
-`contextGeneration`, `supersededTargets`, `cleanupFence`, `admission` and `nextAction` are present on every
-operation read. `outcome=blocked` is terminal for the
+`contextGeneration`, `supersededTargets`, `cleanupFence`, `admission`, `reason` and `nextAction` are present on every
+operation read. `reason` is explicitly nullable while an operation is pending or succeeded; a
+rejected, failed, blocked or unknown operation must expose a stable non-empty reason. `outcome=blocked` is terminal for the
 operation that can no longer make progress under its original deadline. A `cleanup-pending`
 candidate may still have a separate cleanup fence; that fence never keeps a new binding operation
 from being claimed after the original operation is terminal.
+
+`kind=stop` uses the operation row itself as the durable Turn-stop fence. Its `targetTurnId`,
+`expectedBinding`, complete owner/claim/deadline fields and `reason` are queryable; there is no
+in-memory `stopFence` model. A queued target can be cancelled in the same Session transaction.
+For a running target, the owner claims or takes over this operation, rechecks the complete
+`FenceToken` immediately before and immediately after `Runtime.stop`, and only then persists the
+Turn outcome. A lost or unknown Runtime response keeps the operation and Turn `unknown`, with an
+actionable `nextAction` to query the same `operationId` or perform bounded same-operation retry;
+it never creates a new stop operation or claims success.
 
 The launch identities are separate. The caller provides `launchRequestId`; Server creates
 `launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither
