@@ -290,6 +290,15 @@ Operation projection 是 canonical read model 的一部分。它必须返回该 
 
   collector、`supersededTargets`、`unresolvedPrevious`、旧 operation 的 supersede 标记、新 operation 的完整 fence 和 `admission=blocked` 先在同一原子事务提交；在新的 candidate binding 与 ContextBoundary 原子提交前不接受新的 Input/Turn。完成提交按同一事务递增 ContextGeneration、写 boundary、将 admission 置 ready，再允许新输入。旧 target 和旧 operation 仍可按 targetId/operationId 查询；响应丢失时重用同一 force-reset operationId，不创建第二个 context。
 
+force-reset 的 candidate `getByKey` 返回 `definitely-rejected` 时，不把它当成候选存在或缺失的
+未知 binding：无论是 create response-loss 后的 lookup，还是 Server 重启/重复请求的 same-key
+reconcile，都保留 `candidateState=none`、`candidateBinding=null`、稳定
+`reason=force_reset_candidate_rejected`。deadline 未到时 outcome 为 `pending`，nextAction
+为 `retry_same_force_reset_candidate`，沿用同一 candidate key；deadline 到达后 outcome 为
+`blocked`，nextAction 为 `inspect_force_reset_operation`。这两个分支都不 cleanup、不读未确认
+binding、不构造 CAS；response loss 或 generic unknown 才进入 `candidateState=unknown` 和
+查询/人工核对。
+
 ### ContextGeneration 与未决历史
 
 `ContextGeneration` 从 1 开始，标识当前逻辑上下文，不等同于 operation fence 的 claim generation。普通 Compact 不递增它；Reset、runtime change、missing recovery、force-reset、handoff 和 rebind 开始新的 logical context，并在同一 Session 边界中递增它。每个 Input/Turn 保留创建时的 generation，不能移到新上下文。
@@ -307,6 +316,21 @@ Steer operation 在 Server 重启后按 `operationId=requestId` 扫描；pending
 否则保留 `steerStatus=unknown`、`steerRetryAllowed=false`、`admission=blocked` 和
 `query_same_steer_or_force_reset`。同一 request 的重复 follow-up 只返回原 Input/operation
 projection，不能创建第二个 effect，也不能把没有 replay path 的状态报告为 accepted。
+
+Steer 的 Server-to-Runner effect 使用同一 `operationId=requestId` 和可查询的
+`effectId={sessionId, operationId}`。请求固定携带目标 Session、Input、Turn、完整 runtime
+binding/fence 与已接受的原文；Runner 只通过 `apply`、同 effect 的 `query` 或同 effect 的
+`replay` 处理它。重复 effect identity 不创建第二次 provider effect；Server 重启先 query，
+只有完整 fence、deadline 和 `steerRetryAllowed=true` 仍有效时才 replay。`ProviderAccepted`
+才表示 provider 已接受；response loss、unknown 或 stale fence 不能被产品状态翻译为
+provider accepted。
+
+如果目标 Turn 在 steer 调用前已 terminal，或被 stop/force-reset 变得不可受理，Server 会在
+同一 fence 保护的 Session 事务中把 steer settle 为稳定 terminal `rejected`；如果变化发生在
+adapter/query/replay 已开始后，则 settle 为 terminal `blocked`，因为 provider 结果已不再可
+裁定。两种情况都释放 ActiveOperation，设置 `steerRetryAllowed=false`、稳定 reason 和
+nextAction，保留原 Input/Turn ID 与 Input accepted，不会无限重试，也不会报告 provider
+accepted。重复请求和重启只返回这一 durable 结果。
 
 Input accepted 后的 dispatch retry 必须有 canonical `dispatchOperationId`、
 `dispatchAttemptCount`、固定 `dispatchDeadline`、`dispatchAttemptId`、`dispatchLastResult`、
@@ -502,6 +526,15 @@ AgentJob。Web UI 和 CLI 已能创建、编辑、启动 Mohist Agent，并读�
 
 Runtime Session 缺失时的自动重建与重新绑定尚未完整落地；当前部分执行路径仍会失败并
 要求用户 Reset。对应实施 issue 待从本 spec 创建。
+
+### Implementation gap: caller key is required
+
+产品合同要求 follow-up 的 `requestId` 以及 Compact、Reset、recovery、handoff、rebind、stop
+和 force-reset 的 `operationId` 都由调用方提供；缺失或空 key 必须在受理前拒绝，Server 不
+生成用户不可见的替代 key。当前 routes/Grain 仍有缺失 caller key 时生成隐藏 key 的路径，
+这是后续实现工作，不是产品合同的例外，也不代表当前实现已完成。迁移边界是 Server
+canonical admission/operation 层：所有入口先传递 caller key，再由该层在写入任何 operation、
+Input、Turn 或外部 effect 前执行非空校验；在迁移完成前，这个实现 gap 必须保持可见。
 
 Max concurrent runs 尚未真正限制并发。
 

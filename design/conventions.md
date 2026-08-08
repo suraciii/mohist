@@ -678,9 +678,129 @@ operation phases are `steer-queued` (durable replay record exists), `steer-dispa
 owner is invoking the adapter), `steer-accepted` (the adapter confirmed the Runtime accepted the
 effect), and `completed`/`failed`/`superseded` as applicable. `outcome=succeeded` maps to
 `steerStatus=accepted`; `outcome=unknown` maps to `steerStatus=unknown`; a definitive refusal or a
-bounded failure maps to `steerStatus=terminal`. `retryAllowed` is persisted, and `nextAction` is
-not a retry signal by itself. The OpenCode `session.promptAsync` and Pi `session.steer` calls are
-adapter internals behind this effect identity; they do not define a second idempotency contract.
+bounded failure maps to `steerStatus=terminal`. The terminal-race `outcome=blocked` also maps to
+`steerStatus=terminal` and means that no provider result is authoritative. `retryAllowed` is
+persisted, and `nextAction` is not a retry signal by itself. The OpenCode `session.promptAsync` and
+Pi `session.steer` calls are adapter internals behind this effect identity; they do not define a
+second idempotency contract.
+
+#### Durable steer adapter seam
+
+The Server-to-Runner contract for a steer effect is the following target seam. It is a design
+contract even while the current Runner routes and Runtime adapters remain on the pre-migration
+implementation. `sessionId` is the logical target Session; `binding.runtimeSessionId` is the
+physical target Runtime Session.
+
+```text
+SteerEffectId = {
+  sessionId,
+  operationId                 # operationId == caller-provided requestId
+}
+
+SteerEffectRequest = {
+  effectId: SteerEffectId    # derived from the durable operation; no second random key
+  sessionId                   # logical target AgentSession
+  targetSessionId             # must equal sessionId; explicit logical target field
+  targetInputId
+  targetTurnId
+  requestFingerprint          # canonical accepted Input envelope hash
+  text                        # exact accepted Input text; immutable after acceptance
+  binding: BindingTuple       # complete target runner/runtime/physical session/epoch
+  bindingAtEffect: BindingTuple
+  fence: FenceToken            # complete token; dispatch IDs are explicit null
+}
+
+SteerEffectQuery = {
+  effectId: SteerEffectId
+  sessionId
+  targetSessionId
+  targetInputId
+  targetTurnId
+  requestFingerprint
+  binding: BindingTuple
+  fence: FenceToken
+}
+
+SteerEffectReplay = SteerEffectRequest
+
+RunnerSteerAdapter = {
+  apply(request: SteerEffectRequest): SteerEffectResult
+  query(request: SteerEffectQuery): SteerEffectResult
+  replay(request: SteerEffectReplay): SteerEffectResult
+}
+
+SteerEffectResult =
+    ProviderAccepted(effectId)
+  | DefinitelyRejected(effectId, reason)
+  | DefinitelyAbsent(effectId)       # query only; same identity may be replayed
+  | ResponseLost(effectId)
+  | Unknown(effectId, reason)
+  | StaleFence(effectId, reason)     # Server must not persist this as provider acceptance
+```
+
+`effectId` is the persisted pair `(sessionId, operationId)`, not a hidden replacement for the
+caller key. `apply` is used for the first attempt, `query` reads the provider's durable record for
+the same effect, and `replay` repeats the same effect identity only when the operation's complete
+fence and `retryAllowed=true` still match. The adapter must make repeated `apply`/`replay` calls for
+the same `effectId` and identical target, binding and text return the original provider result
+without creating another provider effect. A reused effect identity with a different target,
+binding, text or fingerprint returns `DefinitelyRejected(..., effect_identity_conflict)` and does
+not call the provider. Query and replay never create a new Input, Turn, operation, binding or
+effect identity.
+
+`ProviderAccepted` is the only adapter result that may settle `outcome=succeeded`; it is written
+only after the Server rechecks the exact fence after the adapter returns. `DefinitelyRejected`
+and `DefinitelyAbsent` never authorize a CAS. `ResponseLost` means the effect may exist and must
+first be queried by the same `effectId`; `Unknown` means the adapter cannot classify it. Both keep
+the operation queryable and cannot be translated into provider acceptance. `StaleFence` is a
+fail-closed Server result, not evidence that the provider rejected or accepted the text.
+
+Immediately before `apply`, `query` or `replay`, Server atomically checks the complete `fence`,
+current binding, owner lease and target Input/Turn identity, persists the in-flight phase, and
+passes that exact fence and binding to Runner. Immediately after the call, Server checks the same
+fence again before persisting any result. A changed owner, revision, binding, Turn, stop or
+force-reset makes the result stale; the old owner cannot write it, clear a newer owner, or create
+a retry. The current Session transaction then either returns the already-settled operation or
+executes the terminal-race settle below. Server restart scans the stored operation/effect by the
+same `effectId`, queries first, and replays only through this seam and the same identity. A
+duplicate follow-up reads the existing request map and operation and returns its complete
+projection; it never invokes `apply` for a second effect.
+
+When a target Turn is terminal before an adapter call, or a stop/force-reset transaction makes the
+target no longer admissible, the target operation is settled atomically under its current fence:
+
+```text
+settleSteerTargetTerminal(operation, fence, cause, adapterAttemptStarted):
+  atomically:
+    require operation.kind == steer
+    require operation.operationId == fence.operationId
+    require operation.targetTurnId is unchanged
+    require current Turn is terminal
+       or a stop/force-reset operation has superseded this target
+    require current operation fence is fence, or the stop/force-reset write
+      is the transaction that invalidates fence
+    if adapterAttemptStarted == false:
+      outcome = rejected
+      reason = cause                  # target_turn_terminal|target_turn_stopped|target_turn_superseded
+    else:
+      outcome = blocked               # provider result is no longer authoritative
+      reason = steer_target_changed_after_effect_attempt
+    persist phase = failed, outcome, retryAllowed = false,
+      steerStatus = terminal, steerNextAction = inspect_steer_operation,
+      operation.reason = reason, operation.nextAction = inspect_steer_operation,
+      Input.state = accepted, Input.inputId and Input.turnId unchanged
+    clear ActiveOperation only when it is this operation
+    increment Session/operation revision and return the stored terminal projection
+```
+
+The stop/force-reset transaction calls this settle before or as it invalidates the steer fence;
+the adapter handler calls it before an effect and after every query/replay result. If the post-call
+fence is stale, an adapter `ProviderAccepted` is ignored and this settle/re-read path returns the
+stored terminal projection. Terminal outcomes are replay-only, so restart and duplicate
+reconciliation return the same `steerStatus=terminal`, `outcome`, `retryAllowed=false`, reason and
+next action and cannot loop or report provider acceptance. If a force-reset has to preserve an
+independent unresolved provider side effect, that fact is recorded in its superseded target; it
+does not reopen or replay this steer operation.
 
 The steer effect result has three externally distinct meanings. `accepted` means the Input and
 the durable effect are confirmed or replayable; a replayable pending effect does not claim that the
@@ -692,6 +812,20 @@ and next action. A response-loss or restart reconciliation never creates a new I
 operation, or binding. It first queries the same effect identity, then retries the same operation
 only when the adapter can reconcile/replay it idempotently; otherwise it persists `unknown` with
 `retryAllowed=false` and must not report `accepted`.
+
+For force-reset candidate reconciliation, a `definitely-rejected` result from `getByKey` has an
+explicit result and is not treated as a missing candidate with an unconfirmed binding. In both the
+create-response-loss lookup and the restart/duplicate same-key lookup, it persists
+`candidateState=none`, `candidateBinding=null`, and `reason=force_reset_candidate_rejected`. While
+the original bounded deadline remains, the operation stays `outcome=pending` with
+`nextAction=retry_same_force_reset_candidate` and retries `createOrGetEmpty` using the same
+`candidateKey`; at the deadline it becomes terminal `outcome=blocked` with
+`nextAction=inspect_force_reset_operation`. Neither branch starts cleanup, reads a binding, or
+constructs a CAS. `response_lost` or generic `unknown` instead persists
+`candidateState=unknown`, `outcome=unknown`, `admission=blocked`, and
+`nextAction=query_same_candidate_or_manual`; only an exact complete candidate may become
+`candidateState=created` and authorize CAS. A complete mismatched candidate alone enters an
+independent cleanup fence.
 
 The canonical candidate identity is the pair `(SessionOperationRead.candidateKey,
 SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only when its key is the

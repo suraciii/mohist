@@ -498,17 +498,24 @@ projection 返回：
 response loss 后已没有可重放 effect，同一 request 的同步结果必须是 `unknown`，即使查询
 能看到已持久化的 Input；不能返回一个没有 replay path 的 `accepted`。
 
-Steer effect 的 durable handler 只有这一条生命周期：
+Steer effect 的 durable handler 只有这一条生命周期。Runner adapter 的 request/query/replay
+字段、effect identity 和结果分类以 [`conventions.md`](conventions.md#durable-steer-adapter-seam)
+为准；这里的 `adapter.apply/query/replay` 是 Server-to-Runner seam，不是当前 Runner 实现已经
+迁移完成的声明：
 
 ```text
 reconcileSteer(operationId):
   operation = Session.operation(operationId)
   require operation.kind == steer
+  currentFence = Session.reloadCurrentFence(operationId)
   if operation.outcome in {succeeded, rejected, failed, blocked}:
     return the stored canonical Input and operation projection
+  require operation.targetInputId and targetTurnId are unchanged
+  if targetTurnIsTerminalOrSuperseded(operation):
+    return settleSteerTargetTerminal(operation, currentFence,
+      cause = targetTurnTerminalCause(operation), adapterAttemptStarted = false)
   if operation.outcome == unknown and operation.retryAllowed == false:
     return the stored unknown projection with nextAction = query_same_steer_or_force_reset
-  require operation.targetInputId and targetTurnId are unchanged
   require Session.turn(operation.targetTurnId).status == running
   require Session.currentBinding == operation.bindingAtEffect
   claim or take over the same operation, incrementing ownerFence and claimGeneration
@@ -517,48 +524,178 @@ reconcileSteer(operationId):
                               expectedBinding = operation.expectedBinding,
                               candidateBinding = null,
                               bindingAtEffect = operation.bindingAtEffect)
-  result = Runtime.steer(effectId = operation.operationId,
-                         text = Session.inputText(operation.targetInputId),
-                         turn = operation.targetTurnId,
-                         binding = operation.bindingAtEffect,
-                         fenceToken = token)
-  if result == accepted:
-    atomically persist the matching operation as
-      phase = steer-accepted, outcome = succeeded, retryAllowed = false,
-      Input.steerStatus = accepted, Input.steerNextAction = inspect_turn
-    clear this ActiveOperation
-  if result == definitely-rejected:
-    atomically persist the matching operation as
-      phase = failed, outcome = rejected, retryAllowed = false,
-      Input.steerStatus = terminal, Input.steerNextAction = inspect_steer_operation
-    clear this ActiveOperation
-  if result == response_lost or result == unknown:
-    persist the same operation as phase = steer-dispatching, outcome = unknown,
-      retryAllowed = adapter_can_replay(operation),
-      Input.steerStatus = unknown,
-      Input.steerNextAction = query_same_steer_operation,
-      Session.activity = unknown, admission = blocked,
-      Session.reason = steer_result_unknown,
-      Session.nextAction = query_same_steer_or_force_reset
+  if targetTurnIsTerminalOrSuperseded(operation):
+    return settleSteerTargetTerminal(operation, token,
+      cause = targetTurnTerminalCause(operation), adapterAttemptStarted = false)
+  result = runFenced(token,
+    token => adapter.apply(SteerEffectRequest(
+      effectId = { sessionId = operation.sessionId, operationId = operation.operationId },
+      sessionId = operation.sessionId,
+      targetSessionId = operation.sessionId,
+      targetInputId = operation.targetInputId,
+      targetTurnId = operation.targetTurnId,
+      requestFingerprint = operation.requestFingerprint,
+      text = Session.inputText(operation.targetInputId),
+      binding = operation.bindingAtEffect,
+      bindingAtEffect = operation.bindingAtEffect,
+      fence = token)),
+    result => Session.persistAdapterAttemptOnlyIfFenceMatches(token, result))
+  if result == StaleFence:
+    current = Session.reloadCurrentOperation(operation.operationId)
+    if targetTurnIsTerminalOrSuperseded(current):
+      return settleSteerTargetTerminal(current, Session.reloadCurrentFence(current.operationId),
+        cause = targetTurnTerminalCause(current), adapterAttemptStarted = true)
+    return the reloaded canonical operation/Input projection (unknown or superseded)
+  if result == ProviderAccepted:
+    atomically:
+      current = Session.reloadCurrentOperation(operation.operationId)
+      if targetTurnIsTerminalOrSuperseded(current):
+        return settleSteerTargetTerminal(current, token,
+          cause = targetTurnTerminalCause(current), adapterAttemptStarted = true)
+      require fenceMatch(Session, Session.reloadCurrentFence(current.operationId), token, now)
+      persist the matching operation as
+        phase = steer-accepted, outcome = succeeded, retryAllowed = false,
+        Input.steerStatus = accepted, Input.steerNextAction = inspect_turn
+      clear this ActiveOperation
+  if result == DefinitelyRejected:
+    atomically:
+      current = Session.reloadCurrentOperation(operation.operationId)
+      if targetTurnIsTerminalOrSuperseded(current):
+        return settleSteerTargetTerminal(current, token,
+          cause = targetTurnTerminalCause(current), adapterAttemptStarted = true)
+      require fenceMatch(Session, Session.reloadCurrentFence(current.operationId), token, now)
+      persist the matching operation as
+        phase = failed, outcome = rejected, retryAllowed = false,
+        Input.steerStatus = terminal, Input.steerNextAction = inspect_steer_operation
+      clear this ActiveOperation
+  if result == ResponseLost or result == Unknown:
+    atomically:
+      current = Session.reloadCurrentOperation(operation.operationId)
+      if targetTurnIsTerminalOrSuperseded(current):
+        return settleSteerTargetTerminal(current, token,
+          cause = targetTurnTerminalCause(current), adapterAttemptStarted = true)
+      require fenceMatch(Session, Session.reloadCurrentFence(current.operationId), token, now)
+      persist the same operation as phase = steer-dispatching, outcome = unknown,
+        retryAllowed = adapter_can_replay(current),
+        Input.steerStatus = unknown,
+        Input.steerNextAction = query_same_steer_operation,
+        Session.activity = unknown, admission = blocked,
+        Session.reason = steer_result_unknown,
+        Session.nextAction = query_same_steer_or_force_reset
     return accepted only when retryAllowed == true; otherwise return unknown
 
 reconcileUnknownSteer(operation):
-  query the same effectId before invoking Runtime.steer again
-  if query == accepted: persist the fenced succeeded projection
-  if query == definitely-rejected: persist the fenced terminal projection
-  if query == response_lost or unknown:
-    retry the same operation only when retryAllowed == true and before deadline
+  operation = Session.reloadCurrentOperation(operation.operationId)
+  if operation.outcome in {succeeded, rejected, failed, blocked}:
+    return the stored canonical projection
+  if targetTurnIsTerminalOrSuperseded(operation):
+    return settleSteerTargetTerminal(operation, Session.reloadCurrentFence(operation.operationId),
+      cause = targetTurnTerminalCause(operation), adapterAttemptStarted = false)
+  queryFence = Session.reloadCurrentFence(operation.operationId)
+  queryToken = fenceToken(queryFence,
+    expectedBinding = queryFence.expectedBinding,
+    candidateBinding = null,
+    bindingAtEffect = queryFence.bindingAtEffect)
+  queryResult = runFenced(queryToken,
+    token => adapter.query(SteerEffectQuery(
+      effectId = { sessionId = operation.sessionId, operationId = operation.operationId },
+      sessionId = operation.sessionId,
+      targetSessionId = operation.sessionId,
+      targetInputId = operation.targetInputId,
+      targetTurnId = operation.targetTurnId,
+      requestFingerprint = operation.requestFingerprint,
+      binding = operation.bindingAtEffect,
+      fence = token)),
+    result => Session.persistAdapterAttemptOnlyIfFenceMatches(token, result))
+  operation = Session.reloadCurrentOperation(operation.operationId)
+  if queryResult == StaleFence:
+    if targetTurnIsTerminalOrSuperseded(operation):
+      return settleSteerTargetTerminal(operation, Session.reloadCurrentFence(operation.operationId),
+        cause = targetTurnTerminalCause(operation), adapterAttemptStarted = true)
+    return the reloaded canonical operation/Input projection (unknown or superseded)
+  if targetTurnIsTerminalOrSuperseded(operation):
+    return settleSteerTargetTerminal(operation, Session.reloadCurrentFence(operation.operationId),
+      cause = targetTurnTerminalCause(operation), adapterAttemptStarted = true)
+  if queryResult == ProviderAccepted: persist the fenced succeeded projection only if the
+    target and complete fence still match; otherwise use the terminal-race settle
+  if queryResult == DefinitelyRejected:
+    persist the fenced terminal projection with outcome = rejected,
+      steerStatus = terminal, retryAllowed = false,
+      reason = steer_provider_rejected, nextAction = inspect_steer_operation
+  if queryResult == DefinitelyAbsent:
+    if operation.retryAllowed == true and now < operation.deadline:
+      replayFence = Session.reloadCurrentFence(operation.operationId)
+      replayToken = fenceToken(replayFence,
+        expectedBinding = replayFence.expectedBinding,
+        candidateBinding = null,
+        bindingAtEffect = replayFence.bindingAtEffect)
+      replayResult = runFenced(replayToken,
+        token => adapter.replay(the original SteerEffectRequest with fence = token),
+        result => Session.persistAdapterAttemptOnlyIfFenceMatches(token, result))
+      reconcile the replay result through the same accepted/rejected/terminal-race branches
+    else:
+      persist outcome = unknown, retryAllowed = false,
+        reason = steer_effect_absent_without_replay_window,
+        nextAction = query_same_steer_or_force_reset, admission = blocked
+  if queryResult == ResponseLost or queryResult == Unknown:
+    retry the same operation only when retryAllowed == true and before deadline;
     otherwise retain outcome = unknown, retryAllowed = false,
       admission = blocked, nextAction = query_same_steer_or_force_reset
+
+settleSteerTargetTerminal(operation, fence, cause, adapterAttemptStarted):
+  atomically:
+    require operation.kind == steer
+    require operation.targetTurnId is unchanged
+    require current Turn is terminal
+       or a stop/force-reset transaction has superseded this target
+    require current operation fence == fence,
+      or this is the stop/force-reset transaction that invalidated fence
+    if adapterAttemptStarted == false:
+      outcome = rejected
+      reason = cause
+    else:
+      outcome = blocked
+      reason = steer_target_changed_after_effect_attempt
+    persist phase = failed, outcome, retryAllowed = false,
+      Input.state = accepted, Input.inputId and Input.turnId unchanged,
+      Input.steerStatus = terminal,
+      Input.steerNextAction = inspect_steer_operation,
+      operation.reason = reason, operation.nextAction = inspect_steer_operation
+    clear ActiveOperation only when it is this operation
+    increment Session/operation revision
+    return the stored terminal projection
+
+targetTurnIsTerminalOrSuperseded(operation):
+  return Session.turn(operation.targetTurnId).status == terminal
+    or confirmed Stop(operation.targetTurnId) exists
+    or force-reset supersedes operation.targetTurnId
+
+targetTurnTerminalCause(operation):
+  return target_turn_stopped when confirmed Stop exists
+    else target_turn_superseded when force-reset supersedes the target
+    else target_turn_terminal
+
+persistSteerAdapterAttemptOnlyIfFenceMatches(token, result):
+  atomically:
+    if not fenceMatch(Session, Session.reloadCurrentFence(token.operationId), token, now):
+      return StaleFence(
+        { sessionId = token.sessionId, operationId = token.operationId },
+        stale_operation_fence)
+    persist only the adapter attempt/result discriminator under this fence
+    return result
 ```
 
-The handler rechecks the complete fence before and after the adapter call. A stale binding,
-takeover, terminal Turn, stop, or force-reset prevents the effect write and leaves the original
-operation queryable as unknown/superseded; it never changes `bindingAtEffect` or constructs a new
-steer operation. Server restart scans pending/unknown steer operations and runs this same lookup,
-claim, query, and same-identity retry path. A duplicate request first reads the request map and
-operation, so it cannot create a second Input or claim `accepted` without the durable replay
-record.
+The handler rechecks the complete fence before and after every adapter call. A stale binding or
+takeover prevents the old effect write. A terminal Turn, stop, or force-reset invokes the atomic
+settle above: before an adapter attempt it is a definitive terminal rejection; after an adapter,
+query or replay attempt has started it is terminal `blocked` with a stable reason, because the
+provider result is no longer authoritative. Both paths release `ActiveOperation`, set
+`retryAllowed=false`, preserve the accepted Input and original Turn identity, and are replay-only;
+they cannot loop or report provider accepted. A stale owner never changes `bindingAtEffect` or
+constructs a new steer operation. Server restart scans pending/unknown steer operations and runs
+this same lookup, claim, query and same-identity replay path. A duplicate request first reads the
+request map and operation, so it cannot create a second Input or claim `accepted` without the
+durable replay record.
 
 调用幂等键用于找到同一个 SessionInput，不是 AgentSession 内的另一个领域实体，也不用于
 把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
@@ -639,6 +776,14 @@ BeginStop(session, operationId, turnId, expectedRevision, expectedContextGenerat
         reason = stop_result_unknown,
         nextAction = query_same_stop_operation_or_attempt)
 ```
+
+The Session transaction that confirms a queued or running Turn stopped also settles any steer
+operation targeting that Turn with `settleSteerTargetTerminal(cause=target_turn_stopped)`. A steer
+that has not reached the adapter becomes `outcome=rejected`; a steer whose adapter/query/replay has
+started becomes terminal `outcome=blocked`. The stop transaction invalidates the steer fence and
+releases its `ActiveOperation` atomically. A late steer result is stale and cannot be persisted as
+accepted. An uncertain Runtime stop does not terminalize the Turn, so it leaves both operations
+queryable as unknown instead of guessing a terminal result.
 
 ```text
 persistStopUnknownIfFenceMatches(stopToken, turnId, reason, nextAction):
@@ -1594,8 +1739,14 @@ BeginForceReset(session, newOperationId, ownerId, expectedRevision,
     old = ActiveOperation targeting expectedContextGeneration
     if old != null:
       require targets contains (targetKind = operation, targetId = old.operationId)
-      persist old.phase = superseded, old.outcome = unknown,
-        old.supersededByOperationId = newOperationId
+      if old.kind == steer:
+        settleSteerTargetTerminal(old, Session.reloadCurrentFence(old.operationId),
+          cause = target_turn_superseded,
+          adapterAttemptStarted = old.phase == steer-dispatching)
+        persist old.supersededByOperationId = newOperationId
+      else:
+        persist old.phase = superseded, old.outcome = unknown,
+          old.supersededByOperationId = newOperationId
     create new ActiveOperation with:
       sessionId = session.id
       operationId = newOperationId
@@ -1661,6 +1812,8 @@ if createResult == response_lost:
     return persistForceResetCandidateRetryable(newFence,
       reason = force_reset_candidate_not_found,
       nextAction = retry_same_force_reset_candidate)
+  if lookupResult == definitely-rejected:
+    return persistForceResetCandidateDefinitelyRejected(newFence)
   if lookupResult == candidate_not_ready:
     return persistForceResetCandidateUnknown(newFence,
       reason = force_reset_candidate_not_ready,
@@ -1670,8 +1823,9 @@ else if createResult == unknown:
   return persistForceResetCandidateUnknown(newFence,
     reason = force_reset_candidate_unknown,
     nextAction = query_same_candidate_or_manual)
-else if createResult == definitely-rejected or createResult == definitely-absent
-        or createResult == candidate_not_ready:
+else if createResult == definitely-rejected:
+  return persistForceResetCandidateDefinitelyRejected(newFence)
+else if createResult == definitely-absent or createResult == candidate_not_ready:
   return persistForceResetCandidateRetryable(newFence,
     reason = force_reset_candidate_not_ready,
     nextAction = retry_same_force_reset_candidate)
@@ -1746,6 +1900,29 @@ persistForceResetCandidateRetryable(fence, reason, nextAction):
       revision = nextRevision(), session.revision = revision
   return retry_same_force_reset_candidate
 
+persistForceResetCandidateDefinitelyRejected(fence):
+  atomically:
+    require fence is still the current operation fence
+    require fence.candidateBinding == null
+    require fence.candidateState in {none, unknown}
+    require Session.currentBinding == fence.expectedBinding
+    if now < fence.deadline:
+      persist phase = resolving, outcome = pending,
+        candidateState = none, candidateBinding = null,
+        reason = force_reset_candidate_rejected,
+        nextAction = retry_same_force_reset_candidate,
+        revision = nextRevision(), session.revision = revision
+      # Reuse the same candidateKey within the bounded deadline. There is no
+      # candidate identity to clean up and no CAS token to build.
+      return retry_same_force_reset_candidate
+    persist phase = failed, outcome = blocked,
+      candidateState = none, candidateBinding = null,
+      reason = force_reset_candidate_rejected,
+      nextAction = inspect_force_reset_operation,
+      revision = nextRevision(), session.revision = revision
+    clear any retry signal and keep admission = blocked
+    return blocked
+
 candidateIdentityMatches(operation, candidate):
   return candidate.key == operation.candidateKey
     and candidate.binding is complete
@@ -1800,6 +1977,8 @@ reconcileForceResetCandidate(operation):
       return persistForceResetCandidateRetryable(operation,
         reason = force_reset_candidate_not_found,
         nextAction = retry_same_force_reset_candidate)
+    if lookup == definitely-rejected:
+      return persistForceResetCandidateDefinitelyRejected(operation)
     if lookup == candidate_not_ready:
       return persistForceResetCandidateUnknown(operation,
         reason = force_reset_candidate_not_ready,
@@ -1823,9 +2002,18 @@ reconcileForceResetCandidate(operation):
 `persistForceResetCandidateRetryable` leaves the operation pending with the same `candidateKey`;
 the durable handler re-enters `Runtime.createOrGetEmpty` with that key before any fresh `getByKey`
 probe. A retry response loss again enters the same response-loss `getByKey` branch, an explicit
-ready candidate repeats identity validation, and a second absent/refused result remains pending
-until the fixed deadline. It never creates a new candidate key or CAS token from a transient
-response.
+ready candidate repeats identity validation, and a second absent result remains pending until the
+fixed deadline. A `definitely-rejected` result from the create response-loss lookup and from the
+restart reconciliation lookup follows the same `persistForceResetCandidateDefinitelyRejected`
+transition: before the deadline, `candidateState=none`, `candidateBinding=null`,
+`outcome=pending`, `reason=force_reset_candidate_rejected`, and
+`nextAction=retry_same_force_reset_candidate`; at the deadline, `candidateState=none`,
+`outcome=blocked`, the same stable reason, and `nextAction=inspect_force_reset_operation`.
+Neither branch starts cleanup, reads an unconfirmed binding, or constructs a CAS. A response loss
+or generic unknown instead persists `candidateState=unknown`, `outcome=unknown`,
+`nextAction=query_same_candidate_or_manual`; only a complete exact candidate may enter the
+independent cleanup or CAS paths. No branch creates a new candidate key or CAS token from a
+transient response.
 
 若旧 `ActiveOperation` 不存在，`targets` 仍会把 unknown Input/Turn/dispatch/Runtime
 side effect 变成持久 `UnresolvedPrevious`，并在 `SessionOperationRead.supersededTargets`
@@ -2680,6 +2868,16 @@ Runtime binding 基础，但尚未让本文的目标契约成为所有入口共�
   generation，其他新 logical context 递增，force-reset 后旧 Unknown 不得混入当前 activity。
 - Web 与 CLI 仍需只适配 Server canonical 状态，并把 explicit force-reset 的风险确认和
   原 operation 查询/重试暴露出来；不能从本地日志、HTTP 状态或 provider event 推导结果。
+
+### Implementation gap: caller key is required
+
+本文的目标行为是：follow-up 必须有非空 caller `requestId`，Compact、Reset、recovery、handoff、
+rebind、stop 和 force-reset 必须有 caller `operationId`；缺失 key 在受理前拒绝，不生成隐藏
+identity，也不写 operation、Input、Turn、candidate 或外部 effect。当前 routes/Grain 仍有
+缺失 caller key 时生成隐藏 key 的路径，这是 follow-on implementation work，不是目标契约的
+替代行为，也不表示当前实现已经完成。迁移边界在 Server canonical admission/operation 层：
+所有入口先传递 caller key，再由该层在任何 durable write 或 external effect 前拒绝 null/empty
+key；迁移完成前必须保留这一实现 gap。
 
 这些是目标落地差距，不改变边界：#377 负责 Agent 配置与启动体验，不在本文新增配置模型；
 #382 负责跨 Session max-concurrent-runs、capacity claim/release 和容量视图；#384 负责默认

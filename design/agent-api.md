@@ -227,6 +227,35 @@ replayable effect to be committed together, or an already confirmed successful o
 operation identity; no duplicate follow-up may report `accepted` when the operation is not already
 `outcome=succeeded` and `steerRetryAllowed=false`.
 
+### Durable steer effect boundary
+
+The Server-to-Runner steer seam is concrete even though the current Runner routes are not yet
+migrated to it. The canonical request and result types live in
+[`conventions.md#durable-steer-adapter-seam`](conventions.md#durable-steer-adapter-seam). Every
+adapter call receives the persisted `effectId={sessionId, operationId}`, logical `sessionId`,
+`targetSessionId=sessionId`, `targetInputId`, `targetTurnId`, canonical
+`requestFingerprint`, exact accepted `text`, complete target `binding` and `bindingAtEffect`, and
+complete `FenceToken` with explicit null dispatch identities. The Server
+offers `apply`, `query` and same-identity `replay`; no method may create a second Input, Turn,
+operation, binding or effect key.
+
+`ProviderAccepted` is the only result that can become `outcome=succeeded`. `DefinitelyRejected`
+becomes stable terminal `steerStatus=terminal`; `DefinitelyAbsent` is query-only and can lead to
+same-key replay while the fence/deadline allows it; `ResponseLost`, `Unknown` and `StaleFence`
+never become provider acceptance. Duplicate apply/replay with the same effect identity and
+payload returns the original provider result. A different target, binding, text or fingerprint
+under the same identity is rejected. Before and after every adapter call, Server atomically
+rechecks the complete fence and current binding. Restart scans the same operation/effect,
+queries first, and replays only through this seam and the original identity.
+
+If the target Turn becomes terminal, is stopped, or is superseded by force-reset before the call,
+the Server atomically settles the steer operation as terminal `rejected`; if that change happens
+after an adapter/query/replay attempt has started, it settles as terminal `blocked` because the
+provider result is no longer authoritative. Both set `retryAllowed=false`, stable
+`reason`/`nextAction`, release `ActiveOperation`, preserve `state=accepted` and the original
+Input/Turn IDs, and are replay-only. A stale `ProviderAccepted` is discarded and can never be
+reported by the API.
+
 `dispatchStatus=blocked` 只表示同一次 dispatch attempt 已得到 `definitely-rejected` 且当前
 仍可重试的临时阻塞，Turn 仍为 `status=queued`；客户端
 不能把它当作终态，Server durable coordinator 也不能因读到这个值就返回。它必须在下一次
@@ -394,6 +423,16 @@ Restart and duplicate requests repeat this same operation
 lookup/reconcile path; they never create another key, candidate, context, or CAS. A discard response
 loss remains on the independent cleanup fence with a revisioned `cleanup-pending` result; it never
 becomes an unbounded retry or deletes a candidate after the current binding changes.
+
+The `getByKey` result `definitely-rejected` is explicit in both the create-response-loss and
+restart/duplicate same-key branches: persist `candidateState=none`, `candidateBinding=null`,
+`outcome=pending`, `reason=force_reset_candidate_rejected`, and
+`nextAction=retry_same_force_reset_candidate` while the original deadline remains; at the
+deadline persist terminal `outcome=blocked` with the same candidate state/reason and
+`nextAction=inspect_force_reset_operation`. These branches do not start cleanup, read an
+unconfirmed binding, or construct CAS. `response_lost`/generic `unknown` instead persist
+`candidateState=unknown`, `outcome=unknown`, and `query_same_candidate_or_manual`; only an exact
+complete candidate may be persisted as `created` for CAS.
 
 它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
 要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一 Session 事务中
@@ -608,6 +647,21 @@ Buzz 的实现证明聊天入口需要明确的调用者访问策略和有界队
 当前 Web UI 与 CLI 已有 Agent 创建、启动、查看和继续会话的基础路径，但上述跨入口契约尚未
 完整成立，尤其是输入身份、执行轮次、重复请求保护、断线续读和并发调度。命名 Agent 的
 执行定义已由 Agent profile 统一拥有，客户端输入不能覆盖它；Skills 随每次执行固定。
+
+### Implementation gap: caller key is required
+
+Target behavior is explicit: every follow-up must carry a non-empty caller-provided `requestId`,
+and every Compact, Reset, recovery, handoff, rebind, stop and force-reset command must carry its
+caller-provided `operationId`. Missing keys are rejected before any durable operation, Input, Turn,
+candidate or hidden identity is created. A response-loss retry reuses the original key.
+
+The current routes/Grain still have paths that generate a hidden key when the caller key is
+missing. This is a known follow-on implementation gap, not an alternative contract and not a claim
+that the current implementation is complete. The migration boundary is the Server admission layer:
+all routes and Grain entry points must pass the caller key into the canonical admission/operation
+path, and that path must reject null/empty keys before any state or external effect. Until that
+follow-on work lands, this target design remains the authority for new implementation and the gap
+must remain visible in delivery status.
 
 实施顺序由产品依赖决定：
 
