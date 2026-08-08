@@ -88,8 +88,9 @@ Web tests run with `isolate: false`: test files share a worker module registry a
 ### 4. Fast and concise
 
 The duration budget is enforced by the test-duration guard
-(`scripts/test-duration/`, `npm run test:budget`), locally and in CI. It is two
-hard constraints, both FAIL — never a warning:
+(`scripts/test-duration/`, `npm run test:budget`) locally; CI does not run the
+guard, it runs the suites directly. The guard is two hard constraints, both
+FAIL — never a warning:
 
 | Constraint | What it proves | Threshold |
 |---|---|---|
