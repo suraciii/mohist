@@ -11,7 +11,6 @@
   "Mohist.Server.SpecTests/Specs/Issue/Api/IssueCreationSpecs.cs": 35000,
   "Mohist.Server.SpecTests/Specs/Issue/Grain/IssueCompositeAdvancementGrainSpecs.cs": 25000,
   "Mohist.Server.SpecTests/Specs/Issue/IssueTemplate/IssueTemplateRegistrySpecs.cs": 27000,
-  "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs": 36000,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsQualitySpecs.cs": 51000,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueMetricsStageDurationsSpecs.cs": 46000,
   "Mohist.Server.SpecTests/Specs/Issue/Querier/IssueQuerierSpecs.cs": 26000,
@@ -34,6 +33,7 @@
   "Mohist.Server.SpecTests/Support/DispatcherFixture.cs": 35000,
   "Mohist.Server.SpecTests/Support/MohistIntegrationFixture.cs": 28000,
   "Mohist.Server.UnitTests/Foundation/VariableBundleTests.cs": 28000,
+  "Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs": 36000,
   "Mohist.Server.UnitTests/SystemSpecs/EventDispatcherSpecs.cs": 44000,
   "Mohist.Server.UnitTests/Workflow/Services/ActionContractValidatorTests.cs": 29000
 }
