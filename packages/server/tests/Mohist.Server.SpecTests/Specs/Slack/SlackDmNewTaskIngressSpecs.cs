@@ -258,7 +258,8 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         // deterministically selects the runner registered here.
         var registry = _fixture.Grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         foreach (var staleId in await registry.ListRunnerIdsAsync())
-            await registry.UnregisterAsync(staleId);
+            await _fixture.Grains.GetGrain<IRunnerGrain>(staleId).UnregisterAsync();
+        Assert.Empty(await registry.ListRunnerIdsAsync());
 
         using var register = await _fixture.Client.PostAsJsonAsync($"/api/runner/{runnerId}/register", new
         {
