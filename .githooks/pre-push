@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Resolve the main checkout via --git-common-dir so the hook also works from
+# linked worktrees, which have no .githooks/ of their own.
+cd "$(git rev-parse --path-format=absolute --git-common-dir)/.."
+exec scripts/check-branch-skew.sh
