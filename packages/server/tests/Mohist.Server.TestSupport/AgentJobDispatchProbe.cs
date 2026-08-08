@@ -12,10 +12,14 @@ namespace Mohist.Server.TestSupport;
 /// </summary>
 public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 {
+    private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, int> _preparedCounts =
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PreparedSignal> _preparedSignals =
         new(StringComparer.Ordinal);
+
+    public AgentJobDispatchProbe(TimeProvider? timeProvider = null) =>
+        _timeProvider = timeProvider ?? new FixedTimeProvider(TestTime.UtcNow);
 
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
@@ -30,6 +34,15 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 
     public int PreparedCount(string agentJobId) =>
         _preparedCounts.GetValueOrDefault(agentJobId);
+
+    public int RetainedSignalCount(string agentJobId) =>
+        _preparedSignals.ContainsKey(agentJobId) ? 1 : 0;
+
+    public Task WaiterRegisteredAsync(string agentJobId) =>
+        _preparedSignals.TryGetValue(agentJobId, out var signal)
+            ? signal.WaiterRegistered.Task
+            : throw new InvalidOperationException(
+                $"No assignment-prepared waiter is registered for AgentJob '{agentJobId}'.");
 
     public async Task WaitForAssignmentPreparedAsync(
         string agentJobId,
@@ -47,7 +60,9 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
             if (_preparedCounts.ContainsKey(agentJobId))
                 signal.Completion.TrySetResult();
 
-            await signal.Completion.Task.WaitAsync(timeout, cancellationToken);
+            var wait = signal.Completion.Task.WaitAsync(timeout, _timeProvider, cancellationToken);
+            signal.WaiterRegistered.TrySetResult();
+            await wait;
         }
         catch (TimeoutException)
         {
@@ -93,6 +108,9 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
         private bool _retired;
 
         public TaskCompletionSource Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource WaiterRegistered { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool TryAcquireWaiter()
