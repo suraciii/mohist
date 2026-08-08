@@ -135,10 +135,11 @@ describe('AgentSessionComposerPage', () => {
       agentRef: 'agent-1',
       body: {
         prompt: 'Analyze this',
-        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspace: '/workspace' },
+        context: { issueNumber: 42, epicNumber: 7, repository: 'org/repo', workspacePath: '/workspace' },
         attachments: [],
       },
     })
+    expect(state.launchCalls[0].body).not.toHaveProperty('context.workspace')
     expect(state.launchCalls[0].body).not.toHaveProperty('runtime')
     expect(state.launchCalls[0].body).not.toHaveProperty('model')
     expect(state.launchCalls[0].body).not.toHaveProperty('variant')

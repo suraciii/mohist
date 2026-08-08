@@ -278,7 +278,7 @@ export function AgentSessionComposerPage({
         else context.epicNumber = number
       }
       else if (ref.type === 'repository') context.repository = ref.value
-      else if (ref.type === 'workspace') context.workspace = ref.value
+      else if (ref.type === 'workspace') context.workspacePath = ref.value
     }
     const hasContext = Object.keys(context).length > 0
 
