@@ -8,6 +8,7 @@ public sealed record Credential(
     IReadOnlyList<Scope> Scopes,
     string? Name,
     string? Prefix,
+    string? ProjectId,
     DateTimeOffset? ExpiresAt,
     DateTimeOffset? RevokedAt,
     DateTimeOffset CreatedAt);

@@ -1,8 +1,13 @@
 using EnvironmentAbstractions.TestHelpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Project.Services;
 using Xunit;
 
 namespace Mohist.Server.UnitTests.Auth;
@@ -54,6 +59,7 @@ internal static class AuthResolutionTestSupport
             [Scope.Readonly],
             "spec",
             "moh_pat_ab",
+            null,
             new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -83,6 +89,7 @@ internal static class AuthResolutionTestSupport
             "moh_runner_ab",
             null,
             null,
+            null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
         context.Request.Path = path;
@@ -100,7 +107,9 @@ internal static class AuthResolutionTestSupport
                 metadata.Where(item => item is not null).Cast<object>().ToArray()),
             displayName: "test"));
 
-    internal static AuthResolutionMiddleware NewMiddleware(FakeCredentialStore? db = null)
+    internal static AuthResolutionMiddleware NewMiddleware(
+        FakeCredentialStore? db = null,
+        ProjectRefResolver? projects = null)
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -111,7 +120,71 @@ internal static class AuthResolutionTestSupport
             .Build();
         var environment = new MockEnvironmentVariableProvider(addExistingEnvironmentVariables: false);
         var loader = new FileCredentialLoader(configuration, environment, new FakeFileStore());
-        return new AuthResolutionMiddleware(loader, db ?? new FakeCredentialStore());
+        return new AuthResolutionMiddleware(
+            loader,
+            db ?? new FakeCredentialStore(),
+            projects ?? Projects.Resolver);
+    }
+
+    internal static ProjectResolverSetup Projects { get; } =
+        CreateProjectResolver(("proj_a", "alpha"), ("proj_b", "beta"));
+
+    internal static ProjectResolverSetup CreateProjectResolver(params (string Id, string Name)[] projects)
+    {
+        var connection = new SqliteConnection($"Data Source=auth-middleware-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        connection.Open();
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = """
+                CREATE TABLE "Projects" (
+                    "Id" TEXT NOT NULL CONSTRAINT "PK_Projects" PRIMARY KEY,
+                    "Name" TEXT NOT NULL,
+                    "RepositoriesJson" TEXT NOT NULL,
+                    "CreatedAt" TEXT NOT NULL,
+                    "UpdatedAt" TEXT NOT NULL,
+                    "RepositoryRevision" INTEGER NOT NULL,
+                    "LastRepositoryCommandJson" TEXT NULL
+                );
+                CREATE TABLE "ProjectWorkflowProfiles" (
+                    "ProjectId" TEXT NOT NULL CONSTRAINT "PK_ProjectWorkflowProfiles" PRIMARY KEY,
+                    "Variables" TEXT NOT NULL
+                );
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        foreach (var (id, name) in projects)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO "Projects" ("Id", "Name", "RepositoriesJson", "CreatedAt", "UpdatedAt", "RepositoryRevision", "LastRepositoryCommandJson")
+                VALUES ($id, $name, '[]', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00', 0, NULL);
+                """;
+            command.Parameters.AddWithValue("$id", id);
+            command.Parameters.AddWithValue("$name", name);
+            command.ExecuteNonQuery();
+        }
+
+        var services = new ServiceCollection();
+        services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(connection));
+        var provider = services.BuildServiceProvider();
+        return new ProjectResolverSetup(
+            new ProjectRefResolver(new ProjectQuerier(
+                provider.GetRequiredService<IDbContextFactory<MohistDbContext>>())),
+            provider,
+            connection);
+    }
+
+    internal sealed record ProjectResolverSetup(
+        ProjectRefResolver Resolver,
+        ServiceProvider Provider,
+        SqliteConnection Connection) : IDisposable
+    {
+        public void Dispose()
+        {
+            Provider.Dispose();
+            Connection.Dispose();
+        }
     }
 
     internal static DefaultHttpContext NewContext(
@@ -231,6 +304,24 @@ internal static class AuthResolutionTestSupport
 
         public Task<bool> RevokeRunnerCredentialAsync(
             string runnerId,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<IntegrationCreateResult> CreateIntegrationAsync(
+            string principalId,
+            string name,
+            string projectId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokeIntegrationAsync(
+            string principalId,
+            string id,
             DateTimeOffset revokedAt,
             CancellationToken ct = default)
         {

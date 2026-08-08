@@ -227,6 +227,71 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         return revoked > 0;
     }
 
+    public async Task<IntegrationCreateResult> CreateIntegrationAsync(
+        string principalId,
+        string name,
+        string projectId,
+        CancellationToken ct = default)
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var row = new CredentialRow
+        {
+            Id = $"itok_{Guid.NewGuid():N}",
+            PrincipalId = principalId,
+            Kind = CredentialKind.Integration.ToString(),
+            TokenHash = CredentialToken.Hash(token),
+            ScopesJson = JSON.Serialize(new[] { Scope.Webhook.Name }),
+            Name = name,
+            Prefix = CredentialToken.DisplayPrefix(token),
+            ProjectId = projectId,
+            CreatedAt = _time.GetUtcNow(),
+        };
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        if (await NameIsInUseAsync(db, principalId, name, ct).ConfigureAwait(false))
+            return new IntegrationCreateResult(IntegrationCreateStatus.DuplicateName, null, null);
+
+        db.Credentials.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent issuance of the same name won the race; the
+            // unique (PrincipalId, Name) index on active rows is the
+            // backstop that turns both into one winner.
+            return new IntegrationCreateResult(IntegrationCreateStatus.DuplicateName, null, null);
+        }
+
+        return new IntegrationCreateResult(
+            IntegrationCreateStatus.Created,
+            ToCredential(row, CredentialKind.Integration),
+            token);
+    }
+
+    public async Task<bool> RevokeIntegrationAsync(
+        string principalId,
+        string id,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var row = await db.Credentials
+            .FirstOrDefaultAsync(
+                candidate => candidate.PrincipalId == principalId
+                    && candidate.Kind.ToLower() == "integration"
+                    && candidate.Id == id,
+                ct)
+            .ConfigureAwait(false);
+        if (row is null)
+            return false;
+
+        row.RevokedAt ??= revokedAt;
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return true;
+    }
+
     private static async Task<bool> NameIsInUseAsync(
         MohistDbContext db,
         string principalId,
@@ -254,6 +319,7 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
             DeserializeScopes(row.ScopesJson),
             row.Name,
             row.Prefix,
+            row.ProjectId,
             row.ExpiresAt,
             row.RevokedAt,
             row.CreatedAt);

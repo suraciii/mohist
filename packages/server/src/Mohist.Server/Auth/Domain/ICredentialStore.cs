@@ -108,6 +108,32 @@ public interface ICredentialStore
         string runnerId,
         DateTimeOffset revokedAt,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Issues an integration token for the given principal and project:
+    /// generates the token, stores only its hash (plus a short display
+    /// prefix) and returns the full value exactly once. The credential
+    /// carries the <c>webhook</c> scope and the canonical project id it
+    /// is narrowed to. The name must be unused by any active
+    /// (non-revoked) credential of the same principal; a concurrent
+    /// duplicate is rejected by the same rule.
+    /// </summary>
+    Task<IntegrationCreateResult> CreateIntegrationAsync(
+        string principalId,
+        string name,
+        string projectId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes the principal's integration token with the given id.
+    /// Idempotent: true when a row with that id exists (already revoked
+    /// or not), false when there is no such credential.
+    /// </summary>
+    Task<bool> RevokeIntegrationAsync(
+        string principalId,
+        string id,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default);
 }
 
 public enum EnrollmentTokenConsumeStatus
@@ -121,3 +147,14 @@ public enum EnrollmentTokenConsumeStatus
 public sealed record EnrollmentTokenCreateResult(string Token, EnrollmentToken EnrollmentToken);
 
 public sealed record RunnerCredentialCreateResult(string Token, Credential Credential);
+
+public enum IntegrationCreateStatus
+{
+    Created,
+    DuplicateName,
+}
+
+public sealed record IntegrationCreateResult(
+    IntegrationCreateStatus Status,
+    Credential? Credential,
+    string? Token);

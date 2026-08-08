@@ -8,14 +8,17 @@ namespace Mohist.Server.Auth.Identity;
 /// carries. <see cref="RunnerId"/> is the runner the credential is
 /// bound to (runner-kind credentials only); the auth layer rejects any
 /// runner-scoped request whose self-declared runner id does not match
-/// it (docs/auth.md Runner 顶替防护).
+/// it (docs/auth.md Runner 顶替防护). <see cref="ProjectId"/> is the
+/// project an integration credential is narrowed to and is null for
+/// every other kind.
 /// </summary>
 public sealed record MohistPrincipal(
     string Id,
     PrincipalKind Kind,
     string Name,
     IReadOnlyList<Scope> Scopes,
-    string? RunnerId = null)
+    string? RunnerId = null,
+    string? ProjectId = null)
 {
     public const string AdminPrincipalId = "admin";
     public const string ServicePrincipalId = "service";

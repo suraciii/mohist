@@ -1,8 +1,16 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
+using EnvironmentAbstractions.TestHelpers;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Project.Services;
 using Xunit;
 using static Mohist.Server.UnitTests.Auth.AuthResolutionTestSupport;
 
@@ -155,6 +163,7 @@ public sealed class AuthResolutionMiddlewareTests
             "moh_pat_ab",
             null,
             null,
+            null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         var middleware = NewMiddleware(db);
         var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
@@ -180,6 +189,7 @@ public sealed class AuthResolutionMiddlewareTests
             [Scope.Runner],
             "spec",
             "moh_pat_ab",
+            null,
             null,
             new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero),
             new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero)));
@@ -214,4 +224,188 @@ public sealed class AuthResolutionMiddlewareTests
         Assert.Equal(HttpStatusCode.OK, (HttpStatusCode)context.Response.StatusCode);
         Assert.False(context.Items.ContainsKey(MohistPrincipal.HttpContextItemKey));
     }
+
+    [Fact]
+    public async Task IntegrationCredential_ResolvesThePrincipalWithTheProjectConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "itok_1",
+            "admin",
+            CredentialKind.Integration,
+            CredentialToken.Hash(token),
+            [Scope.Webhook],
+            "github-webhook",
+            "moh_integration_ab",
+            "proj_a",
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        var middleware = NewMiddleware(db);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
+        Assert.Equal("proj_a", principal.ProjectId);
+        Assert.Equal(Scope.Webhook, Assert.Single(principal.Scopes));
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestForTheConstrainedProject_SatisfiesTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.RouteValues["projectRef"] = "proj_a";
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_a", resolution.ConstrainedProjectId);
+        Assert.Equal("proj_a", resolution.RequestProjectId);
+        Assert.True(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestForAnotherProject_DoesNotSatisfyTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.RouteValues["projectRef"] = "proj_b";
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_b", resolution.RequestProjectId);
+        Assert.False(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_ProjectInQueryParam_IsExtractedAndEvaluated()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+        context.Request.QueryString = new QueryString("?projectRef=proj_a");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Equal("proj_a", resolution.RequestProjectId);
+        Assert.True(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task IntegrationCredential_RequestWithoutAProject_NeverSatisfiesTheConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Integration);
+        var db = NewIntegrationStore(token, "proj_a");
+        var middleware = NewMiddleware(db, Projects.Resolver);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        var resolution = Assert.IsType<IntegrationProjectConstraint.Resolution>(
+            context.Items[IntegrationProjectConstraint.ItemKey]);
+        Assert.Null(resolution.RequestProjectId);
+        Assert.False(resolution.IsSatisfied);
+    }
+
+    [Fact]
+    public async Task NonIntegrationCredential_RecordsNoProjectConstraint()
+    {
+        var token = CredentialToken.Generate(CredentialKind.Pat);
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "pat_1",
+            "admin",
+            CredentialKind.Pat,
+            CredentialToken.Hash(token),
+            [Scope.Operator],
+            "ci",
+            "moh_pat_ab",
+            null,
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        var middleware = NewMiddleware(db);
+        var context = NewContext(request => request.Headers.Authorization = $"Bearer {token}");
+
+        await middleware.InvokeAsync(context, _ => Task.CompletedTask);
+
+        Assert.False(context.Items.ContainsKey(IntegrationProjectConstraint.ItemKey));
+        var principal = Assert.IsType<MohistPrincipal>(context.Items[MohistPrincipal.HttpContextItemKey]);
+        Assert.Null(principal.ProjectId);
+    }
+
+    private static FakeCredentialStore NewIntegrationStore(string token, string projectId)
+    {
+        var db = new FakeCredentialStore();
+        db.Add(new Credential(
+            "itok_1",
+            "admin",
+            CredentialKind.Integration,
+            CredentialToken.Hash(token),
+            [Scope.Webhook],
+            "github-webhook",
+            "moh_integration_ab",
+            projectId,
+            null,
+            null,
+            new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
+        return db;
+    }
+
+    private static void AssertUnauthorized(HttpContext context)
+    {
+        Assert.Equal(StatusCodes.Status401Unauthorized, context.Response.StatusCode);
+        Assert.Equal(
+            "Bearer error=\"invalid_token\"",
+            Assert.Single(context.Response.Headers.WWWAuthenticate));
+    }
+
+    private static string ReadBody(HttpContext context)
+    {
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, Encoding.UTF8);
+        return reader.ReadToEnd();
+    }
+
+    private static DefaultHttpContext NewContext(
+        Action<HttpRequest>? configure = null,
+        string path = "/api/projects")
+    {
+        var context = new DefaultHttpContext
+        {
+            Request =
+            {
+                Method = HttpMethods.Get,
+                Path = path,
+            },
+        };
+        context.Response.Body = new MemoryStream();
+        configure?.Invoke(context.Request);
+        return context;
+    }
+
+    private sealed class FakeFileStore : IFileCredentialStore
+    {
+        public int CreateCount { get; private set; }
+
+        public string LoadOrCreateDefault(string path) =>
+            throw new InvalidOperationException("Tokens are always configured in these tests.");
+
+        public string ReadExplicit(string path) =>
+            throw new InvalidOperationException("Tokens are always configured in these tests.");
+    }
+
 }
