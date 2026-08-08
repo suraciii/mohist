@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
@@ -42,7 +44,7 @@ public static class RunnerIdentityRoutes
                 isOnline ? "online" : "offline",
                 runtime?.LastHeartbeatAt,
                 connectionId is not null ? "connected" : "disconnected"));
-        });
+        }).RequireScopes(Scope.Operator);
 
         return app;
     }

@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Orleans;
@@ -20,7 +22,7 @@ public static class RunnerRoutes
 {
     public static WebApplication MapRunnerRoutes(this WebApplication app)
     {
-        var group = app.MapGroup("/api/runner/{runnerId}");
+        var group = app.MapGroup("/api/runner/{runnerId}").RequireScopes(Scope.Runner);
 
         group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
         {

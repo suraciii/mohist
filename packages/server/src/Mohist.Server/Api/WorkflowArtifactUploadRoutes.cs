@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Hosting;
 using Mohist.Server.Workflow.Services.Artifacts;
 
@@ -50,7 +52,8 @@ public static class WorkflowArtifactUploadRoutes
 
                 var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
                 return ToApiResult(result);
-            });
+            })
+            .RequireScopes(Scope.Runner);
 
         app.MapPost(
             "/api/agent-jobs/{agentJobId}/work/{workId}/artifact-uploads",
@@ -67,7 +70,8 @@ public static class WorkflowArtifactUploadRoutes
 
                 var result = await uploadService.UploadAsync(parsed.Request!, cancellationToken);
                 return ToApiResult(result);
-            });
+            })
+            .RequireScopes(Scope.Runner);
 
         return app;
     }
