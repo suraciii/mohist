@@ -276,7 +276,9 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(jobKey);
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
+            jobKey,
+            TimeSpan.FromSeconds(5));
 
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
