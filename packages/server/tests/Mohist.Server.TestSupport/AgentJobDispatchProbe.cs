@@ -19,7 +19,7 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
         new(StringComparer.Ordinal);
 
     public AgentJobDispatchProbe(TimeProvider? timeProvider = null) =>
-        _timeProvider = timeProvider ?? TimeProvider.System;
+        _timeProvider = timeProvider ?? new FixedTimeProvider(TestTime.UtcNow);
 
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
