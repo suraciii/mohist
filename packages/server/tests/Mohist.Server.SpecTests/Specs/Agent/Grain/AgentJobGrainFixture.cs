@@ -247,9 +247,13 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
             : Task.CompletedTask;
     }
 
-    public Task WaitForRunnerAcceptedAsync() => _runnerAccepted.Task;
+    public Task WaitForRunnerAcceptedAsync() => WaitForSignalAsync(
+        _runnerAccepted,
+        "AgentJob dispatch observer runner accepted");
 
-    public Task WaitForAssignmentPreparedAsync() => _assignmentPrepared.Task;
+    public Task WaitForAssignmentPreparedAsync() => WaitForSignalAsync(
+        _assignmentPrepared,
+        "AgentJob dispatch observer assignment prepared");
 
     public void BlockAssignmentPrepared() => _assignmentPreparedBlock ??= NewSignal();
 
@@ -267,4 +271,17 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
 
     private static TaskCompletionSource NewSignal() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private static Task WaitForSignalAsync(TaskCompletionSource signal, string description) =>
+        TestWait.ForAsync(
+            async () =>
+            {
+                if (!signal.Task.IsCompleted)
+                    await Task.Run(static () => { });
+                return signal.Task.IsCompleted;
+            },
+            completed => completed,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            description);
 }
