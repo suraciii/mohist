@@ -19,7 +19,7 @@ Mohist Agent。
 
 本目录保存需要独立说明的 Action 产品契约。Workflow 的阶段、task、`expect` 和恢复
 配置见 [Workflow Profile](../workflow-profiles.md);Action、Inline Agent 和 Mohist Agent
-的关系见 [Agent 与 AgentSession](../agents.md)。
+的关系见 [Agent 与 AgentSession](../agent-sessions.md)。
 
 正文统一使用中文;产品中的规范术语、配置字段和命令保留原名。
 

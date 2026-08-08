@@ -197,6 +197,26 @@ Out of scope: per-track thresholds. The table above sets Unit < 300 LOC and Spec
 < 800 LOC, but one threshold covers every test project. Separating them moves
 ~30 UnitTests files at once and is its own decision.
 
+## C# focused tests
+
+C# test projects use Microsoft Testing Platform + xUnit v3. Do not treat VSTest filters as focused tests:
+
+- Do not use `dotnet test <csproj> --filter "FullyQualifiedName~..."`. It currently reports `MTP0001` (`VSTestTestCaseFilter` ignored) and may run the whole test assembly.
+- The pass-through `dotnet test <csproj> --no-restore --no-build -- -class <FQCN>` is not reliable today: MTP turns `-class` into `--class` and reports an unknown option.
+- The correct way is to run the compiled xUnit v3 apphost directly. Confirm `-class` exists via the apphost `--help` first, then run:
+
+```bash
+dotnet build packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj --no-restore
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -list classes -noColor -noLogo \
+  -class Mohist.Cli.Tests.Skills.SkillsContentTests
+packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
+  -noColor -noLogo -class Mohist.Cli.Tests.Skills.SkillsContentTests
+```
+
+- Focused runs use the compiled apphost above; never fall back to `dotnet --filter`.
+- In a new worktree, run `npm ci` explicitly first; run `dotnet restore <csproj>` explicitly when `obj/project.assets.json` is missing; afterwards build/test with explicit `--no-restore` / `--no-build`; no implicit installs or lockfile rewrites.
+
 ## Fake quick reference
 
 | Dependency | server | runner | web | cli |

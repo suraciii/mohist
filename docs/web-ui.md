@@ -205,7 +205,7 @@ Slack 接入仍可读。active Agent 的 Add Slack 不受 Readiness 阻塞，因
 Compact / Reset 与缺失自动恢复的语义见
 [Action 契约 · 共享语义](actions/README.md#agent-执行类-action-的共享语义)；两者都继续
 显示在同一个 AgentSession 下，页面以「上下文已重置」标注，不展示底层 Session 历史。
-Session 来源与身份见 [Agent 与 AgentSession](agents.md)。
+Session 来源与身份见 [Agent 与 AgentSession](agent-sessions.md)。
 
 ### 实装差距
 

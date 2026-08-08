@@ -9,7 +9,7 @@
 - [产品愿景](vision.md) —— Mohist 要去哪里、独立 Agent 与外部交互场所如何配合
 - [快速上手](getting-started.md) —— 从零启动，通过 Mohist Agent、外部 Agent 或 `mo` 看一个 Issue 走完全流程
 - [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
-- [Agent 与 AgentSession](agents.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
+- [Agent 与 AgentSession](agent-sessions.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
 
 ## 板块 2：工作流
 
@@ -57,6 +57,7 @@
 
 ## 写作约束
 
+- **面向 agent 的文档写作规则**：[_agents.md](_agents.md) —— 在 docs/ 写文档必须遵守；先读它再动笔。
 - **每节一个目的**：节名即它回答的问题。动机说教、铺垫导言、常识直接删；能列表不段落，能表格不列表。
 - **规则单点定义**：一个规则只在一篇里定义，其他篇链接它，不复制。
 - **spec 先于实现**：文档记录目标形态——产品该满足什么。实装由 issue 追赶 spec，而非 spec 跟着实装走。文档里出现尚未实装的能力是正常的，由对应 issue 推进落地；落地后无需改动文档（它本就描述目标）。
