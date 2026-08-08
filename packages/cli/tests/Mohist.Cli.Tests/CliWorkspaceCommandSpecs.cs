@@ -358,22 +358,26 @@ public class CliWorkspaceCommandSpecs
         var (http, handler, output, error, fileSystem, executor) = SetupSync(req =>
             RecordingHttpHandler.Json(new
             {
-                jobId = "job_1",
-                sessionId = "sess_1",
-                inputId = "input_1",
-                turnId = "turn_1",
-                agentId = "agent_abc",
-                agentName = "test-agent",
-                workspaceId = "cli-current",
-                targetId = "agent_abc",
-                origin = "cli",
-                status = "running",
-                attachments = (object?)null,
-                rejectedAttachments = (object?)null,
-                transcriptUrl = "/transcript",
-                jobUrl = "/job",
-                observationUrl = "/obs",
-                sessionUrl = "/Test/sessions/sess_1",
+                success = true,
+                data = new
+                {
+                    jobId = "job_1",
+                    sessionId = "sess_1",
+                    inputId = "input_1",
+                    turnId = "turn_1",
+                    agentId = "agent_abc",
+                    agentName = "test-agent",
+                    workspaceId = "cli-current",
+                    targetId = "agent_abc",
+                    origin = "cli",
+                    status = "running",
+                    attachments = (object?)null,
+                    rejectedAttachments = (object?)null,
+                    transcriptUrl = "/transcript",
+                    jobUrl = "/job",
+                    observationUrl = "/obs",
+                    sessionUrl = "/Test/sessions/sess_1",
+                },
             }));
 
         var exitCode = await MohistCliCommands.RunAsync(
