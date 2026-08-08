@@ -117,6 +117,116 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
         return true;
     }
 
+    public async Task<EnrollmentTokenCreateResult> CreateEnrollmentTokenAsync(
+        DateTimeOffset expiresAt,
+        CancellationToken ct = default)
+    {
+        var token = CredentialToken.GenerateEnrollmentToken();
+        var row = new EnrollmentTokenRow
+        {
+            Id = $"enroll_{Guid.NewGuid():N}",
+            TokenHash = CredentialToken.Hash(token),
+            ExpiresAt = expiresAt,
+            CreatedAt = _time.GetUtcNow(),
+        };
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        db.EnrollmentTokens.Add(row);
+        await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        return new EnrollmentTokenCreateResult(token, ToEnrollmentToken(row));
+    }
+
+    public async Task<EnrollmentTokenConsumeStatus> ConsumeEnrollmentTokenAsync(
+        string tokenHash,
+        DateTimeOffset now,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        // The SQLite provider cannot translate DateTimeOffset comparisons
+        // inside ExecuteUpdate, so the atomic conditional consume is one
+        // parameterized UPDATE: only an unconsumed, unexpired row matches.
+        var consumed = await db.Database.ExecuteSqlInterpolatedAsync(
+            $"""
+            UPDATE "EnrollmentTokens"
+            SET "ConsumedAt" = {now}
+            WHERE "TokenHash" = {tokenHash} AND "ConsumedAt" IS NULL AND "ExpiresAt" > {now}
+            """, ct)
+            .ConfigureAwait(false);
+        if (consumed == 1)
+            return EnrollmentTokenConsumeStatus.Consumed;
+
+        var row = await db.EnrollmentTokens
+            .AsNoTracking()
+            .FirstOrDefaultAsync(candidate => candidate.TokenHash == tokenHash, ct)
+            .ConfigureAwait(false);
+        if (row is null)
+            return EnrollmentTokenConsumeStatus.NotFound;
+        return row.ConsumedAt is not null
+            ? EnrollmentTokenConsumeStatus.AlreadyConsumed
+            : EnrollmentTokenConsumeStatus.Expired;
+    }
+
+    public async Task<RunnerCredentialCreateResult?> CreateRunnerCredentialAsync(
+        string principalId,
+        string runnerId,
+        CancellationToken ct = default)
+    {
+        var token = CredentialToken.Generate(CredentialKind.Runner);
+        var row = new CredentialRow
+        {
+            Id = $"runner_{Guid.NewGuid():N}",
+            PrincipalId = principalId,
+            Kind = CredentialKind.Runner.ToString(),
+            TokenHash = CredentialToken.Hash(token),
+            ScopesJson = JSON.Serialize<string[]>([Scope.Runner.Name]),
+            Name = runnerId,
+            Prefix = CredentialToken.DisplayPrefix(token),
+            CreatedAt = _time.GetUtcNow(),
+        };
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // A runner has at most one live credential: re-registration (the
+        // recovery path) revokes the previous one inside the same
+        // transaction, so the active-unique (PrincipalId, Name) index never
+        // sees two live rows for one runner.
+        await db.Credentials
+            .Where(candidate => candidate.Kind.ToLower() == "runner"
+                && candidate.Name == runnerId
+                && candidate.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.RevokedAt, row.CreatedAt), ct)
+            .ConfigureAwait(false);
+        db.Credentials.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            await transaction.CommitAsync(ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent registration of the same runner won the race;
+            // the caller reports it and the install flow is re-run.
+            return null;
+        }
+
+        return new RunnerCredentialCreateResult(token, ToCredential(row, CredentialKind.Runner));
+    }
+
+    public async Task<bool> RevokeRunnerCredentialAsync(
+        string runnerId,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct).ConfigureAwait(false);
+        var revoked = await db.Credentials
+            .Where(candidate => candidate.Kind.ToLower() == "runner"
+                && candidate.Name == runnerId
+                && candidate.RevokedAt == null)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(candidate => candidate.RevokedAt, revokedAt), ct)
+            .ConfigureAwait(false);
+        return revoked > 0;
+    }
+
     private static async Task<bool> NameIsInUseAsync(
         MohistDbContext db,
         string principalId,
@@ -131,6 +241,9 @@ public sealed class CredentialStore : ICredentialStore, IScopedService
                 ct)
             .ConfigureAwait(false);
     }
+
+    private static EnrollmentToken ToEnrollmentToken(EnrollmentTokenRow row) =>
+        new(row.TokenHash, row.ExpiresAt, row.ConsumedAt);
 
     private static Credential ToCredential(CredentialRow row, CredentialKind kind) =>
         new(

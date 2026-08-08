@@ -12,14 +12,22 @@ public static class CredentialToken
 {
     private const int RandomByteCount = 32;
 
-    public static string Generate(CredentialKind kind)
-    {
-        var secret = Convert.ToBase64String(RandomNumberGenerator.GetBytes(RandomByteCount))
+    public static string Generate(CredentialKind kind) =>
+        $"moh_{KindName(kind)}_{NewSecret()}";
+
+    /// <summary>
+    /// Generates a one-time runner enrollment token. Deliberately not
+    /// parseable as a credential (<see cref="TryParse"/> only knows
+    /// credential kinds), so it can never be presented as a Bearer
+    /// credential — the register endpoint consumes it from the body.
+    /// </summary>
+    public static string GenerateEnrollmentToken() => $"moh_enroll_{NewSecret()}";
+
+    private static string NewSecret() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(RandomByteCount))
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
-        return $"moh_{KindName(kind)}_{secret}";
-    }
 
     /// <summary>
     /// True when <paramref name="token"/> has the issued shape with a

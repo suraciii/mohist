@@ -245,6 +245,7 @@ export class RunnerHost {
       this.buildGitHash,
       {
         onReconnected: () => this.onDispatchReconnected(),
+        credential: options.credential ?? null,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
         registry: this.workspaceRegistry,

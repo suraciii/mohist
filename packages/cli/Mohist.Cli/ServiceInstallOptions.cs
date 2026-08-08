@@ -6,7 +6,8 @@ internal sealed record ServiceInstallOptions(
     string? RepoRoot,
     string? ListenUrl,
     string? ServerUrl,
-    string? RunnerRoot)
+    string? RunnerRoot,
+    string? EnrollmentToken = null)
 {
     public static ServiceInstallOptions From(string[] args) => new(
         DryRun: args.Contains("--dry-run"),
@@ -14,7 +15,8 @@ internal sealed record ServiceInstallOptions(
         RepoRoot: Option(args, "--repo-root"),
         ListenUrl: Option(args, "--listen-url"),
         ServerUrl: Option(args, "--server-url"),
-        RunnerRoot: Option(args, "--runner-root"));
+        RunnerRoot: Option(args, "--runner-root"),
+        EnrollmentToken: Option(args, "--enrollment-token"));
 
     private static string? Option(string[] args, string name)
     {

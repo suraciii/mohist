@@ -114,7 +114,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         var safeRepoRoot = SanitizeForCmdAssignment(repoRoot);
         var safeServerUrl = SanitizeForCmdAssignment(serverUrl);
         var safeRunnerRoot = options.RunnerRoot is null ? null : SanitizeForCmdAssignment(options.RunnerRoot);
-        var spec = new RunnerLauncherSpec(safeRepoRoot, safeServerUrl, safeRunnerRoot);
+        var spec = new RunnerLauncherSpec(safeRepoRoot, safeServerUrl, safeRunnerRoot, options.EnrollmentToken is null ? null : SanitizeForCmdAssignment(options.EnrollmentToken));
         var launcherBody = RenderRunnerLauncher(spec);
 
         if (options.DryRun)
@@ -785,6 +785,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     // The Slack adapter's service credential env name is the server's own
     // (the adapter presents the content as Authorization: Bearer).
     private const string SlackAdapterTokenEnvironmentVariable = "MOHIST_OPERATOR_TOKEN";
+    private const string RunnerEnrollmentTokenEnvironmentVariable = "MOHIST_ENROLLMENT_TOKEN";
 
     private string ServerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-server.cmd");
     private string RunnerLauncherPath() => Path.Combine(ServiceDirectory(), "mohist-runner.cmd");
@@ -827,6 +828,8 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
         sb.AppendLine($"set \"SERVER_URL={spec.ServerUrl}\"");
         if (!string.IsNullOrEmpty(spec.RunnerRoot))
             sb.AppendLine($"set \"RUNNER_ROOT={spec.RunnerRoot}\"");
+        if (!string.IsNullOrEmpty(spec.EnrollmentToken))
+            sb.AppendLine($"set \"{RunnerEnrollmentTokenEnvironmentVariable}={spec.EnrollmentToken}\"");
         sb.AppendLine($"node packages\\runner\\dist\\cli.js >> \"{logFile}\" 2>&1");
         return sb.ToString();
     }
@@ -879,7 +882,7 @@ internal sealed class WindowsScheduledTaskInstaller : IServiceInstaller
     }
 
     internal sealed record ServerLauncherSpec(string RepoRoot, string? ListenUrl);
-    internal sealed record RunnerLauncherSpec(string RepoRoot, string? ServerUrl, string? RunnerRoot);
+    internal sealed record RunnerLauncherSpec(string RepoRoot, string? ServerUrl, string? RunnerRoot, string? EnrollmentToken = null);
     internal sealed record SlackLauncherSpec(string RepoRoot, string ServerUrl, string? OperatorToken = null);
     internal sealed record TaskCreateSpec(string TaskName, string TrPayload);
     internal sealed record InstallMetadata(string Backend, string? ListenUrl, string? ServerUrl);

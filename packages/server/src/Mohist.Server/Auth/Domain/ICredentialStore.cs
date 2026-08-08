@@ -65,4 +65,59 @@ public interface ICredentialStore
     /// was unknown or already revoked.
     /// </summary>
     Task<bool> RevokeAsync(string tokenHash, DateTimeOffset revokedAt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issues a one-time runner enrollment token: generates the value,
+    /// stores only its SHA-256 hash and returns the full value exactly
+    /// once. Unbound — whoever consumes it registers their own RunnerId.
+    /// </summary>
+    Task<EnrollmentTokenCreateResult> CreateEnrollmentTokenAsync(
+        DateTimeOffset expiresAt,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically consumes the enrollment token at <paramref name="now"/>:
+    /// succeeds only when the row exists, is not yet consumed and has not
+    /// expired. The caller never learns the token's value, only the
+    /// outcome class.
+    /// </summary>
+    Task<EnrollmentTokenConsumeStatus> ConsumeEnrollmentTokenAsync(
+        string tokenHash,
+        DateTimeOffset now,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Issues a runner machine credential bound to
+    /// <paramref name="runnerId"/> under the given principal. Any
+    /// still-active credential of the same runner is revoked first, so a
+    /// runner has at most one live credential and re-install replaces the
+    /// previous one. Returns the full value exactly once; the store keeps
+    /// only its hash. Null when a concurrent registration of the same
+    /// runner won the race.
+    /// </summary>
+    Task<RunnerCredentialCreateResult?> CreateRunnerCredentialAsync(
+        string principalId,
+        string runnerId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes every active credential of the runner. Idempotent: false
+    /// when the runner had no active credential.
+    /// </summary>
+    Task<bool> RevokeRunnerCredentialAsync(
+        string runnerId,
+        DateTimeOffset revokedAt,
+        CancellationToken ct = default);
 }
+
+public enum EnrollmentTokenConsumeStatus
+{
+    Consumed,
+    NotFound,
+    Expired,
+    AlreadyConsumed,
+}
+
+public sealed record EnrollmentTokenCreateResult(string Token, EnrollmentToken EnrollmentToken);
+
+public sealed record RunnerCredentialCreateResult(string Token, Credential Credential);

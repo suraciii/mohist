@@ -20,7 +20,8 @@ public static class AuthExemptionList
 
         if (IsExactPath(path, "/api/auth/session")
             || IsExactPath(path, "/api/auth/device/code")
-            || IsExactPath(path, "/api/auth/token"))
+            || IsExactPath(path, "/api/auth/token")
+            || IsExactPath(path, "/api/runners/register"))
             return true;
 
         return IsGitHubIngress(path);

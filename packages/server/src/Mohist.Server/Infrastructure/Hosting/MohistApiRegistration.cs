@@ -55,6 +55,7 @@ public static class MohistApiRegistration
         app.MapGitHubConnectionRoutes();
         app.MapGitHubIngressRoutes();
         app.MapAuthTokenRoutes();
+        app.MapRunnerEnrollmentRoutes();
         app.MapRoutingTestRoutes();
         app.MapAgentSessionListRoutes();
         app.MapAgentSessionContextAssociationRoutes();

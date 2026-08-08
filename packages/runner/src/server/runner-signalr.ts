@@ -78,6 +78,12 @@ export type {
 export interface RunnerSignalRClientOptions {
   probeTimeoutMs?: number
   onReconnected?: (connectionId: string) => void
+  /**
+   * The runner's machine credential; presented as
+   * <c>Authorization: Bearer</c> on the hub connection. Absent for
+   * anonymous (pre-registration) connections.
+   */
+  credential?: string | null
   followupTargetResolver?: FollowupTargetResolver | null
   agentSessionRuntimeEventOutbox?: AgentSessionRuntimeEventOutbox | null
   registry?: WorkspaceRegistry | null
@@ -144,7 +150,11 @@ export class RunnerSignalRClient {
     this.probeTimeoutMs = options.probeTimeoutMs ?? 5_000
     this.onReconnected = options.onReconnected
     this.connection = new signalR.HubConnectionBuilder()
-      .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`)
+      .withUrl(`${baseUrl}/hubs/runner?${params.toString()}`, {
+        // SignalR omits the Authorization header when the factory returns
+        // a falsy value, so pre-registration connections stay headerless.
+        accessTokenFactory: () => options.credential ?? "",
+      })
       .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
       .build()
     this.registry = options.registry ?? null

@@ -336,5 +336,36 @@ public sealed class AuthResolutionMiddlewareTests
 
             return Task.FromResult(false);
         }
+
+        public Task<EnrollmentTokenCreateResult> CreateEnrollmentTokenAsync(
+            DateTimeOffset expiresAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<EnrollmentTokenConsumeStatus> ConsumeEnrollmentTokenAsync(
+            string tokenHash,
+            DateTimeOffset now,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<RunnerCredentialCreateResult?> CreateRunnerCredentialAsync(
+            string principalId,
+            string runnerId,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
+
+        public Task<bool> RevokeRunnerCredentialAsync(
+            string runnerId,
+            DateTimeOffset revokedAt,
+            CancellationToken ct = default)
+        {
+            throw new NotSupportedException();
+        }
     }
 }
