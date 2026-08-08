@@ -92,6 +92,7 @@
 
 ## 全局基础
 
+- [agents.md](agents.md) — 面向 agent 的设计文档写作规则；在 design/ 写 spec 先读它。
 - [../CONTEXT.md](../CONTEXT.md) — 跨上下文统一语言；术语定义的单一入口。
 - [architecture.md](architecture.md) — 运行时边界、控制平面/执行平面职责、放置规则。
 - [domain-analysis.md](domain-analysis.md) — 领域分析与上下文映射：子域划分、限界上下文关系、依赖不变量。

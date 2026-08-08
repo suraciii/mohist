@@ -10,18 +10,6 @@ Active development — do not design for version compatibility.
 - cli: .NET, command `mo` (`packages/cli/`)
 - `docs/` user docs · `design/` developer design · `openspec/` workflow artifacts
 
-## Source of Truth
-
-Read before changing code:
-
-- **Product direction**: [`docs/vision.md`](docs/vision.md)
-- **Product language**: [`CONTEXT.md`](CONTEXT.md) — unified vocabulary and avoided usage
-- **Boundaries and placement**: [`design/architecture.md`](design/architecture.md) — execution facts vs state arbitration
-- **Domain decomposition**: [`design/domain-analysis.md`](design/domain-analysis.md)
-- **Conventions**: [`design/conventions.md`](design/conventions.md)
-- **Testing**: [`design/testing.md`](design/testing.md) — tracks, hard rules, commands, fake entries
-- **Documentation writing**: [`docs/README.md`](docs/README.md) and [`design/README.md`](design/README.md)
-
 ## Engineering Principles
 
 - Study established products before designing a solution. Reuse proven patterns and conventions when they fit the current requirements.
@@ -42,9 +30,7 @@ Read before changing code:
 
 ## Specs
 
-- Write the spec before implementing.
-- `docs/`: product spec — rules in [`docs/_agents.md`](docs/_agents.md).
-- `design/`: design spec — rules in [`design/agents.md`](design/agents.md).
+- Write the spec before implementing: `docs/` = product spec, `design/` = design spec.
 - Body is the spec; the gap is the footnote.
 - No comments by default; comments never cite docs or issues.
 
