@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter } from 'react-router-dom'
@@ -64,13 +64,11 @@ function makeWrapper() {
 }
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['Date'], now: DIGEST_NOW })
   mockIssuesResponse([])
 })
 
 afterEach(() => {
   cleanup()
-  vi.useRealTimers()
 })
 
 describe('DashboardDigestWidget', () => {
@@ -198,7 +196,7 @@ describe('DigestRow', () => {
     const updatedAt = '2026-07-09T07:00:00Z'
     const issue = makeIssue({ number: 7, title: 'Row title', updatedAt })
 
-    render(<DigestRow issue={issue} timestamp={updatedAt} />, { wrapper: makeWrapper() })
+    render(<DigestRow issue={issue} timestamp={updatedAt} now={DIGEST_NOW.getTime()} />, { wrapper: makeWrapper() })
 
     const row = screen.getByTestId('digest-row')
     expect(row).toHaveTextContent('#7')
