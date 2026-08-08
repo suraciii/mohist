@@ -284,16 +284,49 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         Assert.Equal(runnerId, assignment.RunnerId);
         Assert.Equal(AgentJobStatus.Pending, assignment.Status);
 
-        using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
-        var dispatches = await poll.ReadDispatchElementsAsync();
-        Assert.Contains(dispatches, element =>
-            string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal));
-        var dispatch = dispatches.Single(element =>
-            string.Equals(element.GetProperty("agentJobId").GetString(), jobKey, StringComparison.Ordinal));
-        var workId = dispatch.GetProperty("workId").GetString();
+        var poll = await TestWait.ForAsync(
+            async () =>
+            {
+                using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
+                var dispatches = await response.ReadDispatchElementsAsync();
+                var matching = dispatches
+                    .Where(element => element.TryGetProperty("agentJobId", out var agentJobId)
+                        && agentJobId.ValueKind != JsonValueKind.Null
+                        && string.Equals(agentJobId.GetString(), jobKey, StringComparison.Ordinal))
+                    .ToList();
+                var workId = matching.Count == 1
+                    ? matching[0].GetProperty("workId").GetString()
+                    : null;
+                return new PollObservation(
+                    workId,
+                    matching.Count,
+                    dispatches
+                        .Select(element => element.TryGetProperty("agentJobId", out var agentJobId)
+                            && agentJobId.ValueKind != JsonValueKind.Null
+                            ? agentJobId.GetString() ?? "<missing>"
+                            : "<non-agent-job>")
+                        .ToArray());
+            },
+            observation => observation.TargetCount == 1
+                && !string.IsNullOrWhiteSpace(observation.TargetWorkId),
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to claim AgentJob '{jobKey}' via HTTP /poll");
+
+        var workId = poll.TargetWorkId;
         Assert.False(string.IsNullOrWhiteSpace(workId));
         Assert.Equal(assignment.CurrentWorkId, workId);
         return (runnerId, workId!);
+    }
+
+    private sealed record PollObservation(
+        string? TargetWorkId,
+        int TargetCount,
+        IReadOnlyList<string> AgentJobIds)
+    {
+        public override string ToString() =>
+            $"TargetCount={TargetCount}, TargetWorkId={TargetWorkId ?? "<missing>"}, "
+            + $"AgentJobIds=[{string.Join(", ", AgentJobIds)}]";
     }
 
     private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)
