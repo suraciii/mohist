@@ -140,7 +140,7 @@ SessionInput
   RequestFingerprint
   Text?
   TurnId
-  Route = new-turn | steer
+  TurnRelation = new-turn | steer
   ContextGeneration
   Source
   Attachments
@@ -320,7 +320,7 @@ Session 是输入顺序、Turn 归属和状态转换的唯一写入权威。Tran
 顺序追加的会话事实；Input 与 Turn ID 只提供稳定关联，不建立第二份消息树或物理 Session
 历史。
 
-每条被接受的输入都对应一个稳定 SessionInput，同一调用重试不能复制输入。Input 的 `Route`
+每条被接受的输入都对应一个稳定 SessionInput，同一调用重试不能复制输入。Input 的 canonical `turnRelation`
 为 `new-turn` 或 `steer`：前者创建一个新的 Turn，后者关联当前已经 running 的 Turn。
 一个 Turn 可以有多个 steer Input，但每个 Input 只能有一个 TurnId；任何 Input 一旦持久化，
 就不能改绑到另一个 Turn。消息、reasoning、tool、usage、model、provider retry、compaction
@@ -361,9 +361,9 @@ ContextBoundary、替换 binding（如需要）并写入 `session.context_reset`
 
 ## Follow-up 与 Cancel
 
-Follow-up 的产品语义保留两种路径。空闲 Session 收到 Follow-up 时，以 `Route=new-turn`
+Follow-up 的产品语义保留两种路径。空闲 Session 收到 Follow-up 时，以 `turnRelation=new-turn`
 受理并开始新的 Turn。已知 `running` Session 在 Runtime 明确支持 steer 时，以
-`Route=steer` 把 Input 加入当前 Turn；不支持 steer 时，以 `Route=new-turn` 按顺序放入
+`turnRelation=steer` 把 Input 加入当前 Turn；不支持 steer 时，以 `turnRelation=new-turn` 按顺序放入
 后续 queued Turn。`outcome_pending`、`unknown` 或恢复/上下文 operation 期间拒绝普通
 Follow-up，不能猜测它属于旧 Turn 还是新 Turn。
 
@@ -371,6 +371,16 @@ Follow-up，不能猜测它属于旧 Turn 还是新 Turn。
 acceptFollowUp(session, requestId, inputEnvelope):
   require requestId is caller-provided and non-empty
   fingerprint = canonicalFingerprint(inputEnvelope)
+
+  # Distinguish the relation before queue admission. The transaction rechecks this
+  # capability and the current Turn before it writes any Session child record.
+  turnRelation = new-turn
+  if session.currentTurn != null
+     and session.currentTurn.status == running
+     and Runtime.supportsSteer(session.currentBinding)
+     and session.ActiveOperation == null:
+    turnRelation = steer
+
   existing = RequestMap.find(session.id, requestId)
   if existing != null:
     if existing.requestFingerprint != fingerprint:
@@ -381,25 +391,45 @@ acceptFollowUp(session, requestId, inputEnvelope):
       return readStoredAcceptanceUnknown(existing)
     return readInputAndTurn(existing.inputId, existing.turnId)
 
-  require session.admission == ready or supportedRunningSteer(session)
   atomically:
     insert RequestMap(session.id, requestId, fingerprint)
       with unique(session.id, requestId)
+    reread current Turn, current binding, and ActiveOperation
+    if turnRelation == steer:
+      if current Turn is not running
+         or not Runtime.supportsSteer(current binding)
+         or ActiveOperation != null:
+        turnRelation = new-turn
+      else:
+        materialize one SessionInput with
+          turnId = current Turn.id, turnRelation = steer
+        persist RequestMap, SessionInput and its transcript input together
+        # Steer has no second Turn, dispatch attempt, or queue entry.
+        return accepted(inputId, turnId = current Turn.id, turnRelation = steer)
+
+    # Unsupported steer and a non-running Turn use new-turn. Unknown facts are rejected.
+    require ActiveOperation == null
+    require no current-generation unknown Input, Turn, dispatch or Runtime side effect
+    require no current Turn.status in {outcome_pending, unknown}
     if queuedTurnCount(session) >= session.queueLimit:
       persist RequestMap(state = rejected, InputId = null, TurnId = null,
                          AcceptanceReason = queue_full,
                          NextAction = retry_with_new_request_id_after_capacity)
       return rejected(queue_full)
-    materialize one SessionInput and one Turn
+    materialize one SessionInput with turnRelation = new-turn and one new Turn
     persist the mapping, Input, Turn and dispatch record together
   if unique constraint loses a concurrent race:
     return read the winning mapping
-  return accepted(inputId, turnId)
+  return accepted(inputId, turnId, turnRelation = new-turn)
 ```
 
 The first launch uses `requestId=launchRequestId` when materializing its first Input; its
 `launchOperationId` remains a separate cross-aggregate identity.
 
+`steer` 只在当前 Turn 已知 `running`、当前 binding 能力明确支持 steer 且没有 active operation 时
+受理；它复用现有 Turn，不增加 `queuedTurnCount`。Runtime 不支持 steer 或当前 Turn 不是
+`running` 时走 `new-turn`；若当前有 `outcome_pending`、`unknown` 或未知副作用，则明确返回
+`rejected(turn_outcome_unknown)` 和查询原 Turn 的 `nextAction`，不能假装成新 Turn。只有
 `new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时在同一个 Session
 事务持久化 definitive rejection tombstone 后返回 `rejected(queue_full)`，不持久化 Input。
 后续相同 `(SessionId, requestId)` 先命中这个 tombstone：同 fingerprint 永远返回相同
@@ -483,7 +513,7 @@ BeginStop(session, operationId, turnId, expectedRevision, expectedContextGenerat
         dispatchRetryOwnerId = null, dispatchRetryLeaseUntil = null,
         dispatchRetryClaimGeneration = null,
         dispatchFence = null
-      persist Turn.status = terminal, Turn.outcome = cancelled
+      persist Turn.status = terminal, Turn.outcome = cancelled, Turn.result = null
       complete fence with outcome = succeeded, reason = null,
         nextAction = inspect_turn
       return cancelled
@@ -496,20 +526,50 @@ BeginStop(session, operationId, turnId, expectedRevision, expectedContextGenerat
     Server.recheckBeforePersistingEffectResult(preToken)
     persist stop result only if the same complete preToken still matches
     if result is accepted:
-      persist Turn.status = terminal, Turn.outcome = cancelled,
+      atomically persist dispatchStatus = terminal, dispatchLastResult = accepted,
+        retryAllowed = false, dispatchFence = null,
+        Turn.status = terminal, Turn.outcome = cancelled, Turn.result = null,
         operation.phase = completed, operation.outcome = succeeded,
         operation.reason = null, nextAction = inspect_turn
     if result is unknown:
-      persist Turn.status = unknown, operation.outcome = unknown,
-        operation.reason = stop_result_unknown,
-        nextAction = query_same_stop_operation
+      persistStopUnknownIfFenceMatches(preToken, turnId,
+        reason = stop_result_unknown,
+        nextAction = query_same_stop_operation_or_attempt)
+```
+
+```text
+persistStopUnknownIfFenceMatches(stopToken, turnId, reason, nextAction):
+  atomically:
+    require the stop operation fence and target Turn still match stopToken
+    require Turn.id == turnId and Turn.status == running
+    require TurnDispatch.dispatchAttemptId != null
+    if TurnDispatch.dispatchRetryId != null:
+      mark DispatchRetryWork(TurnDispatch.dispatchRetryId) = cancelled
+    newRevision = nextRevision()
+    persist TurnDispatch.dispatchStatus = unknown,
+      TurnDispatch.dispatchLastResult = unknown,
+      TurnDispatch.retryAllowed = false,
+      TurnDispatch.dispatchFence = null,
+      TurnDispatch.revision = newRevision,
+      Turn.status = unknown, Turn.outcome = null,
+      Turn.reason = stop_result_unknown,
+      Turn.nextAction = nextAction,
+      operation.phase = stopping, operation.outcome = unknown,
+      operation.reason = reason, operation.nextAction = nextAction,
+      operation.revision = newRevision, session.revision = newRevision
+    clear only dispatch retry identity/lease fields; retain the original
+      TurnDispatch.dispatchAttemptId for same-attempt query
+    return unknown
 ```
 
 The durable coordinator scans pending/unknown stop operations after restart, takes over an expired
 lease by incrementing `ownerFence` and `claimGeneration`, and rechecks the complete `FenceToken`
 both before and after `Runtime.stop`. Response-loss query/retry uses the same `operationId`, target
-Turn and binding, is bounded by the persisted deadline, and never creates an in-memory replacement
-fence or a second stop effect.
+Turn and binding, is bounded by the persisted deadline, and never creates a new stop operation,
+dispatch attempt, Input or Turn. It first queries the same stop operation and original
+`dispatchAttemptId`; a bounded retry may reuse that operation's provider idempotency identity. If
+the query/retry remains unknown at the deadline, the operation and Turn stay `unknown` with the
+manual/query next action rather than becoming cancelled or idle.
 
 Compact uses the same before/after fence gates around `Runtime.compact`; neither Runtime effect
 may run after lease expiry, binding change, or operation takeover.
@@ -737,6 +797,13 @@ resolved = runFenced(resolveToken,
 
 if resolved is ready:
     fence = Session.reloadCurrentFence(fence.operationId)
+    require fence.expectedBinding == expected
+    require fence.candidateBinding == null
+    require Session.currentBinding == expected
+    persistReadyPhaseIfFenceMatches(fence,
+      bindingAtEffect = expected, result = ready)
+    postBindingFence = Session.reloadCurrentFence(fence.operationId)
+    require postBindingFence.bindingAtEffect == expected
     selected = expected
 else if resolved is definitely-missing and fence is owned:
     createToken = fenceToken(
@@ -759,9 +826,16 @@ else if resolved is definitely-missing and fence is owned:
       candidate = runFenced(getToken,
         token => Runtime.getByKey(getFence.candidateKey, fenceToken = token),
         result => Session.recordCandidateIfFenceMatches(getToken, result))
-      if response is still unknown: reconcileBindingOperation(fence)
+      if response is still unknown:
+        reconciliation = reconcileBindingOperation(fence)
+        if reconciliation is unknown or reconciliation is cleanup-pending:
+          return recovery_observation_unknown
+    fence = Session.reloadCurrentFence(fence.operationId)
+    require candidate is ready
+    require fence.candidateState == created
+    require fence.candidateBinding is complete
     candidateToken = fenceToken(fence, expectedBinding = expected,
-                                candidateBinding = candidate.binding,
+                                candidateBinding = fence.candidateBinding,
                                 bindingAtEffect = expected)
     cas = compareAndSwapBinding(candidateToken, boundaryKind = missing-recovery)
     selected = cas.currentBinding
@@ -771,9 +845,11 @@ else if resolved is definitely-missing and fence is owned:
       return recovery_cas_conflict
 else:
     fail without changing the binding
+    return recovery_observation_unknown
 
-inputToken = fenceToken(postBindingFence, expectedBinding = expected,
-                        candidateBinding = selected,
+inputFence = Session.reloadCurrentFence(fence.operationId)
+inputToken = fenceToken(inputFence, expectedBinding = expected,
+                        candidateBinding = selected if selected != expected else null,
                         bindingAtEffect = selected)
 Session.recordInputIfFenceMatches(inputToken, input = input)
 # The protected write advances the operation/session revision; the submit token
@@ -782,7 +858,7 @@ submitFence = Session.reloadCurrentFence(fence.operationId)
 submitToken = fenceToken(
   submitFence,
   expectedBinding = expected,
-  candidateBinding = selected,
+  candidateBinding = selected if selected != expected else null,
   bindingAtEffect = selected)
 submit = runFenced(submitToken,
   token => Runtime.submitInputExactlyOnce(binding = selected, input = input,
@@ -790,12 +866,33 @@ submit = runFenced(submitToken,
   result => Session.recordSubmitIfFenceMatches(submitToken, result))
 completeFence = Session.reloadCurrentFence(fence.operationId)
 completeToken = fenceToken(completeFence, expectedBinding = expected,
-                           candidateBinding = selected,
+                           candidateBinding = selected if selected != expected else null,
                            bindingAtEffect = selected)
 complete = runFenced(completeToken,
   token => no_external_call(),
   result => Session.completeOperationIfFenceMatches(completeToken, result))
 ```
+
+```text
+persistReadyPhaseIfFenceMatches(fence, bindingAtEffect, result):
+  atomically:
+    operation = Session.operation(fence.operationId)
+    require full fenceMatch(session, operation, fence, serverNow)
+    require session.currentBinding == fence.expectedBinding
+    require bindingAtEffect == fence.expectedBinding
+    newRevision = nextRevision()
+    persist operation.phase = resolving, operation.outcome = pending,
+      operation.bindingAtEffect = bindingAtEffect,
+      operation.revision = newRevision, session.revision = newRevision
+  return Session.reloadCurrentFence(fence.operationId)
+```
+
+`persistReadyPhaseIfFenceMatches` is an atomic Session write: it requires the current binding to
+equal `expected`, writes the resolved `bindingAtEffect=expected` and ready phase, increments the
+operation/Session revision, and returns only after `Session.reloadCurrentFence(operationId)`. If
+that phase write or the later input write observes a revision change, the caller reloads and builds
+a new token before `recordInput`, `submitInputExactlyOnce` or `complete`; no ready path references
+an undefined or pre-write `postBindingFence`.
 
 同一 `candidateKey` 的 create/get 必须返回同一候选或明确失败；创建响应丢失时按 key 查询，
 不能创建第二个候选。若 binding CAS 因 Reset、handoff 或另一已提交变化失败，candidate
@@ -814,6 +911,8 @@ recordCandidate(operation, candidate):
     require fenceMatch(session, operation, token, serverNow)
     require operation.candidateBinding == null
     require candidate.key == operation.candidateKey
+    require candidate is ready
+    require candidate.binding is complete
     persist candidateBinding = candidate.binding with
       bindingEpoch = operation.expectedBinding.bindingEpoch + 1
     persist candidateState = created
@@ -821,9 +920,16 @@ recordCandidate(operation, candidate):
   return Session.reloadCurrentFence(operation.operationId)
 
 reconcileBindingOperation(operation):
-  if currentBinding.adoptedCandidateKey == operation.candidateKey:
-    mark operation succeeded, candidateState = adopted, phase = completed
-    return adopted
+  if operation.candidateBinding != null
+     and candidateIsCurrent(operation, {
+       key = operation.candidateKey, binding = operation.candidateBinding
+     }, session):
+    currentFence = Session.reloadCurrentFence(operation.operationId)
+    postToken = fenceToken(currentFence,
+      expectedBinding = operation.expectedBinding,
+      candidateBinding = operation.candidateBinding,
+      bindingAtEffect = operation.candidateBinding)
+    return persistAdoptedAndCompleteIfFenceMatches(postToken)
   if currentBinding is not operation.expectedBinding:
     beginCleanupFence(operation, candidate = operation.candidateBinding or unknown)
     return orphaned
@@ -839,21 +945,37 @@ reconcileBindingOperation(operation):
       result => recordCandidateIfFenceMatches(getToken, result))
     if candidate is definitely absent: mark failed with nextAction = retry_binding_operation
     if response is unknown: beginCleanupFence(operation, candidate = unknown)
+    operation = Session.reloadCurrentOperation(operation.operationId)
   if operation.candidateBinding exists:
     casToken = fenceToken(operation, expectedBinding = operation.expectedBinding,
                           candidateBinding = operation.candidateBinding,
                           bindingAtEffect = operation.expectedBinding)
     cas = compareAndSwapBinding(casToken, boundaryKind = operation.kind)
-    if cas succeeds: mark adopted and complete operation
-    else: beginCleanupFence(operation, candidate = operation.candidateBinding)
+    if cas succeeds:
+      postFence = cas.postFence
+      currentFence = Session.reloadCurrentFence(postFence.operationId)
+      require currentFence.revision >= postFence.revision
+      require currentFence.candidateBinding == postFence.candidateBinding
+      require Session.currentBinding == postFence.candidateBinding
+      postToken = fenceToken(currentFence,
+        expectedBinding = operation.expectedBinding,
+        candidateBinding = postFence.candidateBinding,
+        bindingAtEffect = postFence.candidateBinding)
+      return persistAdoptedAndCompleteIfFenceMatches(postToken)
+    else:
+      beginCleanupFence(operation, candidate = operation.candidateBinding)
 
 beginCleanupFence(operation, candidate):
   atomically:
-    if candidate is known and currentBinding.adoptedCandidateKey == candidate.key:
-      mark operation succeeded, candidateState = adopted, phase = completed
+    if candidate is known and candidate.binding is complete
+       and candidate.key == operation.candidateKey
+       and currentBinding == candidate.binding:
+      newRevision = nextRevision()
+      mark operation succeeded, candidateState = adopted, phase = completed,
+        operation.revision = newRevision, session.revision = newRevision
       return already_adopted
     cleanupId = stableCleanupId(operation.operationId, candidate.key or unknown)
-    persist a distinct cleanup fence using the canonical FenceToken with:
+    persist a distinct cleanup operation using the canonical FenceToken with:
       operationId = cleanupId
       sessionId = operation.sessionId
       expectedBinding = operation.expectedBinding
@@ -861,11 +983,27 @@ beginCleanupFence(operation, candidate):
       bindingAtEffect = currentBinding observed at handoff
       ownerId, ownerFence, claimGeneration, revision, leaseUntil
       deadline = min(serverNow + cleanupBudget, operation.deadline + grace)
-      candidateKey and candidate identity
+      candidateKey = candidate.key or operation.candidateKey
+      candidateState = orphan or cleanup-pending
+    newRevision = nextRevision()
     mark operation outcome = blocked, phase = cleanup-pending,
       candidateState = orphan or cleanup-pending,
-      nextAction = retry_candidate_cleanup or operator_reconcile_candidate
+      nextAction = retry_candidate_cleanup or operator_reconcile_candidate,
+      operation.revision = newRevision, session.revision = newRevision
     release the operation's Session admission slot
+
+persistAdoptedAndCompleteIfFenceMatches(postToken):
+  atomically:
+    operation = Session.operation(postToken.operationId)
+    require fenceMatch(session, operation, postToken, serverNow)
+    require postToken.bindingAtEffect == postToken.candidateBinding
+    require postToken.candidateBinding != null
+    require session.currentBinding == postToken.candidateBinding
+    newRevision = nextRevision()
+    persist operation.phase = completed, operation.outcome = succeeded,
+      operation.candidateState = adopted, operation.revision = newRevision,
+      session.revision = newRevision
+    return adopted
 ```
 
 The cleanup fence has its own `operationId`, owner and monotonic `ownerFence`/`claimGeneration`;
@@ -880,51 +1018,131 @@ Cleanup calls use the independent fence and compare the candidate identity, not 
 
 ```text
 cleanupCandidate(cleanupFence):
-  token = cleanupFence.token(bindingAtEffect = currentBinding)
-  token = Server.recheckBeforeExternalEffect(token)
-  atomically:
-    require fenceMatch(session, cleanupFence, token, serverNow)
-    require cleanupFence is current owner and serverNow <= cleanupFence.deadline
-    require cleanupFence.attempts < cleanupFence.maxAttempts
-    increment attempts and persist cleanup phase before any Runtime effect
-    if currentBinding.adoptedCandidateKey == cleanupFence.candidateKey:
-      mark cleanup fence succeeded and candidateState = adopted
-      return already_adopted
-    if cleanupFence.candidateIdentity is unknown:
-      getToken = cleanupFence.token(bindingAtEffect = currentBinding)
-      candidate = runFenced(getToken,
-        token => Runtime.getByKey(cleanupFence.candidateKey, fenceToken = token),
-        result => persistCandidateIdentityIfFenceMatches(getToken, result))
-      cleanupFence = reloadCleanupFence(cleanupFence.operationId)
-      if candidate is definitely absent:
-        mark cleanup fence succeeded and candidateState = discarded
-        return already_discarded
-      if response is unknown:
-        persist cleanup-pending and nextAction = retry_candidate_cleanup
-        return unknown
-    token = cleanupFence.token(bindingAtEffect = currentBinding)
-  discarded = runFenced(token,
-    t => Runtime.discardCandidate(cleanupFence.candidateKey,
-                                  candidateIdentity = cleanupFence.candidateIdentity,
-                                  fenceToken = t),
-    result => persistCleanupResultIfFenceMatches(token, result))
-  reconcile cleanup response by the same `token.operationId` and candidateKey
-  if discarded: mark cleanup succeeded and original candidateState = discarded
-  if response is unknown and attempts < maxAttempts and now < cleanupFence.deadline:
-    persist cleanup-pending and nextAction = retry_candidate_cleanup
-  else if response is unknown or attempts >= maxAttempts or now >= cleanupFence.deadline:
-    mark cleanup outcome = blocked and candidateState = cleanup-pending,
-      nextAction = operator_reconcile_candidate
+  cleanupFence = Session.reloadCurrentFence(cleanupFence.operationId)
+  require cleanupFence.operationId is the cleanup operation identity
+  if now >= cleanupFence.deadline:
+    return persistCleanupDeadlineIfRecordMatches(cleanupFence,
+      nextAction = operator_reconcile_candidate)
+  if Session.currentBinding != cleanupFence.bindingAtEffect
+     and Session.currentBinding != cleanupFence.candidateBinding:
+    return beginReplacementCleanupFence(cleanupFence,
+      reason = cleanup_binding_changed)
+  attemptToken = fenceToken(cleanupFence, bindingAtEffect = currentBinding)
+  attemptToken = Server.recheckBeforeExternalEffect(attemptToken)
+  cleanupFence = persistCleanupAttemptIfFenceMatches(attemptToken)
+  # The attempt write increments revision; never reuse attemptToken after this point.
+  cleanupFence = Session.reloadCurrentFence(cleanupFence.operationId)
+  if now >= cleanupFence.deadline:
+    return persistCleanupDeadlineIfRecordMatches(cleanupFence,
+      nextAction = operator_reconcile_candidate)
+
+  if cleanupFence.candidateBinding != null
+     and Session.currentBinding == cleanupFence.candidateBinding:
+    return persistCleanupAdoptedIfFenceMatches(
+      fenceToken(cleanupFence, bindingAtEffect = Session.currentBinding))
+
+  if Session.currentBinding != cleanupFence.bindingAtEffect
+     and Session.currentBinding != cleanupFence.candidateBinding:
+    return beginReplacementCleanupFence(cleanupFence,
+      reason = cleanup_binding_changed)
+
+  if cleanupFence.candidateBinding == null:
+    getToken = fenceToken(cleanupFence, bindingAtEffect = currentBinding)
+    candidate = runFenced(getToken,
+      token => Runtime.getByKey(cleanupFence.candidateKey, fenceToken = token),
+      result => persistCandidateIdentityIfFenceMatches(getToken, result))
+    cleanupFence = Session.reloadCurrentFence(cleanupFence.operationId)
+    if candidate is definitely absent:
+      return persistCleanupDiscardedIfFenceMatches(
+        fenceToken(cleanupFence, bindingAtEffect = currentBinding))
+    if candidate is unknown or candidate.binding is not complete:
+      return persistCleanupPendingIfFenceMatches(
+        fenceToken(cleanupFence, bindingAtEffect = currentBinding),
+        reason = candidate_identity_unknown, nextAction = retry_candidate_cleanup)
+    cleanupFence = Session.reloadCurrentFence(cleanupFence.operationId)
+
+  # Candidate identity/status write above also advances revision. Build a fresh token for discard.
+  discardToken = fenceToken(cleanupFence, bindingAtEffect = currentBinding)
+  discarded = runFenced(discardToken,
+    token => Runtime.discardCandidate(cleanupFence.candidateKey,
+                                      candidateBinding = cleanupFence.candidateBinding,
+                                      fenceToken = token),
+    result => persistCleanupResultIfFenceMatches(discardToken, result))
+  cleanupFence = Session.reloadCurrentFence(cleanupFence.operationId)
+  if discarded:
+    return persistCleanupDiscardedIfFenceMatches(
+      fenceToken(cleanupFence, bindingAtEffect = currentBinding))
+  if discarded is unknown and now < cleanupFence.deadline
+     and cleanupFence.attempts < cleanupFence.maxAttempts:
+    return persistCleanupPendingIfFenceMatches(
+      fenceToken(cleanupFence, bindingAtEffect = currentBinding),
+      reason = cleanup_result_unknown, nextAction = retry_candidate_cleanup)
+  return persistCleanupBlockedIfFenceMatches(
+    fenceToken(cleanupFence, bindingAtEffect = currentBinding),
+    reason = cleanup_result_unknown, nextAction = operator_reconcile_candidate)
 ```
+
+All cleanup state helpers (`persistCleanupAttemptIfFenceMatches`,
+`persistCandidateIdentityIfFenceMatches`, `persistCleanupPendingIfFenceMatches`,
+`persistCleanupDiscardedIfFenceMatches` and `persistCleanupBlockedIfFenceMatches`) use this
+atomic shape:
+
+```text
+cleanupStateWrite(token, state):
+  atomically:
+    require full fenceMatch(session, cleanupOperation, token, now)
+    require cleanupOperation.candidateKey and candidateBinding are the same durable pair
+    newRevision = nextRevision()
+    persist state and cleanupOperation.revision = newRevision,
+      session.revision = newRevision
+  return Session.reloadCurrentFence(token.operationId)
+
+persistCleanupDeadlineIfRecordMatches(cleanupOperation, nextAction):
+  atomically:
+    require cleanupOperation is still the current operation row
+    require now >= cleanupOperation.deadline
+    newRevision = nextRevision()
+    persist cleanupOperation.outcome = blocked,
+      cleanupOperation.phase = cleanup-pending,
+      cleanupOperation.candidateState = cleanup-pending,
+      cleanupOperation.reason = cleanup_deadline,
+      cleanupOperation.nextAction = nextAction,
+      cleanupOperation.revision = newRevision,
+      session.revision = newRevision
+  return cleanup_pending
+
+beginReplacementCleanupFence(oldCleanup, reason = cleanup_binding_changed):
+  atomically:
+    require oldCleanup is the current cleanup operation row
+    if now >= oldCleanup.deadline:
+      return persistCleanupDeadlineIfRecordMatches(oldCleanup,
+        nextAction = operator_reconcile_candidate)
+    oldRevision = nextRevision()
+    persist oldCleanup.outcome = blocked, oldCleanup.reason = reason,
+      oldCleanup.nextAction = retry_candidate_cleanup,
+      oldCleanup.revision = oldRevision, session.revision = oldRevision
+    create a new bounded cleanup operation with a new operationId,
+      ownerFence/claimGeneration/revision, expectedBinding = Session.currentBinding,
+      bindingAtEffect = Session.currentBinding, the same candidateKey and complete
+      candidateBinding, and deadline = min(now + cleanupBudget, oldCleanup.deadline)
+    return the new cleanup fence
+```
+
+An expired lease is taken over by incrementing `ownerFence` and `claimGeneration`; a stale owner
+fails the first `full fenceMatch` and cannot write cleanup state. A changed binding creates the
+replacement cleanup fence above, never repairs the old token. A cleanup deadline closes the cleanup
+operation as `blocked/cleanup-pending` with a manual `nextAction`; it does not discard by guessing.
 
 Before both `getByKey` and `discardCandidate`, the cleanup fence rechecks every field of the
 canonical token, including owner lease, revision, expected/candidate binding and the observed
-current binding. `currentBinding` may have changed since the original CAS: the old cleanup then
-fails closed and a new bounded cleanup fence is created with the changed binding. If the current
-binding is the candidate, or the stored adopted-candidate key matches, cleanup returns
-`already_adopted` and never deletes it. An old cleanup therefore cannot delete an adopted binding
-or a newer binding that reused the same Runtime session. A cleanup response loss is reconciled by
-the same cleanup identity; it is never converted into an unbounded retry.
+current binding. Every attempt, phase, candidate-identity and cleanup-pending write increments
+revision; the caller reloads the cleanup operation and constructs a fresh `FenceToken` before the
+next Runtime effect. `currentBinding` may have changed since the original CAS: the old cleanup
+fails closed and a new bounded cleanup fence is created with the changed binding. If the complete
+candidate binding is current, cleanup returns `already_adopted` and never deletes it. An old cleanup
+therefore cannot delete an adopted binding or a newer binding that reused the same Runtime session.
+A cleanup response loss is reconciled by the same cleanup identity; it is never converted into an
+unbounded retry.
 
 Lease takeover increments `ownerFence` and `claimGeneration` before issuing a new token. An old
 owner's create, submit, discard, cleanup, phase write, binding CAS or complete therefore fails the
@@ -933,9 +1151,10 @@ Server recheck and the Runtime/provider token check, even when it reuses the sam
 查询，不能只写日志或静默遗留。
 
 candidate 一旦被 `replaceBinding` 采用，Server 在同一事务把 phase 置为 `rebound`，并把
-current binding 的完整 tuple（含新的 `bindingEpoch`）写入 `candidateBinding`，并记录
-`adoptedCandidateKey`。此后旧 owner 的 cleanup 即使在 Runtime 侧仍能定位旧 candidate，也
-必须先发现 candidate 已 adopted、adopted key 相同或 current binding 已等于该 candidate；
+current binding 的完整 tuple（含新的 `bindingEpoch`）写入 `candidateBinding`。此后旧 owner
+的 cleanup 即使在 Runtime 侧仍能定位旧 candidate，也必须用完整
+`(candidateKey, candidateBinding)` 的 `candidateIsCurrent` 谓词确认 current binding 已等于
+该 candidate；
 cleanup 只能返回 `already_adopted`，不得 discard、删除或回收 current binding。未被采用的
 candidate 只能在匹配其独立 cleanup fence 的 `cleanup-pending` 中 discard。
 
@@ -1035,8 +1254,21 @@ candidate = runFenced(candidateToken,
     fenceToken = token),
   result => Session.recordCandidateIfFenceMatches(candidateToken, result))
 fence = Session.reloadCurrentFence(fence.operationId)
+if candidate is unknown or fence.candidateState == unknown:
+  persist operation phase = resolving, outcome = unknown, candidateState = unknown,
+    candidateBinding = null, admission = blocked,
+    reason = candidate_unknown, nextAction = query_same_candidate_or_manual,
+    revision = nextRevision(), session.revision = revision
+  return unknown
+if candidate is definitely absent or fence.candidateBinding is not complete:
+  persist operation phase = failed, outcome = failed, candidateState = orphan,
+    reason = candidate_not_ready, nextAction = retry_binding_operation,
+    revision = nextRevision(), session.revision = revision
+  return failed
+require fence.candidateState == created
+require fence.candidateBinding is complete
 candidateToken = fenceToken(fence, expectedBinding = expected,
-                            candidateBinding = candidate.binding,
+                            candidateBinding = fence.candidateBinding,
                             bindingAtEffect = expected)
 replace = compareAndSwapBinding(candidateToken, boundaryKind = kind)
 postFence = replace.postFence
@@ -1290,6 +1522,15 @@ candidate = runFenced(candidateToken,
     fenceToken = token),
   result => Session.recordCandidateIfFenceMatches(candidateToken, result))
 newFence = Session.reloadCurrentFence(newOperationId)
+if candidate is unknown:
+  return persistForceResetCandidateUnknown(newFence,
+    reason = force_reset_candidate_unknown,
+    nextAction = query_same_candidate_or_manual)
+if candidate is definitely absent or candidate is not ready
+   or candidate.binding is not complete:
+  return persistForceResetCandidateFailed(newFence,
+    reason = force_reset_candidate_not_ready,
+    nextAction = retry_force_reset_binding)
 if candidate response is lost:
   getToken = fenceToken(newFence,
     expectedBinding = newFence.expectedBinding,
@@ -1298,10 +1539,23 @@ if candidate response is lost:
   candidate = runFenced(getToken,
     token => Runtime.getByKey(newFence.candidateKey, fenceToken = token),
     result => Session.recordCandidateIfFenceMatches(getToken, result))
+  newFence = Session.reloadCurrentFence(newOperationId)
+  if candidate is unknown or candidate is not ready
+     or candidate.binding is not complete:
+    return persistForceResetCandidateUnknown(newFence,
+      reason = force_reset_candidate_unknown,
+      nextAction = query_same_candidate_or_manual)
+  if candidate is definitely absent:
+    return persistForceResetCandidateFailed(newFence,
+      reason = force_reset_candidate_not_found,
+      nextAction = retry_force_reset_binding)
 
+newFence = Session.reloadCurrentFence(newOperationId)
+require newFence.candidateState == created
+require newFence.candidateBinding is complete
 finalizeToken = fenceToken(newFence,
   expectedBinding = newFence.expectedBinding,
-  candidateBinding = candidate.binding,
+  candidateBinding = newFence.candidateBinding,
   bindingAtEffect = newFence.expectedBinding)
 cas = compareAndSwapBinding(finalizeToken, boundaryKind = force-reset)
 postToken = cas.postFence
@@ -1318,6 +1572,41 @@ finalized = effectWithFence(postToken,
     set session.admission = ready, reason = null, nextAction = inspect_session)
 if finalized is not committed:
   beginCleanupFence(newFence, candidate)
+```
+
+```text
+persistForceResetCandidateUnknown(fence, reason, nextAction):
+  atomically:
+    require fence is still the current operation fence
+    newRevision = nextRevision()
+    persist phase = resolving, outcome = unknown,
+      candidateKey = fence.candidateKey, candidateBinding = null,
+      candidateState = unknown, admission = blocked,
+      reason = reason, nextAction = nextAction,
+      revision = newRevision, session.revision = newRevision
+  return unknown
+
+reconcileForceResetCandidate(operation):
+  require operation.operationId is the original force-reset operationId
+  if operation.candidateState == unknown:
+    if now >= operation.deadline:
+      return persistForceResetCandidateUnknown(operation,
+        reason = force_reset_candidate_unknown,
+        nextAction = operator_reconcile_candidate)
+    queryToken = Session.reloadCurrentFence(operation.operationId)
+    candidate = runFenced(queryToken,
+      token => Runtime.getByKey(operation.candidateKey, fenceToken = token),
+      result => Session.recordCandidateIfFenceMatches(queryToken, result))
+    operation = Session.reloadCurrentOperation(operation.operationId)
+    if candidate is unknown or candidate is not ready
+       or candidate.binding is not complete:
+      return persistForceResetCandidateUnknown(operation,
+        reason = force_reset_candidate_unknown,
+        nextAction = query_same_candidate_or_manual)
+    require operation.candidateState == created
+    require operation.candidateBinding is complete
+  # Only this explicit ready/created path may construct a CAS token.
+  return continueForceResetWithCandidate(operation)
 ```
 
 若旧 `ActiveOperation` 不存在，`targets` 仍会把 unknown Input/Turn/dispatch/Runtime
@@ -1613,6 +1902,11 @@ reconcileAcceptedDispatch(record):
   if record.dispatchStatus == unknown and record.retryAllowed == false:
     return stored unknown with nextAction = query_same_dispatch_attempt_or_manual_reconcile
 
+  # This check is before claimDueOrTakeOver: no expired lease is ever minted.
+  if now >= record.dispatchDeadline:
+    return persistDispatchDeadlineOutcomeIfFenceRecordMatches(
+      record, record.dispatchFence, now)
+
   work = loadDurableRetryWork(record.dispatchRetryId)
   if work is missing:
     require record.dispatchRetryId != null
@@ -1735,7 +2029,8 @@ persistTerminalResultIfFenceMatches(record, dispatchFence, result):
       retryAllowed = false, blockedReason = null,
       Turn.status = terminal, Turn.outcome = result.outcome,
       Turn.reason = result.reason, Turn.nextAction = inspect_turn,
-      Turn.result = result.result, record.revision = newRevision,
+      Turn.result = if result.outcome == completed then result.result else null,
+      record.revision = newRevision,
       session.revision = newRevision
     mark DispatchRetryWork(dispatchFence.dispatchRetryId) = consumed
     clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
@@ -1831,7 +2126,8 @@ terminalizeDispatchBlocked(record, dispatchFence, reason):
       session.revision = newRevision
     persist Turn.status = terminal, Turn.outcome = blocked
     persist Turn.reason = dispatch_terminal_rejected,
-      Turn.nextAction = inspect_or_explicit_requeue
+      Turn.nextAction = inspect_or_explicit_requeue,
+      Turn.result = null
     persist blockedReason = reason, dispatchFence = null
     persist nextAction = inspect_or_explicit_requeue
     mark DispatchRetryWork(dispatchFence.dispatchRetryId) = cancelled

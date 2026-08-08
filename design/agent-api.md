@@ -48,6 +48,15 @@ Agent API 对客户端提供六类能力：
 启动一次 Agent 会建立一项工作和一段会话。首次输入及其执行属于这项 AgentJob；首次执行
 结束后，AgentSession 仍可继续。follow-up 只增加会话输入和后续执行，不重开 AgentJob。
 
+Follow-up first selects canonical `turnRelation`: a current `running` Turn with an explicitly
+steer-capable current binding and no active operation uses `steer`, and the Session transaction
+persists one `SessionInput` against that existing `turnId` only. It does not create a second Turn,
+dispatch attempt or queue entry, and `queuedTurnCount` does not reject it. If steer is unsupported
+or the current Turn is not running, the request uses `new-turn` and only that path checks the Session
+queue limit and creates a Turn plus dispatch record. An `outcome_pending`, `unknown` or unresolved
+operation is rejected with the original Turn's query next action; unsupported steer alone is not a
+rejection when a new Turn can safely queue.
+
 每次 follow-up 都必须由调用方提供稳定的 `requestId`。它不是 Server 生成的 InputId，也不是
 可选的客户端 trace id；Server 以 `(sessionId, requestId)` 的唯一约束持久化请求到 Input/Turn
 的映射。相同 key 的 response loss 或重复提交返回同一 `InputId`、`TurnId` 和 canonical 状态，
@@ -168,9 +177,20 @@ nextAction
 sessionId, sessionIdReason
 inputId, inputIdReason
 turnId, turnIdReason
+workspace: LaunchWorkspaceRead | null
+workspaceReason
+target: ResourceKey | null
+targetReason
 revision
 observedAt
 ```
+
+`workspace` and `target` follow the canonical `AgentJobLaunchRead` definition in
+[`conventions.md`](conventions.md#canonical-agent-session-launch-and-turn-result-projections):
+the workspace is `{ projectId, workspaceId, path }`, and target is an existing `ResourceKey`.
+Accepted launches return both non-null with null reasons. A pre-accept, rejected or unresolved
+launch may return null values only with non-empty `workspaceReason`/`targetReason`; reservation IDs
+never fill these fields.
 
 `sessionId`、`inputId` 或 `turnId` 尚未存在时必须是 `null`，对应 reason 必须非空；reservation
 ID 不能冒充 live mapping。Session accept 成功时三个 mapping 一起出现；明确拒绝或不可恢复
@@ -216,9 +236,19 @@ enqueue、same-attempt query、claim/takeover、reschedule、`persistBlockedAndS
 `DispatchFenceToken`；Owner A 的迟到结果在 Owner B takeover/完成后只能返回
 `stale_operation_fence`，不能覆盖状态或重建 retry。
 
+The coordinator checks `now >= dispatchDeadline` before `claimDueOrTakeOver` can create a lease.
+The deadline branch atomically matches the current dispatch record fence, increments the Session and
+dispatch revision, and cancels retry work: a persisted current attempt whose last result is
+`definitely-rejected` goes through `terminalizeDispatchBlocked`; no attempt, missing outbox, or
+`unknown` result goes through `retainUnknownWithoutRetry`, preserving the same
+`dispatchAttemptId`, setting `dispatchStatus=unknown` and `Turn.status=unknown`, and exposing
+`query_same_dispatch_attempt_or_manual_reconcile`. It never mints a lease ending at or after the
+deadline and then relies on a failed fence check.
+
 Turn result 使用 conventions 的唯一 `TurnResultRead`：`outcome`、`reason`、`nextAction` 和
 可空 `result` 由 Server 持久返回；`TurnDispatchRead.blockedReason` 只表达派发阻塞原因，
-不能替代 Turn result，也不能用客户端自造文本替代。
+不能替代 Turn result，也不能用客户端自造文本替代。`completed` 才能保留 Runtime result；
+`failed`、`cancelled` 和 `blocked` 必须持久化 `result=null`，同时保留 `reason` 与 `nextAction`。
 
 CLI/Web 可以把 `reason` 和 `nextAction` 翻译为适合界面的文字，但不能丢失其可行动含义或
 自行合并 Job/Session/Input/Turn 状态。
@@ -330,6 +360,14 @@ complete = effectWithFence(postToken, no_external_call,
 
 `complete` and every result write use the post token's new revision and candidate binding; a stale
 pre or post owner returns `stale_operation_fence`.
+
+The durable candidate identity is `(operation.candidateKey, operation.candidateBinding)`. If
+`createOrGetEmpty` or `getByKey` returns response loss/unknown, Server persists the same operation
+as `outcome=unknown`, `candidateState=unknown`, `candidateBinding=null`, `admission=blocked`, with
+`query_same_candidate_or_manual`; the bounded same-operation query may retry `getByKey`, but cannot
+read `candidate.binding` or call CAS until a complete ready binding is durably recorded. A discard
+response loss remains on the independent cleanup fence with a revisioned `cleanup-pending` result;
+it never becomes an unbounded retry or deletes a candidate after the current binding changes.
 
 它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
 要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一 Session 事务中
@@ -446,11 +484,14 @@ BeginStop(sessionId, operationId, turnId, expectedRevision, expectedContextGener
     a stale owner returns stale_operation_fence and cannot overwrite or recreate retry
 ```
 
-`Runtime.stop` response loss keeps the operation and Turn `unknown`; the durable coordinator
-reconciles the same operation by query or bounded retry before its deadline. At an unresolved
-deadline it records a stable `reason` and actionable `nextAction` for query/manual verification,
-never a false cancelled or idle result. Every response-loss retry returns the complete canonical
-operation projection with the same `operationId`, target Turn and binding.
+`Runtime.stop` response loss is one fenced Session transaction: it keeps the original
+`dispatchAttemptId`, sets `dispatchStatus=unknown`, `dispatchLastResult=unknown`,
+`Turn.status=unknown`, `Turn.outcome=null`, `Turn.reason=stop_result_unknown` and a query/manual
+`nextAction`, and does not create a new attempt. The durable coordinator first queries the same stop
+operation and same dispatch attempt; a bounded retry may reuse that operation's provider idempotency
+identity. At an unresolved deadline the operation and Turn remain unknown, never cancelled or idle.
+Every response-loss retry returns the complete canonical operation projection with the same
+`operationId`, target Turn, binding and attempt.
 
 ## 可靠性契约
 

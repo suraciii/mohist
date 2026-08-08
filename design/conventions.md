@@ -144,8 +144,18 @@ AgentJobLaunchRead {
   sessionId, sessionIdReason
   inputId, inputIdReason
   turnId, turnIdReason
+  workspace: LaunchWorkspaceRead | null
+  workspaceReason
+  target: ResourceKey | null
+  targetReason
   revision
   observedAt
+}
+
+LaunchWorkspaceRead {
+  projectId
+  workspaceId
+  path
 }
 
 TurnResultRead {
@@ -169,6 +179,15 @@ completed Turn may still have a null result only when the product explicitly def
 success; otherwise completion requires the persisted result. `Turn.reason` and `Turn.nextAction`
 are the only result-level reason/action fields. `TurnDispatchRead.blockedReason` describes only
 dispatch refusal and never replaces the Turn result fields.
+
+`AgentJobLaunchRead.workspace` is the resolved workspace actually persisted for the launch, not a
+reservation or a caller hint. A non-null workspace has all three non-empty fields and
+`workspaceReason=null`; a null workspace has a non-empty `workspaceReason`. `target` is the existing
+target resource key (`ResourceKey`), not a reservation or a new target model. An accepted launch must
+return non-null `workspace` and `target` with null reasons. Before Session acceptance, or for a rejected
+or unresolved launch, either value may be null but its corresponding reason must be non-empty. A non-null
+target has `targetReason=null`; a null target has a non-empty `targetReason`. Clients never turn a
+reservation ID into either live context value.
 
 ### Canonical SessionInput and dispatch schema
 
@@ -261,6 +280,9 @@ claimDueOrTakeOver(record, work, previousFence, now, coordinatorId):
     require record.dispatchRetryId != null and record.retryAllowed == true
     require record.dispatchStatus in {queued, blocked, retrying, unknown}
     require work.deadline == record.dispatchDeadline
+    # Close the bounded dispatch before creating another lease. This branch does not claim work.
+    if now >= record.dispatchDeadline:
+      return persistDispatchDeadlineOutcomeIfFenceRecordMatches(record, previousFence, now)
     if work.dueAt > now:
       return retry_waiting
     if previousFence == null:
@@ -292,6 +314,44 @@ claimDueOrTakeOver(record, work, previousFence, now, coordinatorId):
       record.revision = newRevision, session.revision = newRevision,
       record.dispatchFence = token
     return { work = claimedWork, dispatchFence = token }
+
+persistDispatchDeadlineOutcomeIfFenceRecordMatches(record, previousFence, now):
+  atomically:
+    require now >= record.dispatchDeadline
+    if previousFence == null:
+      require record.dispatchFence == null
+    else:
+      require previousFence is a complete DispatchFenceToken
+      require dispatchFenceRecordMatches(session, record, previousFence)
+      require record.dispatchFence == previousFence
+    require record.dispatchStatus in {queued, blocked, retrying, unknown}
+    if record.dispatchRetryId != null:
+      mark DispatchRetryWork(record.dispatchRetryId) = cancelled
+    newRevision = nextRevision()
+    if record.dispatchAttemptId != null
+       and record.dispatchLastResult == definitely-rejected:
+      persist dispatchStatus = terminal, dispatchLastResult = definitely-rejected,
+        retryAllowed = false, blockedReason = dispatch_retry_exhausted,
+        Turn.status = terminal, Turn.outcome = blocked,
+        Turn.reason = dispatch_terminal_rejected,
+        Turn.nextAction = inspect_or_explicit_requeue, Turn.result = null,
+        record.revision = newRevision, session.revision = newRevision,
+        dispatchFence = null
+      clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
+        dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
+        dispatchRetryLeaseUntil
+      return terminal_blocked
+    persist dispatchStatus = unknown, dispatchLastResult = unknown,
+      retryAllowed = false, Turn.status = unknown, Turn.outcome = null,
+      Turn.reason = dispatch_outcome_unknown,
+      Turn.nextAction = query_same_dispatch_attempt_or_manual_reconcile,
+      nextAction = query_same_dispatch_attempt_or_manual_reconcile,
+      record.revision = newRevision, session.revision = newRevision,
+      dispatchFence = null
+    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
+      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
+      dispatchRetryLeaseUntil
+    return unknown
 
 rescheduleDispatch(record, dispatchFence, work, dueAt):
   atomically:
@@ -591,6 +651,31 @@ equivalent to `null`. `candidateKey`, `targetRunnerId` and `targetRuntime` are p
 any Runtime effect. `candidateState=orphan` means a candidate exists but was never adopted;
 `candidateState=cleanup-pending` belongs to an independent cleanup fence, not to a live recovery
 owner.
+
+The canonical candidate identity is the pair `(SessionOperationRead.candidateKey,
+SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only when its key is the
+operation's `candidateKey`, its binding is complete, and `candidateState=created`. The atomic
+adopted predicate is:
+
+```text
+candidateIsCurrent(operation, candidate, session) =
+  candidate.key == operation.candidateKey
+  && operation.candidateBinding == candidate.binding
+  && candidate.binding is complete
+  && operation.candidateState in {created, adopted}
+  && session.currentBinding == operation.candidateBinding
+```
+
+Cleanup stores the same candidate key and complete candidate binding in its owning operation read,
+and its `cleanupFence` protects that pair. It compares the pair atomically before `getByKey` and
+`discardCandidate`; `BindingTuple` has no separate adopted-candidate field. A changed current
+binding or an already-current candidate therefore fails closed without deleting the candidate.
+
+In cleanup pseudocode, `cleanupFence` means the durable cleanup operation read plus its
+`cleanupFence: FenceToken`; `candidateKey`, `candidateBinding` and `candidateState` come from that
+operation read, while lease, owner, revision, expected binding and `bindingAtEffect` come from the
+token. Reloading a cleanup fence reloads both parts. This is an internal projection of the one
+canonical `SessionOperationRead`, not a second public candidate schema.
 
 `supersededTargets` is present on every operation read (an empty array when none were superseded).
 It is the durable target mapping for force-reset, including unknown Input, Turn, dispatch, Runtime

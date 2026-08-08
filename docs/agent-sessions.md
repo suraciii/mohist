@@ -201,8 +201,13 @@ Workflow 的对应工作所有者是 TaskRun，而不是 AgentJob。TaskRun 或 
 表示 launch 工作已由 Runtime 成功处理，不表示整段对话关闭，也不
 保证用户口头描述的宽泛目标已经交付。Agent 可以在回复中提出问题；此时 AgentJob 可以已经
 完成，AgentSession 回到空闲，用户通过 follow-up 继续。每次 follow-up 创建一个有稳定 ID
-的新 SessionInput：空闲时它开始新的 AgentTurn；执行中可由当前 Turn steer 接受，不支持
-steer 时则按顺序等待下一 Turn。两种情况都不创建新的 AgentJob，也不重写首次启动的结果。
+的新 SessionInput：先区分 canonical `turnRelation`。当前 Turn 已知 `running`、当前 Runtime
+binding 明确支持 steer 且没有 operation 时，使用 `steer` 复用现有 Turn；只创建一个
+SessionInput，不创建第二个 Turn、dispatch attempt 或 queue entry，也不受 `queuedTurnCount`
+限制。Runtime 不支持 steer 或当前 Turn 不是 running 时使用 `new-turn`，只有此路径检查 queue
+limit 并创建 Turn 与 dispatch record。若当前为 `outcome_pending`、`unknown` 或有未决 operation，
+明确拒绝并给出原 Turn 的查询 action；不把未知事实转换成新 Turn。两种接受情况都不创建新的
+AgentJob，也不重写首次启动的结果。
 
 需要被持续追踪到 Done 的业务工作应由 Agent 创建或推进 Issue / Workflow；不要靠一个永不
 结束的聊天 Job 代替执行层。用户要开始另一项需要独立启动记录的工作时，应再次 launch，
@@ -244,9 +249,11 @@ AgentTurn 为实际处理过程提供状态；两者都只能通过所属 Sessio
 Server 是 AgentJob、AgentSession、SessionInput 和 AgentTurn 的 canonical read model。Web、CLI 和 Agent 接入只适配这份事实，不能从本地日志、HTTP 状态、Runner 事件或 provider 响应自行推导状态。每份读取结果都带有 Server 的 `revision` 和 `observedAt`。
 
 AgentJob 的读取结果使用 canonical `AgentJobLaunchRead`，至少公开 `jobId`、`launchRequestId`、
-`launchRequestFingerprint`、`launchOperationId`、`status`、`outcome`、`reason`、`nextAction` 和
-当前的 Session/Input/Turn mapping。尚未建立的 mapping 必须是 `null` 并带非空 reason；reservation
-ID 不能冒充可访问资源。Session 使用 canonical `AgentSessionRead`，明确公开
+`launchRequestFingerprint`、`launchOperationId`、`status`、`outcome`、`reason`、`nextAction`、
+`workspace`、`workspaceReason`、`target`、`targetReason` 和当前的 Session/Input/Turn mapping。
+`workspace` 的类型是 `{ projectId, workspaceId, path }`，`target` 是现有 `ResourceKey`；接受的
+launch 两者必须非 null 且对应 reason 为 null。尚未解析或尚未建立的值可以是 null，但对应
+reason 必须非空；reservation ID 不能冒充 live mapping。Session 使用 canonical `AgentSessionRead`，明确公开
 `admission=ready|blocked`、`reason`、`nextAction`、activity、binding 和 unresolved targets；
 Input 使用 `SessionInputRead`，Turn 使用 `TurnResultRead`。客户端不能把这些事实合并成一个状态。
 
@@ -314,6 +321,10 @@ response loss、result unknown 或没有 definitely-rejected 证据时，只保�
 `query_same_attempt_or_manual_reconcile`，不能写 terminal blocked。临时 `blocked` 只能表示
 definitely-rejected 且有有效 retry due；它不是终态，也不能只靠 `nextAction` 唤醒。
 
+Turn 的 canonical `result` 只有 `outcome=completed` 时保留；`failed`、`cancelled` 和
+`blocked` 即使 Runtime 返回了附带 payload，也必须持久化为 `result=null`，同时保留
+`reason` 与 `nextAction`。
+
 `retainUnknownWithoutRetry` 清除 retry identity 时必须持久化 `retryAllowed=false`、
 `dispatchRetryId=null`、`dispatchRetryDueAt=null`、无 due/lease/owner，并保留 Turn/dispatch
 unknown 与可行动 nextAction。重启和重复 reconcile 只能保留 unknown，不能从 null identity
@@ -323,6 +334,14 @@ dispatch claim/takeover、enqueue/query、reschedule、blocked/terminal/unknown 
 完整 `DispatchFenceToken`（session/operation/owner/ownerFence/claimGeneration/revision、attempt/
 retry IDs、lease/deadline、expected binding、candidate binding 和 bindingAtEffect）；Owner A 的迟到结果在 Owner B 接管或
 完成后只能返回 `stale_operation_fence`。
+
+Coordinator 必须在 `claimDueOrTakeOver` 之前检查 `now >= dispatchDeadline`，不得先生成已经
+过期的 lease 再让 fence 失败。该检查在当前 dispatch record fence 下原子递增 revision 并取消
+retry work：若当前 attempt 的持久 `dispatchLastResult=definitely-rejected`，写唯一终态
+`dispatchStatus=terminal`、`Turn.status=terminal`、`Turn.outcome=blocked`；若没有 attempt、
+outbox 未送达或结果为 `unknown`，则写 `dispatchStatus=unknown`、`Turn.status=unknown`、
+`Turn.reason/nextAction`，保留同一 `dispatchAttemptId` 并要求查询/人工核对。两条分支都清空
+retry lease/fence，写入新的 record/session revision。
 
 **Stop** 使用唯一 `SessionOperationRead.kind=stop`。`mo session cancel` 仍取消 queued 或
 active Turn；调用方必须提供 stable operationId、expected revision/binding 和 bounded deadline。
@@ -364,8 +383,13 @@ BeginStop(sessionId, operationId, turnId, fingerprint, expectedRevision,
 The existing-operation lookup precedes the non-terminal Turn check, so response loss after a
 successful queued cancel or running stop returns the original canonical projection even when the
 Turn is already terminal. Wrong operation kind, target, fingerprint, revision, or binding is
-explicitly rejected. Runtime.stop response loss leaves operation and Turn `unknown`; query or
-bounded retry uses the same operationId and never creates a second stop or retry.
+explicitly rejected. A running Turn whose `Runtime.stop` response is lost is updated in the same
+fenced Session transaction to `dispatchStatus=unknown`, `dispatchLastResult=unknown`,
+`Turn.status=unknown`, `Turn.outcome=null`, `Turn.reason=stop_result_unknown`, while retaining the
+original `dispatchAttemptId`; no new attempt is created. Query first uses the same stop operation and
+attempt, and a bounded retry reuses that operation's provider idempotency identity. If still unknown
+at the deadline, operation and Turn remain unknown with query/manual nextAction, never cancelled or
+idle.
 
 ## AgentSession 来源
 
@@ -418,6 +442,17 @@ binding、revision、owner/lease、operation 和 candidate；CAS 原子换绑并
 epoch，返回 `postFence/currentBinding=candidate`。后续 effect/result/complete 只能使用 post
 fence；旧 pre/post owner 都 fail closed。替换不改变 AgentSession ID、来源、工作目录或已记录
 的会话内容；新 Session 从空上下文开始，会话中以「上下文已重置」标注，旧消息不重放。
+
+Candidate identity is the complete pair `(operation.candidateKey, operation.candidateBinding)`;
+there is no separate adopted-candidate field on `BindingTuple`. A create/get response loss or a
+non-ready candidate persists the same operation with `candidateState=unknown`,
+`candidateBinding=null`, `admission=blocked`, a stable reason and
+`query_same_candidate_or_manual`; the bounded same-operation query may reach CAS only after a
+complete ready candidate binding is persisted. Candidate cleanup carries that same pair in its
+operation read and uses an independent cleanup fence. Every attempt, phase, identity or
+`cleanup-pending` write increments revision and is reloaded before `getByKey` or `discardCandidate`;
+a changed current binding creates a new bounded cleanup fence, and an adopted/current candidate or
+an expired/stale cleanup fails closed without discard.
 
 复用不变量、自动恢复边界与并发规则见
 [Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
