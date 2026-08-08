@@ -50,14 +50,27 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
+      - name: Setup Node.js for focused gate
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22.19.0
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install script dependencies for focused gate
+        run: timeout --signal=TERM --kill-after=30s 480s npm ci
+
       - name: Restore
-        run: dotnet restore Mohist.sln
+        run: timeout --signal=TERM --kill-after=30s 480s dotnet restore Mohist.sln
 
       - name: Build
-        run: dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
+        run: timeout --signal=TERM --kill-after=30s 480s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
+
+      - name: AgentJob focused stability gate
+        run: timeout --signal=TERM --kill-after=30s 480s npm run ci:agent-job-gate
 
       - name: Test
-        run: dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-build
+        run: timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-build
         timeout-minutes: 6
 
       - name: Upload failed test results
@@ -68,6 +81,15 @@ jobs:
           path: "**/TestResults/*.log"
           if-no-files-found: warn
           retention-days: 7
+
+      - name: Upload AgentJob focused gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-job-focused-gate-${{ github.run_attempt }}
+          path: artifacts/agent-job-ci-gate
+          if-no-files-found: error
+          retention-days: 14
 
   dotnet-core:
     name: .NET build and test
@@ -96,17 +118,17 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore
-        run: dotnet restore Mohist.sln
+        run: timeout --signal=TERM --kill-after=30s 480s dotnet restore Mohist.sln
 
       - name: Build
-        run: dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
+        run: timeout --signal=TERM --kill-after=30s 480s dotnet build Mohist.sln -p:SkipWebBuild=true --no-restore
 
       - name: Test
         run: |
-          dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
-          dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
-          dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
-          dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.UnitTests/Mohist.Server.UnitTests.csproj -p:SkipWebBuild=true --no-build
+          timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-build
         timeout-minutes: 6
 
       - name: Upload failed test results
@@ -137,7 +159,7 @@ jobs:
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: timeout --signal=TERM --kill-after=30s 480s npm ci
 
       - name: Resolve Node test budget base
         shell: bash
@@ -161,16 +183,16 @@ jobs:
 
       - name: Check Node architecture scripts
         run: |
-          npm run archtest
+          timeout --signal=TERM --kill-after=30s 180s npm run archtest
 
       - name: Build
-        run: npm run build --workspaces --if-present
+        run: timeout --signal=TERM --kill-after=30s 480s npm run build --workspaces --if-present
 
       - name: Test runner
-        run: npm run test:ci -w packages/runner
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/runner
 
       - name: Test runner integration
-        run: npm run test:integration -w packages/runner
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:integration -w packages/runner
 
       - name: Test web
-        run: npm run test:ci -w packages/web
+        run: timeout --signal=TERM --kill-after=30s 180s npm run test:ci -w packages/web
