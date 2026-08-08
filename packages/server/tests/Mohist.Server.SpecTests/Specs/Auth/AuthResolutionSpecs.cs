@@ -134,7 +134,8 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
         var token = CredentialToken.Generate(CredentialKind.Pat);
         await InsertCredentialRowAsync(
             "cred_spec_active", "agent-spec", CredentialKind.Pat, token,
-            revokedAt: null, expiresAt: new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            revokedAt: null, expiresAt: new DateTimeOffset(2027, 1, 1, 0, 0, 0, TimeSpan.Zero),
+            scopesJson: """["operator"]""");
 
         using var client = fixture.CreateClient();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -251,7 +252,8 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
         CredentialKind kind,
         string token,
         DateTimeOffset? revokedAt,
-        DateTimeOffset? expiresAt)
+        DateTimeOffset? expiresAt,
+        string scopesJson = """["runner"]""")
     {
         var dbFactory = fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         await using var db = await dbFactory.CreateDbContextAsync();
@@ -261,8 +263,7 @@ public sealed class AuthResolutionSpecs(MohistIntegrationFixture fixture)
             PrincipalId = principalId,
             Kind = kind.ToString(),
             TokenHash = CredentialToken.Hash(token),
-            ScopesJson = """["runner"]""",
-            Name = "spec",
+            ScopesJson = scopesJson,            Name = "spec",
             ExpiresAt = expiresAt,
             RevokedAt = revokedAt,
             CreatedAt = new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero),
