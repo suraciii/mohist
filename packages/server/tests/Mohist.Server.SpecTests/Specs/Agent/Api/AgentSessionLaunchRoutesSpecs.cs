@@ -106,13 +106,23 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             Assert.Equal("web", data.GetProperty("origin").GetString());
             var workspaceId = data.GetProperty("workspaceId").GetString();
             Assert.False(string.IsNullOrWhiteSpace(workspaceId));
+            using var projectResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}");
+            projectResponse.EnsureSuccessStatusCode();
+            var projectPayload = await projectResponse.Content.ReadFromJsonAsync<JsonElement>();
+            var projectName = projectPayload.GetProperty("data").GetProperty("name").GetString();
+            Assert.False(string.IsNullOrWhiteSpace(projectName));
             using var workspacesResponse = await _fixture.Client.GetAsync($"/api/projects/{projectId}/workspaces");
             var workspacesPayload = await workspacesResponse.Content.ReadFromJsonAsync<JsonElement>();
             var persistedWorkspace = workspacesPayload.GetProperty("data")
                 .EnumerateArray()
                 .Single(workspace => string.Equals(workspace.GetProperty("name").GetString(), workspaceId, StringComparison.Ordinal));
+            Assert.Equal(workspaceId, persistedWorkspace.GetProperty("name").GetString());
+            Assert.Equal("active", persistedWorkspace.GetProperty("status").GetString());
             Assert.Equal("web", persistedWorkspace.GetProperty("origin").GetProperty("kind").GetString());
-            Assert.Equal($"/launch-201/sessions/{sessionId}", data.GetProperty("sessionUrl").GetString());
+            Assert.Equal(sessionId, persistedWorkspace.GetProperty("origin").GetProperty("conversationId").GetString());
+            Assert.Equal(
+                $"/{Uri.EscapeDataString(projectName!)}/sessions/{Uri.EscapeDataString(sessionId!)}",
+                data.GetProperty("sessionUrl").GetString());
             Assert.False(string.IsNullOrWhiteSpace(data.GetProperty("status").GetString()));
             Assert.Equal(
                 $"/api/projects/{projectId}/agent-sessions/{sessionId}/transcript",

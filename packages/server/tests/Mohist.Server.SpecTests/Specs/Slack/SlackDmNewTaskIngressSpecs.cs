@@ -271,6 +271,14 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         _runnerIds.Add(runnerId);
         using var slots = await _fixture.Client.PatchAsJsonAsync($"/api/runner/{runnerId}", new { slots = 1 });
         slots.EnsureSuccessStatusCode();
+
+        var runner = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
+        await TestWait.ForAsync(
+            () => runner.GetRuntimeStateAsync(),
+            state => state.Status == RunnerStatus.Online,
+            TimeSpan.FromSeconds(5),
+            TimeSpan.FromMilliseconds(25),
+            $"Runner '{runnerId}' to reach Online");
     }
 
     private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
