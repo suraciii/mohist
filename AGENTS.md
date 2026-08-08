@@ -42,9 +42,9 @@ Read before changing code:
 
 ## Specs
 
-- Write the spec before implementing: `docs/` = product spec, `design/` = design spec.
-- `docs/`: product + domain language only.
-- `design/`: technical language allowed here only.
+- Write the spec before implementing.
+- `docs/`: product spec — rules in [`docs/agents.md`](docs/agents.md).
+- `design/`: design spec — rules in [`design/agents.md`](design/agents.md).
 - Body is the spec; the gap is the footnote.
 - No comments by default; comments never cite docs or issues.
 
