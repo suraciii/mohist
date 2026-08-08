@@ -48,6 +48,7 @@ public class MohistDbContext : DbContext
     public DbSet<EnrollmentTokenRow> EnrollmentTokens { get; set; } = null!;
     public DbSet<PrincipalRow> Principals { get; set; } = null!;
     public DbSet<AuthAuditEventRow> AuthAuditEvents { get; set; } = null!;
+    public DbSet<DeviceAuthorizationRow> DeviceAuthorizations { get; set; } = null!;
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -135,6 +136,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Name).HasMaxLength(256);
             entity.Property(e => e.Prefix).HasMaxLength(64);
             entity.Property(e => e.ProjectId).HasMaxLength(256);
+            entity.Property(e => e.FamilyId).HasMaxLength(128);
             entity.Property(e => e.ExpiresAt);
             entity.Property(e => e.RevokedAt);
             entity.Property(e => e.CreatedAt).IsRequired();
@@ -143,6 +145,24 @@ public class MohistDbContext : DbContext
                 .IsUnique()
                 .HasFilter("\"RevokedAt\" IS NULL");
             entity.HasIndex(e => new { e.PrincipalId, e.Kind, e.RevokedAt });
+            entity.HasIndex(e => e.FamilyId);
+        });
+
+        modelBuilder.Entity<DeviceAuthorizationRow>(entity =>
+        {
+            entity.ToTable("DeviceAuthorizations");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.DeviceCodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.UserCodeHash).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.ClientName).HasMaxLength(256);
+            entity.Property(e => e.Status).HasMaxLength(16).IsRequired();
+            entity.Property(e => e.PrincipalId).HasMaxLength(256);
+            entity.Property(e => e.DecidedAt);
+            entity.Property(e => e.ExpiresAt).IsRequired();
+            entity.Property(e => e.CreatedAt).IsRequired();
+            entity.HasIndex(e => e.DeviceCodeHash).IsUnique();
+            entity.HasIndex(e => e.UserCodeHash).IsUnique();
         });
 
         modelBuilder.Entity<EnrollmentTokenRow>(entity =>

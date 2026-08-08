@@ -9,6 +9,7 @@ public sealed record Credential(
     string? Name,
     string? Prefix,
     string? ProjectId,
+    string? FamilyId,
     DateTimeOffset? ExpiresAt,
     DateTimeOffset? RevokedAt,
     DateTimeOffset CreatedAt);
