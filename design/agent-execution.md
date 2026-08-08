@@ -197,7 +197,8 @@ in [`conventions.md`](conventions.md). In particular, `AgentSession.Admission` i
 `operationId` 必须由调用方提供并可重用，Server 不生成客户端不可见的 operation key。
 
 Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的 command 都必须带调用方持有的
-`operationId`；同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
+`operationId`；steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。
+同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
 coordinator 也必须在发出 command 前持有并持久化这个身份，不能让客户端只能等待一个
 不可见的 Server key。只有 launch 使用不同的两级身份：客户端提供 `launchRequestId`，Server
 在第一次 prepare 中创建 `launchOperationId`；两者的映射必须出现在 canonical launch read
@@ -236,7 +237,7 @@ model 中，不能混用。
   `new-turn` 输入。`#382` 负责跨 Session 的 capacity claim/release 与容量视图。
 - 同一 Session 的有界排队上限是本设计的受理不变量，具体数值是运行参数，不复制 `#382`
   的全局容量策略。
-- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset、force-reset、handoff、stop
+- AgentSession 至多有一个 `ActiveOperation`。它是恢复、Compact、Reset、force-reset、handoff、stop、steer
   或 rebind 的
   持久 operation fence，不是新的业务实体；操作明确完成或拒绝后才能清除。
 - 用户输入必须包含可见文本或明确附件；attachment-only 输入不生成隐藏 prompt。
@@ -387,6 +388,9 @@ acceptFollowUp(session, requestId, inputEnvelope):
       return rejected(idempotency_key_reused)
     if existing.State == rejected:
       return readStoredRejection(existing)
+    if existing.turnRelation == steer:
+      effect = Session.operation(existing.steerOperationId or existing.requestId)
+      return readStoredSteerResult(effect)
     if existing.State == unknown:
       return readStoredAcceptanceUnknown(existing)
     return readInputAndTurn(existing.inputId, existing.turnId)
@@ -403,9 +407,21 @@ acceptFollowUp(session, requestId, inputEnvelope):
       else:
         materialize one SessionInput with
           turnId = current Turn.id, turnRelation = steer
-        persist RequestMap, SessionInput and its transcript input together
-        # Steer has no second Turn, dispatch attempt, or queue entry.
-        return accepted(inputId, turnId = current Turn.id, turnRelation = steer)
+        operationId = requestId
+        create one SessionOperationRead(kind = steer,
+          operationId = operationId, targetInputId = new input id,
+          targetTurnId = current Turn.id, expectedBinding = current binding,
+          bindingAtEffect = current binding, candidateBinding = null,
+          phase = steer-queued, outcome = pending, retryAllowed = true,
+          nextAction = dispatch_same_steer_operation,
+          full owner/lease/deadline/revision fence)
+        persist RequestMap, SessionInput, the steer operation, its durable
+          effect/outbox and transcript input together
+        # Steer has no second Turn, dispatch attempt, or queue entry. The
+        # operation row is the replay identity and durable retry record.
+        return accepted(inputId, turnId = current Turn.id, turnRelation = steer,
+          steerOperationId = operationId, steerStatus = pending,
+          steerRetryAllowed = true)
 
     # Unsupported steer and a non-running Turn use new-turn. Unknown facts are rejected.
     require ActiveOperation == null
@@ -427,10 +443,26 @@ The first launch uses `requestId=launchRequestId` when materializing its first I
 `launchOperationId` remains a separate cross-aggregate identity.
 
 `steer` 只在当前 Turn 已知 `running`、当前 binding 能力明确支持 steer 且没有 active operation 时
-受理；它复用现有 Turn，不增加 `queuedTurnCount`。Runtime 不支持 steer 或当前 Turn 不是
-`running` 时走 `new-turn`；若当前有 `outcome_pending`、`unknown` 或未知副作用，则明确返回
-`rejected(turn_outcome_unknown)` 和查询原 Turn 的 `nextAction`，不能假装成新 Turn。只有
-`new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时在同一个 Session
+受理；它复用现有 Turn，不增加 `queuedTurnCount`、第二个 Turn、dispatch attempt 或 queue
+entry。受理事务必须同时持久化 Input、transcript input、`SessionOperationRead(kind=steer)`
+和可重放的 effect/outbox；operationId 就是 caller-provided `requestId`，不会生成隐藏的第二
+幂等键。Runtime adapter 随后把这个 operation/fence 映射为 OpenCode `session.promptAsync`
+或 Pi `session.steer`，并且必须支持以同一 operation identity 查询或幂等重放。
+
+Steer command 的返回语义是：初次或未决重试的 `accepted` 表示上述 durable effect 已提交且
+`steerRetryAllowed=true`，不表示 provider 已经完成；已确认 `outcome=succeeded` 的 operation
+也稳定返回 `accepted`。Runtime 确认接受后 operation 进入
+`steer-accepted`/`outcome=succeeded`、Input 的 `steerStatus=accepted`，并释放 active
+operation。调用或 Runtime response loss 先保留同一 operation；如果该 effect 仍可用同一
+identity 重放，Input 可继续对外报告 `accepted` 但 `steerStatus=unknown`/`pending`，否则
+command 返回 `unknown`，operation `retryAllowed=false`、Session admission 保持 blocked。
+确定拒绝或达到固定 retry/deadline 后进入 `terminal`，Input 的 `state=accepted` 不改写，
+并返回稳定 reason/nextAction；不得用新 requestId 自动复制原 steer。Runtime 不支持 steer
+或当前 Turn 不是 `running` 时走 `new-turn`；若当前有 `outcome_pending`、`unknown` 或
+未知副作用，则明确返回 `rejected(turn_outcome_unknown)` 和查询原 Turn 的 `nextAction`，
+不能假装成新 Turn。
+
+只有 `new-turn` 受理前检查 Session 内有界的 queued Turn 上限；达到上限时在同一个 Session
 事务持久化 definitive rejection tombstone 后返回 `rejected(queue_full)`，不持久化 Input。
 后续相同 `(SessionId, requestId)` 先命中这个 tombstone：同 fingerprint 永远返回相同
 rejection，改 payload 永远返回 `rejected(idempotency_key_reused)`，不能趁容量恢复窗口接受。
@@ -438,7 +470,8 @@ rejection，改 payload 永远返回 `rejected(idempotency_key_reused)`，不能
 负责跨 Session 的 max-concurrent-runs、capacity claim/release 和容量视图，不在本设计复制
 它的调度策略。
 
-受理事务先持久化 Input、Turn 关系和 canonical dispatch record，再异步入队。若 event/outbox
+`new-turn` 受理事务先持久化 Input、Turn 关系和 canonical dispatch record，再异步入队；`steer`
+受理事务则先持久化上面定义的 steer operation/effect，不创建 dispatch record。若 event/outbox
 写入明确失败，整个 Session 受理事务失败，Input 不对外报告 accepted；若 Session 事务已
 提交但后续入队得到 `definitely-rejected`，Input 仍保持 `accepted=true`，Turn 保持非终态
 `queued`，并记录 `dispatchStatus=blocked` 与原因。这个 blocked 值表示临时可重试，且这次写入必须原子包含
@@ -452,18 +485,88 @@ rejection，改 payload 永远返回 `rejected(idempotency_key_reused)`，不能
 `SessionInput` 追加给目标会话，不创建新输入类别、调度器或 Session 终态。完整契约见
 [`subagents.md`](subagents.md) 的「定时输入」节。
 
-Follow-up 命令只需要三种同步结果：
+Follow-up 命令只需要三种同步结果；steer 的 effect 状态另由 canonical Input/operation
+projection 返回：
 
 - `accepted`：Mohist 已持久接受 SessionInput，它可能仍在排队；
 - `rejected`：Mohist 已确认没有接受输入；
 - `unknown`：无法确认是否接受，不能自动重新发送。
+
+对 steer，`accepted` 的前提是 durable operation 已确认成功，或仍有可重放 effect；`steerStatus=unknown`
+表示 Runtime 接受事实未确认，不得被客户端解释为 provider 已接受。`terminal` 是 effect
+的终态，不是把已 accepted Input 改成 rejected；它必须带稳定 reason/nextAction。若
+response loss 后已没有可重放 effect，同一 request 的同步结果必须是 `unknown`，即使查询
+能看到已持久化的 Input；不能返回一个没有 replay path 的 `accepted`。
+
+Steer effect 的 durable handler 只有这一条生命周期：
+
+```text
+reconcileSteer(operationId):
+  operation = Session.operation(operationId)
+  require operation.kind == steer
+  if operation.outcome in {succeeded, rejected, failed, blocked}:
+    return the stored canonical Input and operation projection
+  if operation.outcome == unknown and operation.retryAllowed == false:
+    return the stored unknown projection with nextAction = query_same_steer_or_force_reset
+  require operation.targetInputId and targetTurnId are unchanged
+  require Session.turn(operation.targetTurnId).status == running
+  require Session.currentBinding == operation.bindingAtEffect
+  claim or take over the same operation, incrementing ownerFence and claimGeneration
+  token = complete FenceToken(operation, dispatchAttemptId = null,
+                              dispatchRetryId = null,
+                              expectedBinding = operation.expectedBinding,
+                              candidateBinding = null,
+                              bindingAtEffect = operation.bindingAtEffect)
+  result = Runtime.steer(effectId = operation.operationId,
+                         text = Session.inputText(operation.targetInputId),
+                         turn = operation.targetTurnId,
+                         binding = operation.bindingAtEffect,
+                         fenceToken = token)
+  if result == accepted:
+    atomically persist the matching operation as
+      phase = steer-accepted, outcome = succeeded, retryAllowed = false,
+      Input.steerStatus = accepted, Input.steerNextAction = inspect_turn
+    clear this ActiveOperation
+  if result == definitely-rejected:
+    atomically persist the matching operation as
+      phase = failed, outcome = rejected, retryAllowed = false,
+      Input.steerStatus = terminal, Input.steerNextAction = inspect_steer_operation
+    clear this ActiveOperation
+  if result == response_lost or result == unknown:
+    persist the same operation as phase = steer-dispatching, outcome = unknown,
+      retryAllowed = adapter_can_replay(operation),
+      Input.steerStatus = unknown,
+      Input.steerNextAction = query_same_steer_operation,
+      Session.activity = unknown, admission = blocked,
+      Session.reason = steer_result_unknown,
+      Session.nextAction = query_same_steer_or_force_reset
+    return accepted only when retryAllowed == true; otherwise return unknown
+
+reconcileUnknownSteer(operation):
+  query the same effectId before invoking Runtime.steer again
+  if query == accepted: persist the fenced succeeded projection
+  if query == definitely-rejected: persist the fenced terminal projection
+  if query == response_lost or unknown:
+    retry the same operation only when retryAllowed == true and before deadline
+    otherwise retain outcome = unknown, retryAllowed = false,
+      admission = blocked, nextAction = query_same_steer_or_force_reset
+```
+
+The handler rechecks the complete fence before and after the adapter call. A stale binding,
+takeover, terminal Turn, stop, or force-reset prevents the effect write and leaves the original
+operation queryable as unknown/superseded; it never changes `bindingAtEffect` or constructs a new
+steer operation. Server restart scans pending/unknown steer operations and runs this same lookup,
+claim, query, and same-identity retry path. A duplicate request first reads the request map and
+operation, so it cannot create a second Input or claim `accepted` without the durable replay
+record.
 
 调用幂等键用于找到同一个 SessionInput，不是 AgentSession 内的另一个领域实体，也不用于
 把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
 产生重复副作用。
 
 Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的调用方必须显式提供
-`operationId`；没有 key 的 command 在受理前拒绝，不由 grain 生成客户端不可见的替代 key。
+`operationId`；steer 使用 follow-up 的 caller-provided `requestId` 作为 operationId。没有 key
+的 command 在受理前拒绝，不由 grain 生成客户端不可见的替代 key。
 同一 `operationId` 重放返回同一 operation，异 key 不能 join 或覆盖另一个 active operation；
 已完成 operation 仍可按同一 key 查询，response loss 不会开启第二个 operation。
 
@@ -1247,24 +1350,39 @@ BeginBindingOperation(session, kind, operationId, ownerId, expectedRevision,
 candidateToken = fenceToken(fence, expectedBinding = expected,
                             candidateBinding = null,
                             bindingAtEffect = expected)
-candidate = runFenced(candidateToken,
+candidateResult = runFenced(candidateToken,
   token => Runtime.createOrGetEmpty(
     workDir = session.workDir,
     candidateKey = fence.candidateKey,
     fenceToken = token),
-  result => Session.recordCandidateIfFenceMatches(candidateToken, result))
+  result => Session.recordCandidateAttemptOnlyIfFenceMatches(candidateToken, result))
 fence = Session.reloadCurrentFence(fence.operationId)
-if candidate is unknown or fence.candidateState == unknown:
+if candidateResult == response_lost:
+  getToken = fenceToken(fence, expectedBinding = expected,
+                        candidateBinding = null, bindingAtEffect = expected)
+  candidateResult = runFenced(getToken,
+    token => Runtime.getByKey(fence.candidateKey, fenceToken = token),
+    result => Session.recordCandidateAttemptOnlyIfFenceMatches(getToken, result))
+  fence = Session.reloadCurrentFence(fence.operationId)
+if candidateResult == response_lost or candidateResult == unknown:
   persist operation phase = resolving, outcome = unknown, candidateState = unknown,
     candidateBinding = null, admission = blocked,
     reason = candidate_unknown, nextAction = query_same_candidate_or_manual,
     revision = nextRevision(), session.revision = revision
   return unknown
-if candidate is definitely absent or fence.candidateBinding is not complete:
+if candidateResult == definitely-absent or candidateResult == definitely-rejected
+   or candidateResult == candidate_not_ready:
   persist operation phase = failed, outcome = failed, candidateState = orphan,
     reason = candidate_not_ready, nextAction = retry_binding_operation,
     revision = nextRevision(), session.revision = revision
   return failed
+candidate = candidateResult.candidate
+require candidate.key == fence.candidateKey
+require candidate.binding is complete
+require candidate.binding.runnerId == fence.targetRunnerId
+require candidate.binding.runtime == fence.targetRuntime
+require candidate.binding.bindingEpoch == fence.expectedBinding.bindingEpoch + 1
+fence = recordValidatedCandidateIfFenceMatches(fence, candidate)
 require fence.candidateState == created
 require fence.candidateBinding is complete
 candidateToken = fenceToken(fence, expectedBinding = expected,
@@ -1515,40 +1633,60 @@ candidateToken = fenceToken(newFence,
   expectedBinding = newFence.expectedBinding,
   candidateBinding = null,
   bindingAtEffect = newFence.expectedBinding)
-candidate = runFenced(candidateToken,
+createResult = runFenced(candidateToken,
   token => Runtime.createOrGetEmpty(
     workDir = session.workDir,
     candidateKey = newFence.candidateKey,
     fenceToken = token),
-  result => Session.recordCandidateIfFenceMatches(candidateToken, result))
+  result => Session.recordCandidateAttemptOnlyIfFenceMatches(candidateToken, result))
 newFence = Session.reloadCurrentFence(newOperationId)
-if candidate is unknown:
-  return persistForceResetCandidateUnknown(newFence,
-    reason = force_reset_candidate_unknown,
-    nextAction = query_same_candidate_or_manual)
-if candidate is definitely absent or candidate is not ready
-   or candidate.binding is not complete:
-  return persistForceResetCandidateFailed(newFence,
-    reason = force_reset_candidate_not_ready,
-    nextAction = retry_force_reset_binding)
-if candidate response is lost:
-  getToken = fenceToken(newFence,
-    expectedBinding = newFence.expectedBinding,
-    candidateBinding = newFence.candidateBinding,
-    bindingAtEffect = newFence.expectedBinding)
-  candidate = runFenced(getToken,
-    token => Runtime.getByKey(newFence.candidateKey, fenceToken = token),
-    result => Session.recordCandidateIfFenceMatches(getToken, result))
+
+# Preserve response_lost as a branchable result. It means create may have happened;
+# generic unknown means that even the lookup path is not yet classified.
+if createResult == response_lost:
+  lookupFence = Session.reloadCurrentFence(newOperationId)
+  lookupToken = fenceToken(lookupFence,
+    expectedBinding = lookupFence.expectedBinding,
+    candidateBinding = null,
+    bindingAtEffect = lookupFence.expectedBinding)
+  lookupResult = runFenced(lookupToken,
+    token => Runtime.getByKey(lookupFence.candidateKey, fenceToken = token),
+    result => Session.recordCandidateAttemptOnlyIfFenceMatches(lookupToken, result))
   newFence = Session.reloadCurrentFence(newOperationId)
-  if candidate is unknown or candidate is not ready
-     or candidate.binding is not complete:
+  if lookupResult == response_lost or lookupResult == unknown:
     return persistForceResetCandidateUnknown(newFence,
       reason = force_reset_candidate_unknown,
       nextAction = query_same_candidate_or_manual)
-  if candidate is definitely absent:
-    return persistForceResetCandidateFailed(newFence,
+  if lookupResult == definitely-absent:
+    return persistForceResetCandidateRetryable(newFence,
       reason = force_reset_candidate_not_found,
-      nextAction = retry_force_reset_binding)
+      nextAction = retry_same_force_reset_candidate)
+  if lookupResult == candidate_not_ready:
+    return persistForceResetCandidateUnknown(newFence,
+      reason = force_reset_candidate_not_ready,
+      nextAction = query_same_candidate_or_manual)
+  candidate = lookupResult.candidate
+else if createResult == unknown:
+  return persistForceResetCandidateUnknown(newFence,
+    reason = force_reset_candidate_unknown,
+    nextAction = query_same_candidate_or_manual)
+else if createResult == definitely-rejected or createResult == definitely-absent
+        or createResult == candidate_not_ready:
+  return persistForceResetCandidateRetryable(newFence,
+    reason = force_reset_candidate_not_ready,
+    nextAction = retry_same_force_reset_candidate)
+else:
+  candidate = createResult.candidate
+
+if not candidateIdentityMatches(newFence, candidate):
+  if candidate has a complete provider-confirmed binding:
+    return beginCleanupFence(newFence, candidate,
+      reason = force_reset_candidate_identity_mismatch,
+      nextAction = retry_candidate_cleanup)
+  return persistForceResetCandidateUnknown(newFence,
+    reason = force_reset_candidate_identity_unknown,
+    nextAction = operator_reconcile_candidate)
+newFence = recordValidatedCandidateIfFenceMatches(newFence, candidate)
 
 newFence = Session.reloadCurrentFence(newOperationId)
 require newFence.candidateState == created
@@ -1574,10 +1712,21 @@ if finalized is not committed:
   beginCleanupFence(newFence, candidate)
 ```
 
+`Runtime.createOrGetEmpty` and `Runtime.getByKey` preserve the normalized result discriminator
+`ready(candidate)`, `candidate_not_ready`, `definitely-absent`, `definitely-rejected`,
+`response_lost`, or `unknown`. `recordCandidateAttemptOnlyIfFenceMatches` records the fenced
+attempt and raw discriminator but never writes `candidateState=unknown` for `response_lost`; this
+is what keeps the lookup branch reachable. `recordValidatedCandidateIfFenceMatches` is the only
+write that may set `candidateState=created` and `candidateBinding`; it requires the complete
+identity predicate above, current expected binding, and the pre-CAS fence, increments revision,
+and returns a reloaded operation. A provider response that lacks a complete binding is not a
+candidate for CAS or discard.
+
 ```text
 persistForceResetCandidateUnknown(fence, reason, nextAction):
   atomically:
     require fence is still the current operation fence
+    require no complete validated candidate binding has been recorded
     newRevision = nextRevision()
     persist phase = resolving, outcome = unknown,
       candidateKey = fence.candidateKey, candidateBinding = null,
@@ -1586,28 +1735,97 @@ persistForceResetCandidateUnknown(fence, reason, nextAction):
       revision = newRevision, session.revision = newRevision
   return unknown
 
+persistForceResetCandidateRetryable(fence, reason, nextAction):
+  atomically:
+    require fence is still the current operation fence
+    require Session.currentBinding == fence.expectedBinding
+    persist phase = resolving, outcome = pending,
+      candidateKey = fence.candidateKey, candidateBinding = null,
+      candidateState = none, admission = blocked,
+      reason = reason, nextAction = nextAction,
+      revision = nextRevision(), session.revision = revision
+  return retry_same_force_reset_candidate
+
+candidateIdentityMatches(operation, candidate):
+  return candidate.key == operation.candidateKey
+    and candidate.binding is complete
+    and candidate.binding.runnerId == operation.targetRunnerId
+    and candidate.binding.runtime == operation.targetRuntime
+    and candidate.binding.bindingEpoch == operation.expectedBinding.bindingEpoch + 1
+
 reconcileForceResetCandidate(operation):
   require operation.operationId is the original force-reset operationId
-  if operation.candidateState == unknown:
-    if now >= operation.deadline:
-      return persistForceResetCandidateUnknown(operation,
-        reason = force_reset_candidate_unknown,
-        nextAction = operator_reconcile_candidate)
-    queryToken = Session.reloadCurrentFence(operation.operationId)
-    candidate = runFenced(queryToken,
-      token => Runtime.getByKey(operation.candidateKey, fenceToken = token),
-      result => Session.recordCandidateIfFenceMatches(queryToken, result))
+  if operation.outcome in {succeeded, rejected, failed, blocked}:
+    return fullSessionOperationRead(operation)
+  if operation.candidateBinding != null
+     and candidateIsCurrent(operation,
+       { key = operation.candidateKey, binding = operation.candidateBinding }, Session):
+    currentFence = Session.reloadCurrentFence(operation.operationId)
+    postToken = fenceToken(currentFence,
+      expectedBinding = operation.expectedBinding,
+      candidateBinding = operation.candidateBinding,
+      bindingAtEffect = operation.candidateBinding)
+    return persistAdoptedAndCompleteIfFenceMatches(postToken)
+  if Session.currentBinding != operation.expectedBinding:
+    if operation.candidateBinding is complete:
+      return beginCleanupFence(operation, candidate = operation.candidateBinding,
+        reason = force_reset_binding_changed,
+        nextAction = retry_candidate_cleanup)
+    return persistForceResetCandidateUnknown(operation,
+      reason = force_reset_binding_changed,
+      nextAction = operator_reconcile_candidate)
+  if now >= operation.deadline:
+    if operation.candidateBinding is complete:
+      return beginCleanupFence(operation, candidate = operation.candidateBinding,
+        reason = force_reset_deadline,
+        nextAction = retry_candidate_cleanup)
+    return persistForceResetCandidateUnknown(operation,
+      reason = force_reset_candidate_unknown,
+      nextAction = operator_reconcile_candidate)
+  if operation.candidateState in {none, unknown}:
+    queryFence = Session.reloadCurrentFence(operation.operationId)
+    queryToken = fenceToken(queryFence,
+      expectedBinding = queryFence.expectedBinding,
+      candidateBinding = null,
+      bindingAtEffect = queryFence.expectedBinding)
+    lookup = runFenced(queryToken,
+      token => Runtime.getByKey(queryFence.candidateKey, fenceToken = token),
+      result => Session.recordCandidateAttemptOnlyIfFenceMatches(queryToken, result))
     operation = Session.reloadCurrentOperation(operation.operationId)
-    if candidate is unknown or candidate is not ready
-       or candidate.binding is not complete:
+    if lookup == response_lost or lookup == unknown:
       return persistForceResetCandidateUnknown(operation,
         reason = force_reset_candidate_unknown,
         nextAction = query_same_candidate_or_manual)
-    require operation.candidateState == created
-    require operation.candidateBinding is complete
+    if lookup == definitely-absent:
+      return persistForceResetCandidateRetryable(operation,
+        reason = force_reset_candidate_not_found,
+        nextAction = retry_same_force_reset_candidate)
+    if lookup == candidate_not_ready:
+      return persistForceResetCandidateUnknown(operation,
+        reason = force_reset_candidate_not_ready,
+        nextAction = query_same_candidate_or_manual)
+    candidate = lookup.candidate
+    if not candidateIdentityMatches(operation, candidate):
+      if candidate has a complete provider-confirmed binding:
+        return beginCleanupFence(operation, candidate,
+          reason = force_reset_candidate_identity_mismatch,
+          nextAction = retry_candidate_cleanup)
+      return persistForceResetCandidateUnknown(operation,
+        reason = force_reset_candidate_identity_unknown,
+        nextAction = operator_reconcile_candidate)
+    operation = recordValidatedCandidateIfFenceMatches(operation, candidate)
+  require operation.candidateState == created
+  require operation.candidateBinding is complete
   # Only this explicit ready/created path may construct a CAS token.
   return continueForceResetWithCandidate(operation)
 ```
+
+`persistForceResetCandidateRetryable` leaves the operation pending with the same `candidateKey`;
+the durable handler re-enters `Runtime.createOrGetEmpty` with that key before any fresh `getByKey`
+probe. A retry response loss again enters the same response-loss `getByKey` branch, an explicit
+ready candidate repeats identity validation, and a second absent/refused result remains pending
+until the fixed deadline. It never creates a new candidate key or CAS token from a transient
+response.
 
 若旧 `ActiveOperation` 不存在，`targets` 仍会把 unknown Input/Turn/dispatch/Runtime
 side effect 变成持久 `UnresolvedPrevious`，并在 `SessionOperationRead.supersededTargets`
@@ -1644,6 +1862,8 @@ Server 是 binding 与 activity 的唯一状态裁判。Runner 不能自行决�
 
 - 同一 AgentSession 跨 task、retry、Follow-up 与 Runner 重启复用 current binding；
 - SessionInput 与 AgentTurn 的身份、route、归属和顺序在进程重启后保持不变，steer 不复制 Turn；
+- steer Input 与同事务 durable operation/effect 一起提交；重复、response loss 和 Server restart
+  只查询或重放同一 operation，不能在无 replayable effect 时返回 accepted；
 - 相同输入重试不产生重复记录，已接受输入不会因背压丢失；
 - binding 替换与 `session.context_reset` 原子持久化，且事件不包含物理 Session 沿革；
 - `outcome_pending` 和 `unknown` 不被映射成 Turn `idle`；activity=idle 时没有任何未终结 Turn；
@@ -1719,9 +1939,9 @@ endpoint。
 |---|---|---|
 | AgentJob status | 这次 launch 工作排队、执行、成功、拒绝或失败了吗 | canonical `AgentJobLaunchRead`：含 `launchRequestFingerprint`、status/outcome/reason/nextAction、mapping、`revision`、`observedAt` |
 | Session activity | 这段会话当前 context 能否继续、过去是否仍有未知事实 | canonical `AgentSessionRead`：含 `admission`、reason/nextAction、activity、binding、unresolved targets、`revision`、`observedAt` |
-| Input acceptance | 这条输入是否已由 Mohist 持久接受，以及属于哪一轮 | canonical `SessionInputRead`：`sessionId`、`inputId`、`requestId`、`requestFingerprint`、`state`、`acceptanceReason`、`turnId`、`turnRelation`、`contextGeneration`、`revision`、`observedAt` |
+| Input acceptance | 这条输入是否已由 Mohist 持久接受，以及属于哪一轮 | canonical `SessionInputRead`：`sessionId`、`inputId`、`requestId`、`requestFingerprint`、`state`、`acceptanceReason`、`turnId`、`turnRelation`、`steerOperationId`、`steerStatus`、`steerRetryAllowed`、`steerNextAction`、`contextGeneration`、`revision`、`observedAt` |
 | Turn result | 这一轮的执行状态、派发状态和结果是什么 | canonical `TurnResultRead`：唯一 `outcome`/`reason`/`nextAction` 与可空 `result` 规则，以及 `TurnDispatchRead` |
-| Session operation | Compact/Reset/recovery/handoff/rebind/stop/force-reset 当前或历史如何收敛 | 完整 [`SessionOperationRead`](conventions.md#canonical-sessionoperationread)，不在此处复制字段列表 |
+| Session operation | Compact/Reset/recovery/handoff/rebind/stop/force-reset/steer 当前或历史如何收敛 | 完整 [`SessionOperationRead`](conventions.md#canonical-sessionoperationread)，不在此处复制字段列表 |
 | launch context | 这次工作实际绑定了哪个 Workspace 与现有 target | `workspace`、`target`、`launchRequestId`、`launchOperationId`、`revision`、`observedAt` |
 
 `unresolvedPrevious` 是旧 `ContextGeneration` 中仍未知的 operation/Input/Turn/side effect
@@ -2310,11 +2530,11 @@ operation fence。
 
 | AC | 可观察验收标准 | 场景映射 | 实施批次 |
 |---|---|---|---|
-| AC1 稳定受理身份 | launch/follow-up 都有 caller `requestId`；launch 还持久化 `launchRequestFingerprint`，同 launch key 同 fingerprint response loss 返回原 rejection/operation，改 payload 返回 `idempotency_key_reused`；`(SessionId, requestId)` 唯一映射稳定返回同一 Input/Turn；accepted 只表示 Input 已接受 | harness、正常 launch、相同 key 重试/response loss、launch key 重用改 payload、不同 key、accept rejection | Batch 1 |
-| AC2 Turn 与输入语义 | queued/retrying/blocked/dispatched/terminal/unknown 与 Turn status 自洽；blocked 可重试、terminal blocked 不再 retry；steer 关联 existing Turn；queue full 在受理前拒绝 | 正常 follow-up、steer、follow-up 排队、queue full、accepted 后入队失败、permanent dispatch failure | Batch 2 |
+| AC1 稳定受理身份 | launch/follow-up 都有 caller `requestId`；launch 还持久化 `launchRequestFingerprint`，同 launch key 同 fingerprint response loss 返回原 rejection/operation，改 payload 返回 `idempotency_key_reused`；`(SessionId, requestId)` 唯一映射稳定返回同一 Input/Turn；steer 只有随 Input 一起持久化 replayable effect 才能报告 accepted | harness、正常 launch、相同 key 重试/response loss、launch key 重用改 payload、不同 key、accept rejection、steer effect response loss | Batch 1 |
+| AC2 Turn 与输入语义 | queued/retrying/blocked/dispatched/terminal/unknown 与 Turn status 自洽；blocked 可重试、terminal blocked 不再 retry；steer 关联 existing Turn，并以 durable steer operation/fence/reportable `pending|accepted|unknown|terminal` effect 收敛；queue full 在受理前拒绝 | 正常 follow-up、steer、steer response loss/restart/duplicate、follow-up 排队、queue full、accepted 后入队失败、permanent dispatch failure | Batch 2 |
 | AC3 Server canonical 事实 | Job status、Session activity/admission、Input acceptance、Turn result 分开返回；Turn result 唯一使用 outcome/reason/nextAction/nullable result；Input/dispatch 使用 conventions 唯一 schema；Job 映射缺失时 null+reason；attempt/deadline/fence/reason/nextAction/revision/observedAt 可追踪 | canonical read、stale event、Job/Session 结果分离、dispatch unknown、force-reset 后 current activity | Batch 3 |
 | AC4 Launch 跨聚合收敛 | AgentJob/Session 不共享事务；durable coordinator/outbox 用幂等命令把部分失败收敛到唯一 Job/首 Input/Turn 映射 | launch partial failure、Server restart、Runner submit response loss | Batch 4 |
-| AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；每个 effect 比较完整 `FenceToken` 的 session/operation/owner/fence/generation/revision/expected/candidate/lease/deadline；candidate get/discard、CAS、cleanup deadline/CAS changed 和旧 owner fail closed 均可观察 | concurrent recovery、lease expiry old owner、Server restart、candidate CAS failure、cleanup binding changed、Runner handoff、旧事件 | Batch 5 |
+| AC5 Binding 与 recovery fence | 同一 Session 只有一个 recovery owner；每个 effect 比较完整 `FenceToken` 的 session/operation/owner/fence/generation/revision/expected/candidate/lease/deadline；candidate response-loss 先按同一 key `getByKey`，完整身份持久化后才 CAS；mismatched candidate 只进入独立 cleanup；candidate get/discard、CAS、cleanup deadline/CAS changed 和旧 owner fail closed 均可观察 | concurrent recovery、lease expiry old owner、Server restart、candidate create response loss/get response loss/identity mismatch、candidate CAS failure、cleanup binding changed、Runner handoff、旧事件 | Batch 5 |
 | AC6 Context operation 与 Unknown | Compact、Cancel/stop 和 binding operation 都有 effect 前后 fence；Compact 不递增 generation；Reset/Runtime change/missing-recovery/force-reset 递增；force-reset 原子保留 superseded targets，binding 提交前 `admission=blocked` | Compact success/response loss、provider already executed、cancel stop uncertain、force-reset with ActiveOperation、force-reset with only unknown Turn/Input/dispatch | Batch 6 |
 
 ### 可观察不变量与场景矩阵
@@ -2354,7 +2574,8 @@ operation fence。
 |---|---|---|
 | 正常 launch | 无 binding、空 Session | 返回稳定 Job/Session/Input/Turn，accepted 后先 queued，再 running，最终 terminal |
 | 正常 follow-up | Session idle、已有 transcript | 不新建 Job；同一 Session 新 Input/Turn 串行执行 |
-| steer | 当前 Turn running，Runtime 明确支持 steer | 新 Input 关联 existing Turn，不创建第二个 Turn |
+| steer | 当前 Turn running，Runtime 明确支持 steer | 新 Input 关联 existing Turn，并与同一事务提交 durable steer operation/effect，不创建第二个 Turn |
+| steer response loss/restart | steer operation 已持久但 Runtime reply 丢失或 owner lease 过期 | 查询同一 effectId；仅有同一 identity replay path 才保留 accepted，否则 effect unknown、admission blocked，不创建第二个 Input/Turn |
 | follow-up 排队 | 前一 Turn running | 后一 Turn 保持 queued；前一 Turn 终结后才可 running |
 | queue full | Session queued 上限已达 | rejected(queue_full)，持久化 fingerprint tombstone，不持久化新 Input；同 key 改 payload 永远拒绝 |
 | harness | Server store、Runner/Runtime fake、outbox 和可注入时间按固定事件顺序运行 | 不访问真实网络、进程、Runtime、DB 或墙钟；每个断言能观察持久状态和副作用次数 |
@@ -2371,6 +2592,8 @@ operation fence。
 | recovery restart/expiry | fence 在重启前未完成 | 按 phase reconcile；超 deadline 后原 operation terminal blocked/cleanup-pending，独立 cleanup fence 有界推进，新 recovery 不被永久阻塞 |
 | lease expiry old owner | lease 到期后旧 owner 仍提交 phase、discard 或 complete | takeover 递增 ownerFence/claimGeneration；旧写入全部 stale_operation_fence，不能删除 adopted candidate |
 | candidate CAS failure | candidate 已创建但 expected binding 已变化 | candidate 标为 orphan；独立 cleanup fence 比较 candidate identity 与 adopted/current binding，安全 discard 或进入 terminal cleanup-pending |
+| force-reset candidate response loss | create response 丢失，candidate 是否存在未知 | 保留 `response_lost`，同 fence `getByKey`；absent 保持同 operation pending/retry，二次 loss 保持 unknown，完整匹配 candidate 持久化后才 CAS |
+| force-reset candidate identity mismatch | getByKey 返回的 key/binding 与 persisted target 不符 | 不构造 CAS；完整 provider identity 进入独立 cleanup，无法确认 identity 则 unknown + operator reconcile |
 | launch partial failure | Job 已提交但 Session response 丢失 | 原 request fingerprint/operation 重试返回同一映射或 rejection；不创建第二个 Session/首 Turn |
 | accept rejection | prepare-job 已保留 reservation，Session 明确拒绝 | Job terminal/rejected；Session/Input/Turn null+reason；tombstone 保留，不留 dangling live ID |
 | submit response loss | Runner 可能已接受首 Turn | Turn 查询为 terminal 或 unknown；不隐式再次 submit |

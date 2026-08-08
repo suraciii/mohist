@@ -205,6 +205,10 @@ SessionInputRead {
   acceptanceReason
   turnId                    # null unless state=accepted
   turnRelation = new-turn | steer | none
+  steerOperationId          # same as requestId when turnRelation=steer; null otherwise
+  steerStatus = none | pending | accepted | unknown | terminal
+  steerRetryAllowed         # null unless turnRelation=steer
+  steerNextAction           # null unless turnRelation=steer
   contextGeneration
   revision
   observedAt
@@ -415,6 +419,18 @@ including after response loss; a changed payload can never pass the same key. Th
 new request ID after capacity is available. Different request IDs are different inputs and still
 pass the Session's canonical `admission=ready` and queue capacity checks.
 
+For `turnRelation=steer`, the same Session transaction also creates one canonical
+`SessionOperationRead(kind=steer)`, a durable effect record/outbox, and the Input mapping. Its
+`operationId` is the caller's `requestId`; `inputId` and `turnId` are the other durable effect
+identities. The operation is the retry record, so steer creates no second Turn, dispatch attempt,
+queue entry, or `dispatchRetryId`. The Input may be returned as `state=accepted` only when that
+transaction has committed the complete operation and replayable effect (`steerRetryAllowed=true`);
+the Runtime has not yet been claimed by that response. A duplicate follow-up returns `accepted`
+when the stored steer operation is already confirmed `outcome=succeeded`, or while a pending or
+response-loss operation still has a replayable effect that can be retried with the same operation
+identity. If the acceptance transaction cannot be confirmed, the result is `unknown` and no new
+Input is created.
+
 Dispatch states are deliberately not interchangeable:
 
 | `dispatchStatus` | Meaning | Automatic transition |
@@ -591,7 +607,7 @@ is terminal `blocked` and a new binding operation may proceed.
 
 ### Canonical SessionOperationRead
 
-`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind` and `stop` are durable
+`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, `stop` and `steer` are durable
 Session operations. Their caller supplies a reusable `operationId`; Server never creates an
 unqueryable operation key for a command response. This is the only authoritative
 `SessionOperationRead` schema. `agent-api.md` and `agent-execution.md` link to it; they do not
@@ -601,10 +617,11 @@ define another operation field list.
 SessionOperationRead {
   sessionId
   operationId
-  kind = compact | reset | recovery | force-reset | handoff | rebind | stop
+  kind = compact | reset | recovery | force-reset | handoff | rebind | stop | steer
   requestFingerprint       # canonical hash of the complete command envelope
-  phase = claimed | resolving | candidate-created | cas-pending | stopping | rebound | completed |
-          superseded | expired | failed | cleanup-pending
+  phase = claimed | resolving | candidate-created | cas-pending | stopping | rebound |
+          steer-queued | steer-dispatching | steer-accepted | completed | superseded |
+          expired | failed | cleanup-pending
   outcome = pending | succeeded | rejected | failed | unknown | blocked
   reason                    # explicit null while no stable reason is known
   ownerId
@@ -621,9 +638,11 @@ SessionOperationRead {
   bindingAtEffect
   candidateKey
   candidateState = none | created | adopted | orphan | cleanup-pending | discarded | unknown
+  retryAllowed               # required for steer; false when no replay is safe
   targetRunnerId
   targetRuntime
-  targetTurnId              # required for kind=stop, otherwise explicit null
+  targetInputId              # required for kind=steer, otherwise explicit null
+  targetTurnId               # required for kind=stop|steer, otherwise explicit null
   supersededTargets = [UnresolvedTargetRead]
   supersededByOperationId
   cleanupFence = null | FenceToken
@@ -651,6 +670,28 @@ equivalent to `null`. `candidateKey`, `targetRunnerId` and `targetRuntime` are p
 any Runtime effect. `candidateState=orphan` means a candidate exists but was never adopted;
 `candidateState=cleanup-pending` belongs to an independent cleanup fence, not to a live recovery
 owner.
+
+`kind=steer` is the durable runtime effect for one accepted steer Input. Its `operationId` is the
+same caller-provided `requestId`, `targetInputId` and `targetTurnId` are fixed before dispatch, and
+its complete `FenceToken` carries explicit null `dispatchAttemptId`/`dispatchRetryId` values. The
+operation phases are `steer-queued` (durable replay record exists), `steer-dispatching` (one fenced
+owner is invoking the adapter), `steer-accepted` (the adapter confirmed the Runtime accepted the
+effect), and `completed`/`failed`/`superseded` as applicable. `outcome=succeeded` maps to
+`steerStatus=accepted`; `outcome=unknown` maps to `steerStatus=unknown`; a definitive refusal or a
+bounded failure maps to `steerStatus=terminal`. `retryAllowed` is persisted, and `nextAction` is
+not a retry signal by itself. The OpenCode `session.promptAsync` and Pi `session.steer` calls are
+adapter internals behind this effect identity; they do not define a second idempotency contract.
+
+The steer effect result has three externally distinct meanings. `accepted` means the Input and
+the durable effect are confirmed or replayable; a replayable pending effect does not claim that the
+provider has already accepted the text. `unknown` means Input acceptance or Runtime acceptance cannot be confirmed; admission stays
+blocked and the same operation may be queried or retried only while its complete fence and
+`retryAllowed=true` remain valid. `terminal` means the effect is definitively not going to be
+retried; an already accepted Input remains accepted, while the operation exposes a stable reason
+and next action. A response-loss or restart reconciliation never creates a new Input, Turn,
+operation, or binding. It first queries the same effect identity, then retries the same operation
+only when the adapter can reconcile/replay it idempotently; otherwise it persists `unknown` with
+`retryAllowed=false` and must not report `accepted`.
 
 The canonical candidate identity is the pair `(SessionOperationRead.candidateKey,
 SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only when its key is the
@@ -687,6 +728,10 @@ these targets still make the supersession and old facts queryable.
 
 The required/null rules are:
 
+`targetInputId` is explicitly null unless `kind=steer`; `targetTurnId` is explicitly null unless
+`kind=stop|steer`; `retryAllowed` is a boolean only for `kind=steer` and is explicitly null for
+other operation kinds.
+
 | kind | required values | explicitly null before completion |
 |---|---|---|
 | `compact` | `expectedBinding`, `contextGeneration`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction` | `candidateBinding`, `candidateKey`, `targetRunnerId`, `targetRuntime`, `supersededByOperationId` |
@@ -696,6 +741,7 @@ The required/null rules are:
 | `handoff` | `expectedBinding`, `candidateKey`, target runner/runtime, with target runner different from expected | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
 | `rebind` | `expectedBinding`, `candidateKey`, target runner equal to expected and target runtime | `candidateBinding` until recorded; `supersededByOperationId` unless explicitly superseded |
 | `stop` | `targetTurnId`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction`; `expectedBinding` and target runner/runtime when a binding exists | `expectedBinding`, `targetRunnerId`, `targetRuntime` when the queued Turn has no binding, `candidateBinding`, `candidateKey`, `supersededByOperationId` unless explicitly superseded |
+| `steer` | `targetInputId`, `targetTurnId`, `expectedBinding`, `targetRunnerId`, `targetRuntime`, `ownerId`, `ownerFence`, `claimGeneration`, `deadline`, `nextAction`, `retryAllowed` | `candidateBinding`, `candidateKey`, `supersededByOperationId` unless explicitly superseded |
 
 `sessionId`, `ownerId`, `ownerFence`, `claimGeneration`, `leaseUntil`, `revision`, `deadline`,
 `expectedRevision`, `expectedContextGeneration`, `contextGeneration`, `supersededTargets`,

@@ -218,6 +218,15 @@ Input acceptance 与 Turn dispatch 使用 [`conventions.md`](conventions.md#cano
 `revision` 和 `observedAt`。`dispatchStatus=unknown` 时 `Turn.status` 也必须是 `unknown`；
 `retryAllowed=false` 时 retry identity、due、owner 和 lease 全为 null。
 
+`turnRelation=steer` additionally returns the canonical Input fields `steerOperationId` (equal to
+the caller's `requestId`), `steerStatus=none|pending|accepted|unknown|terminal`,
+`steerRetryAllowed`, and `steerNextAction`. The steer operation is the durable effect/outbox and
+uses the full `SessionOperationRead`/`FenceToken`; it has no second Turn, dispatch attempt, or
+`dispatchRetryId`. Input `state=accepted` and command result `accepted` require the operation and
+replayable effect to be committed together, or an already confirmed successful operation. A response-loss or restart retry uses the same
+operation identity; no duplicate follow-up may report `accepted` when the operation is not already
+`outcome=succeeded` and `steerRetryAllowed=false`.
+
 `dispatchStatus=blocked` 只表示同一次 dispatch attempt 已得到 `definitely-rejected` 且当前
 仍可重试的临时阻塞，Turn 仍为 `status=queued`；客户端
 不能把它当作终态，Server durable coordinator 也不能因读到这个值就返回。它必须在下一次
@@ -263,7 +272,8 @@ Job、Session、Input 和 Turn projection 只能引用 `operationId` 或嵌入�
 发明裁剪后含义不同的 operation schema。
 
 Compact、Reset、recovery、handoff、rebind、stop 和 force-reset command 都必须由调用方提供
-`operationId`；没有 key 时 Server 拒绝，不生成客户端不可见的替代 key。Query 可以按
+`operationId`；steer follow-up 使用 caller-provided `requestId` as its operationId。没有 key 时
+Server 拒绝，不生成客户端不可见的替代 key。Query 可以按
 `operationId` 读取当前或历史 operation；response loss 的 retry 必须重用同一个 key，并返回
 同一 phase/outcome/binding/context mapping。`launchRequestId` 只用于 launch 的第一层查找，
 不能当作 Session operationId。
@@ -349,8 +359,13 @@ a second context. The later candidate CAS uses `compareAndSwapBinding(preToken)`
 returned `postFence/currentBinding=candidate` for boundary completion and every subsequent effect.
 
 ```text
+require operation.candidateState == created
+require operation.candidateBinding is complete
+require operation.candidateBinding.runnerId == operation.targetRunnerId
+require operation.candidateBinding.runtime == operation.targetRuntime
+require operation.candidateBinding.bindingEpoch == operation.expectedBinding.bindingEpoch + 1
 preToken = fenceToken(operation, expectedBinding = operation.expectedBinding,
-                      candidateBinding = candidate,
+                      candidateBinding = operation.candidateBinding,
                       bindingAtEffect = operation.expectedBinding)
 cas = compareAndSwapBinding(preToken, boundaryKind)
 postToken = cas.postFence
@@ -361,13 +376,24 @@ complete = effectWithFence(postToken, no_external_call,
 `complete` and every result write use the post token's new revision and candidate binding; a stale
 pre or post owner returns `stale_operation_fence`.
 
-The durable candidate identity is `(operation.candidateKey, operation.candidateBinding)`. If
-`createOrGetEmpty` or `getByKey` returns response loss/unknown, Server persists the same operation
-as `outcome=unknown`, `candidateState=unknown`, `candidateBinding=null`, `admission=blocked`, with
-`query_same_candidate_or_manual`; the bounded same-operation query may retry `getByKey`, but cannot
-read `candidate.binding` or call CAS until a complete ready binding is durably recorded. A discard
-response loss remains on the independent cleanup fence with a revisioned `cleanup-pending` result;
-it never becomes an unbounded retry or deletes a candidate after the current binding changes.
+The durable candidate identity is `(operation.candidateKey, operation.candidateBinding)`. A
+`createOrGetEmpty` response is classified before persistence as `ready(candidate)`,
+`candidate_not_ready`, `definitely-absent`, `definitely-rejected`, `response_lost`, or `unknown`.
+`response_lost` is not collapsed into `unknown`: the same fenced operation first calls
+`getByKey(operation.candidateKey)` with `candidateBinding=null`. A second response loss or generic
+unknown persists `outcome=unknown`, `candidateState=unknown`, `candidateBinding=null`,
+`admission=blocked`, and `query_same_candidate_or_manual`; an explicit absent result leaves the
+same operation pending with `retry_same_force_reset_candidate`. A ready result is accepted only
+when its key is exact, its binding is complete, its runner/runtime match the persisted target, and
+its `bindingEpoch` is `expectedBinding.bindingEpoch + 1`; only then is the binding persisted as
+`candidateState=created` and reloaded for CAS. No unconfirmed binding is read for authorization and
+no CAS is constructed from the raw response. A complete but mismatched candidate is handed to an
+independent cleanup fence without CAS with reason `force_reset_candidate_identity_mismatch`; an
+incomplete or unclassifiable candidate remains unknown with `operator_reconcile_candidate`.
+Restart and duplicate requests repeat this same operation
+lookup/reconcile path; they never create another key, candidate, context, or CAS. A discard response
+loss remains on the independent cleanup fence with a revisioned `cleanup-pending` result; it never
+becomes an unbounded retry or deletes a candidate after the current binding changes.
 
 它必须使用新的 operationId，并明确确认旧 Runtime 可能仍有副作用、旧结果仍未知。Server
 要求 `expectedRevision` 与 `expectedContextGeneration` 同时匹配，并在同一 Session 事务中
