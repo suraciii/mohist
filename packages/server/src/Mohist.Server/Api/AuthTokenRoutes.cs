@@ -28,6 +28,7 @@ public static class AuthTokenRoutes
         HttpContext context,
         CreatePatRequest request,
         ICredentialStore store,
+        IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
     {
@@ -69,6 +70,9 @@ public static class AuthTokenRoutes
         }
 
         var credential = result.Credential;
+        await audit.RecordAsync(AuthAuditEvent.CredentialIssued(
+            principal.Id, credential.Id, credential.Kind, credential.Name, credential.CreatedAt), ct)
+            .ConfigureAwait(false);
         return Results.Json(
             new ApiResponse<PatCreatedResponse>(true, new PatCreatedResponse(
                 credential.Id,
@@ -105,6 +109,7 @@ public static class AuthTokenRoutes
         HttpContext context,
         string name,
         ICredentialStore store,
+        IAuthAuditRecorder audit,
         TimeProvider time,
         CancellationToken ct)
     {
@@ -119,6 +124,18 @@ public static class AuthTokenRoutes
             principal.Id, name, revokedAt, ct).ConfigureAwait(false);
         if (!revoked)
             return ApiResults.NotFound($"No PAT named '{name}'");
+
+        // The credential id is the audit target; the revoke path only
+        // knows the name, so resolve it from the list before emitting.
+        var credentials = await store.ListPatAsync(principal.Id, ct).ConfigureAwait(false);
+        var revokedCredential = credentials.FirstOrDefault(candidate => candidate.Name == name);
+        await audit.RecordAsync(AuthAuditEvent.CredentialRevoked(
+            principal.Id,
+            revokedCredential?.Id ?? name,
+            CredentialKind.Pat,
+            name,
+            revokedAt), ct)
+            .ConfigureAwait(false);
 
         return ApiResults.Ok(new { name, revokedAt });
     }

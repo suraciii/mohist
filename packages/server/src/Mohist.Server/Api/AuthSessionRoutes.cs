@@ -22,6 +22,7 @@ public static class AuthSessionRoutes
             HttpContext context,
             FileCredentialLoader fileCredentials,
             ICredentialStore credentials,
+            IAuthAuditRecorder audit,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
@@ -39,7 +40,7 @@ public static class AuthSessionRoutes
 
             var now = timeProvider.GetUtcNow();
             var token = CredentialToken.Generate(CredentialKind.Session);
-            await credentials.CreateAsync(new Credential(
+            var credential = new Credential(
                 Guid.NewGuid().ToString(),
                 principalId,
                 CredentialKind.Session,
@@ -50,7 +51,9 @@ public static class AuthSessionRoutes
                 ProjectId: null,
                 ExpiresAt: now + SessionLifetime,
                 RevokedAt: null,
-                CreatedAt: now), ct);
+                CreatedAt: now);
+            await credentials.CreateAsync(credential, ct);
+            await audit.RecordAsync(AuthAuditEvent.SessionEstablished(principalId, credential.Id, now), ct);
 
             context.Response.Cookies.Append(
                 AuthResolutionMiddleware.SessionCookieName,
@@ -71,13 +74,22 @@ public static class AuthSessionRoutes
         app.MapDelete("/api/auth/session", async (
             HttpContext context,
             ICredentialStore credentials,
+            IAuthAuditRecorder audit,
             TimeProvider timeProvider,
             CancellationToken ct) =>
         {
             var cookie = context.Request.Cookies[AuthResolutionMiddleware.SessionCookieName];
             if (!string.IsNullOrWhiteSpace(cookie))
             {
-                await credentials.RevokeAsync(CredentialToken.Hash(cookie), timeProvider.GetUtcNow(), ct);
+                var tokenHash = CredentialToken.Hash(cookie);
+                var revokedAt = timeProvider.GetUtcNow();
+                var credential = await credentials.FindActiveAsync(tokenHash, ct);
+                await credentials.RevokeAsync(tokenHash, revokedAt, ct);
+                if (credential is not null)
+                {
+                    await audit.RecordAsync(AuthAuditEvent.CredentialRevoked(
+                        credential.PrincipalId, credential.Id, credential.Kind, credential.Name, revokedAt), ct);
+                }
             }
 
             context.Response.Cookies.Delete(AuthResolutionMiddleware.SessionCookieName);

@@ -141,7 +141,7 @@ internal static class AuthCommands
         return cmd;
     }
 
-    private static void WriteTable(
+    internal static void WriteTable(
         TextWriter output,
         string[] headers,
         int[] widths,

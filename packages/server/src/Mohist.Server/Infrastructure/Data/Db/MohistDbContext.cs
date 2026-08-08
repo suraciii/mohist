@@ -47,6 +47,7 @@ public class MohistDbContext : DbContext
     public DbSet<CredentialRow> Credentials { get; set; } = null!;
     public DbSet<EnrollmentTokenRow> EnrollmentTokens { get; set; } = null!;
     public DbSet<PrincipalRow> Principals { get; set; } = null!;
+    public DbSet<AuthAuditEventRow> AuthAuditEvents { get; set; } = null!;
     public DbSet<ProjectRow> Projects { get; set; } = null!;
     public DbSet<ProjectWorkflowProfile> ProjectWorkflowProfiles { get; set; } = null!;
     public DbSet<ProjectWorkflowTemplateRow> ProjectWorkflowTemplates { get; set; } = null!;
@@ -164,6 +165,20 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Kind).HasMaxLength(32).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(256).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
+        });
+
+        modelBuilder.Entity<AuthAuditEventRow>(entity =>
+        {
+            entity.ToTable("AuthAuditEvents");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).HasMaxLength(128);
+            entity.Property(e => e.SubjectId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TargetKind).HasMaxLength(64).IsRequired();
+            entity.Property(e => e.TargetId).HasMaxLength(256).IsRequired();
+            entity.Property(e => e.OccurredAt).IsRequired();
+            entity.Property(e => e.MetadataJson).IsRequired();
+            entity.HasIndex(e => new { e.EventType, e.OccurredAt });
         });
 
         modelBuilder.Entity<ProjectRow>(entity =>

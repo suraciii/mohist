@@ -511,6 +511,46 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Principals");
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Auth.AuthAuditEventRow", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MetadataJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SubjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetKind")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EventType", "OccurredAt");
+
+                    b.ToTable("AuthAuditEvents", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Epic.EpicCounterRow", b =>
                 {
                     b.Property<string>("ProjectId")
