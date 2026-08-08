@@ -50,24 +50,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Setup Node.js for focused gate
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22.19.0
-          cache: npm
-          cache-dependency-path: package-lock.json
-
-      - name: Install script dependencies for focused gate
-        run: timeout --signal=TERM --kill-after=30s 480s npm ci
-
       - name: Restore
         run: timeout --signal=TERM --kill-after=30s 480s dotnet restore Mohist.sln
 
       - name: Build
         run: timeout --signal=TERM --kill-after=30s 480s dotnet build packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-restore
-
-      - name: AgentJob focused stability gate
-        run: timeout --signal=TERM --kill-after=30s 480s npm run ci:agent-job-gate
 
       - name: Test
         run: timeout --signal=TERM --kill-after=30s 480s dotnet test packages/server/tests/Mohist.Server.SpecTests/Mohist.Server.SpecTests.csproj -p:SkipWebBuild=true --no-build
@@ -81,15 +68,6 @@ jobs:
           path: "**/TestResults/*.log"
           if-no-files-found: warn
           retention-days: 7
-
-      - name: Upload AgentJob focused gate evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-job-focused-gate-${{ github.run_attempt }}
-          path: artifacts/agent-job-ci-gate
-          if-no-files-found: error
-          retention-days: 14
 
   dotnet-core:
     name: .NET build and test

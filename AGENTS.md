@@ -116,6 +116,10 @@ spec 定稿后规划实施 issues 时，把 spec 作为已有需求材料交给 
 
 默认只跑受控 track（enforce=true，含 server-unit/server-spec/server-arch）；`--all` 加入 deadline-governed、baseline-pending track。未 baseline 的 track 显式 `status: baseline-pending`，只受 deadline 管控。
 
+### 默认 CI 硬规则
+
+默认 CI workflow 必须在 5 分钟内完成并通过；不得通过增加 `timeout`、`retry`、`skip`、弱化断言或加入可选慢 gate 掩盖超时。`AgentJob` focused 测试若仍有需要，只能走本地或专门验证，不得进入默认 CI gate。
+
 ### C# focused test
 
 C# 测试项目使用 Microsoft Testing Platform + xUnit v3。不要把 VSTest
