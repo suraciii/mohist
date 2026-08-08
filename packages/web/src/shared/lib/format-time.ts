@@ -2,9 +2,8 @@ export function formatTime(iso: string): string {
   return new Date(iso).toLocaleString()
 }
 
-export function formatTimeAgo(date: Date): string {
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
+export function formatTimeAgo(date: Date, now = Date.now()): string {
+  const diffMs = now - date.getTime()
   const diffMin = Math.floor(diffMs / 60000)
   const diffHr = Math.floor(diffMin / 60)
   const diffDay = Math.floor(diffHr / 24)
