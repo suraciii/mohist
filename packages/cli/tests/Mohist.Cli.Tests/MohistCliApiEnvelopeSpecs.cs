@@ -16,6 +16,28 @@ public class MohistCliApiEnvelopeSpecs
         return (api, handler);
     }
 
+    [Fact]
+    public async Task PrintGet_Unauthorized401_AndForbidden403_PromptsAreDistinguishable()
+    {
+        var (unauthorizedApi, unauthorizedHandler) = CreateApi();
+        unauthorizedHandler.SetResponder((_, _) => Task.FromResult(JsonResponse(
+            HttpStatusCode.Unauthorized,
+            """{"success":false,"error":"Authentication required.","code":"unauthorized"}""")));
+        var unauthorizedExit = await unauthorizedApi.PrintGetAsync("/api/fs/home");
+        Assert.Contains("code=unauthorized", unauthorizedApi.Error.ToString());
+        Assert.DoesNotContain("code=forbidden", unauthorizedApi.Error.ToString());
+
+        var (forbiddenApi, forbiddenHandler) = CreateApi();
+        forbiddenHandler.SetResponder((_, _) => Task.FromResult(JsonResponse(
+            HttpStatusCode.Forbidden,
+            """{"success":false,"error":"Insufficient scope.","code":"forbidden"}""")));
+        var forbiddenExit = await forbiddenApi.PrintGetAsync("/api/fs/home");
+        Assert.Contains("code=forbidden", forbiddenApi.Error.ToString());
+        Assert.DoesNotContain("code=unauthorized", forbiddenApi.Error.ToString());
+
+        Assert.Equal(unauthorizedExit, forbiddenExit);
+    }
+
     private static HttpResponseMessage EmptyResponse(HttpStatusCode status, string? reason = null)
     {
         var response = new HttpResponseMessage(status);

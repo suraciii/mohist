@@ -1,4 +1,6 @@
 using Mohist.Server.Api;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Events.Hub;
 using Mohist.Server.Runner.Services.SignalR;
 
@@ -71,8 +73,8 @@ public static class MohistApiRegistration
         app.MapRunnerIdentityRoutes();
         app.MapWorkflowArtifactUploadRoutes();
         app.MapTaskLogRoutes();
-        app.MapHub<RunnerHub>("/hubs/runner");
-        app.MapHub<MohistHub>("/hubs/events");
+        app.MapHub<RunnerHub>("/hubs/runner").RequireScopes(Scope.Runner);
+        app.MapHub<MohistHub>("/hubs/events").RequireScopes(Scope.Operator, Scope.Readonly);
         app.MapOtlpRoutes();
         app.MapOtelQueryRoutes();
         return app;

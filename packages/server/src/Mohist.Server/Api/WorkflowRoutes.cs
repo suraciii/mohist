@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Workflow.Grains;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Server.Workflow.Services;
@@ -88,7 +90,7 @@ public static partial class WorkflowRoutes
             var result = await workflow.AddTasksAsync(new AddTasksBatchRequest(items));
 
             return ApiResults.Ok(new { result.WorkflowRunId, result.Stage, result.AddedCount });
-        });
+        }).RequireScopes(Scope.Runner);
 
         app.MapGet("/api/workflow-runs/{workflowRunId}/workflow-profile", async (
             string workflowRunId,
@@ -133,7 +135,7 @@ public static partial class WorkflowRoutes
             {
                 return ApiResults.BadRequest(ex.Message, "invalid_variables");
             }
-        });
+        }).RequireScopes(Scope.Runner);
 
         return app;
     }

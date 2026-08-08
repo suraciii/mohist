@@ -1,3 +1,5 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure.Config;
 
 namespace Mohist.Server.Api;
@@ -61,7 +63,7 @@ public static class ConfigRoutes
                     cfg[key] = "***";
             }
             return ApiResults.Ok(cfg);
-        });
+        }).RequireScopes(Scope.Operator);
 
         config.MapGet("/list", async (ConfigService svc) =>
         {
@@ -86,7 +88,7 @@ public static class ConfigRoutes
             await svc.SetAsync(key, req.Value);
             var cfg = await svc.GetConfigAsync();
             return ApiResults.Ok(cfg);
-        });
+        }).RequireScopes(Scope.Operator);
 
         return app;
     }

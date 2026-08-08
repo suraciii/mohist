@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Runner.Services;
 
@@ -40,7 +42,7 @@ public static class TaskLogRoutes
             CancellationToken cancellationToken) =>
         {
             return await HandleUploadAsync(request, OwnerKindWorkflow, workflowRunId, workId, service, cancellationToken);
-        });
+        }).RequireScopes(Scope.Runner);
 
         app.MapPost(RouteAgentJob, async (
             HttpRequest request,
@@ -50,7 +52,7 @@ public static class TaskLogRoutes
             CancellationToken cancellationToken) =>
         {
             return await HandleUploadAsync(request, OwnerKindAgentJob, agentJobId, workId, service, cancellationToken);
-        });
+        }).RequireScopes(Scope.Runner);
 
         return app;
     }

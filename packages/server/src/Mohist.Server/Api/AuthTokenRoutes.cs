@@ -15,7 +15,7 @@ public static class AuthTokenRoutes
 
     public static WebApplication MapAuthTokenRoutes(this WebApplication app)
     {
-        var group = app.MapGroup("/api/auth/tokens");
+        var group = app.MapGroup("/api/auth/tokens").RequireScopes(Scope.Operator);
 
         group.MapPost("/", CreateAsync);
         group.MapGet("/", ListAsync);

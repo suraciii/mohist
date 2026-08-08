@@ -1,3 +1,5 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Events.Grains;
 using Mohist.Server.Infrastructure.Events;
 using System.Text.Json;
@@ -14,7 +16,7 @@ public static class DeadLetterRoutes
         if (!UsesLoopbackOnlyListener(app.Configuration))
             return app;
 
-        var group = app.MapGroup("/api/events/dead-letters");
+        var group = app.MapGroup("/api/events/dead-letters").RequireScopes(Scope.Operator);
 
         group.MapGet("/", async (
             HttpContext context,

@@ -65,7 +65,7 @@ public static class AuthSessionRoutes
             return ApiResults.Ok();
         });
 
-        app.MapGet("/api/auth/session", () => ApiResults.Ok());
+        app.MapGet("/api/auth/session", () => ApiResults.Ok()).RequireScopes(Scope.Operator);
 
         app.MapDelete("/api/auth/session", async (
             HttpContext context,
@@ -81,7 +81,7 @@ public static class AuthSessionRoutes
 
             context.Response.Cookies.Delete(AuthResolutionMiddleware.SessionCookieName);
             return ApiResults.Ok();
-        });
+        }).RequireScopes(Scope.Operator);
 
         return app;
     }

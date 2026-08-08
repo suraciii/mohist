@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
@@ -66,7 +67,140 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
         context.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, principal.Id)],
             "mohist"));
+
+        var required = ResolveRequiredScopes(context);
+        if (!ScopeSatisfaction.Satisfies(required, principal.Scopes, EffectiveMethod(context)))
+        {
+            await RejectForbiddenAsync(context, principal, required);
+            return;
+        }
+
+        if (principal.RunnerId is { } boundRunnerId
+            && ClaimedRunnerId(context) is { } claimed
+            && !string.Equals(claimed, boundRunnerId, StringComparison.Ordinal))
+        {
+            await RejectRunnerImpersonationAsync(context, principal, claimed, boundRunnerId);
+            return;
+        }
+
         await next(context);
+    }
+
+    /// <summary>
+    /// The method the readonly rule sees. SignalR clients negotiate over
+    /// POST on this stack; the handshake belongs to the observation
+    /// connection itself (the GET upgrade that follows), so a readonly
+    /// credential on a readonly-declared hub surface is not rejected by
+    /// the negotiate verb. No other surface is affected: runner scope is
+    /// method-agnostic and operator satisfies everything.
+    /// </summary>
+    private static string EffectiveMethod(HttpContext context)
+    {
+        if (HttpMethods.IsPost(context.Request.Method)
+            && context.Request.Path.Value?.EndsWith("/negotiate", StringComparison.Ordinal) == true)
+        {
+            return HttpMethods.Get;
+        }
+
+        return context.Request.Method;
+    }
+
+    /// <summary>
+    /// The route's declared scopes, or the method-based default for
+    /// business routes: GET is the observation surface (operator or
+    /// readonly), every other method requires operator.
+    /// </summary>
+    private static IReadOnlyList<Scope> ResolveRequiredScopes(HttpContext context)
+    {
+        var metadata = context.GetEndpoint()?.Metadata.GetMetadata<RouteScopeRequirement>();
+        if (metadata is not null)
+            return metadata.Scopes;
+
+        return HttpMethods.IsGet(context.Request.Method)
+            ? RouteScopeRequirementExtensions.OperatorOrReadonly
+            : RouteScopeRequirementExtensions.Operator;
+    }
+
+    /// <summary>
+    /// The runner id a runner-scoped request self-declares, in priority
+    /// order: the <c>/api/runner/{{runnerId}}/**</c> path segment, the
+    /// <c>/hubs/runner</c> query parameter, and the
+    /// <c>x-mohist-runner-id</c> header (task-log uploads). The auth
+    /// layer never trusts any of these — they must all match the
+    /// credential's binding.
+    /// </summary>
+    private static string? ClaimedRunnerId(HttpContext context)
+    {
+        var path = context.Request.Path.Value;
+        if (path is not null)
+        {
+            var segments = path.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Length >= 4
+                && string.Equals(segments[0], "api", StringComparison.Ordinal)
+                && string.Equals(segments[1], "runner", StringComparison.Ordinal))
+            {
+                return segments[2];
+            }
+
+            if (segments.Length >= 2
+                && string.Equals(segments[0], "hubs", StringComparison.Ordinal)
+                && string.Equals(segments[1], "runner", StringComparison.Ordinal))
+            {
+                var query = context.Request.Query["runnerId"].ToString();
+                if (!string.IsNullOrWhiteSpace(query))
+                    return query;
+            }
+        }
+
+        var header = context.Request.Headers["x-mohist-runner-id"].ToString();
+        return string.IsNullOrWhiteSpace(header) ? null : header;
+    }
+
+    private static async Task RejectForbiddenAsync(
+        HttpContext context,
+        MohistPrincipal principal,
+        IReadOnlyList<Scope> required)
+    {
+        var requiredNames = required.Select(scope => scope.Name).ToArray();
+        var grantedNames = principal.Scopes.Select(scope => scope.Name).ToArray();
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            success = false,
+            error = $"Insufficient scope. Route requires [{string.Join(", ", requiredNames)}]; "
+                + $"principal '{principal.Id}' holds [{string.Join(", ", grantedNames)}].",
+            code = "forbidden",
+            details = new
+            {
+                principal = principal.Id,
+                required = requiredNames,
+                granted = grantedNames,
+            },
+        }));
+    }
+
+    private static async Task RejectRunnerImpersonationAsync(
+        HttpContext context,
+        MohistPrincipal principal,
+        string claimedRunnerId,
+        string boundRunnerId)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            success = false,
+            error = $"Runner credential of principal '{principal.Id}' is bound to '{boundRunnerId}' "
+                + $"but the request claims runner '{claimedRunnerId}'.",
+            code = "forbidden",
+            details = new
+            {
+                principal = principal.Id,
+                boundRunnerId,
+                claimedRunnerId,
+            },
+        }));
     }
 
     private async Task<MohistPrincipal?> ResolveFromStoreAsync(string token, CancellationToken ct)
@@ -87,7 +221,8 @@ public sealed class AuthResolutionMiddleware : IMiddleware, IScopedService
                 _ => PrincipalKind.Agent,
             },
             credential.PrincipalId,
-            credential.Scopes);
+            credential.Scopes,
+            RunnerId: credential.Kind == CredentialKind.Runner ? credential.Name : null);
 
     private static bool IsAuthSurface(PathString path) =>
         path.StartsWithSegments("/api", StringComparison.Ordinal)

@@ -1,3 +1,5 @@
+using Mohist.Server.Auth.Domain;
+using Mohist.Server.Auth.Identity;
 using Mohist.Server.Logging;
 
 namespace Mohist.Server.Api;
@@ -27,7 +29,7 @@ public static class LogsRoutes
 
             var result = await reader.ReadTailAsync(cursor, limit, maxBytes);
             return ApiResults.Ok(result);
-        });
+        }).RequireScopes(Scope.Operator);
 
         return app;
     }
