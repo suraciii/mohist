@@ -32,7 +32,8 @@ Active development — do not design for version compatibility.
 
 - Write the spec before implementing: `docs/` = product spec, `design/` = design spec.
 - Body is the spec; the gap is the footnote.
-- No comments by default; comments never cite docs or issues.
+- This file holds only rules that apply across the whole repo. Narrow-scope technical details belong in code comments, not here.
+- Comments explain "why", never "what"; they never cite docs or issues.
 
 ## Verification
 
