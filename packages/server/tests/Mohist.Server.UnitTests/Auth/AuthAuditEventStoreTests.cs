@@ -17,8 +17,8 @@ public sealed class AuthAuditEventStoreTests
     {
         using var setup = CreateStore();
 
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(1)));
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialRevoked("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(2)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(1)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialRevoked("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(2)));
         await setup.Store.RecordAsync(AuthAuditEvent.EnrollmentTokenIssued("admin", "hash-a", Epoch.AddMinutes(3)));
         await setup.Store.RecordAsync(AuthAuditEvent.EnrollmentTokenConsumed("admin", "hash-a", "runner-1", Epoch.AddMinutes(4)));
         await setup.Store.RecordAsync(AuthAuditEvent.DeviceApproved("admin", "device-1", Epoch.AddMinutes(5)));
@@ -55,7 +55,7 @@ public sealed class AuthAuditEventStoreTests
     public async Task List_FiltersByEventType()
     {
         using var setup = CreateStore();
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(1)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(1)));
         await setup.Store.RecordAsync(AuthAuditEvent.SessionEstablished("admin", "session-1", Epoch.AddMinutes(2)));
 
         var events = await setup.Store.ListAsync(AuthAuditEventType.CredentialIssued);
@@ -68,7 +68,7 @@ public sealed class AuthAuditEventStoreTests
     public async Task List_FiltersBySince()
     {
         using var setup = CreateStore();
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(1)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(1)));
         await setup.Store.RecordAsync(AuthAuditEvent.SessionEstablished("admin", "session-1", Epoch.AddMinutes(3)));
 
         var events = await setup.Store.ListAsync(since: Epoch.AddMinutes(2));
@@ -81,9 +81,9 @@ public sealed class AuthAuditEventStoreTests
     public async Task List_RespectsLimit()
     {
         using var setup = CreateStore();
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(1)));
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_2", "pat", "ci", Epoch.AddMinutes(2)));
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_3", "pat", "ci", Epoch.AddMinutes(3)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(1)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_2", CredentialKind.Pat, "ci", Epoch.AddMinutes(2)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_3", CredentialKind.Pat, "ci", Epoch.AddMinutes(3)));
 
         var events = await setup.Store.ListAsync(limit: 2);
 
@@ -96,7 +96,7 @@ public sealed class AuthAuditEventStoreTests
     public async Task List_SkipsRowsWithUnknownStoredEventTypes()
     {
         using var setup = CreateStore();
-        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", "pat", "ci", Epoch.AddMinutes(1)));
+        await setup.Store.RecordAsync(AuthAuditEvent.CredentialIssued("admin", "pat_1", CredentialKind.Pat, "ci", Epoch.AddMinutes(1)));
         await InsertRawAsync(setup.Connection, "audit_future", "FutureEvent", Epoch.AddMinutes(2));
 
         var events = await setup.Store.ListAsync();
