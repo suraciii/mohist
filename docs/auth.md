@@ -62,7 +62,7 @@ mo auth logout    # 注销并清除本地会话
 CI、脚本、外部 Agent 这类没有浏览器的调用者，用个人访问令牌：
 
 ```bash
-mo auth token create --name ci-bot --scope readonly --ttl 720h
+mo auth token create --name ci-bot --scope readonly --ttl 720h --project proj_123
 ```
 
 令牌只完整显示一次，且必须有过期时间（缺省 90 天，最长 1 年）——泄露的令牌不会永远有效。调用方通过环境变量提供：
@@ -78,6 +78,10 @@ mo issue list
 mo auth token list
 mo auth token revoke ci-bot
 ```
+
+直接调用 Agent 的令牌在签发时必须明确绑定可用的私有 Project：重复 `--project` 可绑定多份
+Project；需要覆盖全部 Project 时，使用具有“全部”范围的令牌并明确选择 `--all-projects`。这只
+限制该令牌的外部 Agent 调用范围，不会创建面向多人或通用资源的项目权限体系。
 
 ## Web UI：令牌登录
 
@@ -108,7 +112,7 @@ Mohist Agent 是独立身份：它经手的活动在 Mohist 记为它所为；�
 
 ## 非目标
 
-- 多用户、角色、权限组、项目级授权。
+- 多用户、角色、权限组和可复用的项目级授权模型；外部 Agent PAT 的显式 Project 绑定只是令牌签发时的最小范围。
 - 公共开发者平台、第三方应用注册。
 - 单点登录（SSO）与企业身份联邦。
 
