@@ -332,11 +332,14 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
         var firstHub = new RecordingRunnerHubContext();
         var secondHub = new RecordingRunnerHubContext();
         var reply = NewReplySignal();
+        var secondInvocation = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
         var invocationNumber = 0;
         object? ReturnUnknownReply(IReadOnlyList<object?> _)
         {
             var number = Interlocked.Increment(ref invocationNumber);
-            RecordStopEvent($"runner.invocation.{number}");
+            if (number == 2)
+                secondInvocation.TrySetResult(true);
             return reply.Task;
         }
 
@@ -346,14 +349,12 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
         Task<TurnControlResult>? second = null;
         try
         {
-            RecordStopEvent("operation.first.started");
             first = StopAsync(
                 project.Id,
                 sessionId,
                 turnId,
                 expectedOperationId: initialClaim.OperationId,
                 hub: firstHub);
-            RecordStopEvent("operation.second.started");
             second = StopAsync(
                 project.Id,
                 sessionId,
@@ -361,13 +362,17 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
                 expectedOperationId: initialClaim.OperationId,
                 hub: secondHub);
 
-            RecordStopEvent("reply.released");
+            var dispatchOrSettlement = await Task.WhenAny(
+                secondInvocation.Task,
+                first!,
+                second!);
+            Assert.Same(secondInvocation.Task, dispatchOrSettlement);
+            Assert.True(secondInvocation.Task.IsCompleted);
+            Assert.Equal(2, invocationNumber);
             Assert.True(reply.TrySetResult(new RunnerStopReply("unknown", true)));
             var results = await Task.WhenAll(first!, second!);
-            RecordStopEvent("operations.settled");
 
             Assert.All(results, result => Assert.Equal(TurnControlResultKind.Unknown, result.Kind));
-            Assert.Equal(2, invocationNumber);
             Assert.Equal(
                 initialClaim.OperationId,
                 ReadOperationId(Assert.Single(firstHub.Invocations)));
@@ -375,8 +380,6 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
                 initialClaim.OperationId,
                 ReadOperationId(Assert.Single(secondHub.Invocations)));
             Assert.True(reply.Task.IsCompleted);
-            AssertStopEvent("reply.released");
-            Assert.Equal(2, StopEventCount("runner.invocation."));
 
             await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
             await session.CompleteTurnStopAsync(turnId, initialClaim.OperationId!);
@@ -385,7 +388,6 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
         }
         finally
         {
-            RecordStopEvent("reply.release-finally");
             reply.TrySetResult(new RunnerStopReply("unknown", true));
             var pendingOperations = new List<Task>(2);
             if (first is not null)
@@ -393,10 +395,7 @@ public sealed class GenericAgentSessionStopServiceSpecs : GenericAgentSessionSto
             if (second is not null)
                 pendingOperations.Add(second);
             if (pendingOperations.Count > 0)
-            {
                 await Task.WhenAll(pendingOperations);
-                RecordStopEvent("operations.finally-settled");
-            }
         }
     }
 

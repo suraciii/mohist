@@ -135,6 +135,76 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionStopTestSupp
     }
 
     [Fact]
+    public async Task Stop_RunnerUnavailableReturns503EnvelopeAndReleasesClaim()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForStopAsync("agent-launch");
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var turnId = Assert.Single(await session.ListTurnsAsync()).Id;
+        var hub = Hub();
+        hub.Clear();
+        UnregisterRunnerConnection();
+
+        try
+        {
+            using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = document.RootElement;
+            Assert.Equal(
+                ["success", "error", "code", "details"],
+                root.EnumerateObject().Select(property => property.Name).ToArray());
+            Assert.False(root.GetProperty("success").GetBoolean());
+            Assert.Equal("Runner is unavailable", root.GetProperty("error").GetString());
+            Assert.Equal("runner_unavailable", root.GetProperty("code").GetString());
+            var details = root.GetProperty("details");
+            Assert.Equal(
+                ["runnerId"],
+                details.EnumerateObject().Select(property => property.Name).ToArray());
+            Assert.Equal(_runnerId, details.GetProperty("runnerId").GetString());
+            Assert.Empty(hub.Invocations);
+
+            var reservation = await session.BeginFollowupAsync();
+            Assert.False(reservation.StartsIdleTurn);
+            await session.AbandonFollowupAsync(reservation.OperationId!);
+        }
+        finally
+        {
+            RegisterRunnerConnection();
+        }
+
+        await AssertNoStopOwnedResourcesAsync(project.Id, sessionId, _runnerId);
+    }
+
+    [Fact]
+    public async Task Stop_UnknownReplyReturnsUnknownEnvelopeWithInterruptFlag()
+    {
+        var (project, sessionId) = await CreateCanonicalSessionForStopAsync("agent-launch");
+        var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        var turnId = Assert.Single(await session.ListTurnsAsync()).Id;
+        var hub = Hub();
+        hub.Clear();
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("unknown", true));
+
+        using var response = await PostStopAsync(project.Id, sessionId, turnId);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal(
+            ["state", "interruptUnconfirmed"],
+            data.EnumerateObject().Select(property => property.Name).ToArray());
+        Assert.Equal("unknown", data.GetProperty("state").GetString());
+        Assert.True(data.GetProperty("interruptUnconfirmed").GetBoolean());
+        Assert.Single(hub.Invocations);
+
+        var operationId = StopOperationId(hub);
+        await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
+        await session.CompleteTurnStopAsync(turnId, operationId);
+        await Assert.ThrowsAsync<SessionActivityUnknownException>(session.BeginFollowupAsync);
+        await AssertNoStopOwnedResourcesAsync(project.Id, sessionId, _runnerId);
+    }
+
+    [Fact]
     public async Task StopAndCancel_UnknownProjectSessionAndTurnReturnNotFoundEnvelope()
     {
         var (project, sessionId) = await CreateCanonicalSessionForStopAsync("agent-launch");
@@ -260,4 +330,9 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionStopTestSupp
     private RecordingRunnerHubContext Hub() =>
         _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
         ?? throw new InvalidOperationException("Recording runner hub context was not registered.");
+
+    private static string StopOperationId(RecordingRunnerHubContext hub) =>
+        JsonSerializer.SerializeToElement(Assert.Single(hub.Invocations).Arguments.Single())
+            .GetProperty("operationId").GetString()
+        ?? throw new InvalidOperationException("stop invocation did not contain an operation id");
 }
