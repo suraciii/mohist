@@ -1,218 +1,238 @@
-# 故障恢复
+# Troubleshooting and Recovery
 
-Issue 跑挂了怎么办？这份是速查手册。
+Use this guide when an Issue stops advancing.
 
-## 先判断状态
+## Inspect State First
 
 ```bash
 mo issue view <number>
 ```
 
-或 Web UI 看详情页。关注三个字段：
+You can also open Issue details in the Web UI. Inspect three fields:
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `health` | `blocked` / `cancelled` / `done` |
-| `status` | `in-progress` / `done` / `cancelled` |
-| `blockedReason` | 如果 blocked，原因是什么 |
+| `health` | `blocked`, `cancelled`, or `done` |
+| `status` | `in-progress`, `done`, or `cancelled` |
+| `blockedReason` | Cause when health is `blocked` |
 
-## 健康度对照表
+## Health Actions
 
-各 health 状态的语义见 [工作流详解 · 健康度](the-workflow.md#健康度health)。本篇只关心每个状态对应的动作：
+See [Workflow Health](the-workflow.md#health) for the meaning of each value.
+This table maps each value to an operator action:
 
-| Health | 你该做什么 |
+| Health | Action |
 |---|---|
-| `active` | 等 |
-| `paused` | Approve / Reject / Resume |
-| `blocked` | 看下面"恢复动作" |
-| `cancelled` | Reopen（如需要） |
-| `done` | 验收 / 归档 |
+| `active` | Wait |
+| `paused` | Approve, reject, or resume |
+| `blocked` | Use a recovery action below |
+| `cancelled` | Reopen when necessary |
+| `done` | Accept or archive |
 
-## 恢复动作速查
+## Recovery Commands
 
-| 场景 | 命令 | 说明 |
+| Scenario | Command | Meaning |
 |---|---|---|
-| AI 自检失败（check 没过） | `mo run retry --issue <n>` | 重新跑当前失败点 |
-| Runner 崩了且自动恢复失败 | `mo run retry --issue <n>` | Runner 恢复后重试失败点 |
-| 想完全重做当前阶段 | `mo run rerun --issue <n> --from-stage <stage>` | 丢弃目标阶段及之后产物重跑 |
-| 当前阶段彻底卡死 | `mo run pause --issue <n>` | 暂停当前执行，后续用 resume 继续 |
-| 不想继续了 | `mo run stop --issue <n> --yes` | 永久终止运行，不能恢复 |
-| Workflow 已停止，工作已通过其它方式交付 | `mo issue done <n>` | 进入 Done，保留原 workflow 历史 |
-| 完全放弃 | `mo issue close <n>` | 进 cancelled 终态 |
+| An automated Check failed | `mo run retry --issue <n>` | Retry the current failure point |
+| Runner crashed and automatic recovery failed | `mo run retry --issue <n>` | Retry after Runner recovers |
+| Rebuild the current stage completely | `mo run rerun --issue <n> --from-stage <stage>` | Discard output from the target stage and later stages, then rerun |
+| The current stage is stuck | `mo run pause --issue <n>` | Pause current execution and resume later |
+| Work must not continue | `mo run stop --issue <n> --yes` | Stop the run permanently; it cannot resume |
+| Workflow stopped, but work was delivered another way | `mo issue done <n>` | Enter Done and retain Workflow history |
+| Abandon the Issue | `mo issue close <n>` | Enter the cancelled terminal state |
 
-**所有恢复命令都保留 issue 历史**。除非 close + archive，否则状态和产物都不会丢。
+Every recovery command preserves Issue history. State and artifacts remain
+unless the Issue is closed and archived.
 
-**retry 会拿回完整的自动恢复预算**。审查-修复循环耗尽预算失败后，retry 让它从头再来一轮。
+A retry restores the complete automatic recovery budget. When a review and
+repair loop exhausts that budget, retry starts a new budget.
 
-## 常见失败模式
+## Common Failure Modes
 
-### 1. Plan 阶段产不出 proposal.md
+### 1. Plan Does Not Produce `proposal.md`
 
-**症状**：Plan 阶段 blocked，`proposal.md` 不存在。
+**Symptom:** Plan is blocked and `proposal.md` does not exist.
 
-**可能原因**：
-- opencode 没装好或路径不对
-- AI 模型 API 没配 / 限速
-- Issue body 太模糊，AI 反复犹豫
+Possible causes:
 
-**排查**：
+- OpenCode is missing or its path is wrong.
+- Model API configuration or rate limiting prevents execution.
+- The Issue body is too ambiguous for a stable plan.
+
+Inspect:
 
 ```bash
-mo issue logs <n>      # 看具体错误
-mo session list --issue <n>  # 看 AI 实际在想什么
+mo issue logs <n>              # Read the specific error
+mo session list --issue <n>   # Inspect the Agent execution
 ```
 
-**解决**：
+Resolve:
 
-- 确认 `opencode --help` 工作
-- Web UI Settings → OpenCode 检查模型配置
-- 改 issue body 更具体，retry
+- Confirm that `opencode --help` works.
+- Inspect model configuration under Settings > OpenCode in the Web UI.
+- Make the Issue body more specific, then retry.
 
-### 2. Build 阶段写不出代码
+### 2. Build Does Not Produce Code
 
-**症状**：Build task 反复失败。
+**Symptom:** A Build task fails repeatedly.
 
-**可能原因**：
-- 项目代码库太大，AI 上下文不够
-- 测试套件本身有问题，AI 跑不过
-- 任务定义矛盾
+Possible causes:
 
-**排查**：
+- The Repository is too large for the Agent context.
+- The test suite itself fails or is unstable.
+- Task definitions conflict.
+
+Inspect:
 
 ```bash
-mo session list --issue <n>   # 看 AI 的挣扎过程
+mo session list --issue <n>
 ```
 
-**解决**：
+Resolve:
 
-- 改 tasks.json（删掉卡住的任务）
-- Reject 这个 plan，让 AI 重新规划
-- 拆 issue 成更小的（reject + 建 sub-issue）
+- Edit `tasks.json` and remove a blocked task.
+- Reject the Plan so the Agent plans again.
+- Split the Issue into smaller child Issues.
 
-### 3. Check 阶段 review 失败
+### 3. Check Review Fails
 
-**症状**：Check 的 AI review 给出 fail verdict。
+**Symptom:** The Check Agent returns a failing review verdict.
 
-**含义**：AI 自己 review 自己的代码发现问题。
+**Meaning:** The Agent found a problem while reviewing its output.
 
-**这其实是好事**。Workflow 会自动触发 re-build 修复（如果 profile 配了 convergence）。
+This is expected quality control. When the Profile configures convergence, the
+Workflow creates a repair Build automatically.
 
-**你的选择**：
+Choose one action:
 
-- 等 convergence 自动修复（看收敛面板）
-- Reject 让 AI 重新 build
-- Approve 接受现状（review 的问题不致命）
+- Wait for convergence to repair the problem and inspect its panel.
+- Reject so the Agent builds again.
+- Approve the current output when the finding is not material.
 
-### 4. Integrate 失败：merge conflict
+### 4. Integrate Has a Merge Conflict
 
-**症状**：Integrate blocked，提示 conflict。
+**Symptom:** Integrate is blocked with a conflict.
 
-**原因**：Base branch 在 issue 跑的过程中被推进了（别的 issue 合并了、或你手动推了）。
+**Cause:** The base branch advanced while the Issue was running, because
+another Issue merged or a user pushed manually.
 
-**解决**：
+First try automatic rebase:
 
 ```bash
-mo issue rebase <n>     # 尝试自动 rebase
+mo issue rebase <n>
 ```
 
-如果自动 rebase 也冲突：
+If it also conflicts:
 
-1. 进 worktree：`cd <repo>/.mohist/worktrees/issue-<n>/`
-2. 手动解决冲突
-3. `git add` + `git rebase --continue`
-4. 恢复 Workflow：`mo run resume --issue <n>`
+1. Enter the worktree at `<repo>/.mohist/worktrees/issue-<n>/`.
+2. Resolve conflicts manually.
+3. Run `git add` and `git rebase --continue`.
+4. Resume with `mo run resume --issue <n>`.
 
-### 5. Runner 不可用
+### 5. Runner Is Unavailable
 
-**症状**：Workflow 长时间等待，或 Issue 因 `runner-lost` 进入 blocked。
+**Symptom:** A Workflow waits for a long time, or the Issue becomes blocked
+with `runner-lost`.
 
-**原因**：Runner 没有运行、失去连接，或自动恢复没有成功。
+**Cause:** Runner is stopped or disconnected, or automatic recovery failed.
 
-**解决**：
+Verify Runner state:
 
 ```bash
-# 确保 Runner 已经起来
 mo server status
 ```
 
-仍在等待的 Workflow 会自动继续。已经 blocked 的 Workflow 在 Runner 恢复后执行 Retry；已完成阶段和历史不会丢失。
+A waiting Workflow continues automatically when Runner returns. For a blocked
+Workflow, retry after Runner recovers. Completed stages and history remain.
 
-### 6. AgentSession 卡死（无输出）
+### 6. AgentSession Produces No Output
 
-**症状**：Issue 显示 running，但长时间（> 10 分钟）无任何输出。
+**Symptom:** The Issue shows running but produces no output for more than ten
+minutes.
 
-**排查**：
-
-```bash
-mo session list --issue <n>   # 看最后一行
-mo server logs          # 看应用级日志（Mohist server 自身的 log tail）
-```
-
-**解决**：
+Inspect:
 
 ```bash
-mo run pause --issue <n>    # 暂停
-mo run resume --issue <n>   # 从断点继续
-# 或
-mo run retry --issue <n>    # 重试失败点
+mo session list --issue <n>   # Inspect the latest AgentSession entry
+mo server logs                # Inspect the Server application log tail
 ```
 
-### 7. Drift 警告
+Resolve:
 
-**症状**：Issue 详情页出现 "Base Drift Detected" 卡片。
+```bash
+mo run pause --issue <n>     # Pause
+mo run resume --issue <n>    # Continue from the pause point
+# Or
+mo run retry --issue <n>     # Retry the failure point
+```
 
-**含义**：Base branch 在你 issue 跑的过程中推进了。当前还没失败，但 Integrate 时可能失败。
+### 7. Drift Warning
 
-**Drift decision**：
+**Symptom:** Issue details show a "Base Drift Detected" panel.
 
-| Decision | 含义 | 你做什么 |
+**Meaning:** The base branch advanced while the Issue was running. Execution has
+not failed, but Integrate can fail later.
+
+| Decision | Meaning | Action |
 |---|---|---|
-| `needs-attention` | 必须处理 | 立刻 rebase |
-| `defer` | 等到合适时机自动处理 | 等 |
-| `suggest` | 建议你处理 | 看情况 |
-| `enqueue` | 排队处理 | 等 |
+| `needs-attention` | Drift must be handled | Rebase now |
+| `defer` | Mohist can handle it automatically later | Wait |
+| `suggest` | Handling is recommended | Decide from current context |
+| `enqueue` | Handling is queued | Wait |
 
-**操作**：
+Rebase explicitly with:
 
 ```bash
-mo issue rebase <n>     # 主动 rebase
+mo issue rebase <n>
 ```
 
-或者忽略——某些 drift 会自动消化。
+Some drift resolves automatically and can be left alone.
 
-## 怎么知道出问题了
+## Failure Signals
 
-不用每天盯。Mohist 会在这些时机通知你：
+Constant monitoring is not required. Mohist signals a problem through:
 
-- **看板顶部 Needs attention 条**（Web UI）
-- **Issue card 上的 blocked pill**（红色）
-- **Issue 详情页的红色错误框**
-- **Hermes 推送**：审批点、失败、完成可推送到你的聊天工具，见 [Hermes 通知](hermes-notifications.md)
+- The **Needs attention** banner above the Web UI board.
+- A red blocked indicator on the Issue card.
+- The red error panel on Issue details.
+- A Hermes notification for an Approval point, failure, or completion. See
+  [Hermes Notifications](hermes-notifications.md).
 
-## 预防性建议
+## Prevention
 
-- **Issue body 写清楚**：多数 plan 跑偏源于模糊的 body；写法见 [Issue 管理](issues.md#issue-body-怎么写)。
-- **小步快跑**：一个 issue 一件事——失败好恢复、plan 质量高、能并行。
-- **别在 AI 跑的时候动 base branch**：会导致 drift / conflict。
-- **监控 capacity**：`mo server status` 看使用量；超量启动只会排队，不报错。
-- **定期清理 worktree**：`git worktree list` 查看，`git worktree prune` 清理。
-- **关注反复失败的模式**：多个 issue 在同一类任务上反复 blocked 时，不要只逐个 retry。常见原因是输入模板不清、测试慢或不稳定、模块边界混乱、workflow profile 不适合任务类型——先修这些，再扩大并发。
+- **Write a specific Issue body.** Ambiguous bodies cause many poor Plans. See
+  [Write an Effective Issue Body](issues.md#write-an-effective-issue-body).
+- **Keep an Issue small.** One Issue should do one thing. Small Issues recover
+  easily, plan better, and execute concurrently.
+- **Avoid changing the base branch during Agent work.** A change can cause drift
+  or conflict.
+- **Monitor capacity.** `mo server status` shows use. Work above capacity waits
+  instead of failing.
+- **Reclaim worktrees periodically.** Inspect with `git worktree list` and
+  reclaim stale metadata with `git worktree prune`.
+- **Investigate repeated failure patterns.** When several Issues block on the
+  same work, do not retry each one indefinitely. Common causes include an
+  ambiguous input template, slow or unstable tests, unclear module boundaries,
+  or a Workflow Profile that does not fit the work. Repair the common cause
+  before increasing concurrency.
 
-## 找不到原因？
+## Complete Diagnostics
+
+When the cause remains unclear, collect:
 
 ```bash
-# 完整诊断
 mo issue logs <n>
 mo issue events <n>
 mo session list --issue <n>
 mo server logs
 
-# 还不行
-# Web UI → Logs 页 → 找 error 级别日志
+# Then inspect error-level entries on the Web UI Logs page.
 ```
 
-如果是 Mohist 本身的 bug，提 issue 并附上：Issue number、health / status / blockedReason、logs 关键片段、复现步骤。
+For a Mohist defect, create an Issue with the Issue number, `health`, `status`,
+`blockedReason`, relevant log excerpts, and reproduction steps.
 
 ---
 
-对应源码：跨域；恢复逻辑见 `Issue/`、`Workflow/`（health / blocked 处理）。
+Implementation source: recovery spans the Issue and Workflow domains, including
+health and blocked-state handling.
