@@ -31,11 +31,16 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-job-id-roundtrip");
         var runnerId = $"launch-job-roundtrip-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "roundtrip-agent");
+        await CreateWorkspaceAsync(projectId, "launch-job-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "roundtrip the job id" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "roundtrip the job id",
+                context = new { workspace = "launch-job-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
@@ -72,13 +77,18 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-exactly-once");
         var runnerId = $"launch-exactly-once-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "exactly-once-agent");
+        await CreateWorkspaceAsync(projectId, "launch-job-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
             var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "exactly one of each" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "exactly one of each",
+                context = new { workspace = "launch-job-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;

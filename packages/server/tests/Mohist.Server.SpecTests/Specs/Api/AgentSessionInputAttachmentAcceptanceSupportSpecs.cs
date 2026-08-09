@@ -1,6 +1,7 @@
 using Mohist.Server.SpecTests.Support;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
@@ -17,6 +18,9 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 
 public partial class AgentSessionInputAttachmentAcceptanceSpecs
 {
+    private const string LaunchWorkspaceName = "attachment-launch-workspace";
+    private const string LaunchRepositoryName = "main";
+
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var name = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
@@ -29,6 +33,11 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
             setDefault = true,
+        });
+        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/workspaces", new
+        {
+            name = LaunchWorkspaceName,
+            repos = new[] { LaunchRepositoryName },
         });
         return projectId;
     }
@@ -76,9 +85,16 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         object body,
         string? idempotencyKey = null)
     {
+        var requestBody = JsonSerializer.SerializeToNode(body)?.AsObject()
+            ?? throw new InvalidOperationException("Launch body must serialize as an object");
+        var context = requestBody["context"] as JsonObject ?? new JsonObject();
+        context["workspace"] = LaunchWorkspaceName;
+        context["repository"] = LaunchRepositoryName;
+        requestBody["context"] = context;
+
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
         {
-            Content = JsonContent.Create(body),
+            Content = JsonContent.Create(requestBody),
         };
         request.Headers.Add("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
         return _fixture.Client.SendAsync(request);

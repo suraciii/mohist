@@ -12,6 +12,7 @@ using Mohist.Server.Contracts;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Workflow.Services;
+using Mohist.Server.Workspace.Domain;
 using Mohist.Server.Workspace.Services;
 
 namespace Mohist.Server.Api;
@@ -109,6 +110,14 @@ public static class AgentSessionLaunchRoutes
             var launchOrigin = ReadLaunchOrigin(context.Request);
             var suppliedWorkspace = body.Context?.Workspace?.Trim();
             var hasExplicitWorkspace = suppliedWorkspace is { Length: > 0 };
+            if (launchOrigin == "web" && !hasExplicitWorkspace)
+            {
+                return ApiResults.BadRequest(
+                    "context.workspace is required for Web agent launches",
+                    "workspace_required",
+                    new { fields = new[] { "context.workspace" } });
+            }
+
             var workspaceName = hasExplicitWorkspace
                 ? suppliedWorkspace!
                 : launchOrigin == "cli"
@@ -121,22 +130,25 @@ public static class AgentSessionLaunchRoutes
             // accepted subset is what the dispatch envelope carries and
             // is established later via ValidateAndBindAgentInputAsync.
 
+            var contextValidation = await ValidateContextAsync(
+                body.Context,
+                project.Id,
+                issueQuerier,
+                epicQuerier,
+                grains);
+            if (contextValidation.Error is not null)
+                return contextValidation.Error;
+
             IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
-            if (!string.IsNullOrWhiteSpace(workspaceName))
+            if (contextValidation.Workspace is { RepositoryNames.Count: > 0 })
             {
-                var wsGrain = grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
-                    Infrastructure.Orleans.GrainKey.Workspace(project.Id, workspaceName));
-                var ws = await wsGrain.GetAsync();
-                if (ws is { RepositoryNames.Count: > 0 })
-                {
-                    var repos = project.Repositories;
-                    workspaceRepositories = ws.RepositoryNames
-                        .Select(name => repos.FirstOrDefault(r =>
-                            string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
-                        .Where(r => r is not null)
-                        .Select(r => new WorkspaceRepositorySnapshot(r!.Name, r.GitUrl, r.ResolvedBaseBranch))
-                        .ToList();
-                }
+                var repos = project.Repositories;
+                workspaceRepositories = contextValidation.Workspace.RepositoryNames
+                    .Select(name => repos.FirstOrDefault(r =>
+                        string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
+                    .Where(r => r is not null)
+                    .Select(r => new WorkspaceRepositorySnapshot(r!.Name, r.GitUrl, r.ResolvedBaseBranch))
+                    .ToList();
             }
 
             var launchRequest = new AgentLaunchCoordinatorRequest(
@@ -203,10 +215,6 @@ public static class AgentSessionLaunchRoutes
             {
                 return ApiResults.Conflict("Archived agents cannot start new sessions", "agent_archived");
             }
-
-            var contextError = await ValidateContextAsync(body.Context, project.Id, issueQuerier, epicQuerier, grains);
-            if (contextError is not null)
-                return contextError;
 
             try
             {
@@ -429,7 +437,7 @@ public static class AgentSessionLaunchRoutes
             "agent_needs_setup",
             exception.Result);
 
-    private static async Task<IResult?> ValidateContextAsync(
+    private static async Task<(IResult? Error, WorkspaceState? Workspace)> ValidateContextAsync(
         AgentSessionLaunchContextRef? context,
         string projectId,
         IssueQuerier issueQuerier,
@@ -437,33 +445,46 @@ public static class AgentSessionLaunchRoutes
         IGrainFactory grains)
     {
         if (context?.IssueNumber is <= 0)
-            return ApiResults.BadRequest("issueNumber must be positive", "validation_failed");
+            return (ApiResults.BadRequest("issueNumber must be positive", "validation_failed"), null);
         if (context?.EpicNumber is <= 0)
-            return ApiResults.BadRequest("epicNumber must be positive", "validation_failed");
+            return (ApiResults.BadRequest("epicNumber must be positive", "validation_failed"), null);
 
         if (context?.IssueNumber is int issueNumber
             && await issueQuerier.GetAsync(projectId, issueNumber) is null)
         {
-            return ApiResults.NotFound($"Issue #{issueNumber} not found");
+            return (ApiResults.NotFound($"Issue #{issueNumber} not found"), null);
         }
 
         if (context?.EpicNumber is int epicNumber
             && await epicQuerier.GetAsync(projectId, epicNumber) is null)
         {
-            return ApiResults.NotFound($"Epic #{epicNumber} not found");
+            return (ApiResults.NotFound($"Epic #{epicNumber} not found"), null);
         }
 
-        if (!string.IsNullOrWhiteSpace(context?.Workspace))
+        if (string.IsNullOrWhiteSpace(context?.Workspace))
+            return (null, null);
+
+        var workspaceName = context.Workspace.Trim();
+        var workspace = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
+            Infrastructure.Orleans.GrainKey.Workspace(projectId, workspaceName)).GetAsync();
+        if (workspace is null)
+            return (ApiResults.BadRequest($"Workspace '{workspaceName}' not found", "workspace_not_found"), null);
+        if (workspace.Status != WorkspaceStatus.Active)
+            return (ApiResults.BadRequest($"Workspace '{workspaceName}' is archived and cannot accept new sessions", "workspace_archived"), null);
+
+        var repository = context.Repository?.Trim();
+        if (!string.IsNullOrWhiteSpace(repository)
+            && !workspace.RepositoryNames.Any(name => string.Equals(name, repository, StringComparison.OrdinalIgnoreCase)))
         {
-            var workspace = await grains.GetGrain<Mohist.Server.Workspace.Grains.IWorkspaceGrain>(
-                Infrastructure.Orleans.GrainKey.Workspace(projectId, context.Workspace.Trim())).GetAsync();
-            if (workspace is null)
-                return ApiResults.BadRequest($"Workspace '{context.Workspace}' not found", "workspace_not_found");
-            if (workspace.Status != Mohist.Server.Workspace.Domain.WorkspaceStatus.Active)
-                return ApiResults.BadRequest($"Workspace '{context.Workspace}' is archived and cannot accept new sessions", "workspace_archived");
+            return (
+                ApiResults.BadRequest(
+                    $"Repository '{repository}' is not attached to Workspace '{workspaceName}'",
+                    "repository_workspace_mismatch",
+                    new { repository, workspace = workspaceName }),
+                null);
         }
 
-        return null;
+        return (null, workspace);
     }
     private static string? ReadIdempotencyKey(HttpRequest request)
     {

@@ -25,6 +25,43 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task Launch_WebWithoutWorkspace_Returns400WithoutCreatingWorkspace()
+    {
+        var projectId = await CreateProjectAsync("launch-workspace-required");
+        var agent = await CreateAgentAsync(projectId, "workspace-required-agent");
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
+
+        using var launch = await LaunchAsync(projectId, agent.Id, new { prompt = "requires an explicit scope" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, launch.StatusCode);
+        var payload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("workspace_required", payload.GetProperty("code").GetString());
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_RejectsRepositoryOutsideWorkspaceBeforeCreatingSession()
+    {
+        var projectId = await CreateProjectAsync("launch-workspace-repository-mismatch");
+        var agent = await CreateAgentAsync(projectId, "workspace-repository-agent");
+        await CreateWorkspaceAsync(projectId, "launch-scope", new[] { "main" });
+        var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var launch = await LaunchAsync(projectId, agent.Id, new
+        {
+            prompt = "use the selected scope",
+            context = new { workspace = "launch-scope", repository = "other" },
+        });
+
+        Assert.Equal(HttpStatusCode.BadRequest, launch.StatusCode);
+        var payload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("repository_workspace_mismatch", payload.GetProperty("code").GetString());
+        Assert.Equal(sessionsBefore, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Fact]
     public async Task Launch_NeedsSetup_ReturnsGapsBeforeCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-readiness-gate");
@@ -46,8 +83,13 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 
         var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
         var jobsBefore = await CountJobsAsync(projectId, agentId);
+        await CreateWorkspaceAsync(projectId, "launch-readiness-workspace");
         var workspacesBefore = await CountWorkspacesAsync(projectId);
-        using var launch = await LaunchAsync(projectId, agentId, new { prompt = "do it" });
+        using var launch = await LaunchAsync(projectId, agentId, new
+        {
+            prompt = "do it",
+            context = new { workspace = "launch-readiness-workspace" },
+        });
         Assert.Equal(HttpStatusCode.Conflict, launch.StatusCode);
         var launchBody = await launch.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("agent_needs_setup", launchBody.GetProperty("code").GetString());
@@ -78,6 +120,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var projectId = await CreateProjectAsync("launch-201");
         var runnerId = $"launch-201-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "reviewer");
+        await CreateWorkspaceAsync(projectId, "launch-201-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
@@ -85,6 +128,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
             using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
                 {
                     prompt = "Refactor the auth module",
+                    context = new { workspace = "launch-201-workspace" },
                 });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -118,8 +162,7 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
                 .Single(workspace => string.Equals(workspace.GetProperty("name").GetString(), workspaceId, StringComparison.Ordinal));
             Assert.Equal(workspaceId, persistedWorkspace.GetProperty("name").GetString());
             Assert.Equal("active", persistedWorkspace.GetProperty("status").GetString());
-            Assert.Equal("web", persistedWorkspace.GetProperty("origin").GetProperty("kind").GetString());
-            Assert.Equal(sessionId, persistedWorkspace.GetProperty("origin").GetProperty("conversationId").GetString());
+            Assert.Equal("manual", persistedWorkspace.GetProperty("origin").GetProperty("kind").GetString());
             Assert.Equal(
                 $"/{Uri.EscapeDataString(projectName!)}/sessions/{Uri.EscapeDataString(sessionId!)}",
                 data.GetProperty("sessionUrl").GetString());
@@ -148,11 +191,16 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
         var projectId = await CreateProjectAsync("launch-read-session");
         var runnerId = $"launch-read-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "readable-agent");
+        await CreateWorkspaceAsync(projectId, "launch-read-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "open product transcript" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "open product transcript",
+                context = new { workspace = "launch-read-workspace" },
+            });
 
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();

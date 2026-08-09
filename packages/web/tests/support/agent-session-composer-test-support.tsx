@@ -100,6 +100,19 @@ export function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): Agent
   }
 }
 
+export function makeWorkspace(name: string, repositories: string[] = ['main']): Workspace {
+  return {
+    projectId: 'proj-1',
+    name,
+    origin: { kind: 'manual' },
+    repositories,
+    status: 'active',
+    home: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    boundSessionCount: 0,
+  }
+}
+
 function LocationProbe() {
   const location = useLocation()
   return <div data-testid="current-path">{location.pathname}</div>

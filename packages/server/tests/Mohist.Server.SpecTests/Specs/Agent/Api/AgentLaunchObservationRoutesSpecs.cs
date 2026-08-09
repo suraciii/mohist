@@ -26,6 +26,9 @@ namespace Mohist.Server.SpecTests.Specs.Agent.Api;
 [Collection("AgentLaunchObservationRoutes")]
 public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSupport
 {
+    private const string ObservationWorkspaceName = "observation-workspace";
+    private const string ObservationRepositoryName = "main";
+
     public AgentLaunchObservationRoutesSpecs(MohistIntegrationFixture fixture) : base(fixture)
     {
     }
@@ -33,14 +36,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Launch_ReturnsAllFourStableReferencesAndObservationUrl()
     {
-        var projectId = await CreateProjectAsync("obs-201-ids");
+        var projectId = await CreateObservationProjectAsync("obs-201-ids");
         var runnerId = $"obs-201-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-id-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "return four ids" });
+            using var launch = await LaunchObservationAsync(projectId, agent.Id, "return four ids");
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
@@ -69,10 +72,10 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_DuringQueuedState_ReportsAcceptedInputAndPendingTurn()
     {
-        var projectId = await CreateProjectAsync("obs-queued");
+        var projectId = await CreateObservationProjectAsync("obs-queued");
         var agent = await CreateAgentAsync(projectId, "obs-queued-agent");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "no runner online" });
+        using var launch = await LaunchObservationAsync(projectId, agent.Id, "no runner online");
         Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
         var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
         var data = launchPayload.GetProperty("data");
@@ -94,14 +97,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_DuringTerminalState_ReportsJobResultAndTurnResult()
     {
-        var projectId = await CreateProjectAsync("obs-terminal");
+        var projectId = await CreateObservationProjectAsync("obs-terminal");
         var runnerId = $"obs-terminal-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-terminal-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "complete me" });
+            using var launch = await LaunchObservationAsync(projectId, agent.Id, "complete me");
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -144,14 +147,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_AfterReportTimeout_ReportsJobUnknownWithoutCreatingNewInputsOrTurns()
     {
-        var projectId = await CreateProjectAsync("obs-unknown");
+        var projectId = await CreateObservationProjectAsync("obs-unknown");
         var runnerId = $"obs-unknown-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-unknown-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "will time out" });
+            using var launch = await LaunchObservationAsync(projectId, agent.Id, "will time out");
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -194,10 +197,10 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_RepeatedReads_DoNotCreateAdditionalInputsOrTurns()
     {
-        var projectId = await CreateProjectAsync("obs-repeat");
+        var projectId = await CreateObservationProjectAsync("obs-repeat");
         var agent = await CreateAgentAsync(projectId, "obs-repeat-agent");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "read me twice" });
+        using var launch = await LaunchObservationAsync(projectId, agent.Id, "read me twice");
         Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
         var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
         var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
@@ -223,11 +226,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_CrossProjectJob_Returns404()
     {
-        var projectA = await CreateProjectAsync("obs-proj-a");
-        var projectB = await CreateProjectAsync("obs-proj-b");
+        var projectA = await CreateObservationProjectAsync("obs-proj-a");
+        var projectB = await CreateObservationProjectAsync("obs-proj-b");
         var agent = await CreateAgentAsync(projectA, "obs-cross-agent");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectA, agent.Id, new { prompt = "cross project" });
+        using var launch = await LaunchObservationAsync(projectA, agent.Id, "cross project");
         Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
         var jobId = (await launch.Content.ReadFromJsonAsync<JsonElement>())
             .GetProperty("data").GetProperty("jobId").GetString()!;
@@ -247,14 +250,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Observation_AfterAuthoritativeTerminalReport_ResolvesUnknownToCompleted()
     {
-        var projectId = await CreateProjectAsync("obs-resolve");
+        var projectId = await CreateObservationProjectAsync("obs-resolve");
         var runnerId = $"obs-resolve-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-resolve-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "recover to terminal" });
+            using var launch = await LaunchObservationAsync(projectId, agent.Id, "recover to terminal");
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -314,14 +317,14 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     {
         // Spec: a completed initial Job leaves its AgentSession usable;
         // the Session activity is independent of the Job verdict.
-        var projectId = await CreateProjectAsync("obs-session-usable");
+        var projectId = await CreateObservationProjectAsync("obs-session-usable");
         var runnerId = $"obs-session-usable-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-session-usable-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "completed first" });
+            using var launch = await LaunchObservationAsync(projectId, agent.Id, "completed first");
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -360,7 +363,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
     [Fact]
     public async Task Launch_RejectsUnknownJobIdOnObservationRoute_Returns404()
     {
-        var projectId = await CreateProjectAsync("obs-not-found");
+        var projectId = await CreateObservationProjectAsync("obs-not-found");
 
         using var response = await _fixture.Client.GetAsync(
             $"/api/projects/{projectId}/agent-jobs/agent-job-launch-{Guid.NewGuid():N}/launch-observation");
@@ -375,4 +378,22 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
+
+    private async Task<string> CreateObservationProjectAsync(string prefix)
+    {
+        var projectId = await CreateProjectAsync(prefix);
+        await CreateWorkspaceAsync(projectId, ObservationWorkspaceName, new[] { ObservationRepositoryName });
+        return projectId;
+    }
+
+    private Task<HttpResponseMessage> LaunchObservationAsync(string projectId, string agentId, string prompt) =>
+        _fixture.Client.LaunchAgentSessionAsync(projectId, agentId, new
+        {
+            prompt,
+            context = new
+            {
+                workspace = ObservationWorkspaceName,
+                repository = ObservationRepositoryName,
+            },
+        });
 }

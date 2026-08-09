@@ -36,8 +36,13 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             "/api/projects",
             $"generic-open-pi-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "open-pi-agent", runtime: "pi");
+        await CreateWorkspaceAsync(project.Id, "runtime-workspace");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "open on pi" });
+        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+        {
+            prompt = "open on pi",
+            context = new { workspace = "runtime-workspace" },
+        });
         launch.EnsureSuccessStatusCode();
         var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
         var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -84,8 +89,13 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             "/api/projects",
             $"generic-attach-pi-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "attach-pi-agent", runtime: "pi");
+        await CreateWorkspaceAsync(project.Id, "runtime-workspace");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "attach on pi" });
+        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+        {
+            prompt = "attach on pi",
+            context = new { workspace = "runtime-workspace" },
+        });
         launch.EnsureSuccessStatusCode();
         var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
         var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -184,8 +194,13 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
             "/api/projects",
             $"generic-open-default-{Guid.NewGuid():N}");
         var agent = await CreateAgentAsync(project.Id, "open-default-agent");
+        await CreateWorkspaceAsync(project.Id, "runtime-workspace");
 
-        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "open on default" });
+        using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+        {
+            prompt = "open on default",
+            context = new { workspace = "runtime-workspace" },
+        });
         launch.EnsureSuccessStatusCode();
         var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
         var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -233,6 +248,14 @@ public class GenericAgentSessionRuntimeOpenAttachSpecs
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();
         return new AgentRef(body.GetProperty("data").GetProperty("id").GetString()!, name);
+    }
+
+    private async Task CreateWorkspaceAsync(string projectId, string name)
+    {
+        using var response = await _fixture.Client.PostAsJsonAsync(
+            $"/api/projects/{projectId}/workspaces",
+            new { name, repos = new[] { "test-repo" } });
+        response.EnsureSuccessStatusCode();
     }
 
     private sealed record ProjectDto(string Id);

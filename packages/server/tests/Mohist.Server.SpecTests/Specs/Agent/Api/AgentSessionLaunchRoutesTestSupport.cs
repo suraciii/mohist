@@ -202,11 +202,11 @@ public abstract class AgentSessionLaunchRoutesTestSupport
 
     protected const int ProjectDomainMaxLength = 63;
 
-    protected async Task CreateWorkspaceAsync(string projectId, string name)
+    protected async Task CreateWorkspaceAsync(string projectId, string name, IReadOnlyCollection<string>? repositories = null)
     {
         using var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/workspaces",
-            new { name, repositories = new[] { "main" } });
+            new { name, repos = repositories ?? new[] { "main" } });
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync();

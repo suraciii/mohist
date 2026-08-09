@@ -19,6 +19,14 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifetime
 {
+    protected const string LaunchWorkspaceName = "generic-transcript-workspace";
+    protected const string LaunchRepositoryName = "main";
+    protected static object LaunchContext => new
+    {
+        workspace = LaunchWorkspaceName,
+        repository = LaunchRepositoryName,
+    };
+
     protected readonly MohistIntegrationFixture _fixture;
     protected readonly HttpClient _client;
     protected readonly string _runnerId = $"generic-transcript-{Guid.NewGuid():N}";
@@ -302,6 +310,11 @@ public abstract class GenericAgentSessionTranscriptAxisTestSupport : IAsyncLifet
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
             setDefault = true,
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/workspaces", new
+        {
+            name = LaunchWorkspaceName,
+            repos = new[] { LaunchRepositoryName },
         });
         return new ProjectRef(project.Id);
     }

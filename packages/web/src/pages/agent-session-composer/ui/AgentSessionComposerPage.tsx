@@ -345,8 +345,13 @@ export function AgentSessionComposerPage({
     if (epic) refs.push({ type: 'epic', label: `Epic: ${epic}`, value: epic })
     const repo = searchParams.get('repo')
     if (repo) refs.push({ type: 'repository', label: `Repository: ${repo}`, value: repo })
+    const workspace = searchParams.get('workspace')
     const ws = searchParams.get('ws')
-    if (ws) refs.push({ type: 'workspace', label: `Workspace: ${ws}`, value: ws })
+    if (workspace) {
+      refs.push({ type: 'workspace', label: `Workspace: ${workspace}`, value: workspace, workspaceField: 'workspace' })
+    } else if (ws) {
+      refs.push({ type: 'workspace', label: `Workspace: ${ws}`, value: ws, workspaceField: 'workspacePath' })
+    }
     return refs
   })
 
@@ -374,16 +379,6 @@ export function AgentSessionComposerPage({
   const isUnknownReadiness = readinessConclusion === 'Unknown'
   const launchBlockedByReadiness = isNeedsSetup
 
-  const promptEmpty = !prompt.trim()
-  const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
-  const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
-
-  const canLaunch = (!promptEmpty || attachmentIds.length > 0)
-    && !!selectedAgentRef
-    && !isArchived
-    && !launchBlockedByReadiness
-    && !launchMutation.isPending
-
   const removeRef = useCallback((index: number) => {
     setContextRefs((prev) => prev.filter((_, i) => i !== index))
   }, [])
@@ -407,10 +402,42 @@ export function AgentSessionComposerPage({
     () => new Map(contextRefs.map((ref) => [ref.type, ref] as const)),
     [contextRefs],
   )
+  const activeWorkspaces = useMemo(
+    () => workspaces.filter((workspace) => workspace.status === 'active'),
+    [workspaces],
+  )
   const selectedRepository = contextByType.get('repository')?.value ?? null
-  const selectedWorkspace = contextByType.get('workspace')?.value ?? null
+  const selectedWorkspaceRef = contextByType.get('workspace')
+  const selectedWorkspace = selectedWorkspaceRef?.workspaceField === 'workspace'
+    ? selectedWorkspaceRef.value
+    : null
+  const selectedWorkspaceEntry = activeWorkspaces.find((workspace) => workspace.name === selectedWorkspace)
+  const compatibleRepositories = useMemo(
+    () => selectedWorkspaceEntry
+      ? repositories.filter((repository) => selectedWorkspaceEntry.repositories.some(
+        (name) => name.localeCompare(repository.name, undefined, { sensitivity: 'accent' }) === 0,
+      ))
+      : [],
+    [repositories, selectedWorkspaceEntry],
+  )
+  const repositoryScopeCompatible = !selectedRepository || Boolean(
+    selectedWorkspaceEntry?.repositories.some(
+      (name) => name.localeCompare(selectedRepository, undefined, { sensitivity: 'accent' }) === 0,
+    ),
+  )
   const selectedIssue = contextByType.get('issue')?.value ?? null
   const selectedEpic = contextByType.get('epic')?.value ?? null
+  const promptEmpty = !prompt.trim()
+  const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
+  const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
+  const workspaceScopeConfirmed = Boolean(selectedWorkspaceEntry)
+  const canLaunch = (!promptEmpty || attachmentIds.length > 0)
+    && !!selectedAgentRef
+    && !isArchived
+    && !launchBlockedByReadiness
+    && workspaceScopeConfirmed
+    && repositoryScopeCompatible
+    && !launchMutation.isPending
 
   const handleLaunch = useCallback(() => {
     if (!canLaunch || !selectedAgent) return
@@ -606,13 +633,33 @@ export function AgentSessionComposerPage({
           </div>
           <ContextPicker
             contextRefs={contextRefs}
-            repositories={repositories}
-            workspaces={workspaces}
+            repositories={compatibleRepositories}
+            workspaces={activeWorkspaces}
             issues={issues}
             epics={epics}
             loading={contextLoading}
             onChange={updateContextRef}
           />
+          {selectedAgent && !workspaceScopeConfirmed && (
+            <div
+              data-testid="workspace-scope-blocked"
+              className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>Workspace scope is required. Select an active Workspace before launching this Job.</span>
+            </div>
+          )}
+          {selectedAgent && selectedRepository && !repositoryScopeCompatible && (
+            <div
+              data-testid="repository-scope-blocked"
+              className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>{selectedWorkspaceEntry
+                ? 'Repository is not attached to the selected Workspace. Choose a compatible repository before launching.'
+                : 'Select an active Workspace before choosing a Repository.'}</span>
+            </div>
+          )}
           {contextRefs.length > 0 && (
             <div className="flex flex-wrap gap-2 border-t border-border pt-3" data-testid="context-refs-list">
               {contextRefs.map((ref, i) => (
@@ -630,10 +677,10 @@ export function AgentSessionComposerPage({
           <dl className="mt-3 grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
             <div><dt className="text-blue-800/70">Agent</dt><dd data-testid="scope-agent" className="font-medium text-blue-950">{selectedAgent?.name ?? 'Not selected'}</dd></div>
             <div><dt className="text-blue-800/70">Repository</dt><dd data-testid="scope-repository" className="font-medium text-blue-950">{selectedRepository ?? 'Not selected'}</dd></div>
-            <div><dt className="text-blue-800/70">Workspace</dt><dd data-testid="scope-workspace" className="font-medium text-blue-950">{selectedWorkspace ?? 'Not selected; canonical workspace will be returned by launch'}</dd></div>
+            <div><dt className="text-blue-800/70">Workspace</dt><dd data-testid="scope-workspace" className="font-medium text-blue-950">{selectedWorkspaceEntry?.name ?? (selectedWorkspaceRef ? `${selectedWorkspaceRef.value} (not confirmed)` : 'Not selected; choose an active Workspace')}</dd></div>
             <div><dt className="text-blue-800/70">Issue</dt><dd data-testid="scope-issue" className="font-medium text-blue-950">{selectedIssue ? `#${selectedIssue}` : 'Not selected'}</dd></div>
             <div><dt className="text-blue-800/70">Epic</dt><dd data-testid="scope-epic" className="font-medium text-blue-950">{selectedEpic ? `#${selectedEpic}` : 'Not selected'}</dd></div>
-            <div><dt className="text-blue-800/70">Permission impact</dt><dd data-testid="scope-permissions" className="font-medium text-blue-950">{selectedWorkspace ? `Runtime-managed access in ${selectedWorkspace}` : 'Runtime-managed; workspace scope not selected'}</dd></div>
+            <div><dt className="text-blue-800/70">Permission impact</dt><dd data-testid="scope-permissions" className="font-medium text-blue-950">{selectedWorkspaceEntry ? `Runtime-managed access in ${selectedWorkspaceEntry.name}` : 'Cannot review access until a Workspace is selected'}</dd></div>
           </dl>
           <p className="mt-3 border-t border-blue-200 pt-2 text-[10px] leading-relaxed text-blue-900/80">
             Saving the Agent changes future Jobs only. This review records launch facts; it does not change the Agent definition or claim a Server permission policy.
@@ -689,7 +736,13 @@ export function AgentSessionComposerPage({
             data-testid="launch-button"
             onClick={handleLaunch}
             disabled={!canLaunch}
-            title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
+            title={launchBlockedByReadiness
+              ? 'Readiness is Needs setup — fix the gaps first.'
+              : !workspaceScopeConfirmed
+                ? 'Select an active Workspace before launching.'
+                : !repositoryScopeCompatible
+                  ? 'Select a repository attached to the Workspace.'
+                  : undefined}
           >
             {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
           </Button>

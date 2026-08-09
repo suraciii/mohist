@@ -20,6 +20,7 @@ import {
   type AgentDetailPageComponents,
   type AgentDetailPageDataHook,
 } from './AgentDetailPage'
+import { makeWorkspace } from '../../../../tests/support/agent-session-composer-test-support'
 
 const state: {
   agent: AgentInfo | undefined
@@ -115,6 +116,8 @@ const composerDataHook: AgentSessionComposerDataHook = () => {
     availability: [],
     availabilityLoading: false,
     launchMutation,
+    repositories: [{ name: 'main', gitUrl: 'file://main', baseBranch: 'main', isDefault: true }],
+    workspaces: [makeWorkspace('workspace-1')],
   }
 }
 
@@ -143,7 +146,7 @@ function renderPage() {
       <ProjectProvider initialProjectId="proj-1" initialProjects={[{
         id: 'proj-1', name: 'Test',
         createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-        repositories: [],
+        repositories: [{ name: 'main', gitUrl: 'file://main', baseBranch: 'main', isDefault: true }],
       }]}>
         <MemoryRouter initialEntries={['/agents/agent-1']}>
           <Routes>
@@ -371,6 +374,8 @@ describe('AgentDetailPage', () => {
       fireEvent.click(await screen.findByTestId('agent-detail-new-session'))
       expect(await screen.findByTestId('agent-selector-trigger')).toHaveTextContent('Detail Agent')
 
+      fireEvent.change(screen.getByTestId('launch-workspace'), { target: { value: 'workspace-1' } })
+      fireEvent.change(screen.getByTestId('launch-repository'), { target: { value: 'main' } })
       fireEvent.change(screen.getByTestId('journey-prompt'), { target: { value: 'Check the launch path' } })
       fireEvent.click(screen.getByTestId('launch-button'))
 
