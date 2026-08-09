@@ -76,8 +76,11 @@ recovery coordinator that a direct caller must never receive.
 
 The direct external Agent API serializes only the explicit public projection in
 [`agent-api.md`](agent-api.md). It may expose canonical IDs, public
-status/output/error, timestamps, per-Session public sequence, and opaque
-cursor continuation. It must not serialize a binding or operation field,
+status/output/error/reason code, timestamps, per-Session public sequence, and
+opaque cursor continuation. That projection is a durable Server-owned view fed
+by canonical aggregate/outbox facts: its snapshot, journal entries, and source
+checkpoint commit together, but it does not make Job and Session cross-aggregate
+writes atomic. It must not serialize a binding or operation field,
 `runtimeSessionId`, runner/connection identity, request fingerprint, dispatch
 attempt/retry/lease/fence state, workspace/workdir/path, prompt/input content,
 memory, or raw provider payload. A future public field must be added to the

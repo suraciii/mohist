@@ -10,6 +10,11 @@ AgentSession 页时间线的呈现模型：把 transcript 事实派生为可扫�
 本地 `TimelineItem`、浏览器实时订阅或原始 transcript 事实作为事件记录，也不能由本页的
 呈现规则决定外部排序、去重或可见性。
 
+canonical `session.context_reset` 发生时，外部 stream 只追加 `session.context_reset` 的公开
+边界事件：稳定 Session/Project/Agent 身份、公开 Session 状态、安全 reason code、timestamp 和
+sequence。它不是 TimelineItem 的 raw payload，也不携带 runtime、path、prompt、memory 或原始
+transcript。
+
 ## Model
 
 **时间线条目（TimelineItem）**：从一段 transcript 事实派生的呈现单元。它是客户端
