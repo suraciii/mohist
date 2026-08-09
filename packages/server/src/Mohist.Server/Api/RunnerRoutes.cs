@@ -319,17 +319,47 @@ public static class RunnerRoutes
             try
             {
                 var grain = sessions.GetGrain(sessionId);
-                await grain.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-                    req.InputId,
-                    req.TurnId,
-                    req.Prompt,
-                    string.IsNullOrWhiteSpace(req.Source) ? "workflow" : req.Source));
-                var control = await grain.ResolveTurnControlAsync(req.TurnId);
+                var accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                    Text: req.Prompt,
+                    Source: string.IsNullOrWhiteSpace(req.Source) ? "workflow" : req.Source,
+                    IdempotencyKey: WorkflowTurnIdempotencyKey(workflowRunId, sessionName, req.InputId, req.TurnId),
+                    PreMintedInputId: req.InputId,
+                    PreMintedTurnId: req.TurnId));
                 return Results.Ok(new RunnerWorkflowTurnResponse(
                     sessionId,
                     req.InputId,
                     req.TurnId,
-                    control?.Status.ToString().ToLowerInvariant() ?? "queued"));
+                    accept.TurnStatus.ToString().ToLowerInvariant(),
+                    accept.OperationId,
+                    accept.AdmissionReady));
+            }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "runtime_session_missing", new { sessionId = ex.SessionId });
+            }
+            catch (RecoveryOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "recovery_in_progress", new { sessionId = ex.SessionId });
+            }
+            catch (AgentSessionFollowupCapacityExceededException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "capacity_exceeded", new { sessionId = ex.SessionId });
+            }
+            catch (FollowupOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
+            }
+            catch (StopOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
+            }
+            catch (SessionActivityUnknownException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
+            }
+            catch (FollowupConcurrencyLimitException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "concurrency_limit", new { sessionId = ex.SessionId, agentId = ex.AgentId });
             }
             catch (InvalidOperationException ex)
             {
@@ -812,6 +842,13 @@ public static class RunnerRoutes
         return trimmed.Length > 0 ? trimmed : null;
     }
 
+    private static string WorkflowTurnIdempotencyKey(
+        string workflowRunId,
+        string sessionName,
+        string inputId,
+        string turnId) =>
+        $"workflow:{workflowRunId}:{sessionName}:{inputId}:{turnId}";
+
     private static Dictionary<string, string[]>? NormalizeCoderModelVariants(Dictionary<string, string[]>? variants)
     {
         if (variants is null || variants.Count == 0)
@@ -958,7 +995,13 @@ public record AgentSessionOpenRequest(
     AgentExecutionDefinition? Definition = null);
 public record AgentSessionWorkflowTurnRequest(string InputId, string TurnId, string Prompt, string? Source = null);
 public record AgentSessionWorkflowTurnAbandonRequest(string InputId, string TurnId);
-public record RunnerWorkflowTurnResponse(string SessionId, string InputId, string TurnId, string Status);
+public record RunnerWorkflowTurnResponse(
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string Status,
+    string? OperationId = null,
+    bool AdmissionReady = true);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
 /// call. Generic (non-workflow) AgentSessions are identified by

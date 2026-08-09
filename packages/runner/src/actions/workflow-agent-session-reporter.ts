@@ -49,6 +49,7 @@ export class WorkflowAgentSessionReporter {
   private readonly deltaBuffer: RuntimeTurnEvent[] = []
   private inputId: string | null = null
   private turnId: string | null = null
+  private operationId: string | null = null
   private closed = false
   private inputAccepted = false
   private inputRejected = false
@@ -62,10 +63,11 @@ export class WorkflowAgentSessionReporter {
     this.randomId = options.randomId
   }
 
-  async awaitInput(prompt: string, runtimeSessionId: string, identity?: { inputId?: string | null; turnId?: string | null }): Promise<void> {
+  async awaitInput(prompt: string, runtimeSessionId: string, identity?: { inputId?: string | null; turnId?: string | null; operationId?: string | null }): Promise<void> {
     if (this.closed) return
     this.inputId = identity?.inputId ?? null
     this.turnId = identity?.turnId ?? null
+    this.operationId = identity?.operationId ?? null
     const record = this.buildRecord(runtimeSessionId, {
       type: "session.input",
       payload: {
@@ -74,6 +76,7 @@ export class WorkflowAgentSessionReporter {
         source: "workflow",
         role: "user",
         runtimeSessionId,
+        ...(identity?.operationId ? { operationId: identity.operationId } : {}),
         ...(identity?.inputId ? { inputId: identity.inputId } : {}),
         ...(identity?.turnId ? { turnId: identity.turnId } : {}),
       },
@@ -167,11 +170,11 @@ export class WorkflowAgentSessionReporter {
     const records: RuntimeEventRecord[] = []
     if (payload.status === "failed") records.push(this.buildRecord(payload.runtimeSessionId, {
       type: "turn.failed",
-      payload: { status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), ...(payload.turnId ? { turnId: payload.turnId } : {}) },
+      payload: { status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), ...(this.operationId ? { operationId: this.operationId } : {}), ...(payload.turnId ? { turnId: payload.turnId } : {}) },
     }, this.turnId ? `workflow-turn-failed-event-${this.turnId}` : null))
     records.push(this.buildRecord(payload.runtimeSessionId, {
       type: "session.activity",
-      payload: { activity: "idle", status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), ...(payload.turnId ? { turnId: payload.turnId } : {}), runtimeSessionId: payload.runtimeSessionId, observedAt: new Date().toISOString() },
+      payload: { activity: "idle", status: payload.status, exitCode: payload.exitCode, ...(payload.failureReason ? { failureReason: payload.failureReason } : {}), ...(this.operationId ? { operationId: this.operationId } : {}), ...(payload.turnId ? { turnId: payload.turnId } : {}), runtimeSessionId: payload.runtimeSessionId, observedAt: new Date().toISOString() },
     }, this.turnId ? `workflow-turn-terminal-event-${this.turnId}` : null))
     const promise = this.outbox.enqueueProducedFactBatch(records)
       .catch((error) => {

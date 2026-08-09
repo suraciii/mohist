@@ -621,7 +621,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
                 ShouldRedeliver: existingTurn.Status == AgentTurnStatus.Queued,
                 InputAcceptance: accepted.Acceptance,
                 TurnStatus: existingTurn.Status,
-                Attachments: accepted.Attachments);
+                Attachments: accepted.Attachments,
+                AdmissionReady: FollowupAdmissionReady(session, existingTurn.Id));
         }
 
         const int maxQueuedTurns = 16;
@@ -651,7 +652,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             string.Equals(candidate.OperationId, result.OperationId, StringComparison.Ordinal));
         if (acceptedLease is not null && session.Status.Activity == AgentSessionActivity.Idle)
             await EnsureFollowupGateAsync(session, acceptedLease);
-        return result with { AttachmentResults = command.AttachmentResults };
+        return result with
+        {
+            AttachmentResults = command.AttachmentResults,
+            AdmissionReady = FollowupAdmissionReady(session, result.TurnId),
+        };
     }
 
     private static bool AttachmentSetEquivalent(
@@ -983,9 +988,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 
         var permit = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
-            .GetPermitAsync(token);
+                .GetPermitAsync(token);
         if (permit is null)
+        {
+            leasesAfterAcquire[acquiredIndex] = leasesAfterAcquire[acquiredIndex] with
+            {
+                ConcurrencyGateStatus = "granted",
+                WaitingReason = null,
+                ConcurrencyWaiterId = null,
+            };
+            SetPendingFollowups(session, leasesAfterAcquire);
+            await CommitAsync(session, []);
             return true;
+        }
 
         leasesAfterAcquire[acquiredIndex] = leasesAfterAcquire[acquiredIndex] with
         {
@@ -1227,6 +1242,12 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             return pending;
         return session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
     }
+
+    private static bool FollowupAdmissionReady(AgentSession session, string turnId) =>
+        GetPendingFollowups(session).FirstOrDefault(lease =>
+            string.Equals(lease.TurnId, turnId, StringComparison.Ordinal)) is not { } lease
+        || string.IsNullOrWhiteSpace(lease.ConcurrencyToken)
+        || !string.Equals(lease.ConcurrencyGateStatus, "queued", StringComparison.Ordinal);
 
     private static void SetPendingFollowups(AgentSession session, IReadOnlyList<AgentSessionFollowupLease> leases)
     {
@@ -3188,14 +3209,38 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (string.IsNullOrWhiteSpace(inputId) || string.IsNullOrWhiteSpace(turnId))
             return;
         var session = await GetRequiredAsync();
+        var turn = (session.Status.Turns ?? []).FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, turnId, StringComparison.Ordinal));
+        var lease = turn is not null
+            && turn.JobId is null
+            && turn.Status == AgentTurnStatus.Queued
+            && turn.InputIds.Contains(inputId, StringComparer.Ordinal)
+            ? GetPendingFollowups(session).FirstOrDefault(candidate =>
+                string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal))
+            : null;
         var events = session.AbandonFollowupTurn(inputId, turnId, Now());
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
-            return;
         }
-        await CommitAsync(session, events);
+        else
+        {
+            await CommitAsync(session, events);
+        }
+        if (lease is null)
+            return;
+
+        await ReleaseFollowupConcurrencyPermitAsync(
+            session,
+            lease.ConcurrencyToken,
+            lease.ConcurrencyAgentId,
+            lease.ConcurrencyPermitId,
+            lease.ConcurrencyGeneration,
+            lease.ConcurrencyWaiterId);
+        _followupDispatchScheduler?.Schedule(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+            session.Id);
     }
 
     public async Task MarkTurnExecutingAsync(string turnId)

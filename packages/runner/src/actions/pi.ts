@@ -74,7 +74,7 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   if (parsed.kind === "failure") return parsed.result
   const { prompt, options } = parsed
   const definition = context.agentDefinition
-  const identity: WorkflowAgentTurnIdentity = { agentId: definition?.agentId ?? null, sessionId: null, inputId: null, turnId: null }
+  const identity: WorkflowAgentTurnIdentity = { agentId: definition?.agentId ?? null, sessionId: null, inputId: null, turnId: null, operationId: null }
   const failAgent = (code: string, message: string, nextAction = "retry") => fail(code, message, {
     exitCode: 1,
     turnFact: {
@@ -146,6 +146,21 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
       identity.sessionId = reserved.sessionId
       identity.inputId = reserved.inputId
       identity.turnId = reserved.turnId
+      identity.operationId = reserved.operationId
+      if (!reserved.admissionReady) {
+        try {
+          await abandonWorkflowAgentTurn(
+            context.serverConnection!,
+            { workflowRunId: context.workflowRunId, projectId: context.projectId },
+            sessionName,
+            identity,
+            context.signal,
+          )
+        } catch (rollbackError) {
+          return failAgent("turn-rollback-failed", `Workflow AgentSession turn is queued for concurrency capacity and could not be rolled back: ${actionErrorMessage(rollbackError)}`)
+        }
+        return failAgent("agent-concurrency-queued", "Workflow AgentSession turn is queued for Agent concurrency capacity; retry the Workflow task when capacity is available")
+      }
     } catch (error) {
       return failAgent("turn-reservation-failed", `Failed to durably reserve the Workflow AgentSession turn: ${actionErrorMessage(error)}`)
     }
@@ -183,8 +198,8 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
     try {
       await reportWithTerminalSignal(report, [
         ...events,
-        { id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed", ...(identity.turnId ? { turnId: identity.turnId } : {}) } },
-        activityEvent(runtimeSessionId, "idle", context, identity.turnId, "failed"),
+        { id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: "failed", errorCode: "turn-failed", ...(identity.operationId ? { operationId: identity.operationId } : {}), ...(identity.turnId ? { turnId: identity.turnId } : {}) } },
+        activityEvent(runtimeSessionId, "idle", context, identity.turnId, "failed", identity.operationId),
       ])
     } catch {
       terminalReportingFailed = true
@@ -202,8 +217,8 @@ export async function piAction(contextOrInputs: ActionInvocationContext | JsonOb
   if (result.ok || submittedFailure) {
     const cancelled = !result.ok && (context.signal.aborted || result.error.kind === "interrupted")
     const terminalStatus = !result.ok ? (cancelled ? "cancelled" : "failed") : "completed"
-    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: terminalStatus, errorCode: runtimeCode ?? "turn-failed", message: result.error.message, ...(identity.turnId ? { turnId: identity.turnId } : {}) } })
-    finalFacts.push(activityEvent(runtimeSessionId, "idle", context, identity.turnId, terminalStatus))
+    if (!result.ok) finalFacts.push({ id: `turn-failed-${context.workId}`, type: "turn.failed", runtimeSessionId, workDir: context.workDir, payload: { status: terminalStatus, errorCode: runtimeCode ?? "turn-failed", message: result.error.message, ...(identity.operationId ? { operationId: identity.operationId } : {}), ...(identity.turnId ? { turnId: identity.turnId } : {}) } })
+    finalFacts.push(activityEvent(runtimeSessionId, "idle", context, identity.turnId, terminalStatus, identity.operationId))
   }
   try {
     await reportWithTerminalSignal(report, finalFacts)
@@ -283,12 +298,12 @@ async function parseInput(context: ActionInvocationContext): Promise<{ kind: "ok
 }
 
 function inputEvent(runtimeSessionId: string, prompt: string, context: ActionInvocationContext, identity: WorkflowAgentTurnIdentity): PiRuntimeEvent {
-  return { id: `session-input-${context.workId}`, type: "session.input", runtimeSessionId, workDir: context.workDir, payload: { text: prompt, kind: context.workType, source: "workflow", role: "user", runtimeSessionId, ...(identity.inputId ? { inputId: identity.inputId } : {}), ...(identity.turnId ? { turnId: identity.turnId } : {}) }
+  return { id: `session-input-${context.workId}`, type: "session.input", runtimeSessionId, workDir: context.workDir, payload: { text: prompt, kind: context.workType, source: "workflow", role: "user", runtimeSessionId, ...(identity.operationId ? { operationId: identity.operationId } : {}), ...(identity.inputId ? { inputId: identity.inputId } : {}), ...(identity.turnId ? { turnId: identity.turnId } : {}) }
 }
 }
 
-function activityEvent(runtimeSessionId: string, activity: "idle" | "unknown", context: ActionInvocationContext, turnId: string | null = null, status: "completed" | "failed" | "cancelled" = "completed"): PiRuntimeEvent {
-  return { id: `session-activity-${context.workId}-${activity}`, type: "session.activity", runtimeSessionId, workDir: context.workDir, payload: { activity, status, ...(turnId ? { turnId } : {}), observedAt: new Date().toISOString() } }
+function activityEvent(runtimeSessionId: string, activity: "idle" | "unknown", context: ActionInvocationContext, turnId: string | null = null, status: "completed" | "failed" | "cancelled" = "completed", operationId: string | null = null): PiRuntimeEvent {
+  return { id: `session-activity-${context.workId}-${activity}`, type: "session.activity", runtimeSessionId, workDir: context.workDir, payload: { activity, status, ...(operationId ? { operationId } : {}), ...(turnId ? { turnId } : {}), observedAt: new Date().toISOString() } }
 }
 
 function runtimeErrorCode(kind: string): string {

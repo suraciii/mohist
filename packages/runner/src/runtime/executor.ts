@@ -312,6 +312,7 @@ export class WorkExecutor {
           sessionId: null,
           inputId: null,
           turnId: null,
+          operationId: null,
         }
         const failAgent = (code: string, message: string, nextAction = "retry") => actionFail(code, message, {
           exitCode: 1,
@@ -473,6 +474,15 @@ export class WorkExecutor {
             workflowIdentity.sessionId = reserved.sessionId
             workflowIdentity.inputId = reserved.inputId
             workflowIdentity.turnId = reserved.turnId
+            workflowIdentity.operationId = reserved.operationId
+            if (!reserved.admissionReady) {
+              try {
+                await abandonWorkflowAgentTurn(self.connection, work, sessionName, workflowIdentity, signal)
+              } catch (rollbackError) {
+                return failAgent("turn-rollback-failed", `Workflow AgentSession turn is queued for concurrency capacity and could not be rolled back: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+              }
+              return failAgent("agent-concurrency-queued", "Workflow AgentSession turn is queued for Agent concurrency capacity; retry the Workflow task when capacity is available")
+            }
           } catch (error) {
             return failAgent("turn-reservation-failed", `Failed to durably reserve the Workflow AgentSession turn: ${error instanceof Error ? error.message : String(error)}`)
           }

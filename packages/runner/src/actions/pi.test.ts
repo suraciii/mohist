@@ -50,12 +50,12 @@ function runtime() {
   }
 }
 
-function server() {
+function server(admissionReady = true) {
   const calls: unknown[] = []
   return {
     calls,
     openWorkflowAgentSession: vi.fn(async () => ({ sessionId: "session-1", runtime: "pi", runtimeSessionId: null, workDir: "/workspace" })),
-    recordWorkflowAgentTurn: vi.fn(async (_project: string, _run: string, _name: string, body: { inputId: string; turnId: string }) => ({ sessionId: "session-1", inputId: body.inputId, turnId: body.turnId, status: "queued" })),
+    recordWorkflowAgentTurn: vi.fn(async (_project: string, _run: string, _name: string, body: { inputId: string; turnId: string }) => ({ sessionId: "session-1", inputId: body.inputId, turnId: body.turnId, status: "queued", operationId: "operation-1", admissionReady })),
     attachWorkflowAgentSession: vi.fn(async () => ({ sessionId: "session-1", runtime: "pi", runtimeSessionId: "/workspace/.pi/session.json", workDir: "/workspace" })),
     workflowAgentSessionRuntimeEvents: vi.fn(async (_project: string, _run: string, _name: string, body: unknown) => { calls.push(body); return [{ id: "accepted" }] }),
     abandonWorkflowAgentTurn: vi.fn(async () => {}),
@@ -176,11 +176,12 @@ describe("mohist/pi Action", () => {
       },
     })
     expect(connection.recordWorkflowAgentTurn).toHaveBeenCalledTimes(1)
-    const input = (connection.calls[0] as { runtimeEvents: Array<{ payload: { text: string; inputId: string; turnId: string } }> }).runtimeEvents[0].payload
+    const input = (connection.calls[0] as { runtimeEvents: Array<{ payload: { text: string; inputId: string; turnId: string; operationId: string } }> }).runtimeEvents[0].payload
     expect(input.text).toBe("review this")
     expect(input.text).not.toContain("Internal policy")
     expect(input.inputId).toMatch(/^workflow-input-/)
     expect(input.turnId).toMatch(/^workflow-turn-/)
+    expect(input.operationId).toBe("operation-1")
   })
 
   it("keeps workflow identity and Server connection on the built-in ActionHost path", async () => {
@@ -260,6 +261,30 @@ describe("mohist/pi Action", () => {
     expect(connection.recordWorkflowAgentTurn).not.toHaveBeenCalled()
   })
 
+  it("does not start a runtime turn when the canonical concurrency gate queues admission", async () => {
+    const pi = runtime()
+    const connection = server(false)
+    const definition: AgentExecutionDefinition = {
+      agentId: "agent-reviewer",
+      instructions: "review",
+      runtime: "pi",
+      model: "provider/model",
+      variant: null,
+      skills: [],
+    }
+
+    const result = await piAction(context({ agentDefinition: definition, piRuntime: pi as never, serverConnection: connection as never, projectId: "project" }))
+
+    expect(result).toMatchObject({
+      error: { code: "agent-concurrency-queued" },
+      turnFact: { agentObservation: { status: "failed", reason: "agent-concurrency-queued", nextAction: "retry" } },
+    })
+    expect(connection.abandonWorkflowAgentTurn).toHaveBeenCalledTimes(1)
+    expect(pi.createSession).toHaveBeenCalledTimes(1)
+    expect(pi.runTurn).not.toHaveBeenCalled()
+    expect(connection.workflowAgentSessionRuntimeEvents).not.toHaveBeenCalled()
+  })
+
   it("maps an interrupted runtime turn to cancelled with recovery guidance", async () => {
     const pi = runtime()
     pi.runTurn.mockResolvedValueOnce({
@@ -283,7 +308,7 @@ describe("mohist/pi Action", () => {
       error: { code: "interrupted" },
       turnFact: { agentObservation: { status: "cancelled", outcome: "cancelled", nextAction: "recover" } },
     })
-    expect((connection.calls[1] as { runtimeEvents: Array<{ payload: { status: string } }> }).runtimeEvents.at(-1)?.payload.status).toBe("cancelled")
+    expect((connection.calls[1] as { runtimeEvents: Array<{ payload: { status: string; operationId: string } }> }).runtimeEvents.at(-1)?.payload).toMatchObject({ status: "cancelled", operationId: "operation-1" })
   })
 
   it("rolls back the durable reservation when public input is rejected", async () => {

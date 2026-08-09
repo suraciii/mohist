@@ -7,6 +7,7 @@ export interface WorkflowAgentTurnIdentity {
   sessionId: string | null
   inputId: string | null
   turnId: string | null
+  operationId: string | null
 }
 
 export function workflowAgentTurnIds(work: Pick<DispatchWorkItem, "workflowRunId" | "workId">, sessionName: string) {
@@ -25,7 +26,7 @@ export async function reserveWorkflowAgentTurn(
   session: WorkflowAgentSession,
   prompt: string,
   signal: AbortSignal,
-): Promise<WorkflowAgentTurnIdentity & { status: string }> {
+): Promise<WorkflowAgentTurnIdentity & { status: string; admissionReady: boolean }> {
   if (!work.projectId) throw new Error("Workflow Agent Action requires a project id to reserve its Session turn")
   const ids = workflowAgentTurnIds(work, sessionName)
   const accepted = await connection.recordWorkflowAgentTurn(work.projectId, work.workflowRunId, sessionName, {
@@ -39,7 +40,9 @@ export async function reserveWorkflowAgentTurn(
     sessionId: accepted.sessionId || session.sessionId || null,
     inputId: accepted.inputId,
     turnId: accepted.turnId,
+    operationId: accepted.operationId ?? null,
     status: accepted.status,
+    admissionReady: accepted.admissionReady !== false,
   }
 }
 

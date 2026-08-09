@@ -591,6 +591,8 @@ export interface WorkflowAgentTurnAcceptance {
   inputId: string
   turnId: string
   status: string
+  operationId?: string | null
+  admissionReady?: boolean
 }
 
 export interface AgentSessionRuntimeEventReceipt {

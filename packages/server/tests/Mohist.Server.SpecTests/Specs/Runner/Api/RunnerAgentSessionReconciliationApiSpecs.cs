@@ -101,11 +101,15 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
         first.EnsureSuccessStatusCode();
         var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("queued", firstBody.GetProperty("status").GetString());
+        Assert.True(firstBody.GetProperty("admissionReady").GetBoolean());
+        var operationId = firstBody.GetProperty("operationId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(operationId));
 
         using var duplicate = await _fixture.Client.PostAsJsonAsync(route, request);
         duplicate.EnsureSuccessStatusCode();
         var duplicateBody = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("queued", duplicateBody.GetProperty("status").GetString());
+        Assert.Equal(operationId, duplicateBody.GetProperty("operationId").GetString());
         Assert.Single(await grain.ListTurnsAsync());
 
         using var rollback = await _fixture.Client.PostAsJsonAsync(
@@ -115,6 +119,30 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
         var rollbackBody = await rollback.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("abandoned", rollbackBody.GetProperty("status").GetString());
         Assert.Empty(await grain.ListTurnsAsync());
+
+        var request2 = new
+        {
+            inputId = "workflow-input-work-2",
+            turnId = "workflow-turn-work-2",
+            prompt = "public prompt 2",
+            source = "workflow",
+        };
+        using var second = await _fixture.Client.PostAsJsonAsync(route, request2);
+        second.EnsureSuccessStatusCode();
+        var secondBody = await second.Content.ReadFromJsonAsync<JsonElement>();
+        var operationId2 = secondBody.GetProperty("operationId").GetString();
+        Assert.False(string.IsNullOrWhiteSpace(operationId2));
+
+        await grain.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    $$"""{"activity":"idle","status":"completed","operationId":"{{operationId2}}","turnId":"{{request2.turnId}}"}""")
+            },
+            "runtime-workflow-turn"));
+        var completed = await grain.ResolveTurnControlAsync(request2.turnId);
+        Assert.Equal(AgentTurnStatus.Completed, completed?.Status);
     }
 
     private async Task<string> CreateBoundSessionAsync(
