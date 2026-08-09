@@ -374,7 +374,7 @@ change CLI, Slack, authentication, or other components.
 
 Each Server or Runner installation/update follows this fact chain:
 
-```text
+```text diagram
 UpdateSource --repo-root -> InstalledArtifact <component>/<source-hash>
   -> ServiceTarget (absolute, stable) -> RuntimeIdentity <source-hash>
 ```
