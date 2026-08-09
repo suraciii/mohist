@@ -37,6 +37,75 @@ public sealed class CliAgentSubscriptionCommandSpecs
         Assert.Equal("event.type == \"x\"", body?["match"]?.GetValue<string>());
     }
 
+    [Theory]
+    [InlineData("--name")]
+    [InlineData("--match")]
+    [InlineData("--response-prompt")]
+    public async Task Create_MissingRequiredOptionFailsBeforeAnyHttpRequest(string missingOption)
+    {
+        var (handler, http, output, error, fs, executor) = Setup();
+        var args = new List<string>
+        {
+            "agent", "subscription", "create", "agent_1",
+            "--name", "fallback",
+            "--match", "event.type == \"x\"",
+            "--response-prompt", "inspect",
+            "--project", "proj_test",
+        };
+        var missingIndex = args.IndexOf(missingOption);
+        args.RemoveRange(missingIndex, 2);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, args.ToArray(), output, error, fs, executor);
+
+        Assert.Equal(2, exitCode);
+        Assert.Contains($"{missingOption} is required", error.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task Create_RetriesResponseLossWithTheSameGeneratedKeyAndPrintsIt()
+    {
+        var postAttempts = 0;
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create((request, _) =>
+        {
+            var path = request.RequestUri?.PathAndQuery ?? string.Empty;
+            if (path.EndsWith("/agents/agent_1", StringComparison.Ordinal))
+                return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { id = "agent_1", name = "Agent" } }));
+            if (request.Method == HttpMethod.Post && path.EndsWith("/subscriptions", StringComparison.Ordinal))
+            {
+                if (++postAttempts == 1)
+                    throw new HttpRequestException("response lost");
+                return Task.FromResult(RecordingHttpHandler.Json(
+                    new
+                    {
+                        success = true,
+                        data = new
+                        {
+                            id = "rule_1", projectId = "proj_test", agentId = "agent_1", name = "fallback",
+                            match = "event.type == \"x\"", responsePrompt = "inspect", @continue = false,
+                            position = 1, status = "active", createdAt = "2026-08-09T00:00:00Z", updatedAt = "2026-08-09T00:00:00Z",
+                        },
+                    },
+                    System.Net.HttpStatusCode.Created));
+            }
+            return Task.FromResult(RecordingHttpHandler.Json(new { success = true, data = new { } }));
+        }, activeProjectId: "proj_test");
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["agent", "subscription", "create", "agent_1", "--name", "fallback", "--match", "event.type == \"x\"", "--response-prompt", "inspect", "--project", "proj_test"],
+            output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var posts = handler.Requests.Where(request => request.Method == HttpMethod.Post).ToArray();
+        Assert.Equal(2, posts.Length);
+        var key = posts[0].Headers["Idempotency-Key"].Single();
+        Assert.Equal(key, posts[1].Headers["Idempotency-Key"].Single());
+        Assert.Contains($"Idempotency-Key: {key}", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Idempotency-Key:", error.ToString(), StringComparison.Ordinal);
+    }
+
     private static (RecordingHttpHandler Handler, HttpClient Http, StringWriter Output, StringWriter Error, FakeFileSystem FileSystem, FakeCommandExecutor Executor) Setup()
     {
         return CliTestFactory.Create((request, _) =>

@@ -65,6 +65,8 @@ export {
 } from './api/subscriptions'
 export type {
   AgentSubscriptionCreateRequest,
+  AgentSubscriptionCreateError,
+  AgentSubscriptionCreateResult,
   AgentSubscriptionDto,
   AgentSubscriptionListDto,
   AgentSubscriptionUpdateRequest,

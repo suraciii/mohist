@@ -81,7 +81,8 @@ than an empty list.
 Create and patch validate the existing routing expression and Agent rules.
 Archived Agents reject create and patch with `409` and `agent_archived`;
 existing subscriptions can still be listed and deleted. Delete removes only
-the addressed routing rule from the active/readable subscription view. An
+the addressed routing rule from the active/readable subscription view; `deleted`
+is a storage-only tombstone and is never readable, listed, or routed. An
 unknown subscription returns `404`; repeating DELETE for the same known id
 returns the same `deleted` acknowledgement. Patch is final-state idempotent
 when the submitted values already match. Create uses the normal idempotency

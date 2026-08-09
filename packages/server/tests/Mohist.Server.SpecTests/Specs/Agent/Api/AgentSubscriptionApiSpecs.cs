@@ -37,7 +37,7 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
     [Fact]
     public async Task List_UnconfiguredAgentPreservesNeedsSetupState()
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unconfigured", instructions: "");
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unconfigured", configured: false);
 
         using var response = await Client.GetAsync(Path(projectId, agentId));
 
@@ -255,7 +255,8 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
 
     private async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(
         string prefix,
-        string instructions = "subscription spec instructions")
+        string instructions = "subscription spec instructions",
+        bool configured = true)
     {
         var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects", $"{prefix}-{Guid.NewGuid():N}");
@@ -264,7 +265,7 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
             name = "subscription-agent",
             description = "subscription spec agent",
             instructions,
-            agentConfig = new { model = "openai/gpt-5.6", runtime = "pi" },
+            agentConfig = configured ? new { model = "openai/gpt-5.6", runtime = "pi" } : null,
             skills = Array.Empty<string>(),
             maxConcurrentRuns = 1,
         });

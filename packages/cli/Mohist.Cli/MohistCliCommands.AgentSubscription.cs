@@ -55,25 +55,50 @@ internal static partial class AgentCommands
         command.Options.Add(continueOption); command.Options.Add(idempotency); command.Options.Add(output);
         command.SetAction(async context =>
         {
+            var nameValue = context.GetValue(name);
+            if (string.IsNullOrWhiteSpace(nameValue))
+                return CommandHelpHook.RenderUsageFailure(context, api.Error, "--name is required.");
+            var matchValue = context.GetValue(match);
+            if (string.IsNullOrWhiteSpace(matchValue))
+                return CommandHelpHook.RenderUsageFailure(context, api.Error, "--match is required.");
+            var promptValue = context.GetValue(prompt);
+            if (string.IsNullOrWhiteSpace(promptValue))
+                return CommandHelpHook.RenderUsageFailure(context, api.Error, "--response-prompt is required.");
+
             var resolution = await api.ResolveProject(context.GetValue(project));
             if (resolution.Exit != 0) return resolution.Exit;
             var agent = await ResolveAgentAsync(api, resolution.ProjectId, context.GetValue(target) ?? string.Empty);
             if (agent is null) return 1;
             var (mode, exit) = api.ResolveOutputMode(context.GetValue(output));
             if (exit != 0) return exit;
-            var key = context.GetValue(idempotency) ?? Guid.NewGuid().ToString("N");
+            var suppliedKey = context.GetValue(idempotency);
+            var key = string.IsNullOrWhiteSpace(suppliedKey)
+                ? Guid.NewGuid().ToString("N")
+                : suppliedKey;
+            if (string.IsNullOrWhiteSpace(suppliedKey))
+            {
+                if (mode == "table")
+                    api.Output.WriteLine($"Idempotency-Key: {key}");
+                else
+                {
+                    api.Error.WriteLine($"Idempotency-Key: {key}");
+                    api.Error.WriteLine($"If the outcome is unknown, retry with --idempotency-key {key}.");
+                }
+            }
+
             return await api.PrintPostWithOutputAsync(
                 SubscriptionsPath(resolution.ProjectId, agent.Id),
                 new
                 {
-                    name = context.GetValue(name),
-                    match = context.GetValue(match),
-                    responsePrompt = context.GetValue(prompt),
+                    name = nameValue,
+                    match = matchValue,
+                    responsePrompt = promptValue,
                     @continue = context.GetValue(continueOption),
                 },
                 mode,
                 nameof(MohistCliApi.TableShape.AgentSubscription),
-                headers: new Dictionary<string, string> { ["Idempotency-Key"] = key });
+                headers: new Dictionary<string, string> { ["Idempotency-Key"] = key },
+                retries: 1);
         });
         return command;
     }

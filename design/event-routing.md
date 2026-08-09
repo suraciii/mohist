@@ -29,7 +29,7 @@ RoutingRule（项目级，有序表）
   AgentId                   响应 Agent
   ResponsePrompt            模板，{{event.<attr>}} 占位符
   Continue                  bool；命中后是否继续向下求值（默认 false）
-  Status                    active | archived
+  Status                    active | archived | deleted
 ```
 
 一个项目一张表；规则引用 Agent，执行所有权仍在项目级规则表。Agent subscription
@@ -86,6 +86,11 @@ subscription」的用户关系，同时不把排序和兜底/接管次序移到 
   `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
 - AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
   审计证据。
+
+`deleted` 仅是 RoutingRule 的存储 tombstone 状态，不是可读或可路由的资源：它不会
+出现在规则或 Agent subscription 的 list/read 结果中，也不会参与事件匹配。已知规则
+重复删除仍返回同一个 `deleted` 确认；未知 id 返回 `404`。删除后名称可由非 deleted
+规则重新使用，正是因为名称唯一性只约束可读状态。
 
 ## 与系统 handler 的关系
 

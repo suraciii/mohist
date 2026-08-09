@@ -19,6 +19,7 @@ import type {
   AgentSubscriptionListDto,
   AgentSubscriptionUpdateRequest,
 } from '../../../entities/agent'
+import { createIdempotencyKey } from '@/shared/lib/idempotency-key'
 
 interface Props {
   agent: Pick<AgentInfo, 'id' | 'status'>
@@ -93,6 +94,7 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
   const [responsePrompt, setResponsePrompt] = useState('')
   const [continueAfterMatch, setContinueAfterMatch] = useState(false)
   const [formErrors, setFormErrors] = useState<FormErrors>({})
+  const [pendingCreateKey, setPendingCreateKey] = useState<string | null>(null)
 
   useEffect(() => {
     if (!dialogOpen) return
@@ -141,14 +143,17 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
       return
     }
 
+    const idempotencyKey = pendingCreateKey ?? createIdempotencyKey()
+    setPendingCreateKey(idempotencyKey)
     createMutation.mutate(
       {
         name: name.trim(),
         match: match.trim(),
         responsePrompt,
         continue: continueAfterMatch,
+        idempotencyKey,
       },
-      { onSuccess: () => setDialogOpen(false) },
+      { onSuccess: () => { setPendingCreateKey(null); setDialogOpen(false) } },
     )
   }
 
@@ -256,7 +261,11 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
         </ul>
       )}
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!isSaving) setDialogOpen(open) }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => {
+        if (isSaving) return
+        if (!open) setPendingCreateKey(null)
+        setDialogOpen(open)
+      }}>
         <DialogContent className="sm:max-w-lg" data-testid="agent-subscriptions-edit-dialog">
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit Subscription' : 'Create Subscription'}</DialogTitle>
@@ -282,6 +291,11 @@ export function SubscriptionsSection({ agent, operationsHook = useDefaultOperati
               <input type="checkbox" checked={continueAfterMatch} onChange={(event) => setContinueAfterMatch(event.target.checked)} data-testid="subscription-create-continue" />
               Continue evaluating later rules
             </label>
+            {pendingCreateKey && !editing && (
+              <p className="break-all text-xs text-muted-foreground" data-testid="subscription-create-idempotency-key">
+                Idempotency key: {pendingCreateKey}. Retry this create with the same key if the response is lost.
+              </p>
+            )}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>Cancel</Button>
               <Button onClick={save} disabled={isSaving} data-testid="subscription-create-submit">

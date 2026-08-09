@@ -39,6 +39,14 @@ export interface AgentSubscriptionCreateRequest {
   idempotencyKey?: string
 }
 
+export type AgentSubscriptionCreateResult = AgentSubscriptionDto & {
+  idempotencyKey: string
+}
+
+export type AgentSubscriptionCreateError = Error & {
+  idempotencyKey: string
+}
+
 export interface AgentSubscriptionUpdateRequest {
   name?: string
   match?: string
@@ -66,6 +74,14 @@ export function createAgentSubscription(
     headers: { 'Idempotency-Key': key },
     body: JSON.stringify(body),
   })
+    .then((resource): AgentSubscriptionCreateResult => ({ ...resource, idempotencyKey: key }))
+    .catch((error: unknown) => {
+      const retryable = error instanceof Error
+        ? error
+        : new Error('Subscription create response was lost.')
+      Object.assign(retryable, { idempotencyKey: key })
+      throw retryable as AgentSubscriptionCreateError
+    })
 }
 
 export function updateAgentSubscription(

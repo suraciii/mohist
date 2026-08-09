@@ -6,7 +6,7 @@ import { ProjectProvider } from '../../../entities/project'
 import { SubscriptionsSection, type SubscriptionOperationsHook } from './SubscriptionsSection'
 import type { AgentInfo, AgentSubscriptionDto, AgentSubscriptionListDto } from '../../../entities/agent'
 
-const mocks = { data: undefined as AgentSubscriptionListDto | undefined, loading: false, error: false, create: [] as unknown[], update: [] as unknown[], remove: [] as unknown[] }
+const mocks = { data: undefined as AgentSubscriptionListDto | undefined, loading: false, error: false, create: [] as unknown[], createFailures: 0, update: [] as unknown[], remove: [] as unknown[] }
 
 function subscription(overrides: Partial<AgentSubscriptionDto> = {}): AgentSubscriptionDto {
   return {
@@ -25,7 +25,7 @@ function agent(overrides: Partial<AgentInfo> = {}): AgentInfo {
 
 const operations: SubscriptionOperationsHook = () => ({
   subscriptionsQuery: { data: mocks.data, isLoading: mocks.loading, isError: mocks.error, error: mocks.error ? new Error('request failed') : null },
-  createMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.create.push(data); options?.onSuccess?.() }, isPending: false },
+  createMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.create.push(data); if (mocks.createFailures > 0) mocks.createFailures -= 1; else options?.onSuccess?.() }, isPending: false },
   updateMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.update.push(data); options?.onSuccess?.() }, isPending: false },
   deleteMutation: { mutate: (data: unknown, options?: { onSuccess?: () => void }) => { mocks.remove.push(data); options?.onSuccess?.() }, isPending: false },
 })
@@ -43,7 +43,7 @@ function renderSection(value = agent()) {
 describe('SubscriptionsSection', () => {
   beforeEach(() => {
     mocks.data = { subscriptions: [], state: 'empty', agentStatus: 'active', readiness: 'Ready', connection: 'no_connection' }
-    mocks.loading = false; mocks.error = false; mocks.create.length = 0; mocks.update.length = 0; mocks.remove.length = 0
+    mocks.loading = false; mocks.error = false; mocks.create.length = 0; mocks.createFailures = 0; mocks.update.length = 0; mocks.remove.length = 0
   })
   afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -76,5 +76,23 @@ describe('SubscriptionsSection', () => {
     expect(screen.getByTestId('agent-subscriptions-create')).toBeDisabled()
     expect(screen.getByTestId('agent-subscription-edit-rule_x')).toBeDisabled()
     expect(screen.getByTestId('agent-subscriptions-archived-notice')).toBeInTheDocument()
+  })
+
+  it('keeps the generated key when the create response is lost and the form is retried', () => {
+    mocks.createFailures = 1
+    renderSection()
+    fireEvent.click(screen.getByTestId('agent-subscriptions-create'))
+    fireEvent.change(screen.getByTestId('subscription-create-name'), { target: { value: 'fallback' } })
+    fireEvent.change(screen.getByTestId('subscription-create-match'), { target: { value: 'event.type == "x"' } })
+    fireEvent.change(screen.getByTestId('subscription-create-response-prompt'), { target: { value: 'inspect' } })
+    fireEvent.click(screen.getByTestId('subscription-create-submit'))
+
+    const first = mocks.create[0] as { idempotencyKey: string }
+    expect(first.idempotencyKey).toBeTruthy()
+    expect(screen.getByTestId('subscription-create-idempotency-key')).toHaveTextContent(first.idempotencyKey)
+
+    fireEvent.click(screen.getByTestId('subscription-create-submit'))
+    const second = mocks.create[1] as { idempotencyKey: string }
+    expect(second.idempotencyKey).toBe(first.idempotencyKey)
   })
 })

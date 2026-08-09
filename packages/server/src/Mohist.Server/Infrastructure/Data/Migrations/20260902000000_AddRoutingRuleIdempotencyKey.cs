@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Mohist.Server.Infrastructure.Data.Db;
-using System;
 
 #nullable disable
 
@@ -39,7 +38,40 @@ public partial class AddRoutingRuleIdempotencyKey : Migration
             filter: "\"IdempotencyKey\" IS NOT NULL");
     }
 
-    protected override void Down(MigrationBuilder migrationBuilder) =>
-        throw new NotSupportedException(
-            "RoutingRule idempotency facts cannot be represented after removing IdempotencyKey.");
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+            // SQLite only permits RAISE() inside a trigger. Keep the guard and its
+            // no-op update in one migration operation so it runs before destructive
+            // rollback SQL executes.
+        migrationBuilder.Sql(
+            """
+            CREATE TEMP TRIGGER "__Mohist_RoutingRuleIdempotencyRollbackGuard"
+            BEFORE UPDATE OF "IdempotencyKey" ON main."RoutingRules"
+            WHEN OLD."IdempotencyKey" IS NOT NULL
+            BEGIN
+                SELECT RAISE(ABORT, 'RoutingRule idempotency facts cannot be represented after removing IdempotencyKey.');
+            END;
+            UPDATE main."RoutingRules"
+            SET "IdempotencyKey" = "IdempotencyKey"
+            WHERE "IdempotencyKey" IS NOT NULL;
+            DROP TRIGGER "__Mohist_RoutingRuleIdempotencyRollbackGuard";
+            """);
+
+        migrationBuilder.DropIndex(
+            name: "UX_RoutingRules_ProjectId_IdempotencyKey",
+            table: "RoutingRules");
+
+        migrationBuilder.DropIndex(
+            name: "UX_RoutingRules_ProjectId_Name",
+            table: "RoutingRules");
+
+        migrationBuilder.Sql(
+            "ALTER TABLE \"RoutingRules\" DROP COLUMN \"IdempotencyKey\";");
+
+        migrationBuilder.CreateIndex(
+            name: "UX_RoutingRules_ProjectId_Name",
+            table: "RoutingRules",
+            columns: new[] { "ProjectId", "Name" },
+            unique: true);
+    }
 }

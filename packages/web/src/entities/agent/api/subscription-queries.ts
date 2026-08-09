@@ -10,6 +10,7 @@ import {
 } from './subscriptions'
 import type {
   AgentSubscriptionCreateRequest,
+  AgentSubscriptionCreateResult,
   AgentSubscriptionDto,
   AgentSubscriptionListDto,
   AgentSubscriptionUpdateRequest,
@@ -52,7 +53,7 @@ export function createAgentSubscriptionMutationOptions(
   return {
     mutationFn: (data: AgentSubscriptionCreateRequest) =>
       createAgentSubscription(projectId!, agentRef, data),
-    onSuccess: (created: AgentSubscriptionDto) => {
+    onSuccess: (created: AgentSubscriptionCreateResult) => {
       if (projectId) {
         queryClient.invalidateQueries({ queryKey: agentSubscriptionsQueryKey(projectId, agentRef) })
         queryClient.invalidateQueries({ queryKey: agentScopedQueryKey(projectId, agentRef) })

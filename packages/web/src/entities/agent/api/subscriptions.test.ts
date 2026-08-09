@@ -47,15 +47,46 @@ describe('Agent subscription API', () => {
       return successResponse(subscription('rule_new'), 201)
     }))
 
-    await createAgentSubscription('proj-1', 'agent-1', {
+    const result = await createAgentSubscription('proj-1', 'agent-1', {
       name: 'fallback', match: 'event.type == "com.example.failed"', responsePrompt: 'inspect', continue: true,
       idempotencyKey: 'request-1',
     })
 
+    expect(result.idempotencyKey).toBe('request-1')
     expect(requests[0].headers.get('Idempotency-Key')).toBe('request-1')
     await expect(requests[0].json()).resolves.toEqual({
       name: 'fallback', match: 'event.type == "com.example.failed"', responsePrompt: 'inspect', continue: true,
     })
+  })
+
+  it('exposes an auto-generated key after response loss so replay uses the same key', async () => {
+    const keys: string[] = []
+    let attempts = 0
+    server.use(http.post('*/api/projects/:projectId/agents/:agentRef/subscriptions', ({ request }) => {
+      keys.push(request.headers.get('Idempotency-Key') ?? '')
+      attempts += 1
+      if (attempts === 1) return HttpResponse.error()
+      return successResponse(subscription('rule_replayed'), 201)
+    }))
+
+    let firstError: unknown
+    try {
+      await createAgentSubscription('proj-1', 'agent-1', {
+        name: 'fallback', match: 'event.type == "com.example.failed"', responsePrompt: 'inspect',
+      })
+    } catch (error) {
+      firstError = error
+    }
+
+    const key = (firstError as { idempotencyKey?: string }).idempotencyKey
+    expect(key).toBeTruthy()
+    const replay = await createAgentSubscription('proj-1', 'agent-1', {
+      name: 'fallback', match: 'event.type == "com.example.failed"', responsePrompt: 'inspect',
+      idempotencyKey: key,
+    })
+
+    expect(keys).toEqual([key, key])
+    expect(replay.idempotencyKey).toBe(key)
   })
 
   it('patches and deletes the same canonical resource path', async () => {
