@@ -81,6 +81,19 @@ export interface AgentExecutionDefinition {
   model?: string | null
   variant?: string | null
   skills: readonly string[]
+  agentId?: string | null
+}
+
+export interface AgentExecutionObservation {
+  agentId: string | null
+  sessionId: string | null
+  inputId: string | null
+  turnId: string | null
+  status: string
+  outcome: string | null
+  reason: string | null
+  nextAction: string | null
+  finalText: string | null
 }
 
 export interface AgentSessionStartup {
@@ -304,7 +317,10 @@ export type ActionResult = (
    * Actions populate `finalAssistantText`; the executor uses it as the
    * text corpus for `_output` markers.
    */
-  turnFact?: { finalAssistantText?: string | null } | null
+  turnFact?: {
+    finalAssistantText?: string | null
+    agentObservation?: AgentExecutionObservation | null
+  } | null
 }
 
 export interface RunnerOptions {

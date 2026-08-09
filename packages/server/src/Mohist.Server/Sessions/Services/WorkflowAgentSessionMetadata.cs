@@ -11,7 +11,8 @@ public sealed record WorkflowAgentSessionContext(
     string? WorkType = null,
     string? Stage = null,
     string? Title = null,
-    int? EpicNumber = null);
+    int? EpicNumber = null,
+    string? AgentId = null);
 
 public static class WorkflowAgentSessionMetadata
 {
@@ -40,6 +41,8 @@ public static class WorkflowAgentSessionMetadata
             labels[AgentSessionQueryMetadataKeys.WorkType] = context.WorkType;
         if (!string.IsNullOrWhiteSpace(context.Stage))
             labels[AgentSessionQueryMetadataKeys.Stage] = context.Stage;
+        if (!string.IsNullOrWhiteSpace(context.AgentId))
+            labels[GenericAgentSessionMetadata.AgentId] = context.AgentId;
         return labels;
     }
 

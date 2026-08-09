@@ -69,6 +69,54 @@ public sealed class RunnerAgentSessionReconciliationApiSpecs
         Assert.Equal("stale_binding", staleBody.GetProperty("code").GetString());
     }
 
+    [Fact]
+    public async Task WorkflowTurnReservation_IsIdempotentAndRollsBackQueuedReservation()
+    {
+        var projectId = $"project-workflow-turn-{Guid.NewGuid():N}";
+        var workflowRunId = $"workflow-turn-{Guid.NewGuid():N}";
+        var sessionName = "review";
+        var sessionId = $"session-workflow-turn-{Guid.NewGuid():N}";
+        var grain = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await grain.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-workflow-turn",
+            AgentRuntime: "pi",
+            WorkDir: "/work",
+            Metadata: new AgentSessionMetadata()
+                .WithLabel(AgentSessionQueryMetadataKeys.ProjectId, projectId)
+                .WithLabel(AgentSessionQueryMetadataKeys.SourceKind, "workflow")
+                .WithLabel(AgentSessionQueryMetadataKeys.WorkflowRunId, workflowRunId)
+                .WithLabel(AgentSessionQueryMetadataKeys.SessionName, sessionName)));
+        await grain.AttachPhysicalSessionAsync(new AttachPhysicalSessionCommand("runtime-workflow-turn", "/work"));
+
+        var request = new
+        {
+            inputId = "workflow-input-work-1",
+            turnId = "workflow-turn-work-1",
+            prompt = "public prompt",
+            source = "workflow",
+        };
+        var route = $"/api/runner/runner-workflow-turn/sessions/{projectId}/{workflowRunId}/{sessionName}/turn";
+
+        using var first = await _fixture.Client.PostAsJsonAsync(route, request);
+        first.EnsureSuccessStatusCode();
+        var firstBody = await first.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("queued", firstBody.GetProperty("status").GetString());
+
+        using var duplicate = await _fixture.Client.PostAsJsonAsync(route, request);
+        duplicate.EnsureSuccessStatusCode();
+        var duplicateBody = await duplicate.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("queued", duplicateBody.GetProperty("status").GetString());
+        Assert.Single(await grain.ListTurnsAsync());
+
+        using var rollback = await _fixture.Client.PostAsJsonAsync(
+            $"/api/runner/runner-workflow-turn/sessions/{projectId}/{workflowRunId}/{sessionName}/turn/abandon",
+            new { inputId = request.inputId, turnId = request.turnId });
+        rollback.EnsureSuccessStatusCode();
+        var rollbackBody = await rollback.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("abandoned", rollbackBody.GetProperty("status").GetString());
+        Assert.Empty(await grain.ListTurnsAsync());
+    }
+
     private async Task<string> CreateBoundSessionAsync(
         string runnerId,
         string runtimeSessionId,

@@ -2482,6 +2482,8 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
     {
         if (activity == AgentSessionActivity.Unknown)
             return AgentTurnStatus.Unknown;
+        if (string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase))
+            return AgentTurnStatus.Cancelled;
         if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
             return AgentTurnStatus.Failed;
         return AgentTurnStatus.Completed;
