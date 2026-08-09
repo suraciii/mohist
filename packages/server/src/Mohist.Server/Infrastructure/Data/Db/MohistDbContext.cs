@@ -629,6 +629,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.IdempotencyKey).HasMaxLength(256);
             entity.HasIndex(e => new { e.ProjectId, e.Name })
                 .IsUnique()
+                .HasFilter("\"Status\" <> 'deleted'")
                 .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
             entity.HasIndex(e => new { e.ProjectId, e.Position })
                 .HasDatabaseName("IX_RoutingRules_ProjectId_Position");

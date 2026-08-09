@@ -43,7 +43,7 @@ export interface AgentSubscriptionUpdateRequest {
   name?: string
   match?: string
   responsePrompt?: string
-  continue?: boolean
+  continue?: boolean | null
 }
 
 function subscriptionsPath(projectId: string, agentRef: string) {

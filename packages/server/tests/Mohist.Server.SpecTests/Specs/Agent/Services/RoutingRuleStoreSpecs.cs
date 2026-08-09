@@ -93,6 +93,43 @@ public sealed class RoutingRuleStoreSpecs : IClassFixture<MohistDbFixture>
     }
 
     [Fact]
+    public async Task DeleteRetainsFinalFactForReplayButHidesItFromRoutingLists()
+    {
+        await SeedAgentAsync("project-delete-fact", "agent-delete-fact", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var created = await store.CreateAsync(
+            NewRule("delete-me", "project-delete-fact", "agent-delete-fact"),
+            idempotencyKey: "delete-fact-key");
+        var deleted = await store.DeleteAsync(created.ProjectId, created.Id);
+        var repeated = await store.DeleteAsync(created.ProjectId, created.Id);
+
+        Assert.Equal(RoutingRuleStatus.Deleted, deleted!.Status);
+        Assert.Equal(RoutingRuleStatus.Deleted, repeated!.Status);
+        Assert.Equal(created.Id, (await store.GetByIdempotencyKeyAsync(created.ProjectId, "delete-fact-key"))!.Id);
+        Assert.Empty(await store.ListAsync(created.ProjectId));
+        Assert.Null(await store.DeleteAsync(created.ProjectId, "rule-unknown"));
+    }
+
+    [Fact]
+    public async Task DeleteReleasesNameForANewActiveRule()
+    {
+        await SeedAgentAsync("project-delete-name", "agent-delete-name", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var deleted = await store.CreateAsync(NewRule("reusable", "project-delete-name", "agent-delete-name"));
+        await store.DeleteAsync(deleted.ProjectId, deleted.Id);
+
+        var replacement = await store.CreateAsync(NewRule("reusable", "project-delete-name", "agent-delete-name"));
+
+        Assert.NotEqual(deleted.Id, replacement.Id);
+        Assert.Equal("reusable", replacement.Name);
+        Assert.Single(await store.ListAsync("project-delete-name"));
+    }
+
+    [Fact]
     public async Task InvalidCreateAndUpdateDoNotPersistChanges()
     {
         await SeedAgentAsync("project-validation", "agent-validation", AgentStatus.Active);

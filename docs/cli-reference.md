@@ -113,7 +113,7 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `label` | `list`、`create`、`edit`、`delete` |
 | `workflow` | `list`、`view`、`create`、`edit`、`delete`、`validate`；`view --yaml` 读取原始 Workflow Definition |
 | `run` | `list`、`view`、`watch`、`approve`、`reject`、`retry`、`rerun`、`pause`、`resume`、`stop`；`view --yaml` 读取 Run 绑定的 Definition 快照；`feedback list/view`；`variable list/get/set/unset`，其中 `list/get --effective` 读取合并结果 |
-| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；只读 `model list --runtime` |
+| `agent` | `list`、`view`、`create`、`edit`、`archive`、`restore`、`launch`、`install`；`job list/view`；`subscription list/create/edit/delete`；只读 `model list --runtime` |
 | `session` | `list`、`view`、`transcript`、`followup`、`compact`、`reset`、`cancel`；`schedule create/list/cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`；`test` 评估整张路由表 |
@@ -138,6 +138,27 @@ flag 词汇在全命令面唯一，同一个词不表达两种含义：
 | `info` | 查看本机 CLI、安装来源与有效环境 |
 
 每个命令组的叶子帮助才是参数清单。根帮助和本文命令地图不复制所有 flag。
+
+### Agent subscription
+
+Agent subscription 命令按 Agent 名称或 ID 寻址，并使用与其他 Agent 命令相同的
+`--project` 作用域。它提供 Agent 事件响应配置的统一 CLI 视图：
+
+```text
+mo agent subscription list <agent> [--project <project>]
+mo agent subscription create <agent> --name <name> --match <expression> \
+  --response-prompt <prompt> [--continue] [--idempotency-key <key>] [--project <project>]
+mo agent subscription edit <agent> <subscription-id> [--name <name>] [--match <expression>] \
+  [--response-prompt <prompt>] [--continue <true|false>] [--project <project>]
+mo agent subscription delete <agent> <subscription-id> [--project <project>]
+```
+
+创建和编辑使用稳定字段 `id`、`projectId`、`agentId`、`name`、`match`、
+`responsePrompt`、`continue`、`position`、`status`、`createdAt` 和 `updatedAt`。
+订阅状态为 `active` 或 `archived`；删除确认使用 `status: deleted`。列表同时返回
+`subscriptions`、`state`、`agentStatus`、`readiness` 和 `connection`，其中 `state`
+可为 `configured`、`empty`、`unconfigured`、`unavailable` 或 `no_connection`。
+空列表是成功结果，不等同于 Agent 不存在；请求失败保持失败并返回非零退出码。
 
 ## Issue（工作项）
 

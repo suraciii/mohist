@@ -20,4 +20,5 @@ public static class RoutingRuleStatus
 {
     public const string Active = "active";
     public const string Archived = "archived";
+    public const string Deleted = "deleted";
 }

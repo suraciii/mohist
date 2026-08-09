@@ -238,6 +238,7 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Name")
                         .IsUnique()
+                        .HasFilter("\"Status\" <> 'deleted'")
                         .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
 
                     b.HasIndex("ProjectId", "Position")

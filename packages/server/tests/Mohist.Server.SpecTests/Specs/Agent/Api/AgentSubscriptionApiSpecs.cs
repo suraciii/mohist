@@ -1,6 +1,13 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure.Data.Agent;
+using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Xunit;
@@ -24,6 +31,35 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal("no_connection", data.GetProperty("state").GetString());
         Assert.Equal("Unknown", data.GetProperty("readiness").GetString());
         Assert.Equal("no_connection", data.GetProperty("connection").GetString());
+        Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task List_UnconfiguredAgentPreservesNeedsSetupState()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unconfigured", instructions: "");
+
+        using var response = await Client.GetAsync(Path(projectId, agentId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("unconfigured", data.GetProperty("state").GetString());
+        Assert.Equal(AgentReadinessConclusions.NeedsSetup, data.GetProperty("readiness").GetString());
+        Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task List_UnavailableConnectionDoesNotBecomeEmptyOrNoConnection()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unavailable");
+        await SeedConnectionAsync(projectId, agentId);
+
+        using var response = await Client.GetAsync(Path(projectId, agentId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal("unavailable", data.GetProperty("state").GetString());
+        Assert.Equal("unavailable", data.GetProperty("connection").GetString());
         Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
     }
 
@@ -77,6 +113,128 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
     }
 
     [Fact]
+    public async Task Create_SameKeyDifferentRequestReturnsConflict()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-key-conflict");
+        var path = Path(projectId, agentId);
+        const string key = "subscription-key-conflict";
+
+        using var first = await SendCreateAsync(path, key, new
+        {
+            name = "release",
+            match = "event.type == \"release\"",
+            responsePrompt = "Summarize the release.",
+            @continue = false,
+        });
+        using var different = await SendCreateAsync(path, key, new
+        {
+            name = "other",
+            match = "event.type == \"release\"",
+            responsePrompt = "Summarize the release.",
+            @continue = false,
+        });
+
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.Conflict, different.StatusCode);
+        var body = await different.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("idempotency_key_conflict", body.GetProperty("code").GetString());
+        var list = await Client.GetDataAsync<JsonElement>(path);
+        Assert.Single(list.GetProperty("subscriptions").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task Create_WhitespaceIsNormalizedBeforePersistenceAndReplayComparison()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-whitespace");
+        var path = Path(projectId, agentId);
+        const string key = "subscription-whitespace-replay";
+
+        using var first = await SendCreateAsync(path, key, new
+        {
+            name = "  release  ",
+            match = "  event.type == \"release\"  ",
+            responsePrompt = "  Summarize the release.  ",
+            @continue = true,
+        });
+        var firstData = await ReadDataAsync(first);
+        using var replay = await SendCreateAsync(path, key, new
+        {
+            name = "release",
+            match = "event.type == \"release\"",
+            responsePrompt = "Summarize the release.",
+            @continue = true,
+        });
+
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var replayData = await ReadDataAsync(replay);
+        Assert.Equal(firstData.GetProperty("id").GetString(), replayData.GetProperty("id").GetString());
+        Assert.Equal("release", firstData.GetProperty("name").GetString());
+        Assert.Equal("event.type == \"release\"", firstData.GetProperty("match").GetString());
+        Assert.Equal("Summarize the release.", firstData.GetProperty("responsePrompt").GetString());
+    }
+
+    [Fact]
+    public async Task Patch_ContinueAcceptsBooleanAndNullWithNullResettingToFalse()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-continue-values");
+        var path = Path(projectId, agentId);
+        var created = await Client.PostAsJsonAsync(path, new
+        {
+            name = "continue-values",
+            match = "event.type == \"continue\"",
+            responsePrompt = "Inspect the event.",
+            @continue = false,
+        });
+        var id = (await ReadDataAsync(created)).GetProperty("id").GetString()!;
+
+        using var enabled = await PatchRawAsync($"{path}/{id}", "{\"continue\":true}");
+        Assert.True((await ReadDataAsync(enabled)).GetProperty("continue").GetBoolean());
+        using var disabled = await PatchRawAsync($"{path}/{id}", "{\"continue\":false}");
+        Assert.False((await ReadDataAsync(disabled)).GetProperty("continue").GetBoolean());
+        using var reset = await PatchRawAsync($"{path}/{id}", "{\"continue\":null}");
+        Assert.False((await ReadDataAsync(reset)).GetProperty("continue").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("\"true\"")]
+    [InlineData("1")]
+    [InlineData("[]")]
+    public async Task Patch_InvalidContinueTypeReturnsContractErrorAndDoesNotMutate(string jsonValue)
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-invalid-continue");
+        var path = Path(projectId, agentId);
+        var created = await Client.PostAsJsonAsync(path, new
+        {
+            name = "invalid-continue",
+            match = "event.type == \"invalid\"",
+            responsePrompt = "Inspect the event.",
+            @continue = false,
+        });
+        var id = (await ReadDataAsync(created)).GetProperty("id").GetString()!;
+
+        using var response = await PatchRawAsync($"{path}/{id}", $"{{\"continue\":{jsonValue}}}");
+        var error = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("invalid_subscription_request", error.GetProperty("code").GetString());
+        var current = await Client.GetDataAsync<JsonElement>($"{path}");
+        Assert.False(current.GetProperty("subscriptions").EnumerateArray().Single().GetProperty("continue").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Delete_UnknownSubscriptionReturnsNotFound()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-unknown-delete");
+
+        using var response = await Client.DeleteAsync($"{Path(projectId, agentId)}/rule_unknown");
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.Equal("not_found", body.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Create_ArchivedAgentReturnsExplicitConflict()
     {
         var (projectId, agentId) = await CreateProjectAndAgentAsync("subscription-archived");
@@ -95,7 +253,9 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal("agent_archived", body.GetProperty("code").GetString());
     }
 
-    private async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(string prefix)
+    private async Task<(string ProjectId, string AgentId)> CreateProjectAndAgentAsync(
+        string prefix,
+        string instructions = "subscription spec instructions")
     {
         var project = await Client.CreateProjectWithDefaultRepositoryAsync<ProjectDto>(
             "/api/projects", $"{prefix}-{Guid.NewGuid():N}");
@@ -103,7 +263,7 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         {
             name = "subscription-agent",
             description = "subscription spec agent",
-            instructions = "subscription spec instructions",
+            instructions,
             agentConfig = new { model = "openai/gpt-5.6", runtime = "pi" },
             skills = Array.Empty<string>(),
             maxConcurrentRuns = 1,
@@ -118,6 +278,47 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
     {
         var envelope = await response.Content.ReadFromJsonAsync<JsonElement>();
         return envelope.GetProperty("data");
+    }
+
+    private async Task<HttpResponseMessage> SendCreateAsync(string path, string key, object body)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(body),
+        };
+        request.Headers.Add("Idempotency-Key", key);
+        return await Client.SendAsync(request);
+    }
+
+    private async Task<HttpResponseMessage> PatchRawAsync(string path, string json)
+    {
+        return await Client.PatchAsync(path, new StringContent(json, Encoding.UTF8, "application/json"));
+    }
+
+    private async Task SeedConnectionAsync(string projectId, string agentId)
+    {
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.AgentConnections.Add(new AgentConnectionRow
+        {
+            Id = $"connection_{Guid.NewGuid():N}",
+            ProjectId = projectId,
+            AgentId = agentId,
+            ProviderKind = ConnectionProviderKind.Slack,
+            WorkspaceTeamId = "",
+            AppId = "",
+            BotUserId = "",
+            BotName = "",
+            SetupProgress = SetupProgressKind.WaitingForSlackService,
+            DesiredState = DesiredStateKind.Enabled,
+            ConnectionHealth = ConnectionHealthKind.Unhealthy,
+            AgentReadiness = AgentReadinessKind.Unknown,
+            AccessPolicy = AccessPolicyKind.OwnerOnly,
+            CreatedAt = fixture.TimeProvider.GetUtcNow(),
+            UpdatedAt = fixture.TimeProvider.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
     }
 
     private sealed record ProjectDto(string Id);

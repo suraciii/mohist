@@ -29,6 +29,7 @@ public sealed class RoutingRuleStore : IScopedService
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var query = db.RoutingRules.AsNoTracking().Where(rule => rule.ProjectId == projectId);
+        query = query.Where(rule => rule.Status != RoutingRuleStatus.Deleted);
         if (!includeArchived)
             query = query.Where(rule => rule.Status == RoutingRuleStatus.Active);
         var rows = await query.OrderBy(rule => rule.Position).ThenBy(rule => rule.Id).ToListAsync(ct);
@@ -62,6 +63,10 @@ public sealed class RoutingRuleStore : IScopedService
         string? idempotencyKey = null)
     {
         ArgumentNullException.ThrowIfNull(rule);
+        rule.Name = Normalize(rule.Name)!;
+        rule.Match = Normalize(rule.Match)!;
+        rule.AgentId = Normalize(rule.AgentId)!;
+        rule.ResponsePrompt = Normalize(rule.ResponsePrompt)!;
         idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
         if (idempotencyKey is { Length: > 256 })
             throw new RoutingRuleValidationException("Idempotency-Key must be 256 characters or fewer.", "idempotency_key_invalid");
@@ -119,24 +124,24 @@ public sealed class RoutingRuleStore : IScopedService
         CancellationToken ct = default)
     {
         var existing = await GetAsync(projectId, id, ct);
-        if (existing is null) return null;
-        var newName = fields.Contains(nameof(name)) ? name : existing.Name;
-        var newMatch = fields.Contains(nameof(match)) ? match : existing.Match;
-        var newAgentId = fields.Contains(nameof(agentId)) ? agentId : existing.AgentId;
-        var newPrompt = fields.Contains(nameof(responsePrompt)) ? responsePrompt : existing.ResponsePrompt;
+        if (existing is null || existing.Status == RoutingRuleStatus.Deleted) return null;
+        var newName = fields.Contains(nameof(name)) ? Normalize(name) : existing.Name;
+        var newMatch = fields.Contains(nameof(match)) ? Normalize(match) : existing.Match;
+        var newAgentId = fields.Contains(nameof(agentId)) ? Normalize(agentId) : existing.AgentId;
+        var newPrompt = fields.Contains(nameof(responsePrompt)) ? Normalize(responsePrompt) : existing.ResponsePrompt;
         var newContinue = fields.Contains("continue") ? continueValue : existing.Continue;
         await ValidateAsync(projectId, newName, newMatch, newAgentId, newPrompt, id, ct);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
-        if (row is null) return null;
-        if (row.Name == newName!.Trim()
+        if (row is null || row.Status == RoutingRuleStatus.Deleted) return null;
+        if (row.Name == newName
             && row.Match == newMatch
             && row.AgentId == newAgentId
             && row.ResponsePrompt == newPrompt
             && row.Continue == (newContinue ?? false))
             return ToDomain(row);
-        row.Name = newName!.Trim();
+        row.Name = newName!;
         row.Match = newMatch!;
         row.AgentId = newAgentId!;
         row.ResponsePrompt = newPrompt!;
@@ -159,12 +164,15 @@ public sealed class RoutingRuleStore : IScopedService
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
         if (row is null) return null;
+        if (row.Status == RoutingRuleStatus.Deleted) return ToDomain(row);
         var deleted = ToDomain(row);
         var rows = await LoadProjectRulesAsync(db, projectId, ct);
         rows.RemoveAll(candidate => candidate.Id == id);
         for (var position = 0; position < rows.Count; position++)
             rows[position].Position = position + 1;
-        db.RoutingRules.Remove(row);
+        row.Status = RoutingRuleStatus.Deleted;
+        deleted.Status = RoutingRuleStatus.Deleted;
+        row.UpdatedAt = _timeProvider.GetUtcNow();
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
         return deleted;
@@ -175,6 +183,7 @@ public sealed class RoutingRuleStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
         if (row is null) return null;
+        if (row.Status == RoutingRuleStatus.Deleted) return null;
         if (row.Status == RoutingRuleStatus.Archived) return ToDomain(row);
         row.Status = RoutingRuleStatus.Archived;
         row.UpdatedAt = _timeProvider.GetUtcNow();
@@ -189,10 +198,11 @@ public sealed class RoutingRuleStore : IScopedService
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
-        if (row is null) return null;
+        if (row is null || row.Status == RoutingRuleStatus.Deleted) return null;
         var targetId = beforeId ?? afterId!;
         var target = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == targetId, ct);
-        if (target is null) throw new RoutingRuleMoveTargetNotFoundException(targetId);
+        if (target is null || target.Status == RoutingRuleStatus.Deleted)
+            throw new RoutingRuleMoveTargetNotFoundException(targetId);
         if (target.Id == row.Id) throw new RoutingRuleMoveTargetException();
         var rows = await LoadProjectRulesAsync(db, projectId, ct);
         rows.Remove(row);
@@ -220,12 +230,19 @@ public sealed class RoutingRuleStore : IScopedService
             throw new RoutingRuleValidationException($"Agent '{agentId}' is archived.", "agent_archived");
         if (string.IsNullOrWhiteSpace(prompt)) throw new RoutingRuleValidationException("responsePrompt cannot be blank", "response_prompt_blank");
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
-        var duplicate = await db.RoutingRules.AnyAsync(rule => rule.ProjectId == projectId && rule.Name == name.Trim() && rule.Id != existingId, ct);
+        var duplicate = await db.RoutingRules.AnyAsync(rule => rule.ProjectId == projectId
+            && rule.Status != RoutingRuleStatus.Deleted
+            && rule.Name == name.Trim()
+            && rule.Id != existingId, ct);
         if (duplicate) throw new RoutingRuleNameConflictException(projectId, name.Trim());
     }
 
     private static async Task<List<RoutingRuleRow>> LoadProjectRulesAsync(MohistDbContext db, string projectId, CancellationToken ct) =>
-        await db.RoutingRules.Where(rule => rule.ProjectId == projectId).OrderBy(rule => rule.Position).ThenBy(rule => rule.Id).ToListAsync(ct);
+        await db.RoutingRules
+            .Where(rule => rule.ProjectId == projectId && rule.Status != RoutingRuleStatus.Deleted)
+            .OrderBy(rule => rule.Position)
+            .ThenBy(rule => rule.Id)
+            .ToListAsync(ct);
 
     private static int InsertPosition(List<RoutingRuleRow> rules, string? beforeId, string? afterId)
     {
@@ -269,6 +286,8 @@ public sealed class RoutingRuleStore : IScopedService
         Status = rule.Status, CreatedAt = rule.CreatedAt, UpdatedAt = rule.UpdatedAt,
         IdempotencyKey = rule.IdempotencyKey,
     };
+
+    private static string? Normalize(string? value) => value?.Trim();
 
     private static bool IsNameConflict(DbUpdateException ex) => ex.InnerException is SqliteException sqlite
         && sqlite.SqliteErrorCode == 19

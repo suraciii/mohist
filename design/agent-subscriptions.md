@@ -49,6 +49,12 @@ not reconstruct a second filter or priority model. The list is ordered by the
 same routing-table position used by dispatch. A write response returns the
 same `AgentSubscriptionDto` item shape, not a client-specific projection.
 
+For PATCH, omitting a field leaves it unchanged. `continue` accepts `true`,
+`false`, or `null`; `null` resets the boolean routing value to its default
+`false`. Other JSON types are a contract error and return `400` without a
+mutation. Text fields use the same trimmed value for persistence and idempotency
+comparison.
+
 ## Read states
 
 The list route returns `200` for a resolved Agent, including an empty list. The
@@ -75,12 +81,14 @@ than an empty list.
 Create and patch validate the existing routing expression and Agent rules.
 Archived Agents reject create and patch with `409` and `agent_archived`;
 existing subscriptions can still be listed and deleted. Delete removes only
-the addressed routing row. Patch is final-state idempotent when the submitted
-values already match. Delete returns the same deletion acknowledgement when a
-client repeats it for the same id. Create uses the normal idempotency key: a
-repeated request with the same key returns the original resource and does not
-create a second row; reusing a key for different values is a conflict. Without
-a key, a create retry is a new request and is not silently deduplicated.
+the addressed routing rule from the active/readable subscription view. An
+unknown subscription returns `404`; repeating DELETE for the same known id
+returns the same `deleted` acknowledgement. Patch is final-state idempotent
+when the submitted values already match. Create uses the normal idempotency
+key: a repeated request with the same normalized values returns the original
+resource and does not create a second row; reusing a key for different values
+is a conflict. Without a key, a create retry is a new request and is not
+silently deduplicated.
 
 No subscription write starts a runtime, probes Slack, mutates a Connection,
 or changes event matching. A missing or unhealthy Connection is observable

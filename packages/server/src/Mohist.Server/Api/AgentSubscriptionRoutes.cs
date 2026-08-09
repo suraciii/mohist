@@ -56,6 +56,7 @@ public static class AgentSubscriptionRoutes
             CancellationToken ct) =>
         {
             if (request is null) return ApiResults.BadRequest("request body required");
+            request = Normalize(request);
             var projectId = context.GetResolvedProject().Id;
             var agent = await AgentRefResolver.ResolveAsync(agents, projectId, agentRef);
             if (agent is null)
@@ -112,13 +113,15 @@ public static class AgentSubscriptionRoutes
             CancellationToken ct) =>
         {
             if (request is null) return ApiResults.BadRequest("request body required");
+            if (request.ContractError is not null)
+                return ApiResults.BadRequest(request.ContractError, request.ContractErrorCode);
             if (request.Fields.Count == 0) return ApiResults.BadRequest("At least one editable field is required.");
             var projectId = context.GetResolvedProject().Id;
             var agent = await AgentRefResolver.ResolveAsync(agents, projectId, agentRef);
             if (agent is null)
                 return ApiResults.NotFound($"Agent '{agentRef}' not found");
             var existing = await rules.GetAsync(projectId, subscriptionId, ct);
-            if (existing is null || existing.AgentId != agent.Id)
+            if (existing is null || existing.AgentId != agent.Id || existing.Status == RoutingRuleStatus.Deleted)
                 return ApiResults.NotFound($"Subscription '{subscriptionId}' not found");
 
             try
@@ -156,11 +159,17 @@ public static class AgentSubscriptionRoutes
             if (agent is null)
                 return ApiResults.NotFound($"Agent '{agentRef}' not found");
             var existing = await rules.GetAsync(projectId, subscriptionId, ct);
-            if (existing is not null && existing.AgentId != agent.Id)
+            if (existing is null || existing.AgentId != agent.Id)
                 return ApiResults.NotFound($"Subscription '{subscriptionId}' not found");
 
-            // A repeated DELETE has the same observable result as the first one.
-            await rules.DeleteAsync(projectId, subscriptionId, ct);
+            // The store retains a deleted RoutingRule as the final fact needed
+            // to distinguish a safe replay from an unknown subscription.
+            if (existing.Status != RoutingRuleStatus.Deleted)
+            {
+                var deleted = await rules.DeleteAsync(projectId, subscriptionId, ct);
+                if (deleted is null)
+                    return ApiResults.NotFound($"Subscription '{subscriptionId}' not found");
+            }
             return ApiResults.Ok(new { id = subscriptionId, status = "deleted" });
         });
 
@@ -169,10 +178,19 @@ public static class AgentSubscriptionRoutes
 
     private static bool SameRequestValues(RoutingRule existing, string agentId, AgentSubscriptionCreateRequest request) =>
         existing.AgentId == agentId
-        && string.Equals(existing.Name, request.Name?.Trim(), StringComparison.Ordinal)
-        && string.Equals(existing.Match, request.Match, StringComparison.Ordinal)
-        && string.Equals(existing.ResponsePrompt, request.ResponsePrompt, StringComparison.Ordinal)
+        && string.Equals(existing.Name, Normalize(request.Name), StringComparison.Ordinal)
+        && string.Equals(existing.Match, Normalize(request.Match), StringComparison.Ordinal)
+        && string.Equals(existing.ResponsePrompt, Normalize(request.ResponsePrompt), StringComparison.Ordinal)
         && existing.Continue == request.Continue;
+
+    private static AgentSubscriptionCreateRequest Normalize(AgentSubscriptionCreateRequest request) => request with
+    {
+        Name = Normalize(request.Name),
+        Match = Normalize(request.Match),
+        ResponsePrompt = Normalize(request.ResponsePrompt),
+    };
+
+    private static string? Normalize(string? value) => value?.Trim();
 
     private static string DeriveState(AgentInfo agent, IReadOnlyList<AgentSubscriptionDto> subscriptions, IReadOnlyList<AgentConnection> connections)
     {
@@ -242,36 +260,55 @@ public sealed record AgentSubscriptionUpdateRequest(
     string? ResponsePrompt,
     bool? Continue,
     IReadOnlySet<string> Fields,
-    JsonElement Raw)
+    JsonElement Raw,
+    string? ContractError = null,
+    string? ContractErrorCode = null)
 {
     public static async ValueTask<AgentSubscriptionUpdateRequest?> BindAsync(HttpContext context)
     {
-        var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
-        var fields = new HashSet<string>(StringComparer.Ordinal);
-        if (raw.ValueKind == JsonValueKind.Object)
+        try
         {
+            var raw = await JsonSerializer.DeserializeAsync<JsonElement>(context.Request.Body, JSON.Options);
+            if (raw.ValueKind != JsonValueKind.Object)
+                return Invalid("PATCH body must be a JSON object.");
+
+            var fields = new HashSet<string>(StringComparer.Ordinal);
             if (raw.TryGetProperty("name", out _)) fields.Add("name");
             if (raw.TryGetProperty("match", out _)) fields.Add("match");
             if (raw.TryGetProperty("responsePrompt", out _)) fields.Add("responsePrompt");
             if (raw.TryGetProperty("continue", out _)) fields.Add("continue");
+            return new AgentSubscriptionUpdateRequest(
+                GetString(raw, "name"), GetString(raw, "match"), GetString(raw, "responsePrompt"),
+                GetBool(raw, "continue"), fields, raw);
         }
-        return new AgentSubscriptionUpdateRequest(
-            GetString(raw, "name"), GetString(raw, "match"), GetString(raw, "responsePrompt"),
-            GetBool(raw, "continue"), fields, raw);
+        catch (JsonException ex)
+        {
+            return Invalid(ex.Message);
+        }
     }
 
-    private static string? GetString(JsonElement raw, string name) =>
-        raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(name, out var value) && value.ValueKind != JsonValueKind.Null
-            ? value.GetString()
-            : null;
+    private static string? GetString(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        if (value.ValueKind != JsonValueKind.String)
+            throw new JsonException($"Property '{name}' must be a string or null.");
+        return value.GetString();
+    }
 
-    private static bool? GetBool(JsonElement raw, string name) =>
-        raw.ValueKind == JsonValueKind.Object && raw.TryGetProperty(name, out var value)
-            ? value.ValueKind switch
-            {
-                JsonValueKind.True => true,
-                JsonValueKind.False => false,
-                _ => null,
-            }
-            : null;
+    private static bool? GetBool(JsonElement raw, string name)
+    {
+        if (!raw.TryGetProperty(name, out var value) || value.ValueKind == JsonValueKind.Null)
+            return null;
+        return value.ValueKind switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            _ => throw new JsonException($"Property '{name}' must be a boolean or null."),
+        };
+    }
+
+    private static AgentSubscriptionUpdateRequest Invalid(string message) => new(
+        null, null, null, null, new HashSet<string>(StringComparer.Ordinal), default,
+        message, "invalid_subscription_request");
 }
