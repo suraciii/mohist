@@ -75,6 +75,14 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
             environment["RUNNER_ROOT"] = options.RunnerRoot;
+        if (!string.IsNullOrWhiteSpace(options.RunnerId))
+            environment["RUNNER_ID"] = options.RunnerId;
+        if (!string.IsNullOrWhiteSpace(options.RuntimeGeneration))
+            environment["MOHIST_RUNTIME_GENERATION"] = options.RuntimeGeneration;
+        if (!string.IsNullOrWhiteSpace(options.RuntimeSessionToken))
+            environment["MOHIST_RUNTIME_SESSION_TOKEN"] = options.RuntimeSessionToken;
+        if (!string.IsNullOrWhiteSpace(options.ArtifactDigest))
+            environment["MOHIST_ARTIFACT_DIGEST"] = options.ArtifactDigest;
         if (!string.IsNullOrWhiteSpace(options.EnrollmentToken))
             environment[RunnerEnrollmentTokenEnvironmentVariable] = options.EnrollmentToken!;
 
@@ -143,6 +151,38 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     public Task<bool> IsSlackInstalledAsync(string? unitDir = null) => Task.FromResult(
         _fileSystem.Exists(Path.Combine(ResolveUnitDir(unitDir), SlackUnit)));
+
+    public async Task<ServiceManagerProbe> ProbeRuntimeManagerAsync(CancellationToken cancellationToken = default)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return ServiceManagerProbe.Unavailable("systemd user service management is unavailable");
+
+        var (exitCode, _, stderr) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "show-environment"],
+            cancellationToken: cancellationToken);
+        if (exitCode == 0)
+            return ServiceManagerProbe.Ready();
+
+        var reason = string.IsNullOrWhiteSpace(stderr)
+            ? $"systemctl --user show-environment exited {exitCode}"
+            : stderr.Trim();
+        return ServiceManagerProbe.Unavailable(reason);
+    }
+
+    public async Task<int> ReloadRuntimeManagerAsync(CancellationToken cancellationToken = default)
+    {
+        if (!EnsureSystemdSupported(dryRun: false))
+            return 1;
+
+        var (code, stdout, stderr) = await _commandExecutor.ExecuteAsync(
+            "systemctl",
+            ["--user", "daemon-reload"],
+            cancellationToken: cancellationToken);
+        if (!string.IsNullOrWhiteSpace(stdout)) _out.Write(stdout);
+        if (!string.IsNullOrWhiteSpace(stderr)) _err.Write(stderr);
+        return code;
+    }
 
     private bool IsRunnerUnitInstalled(string? unitDir)
     {

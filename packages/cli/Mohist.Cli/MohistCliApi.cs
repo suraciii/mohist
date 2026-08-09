@@ -743,6 +743,7 @@ internal sealed class MohistCliApi
         _out.WriteLine("Identity");
         WriteKeyValue("  version", StringOfNullable(running, "version"));
         WriteKeyValue("  gitHash", StringOfNullable(running, "gitHash"));
+        WriteKeyValue("  artifactDigest", StringOfNullable(running, "artifactDigest"));
         WriteKeyValue("  startedAt", StringOfNullable(running, "startedAt"));
 
         _out.WriteLine();

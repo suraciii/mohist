@@ -120,7 +120,7 @@ public class UpdateAllSpecs
             c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c => c.FileName == "npm");
         var output = f.Stdout.ToString();
-        Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
+        Assert.Contains("Runner service is not installed; skipping managed runner candidate preparation.", output);
         Assert.Contains("Runner refresh skipped: runner service is not installed", output);
         Assert.Contains("runner-refresh-skipped(runner service is not installed)", output);
     }

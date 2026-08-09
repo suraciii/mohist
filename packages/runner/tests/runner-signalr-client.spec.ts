@@ -252,6 +252,22 @@ describe("RunnerSignalRClient handshake", () => {
     expect(last?.url).toBe(`http://localhost:3456/hubs/runner?runnerId=runner-1&buildGitHash=${hash}`)
   })
 
+  it("IncludesTheExactInstalledRuntimeIdentityInTheHandshake", () => {
+    builders.length = 0
+    const hash = "abcdef1234567890abcdef1234567890abcdef12"
+    const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", hash, {
+      artifactDigest: digest,
+      runtimeGeneration: "generation-42",
+      runtimeSessionToken: "session-42",
+    })
+
+    const last = builders.at(-1)
+    expect(last?.url).toBe(
+      `http://localhost:3456/hubs/runner?runnerId=runner-1&buildGitHash=${hash}&artifactDigest=${digest}&runtimeGeneration=generation-42&runtimeSessionToken=session-42`,
+    )
+  })
+
   it("OmitsBuildGitHashWhenNull", () => {
     builders.length = 0
     new RunnerSignalRClient("http://localhost:3456", "runner-1", "/tmp/mohist/projects", null)

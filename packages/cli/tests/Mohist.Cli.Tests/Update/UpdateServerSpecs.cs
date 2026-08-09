@@ -45,13 +45,13 @@ public class UpdateServerSpecs
                 new ResponseSpec(HttpStatusCode.OK)),
             unitDir: UpdateTestFactory.UnitDir);
         Assert.Equal(0, await initial.UpdateServerAsync("/clean", dryRun: false));
+        f.Runtime.FreezeServerIdentity();
         f.ClearOutput();
 
         const string candidate = "0123456789abcdef0123456789abcdef01234567";
         f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, candidate + "\n", "");
         var stale = f.BuildUpdater(
-            SequenceHttpHandler.WithSystemInfo(
-                UpdateTestFactory.HealthySystemInfoJson("abcdef0"),
+            new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.OK),
                 new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
                 new ResponseSpec(HttpStatusCode.OK)),
@@ -75,9 +75,11 @@ public class UpdateServerSpecs
         var f = new UpdateTestFactory(root: "/home/test");
         const string source = "0123456789abcdef0123456789abcdef01234567";
         f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, source + "\n", "");
+        f.Runtime.SetServerIdentityOverride(
+            "fedcba9876543210fedcba9876543210fedcba98",
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
         var updater = f.BuildUpdater(
-            SequenceHttpHandler.WithSystemInfo(
-                UpdateTestFactory.HealthySystemInfoJson("fedcba9876543210fedcba9876543210fedcba98"),
+            new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.OK),
                 new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
                 new ResponseSpec(HttpStatusCode.OK)),
@@ -89,7 +91,7 @@ public class UpdateServerSpecs
         Assert.Null(f.Files.ReadDirectorySymbolicLink("/home/test/.local/share/mohist/runtime/server/current"));
         Assert.Contains(f.Commands.ExecutedCommands, command =>
             command.FileName == "systemctl" && command.Args.SequenceEqual(["--user", "stop", "mohist.service"]));
-        Assert.Contains("Recovery: no verified version existed, stopped the candidate service target", f.Stderr.ToString());
+        Assert.Contains("Recovery: no prior service target existed; stopped candidate service target", f.Stderr.ToString());
         Assert.DoesNotContain("Server runtime verification: current", f.Stdout.ToString());
     }
 

@@ -7,7 +7,7 @@ namespace Mohist.Cli.Tests.Update;
 public class UpdateRecoverySpecs
 {
     [Fact]
-    public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunner_RestoresRunner()
+    public async Task UpdateAll_WhenServerUpdateFails_LeavesActiveRunnerUntouched()
     {
         var tempRoot = "/mohist-tests/mohist-update-all-fail1";
         var f = new UpdateTestFactory(tempRoot);
@@ -23,15 +23,14 @@ public class UpdateRecoverySpecs
         Assert.Equal(1, exitCode);
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
-        Assert.Contains(f.Commands.ExecutedCommands, c =>
+        Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-        Assert.Contains(f.Commands.ExecutedCommands, c =>
+        Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-        Assert.Contains("Restoring workflow runner", f.Stdout.ToString());
     }
 
     [Fact]
-    public async Task UpdateAll_WhenServerUpdateFailsAfterStoppingRunnerAndRunnerWasNotRunning_DoesNotRestoreRunner()
+    public async Task UpdateAll_WhenServerUpdateFailsAndRunnerWasNotRunning_DoesNotRestoreRunner()
     {
         var tempRoot = "/mohist-tests/mohist-update-all-fail1b";
         var f = new UpdateTestFactory(tempRoot);
@@ -54,7 +53,7 @@ public class UpdateRecoverySpecs
     }
 
     [Fact]
-    public async Task UpdateAll_WhenReadinessTimeoutAfterStoppingRunner_RestoresRunner()
+    public async Task UpdateAll_WhenServerReadinessFails_LeavesActiveRunnerUntouched()
     {
         var tempRoot = "/mohist-tests/mohist-update-all-timeout";
         var f = new UpdateTestFactory(tempRoot);
@@ -72,11 +71,10 @@ public class UpdateRecoverySpecs
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains(f.Commands.ExecutedCommands, c =>
+        Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
-        Assert.Contains(f.Commands.ExecutedCommands, c =>
+        Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
-        Assert.Contains("Restoring workflow runner", f.Stdout.ToString());
     }
 
     [Fact]
@@ -89,9 +87,7 @@ public class UpdateRecoverySpecs
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         var updater = f.BuildUpdater(
-            new SequenceHttpHandler(
-                new ResponseSpec(HttpStatusCode.ServiceUnavailable)),
-            serverReadyTimeout: TimeSpan.FromSeconds(10),
+            new SequenceHttpHandler(HttpStatusCode.OK),
             unitDir: UpdateTestFactory.UnitDir);
 
         using var cts = new CancellationTokenSource();
@@ -132,7 +128,7 @@ public class UpdateRecoverySpecs
     }
 
     [Fact]
-    public async Task UpdateAll_WhenRunnerRestoreFails_ReportsUnavailableCapabilityAndManualCommand()
+    public async Task UpdateAll_WhenRunnerRollbackAndPriorRestartFail_ReportUnavailableCapabilityAndManualCommand()
     {
         var tempRoot = "/mohist-tests/mohist-update-all-restore-fail";
         var f = new UpdateTestFactory(tempRoot);
@@ -141,17 +137,22 @@ public class UpdateRecoverySpecs
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
         f.Commands.SetExitCodeFor("systemctl", args => args.Length >= 2 && args[1] == "start", 1);
-        var readiness = new SequenceHttpHandler(
-            new ResponseSpec(HttpStatusCode.ServiceUnavailable));
+        f.Runtime.RunnerIdentityTransform = identity => identity with
+        {
+            BuildGitHash = "stale-runner-source",
+            ArtifactDigest = "0000000000000000000000000000000000000000000000000000000000000000",
+        };
+        f.Files.DirectoryLinkDeleteFailure = link => link.EndsWith("/runtime/runner/current", StringComparison.Ordinal)
+            ? new IOException("runner current link delete denied")
+            : null;
         var updater = f.BuildUpdater(
-            readiness,
-            serverReadyTimeout: TimeSpan.FromMilliseconds(150),
+            new SequenceHttpHandler(HttpStatusCode.OK),
             unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
 
         Assert.Equal(1, exitCode);
-        Assert.Contains("Runner unavailable", f.Stderr.ToString());
+        Assert.Contains("Runtime recovery failed", f.Stderr.ToString());
         Assert.Contains("mo service start runner", f.Stderr.ToString());
     }
 }

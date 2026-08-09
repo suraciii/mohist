@@ -1,5 +1,11 @@
 namespace Mohist.Cli;
 
+internal sealed record ServiceManagerProbe(bool Available, string? Reason = null)
+{
+    public static ServiceManagerProbe Ready() => new(true);
+    public static ServiceManagerProbe Unavailable(string reason) => new(false, reason);
+}
+
 internal interface IServiceInstaller
 {
     Task<int> InstallServerAsync(ServiceInstallOptions options);
@@ -40,4 +46,17 @@ internal interface IServiceInstaller
     /// </param>
     Task<bool> IsRunnerInstalledAsync(string? unitDir = null);
     Task<bool> IsSlackInstalledAsync(string? unitDir = null);
+
+    /// <summary>
+    /// Performs a read-only capability check before a managed runtime transaction
+    /// changes a unit or runtime link.
+    /// </summary>
+    Task<ServiceManagerProbe> ProbeRuntimeManagerAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(ServiceManagerProbe.Unavailable("managed runtime updates are unavailable for this service installer"));
+
+    /// <summary>
+    /// Reloads the service manager after a transaction restores an exact unit
+    /// snapshot. The caller performs no target restart until this succeeds.
+    /// </summary>
+    Task<int> ReloadRuntimeManagerAsync(CancellationToken cancellationToken = default) => Task.FromResult(1);
 }

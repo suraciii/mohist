@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace Mohist.Cli;
 
 internal sealed class UpdateOperations
@@ -11,6 +13,7 @@ internal sealed class UpdateOperations
     private readonly string? _unitDir;
     private readonly Func<string?>? _getUserHome;
     private readonly InstalledRuntimeArtifacts _artifacts;
+    private readonly IRuntimeUpdateLeaseProvider _runtimeUpdateLeases;
 
     public UpdateOperations(
         TextWriter output,
@@ -20,7 +23,8 @@ internal sealed class UpdateOperations
         IFileSystem fileSystem,
         IEnvironmentVariableProvider environment,
         string? unitDir = null,
-        Func<string?>? getUserHome = null)
+        Func<string?>? getUserHome = null,
+        IRuntimeUpdateLeaseProvider? runtimeUpdateLeases = null)
     {
         _out = output;
         _err = error;
@@ -31,6 +35,7 @@ internal sealed class UpdateOperations
         _unitDir = unitDir;
         _getUserHome = getUserHome;
         _artifacts = new InstalledRuntimeArtifacts(error, commandExecutor, fileSystem, environment, getUserHome);
+        _runtimeUpdateLeases = runtimeUpdateLeases ?? new RuntimeUpdateLeaseProvider(fileSystem);
     }
 
     public Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
@@ -44,7 +49,7 @@ internal sealed class UpdateOperations
         bool dryRun,
         TimeSpan serverReadyTimeout,
         ServiceReadinessProbe readinessProbe,
-        Func<string, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
+        Func<InstalledRuntimeArtifact, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
         CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
@@ -71,25 +76,33 @@ internal sealed class UpdateOperations
         if (prepared is null)
             return 1;
 
-        _out.WriteLine("Server candidate service started; verifying runtime identity.");
-        var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
-        if (!ready.Ready)
+        try
         {
-            _err.WriteLine($"Server candidate did not become ready within {(int)serverReadyTimeout.TotalSeconds} seconds.");
-            if (!string.IsNullOrWhiteSpace(ready.LastFailure))
-                _err.WriteLine($"Last readiness error: {ready.LastFailure}");
-            return await RollBackRuntimeAsync(prepared, actualHash: null, "readiness did not pass", cancellationToken);
+            _out.WriteLine("Server candidate service started; verifying runtime identity.");
+            var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
+            if (!ready.Ready)
+            {
+                _err.WriteLine($"Server candidate did not become ready within {(int)serverReadyTimeout.TotalSeconds} seconds.");
+                if (!string.IsNullOrWhiteSpace(ready.LastFailure))
+                    _err.WriteLine($"Last readiness error: {ready.LastFailure}");
+                return await RollBackRuntimeAsync(prepared, actualHash: null, "readiness did not pass", cancellationToken);
+            }
+
+            var identity = await verifyRuntimeIdentity(prepared.Activation.Candidate, cancellationToken);
+            if (!identity.Matches)
+                return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
+
+            if (!TryMarkRuntimeVerified(prepared))
+                return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
+            _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
+            await WriteServerScopeMessageAsync();
+            return 0;
         }
-
-        var identity = await verifyRuntimeIdentity(source.Hash, cancellationToken);
-        if (!identity.Matches)
-            return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
-
-        if (!TryMarkRuntimeVerified(prepared))
-            return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
-        _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
-        await WriteServerScopeMessageAsync();
-        return 0;
+        catch
+        {
+            await RollBackRuntimeAsync(prepared, null, "unexpected exception during server runtime verification", CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<int> UpdateRunnerAsync(
@@ -129,15 +142,23 @@ internal sealed class UpdateOperations
         if (prepared is null)
             return 1;
 
-        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(source.Hash);
-        outcome.WriteSummary(_out, _err);
-        if (outcome.ExitCode != 0)
-            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
+        try
+        {
+            var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(RunnerExpectation(prepared), cancellationToken);
+            outcome.WriteSummary(_out, _err);
+            if (outcome.ExitCode != 0)
+                return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
 
-        if (!TryMarkRuntimeVerified(prepared))
-            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
-        _out.WriteLine("Runner update is verified and current.");
-        return 0;
+            if (!TryMarkRuntimeVerified(prepared))
+                return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
+            _out.WriteLine("Runner update is verified and current.");
+            return 0;
+        }
+        catch
+        {
+            await RollBackRuntimeAsync(prepared, null, "unexpected exception during runner runtime verification", CancellationToken.None);
+            throw;
+        }
     }
 
     public Task<UpdateSource?> ResolveUpdateSourceAsync(string? repoRoot, CancellationToken cancellationToken)
@@ -145,89 +166,137 @@ internal sealed class UpdateOperations
         return _artifacts.ResolveSourceAsync(ResolveRepoRoot(repoRoot), cancellationToken);
     }
 
+    public Task<ServiceManagerProbe> ProbeRuntimeManagerAsync(CancellationToken cancellationToken)
+    {
+        return _systemd.ProbeRuntimeManagerAsync(cancellationToken);
+    }
+
     public async Task<PreparedRuntimeUpdate?> PrepareServerRuntimeAsync(
         UpdateSource source,
         ServiceInstallOptions? requestedOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ServiceManagerProbe? manager = null)
     {
-        var artifact = await _artifacts.BuildServerAsync(source, cancellationToken);
-        if (artifact is null)
-            return null;
-
-        RuntimeActivation activation;
-        try
-        {
-            activation = _artifacts.Activate(artifact);
-        }
-        catch (Exception ex)
-        {
-            _err.WriteLine($"Server runtime activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: service target was left unchanged.");
-            return null;
-        }
-        var options = RuntimeServiceOptions(requestedOptions, source, artifact, dryRun: false);
-        int install;
-        try
-        {
-            install = await _systemd.InstallServerAsync(options);
-        }
-        catch (Exception ex)
-        {
-            var recovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Server);
-            _err.WriteLine($"Server service target activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: {recovery}.");
-            return null;
-        }
-        if (install == 0)
-            return new PreparedRuntimeUpdate(source, activation);
-
-        var serverRecovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Server);
-        _err.WriteLine($"Server service target activation failed: expected {source.Hash}, actual <not-started>; installer exited {install}. Recovery: {serverRecovery}.");
-        return null;
+        return await PrepareRuntimeAsync(
+            ManagedRuntimeComponent.Server,
+            source,
+            requestedOptions,
+            cancellationToken,
+            manager);
     }
 
     public async Task<PreparedRuntimeUpdate?> PrepareRunnerRuntimeAsync(
         UpdateSource source,
         ServiceInstallOptions? requestedOptions,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ServiceManagerProbe? manager = null)
     {
-        var artifact = await _artifacts.BuildRunnerAsync(source, cancellationToken);
-        if (artifact is null)
-            return null;
-
-        RuntimeActivation activation;
-        try
-        {
-            activation = _artifacts.Activate(artifact);
-        }
-        catch (Exception ex)
-        {
-            _err.WriteLine($"Runner runtime activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: service target was left unchanged.");
-            return null;
-        }
-        var options = RuntimeServiceOptions(requestedOptions, source, artifact, dryRun: false);
-        int install;
-        try
-        {
-            install = await _systemd.InstallRunnerAsync(options);
-        }
-        catch (Exception ex)
-        {
-            var recovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Runner);
-            _err.WriteLine($"Runner service target activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: {recovery}.");
-            return null;
-        }
-        if (install == 0)
-            return new PreparedRuntimeUpdate(source, activation);
-
-        var runnerRecovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Runner);
-        _err.WriteLine($"Runner service target activation failed: expected {source.Hash}, actual <not-started>; installer exited {install}. Recovery: {runnerRecovery}.");
-        return null;
+        return await PrepareRuntimeAsync(
+            ManagedRuntimeComponent.Runner,
+            source,
+            requestedOptions,
+            cancellationToken,
+            manager);
     }
 
-    public bool TryMarkRuntimeVerified(PreparedRuntimeUpdate prepared)
+    /// <summary>
+    /// Builds and validates a Runner artifact while holding only its scoped
+    /// lease and recovery snapshot. The existing Runner service keeps running
+    /// until a caller explicitly activates this candidate.
+    /// </summary>
+    public Task<PreparedRuntimeCandidate?> PrepareRunnerRuntimeCandidateAsync(
+        UpdateSource source,
+        ServiceInstallOptions? requestedOptions,
+        CancellationToken cancellationToken,
+        ServiceManagerProbe? manager = null)
+    {
+        return PrepareRuntimeCandidateAsync(
+            ManagedRuntimeComponent.Runner,
+            source,
+            requestedOptions,
+            cancellationToken,
+            manager);
+    }
+
+    public async Task<PreparedRuntimeUpdate?> ActivatePreparedRuntimeAsync(
+        PreparedRuntimeCandidate candidate,
+        CancellationToken cancellationToken)
+    {
+        var component = candidate.Artifact.Component;
+        var lease = candidate.TakeLease();
+        PreparedRuntimeUpdate? prepared = null;
+        try
+        {
+            RuntimeActivation activation;
+            try
+            {
+                activation = _artifacts.Activate(candidate.Artifact);
+            }
+            catch (RuntimeActivationException ex)
+            {
+                var failedActivation = new PreparedRuntimeUpdate(
+                    candidate.Source,
+                    ex.Activation,
+                    candidate.ServiceSnapshot,
+                    candidate.CandidateOptions,
+                    lease);
+                var activationRecovery = await RestorePreparedRuntimeAsync(failedActivation, CancellationToken.None);
+                _err.WriteLine($"{ComponentLabel(component)} runtime activation failed: expected {candidate.Source.Hash}, actual <not-started>; {ex.Message}. Recovery: {activationRecovery.Description}.");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                lease.Dispose();
+                _err.WriteLine($"{ComponentLabel(component)} runtime activation failed: expected {candidate.Source.Hash}, actual <not-started>; {ex.Message}. Recovery: service target was left unchanged.");
+                return null;
+            }
+
+            prepared = new PreparedRuntimeUpdate(
+                candidate.Source,
+                activation,
+                candidate.ServiceSnapshot,
+                candidate.CandidateOptions,
+                lease);
+            var install = component == ManagedRuntimeComponent.Server
+                ? await _systemd.InstallServerAsync(candidate.CandidateOptions)
+                : await _systemd.InstallRunnerAsync(candidate.CandidateOptions);
+            if (install == 0)
+                return prepared;
+
+            var installRecovery = await RestorePreparedRuntimeAsync(prepared, CancellationToken.None);
+            _err.WriteLine($"{ComponentLabel(component)} service target activation failed: expected {candidate.Source.Hash}, actual <not-started>; installer exited {install}. Recovery: {installRecovery.Description}.");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            if (prepared is not null)
+            {
+                var exceptionRecovery = await RestorePreparedRuntimeAsync(prepared, CancellationToken.None);
+                _err.WriteLine($"{ComponentLabel(component)} service target activation failed: expected {candidate.Source.Hash}, actual <not-started>; {ex.Message}. Recovery: {exceptionRecovery.Description}.");
+            }
+            else
+            {
+                lease.Dispose();
+            }
+            return null;
+        }
+        finally
+        {
+            candidate.Dispose();
+        }
+    }
+
+    public bool TryMarkRuntimeVerified(PreparedRuntimeUpdate prepared, bool retainLease = false)
     {
         try
         {
             _artifacts.MarkVerified(prepared.Activation);
+            if (!TryReadBackCandidateTarget(prepared, out var reason))
+                throw new InvalidOperationException(reason);
+            if (!_artifacts.IsCommitted(prepared.Activation))
+                throw new InvalidOperationException("current and verified links did not read back as the candidate artifact");
+            if (!retainLease)
+                prepared.Dispose();
             return true;
         }
         catch (Exception ex)
@@ -237,36 +306,38 @@ internal sealed class UpdateOperations
         }
     }
 
+    internal static RunnerIdentityExpectation CreateRunnerIdentityExpectation(PreparedRuntimeUpdate prepared) =>
+        RunnerExpectation(prepared);
+
     public async Task<int> RollBackRuntimeAsync(
         PreparedRuntimeUpdate prepared,
         string? actualHash,
         string reason,
         CancellationToken cancellationToken)
     {
+        await RollBackRuntimeWithResultAsync(prepared, actualHash, reason, cancellationToken);
+        return 1;
+    }
+
+    public async Task<RuntimeRollbackResult> RollBackRuntimeWithResultAsync(
+        PreparedRuntimeUpdate prepared,
+        string? actualHash,
+        string reason,
+        CancellationToken cancellationToken)
+    {
         var component = prepared.Activation.Candidate.Component;
-        var restored = _artifacts.Restore(prepared.Activation);
         var expected = prepared.Source.Hash;
         var actual = string.IsNullOrWhiteSpace(actualHash) ? "<unavailable>" : actualHash;
-        if (!restored)
-        {
-            await StopRuntimeAsync(component);
-            _err.WriteLine($"{ComponentLabel(component)} runtime verification failed: expected {expected}, actual {actual}; {reason}. Recovery: no verified version existed, stopped the candidate service target.");
-            return 1;
-        }
-
-        var restart = await RestartRuntimeAsync(component);
-        var recovery = restart == 0
-            ? $"restored verified version {prepared.Activation.PreviousVerified!.SourceHash}"
-            : $"restored verified version {prepared.Activation.PreviousVerified!.SourceHash}, but its service restart failed with exit {restart}";
-        _err.WriteLine($"{ComponentLabel(component)} runtime verification failed: expected {expected}, actual {actual}; {reason}. Recovery: {recovery}.");
-        return 1;
+        var recovery = await RestorePreparedRuntimeAsync(prepared, CancellationToken.None);
+        _err.WriteLine($"{ComponentLabel(component)} runtime verification failed: expected {expected}, actual {actual}; {reason}. Recovery: {recovery.Description}.");
+        return recovery;
     }
 
     public async Task<int> InstallServerRuntimeAsync(
         ServiceInstallOptions options,
         TimeSpan serverReadyTimeout,
         ServiceReadinessProbe readinessProbe,
-        Func<string, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
+        Func<InstalledRuntimeArtifact, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
         CancellationToken cancellationToken)
     {
         if (options.DryRun)
@@ -283,18 +354,26 @@ internal sealed class UpdateOperations
         if (prepared is null)
             return 1;
 
-        var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
-        if (!ready.Ready)
-            return await RollBackRuntimeAsync(prepared, null, ready.LastFailure ?? "readiness did not pass", cancellationToken);
+        try
+        {
+            var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
+            if (!ready.Ready)
+                return await RollBackRuntimeAsync(prepared, null, ready.LastFailure ?? "readiness did not pass", cancellationToken);
 
-        var identity = await verifyRuntimeIdentity(source.Hash, cancellationToken);
-        if (!identity.Matches)
-            return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
+            var identity = await verifyRuntimeIdentity(prepared.Activation.Candidate, cancellationToken);
+            if (!identity.Matches)
+                return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
 
-        if (!TryMarkRuntimeVerified(prepared))
-            return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
-        _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
-        return 0;
+            if (!TryMarkRuntimeVerified(prepared))
+                return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
+            _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
+            return 0;
+        }
+        catch
+        {
+            await RollBackRuntimeAsync(prepared, null, "unexpected exception during server runtime verification", CancellationToken.None);
+            throw;
+        }
     }
 
     public async Task<int> InstallRunnerRuntimeAsync(
@@ -316,15 +395,220 @@ internal sealed class UpdateOperations
         if (prepared is null)
             return 1;
 
-        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(source.Hash);
-        outcome.WriteSummary(_out, _err);
-        if (outcome.ExitCode != 0)
-            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
+        try
+        {
+            var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(RunnerExpectation(prepared), cancellationToken);
+            outcome.WriteSummary(_out, _err);
+            if (outcome.ExitCode != 0)
+                return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
 
-        if (!TryMarkRuntimeVerified(prepared))
-            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
-        _out.WriteLine("Runner runtime verification: current.");
-        return 0;
+            if (!TryMarkRuntimeVerified(prepared))
+                return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
+            _out.WriteLine("Runner runtime verification: current.");
+            return 0;
+        }
+        catch
+        {
+            await RollBackRuntimeAsync(prepared, null, "unexpected exception during runner runtime verification", CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task<PreparedRuntimeUpdate?> PrepareRuntimeAsync(
+        ManagedRuntimeComponent component,
+        UpdateSource source,
+        ServiceInstallOptions? requestedOptions,
+        CancellationToken cancellationToken,
+        ServiceManagerProbe? manager = null)
+    {
+        var candidate = await PrepareRuntimeCandidateAsync(
+            component,
+            source,
+            requestedOptions,
+            cancellationToken,
+            manager);
+        if (candidate is null)
+            return null;
+
+        return await ActivatePreparedRuntimeAsync(candidate, cancellationToken);
+    }
+
+    private async Task<PreparedRuntimeCandidate?> PrepareRuntimeCandidateAsync(
+        ManagedRuntimeComponent component,
+        UpdateSource source,
+        ServiceInstallOptions? requestedOptions,
+        CancellationToken cancellationToken,
+        ServiceManagerProbe? manager = null)
+    {
+        var componentRoot = _artifacts.ResolveComponentRoot(component);
+        manager ??= await _systemd.ProbeRuntimeManagerAsync(cancellationToken);
+        if (!manager.Available)
+        {
+            _err.WriteLine($"{ComponentLabel(component)} runtime update cannot start because the service manager is unavailable: {manager.Reason ?? "unknown reason"}. No runtime was changed.");
+            return null;
+        }
+
+        var lease = _runtimeUpdateLeases.TryAcquire(component, componentRoot);
+        if (lease is null)
+        {
+            _err.WriteLine($"{ComponentLabel(component)} update is already in progress for this installed runtime. No runtime was changed.");
+            return null;
+        }
+
+        try
+        {
+            var snapshot = CaptureServiceSnapshot(component, source.Root, requestedOptions, dryRun: false);
+            var artifact = component == ManagedRuntimeComponent.Server
+                ? await _artifacts.BuildServerAsync(source, cancellationToken)
+                : await _artifacts.BuildRunnerAsync(source, cancellationToken);
+            if (artifact is null)
+            {
+                lease.Dispose();
+                return null;
+            }
+
+            var candidateOptions = RuntimeServiceOptions(
+                requestedOptions ?? snapshot.PreviousOptions,
+                source,
+                artifact,
+                dryRun: false);
+
+            return new PreparedRuntimeCandidate(source, artifact, snapshot, candidateOptions, lease);
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
+    }
+
+    private async Task<RuntimeRollbackResult> RestorePreparedRuntimeAsync(
+        PreparedRuntimeUpdate prepared,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            RuntimeRecovery linkRecovery;
+            try
+            {
+                linkRecovery = _artifacts.Restore(prepared.Activation);
+            }
+            catch (Exception ex)
+            {
+                linkRecovery = new RuntimeRecovery(
+                    Restored: false,
+                    RestoredCurrent: null,
+                    RestoredVerified: null,
+                    Failure: $"could not restore runtime links: {ex.Message}");
+            }
+
+            if (!RestoreUnitSnapshot(prepared.ServiceSnapshot, out var unitFailure))
+                return new RuntimeRollbackResult(false, $"could not restore prior service unit: {unitFailure}");
+
+            var reload = await _systemd.ReloadRuntimeManagerAsync(cancellationToken);
+            if (reload != 0)
+                return new RuntimeRollbackResult(false, $"restored prior unit and runtime links, but service-manager reload failed with exit {reload}");
+
+            if (!linkRecovery.Restored)
+            {
+                var stop = await StopRuntimeAsync(prepared.Activation.Candidate.Component);
+                return stop == 0
+                    ? new RuntimeRollbackResult(false, $"service unit was restored but runtime link recovery was not confirmed ({linkRecovery.Failure}); stopped the candidate service target")
+                    : new RuntimeRollbackResult(false, $"service unit was restored but runtime link recovery was not confirmed ({linkRecovery.Failure}); stopping the candidate service target failed with exit {stop}");
+            }
+            if (!SnapshotReadBackMatches(prepared.ServiceSnapshot))
+                return new RuntimeRollbackResult(false, "restored service target did not read back as the pre-update unit");
+
+            var component = prepared.Activation.Candidate.Component;
+            var serviceAction = prepared.ServiceSnapshot.UnitExisted
+                ? await RestartRuntimeAsync(component)
+                : await StopRuntimeAsync(component);
+            if (serviceAction != 0)
+                return new RuntimeRollbackResult(false, $"restored prior unit and runtime links, but service action failed with exit {serviceAction}");
+
+            if (linkRecovery.RestoredVerified is not null)
+                return new RuntimeRollbackResult(true, $"restored verified version {linkRecovery.RestoredVerified.SourceHash} and its prior service target");
+            if (linkRecovery.RestoredCurrent is not null)
+                return new RuntimeRollbackResult(true, $"restored prior current version {linkRecovery.RestoredCurrent.SourceHash} and its prior service target");
+            return prepared.ServiceSnapshot.UnitExisted
+                ? new RuntimeRollbackResult(true, "restored prior local-source service target with no verified runtime version")
+                : new RuntimeRollbackResult(true, "no prior service target existed; stopped candidate service target");
+        }
+        finally
+        {
+            prepared.Dispose();
+        }
+    }
+
+    private bool TryReadBackCandidateTarget(PreparedRuntimeUpdate prepared, out string reason)
+    {
+        reason = string.Empty;
+        var unitPath = prepared.ServiceSnapshot.UnitPath;
+        if (!_fileSystem.Exists(unitPath))
+        {
+            reason = "candidate service unit is missing after installation";
+            return false;
+        }
+
+        string unit;
+        try
+        {
+            unit = _fileSystem.ReadAllText(unitPath);
+        }
+        catch (Exception ex)
+        {
+            reason = $"candidate service unit could not be read: {ex.Message}";
+            return false;
+        }
+
+        var artifact = prepared.Activation.Candidate;
+        var runtimeRoot = artifact.ComponentRoot.Replace('\\', '/');
+        if (!unit.Contains($"WorkingDirectory={runtimeRoot}", StringComparison.Ordinal)
+            || !unit.Contains(runtimeRoot + "/current", StringComparison.Ordinal))
+        {
+            reason = "candidate service unit does not target the installed current runtime";
+            return false;
+        }
+
+        if (artifact.Component == ManagedRuntimeComponent.Server)
+        {
+            if (!unit.Contains(runtimeRoot + "/current/Mohist.Server.dll", StringComparison.Ordinal))
+            {
+                reason = "candidate server unit does not use the installed server entry point";
+                return false;
+            }
+            return true;
+        }
+
+        if (!unit.Contains(runtimeRoot + "/current/dist/cli.js", StringComparison.Ordinal)
+            || !UnitEnvironmentMatches(unit, "RUNNER_ID", prepared.CandidateOptions.RunnerId)
+            || !UnitEnvironmentMatches(unit, "MOHIST_RUNTIME_GENERATION", prepared.CandidateOptions.RuntimeGeneration)
+            || !UnitEnvironmentMatches(unit, "MOHIST_RUNTIME_SESSION_TOKEN", prepared.CandidateOptions.RuntimeSessionToken)
+            || !UnitEnvironmentMatches(unit, "MOHIST_ARTIFACT_DIGEST", artifact.ArtifactDigest))
+        {
+            reason = "candidate runner unit does not read back with its exact runtime identity";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool UnitEnvironmentMatches(string unit, string key, string? expected) =>
+        !string.IsNullOrWhiteSpace(expected)
+        && unit.Contains($"Environment=\"{key}={expected}\"", StringComparison.Ordinal);
+
+    private static RunnerIdentityExpectation RunnerExpectation(PreparedRuntimeUpdate prepared)
+    {
+        var options = prepared.CandidateOptions;
+        if (string.IsNullOrWhiteSpace(options.RunnerId)
+            || string.IsNullOrWhiteSpace(options.RuntimeGeneration))
+        {
+            throw new InvalidOperationException("runner candidate was installed without a durable runner identity");
+        }
+        return new RunnerIdentityExpectation(
+            options.RunnerId,
+            options.RuntimeGeneration,
+            prepared.Activation.Candidate.SourceHash,
+            prepared.Activation.Candidate.ArtifactDigest);
     }
 
     public async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
@@ -513,7 +797,7 @@ internal sealed class UpdateOperations
 
     public async Task<bool> IsRunnerInstalledAsync()
     {
-        return await _systemd.IsRunnerInstalledAsync(_unitDir);
+        return await _systemd.IsRunnerInstalledAsync(ResolveUnitDirectory(_unitDir));
     }
 
     public async Task<bool> IsRunnerRunningAsync(CancellationToken cancellationToken)
@@ -538,38 +822,98 @@ internal sealed class UpdateOperations
         bool dryRun)
     {
         var baseline = requestedOptions ?? ExistingRuntimeServiceOptions(artifact.Component, source.Root, dryRun);
-        return baseline with
+        var options = baseline with
         {
             DryRun = dryRun,
             RepoRoot = source.Root,
             RuntimeRoot = artifact.ComponentRoot,
         };
+        if (artifact.Component != ManagedRuntimeComponent.Runner)
+            return options;
+
+        return options with
+        {
+            RunnerId = string.IsNullOrWhiteSpace(options.RunnerId)
+                ? GenerateRunnerId()
+                : options.RunnerId,
+            RuntimeGeneration = NextRuntimeGeneration(options.RuntimeGeneration),
+            RuntimeSessionToken = GenerateRuntimeSessionToken(),
+            ArtifactDigest = artifact.ArtifactDigest,
+        };
+    }
+
+    private RuntimeServiceSnapshot CaptureServiceSnapshot(
+        ManagedRuntimeComponent component,
+        string sourceRoot,
+        ServiceInstallOptions? requestedOptions,
+        bool dryRun)
+    {
+        var unitDir = requestedOptions?.UnitDir ?? _unitDir;
+        var unitName = component == ManagedRuntimeComponent.Server ? "mohist.service" : "mohist-runner.service";
+        var unitPath = Path.Combine(ResolveUnitDirectory(unitDir), unitName);
+        var unitExisted = _fileSystem.Exists(unitPath);
+        string? unitContents = null;
+        if (unitExisted)
+            unitContents = _fileSystem.ReadAllText(unitPath);
+
+        var existing = ExistingRuntimeServiceOptions(component, sourceRoot, dryRun, unitDir);
+        var baseline = requestedOptions is null
+            ? existing
+            : existing with
+            {
+                DryRun = dryRun,
+                UnitDir = requestedOptions.UnitDir ?? existing.UnitDir,
+                RepoRoot = requestedOptions.RepoRoot ?? sourceRoot,
+                ListenUrl = requestedOptions.ListenUrl ?? existing.ListenUrl,
+                ServerUrl = requestedOptions.ServerUrl ?? existing.ServerUrl,
+                RunnerRoot = requestedOptions.RunnerRoot ?? existing.RunnerRoot,
+                EnrollmentToken = requestedOptions.EnrollmentToken,
+                RunnerId = requestedOptions.RunnerId ?? existing.RunnerId,
+                RuntimeGeneration = requestedOptions.RuntimeGeneration ?? existing.RuntimeGeneration,
+                RuntimeSessionToken = requestedOptions.RuntimeSessionToken ?? existing.RuntimeSessionToken,
+            };
+        return new RuntimeServiceSnapshot(unitPath, unitExisted, unitContents, baseline);
     }
 
     private ServiceInstallOptions ExistingRuntimeServiceOptions(
         ManagedRuntimeComponent component,
         string sourceRoot,
-        bool dryRun)
+        bool dryRun,
+        string? unitDir = null)
     {
         var unitName = component == ManagedRuntimeComponent.Server ? "mohist.service" : "mohist-runner.service";
-        var unitPath = Path.Combine(ResolveUnitDirectory(), unitName);
+        var unitPath = Path.Combine(ResolveUnitDirectory(unitDir), unitName);
         var serverUrl = component == ManagedRuntimeComponent.Runner
             ? ReadUnitEnvironment(unitPath, "SERVER_URL")
             : null;
         var runnerRoot = component == ManagedRuntimeComponent.Runner
             ? ReadUnitEnvironment(unitPath, "RUNNER_ROOT")
             : null;
+        var runnerId = component == ManagedRuntimeComponent.Runner
+            ? ReadUnitEnvironment(unitPath, "RUNNER_ID")
+            : null;
+        var runtimeGeneration = component == ManagedRuntimeComponent.Runner
+            ? ReadUnitEnvironment(unitPath, "MOHIST_RUNTIME_GENERATION")
+            : null;
+        var runtimeSessionToken = component == ManagedRuntimeComponent.Runner
+            ? ReadUnitEnvironment(unitPath, "MOHIST_RUNTIME_SESSION_TOKEN")
+            : null;
         return new ServiceInstallOptions(
             DryRun: dryRun,
-            UnitDir: _unitDir,
+            UnitDir: ResolveUnitDirectory(unitDir ?? _unitDir),
             RepoRoot: sourceRoot,
-            ListenUrl: null,
+            ListenUrl: component == ManagedRuntimeComponent.Server ? ReadServerListenUrl(unitPath) : null,
             ServerUrl: serverUrl,
-            RunnerRoot: runnerRoot);
+            RunnerRoot: runnerRoot,
+            RunnerId: runnerId,
+            RuntimeGeneration: runtimeGeneration,
+            RuntimeSessionToken: runtimeSessionToken);
     }
 
-    private string ResolveUnitDirectory()
+    private string ResolveUnitDirectory(string? preferredUnitDir = null)
     {
+        if (!string.IsNullOrWhiteSpace(preferredUnitDir))
+            return preferredUnitDir!;
         if (!string.IsNullOrWhiteSpace(_unitDir))
             return _unitDir!;
         var home = _getUserHome?.Invoke() ?? _environment.GetEnvironmentVariable("HOME");
@@ -602,18 +946,88 @@ internal sealed class UpdateOperations
         return null;
     }
 
-    private async Task<string> RestoreAfterInstallFailureAsync(RuntimeActivation activation, ManagedRuntimeComponent component)
+    private string? ReadServerListenUrl(string unitPath)
     {
-        if (_artifacts.Restore(activation))
+        if (!_fileSystem.Exists(unitPath))
+            return null;
+
+        try
         {
-            var restart = await RestartRuntimeAsync(component);
-            return restart == 0
-                ? $"restored verified version {activation.PreviousVerified!.SourceHash}"
-                : $"restored verified version {activation.PreviousVerified!.SourceHash}, but its service restart failed with exit {restart}";
+            var unit = _fileSystem.ReadAllText(unitPath);
+            var exec = SystemdUnitParser.ParseSystemdUnit(unit).ExecStart;
+            if (string.IsNullOrWhiteSpace(exec))
+                return null;
+            var marker = exec.IndexOf("--urls", StringComparison.Ordinal);
+            if (marker < 0)
+                return null;
+            var value = exec[(marker + "--urls".Length)..].TrimStart();
+            if (value.StartsWith('\''))
+            {
+                var close = value.IndexOf('\'', 1);
+                return close > 0 ? value[1..close] : null;
+            }
+            if (value.StartsWith('"'))
+            {
+                var close = value.IndexOf('"', 1);
+                return close > 0 ? value[1..close] : null;
+            }
+            return value.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string GenerateRunnerId() => "runner-" + Guid.NewGuid().ToString("N");
+
+    private static string GenerateRuntimeSessionToken() => Guid.NewGuid().ToString("N");
+
+    private static string NextRuntimeGeneration(string? previous)
+    {
+        if (ulong.TryParse(previous, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed)
+            && parsed < ulong.MaxValue)
+        {
+            return (parsed + 1).ToString(CultureInfo.InvariantCulture);
         }
 
-        await StopRuntimeAsync(component);
-        return "no verified version existed; stopped candidate service target";
+        return "1";
+    }
+
+    private bool RestoreUnitSnapshot(RuntimeServiceSnapshot snapshot, out string? failure)
+    {
+        failure = null;
+        try
+        {
+            if (snapshot.UnitExisted)
+            {
+                _fileSystem.WriteAllText(snapshot.UnitPath, snapshot.UnitContents ?? string.Empty);
+                return true;
+            }
+            if (_fileSystem.Exists(snapshot.UnitPath))
+                _fileSystem.Delete(snapshot.UnitPath);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failure = ex.Message;
+            return false;
+        }
+    }
+
+    private bool SnapshotReadBackMatches(RuntimeServiceSnapshot snapshot)
+    {
+        try
+        {
+            if (_fileSystem.Exists(snapshot.UnitPath) != snapshot.UnitExisted)
+                return false;
+            return !snapshot.UnitExisted
+                || string.Equals(_fileSystem.ReadAllText(snapshot.UnitPath), snapshot.UnitContents, StringComparison.Ordinal);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private Task<int> RestartRuntimeAsync(ManagedRuntimeComponent component) => component switch

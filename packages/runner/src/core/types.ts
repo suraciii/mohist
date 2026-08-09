@@ -310,6 +310,16 @@ export type ActionResult = (
 export interface RunnerOptions {
   serverUrl: string
   runnerId: string
+  /**
+   * Immutable service-start generation assigned by the installer. It binds
+   * the runtime handshake to one runner process rather than a hostname.
+   */
+  runtimeGeneration?: string
+  /**
+   * Immutable activation token paired with the generation. It fences delayed
+   * REST and SignalR lifecycle events from a replaced service target.
+   */
+  runtimeSessionToken?: string
   projectId?: string
   runnerRoot: string
   pollIntervalMs: number
@@ -390,5 +400,8 @@ export interface RunnerRegistration {
   coderModelVariants?: Record<string, string[]>
   runtimeCatalogs?: Record<string, RuntimeCatalogEntry>
   buildGitHash?: string | null
+  artifactDigest?: string | null
+  runtimeGeneration?: string | null
+  runtimeSessionToken?: string | null
   connectionId?: string | null
 }

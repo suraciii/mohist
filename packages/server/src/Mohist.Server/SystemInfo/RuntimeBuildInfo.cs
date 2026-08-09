@@ -7,6 +7,7 @@ public interface IRuntimeBuildInfo
 {
     string? Version { get; }
     string? GitHash { get; }
+    string? ArtifactDigest => null;
     DateTimeOffset StartedAt { get; }
 }
 
@@ -16,6 +17,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
 
     public string? Version { get; }
     public string? GitHash { get; }
+    public string? ArtifactDigest { get; }
     public DateTimeOffset StartedAt { get; }
 
     public RuntimeBuildInfo(
@@ -25,6 +27,7 @@ public sealed class RuntimeBuildInfo : IRuntimeBuildInfo, ISingletonService
     {
         StartedAt = timeProvider.GetUtcNow();
         (Version, GitHash) = ResolveIdentity(environment, sourceIdentity);
+        ArtifactDigest = sourceIdentity.ArtifactDigest;
     }
 
     private static (string? Version, string? GitHash) ResolveIdentity(

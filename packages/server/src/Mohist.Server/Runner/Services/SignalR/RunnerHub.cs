@@ -24,9 +24,22 @@ public class RunnerHub : Hub
         var runnerId = query?["runnerId"].ToString();
         if (string.IsNullOrEmpty(runnerId)) return;
 
-        _tracker.Register(runnerId, Context.ConnectionId);
-
         var buildGitHash = NormalizeBuildGitHash(query?["buildGitHash"].ToString());
+        var runtimeGeneration = NormalizeBuildGitHash(query?["runtimeGeneration"].ToString());
+        var artifactDigest = NormalizeBuildGitHash(query?["artifactDigest"].ToString());
+        var runtimeSessionToken = NormalizeBuildGitHash(query?["runtimeSessionToken"].ToString());
+        if (!_tracker.Register(
+                runnerId,
+                Context.ConnectionId,
+                runtimeGeneration,
+                buildGitHash,
+                artifactDigest,
+                runtimeSessionToken))
+        {
+            _log.LogWarning("Rejected stale or incomplete runner connection for {RunnerId}", runnerId);
+            return;
+        }
+
         var runner = _grains.GetGrain<IRunnerGrain>(runnerId);
         await runner.UpdateBuildGitHashAsync(buildGitHash);
     }
@@ -38,7 +51,13 @@ public class RunnerHub : Hub
         var runnerId = Context.GetHttpContext()?.Request.Query["runnerId"].ToString();
         if (!string.IsNullOrEmpty(runnerId))
         {
-            foreach (var sessionId in _tracker.UnregisterAndGetSessions(runnerId, Context.ConnectionId))
+            var query = Context.GetHttpContext()?.Request.Query;
+            var generation = NormalizeBuildGitHash(query?["runtimeGeneration"].ToString());
+            var runtimeSessionToken = NormalizeBuildGitHash(query?["runtimeSessionToken"].ToString());
+            var sessions = generation is not null && runtimeSessionToken is not null
+                ? _tracker.UnregisterAndGetSessions(runnerId, generation, Context.ConnectionId, runtimeSessionToken)
+                : _tracker.UnregisterAndGetSessions(runnerId, Context.ConnectionId);
+            foreach (var sessionId in sessions)
                 _ = _grains.GetGrain<IAgentSessionGrain>(sessionId).RunnerDisconnectedAsync();
         }
         return base.OnDisconnectedAsync(exception);

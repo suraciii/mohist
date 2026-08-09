@@ -9,7 +9,7 @@ namespace Mohist.Cli.Tests;
 public class SourceCodeUpdaterVerifyRuntimeSpecs
 {
     [Fact]
-    public async Task VerifyRuntime_DoesNotDowngradeActivationIdentityToWarning()
+    public async Task VerifyRuntime_SkipsRunnerConnectionWhenRunnerIsNotManaged()
     {
         var handler = new RecordingHttpHandler((request, _) =>
         {
@@ -40,7 +40,8 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
         Assert.Equal(0, exitCode);
         Assert.Equal(UpdateOutcome.Ready, context.Outcome);
         var text = output.ToString();
-        Assert.Contains("Runner connection", text);
+        Assert.False(context.RunnerInstalled);
+        Assert.DoesNotContain("Runner connection", text);
         Assert.DoesNotContain("Server identity", text);
         Assert.DoesNotContain("Runner identity", text);
     }

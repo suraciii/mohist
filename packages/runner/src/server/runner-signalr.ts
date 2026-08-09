@@ -115,6 +115,9 @@ export interface RunnerSignalRClientOptions {
   bindingRecoveryCoordinator?: BindingRecoveryCoordinator | null
   skillResolver?: import("../runtime/skill-resolver.js").SkillResolver
   allowUnverifiedWorkspaceQueriesForTest?: boolean
+  artifactDigest?: string | null
+  runtimeGeneration?: string | null
+  runtimeSessionToken?: string | null
 }
 
 export class RunnerSignalRClient {
@@ -147,6 +150,9 @@ export class RunnerSignalRClient {
     const params = new URLSearchParams()
     params.set("runnerId", runnerId)
     if (buildGitHash) params.set("buildGitHash", buildGitHash)
+    if (options.artifactDigest) params.set("artifactDigest", options.artifactDigest)
+    if (options.runtimeGeneration) params.set("runtimeGeneration", options.runtimeGeneration)
+    if (options.runtimeSessionToken) params.set("runtimeSessionToken", options.runtimeSessionToken)
     this.probeTimeoutMs = options.probeTimeoutMs ?? 5_000
     this.onReconnected = options.onReconnected
     this.connection = new signalR.HubConnectionBuilder()

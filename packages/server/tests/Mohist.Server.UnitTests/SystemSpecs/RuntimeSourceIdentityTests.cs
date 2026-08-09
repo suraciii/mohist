@@ -9,11 +9,24 @@ public class RuntimeSourceIdentityTests
     public void ResolveGitHead_WhenInstalledArtifactHasManifest_ReturnsInstalledSourceHashWithoutGitMetadata()
     {
         var files = new FakeFileSystem()
-            .Add("/runtime/server/current/mohist-build.json", "{\"gitHash\":\"0123456789abcdef0123456789abcdef01234567\"}");
+            .Add("/runtime/server/current/mohist-build.json", "{\"gitHash\":\"0123456789abcdef0123456789abcdef01234567\",\"artifactDigest\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}");
 
         var head = RuntimeSourceIdentity.ResolveGitHead(files, "/runtime/server/current");
 
         Assert.Equal("0123456789abcdef0123456789abcdef01234567", head);
+    }
+
+    [Fact]
+    public void RuntimeSourceIdentity_WhenInstalledArtifactHasDigest_ExposesInstalledArtifactIdentity()
+    {
+        const string digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var files = new FakeFileSystem()
+            .Add("/runtime/server/current/mohist-build.json", $"{{\"gitHash\":\"0123456789abcdef0123456789abcdef01234567\",\"artifactDigest\":\"{digest}\"}}");
+
+        var identity = new RuntimeSourceIdentity(files, "/runtime/server/current");
+
+        Assert.Equal("0123456789abcdef0123456789abcdef01234567", identity.GitHead);
+        Assert.Equal(digest, identity.ArtifactDigest);
     }
 
     [Fact]

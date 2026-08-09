@@ -6,6 +6,22 @@ internal partial class SourceCodeUpdater
     {
         context.Stage = UpdateStage.Complete;
 
+        var commitBatch = exitCode == 0 && !context.Interrupted;
+        if (commitBatch)
+        {
+            context.RuntimeBatch.Commit();
+            context.RunnerCandidate?.Dispose();
+            context.RunnerCandidate = null;
+        }
+        else
+        {
+            await RestoreStagedRuntimeBatchAsync(context, exitCode);
+            await RestoreUnverifiedRuntimeTransactionsAsync(context);
+            context.RunnerCandidate?.Dispose();
+            context.RunnerCandidate = null;
+            await RestorePriorRunnerIfStoppedAsync(context);
+        }
+
         if (context.RunnerWasRunning && !context.RunnerRestored)
         {
             if (context.Interrupted)
@@ -28,6 +44,83 @@ internal partial class SourceCodeUpdater
         }
 
         return finalExit;
+    }
+
+    private async Task RestoreStagedRuntimeBatchAsync(UpdateContext context, int exitCode)
+    {
+        if (!context.RuntimeBatch.HasStagedUpdates)
+            return;
+
+        var reason = context.Interrupted
+            ? "update batch was interrupted after runtime identity verification"
+            : $"update batch ended with exit {exitCode} after runtime identity verification";
+        foreach (var prepared in context.RuntimeBatch.ReverseStaged())
+        {
+            var result = await _operations.RollBackRuntimeWithResultAsync(
+                prepared,
+                actualHash: null,
+                reason,
+                CancellationToken.None);
+            context.RuntimeBatch.Remove(prepared);
+
+            if (prepared.Activation.Candidate.Component == ManagedRuntimeComponent.Runner)
+            {
+                context.RunnerRuntime = null;
+                context.RunnerRestored = result.Restored && context.RunnerWasRunning;
+            }
+            else
+            {
+                context.ServerRuntime = null;
+                context.ServerRuntimeVerified = false;
+            }
+
+            if (result.Restored)
+                continue;
+
+            context.UnavailableCapability ??= "Runtime recovery failed";
+            _err.WriteLine($"Batch recovery failed for {prepared.Activation.Candidate.Component}: {result.Description}.");
+        }
+    }
+
+    private async Task RestoreUnverifiedRuntimeTransactionsAsync(UpdateContext context)
+    {
+        if (context.ServerRuntime is not null && !context.ServerRuntimeVerified)
+        {
+            await _operations.RollBackRuntimeAsync(
+                context.ServerRuntime,
+                actualHash: null,
+                "update ended before server runtime verification completed",
+                CancellationToken.None);
+            context.ServerRuntime = null;
+        }
+
+        if (context.RunnerRuntime is not null && !context.RunnerRestored)
+        {
+            await _operations.RollBackRuntimeAsync(
+                context.RunnerRuntime,
+                actualHash: null,
+                "update ended before runner runtime verification completed",
+                CancellationToken.None);
+            context.RunnerRuntime = null;
+        }
+    }
+
+    private async Task RestorePriorRunnerIfStoppedAsync(UpdateContext context)
+    {
+        if (!context.RunnerStopped || !context.RunnerWasRunning || context.RunnerRestored)
+            return;
+
+        _out.WriteLine(StageLabels.RestoreRunner);
+        var start = await _operations.StartRunnerAsync(dryRun: false);
+        if (start == 0)
+        {
+            context.RunnerRestored = true;
+            _out.WriteLine("Runner service restored to its pre-update target.");
+            return;
+        }
+
+        context.UnavailableCapability ??= "Runner unavailable";
+        _err.WriteLine("Could not restore the prior Runner service target after the failed update batch.");
     }
 
     private static bool ShouldPostOutcome(UpdateContext context)
@@ -61,7 +154,8 @@ internal partial class SourceCodeUpdater
         if (!string.IsNullOrEmpty(context.UnavailableCapability))
         {
             _err.WriteLine($"Mohist is not fully usable. Unavailable capability: {context.UnavailableCapability}.");
-            if (string.Equals(context.UnavailableCapability, "Runner unavailable", StringComparison.Ordinal))
+            if (string.Equals(context.UnavailableCapability, "Runner unavailable", StringComparison.Ordinal)
+                || (context.RunnerWasRunning && !context.RunnerRestored))
             {
                 _err.WriteLine("Start the runner manually with: mo service start runner");
             }

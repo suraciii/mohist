@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using Mohist.Server.Auth.Domain;
 using Mohist.Server.Auth.Identity;
-using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 
@@ -11,39 +10,21 @@ public static class RunnerIdentityRoutes
 {
     public static WebApplication MapRunnerIdentityRoutes(this WebApplication app)
     {
-        app.MapGet("/api/runner/identity", async (HttpContext context, IGrainFactory grains, RunnerConnectionTracker tracker) =>
+        app.MapGet("/api/runner/identity", async (HttpContext context, RunnerConnectionTracker tracker, CancellationToken cancellationToken) =>
         {
-            var hostname = context.Request.Query["hostname"].ToString();
-            if (string.IsNullOrWhiteSpace(hostname))
-                hostname = Environment.MachineName;
+            var runnerId = context.Request.Query["runnerId"].ToString().Trim();
+            var generation = context.Request.Query["generation"].ToString().Trim();
+            if (string.IsNullOrWhiteSpace(runnerId) || string.IsNullOrWhiteSpace(generation))
+                return ApiResults.BadRequest("runnerId and generation are required");
 
-            var globalRegistry = grains.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
-            var globalRunners = await globalRegistry.ListAllAsync();
-            var candidate = globalRunners.FirstOrDefault(r =>
-                string.Equals(r.Hostname, hostname, StringComparison.OrdinalIgnoreCase));
-            if (candidate is null)
-                return ApiResults.NotFound($"No runner registered for hostname '{hostname}'");
+            var wait = bool.TryParse(context.Request.Query["wait"], out var requestedWait) && requestedWait;
+            var identity = tracker.GetRuntimeIdentity(runnerId, generation);
+            if (wait && identity is not { IsOnline: true })
+                identity = await tracker.WaitForRuntimeIdentityAsync(runnerId, generation, cancellationToken);
+            if (identity is null)
+                return ApiResults.NotFound($"No connected runner instance '{runnerId}' generation '{generation}'");
 
-            var grain = grains.GetGrain<IRunnerGrain>(candidate.RunnerId);
-            RunnerRuntimeState? runtime = null;
-            try
-            {
-                runtime = await grain.GetRuntimeStateAsync();
-            }
-            catch
-            {
-                // grain unavailable; report best-effort
-            }
-
-            var connectionId = tracker.GetConnectionId(candidate.RunnerId);
-            var isOnline = runtime is { Status: RunnerStatus.Online };
-            return ApiResults.Ok(new RunnerIdentityView(
-                candidate.RunnerId,
-                candidate.Hostname,
-                candidate.BuildGitHash,
-                isOnline ? "online" : "offline",
-                runtime?.LastHeartbeatAt,
-                connectionId is not null ? "connected" : "disconnected"));
+            return ApiResults.Ok(RunnerIdentityView.FromRuntimeIdentity(identity));
         }).RequireScopes(Scope.Operator);
 
         return app;
@@ -52,8 +33,23 @@ public static class RunnerIdentityRoutes
 
 public sealed record RunnerIdentityView(
     string RunnerId,
-    string Hostname,
+    string RuntimeGeneration,
     string? BuildGitHash,
+    string? ArtifactDigest,
     string Status,
     DateTimeOffset? LastHeartbeatAt,
-    string ConnectionState);
+    string ConnectionState)
+{
+    internal static RunnerIdentityView FromRuntimeIdentity(RunnerRuntimeConnection identity)
+    {
+        var exactRuntimeMatch = identity.IsOnline;
+        return new RunnerIdentityView(
+            identity.RunnerId,
+            identity.RuntimeGeneration,
+            identity.BuildGitHash,
+            identity.ArtifactDigest,
+            exactRuntimeMatch ? "online" : "offline",
+            null,
+            exactRuntimeMatch ? "connected" : "disconnected");
+    }
+}

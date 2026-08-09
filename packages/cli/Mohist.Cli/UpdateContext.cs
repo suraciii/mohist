@@ -10,6 +10,8 @@ internal enum UpdateStage
     PrepareRunner,
     UpdateServer,
     WaitingForReady,
+    PrepareRunnerCandidate,
+    StopRunner,
     RestoreRunner,
     VerifyRuntime,
     Complete,
@@ -28,7 +30,9 @@ internal sealed record RuntimeIdentityVerification(
     string ExpectedHash,
     string? ActualHash,
     bool Matches,
-    string Reason);
+    string Reason,
+    string? ExpectedArtifactDigest = null,
+    string? ActualArtifactDigest = null);
 
 internal sealed record UpdateStageLogEntry(string Stage, string Message, DateTimeOffset At);
 
@@ -94,8 +98,11 @@ internal sealed class UpdateContext
     public string? UnavailableCapability { get; set; }
     public string? SourceHead { get; set; }
     public UpdateSource? UpdateSource { get; set; }
+    public ServiceManagerProbe? RuntimeManager { get; set; }
     public PreparedRuntimeUpdate? ServerRuntime { get; set; }
     public PreparedRuntimeUpdate? RunnerRuntime { get; set; }
+    public PreparedRuntimeCandidate? RunnerCandidate { get; set; }
+    public StagedRuntimeUpdateBatch RuntimeBatch { get; } = new();
     public bool ServerRuntimeVerified { get; set; }
     public int LastExitCode { get; set; }
 

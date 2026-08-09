@@ -34,6 +34,8 @@ try {
   await new RunnerHost({
     serverUrl,
     runnerId,
+    runtimeGeneration: env("MOHIST_RUNTIME_GENERATION"),
+    runtimeSessionToken: env("MOHIST_RUNTIME_SESSION_TOKEN"),
     projectId: env("PROJECT_ID") ?? env("ProjectId"),
     runnerRoot,
     pollIntervalMs: numberEnv("POLL_INTERVAL_MS") ?? 1000,

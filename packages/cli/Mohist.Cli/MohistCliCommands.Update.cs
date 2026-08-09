@@ -165,7 +165,9 @@ internal partial class SourceCodeUpdater
         TimeSpan? runnerIdentityPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IRuntimeUpdateLeaseProvider? runtimeUpdateLeases = null,
+        IRunnerRuntimeReadinessSignal? runnerReadinessSignal = null)
     {
         var fs = fileSystem ?? RealFileSystem.Instance;
         var env = environment ?? SystemEnvironmentVariableProvider.Instance;
@@ -174,26 +176,31 @@ internal partial class SourceCodeUpdater
             BaseAddress = new Uri(env.GetEnvironmentVariable(ServerUrlEnvironmentVariable) ?? "http://127.0.0.1:3456"),
             Timeout = TimeSpan.FromSeconds(5),
         };
-        var operations = new UpdateOperations(output, error, systemd, commandExecutor, fs, env, unitDir, getUserHome);
+        var operations = new UpdateOperations(
+            output,
+            error,
+            systemd,
+            commandExecutor,
+            fs,
+            env,
+            unitDir,
+            getUserHome,
+            runtimeUpdateLeases);
         var validator = new RuntimeConsistencyValidator(
             httpClient,
             commandExecutor,
             fs,
             env,
             output,
-            getUserHome,
-            timeProvider,
-            runnerIdentityTimeout,
-            runnerIdentityPollInterval);
+            getUserHome);
         var readinessProbe = new ServiceReadinessProbe(httpClient, output, timeProvider);
         var runnerRefreshVerifier = new RunnerRefreshVerifier(
             httpClient,
             commandExecutor,
             fs,
-            getLocalHostname: getLocalHostname ?? (() => Environment.MachineName),
             runnerIdentityTimeout: runnerIdentityTimeout,
-            runnerIdentityPollInterval: runnerIdentityPollInterval,
-            timeProvider: timeProvider);
+            timeProvider: timeProvider,
+            readinessSignal: runnerReadinessSignal);
         var outcomeReporter = new UpdateOutcomeReporter(httpClient, output);
         return new SourceCodeUpdater(
             output,
@@ -265,6 +272,16 @@ internal partial class SourceCodeUpdater
     {
         if (!context.DryRun)
         {
+            var manager = await _operations.ProbeRuntimeManagerAsync(context.CancellationToken);
+            if (!manager.Available)
+            {
+                var reason = manager.Reason ?? "unknown reason";
+                _err.WriteLine($"Managed runtime update cannot start because the service manager is unavailable: {reason}. No runtime was changed.");
+                context.RecordStage("Probing service manager", $"unavailable: {reason}");
+                return await FinalizeAsync(context, 1);
+            }
+            context.RuntimeManager = manager;
+
             var source = await _operations.ResolveUpdateSourceAsync(context.RepoRoot, context.CancellationToken);
             if (source is null)
                 return await FinalizeAsync(context, 1);
@@ -308,6 +325,26 @@ internal partial class SourceCodeUpdater
         if (context.Interrupted || !outcome.Success)
         {
             return await FinalizeAfterServerAsync(context, outcome);
+        }
+
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await PrepareRunnerCandidateStageAsync(ctx, token);
+        });
+
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAsync(context, outcome.ExitCode);
+        }
+
+        outcome = await RunStageMachineAsync(context, async (ctx, token) =>
+        {
+            return await StopRunnerStageAsync(ctx, token);
+        });
+
+        if (context.Interrupted || !outcome.Success)
+        {
+            return await FinalizeAsync(context, outcome.ExitCode);
         }
 
         outcome = await RunStageMachineAsync(context, async (ctx, token) =>
@@ -380,24 +417,6 @@ internal partial class SourceCodeUpdater
 
     private async Task<int> FinalizeAfterServerAsync(UpdateContext context, StageOutcome outcome)
     {
-        if (context.RunnerWasRunning && !context.RunnerRestored)
-        {
-            if (context.Interrupted)
-                _err.WriteLine("Update was interrupted and the runner was stopped. Attempting runner restore.");
-            else
-                _err.WriteLine("Update failed after the runner was stopped. Attempting runner restore.");
-
-            var restore = await RunRecoveryStageAsync(context, async (ctx, token) =>
-            {
-                return await RestoreRunnerStageAsync(ctx, token);
-            });
-
-            if (!restore.Success && restore.ExitCode != 0 && context.LastExitCode == 0)
-            {
-                context.LastExitCode = restore.ExitCode;
-            }
-        }
-
         return await FinalizeAsync(context, outcome.ExitCode);
     }
 
@@ -409,6 +428,8 @@ internal partial class SourceCodeUpdater
         public const string PrepareRunner = "Preparing workflow runner";
         public const string UpdateServer = "Updating Mohist Server";
         public const string WaitingForReady = "Waiting for Mohist to become usable";
+        public const string PrepareRunnerCandidate = "Preparing validated workflow runner candidate";
+        public const string StopRunner = "Stopping current workflow runner";
         public const string RestoreRunner = "Restoring workflow runner";
         public const string VerifyRuntime = "Verifying workflow runtime";
     }

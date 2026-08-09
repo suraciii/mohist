@@ -170,6 +170,17 @@ public sealed class CliFieldContractTests
     }
 
     [Fact]
+    public void SystemInfoRunningContractIncludesInstalledArtifactIdentity()
+    {
+        var fields = ContractJsonOptions.GetTypeInfo(typeof(RunningInfo)).Properties
+            .Select(property => property.Name)
+            .ToHashSet(StringComparer.Ordinal);
+
+        Assert.Contains("gitHash", fields);
+        Assert.Contains("artifactDigest", fields);
+    }
+
+    [Fact]
     public void DeviationsHaveCorrectDirectionAndReasons()
     {
         foreach (var deviation in Deviations)

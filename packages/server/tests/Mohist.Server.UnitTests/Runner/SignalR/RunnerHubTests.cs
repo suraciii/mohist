@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Connections.Features;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,26 +54,71 @@ public class RunnerHubTests
         Assert.Equal(["session-1"], tracker.UnregisterAndGetSessions("runner-1", "new-connection"));
     }
 
-    private static RunnerHub NewHub(RunnerConnectionTracker tracker, string connectionId)
+    [Theory]
+    [InlineData(null, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
+    [InlineData("invalid/source", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]
+    [InlineData("0123456789abcdef0123456789abcdef01234567", null)]
+    [InlineData("0123456789abcdef0123456789abcdef01234567", "not-a-sha256-digest")]
+    public async Task OnConnectedAsync_ManagedRuntimeWithMissingOrInvalidIdentity_DoesNotResolveRunnerGrain(
+        string? sourceHash,
+        string? artifactDigest)
     {
+        var tracker = new RunnerConnectionTracker();
+        var query = new List<string>
+        {
+            "runnerId=runner-managed",
+            "runtimeGeneration=2",
+            "runtimeSessionToken=session-2",
+        };
+        if (sourceHash is not null)
+            query.Add($"buildGitHash={sourceHash}");
+        if (artifactDigest is not null)
+            query.Add($"artifactDigest={artifactDigest}");
+        var hub = NewHub(tracker, "connection-2", "?" + string.Join("&", query));
+
+        await hub.OnConnectedAsync();
+
+        Assert.Null(tracker.GetConnectionId("runner-managed"));
+        Assert.Null(tracker.GetRuntimeIdentity("runner-managed", "2"));
+    }
+
+    private static RunnerHub NewHub(RunnerConnectionTracker tracker, string connectionId, string? query = null)
+    {
+        var features = new FeatureCollection();
+        if (query is not null)
+        {
+            var httpContext = new DefaultHttpContext();
+            httpContext.Request.QueryString = new QueryString(query);
+            features.Set<IHttpContextFeature>(new TestHttpContextFeature(httpContext));
+        }
         return new RunnerHub(tracker, new ThrowingGrainFactory(), NullLogger<RunnerHub>.Instance)
         {
-            Context = new TestHubCallerContext(connectionId),
+            Context = new TestHubCallerContext(connectionId, features),
         };
     }
 
     private sealed class TestHubCallerContext : HubCallerContext
     {
         private readonly string _connectionId;
-        public TestHubCallerContext(string connectionId) { _connectionId = connectionId; }
+        private readonly IFeatureCollection _features;
+        public TestHubCallerContext(string connectionId, IFeatureCollection features)
+        {
+            _connectionId = connectionId;
+            _features = features;
+        }
 
         public override string ConnectionId => _connectionId;
         public override string? UserIdentifier => null;
         public override ClaimsPrincipal? User => null;
         public override IDictionary<object, object?> Items { get; } = new Dictionary<object, object?>();
-        public override IFeatureCollection Features { get; } = new FeatureCollection();
+        public override IFeatureCollection Features => _features;
         public override CancellationToken ConnectionAborted { get; } = CancellationToken.None;
         public override void Abort() { }
+    }
+
+    private sealed class TestHttpContextFeature(HttpContext context) : IHttpContextFeature
+    {
+        public HttpContext? HttpContext { get; set; } = context;
     }
 
     /// <summary>
