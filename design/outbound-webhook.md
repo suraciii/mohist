@@ -231,8 +231,3 @@ Explicitly outside v1 and reserved for later slices: test delivery; successful
 and failed delivery-attempt history; manual redelivery; a Web management UI;
 automatic retry and outbox; and a Mohist-specific signature protocol with key
 rotation.
-
-Subscription store, handler, and client are in
-`packages/server/src/Mohist.Server/Webhooks/`. API routes are in
-`packages/server/src/Mohist.Server/Api/WebhookSubscriptionsRoutes.cs`. The CLI
-surface is in `packages/cli/Mohist.Cli/MohistCliCommands.Webhook.cs`.

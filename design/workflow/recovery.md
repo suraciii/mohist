@@ -71,14 +71,12 @@ YAML budget: 2 --> TaskRun ------------> WorkItem / dispatch --> Runner tryRecov
 Invariant: **a budget bounds one continuous round of automatic recovery; a manual retry opens a
 new round with the full budget.**
 
-For a manual retry, `RetryFailedTask` reconstructs the new attempt through
-`TaskRun.ToDefinition()` using only fields from the original declaration. One implementation point,
-`ToDefinition()`, defines which fields are part of that Definition. Its `with` and `expect` must
-still contain Workflow expressions, not the previous attempt's rendered input. Execution state,
-including `recoveryRemaining`, cannot enter the reconstruction path by construction. The new
-attempt reaches Runner with `recoveryRemaining` explicitly set to `null`. Runner initializes the
-round from the declared `budget`, making the automatic recovery loop available again. The failed
-attempt and its consumed numeric state remain unchanged.
+A manual retry reconstructs the Task from its original declaration rather than from the previous
+attempt's resolved input. This boundary lets corrected Variables and Prompts take effect without
+turning execution output into future configuration. `with` and `expect` therefore remain Workflow
+expressions, while execution state such as `recoveryRemaining` cannot enter the new declaration.
+The new attempt starts with `recoveryRemaining = null`, so Runner opens a fresh round from the
+declared `budget`. The failed attempt and its consumed budget remain unchanged for audit.
 
 ## A Stage Rerun Does Not Reuse TaskRun Identity
 
@@ -213,15 +211,12 @@ recoveries:
         retrySelf: false
 ```
 
-- Entry point: the `recoveries` field on WorkflowDefinition is
-  `IReadOnlyDictionary<string, RecoveryDefinition>?`. Parsing uses the shared `BuildRecovery` logic
-  in `WorkflowDefinitionParser`; `WorkflowYamlSerializer` round-trips it completely.
-- Reference: an API route such as rebase calls
-  `WorkflowQuerier.GetRecoveryAsync(workflowRunId, "rebase-conflicts")` to read the Profile bound to
-  the run. C# assembly in the form `BuildRebaseRecovery()` has been removed.
-- Single author: the Workflow content owns recovery `uses`, Prompt references, budget, and handler
-  order. A C# route only selects the name. Upgrading a Profile changes rebase behavior in one place
-  and avoids drift into a copied C# version that selects the wrong Prompt template.
+- The `recoveries` map is part of WorkflowDefinition and round-trips with the rest of the Profile.
+- A recovery trigger selects a named template from the Profile bound to the run. It does not build a
+  second recovery definition in application code.
+- Workflow content is the single author of recovery `uses`, Prompt references, budget, and handler
+  order. Keeping application code limited to name selection lets a Profile upgrade change behavior
+  in one place and prevents a copied recovery path from drifting to the wrong Prompt.
 - Naming convention: template names are lowercase and hyphen-separated, such as
   `rebase-conflicts` and `plan-conflicts`. Each built-in YAML file declares the templates it needs.
   Extract cross-Profile sharing into a separate file only after a third Profile or a second shared

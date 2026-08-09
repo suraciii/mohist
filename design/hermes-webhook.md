@@ -234,10 +234,3 @@ outbox, retry queue, or DLQ.
 
 Web Inbox is the durable source for what happened. A webhook is an immediate
 notification, not a durable log.
-
-## Source Locations
-
-Options, renderer, payload, and `HermesWebhookClient` are in
-`packages/server/src/Mohist.Server/Notifications/`. The subscription entry is
-`packages/server/src/Mohist.Server/Events/Subscriptions/HermesIssueNotificationHandler.cs`.
-The CLI guide is in `packages/cli/Mohist.Cli/MohistCliCommands.Notify.cs`.

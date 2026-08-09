@@ -251,20 +251,17 @@ of full persistence with Run State. Audit needs do not justify retaining complet
 
 ## `WorkflowRunProfile` row/table name: historical misnomer
 
-The persistence entry point for Run-scoped Variables lives in
-`packages/server/src/Mohist.Server/Workflow/Services/WorkflowRunVariablesStore.cs`
-(the `…VariablesStore` suffix follows [`conventions.md`](../conventions.md)'s Store
-suffix for "persistence boundary for one shape"). The C# type, the `…`
-DbSet, and the database table are **deliberately named** `WorkflowRunProfileRow`,
-`WorkflowRunProfiles`, and `WorkflowRunProfiles` respectively, even though they store
-Variables, never a Profile.
+The C# row type, DbSet, and database table are deliberately named
+`WorkflowRunProfileRow`, `WorkflowRunProfiles`, and `WorkflowRunProfiles`, even
+though they store Variables rather than a Profile. This is a historical
+misnomer, not a second domain meaning of Profile.
 
 Decision: keep them. The cosmetic rename would require an EF Core
 migration rewriting a live production table plus coordinated down/up scripts, for
-zero behavioral gain. The misnomer must not be left silent — this note plus the
-inline pointer comment at the top of `WorkflowRunProfileRow.cs` make the decision
-discoverable. When the table is next restructured for a real reason (e.g.
-normalization, archival), rename the row and DbSet in the same change.
+zero behavioral gain. This decision keeps the misnomer explicit instead of
+letting readers infer a second responsibility. When the table is next
+restructured for a behavioral reason, such as normalization or archival, rename
+the row and DbSet in the same change.
 
 The `Run-scoped Variables` table/row rename is rejected **only** on cost/benefit
 grounds; the rename is correct in target. The current persisted

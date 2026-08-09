@@ -99,31 +99,19 @@ Explicit feedback through system comment or inbox remains an open question.
 
 ## Status
 
-Issue #490 implemented the complete behavior:
-
-- `AddCommentAsync` persists the comment and emits a lineage-stamped
-  `com.mohist.issue.comment-added` CloudEvent in the same transaction. Payload
-  contains `commentId`, `author`, and `body`. Lineage contains `projectid`,
-  `issue`, and optional `epic`.
-- `MentionDispatchHandler` subscribes and implements loop prevention, token
-  parsing, case-insensitive name resolution, resolution-failure no-op, and
-  comment-anchored idempotent launch. `AgentQuerier.GetByNameAsync` is
-  case-insensitive.
-- `IAgentLauncher.LaunchMentionAsync` is the mention entry to the manual path.
-  `AgentSessionResolver.CommentSessionId` and `CommentJobKey` derive Session ID
-  and AgentJob key from `hash(projectId, commentId, agentId)`. Trigger labels
-  record `mohist.io/trigger/event-id` and `mohist.io/trigger/comment-id`.
-- A muted watch does not suppress mention launch. The handler does not read
-  `WatchEntryStore`.
+Issue #490 delivered the complete behavior: comment creation and its
+lineage-stamped event commit together; mention parsing and Agent name resolution
+are case-insensitive; comment identity makes launch idempotent; Agent-authored
+comments cannot recurse; and a muted watch does not suppress an explicit
+mention. Mention launch reuses the ordinary Agent launch path rather than
+creating a second execution contract.
 
 ### Open Question
 
 Should an unresolved mention produce an explicit system comment or inbox item?
 Keep structured logging and no visible action until real usage data answers.
 
-### Implemented Dependencies
-
-This design depends on dual-path `IAgentLauncher` with idempotency keys,
-comment-anchored stable keys from `AgentSessionResolver`, comment `author` in
-`AddCommentAsync(author, body)`, and the comment-author attribution convention
-in [`event-response.md`](event-response.md).
+The durable dependency is the comment-author attribution convention in
+[`event-response.md`](event-response.md). It lets the event path distinguish an
+owner's explicit mention from Agent-authored output without coupling the design
+to a handler or launcher class.
