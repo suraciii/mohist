@@ -1,17 +1,40 @@
 # Design
 
-`design/` targets developers and agents. It records architecture boundaries, domain decomposition, workflow mechanics, and cross-module design conventions. User-facing documents live in [`../docs/`](../docs/).
+`design/` targets developers and agents. It explains why architecture boundaries exist and records
+the contracts that implementations must preserve. It covers domain decomposition, workflow
+mechanics, and cross-module design conventions. It is not a tour of the current code. User-facing
+documents live in
+[`../docs/`](../docs/).
 
-Write new or rewritten design prose in English; keep domain identifiers, field names, API names, and code symbols as-is. Existing Chinese documents converge to English as they are revised, so language migration never mixes with unrelated design changes.
+Write all active design prose in English. Use short sentences, active voice, American spelling, and stable
+terms. Use ASD-STE100 writing rules as a target. Do not claim compliance. Keep domain identifiers, field
+names, API names, commands, serialized values, and code symbols as-is when their exact spelling is part of
+the contract. Use `must`, `may`, and `must not` for requirements, options, and prohibitions.
 
 ## Writing a design spec
 
-A design spec is the authoritative statement of how the system implements target behavior. People, agents, and implementations must read the same model from it.
+A design spec is the authoritative statement of why the system is divided this way and how its
+parts must preserve target behavior. People, agents, and implementations must read the same model
+from it.
 Do not let agents guess rules. Do not let the current code decide for the target design.
+
+### Explain the design drivers
+
+- Start with the problem that requires a design decision. State why the existing or obvious model
+  is insufficient.
+- Name the forces that shape the solution: ownership, lifecycle, consistency, reliability,
+  security, cost, or operability.
+- Explain why the chosen boundary satisfies those forces and which trade-off it accepts.
+- Record rejected alternatives only when they could reasonably return in a later change. State the
+  reason for rejection, not the history of the discussion.
+- Describe the macro structure before fields, endpoints, algorithms, or persistence. A reader must
+  understand the dependency direction before implementation detail appears.
+- Keep exact mechanics only when they form a durable contract or remove a real ambiguity. Do not
+  translate a method body, call chain, database procedure, or source tree into prose.
 
 ### Define the model first
 
-- Write what the concept is first. Then write what it is not.
+- After the design drivers, write what the concept is and what it is not.
 - State who owns it, where it applies, how to identify it, when it is created or ends, and what must always hold.
 - Introduce only concepts with business meaning. Do not add new nouns without an identity, behavior, or rules of their own.
 - Keep only the fields the current behavior needs. Do not add resources, scopes, or APIs ahead of possible future capabilities.
@@ -25,12 +48,13 @@ Do not let agents guess rules. Do not let the current code decide for the target
 ### State the semantics
 
 - Write definite rules. Do not state only design intent.
-- Record only design reasons that affect later changes. Do not record the whole discussion.
+- Connect each important rule to the design force it protects. Do not record the whole discussion.
 - Write the full order. State who comes first, who comes after, and who overrides whom.
 - Write the resolution timing. State what takes effect live and what is fixed at startup.
 - Write the write target. State which resource one operation modifies and which it does not.
 - Write failure behavior. Reject invalid states; do not swallow errors silently.
-- Use pseudocode for definite algorithms. A reader must be able to implement them step by step.
+- Use pseudocode only when the algorithm itself is part of the contract. It must remove ambiguity
+  without mirroring a current method body or call chain.
 - Express merging, fallback, selection, and state changes with inputs and outputs.
 - Use the same interface for the same semantics. Do not duplicate APIs for different callers.
 - Write caller restrictions as parameter restrictions. Do not wrap them into a new domain capability.
@@ -42,7 +66,13 @@ Do not let agents guess rules. Do not let the current code decide for the target
 - Prefer short sentences. One sentence states one rule.
 - Prefer domain nouns and product nouns. Use technical nouns only in implementation design.
 - Use canonical names. Keep casing, singular/plural, and field paths consistent.
-- Use PlantUML when prose cannot express a relationship or flow clearly. Do not draw when prose is already clear.
+- Every plain-text fence must choose exactly one semantic marker: `text diagram` or `text literal`.
+- Use `text diagram` only when an ASCII diagram makes a boundary, ownership relation, dependency,
+  sequence, hierarchy, or state transition easier to understand. Do not draw when prose is already clear.
+- Use `text literal` for command output, syntax, protocols, pseudocode, data shapes, and other
+  preformatted text that is not a diagram. Bare `text` fences are invalid.
+- Use only ASCII characters in diagrams. Do not add PlantUML, Mermaid, Unicode line art, or Unicode arrows.
+- Do not use raw HTML. Markdown is the only document markup.
 - Draw only real concepts. Give every arrow a meaning.
 - Write key rules in prose. Do not make a diagram the only source of truth.
 - Use pseudocode for definite computations.
@@ -54,11 +84,13 @@ Do not let agents guess rules. Do not let the current code decide for the target
 
 Start from the structure below. Delete sections that have no content. Do not add empty sections for symmetry.
 
-```text
+```text literal
 # Name
 
-One-sentence definition.
-One-sentence boundary.
+The problem and why a design decision is necessary.
+
+## Design Drivers
+Constraints, forces, chosen trade-offs, and rejected alternatives that may recur.
 
 ## Model
 Resources, ownership, references, and the minimal data shape.
@@ -77,12 +109,15 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 
 ### Before committing
 
+- Confirm the reader can answer: what problem does this solve, why is this boundary here, and which
+  trade-off does it accept?
 - Confirm the reader can answer: what is it? who owns it? what is the scope?
 - Confirm the reader can answer: how is it selected? how is it read? how is it modified?
 - Confirm the reader can answer: who overrides whom on conflict? when does it take effect?
 - Confirm the reader can answer: what happens on failure? which states are not allowed?
 - Confirm the prose describes the target design. Move current implementation gaps to `Status`.
-- Delete duplicate rules, behavior-less abstractions, and prose that only explains code steps.
+- Delete duplicate rules, behavior-less abstractions, and prose that only explains code steps,
+  method bodies, storage operations, or call chains.
 - Check that diagrams, pseudocode, examples, and prose express the same semantics.
 - Have another agent read the spec read-only. If it still needs the code to implement, complete the spec.
 - Have two independent agents derive behavior from the spec. Remove ambiguity when they disagree.
@@ -103,8 +138,9 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 ## Agent and execution
 
 - [agent-execution.md](agent-execution.md) — Action, Inline Agent, Mohist Agent, AgentJob, SessionInput, AgentTurn, AgentSession, Runtime Session: layering, lifecycle ownership, activity and transcript DSL.
-- [agent-api.md](agent-api.md) — Agent call boundary shared by Web, CLI, and external integrations: unified capabilities, state, identity, reliability decisions.
-- [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, timed input.
+- [agent-api.md](agent-api.md) - Versioned direct API for PAT-authenticated external callers: public state, retry identity, event resume, and disclosure boundaries.
+- [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
+- [scheduled-input.md](scheduled-input.md) — Scheduled input (**WIP**): durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.
 - [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
 - [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
 - [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
@@ -130,13 +166,13 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 
 ## Supporting topics
 
-- [auth.md](auth.md) — Auth and identity (**finalized, pending implementation**): single admin plus service/agent principals, file-based and signed credentials, device authorization login, Runner machine credentials, attribution.
+- [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
 - [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution (**WIP**).
-- [workspace.md](workspace.md) — Workspace: first-class persistent execution environment under a Project (**WIP**): Origin unique resolution, dynamic creation, binding and scheduling affinity, archival and runner directory reclamation.
+- [workspace.md](workspace.md) — Workspace (**WIP**): first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
-- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook (**WIP**): OHS + PL, CloudEvent as publication language, expression subscription + HMAC signing + best-effort delivery.
-- [github-integration.md](github-integration.md) — GitHub integration (**WIP**): inbound event reception and signature verification, feed/close/approval translators, write-back, credential boundaries; product behavior in [`docs/github.md`](../docs/github.md).
-- [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design (**finalized, pending implementation**): parent-child model, status aggregation, composite advancement, isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
+- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: implemented v1 general HTTP delivery with CloudEvents, event selection, configurable authentication, 2xx success, and failure inspection; retries, redelivery, attempt history, and Web management remain later capabilities.
+- [github-integration.md](github-integration.md) — GitHub integration: signed ingress, feed/close translation, and write-back are implemented; PR branch correlation, App identity, and failure inspection remain gaps; product behavior in [`docs/github.md`](../docs/github.md).
+- [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design: implemented parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt (**WIP**), builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, presence and runner-lost closeout.

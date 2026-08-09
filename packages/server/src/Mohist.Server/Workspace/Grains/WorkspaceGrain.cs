@@ -254,7 +254,7 @@ public sealed class WorkspaceGrain : Grain, IWorkspaceGrain
             throw new WorkspaceDomainException(
                 "workspace_close_not_allowed_for_issue",
                 "Issue-backed workspaces are archived by the issue lifecycle, not by manual close.",
-                hint: "Finish or cancel the issue instead ('mo issue done <number>' / 'mo issue cancel <number>').");
+                hint: "Finish or close the issue instead ('mo issue done <number>' / 'mo issue close <number>').");
 
         if (state.Status == WorkspaceStatus.Archived)
             throw new WorkspaceDomainException(

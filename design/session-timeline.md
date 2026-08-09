@@ -1,146 +1,167 @@
-# AgentSession 时间线
+# AgentSession Timeline
 
-AgentSession 页时间线的呈现模型：把 transcript 事实派生为可扫读的活动条目。
-本文只定义呈现派生，不定义第二份会话记录；transcript 契约与 Session 状态裁判不变
-（见 [`agent-execution.md`](agent-execution.md)）。产品行为见
-[`../docs/web-ui.md`](../docs/web-ui.md) 的 AgentSession 页一节。
+This document defines the presentation model for the AgentSession page timeline: it derives
+scannable activity items from transcript facts. It defines presentation derivation only, not a
+second session record. The transcript contract and Session state authority remain unchanged
+(see [`agent-execution.md`](agent-execution.md)). See the AgentSession page section in
+[`../docs/web-ui.md`](../docs/web-ui.md) for product behavior.
 
-[`agent-api.md`](agent-api.md) 的外部 Session event stream 是另一份 Server-owned、持久化的
-公开 projection：它有自己的 sequence、cursor、retention 和严格字段 allowlist。它不能复用
-本地 `TimelineItem`、浏览器实时订阅或原始 transcript 事实作为事件记录，也不能由本页的
-呈现规则决定外部排序、去重或可见性。
+The external Session event stream in [`agent-api.md`](agent-api.md) is a separate,
+Server-owned durable public projection. It has its own sequence, cursor,
+retention, and strict field allowlist. It cannot reuse local `TimelineItem`
+values, browser live subscriptions, or raw transcript facts as its event record,
+and the presentation rules in this document cannot define its ordering,
+deduplication, or visibility.
 
-canonical `session.context_reset` 发生时，外部 stream 只追加 `session.context_reset` 的公开
-边界事件：稳定 Session/Project/Agent 身份、公开 Session 状态、安全 reason code、timestamp 和
-sequence。它不是 TimelineItem 的 raw payload，也不携带 runtime、path、prompt、memory 或原始
-transcript。
+When the canonical `session.context_reset` fact occurs, the external stream
+appends only a public `session.context_reset` boundary event: stable
+Session/Project/Agent identities, public Session status, a safe reason code,
+timestamp, and sequence. It is not a raw `TimelineItem` payload and carries no
+runtime, path, prompt, memory, or raw transcript data.
 
 ## Model
 
-**时间线条目（TimelineItem）**：从一段 transcript 事实派生的呈现单元。它是客户端
-本地派生结果——不持久化、不进事件总线、不回写 Server，任何客户端可以用同一套规则
-独立实现。
+**Timeline item (`TimelineItem`)**: a presentation unit derived from a span of transcript facts.
+It is derived locally by the client: it is not persisted, published to the event bus, or written
+back to the Server. Any client can implement the same rules independently.
 
-```text
+```text literal
 TimelineItem
-  Id            # 由来源事实决定：toolCallId、InputId、事实序号等
-  RenderClass   # 呈现类
-  Summary       # 句式：Verb + Object + Outcome?
-  Salience      # 显著性
-  GroupKey?     # 折叠分组键
-  Detail?       # 展开内容：参数、完整输出、diff、原始 payload
+  Id            # Determined by the source fact: toolCallId, InputId, fact sequence, and so on
+  RenderClass   # Presentation class
+  Summary       # Form: Verb + Object + Outcome?
+  Salience      # Salience
+  GroupKey?     # Collapsible group key
+  Detail?       # Expanded content: arguments, full output, diff, raw payload
 ```
 
-呈现类一览：
+Presentation classes:
 
-| RenderClass | 来源事实 | 读法示例 |
+| RenderClass | Source fact | Example reading |
 |---|---|---|
-| `input` | SessionInput | 输入内容 + 受理/投递状态 |
-| `message` | text | Agent 回复 |
-| `reasoning` | reasoning | 思考，默认折叠 |
-| `file-read` | tool（read / grep / glob / list 等） | 「读取了 `x.ts`」 |
-| `file-edit` | tool（edit / write 等） | 「编辑了 `x.ts`（+12/−3）」 |
-| `shell` | tool（bash 等） | 「运行了 `npm test` → 通过」 |
-| `domain-action` | 识别出的 Mohist 领域操作 | 「评论了 #42」「批准了 #42 的 Plan 阶段」 |
-| `plan` | todo / plan 工具 | 计划与完成进度 |
-| `tool` | 其余工具 | 诚实兜底：「执行了 X」 |
-| `status` | session.activity、model、usage、provider.retry 等 | 淡色状态行 |
-| `boundary` | compaction、session.context_reset | 「上下文已重置」分界 |
-| `error` | turn.failed、任何失败的条目 | 醒目失败卡 |
-| `suppressed` | 刻意降级的噪声事实 | 单行淡字 |
+| `input` | SessionInput | Input content plus acceptance/delivery state |
+| `message` | text | Agent response |
+| `reasoning` | reasoning | Reasoning, collapsed by default |
+| `file-read` | tool (read / grep / glob / list, and so on) | `Read x.ts` |
+| `file-edit` | tool (edit / write, and so on) | `Edited x.ts (+12/-3)` |
+| `shell` | tool (bash, and so on) | `Ran npm test -> passed` |
+| `domain-action` | Recognized Mohist domain operation | `Commented on #42`; `Approved the Plan stage for #42` |
+| `plan` | todo / plan tool | Plan and completion progress |
+| `tool` | Any other tool | Honest fallback: `Ran X` |
+| `status` | session.activity, model, usage, provider.retry, and so on | Muted status row |
+| `boundary` | compaction, session.context_reset | `Context reset` boundary |
+| `error` | turn.failed or any failed item | Prominent failure card |
+| `suppressed` | Deliberately de-emphasized noise fact | Single muted line |
 
-条目没有终态生命周期；进行中的条目（如 executing 的 tool call）随事实原地更新。
+Items have no terminal lifecycle. In-progress items, such as an executing tool call, are updated
+in place as facts arrive.
 
 ## Semantics
 
-### 派生与分类
+### Derivation and classification
 
-- 分类是纯函数：transcript 事实序列 → 条目序列。分类与渲染分离，呈现组件只消费
-  TimelineItem。
-- 分类按顺序尝试：`domain-action` 识别 → 工具类型表 → `tool` 兜底。识别失败必须
-  降级，不得编造语义。
-- 同一事实只归一类；失败是出口改写：任何条目带失败结果时 RenderClass 为 `error`，
-  保留原 Summary 并追加失败事实。
+- Classification is a pure function: transcript fact sequence -> item sequence. Classification
+  is separate from rendering; presentation components consume only `TimelineItem` values.
+- Classification tries, in order, `domain-action` recognition -> tool type table -> `tool`
+  fallback. Failed recognition must degrade to the fallback and must not invent semantics.
+- Each fact belongs to exactly one class. Failure rewrites the result: when any item has a failed
+  outcome, its RenderClass is `error`; its original Summary is retained and the failure fact is
+  appended.
 
-### 领域操作识别
+### Domain operation recognition
 
-两条通路收敛到同一 `domain-action` 条目：
+Two paths converge on the same `domain-action` item:
 
-1. **Shell 通路**：解析 bash 类工具执行的 `mo` 命令——提取命令组与动词
-   （`issue comment create`、`run approve`、`issue start` 等）映射为 Verb，参数中的
-   Issue number、WorkflowRun id 等解析为 Object 与页面链接。
-2. **工具通路**：Runtime 工具或 MCP 工具名命中 Mohist 领域操作表时直接映射。
+1. **Shell path**: parse `mo` commands run by bash-like tools. Extract the command group and verb
+   (`issue comment create`, `run approve`, `issue start`, and so on), map them to Verb, and parse
+   arguments such as Issue number and WorkflowRun id into Object and page links.
+2. **Tool path**: map directly when a Runtime or MCP tool name matches the Mohist domain operation
+   table.
 
-命令的退出结果决定 Outcome；失败即 `error`。两条通路产出相同的 RenderClass 与
-句式，只允许来源标记不同。命令不是已知的 `mo` 操作、或解析不出命令组时，按普通
-`shell` 条目处理，不做猜测性升级。
+The command exit result determines Outcome; a failure produces `error`. Both paths produce the
+same RenderClass and sentence form. Only the source marker may differ. A command that is not a
+known `mo` operation, or whose command group cannot be parsed, remains a normal `shell` item and
+is never promoted speculatively.
 
-### 句式与引用解析
+### Sentence form and reference resolution
 
-- Summary 按 `Verb + Object + Outcome?` 构造；Outcome 先行，让人一眼判断成败。
-- Object 必须解析为可识别名字或链接（Issue number 链到 Issue 页、Agent 名、run id
-  链到 run），不显示裸内部 id。
-- 构造不出完整句式时保留事实原样（如「执行了 X」），不补想象内容。
+- Construct Summary as `Verb + Object + Outcome?`; make Outcome immediately visible so success
+  or failure can be identified at a glance.
+- Resolve Object to a recognizable name or link: an Issue number links to the Issue page, an
+  Agent uses its name, and a run id links to the run. Do not show bare internal ids.
+- When a complete sentence cannot be constructed, retain an honest statement of the fact, such
+  as `Ran X`, without adding imagined content.
 
-### 原地更新
+### In-place updates
 
-- `tool_call.started / updated / completed` 按 toolCallId 更新同一条目；终态
-  （completed / failed）不可逆，迟到事实不得回退。
-- 流式 text / reasoning 按消息关联追加；非文本条目插入前封缄当前流，后续 chunk
-  另起条目。
-- 条目可先以兜底类出现，事实补全后升级为更语义化的类（如 `shell` →
-  `domain-action`），Id 不变。
+- `tool_call.started / updated / completed` update one item by toolCallId. Terminal states
+  (`completed / failed`) are irreversible; late facts cannot move them backward.
+- Append streaming text / reasoning by message association. Seal the current stream before
+  inserting a non-text item; a later chunk starts a new item.
+- An item may first appear in a fallback class and be promoted when facts become complete, for
+  example from `shell` to `domain-action`; its Id does not change.
 
-### 折叠分组
+### Collapsible groups
 
-- 连续 ≥3 个同类低显著条目（`file-read`、成功的 `shell`、`tool`）折叠为一条汇总
-  （「读取了 5 个文件」），组内可展开；GroupKey 相同的优先同组。
-- `error`、`domain-action`、`input`、`message`、`status`、`boundary`、`suppressed`
-  永不进组，且打断连续段——失败与关键动作必然浮出折叠。
+- Collapse a consecutive sequence of at least three low-salience items of one class
+  (`file-read`, successful `shell`, or `tool`) into a summary such as `Read 5 files`. The group
+  remains expandable, and items with the same GroupKey are grouped preferentially.
+- `error`, `domain-action`, `input`, `message`, `status`, `boundary`, and `suppressed` never enter
+  a group and break a consecutive sequence. Failures and important actions therefore always
+  remain visible outside collapsed groups.
 
-### 显著性
+### Salience
 
-从高到低：`error` → `domain-action`（写操作）→ `input` / `message` → `file-edit` /
-`shell` → `file-read` / `tool` / `reasoning` → `status` / `suppressed`。
+From highest to lowest: `error` -> write `domain-action` -> `input` / `message` -> `file-edit` /
+`shell` -> `file-read` / `tool` / `reasoning` -> `status` / `suppressed`.
 
-Salience 只影响呈现（醒目程度、折叠资格、当前活动摘要的选取），不回写任何领域
-状态，也不参与 Session 状态推导。
+Salience affects presentation only: prominence, grouping eligibility, and selection of the
+current activity summary. It is never written back to domain state and does not participate in
+Session state derivation.
 
-### 沉默与状态呈现
+### Silence and status presentation
 
-- Turn queued → 输入条目与状态行表达「排队中」。
-- Turn executing 且暂无新条目 → 当前活动条呈现「执行中」，取最近一个未终结的可读
-  条目（跳过 `status` / `suppressed`）作为内容；无进行中条目时呈现 Turn 状态本身。
-- `idle` / `unknown` → 明确的空闲 / 未知呈现；`unknown` 不得渲染成空闲。
-- 以上全部来自 Server 事实（activity、AgentTurn 状态、transcript 状态事实）。客户端
-  不做心跳推断，也不从条目序列推导 Session 状态——与
-  [`agent-execution.md`](agent-execution.md) 的消费者规则一致。
+- Turn `queued` -> the input item and status row show `Queued`.
+- Turn `executing` with no new item -> the current activity bar shows `Executing` and uses the
+  latest readable nonterminal item, skipping `status` / `suppressed`. When no item is in progress,
+  it shows the Turn state itself.
+- `idle` / `unknown` -> distinct idle / unknown presentations. `unknown` must not render as idle.
+- All of these states come from Server facts: activity, AgentTurn state, and transcript status
+  facts. The client does not infer state from heartbeats or from the item sequence, consistent
+  with the consumer rules in [`agent-execution.md`](agent-execution.md).
 
-### 原始视图
+### Raw view
 
-- 页面级开关：同一时间线数据切换为原始事实序视图——每条 transcript 事实一行，可
-  展开 payload。
-- 两种视图是同一数据的两个海拔，不是两条 feed；切换时按条目 Id 锚定滚动位置。
+- A page-level toggle switches the same timeline data to raw fact order: one row per transcript
+  fact with an expandable payload.
+- The two views are two levels of the same data, not two feeds. Switching anchors the scroll
+  position by item Id.
 
-这个原始视图仍是受控 Web 诊断面的呈现能力，不是对外 API export，也不定义任何外部
-caller 可读取的 payload。直接外部调用只能使用 `agent-api.md` 规定的 public projection，
-其中不得出现 prompt、memory、path、runtime/connection identity 或 raw payload。
+This raw view remains a controlled Web diagnostic presentation. It is not an
+external API export and does not define any payload available to an external
+caller. Direct callers can use only the public projection defined by
+`agent-api.md`, which excludes prompts, memory, paths, runtime or connection
+identity, and raw payloads.
 
 ## Examples
 
-1. `tool_call.completed{bash, "mo issue comment create 42 --body …", 退出 0}`
-   → `domain-action`「评论了 #42」，点击跳转 Issue #42。
-2. 同一命令退出非 0 → `error`「评论 #42 失败」，独立醒目，不进折叠。
-3. 连续 read×3 + grep×2 → 折叠「读取了 5 个文件」；若第 3 个失败，则前 2 个折叠、
-   失败条目独立醒目、后 2 个另起折叠。
-4. `session.context_reset{reason: "reset"}` → `boundary`「上下文已重置」；其后的
-   条目属于新 Runtime 上下文。
+1. `tool_call.completed{bash, "mo issue comment create 42 --body ...", exit 0}` becomes the
+   `domain-action` item `Commented on #42`, which links to Issue #42.
+2. The same command with a nonzero exit becomes `error`: `Failed to comment on #42`. It is
+   prominent and never grouped.
+3. A consecutive read x3 plus grep x2 collapses to `Read 5 files`. If the third operation fails,
+   the first two collapse, the failure remains prominent, and the final two form a new group.
+4. `session.context_reset{reason: "reset"}` becomes the `boundary` item `Context reset`; later
+   items belong to the new Runtime context.
 
 ## Status
 
-当前 Web 实现是对话式消息视图：turn 分组 + 工具分类卡片，无 TimelineItem 派生层与
-显著性纪律；context 类工具折叠没有失败打断规则；`mo` 领域操作未经识别；SessionInput
-受理与 AgentTurn 状态以独立证据区呈现，未编入时间线；无原始事件视图。
+The current Web implementation is a conversational message view: turns are grouped and tools
+use classified cards. It has no `TimelineItem` derivation layer or salience policy. Context-tool
+groups do not break on failure, `mo` domain operations are not recognized, and SessionInput
+acceptance and AgentTurn state appear in a separate evidence area rather than in the timeline.
+There is no raw event view.
 
-transcript 事实、持久化与实时推送链路已齐备，本模型不需要新增 transcript 事实，也
-不改变 Server 职责——全部派生可在 Web 客户端本地完成。实施 issue 待从本 spec 创建。
+Transcript facts, persistence, and real-time delivery are already implemented. This model needs
+no new transcript facts and does not change Server responsibilities; all derivation can happen
+locally in the Web client. An implementation issue still needs to be created from this spec.

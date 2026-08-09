@@ -82,7 +82,7 @@ internal static class EpicCommands
         var titleArg = new Argument<string>("title") { Description = "Epic title" };
         var descriptionOpt = new Option<string?>("--description") { Description = "Epic description (mutually exclusive with --description-file)" };
         var descriptionFileOpt = new Option<string?>("--description-file") { Description = "Read epic description from a UTF-8 file path, or - for stdin (mutually exclusive with --description)" };
-        var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3)" };
+        var priorityOpt = new Option<string?>("--priority", "-p") { Description = "Epic priority (p0|p1|p2|p3|p4)" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(titleArg);
@@ -177,7 +177,7 @@ internal static class EpicCommands
         var titleOpt = new Option<string?>("--title") { Description = "New title" };
         var descriptionOpt = new Option<string?>("--description") { Description = "New description (mutually exclusive with --description-file)" };
         var descriptionFileOpt = new Option<string?>("--description-file") { Description = "Read new epic description from a UTF-8 file path, or - for stdin (mutually exclusive with --description)" };
-        var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3)" };
+        var priorityOpt = new Option<string?>("--priority", "-p") { Description = "New priority (p0|p1|p2|p3|p4)" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var jsonOpt = MohistCliCommands.JsonSelectionOption(EpicDescriptor);
         cmd.Arguments.Add(numberArg);

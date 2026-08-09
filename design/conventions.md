@@ -1,11 +1,12 @@
 # Conventions
 
-## 身份
+## Identity
 
-领域身份是能够永久、无歧义地指向一个实体的最小键。它不要求是单个随机 id；当实体
-天然属于父级作用域时，父级身份与作用域内编号共同组成身份。
+A domain identity is the smallest key that identifies an entity permanently and without
+ambiguity. It does not have to be a single random ID. When an entity naturally belongs to a
+parent scope, the parent identity and the number within that scope form the identity together.
 
-| 概念 | 领域身份 | 示例 |
+| Concept | Domain identity | Example |
 |---|---|---|
 | Project | `ProjectId` | `proj_123` |
 | Issue | (`ProjectId`, `IssueNumber`) | (`proj_123`, `42`) |
@@ -18,13 +19,15 @@
 | Principal | `PrincipalId` | `prin_123` |
 | Credential | `CredentialId` | `cred_123` |
 
-- Issue 与 Epic 的 number 是 Project 内永久身份的一部分，不是展示别名；不再为它们
-  维护第二个随机 id。
-- GrainKey 必须从领域身份无损、统一地编码，并能还原为同一个强类型身份。作用域身份
-  使用公共 codec，不在调用点手拼 `projectId:issueNumber` 一类字符串。
-- ResourceKey 用于 HTTP 资源路径，也可以作为 CloudEvents `source`；它不作为另一套实体
-  身份写入扩展属性、锁或审计字段。
-- 外部名称可以解析到身份，但解析结果不得产生另一套实体身份。
+- An Issue or Epic number is a permanent part of its identity within a Project, not a display
+  alias. Do not maintain a second random ID for either entity.
+- A GrainKey must encode the domain identity losslessly and consistently, and must decode to the
+  same strongly typed identity. Scoped identities use the shared codec; callers must not assemble
+  strings such as `projectId:issueNumber` themselves.
+- ResourceKey is used for HTTP resource paths and may also be used as the CloudEvents `source`. Do
+  not store it as another entity identity in extension attributes, locks, or audit fields.
+- An external name may resolve to an identity, but the resolution must not create another entity
+  identity.
 
 ## Role suffixes
 
@@ -33,7 +36,7 @@
 | Querier | single-domain read projection | IssueQuerier |
 | Assembler | cross-domain read assembly (AgentOps) | AgentActivityFeedAssembler |
 | Reporter | cross-domain metrics (AgentOps) | AgentUsageReporter |
-| Resolver | external name → canonical resource | ProjectResolver |
+| Resolver | external name -> canonical resource | ProjectResolver |
 | Manager | config or lifecycle policy | WorkflowProfileManager |
 | Store | persistence boundary for one shape | WorkflowRunStore |
 
@@ -119,8 +122,8 @@ Concept ownership and origin rules are defined in
   independent monotonic values; an unqualified `generation` in an implementation means
   `claimGeneration`, never `ContextGeneration`. The single `FenceToken` contract below is used
   by every phase write, candidate create/get/discard/cleanup, binding CAS, completion, Compact,
-  and Cancel/stop. Before any external effect, Server atomically rechecks that token, the current
-  owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
+  and Cancel/per-target stop. Before any external effect, Server atomically rechecks that token,
+  the current owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
   owner fails closed before the effect and before its result is persisted.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
   incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
@@ -138,7 +141,7 @@ Concept ownership and origin rules are defined in
 `AgentSessionRead` is the only Session admission projection. The durable Session row uses the same
 fields; callers use `admission=ready|blocked` and do not invent another safety field.
 
-```text
+```text literal
 AgentSessionRead {
   sessionId
   activity = idle | active | unknown
@@ -217,7 +220,7 @@ All launch and follow-up inputs use the same input identity contract. The first 
 the caller's `launchRequestId` into `requestId`; a follow-up caller must provide its own stable
 `requestId`. Server never invents one after a response is lost.
 
-```text
+```text literal
 SessionInputRead {
   sessionId
   inputId                   # null unless state=accepted
@@ -297,7 +300,7 @@ Every dispatch claim, takeover, enqueue/query, reschedule, blocked write, unknow
 write, and retry-work repair uses this predicate atomically. `dispatch.dispatchFence` is the same complete
 token, not a shortened owner or retry identity.
 
-```text
+```text literal
 claimDueOrTakeOver(record, work, previousFence, now, coordinatorId):
   atomically:
     require work.sessionId == record.sessionId
@@ -402,7 +405,7 @@ rescheduleDispatch(record, dispatchFence, work, dueAt):
     return retry_scheduled
 ```
 
-```text
+```text literal
 DispatchRetryWork {
   sessionId
   inputId
@@ -466,7 +469,7 @@ Dispatch states are deliberately not interchangeable:
 
 The only valid cross-projection combinations are:
 
-```text
+```text literal
 dispatchStatus=queued|blocked  -> Turn.status=queued, outcome=null
 dispatchStatus=retrying        -> Turn.status=queued, outcome=null
 dispatchStatus=unknown         -> Turn.status=unknown, outcome=null,
@@ -515,7 +518,7 @@ client invents a second reason schema.
 `BindingTuple` is either `null` or the complete tuple below. `null` is explicit and is not the same
 as an omitted field.
 
-```text
+```text literal
 BindingTuple = {
   runnerId,
   runtime,
@@ -545,7 +548,7 @@ FenceToken = {
 binding only for an explicitly post-CAS effect. It is never inferred from the same old token. The
 following predicate is the only `fenceMatch` definition:
 
-```text
+```text literal
 fenceMatch(session, operationFence, token, now) =
   session.id == token.sessionId
   && operationFence.sessionId == token.sessionId
@@ -576,7 +579,7 @@ returns `stale_operation_fence`; it cannot repair its token by changing only the
 
 The only binding replacement protocol is this atomic Server operation:
 
-```text
+```text literal
 compareAndSwapBinding(preToken, boundaryKind):
   atomically:
     require preToken.bindingAtEffect == preToken.expectedBinding
@@ -608,10 +611,10 @@ both old pre and old post tokens fail closed.
 
 Every non-CAS effect follows this shape, including `Runtime.resolve`, `Runtime.createOrGetEmpty`,
 `Runtime.submitInputExactlyOnce`, cleanup `Runtime.getByKey` and `Runtime.discardCandidate`,
-`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and Cancel/stop. Binding CAS uses
+`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and Cancel/per-target stop. Binding CAS uses
 `compareAndSwapBinding` above and does not use `effectWithFence` with a pre-CAS token:
 
-```text
+```text literal
 effectWithFence(token, effect):
   token = Server.recheckBeforeExternalEffect(token)
   result = effect(token)
@@ -629,13 +632,18 @@ is terminal `blocked` and a new binding operation may proceed.
 
 ### Canonical SessionOperationRead
 
-`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, `stop` and `steer` are durable
-Session operations. Their caller supplies a reusable `operationId`; Server never creates an
-unqueryable operation key for a command response. This is the only authoritative
-`SessionOperationRead` schema. `agent-api.md` and `agent-execution.md` link to it; they do not
-define another operation field list.
+`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, and `steer` are
+durable Session operations whose caller supplies a reusable `operationId`; steer reuses its
+caller-provided `requestId`. Server never creates an unqueryable operation key for those commands.
+A cascade stop is different: the public caller supplies only root Session plus `Idempotency-Key`,
+and Server derives the tree operation identity, fingerprint, frozen membership, and stable
+per-target stop-operation identities. [`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the
+sole public stop authority. Each target still projects its derived internal operation through the
+same `SessionOperationRead` shape below. This is the only authoritative `SessionOperationRead`
+schema. `agent-api.md` and `agent-execution.md` link to it; they do not define another operation
+field list.
 
-```text
+```text literal
 SessionOperationRead {
   sessionId
   operationId
@@ -713,7 +721,7 @@ contract even while the current Runner routes and Runtime adapters remain on the
 implementation. `sessionId` is the logical target Session; `binding.runtimeSessionId` is the
 physical target Runtime Session.
 
-```text
+```text literal
 SteerEffectId = {
   sessionId,
   operationId                 # operationId == caller-provided requestId
@@ -791,7 +799,7 @@ projection; it never invokes `apply` for a second effect.
 When a target Turn is terminal before an adapter call, or a stop/force-reset transaction makes the
 target no longer admissible, the target operation is settled atomically under its current fence:
 
-```text
+```text literal
 settleSteerTargetTerminal(operation, fence, cause, adapterAttemptStarted):
   atomically:
     require operation.kind == steer
@@ -854,7 +862,7 @@ SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only 
 operation's `candidateKey`, its binding is complete, and `candidateState=created`. The atomic
 adopted predicate is:
 
-```text
+```text literal
 candidateIsCurrent(operation, candidate, session) =
   candidate.key == operation.candidateKey
   && operation.candidateBinding == candidate.binding
@@ -910,7 +918,9 @@ from being claimed after the original operation is terminal.
 
 `kind=stop` uses the operation row itself as the durable Turn-stop fence. Its `targetTurnId`,
 `expectedBinding`, complete owner/claim/deadline fields and `reason` are queryable; there is no
-in-memory `stopFence` model. A queued target can be cancelled in the same Session transaction.
+in-memory `stopFence` model. The operation ID is the stable per-target identity derived by the
+cascade stop; it is not a second public caller key. A queued target can be cancelled in the same
+Session transaction.
 For a running target, the owner claims or takes over this operation, rechecks the complete
 `FenceToken` immediately before and immediately after `Runtime.stop`, and only then persists the
 Turn outcome. A lost or unknown Runtime response keeps the operation and Turn `unknown`, with an
@@ -943,16 +953,18 @@ WorkflowRun.Metadata
   EpicNumber?
 ```
 
-这三个值是 WorkflowRun 在本地保存的 Issue 上下文，不是 Issue 或 Epic 的第二份权威
-状态。Issue 启动 WorkflowRun 时提供当前上下文；归属后来变化时，持久事件触发幂等命令
-刷新 `EpicNumber`。刷新前已经产生的事件保留生产者当时持有的上下文。
+These three values are the Issue context stored locally by WorkflowRun, not a second authority for
+Issue or Epic state. Issue provides the current context when it starts WorkflowRun. If affiliation
+changes later, a durable event triggers an idempotent command that refreshes `EpicNumber`. Events
+produced before the refresh retain the context held by their producer at that time.
 
-不增加 lineage revision、binding 状态或通用 owner/controller 引用。跨聚合重投递时，
-handler 重新读取 Issue 当前状态，再把完整上下文交给 WorkflowRun；旧事件因此不会把旧
-归属重新写回。
+Do not add a lineage revision, binding state, or a generic owner/controller reference. On
+cross-aggregate redelivery, the handler rereads current Issue state and passes the complete context
+to WorkflowRun. An old event therefore cannot write an old affiliation back.
 
 ## Dispatch namespaces
 
-Runtime context、Workflow Variables、Project Prompts 和 Project Repository resources 具有
-不同所有者和生命周期，不合并成一个 config 或 Variables document。各命名空间的解析时机
-以 [`workflow/task-dispatch.md`](workflow/task-dispatch.md) 为准。
+Runtime context, Workflow Variables, Project Prompts, and Project Repository resources have
+different owners and lifecycles. Do not merge them into one config or Variables document. See
+[`workflow/task-dispatch.md`](workflow/task-dispatch.md) for the resolution timing of each
+namespace.

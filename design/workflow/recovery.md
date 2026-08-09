@@ -1,97 +1,113 @@
 # Task Recovery
 
-任务执行后，runner executor 用 `when` 表达式匹配 `{ output, error }` 结果上下文，构造
-恢复任务并经 `addTasks` 返回，引擎机械插入。恢复是任务完成方式的一部分，不是失败后的
-补救：显式匹配与任务成败无关，成功任务的 output 命中 `when: output.promise=FAIL` 同样触发
-恢复。省略 `when` 的默认 handler 则只处理存在 error 的结果，包括 executor 在 Action
-完成后形成的最终失败。
+After task execution, the Runner executor matches `when` expressions against the
+`{ output, error }` result context, builds recovery tasks, and returns them through `addTasks` for
+mechanical insertion by the engine. Recovery is part of how a task completes, not remediation only
+after failure. Explicit matching is independent of task success or failure: successful output that
+matches `when: output.promise=FAIL` also triggers recovery. The default handler, which omits `when`,
+handles only results that contain an error, including final failures produced by the executor after
+the Action completes.
 
-语法与作者可见语义（budget、first-match、`retrySelf`、人工 retry 开新一轮）见
-[docs 的 recovery 节](../../docs/workflow-definition.md#recovery--失败恢复)。本篇定义
-执行机制。
+See the product reference for author-visible syntax and semantics, including budget, first match,
+`retrySelf`, and manual retry opening a new round:
+[`recovery`](../../docs/workflow-definition.md#recovery-failure-recovery). This document defines the
+execution mechanism.
 
-## 分工
+## Responsibilities
 
-- 引擎保持通用：只认识 stage / task / check / completed / failed，从不认识「恢复」。
-  `recovery` 对引擎是透传的任务属性。
-- recovery 配置从 YAML 到 runner 全程只读。剩余预算是配置之外的每 attempt 执行状态
-  （`recoveryRemaining`），不是被改写的配置副本。
-- 匹配发生在 runner executor：显式 `when` 匹配结果上下文的任意 path；最后一个省略
-  `when` 的 handler 只匹配存在 error 的结果；Action 对恢复零感知。
-- 恢复任务是真实的 Workflow 任务，出现在 graph、时间线与状态中。
-- 触发恢复的任务以 completed 结束：它产出了后续工作。
-- Runner 构造 handler task 时只展开绑定触发 attempt 的 `${{ failure.* }}`；其它表达式保留
-  在新 task declaration 中，见 [`task-dispatch.md`](task-dispatch.md)。
-- `retrySelf` 必须复制触发 attempt 的原始 dispatch 声明，而不是本次 Action 的 rendered input。
-  `with`、task-level `expect`、artifacts、`setVars`、recovery 配置和任务身份都要深拷贝；只把
-  `recoveryRemaining` 作为独立状态减一。这样后续 dispatch 仍可用自己的变量快照重新展开
-  `${{ vars.* }}`，而触发 attempt 已经得到的值不会固化进 retry。
-- 新 attempt 会用自己的 context snapshot 重新展开 declaration。
+- The engine remains generic. It understands only Stage, task, check, completed, and failed; it
+  never understands recovery. To the engine, `recovery` is an opaque task attribute.
+- Recovery configuration remains read-only from YAML through Runner. Remaining budget is
+  per-attempt execution state outside configuration, stored in `recoveryRemaining`, not a modified
+  copy of the configuration.
+- Matching happens in the Runner executor. An explicit `when` matches any path in result context;
+  the final handler without `when` matches only when an error exists. An Action has no recovery
+  awareness.
+- Recovery tasks are real Workflow tasks and appear in the graph, timeline, and state.
+- The task that triggers recovery ends as completed because it produced later work.
+- When Runner constructs a handler task, it expands only `${{ failure.* }}` references bound to the
+  triggering attempt. Other expressions remain in the new task declaration; see
+  [`task-dispatch.md`](task-dispatch.md).
+- `retrySelf` must copy the triggering attempt's original dispatch declaration, not this Action
+  execution's rendered input. It deep-copies `with`, task-level `expect`, artifacts, `setVars`,
+  recovery configuration, and task identity. Only `recoveryRemaining` is decremented as separate
+  state. A later dispatch can therefore expand `${{ vars.* }}` against its own Variable snapshot,
+  rather than freezing values resolved by the triggering attempt into the retry.
+- A new attempt expands its declaration against its own context snapshot.
 
-| 层 | 职责 |
+| Layer | Responsibility |
 |---|---|
-| workflow YAML | 声明 `budget` 与 `handlers`（可选 `when`、`tasks`、`retrySelf`） |
-| Action | 返回 output 或 error，零恢复感知 |
-| runner executor | 先匹配显式 `when`，再为存在 error 的结果匹配默认 handler；显式 `null` 取满额 `budget`，数值 clamp 到声明范围；从原始 declaration 构造 `addTasks` |
-| 引擎 | 机械插入 `addTasks`；把 `recoveryRemaining` 当不透明的每 attempt 状态透传；人工 retry 只从定义性字段重建 |
+| Workflow YAML | Declares `budget` and `handlers`, with optional `when`, `tasks`, and `retrySelf` |
+| Action | Returns output or an error and has no recovery awareness |
+| Runner executor | Matches explicit `when` first, then the default handler when an error exists; maps explicit `null` to the full `budget`, clamps a numeric value to the declared range, and builds `addTasks` from the original declaration |
+| Engine | Mechanically inserts `addTasks`, passes `recoveryRemaining` as opaque per-attempt state, and reconstructs a manual retry only from definitional fields |
 
-## 剩余预算（recoveryRemaining）
+## Remaining Budget (`recoveryRemaining`)
 
-`recovery` 配置全程只读。「本轮还剩几次」是执行状态，放在配置之外的独立字段
-`recoveryRemaining` 里随任务流转：
+The `recovery` configuration remains read-only. The number of recoveries left in the current round
+is execution state outside configuration and flows with the task in `recoveryRemaining`:
 
+```text diagram
+YAML budget: 2 --> TaskRun ------------> WorkItem / dispatch --> Runner tryRecovery
+                   Recovery (read-only)                          null -> budget
+                   RecoveryRemaining                                  |
+                         ^                                             | match and remaining > 0
+                         |                                             |
+                         +-- RuntimeTaskInput <-- addTasks <------------+
+                             retrySelf: original declaration,
+                             recoveryRemaining = remaining - 1
 ```
-YAML budget:2 ──► TaskRun ──────────► WorkItem / dispatch ──► runner tryRecovery
-                  Recovery(只读)                              null -> budget
-                  RecoveryRemaining                                 │ 匹配且 remaining > 0
-                        ▲                                           │
-                        └── RuntimeTaskInput ◄────── addTasks ◄─────┘
-                            (retrySelf: declaration 原样, recoveryRemaining = remaining - 1)
-```
 
-- 读写权威只有一个：runner `tryRecovery`。引擎对该字段只透传，从不读值。
-- 显式 `null` 表示新一轮，取满额 `budget`；字段缺失视为畸形传输，按普通结果处理，
-  不得重新打开预算。
-- 引擎侧 `recoveryRemaining` 不属于任务定义：摄入 addTask 时作为旁路状态传给
-  `TaskRun`（同 `causedByFeedbackId` 先例），不进 `TaskDefinition`。
+- Runner `tryRecovery` is the sole read/write authority. The engine only passes this field through
+  and never reads its value.
+- Explicit `null` starts a new round and receives the full `budget`. An absent field is malformed
+  transport and receives ordinary-result handling; it must not reopen the budget.
+- On the engine side, `recoveryRemaining` is not part of a task definition. During addTask intake,
+  it passes to `TaskRun` as side-channel state, following the `causedByFeedbackId` precedent, and
+  never enters `TaskDefinition`.
 
-## 人工 retry 开启新一轮
+## Manual Retry Opens a New Round
 
-不变量：**budget 界定一轮连续自动恢复；人工 retry 开启新一轮，拿满额预算。**
+Invariant: **a budget bounds one continuous round of automatic recovery; a manual retry opens a
+new round with the full budget.**
 
-机制：人工 retry（`RetryFailedTask`）经 `TaskRun.ToDefinition()` 只从原始 declaration
-字段重建新 attempt。哪些字段构成「定义」在 `ToDefinition()` 一处收敛；其中的 `with` /
-`expect` 必须仍包含 Workflow 表达式，不能是上一次 attempt 的 rendered input。执行状态
-（`recoveryRemaining`）从结构上进不了重建路径。新 attempt 到 runner 时
-`recoveryRemaining` 显式为 `null`，runner 按声明的 `budget` 初始化本轮，自动恢复循环
-重新可用。失败的 attempt 及其已消耗的数值状态保持不变。
+A manual retry reconstructs the Task from its original declaration rather than from the previous
+attempt's resolved input. This boundary lets corrected Variables and Prompts take effect without
+turning execution output into future configuration. `with` and `expect` therefore remain Workflow
+expressions, while execution state such as `recoveryRemaining` cannot enter the new declaration.
+The new attempt starts with `recoveryRemaining = null`, so Runner opens a fresh round from the
+declared `budget`. The failed attempt and its consumed budget remain unchanged for audit.
 
-## Stage 重跑不复用 TaskRun 身份
+## A Stage Rerun Does Not Reuse TaskRun Identity
 
-`TaskRun` 的执行身份由 definition id、Stage attempt 与 task attempt 组成。首个 Stage
-attempt 保持现有的 `{definitionId}.{taskAttempt}` 格式；从第二次起使用
-`{definitionId}.s{stageAttempt}.{taskAttempt}`。例如首次 build task 是 `T-001.1`；同一
-Stage 内人工 retry 是 `T-001.2`；重跑 build 后的首次 task 是 `T-001.s2.1`。
+A `TaskRun` execution identity consists of Definition ID, Stage attempt, and task attempt. The first
+Stage attempt retains the existing `{definitionId}.{taskAttempt}` format. Starting with the second,
+it uses `{definitionId}.s{stageAttempt}.{taskAttempt}`. For example, the first build task is
+`T-001.1`, a manual retry in the same Stage is `T-001.2`, and the first task after rerunning build is
+`T-001.s2.1`.
 
-`rerun-from-stage` 丢弃旧 Stage 的可见 task 历史，但不能让 Stage attempt 倒退或让新的
-TaskRun 复用旧 identity。这样默认以 Work ID 命名的 Workflow AgentSession 总是一个新的
-逻辑 Session，不会继承已失效 attempt 的 physical binding 或工作目录。显式 `session`
-名称仍由 workflow 定义负责其复用语义。
+`rerun-from-stage` discards visible task history from the old Stage, but it cannot decrease the
+Stage attempt or let a new TaskRun reuse an old identity. A Workflow AgentSession whose default
+name is the Work ID is therefore always a new logical Session and cannot inherit the invalidated
+attempt's physical binding or working directory. An explicit `session` name continues to define
+its own reuse semantics through the Workflow Definition.
 
-## Runtime binding 修复不属于 Workflow recovery
+## Runtime Binding Repair Is Not Workflow Recovery
 
-AgentSession 在提交新的独立输入前发现当前 Runtime Session 已明确不存在时，按
-[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 修复 physical binding。
-这发生在 Action 形成成功或失败结果之前：修复成功时原 TaskRun attempt 继续，不创建
-recovery task、不递减 `recoveryRemaining`，也不需要人工 Retry；修复失败时 Action 才把
-规范化错误交给本文件定义的 recovery 与人工 retry 语义处理。
+Before submitting new independent input, AgentSession can determine that its current Runtime
+Session is confirmed missing and repair the physical binding under
+[`agent-execution.md`](../agent-execution.md#runtime-session-missing-recovery). This happens before
+the Action produces either a successful or failed result. When repair succeeds, the original
+TaskRun attempt continues without creating a recovery task, decrementing `recoveryRemaining`, or
+requiring manual Retry. Only if repair fails does the Action pass a normalized error to the recovery
+and manual retry semantics in this document.
 
-Runtime binding 修复不得由 WorkflowRun 决策或实现。Runner 报告 Runtime 事实，Session
-裁决并持久化 binding；Workflow 只解释最终 Action result。
+WorkflowRun must neither decide nor implement Runtime binding repair. Runner reports Runtime facts,
+Session arbitrates and persists the binding, and Workflow interprets only the final Action result.
 
-## Runner executor 流程
+## Runner Executor Flow
 
-```
+```text literal
 result = action.execute()
 context = { output: parseJSON(result.output), error: result.error }
 if recoveryRemaining is absent:
@@ -114,13 +130,15 @@ if result.error is absent:
 return failed
 ```
 
-默认 handler 最多一个且必须最后，因而不会遮蔽显式匹配。它在 executor 已形成失败结果后
-匹配，所以工作区、分支等 Action 之后的最终检查失败也能走同一条恢复路径。负值 clamp 到
-0，超过声明的值 clamp 到声明值。命中 handler 消耗一次额度；未命中不消耗。声明永不改写。
+At most one default handler exists and it must be last, so it cannot shadow an explicit match. It
+matches after the executor has formed the final failed result, which lets the same recovery path
+handle failures found after an Action, such as a dirty workspace or invalid branch. A negative
+value clamps to 0 and a value above the declared limit clamps to that limit. A matched handler
+consumes one unit of budget; an unmatched result consumes none. The declaration is never modified.
 
-Recovery handler 模板可读取 `${{ failure.output.* }}` 和 `${{ failure.error.code }}` /
-`${{ failure.error.message }}`。后者只用于把可操作错误带给恢复任务；handler 不得根据
-message 分支。
+A recovery handler template can read `${{ failure.output.* }}`, `${{ failure.error.code }}`, and
+`${{ failure.error.message }}`. The message exists only to carry an actionable error into a
+recovery task. A handler must not branch on the message.
 
 ## WorkResult
 
@@ -134,43 +152,47 @@ message 分支。
 }
 ```
 
-- `completed` + `addTasks`：引擎把任务插入当前 stage。
-- `completed`（无 `addTasks`）：正常完成。
-- `failed`：workflow 失败。
+- `completed` with `addTasks`: the engine inserts the tasks into the current Stage.
+- `completed` without `addTasks`: normal completion.
+- `failed`: Workflow fails.
 
-## 引擎侧行为
+## Engine Behavior
 
-```
+```text diagram
 result.completed
-  → mark task completed
-  → addTasks non-empty? → AddRuntimeTaskAttempts
-  → Advance
+  -> mark task completed
+  -> addTasks non-empty? -> AddRuntimeTaskAttempts
+  -> Advance
 
 result.failed
-  → mark task failed → stage failed → workflow failed
+  -> mark task failed -> Stage failed -> Workflow failed
 ```
 
 ## Status
 
-已实装（issue #465）：`retrySelf` 与人工 retry 都从原始 declaration 重建——
-`with` / `expect` 保留 Workflow 表达式，新 attempt 用自己的 context snapshot 重新
-展开；`recoveryRemaining` 作为独立执行状态从结构上进不了重建路径。
+Implemented in issue #465: both `retrySelf` and manual retry reconstruct the original declaration.
+`with` and `expect` retain Workflow expressions, a new attempt expands them against its own context
+snapshot, and `recoveryRemaining` is separate execution state that cannot enter reconstruction by
+construction.
 
-## 一次性 task 注入与 Profile 驱动 recovery 是同一机制
+## One-Off Task Injection Uses the Same Recovery Mechanism as a Profile
 
-API 触发的 rebase 任务携带一份 `RecoveryDefinition`，交给引擎按本文档的语义执行——
-budget、handlers、`when` 匹配、`retrySelf`、剩余预算的人工 retry 行为。这与 Profile
-内 inline `task.recovery` 没有行为或语义差别，区别只在于触发点（API 路由 vs. runner
-executor）。同一个机制就够了：API 注入的 recovery 仍是 `RecoveryDefinition`、仍由
-runner 执行匹配与剩余预算递减、`addTasks` 仍走引擎插入路径。
+An API-triggered rebase task carries a `RecoveryDefinition` and submits it to the engine under the
+semantics in this document: budget, handlers, `when` matching, `retrySelf`, and the remaining-budget
+behavior of manual retry. It has no behavioral or semantic difference from inline `task.recovery`
+in a Profile; only the trigger differs, API route versus Runner executor. One mechanism is enough.
+API-injected recovery remains a `RecoveryDefinition`, Runner still performs matching and decrements
+remaining budget, and `addTasks` still follows the engine insertion path.
 
-这就排斥为"一次性注入"另立一个表示（不同的 budget 语义、不同的 handler 匹配、不同的
-名空间）——它只会复制这里定义的全部字段而无任何新增需求。
+This rules out a separate representation for one-off injection with different budget semantics,
+handler matching, or namespaces. Such a representation would duplicate every field defined here
+without adding a requirement.
 
-## `recoveries` 顶层键：命名 recovery 模板
+## Top-Level `recoveries`: Named Recovery Templates
 
-一次性注入按名字引用 Profile 中的 recovery 定义，避免把 recovery 内容硬编码进 API 路由。
-Workflow YAML 的顶层 `recoveries` 是命名 recovery 模板的家：
+One-off injection references a named recovery Definition from the Profile, rather than hard-coding
+recovery content in an API route. The top-level `recoveries` key in Workflow YAML owns named
+recovery templates:
 
 ```yaml
 recoveries:
@@ -189,14 +211,13 @@ recoveries:
         retrySelf: false
 ```
 
-- 入口：WorkflowDefinition 的 `recoveries` 字段是 `IReadOnlyDictionary<string, RecoveryDefinition>?`。
-  解析走 `WorkflowDefinitionParser` 复用的 `BuildRecovery` 逻辑；序列化由 `WorkflowYamlSerializer`
-  完整 round-trip。
-- 引用：API 路由（rebase 等）通过 `WorkflowQuerier.GetRecoveryAsync(workflowRunId, "rebase-conflicts")`
-  从 run 绑定的 Profile 取出。`BuildRebaseRecovery()` 形式的 C# 拼装已删除。
-- 单一作者：recovery 的 `uses`、prompt 引用、budget、handler 顺序全在 workflow 内容里，
-  C# 路由只挑名字。这样 profile 升级一处，rebase 行为同步变化；再不会因为 C# 复制版本
-  漂移而走错 prompt 模板。
-- 命名约定：模板名小写、`-` 分隔（`rebase-conflicts`、`plan-conflicts` 等）。Builtin
-  YAML 各自声明需要的模板；cross-profile 共享留待第三个 profile 或第二个共享模板出现再
-  抽象成独立文件。
+- The `recoveries` map is part of WorkflowDefinition and round-trips with the rest of the Profile.
+- A recovery trigger selects a named template from the Profile bound to the run. It does not build a
+  second recovery definition in application code.
+- Workflow content is the single author of recovery `uses`, Prompt references, budget, and handler
+  order. Keeping application code limited to name selection lets a Profile upgrade change behavior
+  in one place and prevents a copied recovery path from drifting to the wrong Prompt.
+- Naming convention: template names are lowercase and hyphen-separated, such as
+  `rebase-conflicts` and `plan-conflicts`. Each built-in YAML file declares the templates it needs.
+  Extract cross-Profile sharing into a separate file only after a third Profile or a second shared
+  template appears.

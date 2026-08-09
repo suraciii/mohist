@@ -1,219 +1,270 @@
-# 用 Epic 规划
+# Planning with Epics
 
-Epic 是把零散 issue 组织成产品目标的工具，也是给生产线持续供料的单位。它决定哪些 issue 属于同一个目标，以及当前哪个 issue 可以交给 workflow 推进。
+An Epic organizes separate Issues around one product goal and continuously
+feeds ready work into the production line. It defines which Issues belong to
+the goal and which Issue can enter a Workflow next.
 
-## 什么时候用 Epic
+## When to Use an Epic
 
-**用**：
+Use an Epic when:
 
-- 一个产品目标需要 3+ 个 issue 才能完成（如"加上完整登录系统"）
-- 你想做 roadmap 规划，知道下个月做哪几件事
-- 想看一个目标的整体进度，而不是只看单个 issue
-- 想让一个目标下的 ready issue 自动接续推进
+- A product goal needs at least three Issues, such as a complete authentication
+  system.
+- You want to plan a roadmap and identify the goals for a future period.
+- You need progress for the complete goal instead of only individual Issues.
+- Ready Issues under one goal should advance automatically in sequence.
 
-**不用**：
+Do not use an Epic for:
 
-- 单个独立的小改动
-- 还没想清楚的目标（先 backlog 里堆着）
+- A small, independent change.
+- A goal that is not understood yet. Keep those ideas in the backlog first.
 
-## 创建 Epic
+## Create an Epic
 
-### CLI（推荐）
+### CLI
 
 ```bash
 mo epic create "Add user authentication" \
-  --description "完整登录系统：注册、登录、密码重置、session 管理" \
+  --description "Complete authentication: registration, login, password reset, and session management" \
   --priority p1 \
   --project <project-name-or-id>
 ```
 
-`--description` / `-d` 接收长 markdown（推荐先写进文件再传入）；`--priority` 用 `p0`–`p4`。
+`--description` or `-d` accepts long Markdown. Write it in a file first when
+practical. `--priority` accepts `p0` through `p4`.
 
 ### Web UI
 
-Epics 页（顶部导航）→ **New Epic**。
+On the Epics page in the top navigation, select **New Epic**.
 
-### Epic 的属性
+### Epic Properties
 
-| 属性 | 含义 |
+| Property | Meaning |
 |---|---|
-| 标题 | 短标题 |
-| 描述 | 长描述。建议写：Goal、Background、Non-goals、包含哪些 issue |
-| 优先级 | p0–p4 |
-| 状态 | idle / running / paused / done / closed（由生命周期管理） |
+| Title | A short title |
+| Description | A long description. Include the Goal, Background, Non-goals, and member Issues |
+| Priority | `p0` through `p4` |
+| Status | `idle`, `running`, `paused`, `done`, or `closed`, controlled by the lifecycle |
 
-Epic 和 Issue 都用 Project 内的编号作为永久身份。命令、页面和事件使用同一个编号，
-不再要求用户在编号之外理解另一套 id。
+Both Epics and Issues use their Project-scoped number as their permanent
+identity. Commands, pages, and events use that same number. Users do not need
+to understand another ID system.
 
-**好的 epic 描述示例**：
+The following is an effective Epic description:
 
 ```markdown
 ## Goal
-让用户能注册、登录、找回密码。
+Users can register, sign in, and recover a password.
 
 ## Background
-产品当前无身份系统，所有 API 都是公开的。需要先加身份才能做个性化功能。
+The product has no identity system, and every API is public. Identity is needed
+before personalized features can be added.
 
 ## Non-goals
-- 不做 OAuth（先用 email/password）
-- 不做 RBAC（先单一 admin 角色）
-- 不做 2FA
+- Do not add OAuth. Use email and password first.
+- Do not add RBAC. Use one admin role first.
+- Do not add 2FA.
 
-## 包含
-- 注册（email + password）
-- 登录 / 登出
-- 密码重置（邮件链接）
-- Session 管理（JWT）
-- 保护 API 中间件
+## Scope
+- Registration with email and password.
+- Sign in and sign out.
+- Password reset through an email link.
+- Session management with JWT.
+- Middleware that protects APIs.
 ```
 
-## 把 Issue 关联到 Epic
+## Link an Issue to an Epic
 
-### CLI（推荐）
+### CLI
 
 ```bash
 mo epic add <epic-number> <issue-number>
 mo epic remove <epic-number> <issue-number>
 ```
 
-关联会把 Issue 的当前 Epic 改为指定 Epic；若它原本属于另一个 Epic，则直接完成迁移。
-取消关联只在 Issue 当前属于指定 Epic 时生效。重复执行同一操作是安全的。
+Adding a link changes the Issue's current Epic to the selected Epic. If the
+Issue belonged to another Epic, this operation moves it directly. Removing the
+link has an effect only when the Issue currently belongs to the selected Epic.
+Repeating the same operation is safe.
 
 ### Web UI
 
-issue 详情页 → **Edit** → 选 Epic；或在 Epic 详情页的 Linked Issues 列表里添加 / 移除。
+On the Issue details page, select **Edit** and choose an Epic. You can also add
+or remove an Issue in the Linked Issues section of the Epic details page.
 
-一个 Issue 同一时刻最多属于一个 Epic。这个归属是 Issue 自身的一部分；Epic 展示的成员、
-进度和下一个待推进 Issue 都由各 Issue 的当前归属汇总得出。
+An Issue must not belong to more than one Epic at a time. This membership is part of
+the Issue. The Epic derives its members, progress, and next candidate from the
+current membership of its Issues.
 
-`closed` Epic 拒绝新关联，必须先 Reopen。向 `done` Epic 关联 open Issue 时，Epic 会
-恢复为 `running`；关联终态 Issue 不会唤醒 Epic。
+A `closed` Epic rejects new links and must be reopened first. Linking an open
+Issue to a `done` Epic changes the Epic to `running`. Linking a terminal Issue
+does not wake the Epic.
 
-## 查看 Epic
+## View an Epic
 
 ### Web UI
 
-- **Epics 列表页**：所有 epic 概览，按状态分组，显示每个 epic 的当前状态和下一个待推进 issue
-- **Epic 详情页**：epic 信息 + 关联的 issue 列表 + 进度（已交付数 / 总数）+ 当前状态与下一步
+- The **Epics list page** groups all Epics by status and shows the current
+  status and next candidate for each Epic.
+- The **Epic details page** shows the Epic, linked Issues, delivered and total
+  progress, current status, and next action.
 
 ### CLI
 
 ```bash
-# 列出所有 epic
+# List all Epics
 mo epic list --project <project>
 
-# 显示详情（使用 Project 内的 Epic 编号）
+# Show details by the Project-scoped Epic number
 mo epic view <epic-number> --project <project>
 ```
 
-详情（Web UI 详情页或 `mo epic view`）会展示 Epic 的进度：已交付了几个 issue、总共几个、几个被 blocked、几个正在进行；下一个待推进的 issue 是哪一个、当前为什么没有推进；以及是否已经满足标记完成的条件。
+The details view in the Web UI or `mo epic view` shows how many Issues are
+delivered, total, blocked, and in progress. It also identifies the next Issue,
+explains why no Issue is advancing, and reports whether the Epic can be marked
+Done.
 
-## Epic 的生命周期
+## Epic Lifecycle
 
-Epic 有五个生命周期状态，由用户操作和自动推进共同驱动。
+An Epic has five lifecycle states. User operations and automatic advancement
+both drive this state.
 
-| 状态 | 含义 | 进入条件 |
+| State | Meaning | Entry Condition |
 |---|---|---|
-| `idle` | 已创建，但未开始自动推进 | 创建后默认 |
-| `running` | 正在自动推进 linked issues | 从 `idle` 执行 Start |
-| `paused` | 暂停自动推进，当前 in-progress issue 不中断 | 从 `running` 执行 Pause |
-| `done` | 当前已完成（没有 open linked issues） | 在非 `paused`、非 `closed` 状态下执行 Mark Done，且所有 linked issues 都已进入终态；或系统重新计算进度时发现符合条件的非 `paused`、非 `closed` Epic 已没有 open linked issues，自动转入 `done` |
-| `closed` | 关闭（不再继续） | 从 `idle`、`running` 或 `paused` 执行 Close |
+| `idle` | Created but not advancing automatically | The initial state |
+| `running` | Advancing linked Issues automatically | Start from `idle` |
+| `paused` | Future advancement is paused, but the current in-progress Issue continues | Pause from `running` |
+| `done` | Currently complete, with no open linked Issues | Mark Done while not `paused` or `closed` and all linked Issues are terminal; or automatic progress recalculation finds the same condition |
+| `closed` | Closed and will not continue | Close from `idle`, `running`, or `paused` |
 
-- **新建 Epic 默认为 `idle`**，不会自动开始推进。必须显式 Start 才会进入 `running`。
-- **`done` 和 `closed` 是完成状态**，只有 Reopen 能显式恢复为 `idle`；此外，`done` 在关联新的 open Issue 后会自动恢复为 `running`。`closed` 不接受新关联。
+- A new Epic starts in `idle` and does not advance automatically. You must
+  explicitly Start it to enter `running`.
+- `done` and `closed` are completion states. Reopen explicitly restores either
+  state to `idle`. In addition, linking a new open Issue to a `done` Epic
+  automatically restores it to `running`. A `closed` Epic does not accept new
+  links.
 
-### Start / Pause / Resume
+### Start, Pause, and Resume
 
-| 操作 | CLI | Web UI | 语义 |
+| Operation | CLI | Web UI | Semantics |
 |---|---|---|---|
-| Start | `mo epic start <number>` | **Start Epic** | 将 idle → running，并尝试推进第一个 startable linked issue |
-| Pause | `mo epic pause <number>` | **Pause** | 将 running → paused，停止未来推进，不中断当前 in-progress issue |
-| Resume | `mo epic resume <number>` | **Resume** | 将 paused → running，重新评估 readiness 并推进 |
+| Start | `mo epic start <number>` | **Start Epic** | Change `idle` to `running` and try to start the first startable linked Issue |
+| Pause | `mo epic pause <number>` | **Pause** | Change `running` to `paused`; stop future advancement without interrupting the current in-progress Issue |
+| Resume | `mo epic resume <number>` | **Resume** | Change `paused` to `running`; evaluate readiness again and advance |
 
-**重复执行是安全的**：对已处在目标状态的 Epic 重复执行对应操作不报错、无副作用（例如对已是 `running` 的 epic 执行 Start）；在其他不匹配的状态下执行会被拒绝并提示当前状态。
+Repeating an operation when the Epic is already in its target state is safe and
+has no side effects. For example, Start succeeds for an Epic that is already
+`running`. Mohist rejects an operation from any other incompatible state and
+reports the current state.
 
 ```bash
-# Start（idle → running，同时尝试启动第一个 linked issue）
+# Start: idle -> running, then try to start the first linked Issue.
 mo epic start 12
 
-# Pause（running → paused，不中断当前 issue）
+# Pause: running -> paused without interrupting the current Issue.
 mo epic pause 12
 
-# Resume（paused → running，重新开始推进）
+# Resume: paused -> running and resume advancement.
 mo epic resume 12
 ```
 
-### 自动推进与 running-but-idle
+### Automatic Advancement and Running-but-Idle
 
-`running` 的 Epic 会在当前 in-progress linked issue 到达终态（`done` / `cancelled`）后，**自动推进到下一个 startable issue**。`idle` 和 `paused` 状态的 Epic **不会自动推进**。
+When the current in-progress linked Issue reaches `done` or `cancelled`, a
+`running` Epic automatically advances to the next startable Issue. An Epic in
+`idle` or `paused` does not advance automatically.
 
-这不是批量启动。Epic 每次把当前可推进的 issue 交给 workflow，避免一个目标下的工作全靠 owner 手动接力。
+This behavior does not start all Issues at once. The Epic sends one ready Issue
+at a time to its Workflow so that the owner does not have to advance each one
+manually.
 
-当一个 `running` 的 Epic 仍有 open linked issue、但没有可推进的 next startable issue 时，它处于 **running-but-idle** 的可观察情况。此时 Epic 仍然是 `running` 状态（**不是第六个状态**），Epic 详情（Web UI 详情页或 `mo epic view`）会解释当前为什么没有推进（例如正在等待某个 in-progress issue 完成、下一个 issue 被 blocked 或依赖未就绪）。
+A `running` Epic with open linked Issues but no next startable Issue is in the
+observable **running-but-idle** condition. Its state remains `running`; this is
+not a sixth state. The Epic details in the Web UI or `mo epic view` explain why
+nothing is advancing. For example, an in-progress Issue might still be running,
+or the next Issue might be blocked or have an unmet prerequisite.
 
-没有 linked issues 时，详情页会提示这是一个空 Epic；所有 linked issues 都已进入终态时，详情会显示已可标记完成，并可能由系统自动转为 `done`。
+When there are no linked Issues, the details identify an empty Epic. When all
+linked Issues are terminal, the details indicate that the Epic can be marked
+Done, and the system can change it to `done` automatically.
 
-#### 何时不会推进
+#### Conditions That Prevent Advancement
 
-- Epic 不是 `running` 状态
-- 没有 linked issues
-- 所有 linked issues 已是终态
-- 下一个 issue 不满足 startable 条件（例如被 blocked 或依赖未就绪）
+- The Epic is not `running`.
+- The Epic has no linked Issues.
+- All linked Issues are terminal.
+- The next Issue is not startable because it is blocked or has an unmet
+  prerequisite.
 
-### Mark done / Close
+### Mark Done, Close, and Reopen
 
 ```bash
-# Mark done（前置条件：非 paused/closed，且没有 open linked issues）
+# Mark Done. The Epic must not be paused or closed, and it must have no open linked Issues.
 mo epic done <epic-number>
 
-# Close（关闭，不再继续）
+# Close and stop future work.
 mo epic close <epic-number>
 
-# Reopen（done / closed → idle）
+# Reopen: done or closed -> idle.
 mo epic reopen <epic-number>
 ```
 
-Web UI 上对应 Epic 详情页的 **Mark Done** / **Close Epic** / **Reopen** 按钮。
+The Epic details page provides **Mark Done**, **Close Epic**, and **Reopen**.
 
-除了手动 Mark Done，系统在重新计算 linked issues 终态后，也会把符合条件的非 `paused`、非 `closed` Epic 自动转为 `done`。这表示你观察到的完成结果，不是一个需要额外触发的用户操作。
+In addition to manual Mark Done, the system changes an eligible Epic that is
+not `paused` or `closed` to `done` when recalculation finds that all linked
+Issues are terminal. The observed completion does not require another user
+operation.
 
-进度中的已交付数只统计 done 的 issue；cancelled issue 是终态、满足完成条件，但不计入已交付。
+Delivered progress counts only Issues in `done`. A `cancelled` Issue is terminal
+and satisfies the completion condition, but it does not count as delivered.
 
-## 推荐工作流
+## Recommended Workflow
 
-1. 建 Epic，描述里写 Goal / Background / Non-goals（粗略即可），默认 `idle`。
-2. 在 Epic 下逐步创建 / link issue，每个 issue 一个清晰可交付的功能点。
-3. `mo epic start` 开始自动推进；`pause` / `resume` 随时调整。
-4. 没有 open linked issues 时 `mo epic done`；要重新规划就 `reopen` 再 Start。
+1. Create an Epic with a Goal, Background, and Non-goals. It starts in `idle`.
+2. Create or link Issues over time. Give each Issue one clear deliverable.
+3. Run `mo epic start` to begin automatic advancement. Use `pause` and `resume`
+   as needed.
+4. Run `mo epic done` when no linked Issue remains open. Use `reopen` and Start
+   when the goal needs more work.
 
-## 和 workflow 的关系
+## Relationship to Workflows
 
-Epic 会**影响 linked issues 的推进**（决定何时自动启动下一个 issue），但**不改变每个 issue 自身 workflow 的执行规则**。
+An Epic affects when linked Issues advance. It does not change the execution
+rules of an individual Issue's Workflow.
 
-每个 linked issue 仍然走自己的 workflow（默认 `mohist/local`，或你 per-issue 指定）。Epic 决定的是"什么时候把下一个 issue 交给 workflow 去执行"，而不是"workflow 里有哪些步骤"。
+Each linked Issue still uses its own Workflow, such as the default
+`mohist/local` or a per-Issue selection. The Epic decides when to send the next
+Issue to a Workflow. It does not define the Steps inside that Workflow.
 
-## 和子 issue 的关系
+## Relationship to Sub-Issues
 
-Epic 与复合 issue（[复合 Issue 与子 Issue](sub-issues.md)）是两个正交的组织轴：Epic 组织**产品目标下的多个交付物**，复合 issue 是**一份工作的内部分工**；何时用哪个由 sub-issues 篇定义。边界规则：
+Epics and composite Issues are independent organization axes. See
+[Composite Issues and Sub-issues](sub-issues.md). An Epic organizes multiple
+deliverables under a product goal. A composite Issue divides the internal work
+for one deliverable. The boundary rules are:
 
-- **子 issue 不能 link 到 Epic**，Epic 的自动推进永远不会触碰子 issue。
-- **父 issue 是普通的 Epic 成员**：轮到它时 Epic 启动它（父 issue 的启动即推进其子 issue），它 done 时计入 Epic 进度。Epic 不感知复合结构，本节不改变 Epic 的任何行为。
+- A child Issue must not link to an Epic. Epic advancement never operates on a
+  child Issue.
+- A parent Issue is a normal Epic member. When selected, the Epic starts the
+  parent, which advances its children. When the parent reaches Done, it counts
+  toward Epic progress. The Epic does not inspect the composite structure, and
+  these rules do not otherwise change Epic behavior.
 
-## 实装差距
+## Status
 
-当前版本的部分 Epic 命令仍接受内部 id，CLI 尚未提供 Reopen，并且关联关系尚未完全
-收敛为 Issue 的单一归属。目标模型由 issue #412 推进；正文描述的是完成后的产品行为。
+Epic commands use the Project-scoped Epic number, including `reopen`. Each
+Issue owns its current Epic membership, while Epic reads derive progress and
+the next startable Issue from current Issue state. This keeps membership under
+one authority and avoids a second list that can drift.
 
-## 当前限制
+## Current Limitations
 
-Roadmap（已知不足）：
-
-- 没有 roadmap 时间线视图（只有列表）
-- Epic 不能嵌套
-- 没有 epic 间的依赖图
-- 不能批量启动 epic 内所有 backlog issue
+- There is no roadmap timeline view, only a list.
+- Epics cannot be nested.
+- There is no dependency graph between Epics.
+- Mohist cannot start every backlog Issue in an Epic as one batch.
 
 ---
 
-对应源码：`packages/server/src/Mohist.Server/Epic/`、`Api/EpicRoutes.cs`。
+Implementation source: `packages/server/src/Mohist.Server/Epic/` and `Api/EpicRoutes.cs`.

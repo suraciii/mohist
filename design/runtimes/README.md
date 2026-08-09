@@ -1,23 +1,27 @@
-# Runtime 集成
+# Runtime Integrations
 
-Runtime 集成把 Mohist 已经组装好的执行输入与 Session 请求适配到外部执行后端。它是
-Workflow Action adapter 与 AgentJob executor 共享的基础能力；与 Agent / Session 的
-所有权边界与不变量见 [`../agent-execution.md`](../agent-execution.md)。
+A Runtime integration adapts execution input and Session requests assembled by
+Mohist to an external execution backend. Workflow Action adapters and AgentJob
+executors share this capability. See
+[`../agent-execution.md`](../agent-execution.md) for Agent and Session ownership
+boundaries and invariants.
 
-本目录负责各 Runtime 特有的进程生命周期、SDK / protocol 映射、物理 Session 行为、
-事件、状态核对和兼容性决策。
+This directory owns Runtime-specific process lifecycle, SDK or protocol
+mapping, physical Session behavior, events, state verification, and
+compatibility decisions.
 
-正文统一使用中文；领域标识、字段名、API 和代码符号保留原名。
+- [OpenCode](opencode.md): `OpenCodeRuntime`, SDK selection, physical Session
+  lifecycle, Prompt execution, and Session commands.
+- [Pi](pi.md): `PiRuntime`, in-process SDK integration, physical Session
+  lifecycle, Prompt execution, and Session commands. Pi is an independent peer
+  module, not an OpenCode extension.
 
-- [OpenCode](opencode.md) —— `OpenCodeRuntime`、SDK 选择、物理 Session 生命周期、
-  Prompt 执行与 Session 命令。
-- [Pi](pi.md) —— `PiRuntime`、进程内 SDK 接入、物理 Session 生命周期、Prompt 执行与
-  Session 命令；与 OpenCode 平行的独立深模块。
+Related boundaries:
 
-相关边界：
+- [`../workflow/actions.md`](../workflow/actions.md) defines common Workflow
+  Action dispatch and input/output contracts.
+- [`../../docs/actions/`](../../docs/actions/README.md) defines user-facing
+  product contracts for each Action.
 
-- [`../workflow/actions.md`](../workflow/actions.md) 定义通用 Workflow Action dispatch
-  和输入输出契约。
-- [`../../docs/actions/`](../../docs/actions/README.md) 定义面向使用者的各 Action 产品契约。
-
-新增 Runtime 时为它增加独立文件；不为假想的共同点提前建立通用 Runtime 接口。
+Add one independent file for a new Runtime. Do not create a common Runtime
+interface in advance for hypothetical similarities.

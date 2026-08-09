@@ -1,149 +1,193 @@
-# 可观测性
+# Observability
 
-可观测性帮助发现和解释运行问题。它不是业务事实，也不参与业务决策。
+Observability helps find and explain runtime problems. It is not a business
+fact and does not participate in business decisions.
 
-## 边界
+## Boundary
 
-- 业务代码可以发送观测信号，但不能等待观测系统完成工作。
-- 采集、导出、查询和存储失败不改变业务结果。
-- 观测数据可以丢失。业务数据不能因保护观测数据而丢失。
-- 观测自己的请求和写入不得再次产生同类观测数据。
+- Business code can emit an observability signal but cannot wait for the
+  observability system to finish.
+- Collection, export, query, and storage failures do not change a business
+  result.
+- Observability data can be lost. Business data cannot be lost to protect it.
+- Requests and writes made by observability itself must not emit the same class
+  of signal recursively.
 
-## 信号分工
+## Signal Responsibilities
 
-指标负责发现问题。至少覆盖：
+Metrics find problems. At minimum, they cover:
 
-- 请求数量和耗时，按稳定的路由名称聚合；
-- 每次请求的数据库调用量和下游调用量；
-- 进程 CPU、内存和垃圾回收压力；
-- 收到、保存、过载拒绝和异常丢弃的观测数据量；
-- 观测存储的当前大小和增长速度。
+- Request count and duration, aggregated by stable route name.
+- Database and downstream call counts per request.
+- Process CPU, memory, and garbage-collection pressure.
+- Received, stored, overload-rejected, and unexpectedly dropped observability
+  data.
+- Current observability-store size and growth rate.
 
-Trace 负责解释单次操作。慢请求、失败请求和下游调用异常多的请求应能关联到完整
-Trace。日志负责记录离散事件，例如端口绑定失败、批次被拒绝、数据被丢弃和存储降级。
+Traces explain one operation. A slow request, failed request, or request with
+an unusual number of downstream calls must link to its complete Trace. Logs
+record discrete events such as port-binding failure, batch rejection, dropped
+data, and degraded storage.
 
-内置收集器不做 Tail Sampling。它完整保存已经接收的 Trace，并在达到保留预算时删除
-最旧 Trace。需要按失败、耗时或属性采样时，发送方应使用外部 OpenTelemetry Collector；
-Mohist 不重复实现有状态采样器。
+The built-in collector does not perform Tail Sampling. It stores complete
+received Traces and deletes the oldest complete Trace when the retention budget
+is reached. A sender that needs sampling by failure, duration, or attribute
+uses an external OpenTelemetry Collector. Mohist does not duplicate a stateful
+sampler.
 
-指标标签只使用稳定、数量有限的值。Project ID、Issue 编号、WorkflowRun ID、
-AgentSession ID 和原始 URL 不进入指标标签；需要时放入 Trace 或日志。
+Metric labels use only stable, bounded-cardinality values. Project ID, Issue
+number, WorkflowRun ID, AgentSession ID, and raw URL do not enter labels. Put
+them in a Trace or log when needed.
 
-Server 同时维护最近 5 分钟的有界诊断摘要，最多保留 10 条异常路由。摘要使用稳定
-路由名，显示请求量、耗时以及每次请求的数据库和下游调用量，并由 `mo otel status`
-读取。摘要不写入业务数据库，Server 重启后重新开始。
+The Server also maintains a bounded diagnostic summary for the latest five
+minutes, with at most ten anomalous routes. It uses stable route names and
+shows request count, duration, and database and downstream calls per request.
+`mo otel status` reads it. The summary is not written to the business database
+and starts over after a Server restart.
 
-## 日志
+## Logs
 
-日志的第一读者是 agent：行格式必须让 rg 等行工具零学习直接使用，同时被标准
-logfmt 解析器无歧义解析。人裸眼可读是第三目标，不与前两者冲突时尽力满足。
+An Agent is the primary log reader. A line format must work directly with tools
+such as `rg` without learned parsing and must also parse unambiguously with a
+standard logfmt parser. Human readability is the third goal and applies when it
+does not conflict with the first two.
 
-### 行契约
+### Line Contract
 
-日志格式是严格 logfmt（Go slog TextHandler 的文本格式）。一行一条记录，无例外。
+Logs use strict logfmt in the format of Go slog TextHandler. Every record
+occupies exactly one line.
 
-- 前导键固定顺序：`time`、`level`、`msg`；属性随后，`service`、`component` 在前，
-  领域键在后。
-- `time` 是 RFC3339 UTC、毫秒精度，如 `2025-01-15T10:30:45.123Z`。
-- `level` 取值为 `TRACE`、`DEBUG`、`INFO`、`WARN`、`ERROR`、`FATAL`。
-- `msg` 是人类可读短句，陈述发生了什么。
-- 值包含空格、`=`、引号或不可打印字符时加双引号，内部以 `\n`、`\"`、`\\` 转义；
-  数字、布尔和简单标识符使用裸值。
-- 换行只允许以 `\n` 转义形式出现在引号值内。异常的完整信息（类型、消息、堆栈）
-  放入 `exception` 键，保持单行。
-- 没有值的键直接省略。
+- Leading keys have fixed order: `time`, `level`, and `msg`. Attributes follow,
+  with `service` and `component` before domain keys.
+- `time` is RFC 3339 UTC with millisecond precision, such as
+  `2025-01-15T10:30:45.123Z`.
+- `level` is `TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, or `FATAL`.
+- `msg` is a short human-readable statement of what happened.
+- A value containing whitespace, `=`, a quote, or a non-printable character is
+  double-quoted and escapes content with `\n`, `\"`, and `\\`. Numbers,
+  Booleans, and simple identifiers remain bare.
+- A newline appears only as escaped `\n` inside a quoted value. Complete
+  exception information, including type, message, and stack, goes in the
+  `exception` key and remains on one line.
+- Omit a key that has no value.
 
 ```
 time=2025-01-15T10:30:45.123Z level=INFO msg="work claimed" service=server component=dispatch work=w_abc run=r_123 issue=468
 time=2025-01-15T10:30:46.567Z level=ERROR msg="report failed" service=runner component=report work=w_abc attempt=3 exception="HttpRequestException: connection refused\n   at RunnerClient.Report(...)"
 ```
 
-### 字段词汇
+### Field Vocabulary
 
-- 领域键是小写单词：`issue`、`run`、`work`、`session`、`job`、`runner`、`attempt`、
-  `path`、`reason`。同一含义在所有进程使用同一个键名。
-- 日志模板参数（如 `LogWarning(ex, "report failed for {WorkId}", id)` 中的
-  `WorkId`）必须提取为独立键，不得只留在 `msg` 插值文本里。
-- `component` 是短词（如 `dispatch`、`cleanup`），从日志 category 投影；不使用完整
-  类名。投影规则：取 category 最后一段，去除 `Service`、`Grain`、`Handler`、
-  `Routes`、`Provider` 后缀，首字母小写（`DispatchService` → `dispatch`，
-  `RunnerHub` → `runnerHub`）。
-- `service` 标识写入进程（`server` 或 `runner`），与日志文件名一致。
-- 领域 ID 只进日志键和 Trace 属性，不进指标标签。
+- Domain keys are lowercase words: `issue`, `run`, `work`, `session`, `job`,
+  `runner`, `attempt`, `path`, and `reason`. Every process uses the same key for
+  the same meaning.
+- A log-template parameter, such as `WorkId` in
+  `LogWarning(ex, "report failed for {WorkId}", id)`, must become an independent
+  key and cannot exist only as interpolation in `msg`.
+- `component` is a short word such as `dispatch` or `cleanup`, projected from
+  the log category rather than a complete class name. Take the final category
+  segment, remove a `Service`, `Grain`, `Handler`, `Routes`, or `Provider`
+  suffix, and lowercase the first letter. For example,
+  `DispatchService -> dispatch` and `RunnerHub -> runnerHub`.
+- `service` identifies the writing process, `server` or `runner`, and matches
+  the log filename.
+- Domain IDs appear only in log keys and Trace attributes, never metric labels.
 
-### 文件与保留
+### Files and Retention
 
-- 日志目录默认为 `$HOME/.mohist/logs`；Server 可用 `Mohist:LogsPath` 配置覆盖，
-  Runner 可用 `MOHIST_LOGS_PATH` 环境变量覆盖。
-- Server 写 `server.log`，Runner 写 `runner.log`。两端使用同一行契约。
-- 文件按大小滚动：单文件上限 32 MiB，保留当前加两代历史（如 `server.log`、
-  `server.log.1`、`server.log.2`）。滚动产物不压缩，保持行工具直接可用。
-- Runner 的进程诊断输出统一走同一行契约写 `runner.log`，并透传到终端供开发时
-  观察。不再存在只写终端的诊断输出。
+- The default log directory is `$HOME/.mohist/logs`. The Server can override it
+  with `Mohist:LogsPath`, and the Runner with `MOHIST_LOGS_PATH`.
+- Server writes `server.log`; Runner writes `runner.log`. Both use the same line
+  contract.
+- Files rotate by size. One file is limited to 32 MiB, and the current file plus
+  two historical generations are retained, such as `server.log`,
+  `server.log.1`, and `server.log.2`. Rotated files remain uncompressed so line
+  tools can read them directly.
+- Runner process diagnostics use the same line contract in `runner.log` and are
+  also passed through to the terminal for development observation. There is no
+  terminal-only diagnostics path.
 
-### 读取路径
+### Read Path
 
-- `/api/logs/tail` 逐行解析 logfmt 投影为 `LogEntry`；文件格式是唯一真相，不维护
-  第二种磁盘格式。
-- 解析失败的行不丢弃：作为 `message` 原样投影，结构化字段留空，`raw` 保留原行。
+- `/api/logs/tail` parses logfmt one line at a time into `LogEntry`. The file
+  format is the single source of truth; there is no second on-disk format.
+- A line that fails parsing is not dropped. It becomes the unmodified `message`,
+  structured fields remain empty, and `raw` retains the source line.
 
-## 资源预算
+## Resource Budgets
 
-所有队列、批次和存储都有硬上限。默认预算适合单机长期运行：
+Every queue, batch, and store has a hard limit. Defaults support long-running
+single-host use:
 
-- Trace 最长保留 72 小时；
-- Trace 存储最多使用 1 GiB；
-- 单个 OTLP 请求解压后最多 16 MiB；
-- 最多 4 个 OTLP 请求同时占用接收资源，其中最多 1 个执行数据库写入；
-- 单次数据库写入最多处理 4 MiB 或 512 个 Span，以先达到者为准。
+- Retain a Trace for at most 72 hours.
+- Use at most 1 GiB for Trace storage.
+- Limit one decompressed OTLP request to 16 MiB.
+- Allow at most four OTLP requests to hold receive resources concurrently, with
+  at most one database writer.
+- Process at most 4 MiB or 512 Spans in one database write, whichever comes
+  first.
 
-超过时间或空间预算时，先删除最旧的完整 Trace。无法及时回收空间时，不再写入新的
-观测数据，记录过载拒绝数量，并用 OTLP `partial_success` 返回被拒绝的 Span 数，发送方
-不重试这批数据。超过请求上限时，在读取完整请求体前返回 `413`；接收并发已满时，在
-读取请求体前返回带 `Retry-After` 的 `429`。观测过载不能阻塞请求、Workflow 调度或
-Runner 通信。
+When the time or space budget is exceeded, delete the oldest complete Trace
+first. If space cannot be reclaimed in time, stop writing new observability
+data, count overload rejections, and return the rejected Span count through
+OTLP `partial_success`. The sender does not retry that batch. Return `413`
+before reading the complete request body when it exceeds the request limit.
+Return `429` with `Retry-After`, also before reading the body, when receive
+concurrency is full. Observability overload cannot block requests, Workflow
+scheduling, or Runner communication.
 
-存储预算包含数据库及其辅助文件。实现允许短暂超过上限一个内部写入块，但不能持续
-增长。请求大小限制必须在完整缓冲请求体之前生效；启用压缩时按解压后的大小判断。
-关闭观测后不再启动采集、导出或后台清理工作。
+The storage budget includes the database and auxiliary files. One internal
+write block may briefly exceed the limit, but storage cannot grow continuously.
+The request-size limit applies before fully buffering the body and uses the
+decompressed size when compression is enabled. Disabling observability stops
+collection, export, and background cleanup work.
 
-## 运行状态
+## Runtime Status
 
-观测状态只有三种：
+Observability has three states:
 
-- `off`：用户关闭了观测；
-- `healthy`：采集和存储正常，未触发保护；
-- `degraded`：采集或存储不可用，或者正在丢弃数据。
+- `off`: The user disabled observability.
+- `healthy`: Collection and storage work without triggering protection.
+- `degraded`: Collection or storage is unavailable, or data is being dropped.
 
-状态同时给出存储使用量、预算、接收量、保存量、过载拒绝量、异常丢弃量和最近一次
-降级原因，以及当前进程资源压力和有界路由摘要。
-观测降级不等于业务服务不可用，但必须在运行状态中清楚显示。
+Status also reports storage usage and budget, received and stored counts,
+overload rejection and unexpected drop counts, the latest degradation reason,
+current process resource pressure, and the bounded route summary.
+Observability degradation does not mean that the business service is
+unavailable, but runtime status must show it clearly.
 
-## 启用门槛
+## Enablement Gate
 
-内置观测只有在请求、写入和存储上限都生效，且运行状态能显示过载、丢弃和存储压力时，
-才能默认开启。部分保护尚未实装时保持关闭，不能依靠用户定期清理维持运行。
+Built-in observability can be enabled by default only when request, write, and
+storage limits are all enforced and runtime status exposes overload, drops, and
+storage pressure. It remains off while any protection is incomplete. Operation
+cannot depend on a user cleaning it periodically.
 
-## 高频路径
+## High-frequency Paths
 
-轮询、状态查询、心跳和后台扫描会重复执行。它们的成本只随当前相关数据增长，
-不能随无关历史数据增长。
+Polling, status queries, heartbeats, and background scans execute repeatedly.
+Their cost can grow only with currently relevant data, not unrelated history.
 
-这些路径应暴露候选数量、实际处理数量和下游调用数量。一次小响应触发大量数据库或
-跨进程调用时，指标和 Trace 都要能直接显示这种放大。
+These paths expose candidate count, processed count, and downstream call count.
+When a small response causes many database or cross-process calls, metrics and
+Traces must show that amplification directly.
 
-## 验证
+## Verification
 
-- 自观测过滤使用自动化测试锁定，防止形成反馈循环。
-- 接收测试证明解压后请求上限和并发接纳上限在完整缓冲前生效，内部写入按预算分块。
-- 存储测试证明时间上限、空间上限和过载丢弃行为，预算包含数据库、WAL 和 SHM。
-- 高频路径使用操作计数验证成本，不用墙钟耗时判断。
-- 用相同的当前数据和不同数量的历史数据运行测试；历史数据增加不能放大查询和调用。
+- Automated tests lock self-observation filtering to prevent a feedback loop.
+- Receive tests prove that decompressed request and concurrency-admission limits
+  apply before full buffering and that internal writes are budgeted chunks.
+- Storage tests prove time and space limits and overload-drop behavior, with the
+  database, WAL, and SHM included in the budget.
+- High-frequency paths verify cost through operation counts rather than wall
+  time.
+- Tests use the same current data with different amounts of history. More
+  history cannot amplify queries or calls.
 
-## 当前差距
+## Current Gaps
 
-指标、有界路由诊断摘要与 `mo otel status` 运行状态均已落地。剩余差距：
+Metrics, the bounded route diagnostic summary, `mo otel status`, and the Server
+and Runner log line contract are implemented. One gap remains:
 
-- 没有自动异常提示——指标能发现问题，但异常路由只在 status 中可见，不会主动浮现。
-- 日志行契约尚未实装：Server 日志仍是 NDJSON，模板参数未提取为键，无滚动保留；
-  Runner 诊断只写终端，不落盘。
+- There is no automatic anomaly notification. Metrics find problems, but an
+  anomalous route appears only in status and is not surfaced proactively.

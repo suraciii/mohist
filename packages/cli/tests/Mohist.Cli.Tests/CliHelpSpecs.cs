@@ -202,6 +202,24 @@ public sealed class CliHelpSpecs
         Assert.Empty(handler.Requests);
     }
 
+    [Theory]
+    [InlineData("issue", "create")]
+    [InlineData("issue", "edit")]
+    [InlineData("epic", "create")]
+    [InlineData("epic", "edit")]
+    public async Task PriorityWriteHelp_ListsTheCompleteProductRange(string resource, string action)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.Create(activeProjectId: null);
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http, [resource, action, "--help"], output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("p0|p1|p2|p3|p4", output.ToString(), StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+        Assert.Empty(error.ToString());
+    }
+
     [Fact]
     public async Task IssueArchiveHelp_ListsRuntimeJsonFieldsForBothInvocationForms()
     {

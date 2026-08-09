@@ -1,69 +1,119 @@
 # Mohist
 
-Mohist 是面向个人开发者、对 Agent 友好的 AI 软件生产线控制系统。
+Mohist is an Agent-friendly AI software production-line control system for
+individual developers.
 
-它把产品想法整理成可执行的 issue，让 Agent 按 workflow 持续完成规划、实现、检查和集成。Agent 是 owner 的代理人，可以进入流水线上原本由人负责的位置。质量不靠 owner 盯住每个交付点，而靠清晰输入、自动检查、审查任务、审批决策、失败恢复和必要时的人工升级共同保障。
+It turns product ideas into executable Issues. Agents continuously plan,
+implement, check, and integrate each Issue according to its Workflow. An Agent
+acts as the owner's proxy and can occupy a pipeline position that a person can
+also occupy. Quality comes from clear inputs, automated checks, review tasks,
+Approval decisions, failure recovery, and human escalation when necessary.
 
-用户通常留在 Slack、IDE 或其他已有场所。已配置的 Mohist Agent 可以直接从 Web 或 CLI
-使用，也可以作为独立 Bot 接入 Slack；第三方外部 Agent 则通过 Mohist Skill 和 `mo`
-查询、委托和操作执行层。Mohist Web 是备用操作和可视化平面，用于配置和测试 Agent、
-查看全局状态、核对执行证据和人工接管，不是另一个日常工作站点。
+Users usually stay in Slack, an IDE, or another existing workspace. A configured
+Mohist Agent is available directly from the Web UI or CLI. It can also connect
+to Slack as an independent bot. A third-party External Agent uses the Mohist
+Skill and `mo` to query, delegate to, and operate the execution layer. The
+Mohist Web UI is a fallback operations and visualization plane. Use it to
+configure and test Agents, view global state, inspect execution evidence, and
+take over manually. It is not another daily workspace.
 
-## 产品界面
+## Product Interfaces
 
-- **Mohist Agent**：Project 内独立可用的 Agent；从 Web、CLI、外部接入、事件或评论提及启动，配置与执行语义保持一致。
-- **Agent 接入**：把一个已配置 Agent 暴露到 Slack 等已有场所；接入只处理身份、消息和呈现。
-- **Mohist Skill + `mo`**：第三方外部 Agent 使用 Mohist 的路径；人也可以直接使用同一套命令。
-- **Web UI**：备用操作和可视化平面；关键操作完整，也能直接配置、启动和继续 Mohist Agent。
-- **通知**：把需要关注的变化推到用户已有的聊天工具，不拥有执行状态。
+- **Mohist Agent**: An independently usable Agent in a Project. Start it from
+  the Web UI, CLI, an Agent Connection, an event, or a comment mention. Its
+  configuration and execution semantics stay the same across all entry points.
+- **Agent Connection**: Exposes a configured Mohist Agent in an existing place,
+  such as Slack. The connection handles only identity, messages, and
+  presentation.
+- **Mohist Skill + `mo`**: The path through which a third-party External Agent
+  uses Mohist. A person can use the same commands directly.
+- **Web UI**: The fallback operations and visualization plane. It provides all
+  critical operations and can configure, start, and continue a Mohist Agent.
+- **Notifications**: Push changes that need attention to the user's existing
+  chat tools. Notifications do not own execution state.
 
-## 工作流
+## System Overview
 
-Workflow profile 定义 issue 怎么进入生产线，阶段、任务、检查和审批点均可配置。默认 profile（`mohist/local`）：
+The arrows show how a work request reaches the execution environment.
 
+```text diagram
+[Slack] -- Agent Connection --> [Mohist Agent] ---------+
+[IDE / Agent host] --> [External Agent] -- Skill + mo --+--> [Mohist Server]
+[Web UI / CLI] -- direct use ---------------------------+
+                                                            |
+                                                            | dispatch
+                                                            v
+                                                         [Runner]
+                                                            |
+                                                            | executes in
+                                                            v
+                                                 [Workspace / repository]
 ```
-Draft → Plan → Build → Check → Integrate → Done
+
+## Workflow
+
+A Workflow Profile defines how an Issue enters the production line. Its stages,
+tasks, checks, and approval points are configurable. The default Profile is
+`mohist/local`:
+
+```text diagram
+Draft --mark ready--> Backlog --start--> Plan -> Build -> Check -> Integrate -> Done
 ```
 
-多个 issue 同时推进、各自独立。Plan / Check 等关键阶段停在审批点，收到 approve / reject 后继续流动。详见 [Workflow Profile](docs/workflow-profiles.md)。
+Draft and Backlog belong to the Issue lifecycle rather than the Profile. This
+readiness boundary keeps incomplete requirements out of execution; the Profile
+begins at Plan only after the Issue is ready and explicitly started.
 
-## 事件响应
+Multiple Issues advance concurrently and independently. Key stages, such as
+Plan and Check, stop at approval points. The Workflow continues after it
+receives an `approve` or `reject` decision. See
+[Workflow Profile](docs/workflow-profiles.md).
 
-workflow、issue、epic、runner、agent session 都产生事件。Agent 事件路由让你配置 Agent 自动响应：代理审批、分析失败、汇总进展、生成后续 issue、通知 owner。详见 [Agent 事件路由](docs/event-routing.md) 与 [Agent 监管](docs/agent-supervision.md)。
+## Event Responses
 
-## 实装状态
+Workflows, Issues, Epics, Runners, and AgentSessions produce events. Agent event
+routing lets you configure automatic Agent responses. An Agent can approve as a
+proxy, analyze failures, summarize progress, create follow-up Issues, and notify
+the owner. See [Agent Event Routing](docs/event-routing.md) and
+[Agent Supervision](docs/agent-supervision.md).
 
-| ✅ 可用 | 🚧 接线中 | 💭 方案（spec 已定稿） |
+## Implementation Status
+
+| Available | Integration in progress | Not implemented or proposal |
 |---|---|---|
-| 五阶段 Workflow、审批点、Epic 自动推进 | Agent 监管预设、评论 @提及、issue 关注 | 复合与子 issue |
-| `mo` CLI、Web UI、Mohist Agent 直接启动与会话 | Profile collection 迁移 | Agent API 外部调用契约、Slack Agent 接入 |
-| Hermes 通知、事件路由 | Agent Skills 执行与并发限制 | 移动端 PWA |
-| OpenCode / Pi runtime、GitHub PR profile | | 可观测性 |
+| Five-stage Workflow, approval points, Epics, composite Issues, and sub-issues | Workflow Profile UI migration | Mobile PWA and Web Push proposal |
+| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions | PAT-authenticated External Agent API | |
+| Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Automatic observability anomaly notifications | |
+| Agent Skills execution and concurrency limits | | |
+| OpenCode / Pi Runtime, GitHub PR Profile, and Slack Agent Connections | | |
+| Metrics, route diagnostics, and the application log contract | | |
 
-🚧 / 💭 项由对应 issue 推进落地，见各篇「实装差距」。
+The corresponding Issues track items that are in progress or have a finalized
+spec. See the "Implementation Gaps" section in each document.
 
-<!-- TODO: 补 Web UI 截图 -->
+## Documentation
 
-## 文档
+Start with [Getting Started](docs/getting-started.md). See
+[Product Vision](docs/vision.md) for the product direction and the
+[documentation index](docs/README.md) for the complete reading path.
+Architecture and design documents are under [`design/`](design/README.md).
 
-从 [快速上手](docs/getting-started.md) 开始；产品方向见 [产品愿景](docs/vision.md)；完整阅读路径见 [文档索引](docs/README.md)。架构与设计文档在 [`design/`](design/README.md)。
+## Repository Structure
 
-## 仓库结构
-
-```
+```text diagram
 packages/
-  server/    控制平面（ASP.NET Core + Orleans）
-  runner/    执行平面（TypeScript）
-  web/       Web UI（React）
+  server/    Control plane (ASP.NET Core + Orleans)
+  runner/    Execution plane (TypeScript)
+  web/       Web UI (React)
   cli/       mo CLI
-docs/        用户文档
-design/      架构与设计文档
-openspec/    工作流产出的变更产物
+docs/        User documentation
+design/      Architecture and design documentation
+openspec/    Change artifacts produced by Workflows
 ```
 
-## 贡献
+## Contributing
 
-见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+See [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

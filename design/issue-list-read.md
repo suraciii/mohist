@@ -1,89 +1,106 @@
-# Issue 列表低带宽读取与请求隔离
+# Low-bandwidth Issue List Reads and Request Isolation
 
-Issue 列表是 project-scoped 的摘要读取模型。它服务于看板、归档列表、CLI
-列表和少量汇总读取；Issue 详情仍由 `GET /issues/{number}` 的
-`IssueReadModel` 负责。
+The Issue list is a Project-scoped summary read model for boards, archived
+lists, CLI lists, and a small number of aggregate reads. `IssueReadModel` from
+`GET /issues/{number}` remains responsible for Issue details.
+
+## Design Drivers
+
+- **List cost follows list size:** Comments, attachments, history, and merged
+  Variables can grow independently of the number of Issues. A board read must
+  not pay those costs for every row.
+- **Invalidation follows resource identity:** One event should refresh only the
+  Project, Issue, Workflow, artifact, or Inbox resource it can change. A broad
+  cache prefix turns unrelated activity into repeated reads.
+- **Cold transfer follows the current route:** Opening the shell should not load
+  every page, dialog, or candidate collection. The user pays for a route or
+  optional workflow only when entering it.
 
 ## Model
 
 ### IssueListItem
 
-`IssueListItem` 是 Server、Web 和 CLI 共同遵守的列表契约。它只包含列表和
-看板已使用的当前状态、可执行性和紧凑关系摘要：
+`IssueListItem` is the shared Server, Web, and CLI list contract. It contains
+only current state, actionability, and compact relationship summaries used by
+lists and boards:
 
-- `number`、`title`、`status`、`health`、`projectId`、`projectName`；
-- `labels`、`priority`、`risk`、`createdAt`、`updatedAt`、`archivedAt`、`completedAt`；
-- `approvalState`、`blockedReason`、`workflowRunId`、`workflowStage`、
-  `workflowStatus`、`workflowStageProgress`、`workflowProfileId`；
-- `prerequisiteNumbers`、`prerequisites`、`isDraft`、`canStart`、`canBeParent`、
-  `blocker`；
-- `repositoryName`、`repository`、`repositoryProblem`、`primaryEpic`、
-  `parentIssueRef`、`childIssuesSummary` 和现有的紧凑 `children` 引用。
+- `number`, `title`, `status`, `health`, `projectId`, and `projectName`.
+- `labels`, `priority`, `risk`, `createdAt`, `updatedAt`, `archivedAt`, and
+  `completedAt`.
+- `approvalState`, `blockedReason`, `workflowRunId`, `workflowStage`,
+  `workflowStatus`, `workflowStageProgress`, and `workflowProfileId`.
+- `prerequisiteNumbers`, `prerequisites`, `isDraft`, `canStart`, `canBeParent`,
+  and `blocker`.
+- `repositoryName`, `repository`, `repositoryProblem`, `primaryEpic`,
+  `parentIssueRef`, `childIssuesSummary`, and the existing compact `children`
+  references.
 
-列表契约不包含 `body`、`comments`、`attachments`、`feedback`、`agentConfig`、
-`model`、`modelVariant`、`stageModels`、`stageModelVariants` 或从每条 Issue 的
-变量层合并出来的配置。`workflowProfileId` 是当前有效 profile 的身份，不是
-变量展开结果。
+The list contract excludes `body`, `comments`, `attachments`, `feedback`,
+`agentConfig`, `model`, `modelVariant`, `stageModels`, `stageModelVariants`, and
+configuration merged from each Issue's Variable layers. `workflowProfileId`
+identifies the currently effective Profile; it is not an expanded Variable
+result.
 
-`IssueListItem` 的身份是 `(projectId, number)`。`GET /issues` 的 project、状态、
-label、priority、repository、parent 和 archived/all 过滤语义保持不变；返回的
-顺序仍按 `number` 升序。`GET /issues/{number}` 不改为摘要，也不改变不存在
-Issue 时的 404。
+An `IssueListItem` is identified by `(projectId, number)`. Existing Project,
+status, label, priority, repository, parent, and archived or all filters for
+`GET /issues` do not change. Results remain sorted by ascending `number`.
+`GET /issues/{number}` does not become a summary and still returns 404 for a
+missing Issue.
 
 ### ParentCandidate
 
-`ParentCandidate` 只包含 `number` 和 `title`。它属于一个 project，只返回未归档、
-处于 backlog、尚未启动 workflow、且自身没有 parent 的 Issue。Server 按 number
-升序返回，Web 不再从完整 Issue 列表推导候选。
+`ParentCandidate` contains only `number` and `title`. It belongs to one Project
+and includes only an unarchived backlog Issue whose Workflow has not started
+and which has no parent. Server returns candidates by ascending number. Web no
+longer derives them from a complete Issue list.
 
 ### InboxUnreadCount
 
-`InboxUnreadCount` 只包含 `unreadCount`。计数的范围是当前 project 中未归档且
-`ReadAt` 为空的 Inbox 行。Inbox 完整读取模型只由 Inbox 页面使用。
+`InboxUnreadCount` contains only `unreadCount`. It counts unarchived Inbox rows
+with null `ReadAt` in the current Project. Only the Inbox page uses the complete
+Inbox read model.
 
 ## Semantics
 
-### Collection assembly
+### Collection Cost Boundary
 
-`GET /issues` 使用 project-scoped `IssueRow` 当前状态和批量关系读取构造
-`IssueListItem`：
+`GET /issues` projects current Project-scoped Issue state and joins only the
+current Workflow and compact relationship facts required by `IssueListItem`.
+Workflow, parent, child, prerequisite, and Epic facts are read in batches.
+Filtering and sorting operate on that bounded projection.
 
-1. 读取当前 project 的 Issue 状态列和必要的当前状态字段；
-2. 批量读取对应 workflow 的当前状态，得到列表需要的 stage、health、approval
-   和 progress；
-3. 批量读取 parent、child、prerequisite 和 epic 关系，得到紧凑关系字段；
-4. 应用请求过滤、排序并序列化 `IssueListItem`。
+The list path never reads comments, attachments, feedback, history, or merged
+Variable layers. Detail and independent subresource reads own those facts.
+Therefore list work grows with the number of returned Issues and their compact
+relationships, not with unrelated detail volume, and it performs no per-Issue
+database or HTTP query.
 
-列表路径不可调用 `EnrichAsync`，也不可读取 Issue comments、issue/comment
-attachments、issue workflow variables、全局/project variables 或 workflow
-feedback/history。Comments、attachments、feedback 和变量只在详情或对应的
-独立 API 中读取。列表成本因此不会随无关 comments、attachments 或历史数量
-增加；关系读取必须是批量的，不能产生按 Issue 的 `AnyAsync`/HTTP 查询。
+### HTTP Endpoints
 
-### HTTP endpoints
+Add under `/api/projects/{projectRef}/issues`:
 
-在 `/api/projects/{projectRef}/issues` 下增加：
-
-```text
+```text literal
 GET /parent-candidates
   data: [{ number, title }]
 ```
 
-在 `/api/projects/{projectRef}/inbox` 下增加：
+Add under `/api/projects/{projectRef}/inbox`:
 
-```text
+```text literal
 GET /unread-count
   data: { unreadCount }
 ```
 
-两个 endpoint 都经过现有 project resolution filter。未知 project 仍由 filter
-返回 404；不能由 SPA fallback 生成成功响应。
+Both endpoints use the existing Project resolution filter. The filter still
+returns 404 for an unknown Project; the SPA fallback cannot turn it into a
+successful response.
 
-### Web query namespaces
+### Request and Cache Isolation
 
-Web 使用独立的 key factory，不能用一个 `['issues']` 前缀代表所有资源：
+Web uses separate key factories rather than one `['issues']` prefix for every
+resource:
 
-```text
+```text literal
 issue-list       project + list filters
 issue-detail     project + issue number
 issue-workflow   project + issue number + workflow subresource
@@ -93,90 +110,98 @@ inbox-list       project
 inbox-count      project
 ```
 
-详情、workflow、artifact、candidate 和 inbox list/count 的失效必须只命中各自
-namespace。所有 TanStack Query `queryFn` 将 `context.signal` 传入 API client，
-API client 再通过公共 `request` 的 `RequestInit.signal` 传给 `fetch`。
+Invalidation for detail, Workflow, artifact, candidate, and Inbox list or count
+matches only its own namespace. Every read carries the caller's cancellation
+signal through the shared request boundary so leaving a route can stop work that
+no longer has a consumer.
 
-Create Issue dialog 由 `open` 条件控制挂载。关闭时没有 dialog component、候选
-query 或完整 issue-list query；打开后只请求一次 project-scoped
-`parent-candidates`（遵守正常 Query cache 语义），并保留候选的现有选择和
-失效清理行为。Prerequisite picker 在用户展开前不读取 issue list；展开后才按需
-读取可搜索的压缩摘要。创建成功只失效受影响 project 的活动列表、候选列表和
-受影响 parent 的详情/关系资源。
+The Create Issue dialog does not exist in the active component tree while
+closed, so it cannot request candidates. Opening it reads Project-scoped parent
+candidates. The prerequisite picker likewise loads compact summaries only after
+the user expands it. A successful create invalidates the affected Project list
+and candidates plus only the details and relationships of an affected parent.
 
-Inbox shell badge 使用 `unread-count`；Inbox 页面继续使用完整 `/inbox`。读、读
-全部和归档操作同时失效 `inbox-list` 与 `inbox-count`，所以 badge 和页面都由
-HTTP 真值重新协调，实时 hint 不合成 Inbox item。
+The Inbox shell badge uses `unread-count`; the Inbox page continues to use
+complete `/inbox`. Read, read-all, and archive operations invalidate both
+`inbox-list` and `inbox-count`, so HTTP truth reconciles the badge and page. A
+real-time hint does not synthesize an Inbox item.
 
-### Event-to-resource invalidation
+### Event-to-resource Invalidation
 
-事件 envelope 中的 `projectId` 和 `issueNumber` 是失效路由的输入。事件没有
-当前 project 的 projectId 时不触碰该 project 的 cache；有不同 projectId 时
-直接忽略。具有 issue number 的事件只失效该 `(projectId, issueNumber)` 的
-detail/workflow/artifact key，不使用 issue number 无关的 broad key。
+`projectId` and `issueNumber` from the event envelope route invalidation. An
+event without the current Project ID does not touch its cache; a different
+Project ID is ignored. An event with an Issue number invalidates only detail,
+Workflow, and artifact keys for `(projectId, issueNumber)`, never a broad key
+unrelated to the Issue number.
 
-- Issue 创建、归档、取消、重开、开始、完成、draft、label、priority、
-  prerequisite、workflow profile、repository、epic、parent 和 composite 状态变化：
-  失效该 project 的活动 list；创建、parent 和 candidate eligibility 变化还失效
-  `issue-candidates`。parent 变化同时精确失效 previous/current parent 的 detail；
-  其他事件只失效事件 Issue 的 detail 及受影响的关系资源。
-- Workflow run、stage、approval 和 task 事件：失效事件 Issue 的 detail、
-  workflow 和该 project 的活动 list。Artifact 事件只失效对应 artifact/workflow
-  资源。
-- Agent session 事件只失效对应 session/workflow/detail 资源以及已有的 agent
-  activity/status 资源。
-- Inbox hint 只失效当前 project 的 `inbox-list` 和 `inbox-count`。
+- Issue create, archive, cancel, reopen, start, complete, draft, label,
+  priority, prerequisite, Workflow Profile, repository, Epic, parent, and
+  composite-state changes invalidate the Project's active list. Create, parent,
+  and candidate-eligibility changes also invalidate `issue-candidates`. A
+  parent change precisely invalidates previous and current parent detail; other
+  events invalidate only the event Issue's detail and affected relationships.
+- Workflow Run, Stage, Approval, and Task events invalidate the event Issue's
+  detail and Workflow plus the Project's active list. An artifact event
+  invalidates only its artifact and Workflow resources.
+- AgentSession events invalidate only corresponding Session, Workflow, detail,
+  and existing Agent activity or status resources.
+- An Inbox hint invalidates only `inbox-list` and `inbox-count` for the current
+  Project.
 
-列表 project key 的失效采用 TanStack Query 默认的 active refetch 语义；不活动
-列表只标记 stale，不发起网络请求。详情 key 使用 issue number 精确匹配。
-因此 Issue #474 的事件不会重新请求当前查看的 Issue #473 详情；不涉及列表
-结构的无关事件 burst 不会重新请求当前 detail 或 collection。所有重新读取都
-以 HTTP endpoint 为真源，不从事件 payload 合成列表或详情状态。
+Invalidating an inactive list marks it stale without forcing a network request.
+Detail keys match the Issue number exactly. An event for Issue #474 therefore
+does not request Issue #473, and an unrelated event burst that does not change
+list structure does not refresh the collection. Every reread uses HTTP truth;
+an event is an invalidation hint and never becomes synthesized list state.
 
-### Cold transfer and static serving
+### Cold Transfer and Static Serving
 
-Vite production build 开启 minification 并关闭 source map。`App` 保留 shell、
-providers 和 route table 的静态入口，但每个 page route 使用
-`React.lazy`，由一个 `Suspense` boundary 承载；Create Issue dialog 也使用
-lazy import。页面模块不得因 App 的静态 import 被 cold entry 下载。
+The production shell contains only startup providers and route selection. Page
+modules and the Create Issue dialog load on demand, so a static dependency from
+the shell cannot pull an unused route into the cold entry. Production assets are
+minified, omit source maps, and use Brotli or gzip when supported.
 
-Server 注册 Brotli 和 gzip response compression，使静态 JS/CSS 与 JSON 在客户
-端支持时压缩。静态文件规则为：
+Static-file cache boundaries are:
 
-- `/assets/*`：`Cache-Control: public,max-age=31536000,immutable`；
-- `index.html` 和 SPA fallback：`Cache-Control: no-cache`；
-- `/api/*` 和 `/otel/v1/*` 不进入 SPA fallback，未知路径返回 404。
+- `/assets/*`: `Cache-Control: public,max-age=31536000,immutable`.
+- `index.html` and SPA fallback: `Cache-Control: no-cache`.
+- `/api/*` and `/otel/v1/*` do not enter the SPA fallback, and unknown paths
+  return 404.
 
-生产 build assertion 检查：所有 HTML 引用的 assets 是带 fingerprint 的静态文件、
-没有 source map 产物、存在独立 route chunks，并打印/验证 initial compressed
-budget 与 route chunk compressed budget。Server static-serving spec 检查
-assets、HTML fallback 和 API 404 的 headers/status。
+Build checks enforce fingerprinted assets, no source maps, independent route
+chunks, and compressed size budgets. Static-serving checks protect cache headers,
+HTML fallback, and API 404 behavior. These are observable transfer contracts,
+not a required bundler implementation.
 
 ## Examples
 
-### List response boundary
+### List Response Boundary
 
-给定 Issue 有 20 条 comments、12 个 attachments、多个 feedback/history 和一组
-workflow variables，`GET /issues` 仍只返回 `IssueListItem`；这些数量不会改变
-列表关系 assembly 的工作项。`GET /issues/{number}` 仍返回 detail 所需的
-body/comments/attachments/feedback 等字段。
+Given an Issue with 20 comments, 12 attachments, several feedback and history
+records, and Workflow Variables, `GET /issues` still returns only
+`IssueListItem`. Those counts do not change collection-assembly work.
+`GET /issues/{number}` still returns body, comments, attachments, feedback, and
+other fields required by details.
 
-### Event isolation
+### Event Isolation
 
-当前 project 正在查看 `473`，cache 中有 detail key `('project', 473)`。收到带
-`projectId = project`、`issueNumber = 474` 的 workflow event 时，只能标记
-`474` 的 detail/workflow key（以及该事件明确需要的 active list）；不得命中
-`473` 的 detail key。收到另一个 project 的同号 event 时，不触碰当前 project
-的任何 issue key。
+The current Project is viewing `473`, with detail key `('project', 473)` in the
+cache. A Workflow event carrying `projectId = project` and `issueNumber = 474`
+can mark only detail and Workflow keys for `474`, plus an active list explicitly
+required by that event. It cannot match the detail key for `473`. An event with
+the same Issue number in another Project touches no Issue key in the current
+Project.
 
-### Closed dialog
+### Closed Dialog
 
-首次渲染 shell 且 `createIssueOpen = false` 时，Network 中没有
-`GET /issues` 或 `GET /parent-candidates`。打开 dialog 后发出一个
-`GET /parent-candidates`，响应中的每个对象只有 `number`、`title`。
+On the first shell render with `createIssueOpen = false`, the Network view has
+no `GET /issues` or `GET /parent-candidates`. Opening the dialog sends one
+`GET /parent-candidates`; every response object contains only `number` and
+`title`.
 
 ## Status
 
-本 spec 是 issue-473 low-bandwidth 优化的实现目标，已由本工作区的代码与测试
-落地。后续如果列表字段或事件契约扩展，必须同步更新本 spec、对应的 Server/Web
-类型和行为 spec。
+The low-bandwidth list, isolated query namespaces, request cancellation, lazy
+route transfer, compression, and cache boundaries are implemented. A later
+list-field or event-contract extension must preserve the three design drivers
+and update the Server/Web contract and behavioral checks together.

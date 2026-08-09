@@ -1,92 +1,126 @@
-# WorkflowRun State 持久化
+# WorkflowRun State Persistence
 
-本文规定 WorkflowRun 持久化状态（`WorkflowRuns.State`）的内容边界与读写成本规则。
-Dispatch 快照的语义与存储生命周期见 [`task-dispatch.md`](task-dispatch.md) 的
-「Dispatch 快照的持久化」。
+This document defines the content boundary and read/write cost rules for
+persisted WorkflowRun state in `WorkflowRuns.State`. See
+[`task-dispatch.md`](task-dispatch.md) for dispatch-snapshot semantics and
+storage lifecycle.
 
-## State 是什么
+## Design Drivers
 
-State 是单个 WorkflowRun 的持久化权威：run 的当前裁决所需的最小运行事实（status、
-assignment、各 Stage/TaskRun 的状态机字段、工作区与仓库引用、任务 output）。Orleans
-grain 内存态与 State 一一对应，激活时整体载入，每次状态变更后整体重写。
+WorkflowRun state is read and rewritten as one authoritative decision record. That gives one owner
+an unambiguous view of scheduling and recovery, but it also makes every unnecessary byte part of
+the cost of every state transition. Three boundaries follow:
 
-State **不是**：
+- Current decision facts belong in State; traceable history belongs in events.
+- Redeliverable execution input belongs in a short-lived attempt snapshot; copying it into State
+  makes old attempts increase the cost of unrelated current decisions.
+- Format compatibility belongs at startup migration; carrying several historical shapes through
+  the live read path makes every request pay for an upgrade that should happen once.
 
-- 历史记录——事件历史由事件存储承担，State 不保存可追溯历史；
-- dispatch 契约的仓库——dispatch 快照按 [`task-dispatch.md`](task-dispatch.md) 的规则
-  单独管理，不进入 State；
-- 大内容的存放处——凡可重建或可引用的内容（prompt body、全量 tasks 输出汇总、
-  dispatch payload）都不复制进 State。
+The size budget below is therefore a correctness boundary, not only a storage optimization. An
+unbounded State record can make observation and progress compete for the same memory and write
+capacity.
 
-## 内容边界规则
+## Definition
 
-- 进入 State 的字段必须回答一个裁决问题（调度、重试、恢复、锁、状态展示）；只为
-  "以后可能有用"而保留的字段不进入 State。
-- 随任务数 / 重试次数线性增长的内容必须按条（TaskRun）计账：单条 TaskRun 只携带自身
-  裁决所需的字段，不携带与其他 TaskRun 重复的全量副本（如全套 prompts、全部前序任务
-  输出汇总）。
-- 被取代或终态的 attempt 不保留 dispatch 快照；恢复链的 attempt 数量由
-  [`recovery.md`](recovery.md) 的语义决定，State 不额外设历史上限——体积问题靠
-  内容边界解决，不靠截断历史。
-- State 单条体积预算：活跃 run 常态应在数百 KB 以内；超过 1 MB 即视为内容边界被破坏，
-  按缺陷处理而不是扩容。
+State is the persisted authority for one WorkflowRun. It contains the minimal
+runtime facts required for current decisions: status, assignment, state-machine
+fields for each Stage and TaskRun, Workspace and Repository references, and
+task output. The WorkflowRun state owner loads this record when it becomes
+active and rewrites it after each state change.
 
-## 读写成本规则
+State is not:
 
-- 写：每次状态变更整体重写 State 是既定形态；因此 State 体积直接乘以事件频率等于
-  写放大。内容边界（上节）是控制写放大的唯一手段。
-- 读：按 run id 的整载读（执行平面 report / dispatch / 日志路径，控制平面 status
-  查询）每次承担完整的 State 反序列化成本；调用方不得把整载读当作廉价元数据查询——
-  只需 status 等标量字段的查询必须走投影列，不反序列化 State。
-- 遗留 JSON 迁移是写入时义务，不是读取时义务：读取路径不做全文档解析式的迁移探测。
+- History. Event storage owns traceable history.
+- A repository for the dispatch contract. Dispatch snapshots follow
+  [`task-dispatch.md`](task-dispatch.md) and do not enter State.
+- Storage for large content. Rebuildable or referenced content such as Prompt
+  body, complete task-output aggregation, and dispatch payload is not copied
+  into State.
 
-## 格式演进与迁移
+## Content Boundary
 
-运行中的 Server 只识别一种 canonical State 格式。`WorkflowRuns` 不增加逐行
-`SchemaVersion` / `StateSchemaVersion`：单写入者、启动期全库迁移的部署模型不需要让
-每行长期携带格式分支，也不允许多个 State 格式在读路径并存。
+- Every field in State must answer a current decision question about scheduling,
+  retry, recovery, lock, or state presentation. A field retained only for
+  possible future use does not enter State.
+- Content that grows with task or retry count must be budgeted per TaskRun. One
+  TaskRun carries only fields required for its own decisions and no complete
+  duplicate shared data such as every Prompt or all earlier task output.
+- A superseded or terminal attempt does not retain a dispatch snapshot.
+  [`recovery.md`](recovery.md) determines the attempt count in a recovery chain.
+  State adds no historical limit. Enforce size through the content boundary,
+  not truncation.
+- A normal active run must remain within hundreds of KiB. A State record above
+  1 MiB violates the content boundary and is a defect, not a capacity request.
 
-State 格式变化是数据库升级的一部分，必须在新 Server 接受请求前完成：
+## Read and Write Cost
 
-- 数据库初始化是唯一升级入口。EF migration 负责 schema 变化，以及能由 SQLite JSON
-  操作直接、无歧义表达的数据转换；依赖 Workflow 语义、需要结构比较或拒绝歧义输入的
-  转换由同一初始化流程中的有序、幂等 C# data upgrader 完成，不在 SQL 与 C# 中复制规则。
-- 跨多个发布版本升级时，未执行的 EF migrations 与 data upgraders 按既定顺序依次收敛到
-  当前格式。每个迁移只负责单向收敛；历史格式支持留在冷启动迁移路径，不进入当前读模型。
-- data upgrader 先完成无写入的 preflight：找出全部候选行，以唯一转换规则生成新 State，
-  并用当前模型直接反序列化转换结果。任一行无法无歧义转换或无法读取时，不写任何 State，
-  Server 启动失败并报告对应 WorkflowRun。
-- preflight 全部通过后，在单个数据库事务中写入全部转换结果并递增各行 ETag。转换不按
-  WorkflowRun 生命周期筛选：`failed` 是可 retry / rerun 的非终态，也必须在保持语义不变
-  的前提下迁移；已经是 canonical 格式的行不得改写。
-- data upgrader 必须幂等。写入失败由事务回滚；下次启动从持久数据重新判定并重试，不依赖
-  上次进程的内存进度。
-- WorkflowRun State 迁移必须按持久化字节幂等：当前 canonical State 未发生实际改写时不得
-  重新序列化；只有 State 实际改变时才在同一保存事务中将该行 shadow ETag 恰好递增一次。
-  仅 backing key 变化不推进 State ETag，重复执行不得改变 State、ETag 或迁移计数。
+- **Write:** The established shape rewrites complete State on every state
+  change. State size multiplied by event frequency is write amplification. The
+  content boundary is the only control for it.
+- **Read:** A complete read by run ID for report, dispatch, log, or control-plane
+  status pays the complete deserialization cost. Callers must not use it as a
+  cheap metadata query. A query needing only status or another scalar must use
+  projected columns without deserializing State.
+- Legacy JSON migration is a write-time obligation, not a read-time obligation.
+  A read path must not parse the complete document to probe for migration.
 
-破坏性重写生产 State 前必须生成一致的 SQLite 备份并验证可打开。WAL 模式下不得只复制
-主 `.db` 文件；使用 SQLite online backup 或 `VACUUM INTO`，保证备份包含已提交的 WAL
-内容。恢复以该备份为边界，不为数据迁移编造逆向转换。
+## Format Evolution and Migration
 
-迁移完成后，所有读取入口直接按当前模型反序列化 State，不探测历史字段，也不调用转换器。
-未完成迁移的数据库不得进入服务阶段。因此验收指标是读路径中的历史转换调用为零，而不是
-迁移代码从仓库删除；仍需支持从旧数据库升级时，转换器可以只存在于冷启动迁移边界。
+A running Server recognizes one canonical State format. Do not add per-row
+`SchemaVersion` or `StateSchemaVersion` to `WorkflowRuns`. One writer and
+startup-time database migration do not require permanent format branching, and
+multiple formats must not coexist on the read path.
 
-## 现状差距
+A State format change is a database upgrade completed before the new Server
+accepts requests:
 
-当前实现与上述规则的差距（按实测，观测时点为 issue #521 的 check 阶段）：
+- Database initialization is the sole upgrade entry point. EF migration owns
+  schema changes and unambiguous transformations expressible with SQLite JSON.
+  An ordered, idempotent C# data upgrader in the same initialization owns
+  transformations requiring Workflow semantics, structural comparison, or
+  rejection of ambiguity. Do not duplicate a rule in SQL and C#.
+- Across several release versions, pending EF migrations and data upgraders run
+  in order to reach the current format. Each migration converges one way.
+  Historical support remains in cold-start migration and does not enter the
+  current read model.
+- A data upgrader first performs a read-only preflight. It finds all candidates,
+  converts them through one rule, and deserializes each result with the current
+  model. If any row is ambiguous or unreadable, it writes no State. Server
+  startup fails and identifies the WorkflowRun.
+- After preflight succeeds, one database transaction writes all converted rows
+  and increments each affected ETag. The conversion does not filter by
+  WorkflowRun lifecycle. `failed` supports retry and rerun and must migrate
+  without semantic change. A row already in canonical format must not be
+  rewritten.
+- A data upgrader must be idempotent. A failed write rolls back with the
+  transaction. The next startup reevaluates persisted data and retries without
+  process-memory progress.
+- WorkflowRun State migration must be idempotent by persisted bytes. Do not
+  reserialize canonical State when it does not change. Increment shadow ETag
+  exactly once in the same save transaction only when State changes. A backing
+  key change alone does not advance State ETag. Repetition must not change
+  State, ETag, or migration counts.
 
-- 单条 State 平均 325 KB、最大 3.6 MB，全表 364 行共 118 MB；超出预算一个数量级，
-  主要体积来自按条重复持有的 dispatch 快照（见 task-dispatch 差距小节）。
-- 读取路径每次调用都做全量 `JSON.Deserialize<WorkflowRun>`；叠加 `mo run watch` 3s
-  轮询与 runner 高频上报，构成 Server LOH 分配风暴（实测 LOH 分配的 95%+ 来自该路径的
-  STJ 字符串转码），进程 RSS 峰值达 2 GB。
-- `WorkflowRunStore.MigrateLegacyWorkflowRunJson` 在每次读取时对整个 State 做
-  `JsonDocument.Parse` 迁移探测，违反"迁移是写入时义务"。issue #536 实测 364 行中有
-  254 行仍需转换（completed 221、failed 26、stopped 7）；兼容调用分布在 7 个生产文件，
-  其中 `failed` 按 WorkflowRun 生命周期不是终态。
-- `WorkflowQuerier.GetStatusAsync` 无缓存；行上已有 ETag 列，可用于版本化缓存或
-  条件响应。
-- 写放大同时作用于 SQLite：`mohist.db` 达 9.2 GB，尚无针对事件 / 转录 / 遥测数据的
-  保留策略（现有 `CleanupPolicyOptions` 只覆盖 workspace）。
+Before destructive production-State rewrite, create a consistent SQLite backup
+and verify that it opens. In WAL mode, do not copy only the main `.db` file.
+Use SQLite online backup or `VACUUM INTO` so committed WAL content is present.
+Restore from that backup instead of inventing a reverse transformation.
+
+After migration, every read entry deserializes State directly with the current
+model. It neither probes historical fields nor calls a converter. A database
+with incomplete migration cannot enter the service phase. Acceptance requires
+zero historical-conversion calls on the read path. Migration code can remain at
+the cold-start boundary while old database upgrade remains supported.
+
+## Status
+
+Dispatch snapshots are external to WorkflowRun State and follow the lifecycle
+defined in [`task-dispatch.md`](task-dispatch.md). List and status reads use
+small projections and a versioned status cache. A cold-start upgrader converts
+historical State before the service accepts traffic, so normal reads do not
+carry a legacy converter. These boundaries keep arbitration and observation
+cost proportional to current facts rather than execution history.
+
+Retention for events, transcripts, and telemetry is a database-wide lifecycle
+concern. It must not expand WorkflowRun State or its read path.

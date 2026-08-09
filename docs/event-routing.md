@@ -1,119 +1,133 @@
-# Agent 事件路由
+# Agent Event Routing
 
-本文的 Agent 均指有稳定 ID、名称和 Instructions 的 **Mohist Agent**，
-不是 Workflow 直接调用的 Inline Agent。两者关系见 [Agent 与 AgentSession](agent-sessions.md)。
+In this document, Agent means a **Mohist Agent** with a stable ID, name, and
+Instructions. It does not mean an Inline Agent invoked directly by a Workflow.
+See [Agents and AgentSessions](agent-sessions.md) for their relationship.
 
-## 它解决什么问题
+## Problem
 
-Mohist 是一条软件生产线。Workflow、issue、epic、runner、AgentSession 都会产生事件：
-阶段等待审批、任务失败、issue 完成、epic 没有可推进的 issue、runner 掉线等。
+Workflow, Issue, Epic, Runner, and AgentSession all produce events. A stage
+waits for an Approval, a task fails, an Issue completes, an Epic has no Issue
+that can advance, or a Runner disconnects.
 
-事件路由让你把这些事件交给 Agent 响应。你在项目里维护一张**路由表**：每条规则
-声明匹配什么事件、由哪个 Agent 响应、响应时用什么提示词。事件发生后，系统按表
-匹配，命中的 Agent 自动启动，按提示词读取上下文并执行动作。
+Event routing delegates responses to Agents. A Project maintains an ordered
+**routing table**. Each rule declares the event it matches, the Agent that
+responds, and the response prompt. When an event occurs, Mohist evaluates the
+table. A matching Agent starts automatically, reads context under the prompt,
+and performs actions.
 
-每次命中都会创建一次 AgentJob、AgentSession、首条 SessionInput 和首个 AgentTurn。
-AgentJob 记录这次响应是否完成，AgentSession 记录输入、执行轮次、对话和工具调用。
+Each match creates an AgentJob, an AgentSession, the first SessionInput, and the
+first AgentTurn. AgentJob records whether the response completed. AgentSession
+records input, execution turns, conversation, and tool calls.
 
-Agent 在这里是代理人。它进入流水线上原本由 owner 负责的位置：owner 能审批，
-Agent 也能审批；owner 能分析失败、写总结、创建后续 issue，Agent 也通过同一套
-动作完成这些事。Agent 不是特殊通道。判断逻辑归你的提示词，系统负责匹配事件、
-启动 Agent、记录这次响应。
+Here an Agent is a proxy. It occupies a position that a human owner could hold
+in the production system. An owner can decide an Approval, analyze a failure,
+write a summary, or create a follow-up Issue; an Agent uses the same actions.
+It is not a privileged channel. The prompt contains decision logic. Mohist
+matches events, starts the Agent, and records the response.
 
-## 三个心智模型
+## Three Mental Models
 
-### 1. 事件自带业务谱系
+### 1. Events Carry Business Lineage
 
-每个事件都带着一组**属性**，说明它发生在生产线的哪个位置：事件类型是什么
-（`event.type`）、属于哪个 issue（`event.issue`）、哪个 epic、哪次 workflow 运行、
-哪个阶段。凡是围绕某个 issue 发生的事件——无论出自 workflow 还是 issue 本身——
-都带着这个 issue 的编号。
+Every event has **attributes** that locate it in the production system. They
+include event type (`event.type`), Issue (`event.issue`), Epic, WorkflowRun, and
+stage. Any event around an Issue carries that Issue number whether the event
+came from Workflow or Issue itself.
 
-这意味着「盯住 issue #42 的一切」不需要任何特殊机制，一条表达式就够了。
+Watching everything under Issue #42 therefore needs only one expression.
 
-### 2. 两层 Prompt
+### 2. Two Prompt Layers
 
-一个 Agent 实际行动时，它的指令由两层拼成：
+An Agent's effective instruction has two layers:
 
-- **第一层：Agent 内置指令**（定义「我是谁」）——配 Agent 时写一次，长期稳定，
-  所有规则共享。比如「你是 owner 的代理人，负责审批 plan/check，review 要严谨，
-  不确定就升级给 owner」。
-- **第二层：规则的响应提示词**（定义「这次该做什么反应」）——配规则时写，
-  每条规则各写各的。
+- **Agent Instructions define identity.** Configure them once. They remain
+  stable and are shared by every rule. For example: "You are the owner's proxy.
+  Decide Plan and Check Approvals carefully, and escalate uncertainty to the
+  owner."
+- **A rule response prompt defines this reaction.** Configure it on each rule.
 
-**为什么拆开？** 同一个 Agent 可能要响应多种事件。把所有反应塞进身份指令会让
-Agent 定义膨胀、难复用。**身份归 Agent，反应归规则**。
+One Agent can respond to several event types. Putting every response into its
+identity would make the Agent definition large and hard to reuse. Identity
+belongs to the Agent; reaction belongs to the rule.
 
-### 3. 路由表按序求值
+### 3. Evaluate the Routing Table in Order
 
-规则是一张**有序表**，像邮件过滤器：事件来了从上往下逐条比对，命中就触发该条
-规则的 Agent，然后**默认停止**。想让多个 Agent 响应同一事件，给上面的规则标
-「继续」。
+Rules form an **ordered table**, like mail filters. Mohist evaluates each rule
+from top to bottom. On a match, it triggers that rule's Agent and stops by
+default. Mark an earlier rule as `continue` when several Agents should respond
+to the same event.
 
-这一个模型同时表达三种需求：
+This model expresses three needs:
 
-- **独占响应**：审批这类只能有一个决策者的事件，天然 first-match；
-- **并行响应**：issue 完成后一个 Agent 写 release note、另一个通知 owner——
-  上面的规则标「继续」；
-- **兜底 + 接管**：全局兜底规则放表底，针对某个 issue 的规则放它上面。
-  谁先谁赢，一眼看懂，不用心算优先级。
+- **Exclusive response:** First match naturally selects one decision maker for
+  an Approval event.
+- **Parallel response:** After an Issue completes, one Agent can write release
+  notes and another can notify the owner. Mark the earlier rule as `continue`.
+- **Fallback and takeover:** Put a global fallback at the bottom and an
+  Issue-specific rule above it. Order makes precedence visible without a
+  separate priority calculation.
 
-## 表达式怎么写
+## Expressions
 
-规则用一条布尔表达式匹配事件属性，支持 `==`、`!=`、`&&`、`||`、`in`、
-`startsWith` 等：
+A rule matches event attributes with a Boolean expression. Operators include
+`==`, `!=`, `&&`, `||`, `in`, and `startsWith`.
 
-```
-# 只盯 issue #42 的审批
+```text literal
+# Approvals only for Issue #42
 event.type == "com.mohist.workflow.stage.approval-requested" && event.issue == "42"
 
-# 全项目的 workflow 终态失败
+# Terminal Workflow failure anywhere in the Project
 event.type == "com.mohist.workflow.run.failed"
 
-# issue #42 名下的一切事件
+# Every event under Issue #42
 event.issue == "42"
 
-# 某两个 issue 的完成事件
+# Completion of either of two Issues
 event.type == "com.mohist.issue.completed" && event.issue in ["42", "43"]
 ```
 
-响应提示词里可以用同一套属性做占位符：`{{event.issue}}`、
-`{{event.workflowrunid}}`、`{{event.stage}}`。Agent 拿到后自己去拉详情、做判断、
-执行动作。
+Response prompts use the same attributes as placeholders, including
+`{{event.issue}}`, `{{event.workflowrunid}}`, and `{{event.stage}}`. The Agent
+uses them to retrieve details, decide, and act.
 
-## 场景：让 Agent 监管一个 issue
+## Scenario: Supervise an Issue
 
-核心场景：Agent 替你盯 issue 的推进——到达审批门它审批，终态失败它修，只有它
-停手时才轮到你。内置预设 `mo agent install supervisor` 一条命令装好（Agent、
-路由规则、提示词），行为细节见 [Agent 监管](agent-supervision.md)。
+The central scenario delegates Issue supervision to an Agent. It decides an
+Approval, repairs a terminal failure, and involves the owner only when it stops.
+Install the built-in Agent, routing rules, and prompts with one command:
+`mo agent install supervisor`. See
+[Agent Supervision](agent-supervision.md) for its behavior.
 
-## 可见性：知道谁响应了什么
+## Visibility
 
-系统不做严格冲突拦截，但提供**可见性**让你核对配置是否符合预期：
+Mohist does not impose strict configuration conflict prevention. It provides
+visibility so users can verify the intended routing:
 
-- 从事件查：某次事件是被哪条规则、哪个 Agent 响应的；
-- 从 AgentJob 查：这次执行是响应哪个事件、哪条规则触发的；
-- **干跑**：拿最近的事件回放整张路由表，逐条显示会命中什么——配完规则先干跑，
-  不用等真实事件来验证。
+- From an event, inspect which rule and Agent responded.
+- From an AgentJob, inspect its triggering event and rule.
+- Run a **dry run** against a recent event to evaluate every routing rule and
+  show each match before waiting for a real event.
 
-**配置正确性你负责，可观测性系统负责。**
+The user owns configuration correctness. The system owns observability.
 
-## 更多场景
+## More Scenarios
 
-监管之外，同一张路由表还能表达：
+The same routing table supports other scenarios:
 
-| 场景 | 匹配的事件 | 响应提示词让 Agent 干什么 |
+| Scenario | Matched event | Response prompt asks the Agent to |
 |---|---|---|
-| 完成自动汇总 | issue 完成 | 汇总产物，写 release note |
-| 后续工作生成 | issue 完成 / review 发现风险 | 创建 follow-up issue |
-| 产线维护 | runner 掉线 / epic 无可推进 issue | 分析原因，通知 owner 或创建维护 issue |
+| Automatic completion summary | Issue completed | Summarize artifacts and write release notes |
+| Follow-up generation | Issue completed or review found risk | Create a follow-up Issue |
+| Production maintenance | Runner disconnected or Epic cannot advance an Issue | Analyze the cause, notify the owner, or create a maintenance Issue |
 
-这些规则共用同一张表、同一套表达式，只是匹配条件和响应提示词不同。
+These rules use one table and expression language. Only the condition and
+response prompt differ.
 
-## 你和系统的责任边界
+## Responsibility Boundary
 
-| 归谁 | 负责 |
+| Owner | Responsibility |
 |---|---|
-| **你** | 把响应提示词写好、写安全；用表的顺序和「继续」表达独占、兜底或并行 |
-| **系统** | 准确匹配事件、启动 Agent、记录事件与响应之间的关系 |
-| **系统不负责** | 判断提示词对错；给 Agent 提供特殊审批通道。Agent 走的是和 owner、脚本一样的正规通道（详见[工作流详解](the-workflow.md)） |
+| **User** | Write correct and safe response prompts; use table order and `continue` for exclusivity, fallback, or parallel response |
+| **System** | Match events accurately, start Agents, and record the relationship between event and response |
+| **Not the system** | Judge whether a prompt is correct or give Agents a privileged Approval path. Agents use the same supported path as the owner and scripts; see [Workflow](the-workflow.md) |

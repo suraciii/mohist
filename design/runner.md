@@ -1,343 +1,410 @@
-# Runner 与调度
+# Runner and Dispatch
 
-调度无记忆：每个决策都是对持久化状态的无状态查询。runner 的自报只用于发现
-需要重投的工作；自报不是权威，权威永远从 store 当前内容重建。
+Dispatch is memoryless: every decision is a stateless query over persisted
+state. A Runner's self-report is used only to discover work that needs
+redelivery. It is not authoritative; authority is always reconstructed from the
+current store contents.
 
-每个事实只有一个所有者：
+Every fact has exactly one owner:
 
-```
-谁被派发了什么工作        → WorkflowRun / AgentJob（各自是自己的 dispatch ledger，store 可查询）
-此刻正在执行什么          → runner 进程内存（每次 poll 上报）
-runner 是否存活           → RunnerGrain.lastSeen
-```
-
-没有第二份副本。任何组件都不暂存属于其他 owner 的 dispatch 或工作状态；需要时
-从 owner 的持久化状态重建。这是调度协作不需要 reconcile 的原因：不存在需要
-核对的第二份事实。
-
-不变量：
-
-```
-每个 WorkflowRun / AgentJob 本身就是自己的 dispatch ledger
-Running ⟹ 一个 poll 内完成修正：reported ∨ re-dispatched ∨ rejected as invalid ∨ closed out
-|assigned 给 runner 的 Running works| ≤ slots（claim 时检查）
+```text diagram
+What work was dispatched to whom -> WorkflowRun / AgentJob
+                                    (each is its own queryable dispatch ledger)
+What is executing right now      -> Runner process memory, reported on each poll
+Whether a Runner is alive        -> RunnerGrain.lastSeen
 ```
 
-## Runner 聚合与 presence
+There is no second copy. No component stages dispatch or work state owned by
+another owner; it reconstructs that state from the owner's persisted state when
+needed. Dispatch coordination therefore needs no reconciliation because there
+is no duplicate fact to reconcile.
 
-字段按更新生命周期分组，绝不按"谁上报的"分组：
+Invariants:
 
-| 生命周期 | 触发 | 变化 | 失效时机 |
+```text literal
+Every WorkflowRun / AgentJob is its own dispatch ledger.
+Running => corrected within one poll as:
+           reported | re-dispatched | rejected as invalid | closed out
+count(Running work assigned to Runner) <= slots, checked at claim time
+```
+
+## Runner Aggregate and Presence
+
+Fields are grouped by update lifecycle, never by who reports them:
+
+| Lifecycle | Trigger | Change | Invalidated |
 |---|---|---|---|
-| persistent | 控制平面 | 少量单字段 | 从不 |
-| snapshot-replace | register / 成功 poll / unregister | 整体覆盖 | 下一次成功 poll |
+| persistent | control plane | a few individual fields | never |
+| snapshot-replace | register / successful poll / unregister | replace as a whole | next successful poll |
 
-```
+```text literal
 Runner
-  runnerId                       身份
-  slots                          persistent；控制平面拥有
-  lastSeen                       snapshot；register 建立，成功 poll 续期
-  info: RunnerInfo|null          register 填充；heartbeat-repair 刷新；unregister 清空
+  runnerId                       identity
+  slots                          persistent; owned by the control plane
+  lastSeen                       snapshot; established at register, renewed by successful poll
+  info: RunnerInfo|null          populated by register, refreshed by heartbeat-repair,
+                                  cleared by unregister
 
 RunnerInfo
-  state: online|offline          register 建立；成功 poll 的新鲜度维持
+  state: online|offline          established by register, maintained by poll freshness
   hostname, buildGitHash
   capabilities, coderModels, coderModelVariants
 ```
 
-Runner 不持有任何 work 记录。两类工作的真相都在各自 owner 的 store 里
-（workflow：run 的行模型；agent-job：AgentJob 的调度投影），都可直接查询
-`Pending/Running WHERE AssignedRunnerId=R`。slot 不变量
-（`|running| ≤ slots`）在 claim 时对 store 检查，不在此维护：
+A Runner holds no work records. The two work types remain authoritative in
+their owners' stores: Workflow work in the run row model and AgentJob work in
+the AgentJob dispatch projection. Both can be queried directly as
+`Pending/Running WHERE AssignedRunnerId=R`. The slot invariant
+(`count(running) <= slots`) is checked against the store during claim and is not
+maintained here:
 
-| 判定 | 结果 |
+| Test | Result |
 |---|---|
-| 守护 Runner 自身不变量？ | 否 |
-| 无法从其他 aggregate 推导？ | 可推导：两类 owner 的 store 查询 |
-| 行为签名需要它？ | 没有行为以 work 记录为参数 |
+| Protects an invariant owned by Runner itself? | no |
+| Cannot be derived from other aggregates? | it can be derived by querying both owner stores |
+| Required by a behavior signature? | no behavior accepts a work record |
 
-### 行为
+### Behaviors
 
+```text literal
+Register(info)          state=online, lastSeen=now, populate info, write registry
+Unregister()            state=offline, clear info;
+                        close out by reporting FAILED("runner-lost") to owners
+TouchPresence()         successful poll: lastSeen=now; restore online registry state
+HeartbeatRepair(info)   refresh info only; never refresh presence
+Update(slots)           write-through
 ```
-Register(info)                  state=online, lastSeen=now, 填充 info, 写 registry
-Unregister()                    state=offline, 清空 info；
-                                closeout → 向 owner 报告 FAILED("runner-lost")
-TouchPresence()                 成功 poll：lastSeen=now；恢复 registry 的 online 状态
-HeartbeatRepair(info)           只刷新 info；绝不刷新 presence
-Update(slots)                   write-through
-```
 
-每个行为只触碰一个分组。
+Each behavior touches one lifecycle group.
 
-### 运行时读取
+### Runtime Read
 
-`GetRuntimeStateAsync()` → `RunnerRuntimeState`（status + lastSeen + activeWorks）。
+`GetRuntimeStateAsync()` returns `RunnerRuntimeState` containing status,
+lastSeen, and activeWorks.
 
-activeWorks 合并自两类 owner 的 store 直读：
+activeWorks is a direct union of reads from the two owner stores:
 
-- workflow：`Running assigned to me`，每个 run 的当前 task/checks；
-- agent-job：AgentJob 调度投影的 `Pending/Running assigned to me`。
+- Workflow: `Running assigned to me`, with the current task and checks for each
+  run.
+- AgentJob: `Pending/Running assigned to me` from the AgentJob dispatch
+  projection.
 
-## 调度协议：claim / pull / report
+## Dispatch Protocol: Claim / Pull / Report
 
-```
-WorkflowGrain / WorkflowRun          ★ workflow 工作的 dispatch ledger
-  拥有 Assignment 与工作生命周期（Pending/Running/terminal）
-  ClaimNext：原子 Pending→Running + stage lock
-  消费 report；幂等（终态工作再报 → Stale）
-  无 timer，无 runner 概念
+```text diagram
+WorkflowGrain / WorkflowRun       workflow work dispatch ledger
+  owns Assignment and lifecycle: Pending / Running / terminal
+  ClaimNext: atomic Pending -> Running plus stage lock
+  consumes reports idempotently: report for terminal work -> Stale
+  has no timer and no Runner concept
 
-AgentJobGrain / AgentJob             ★ agent-job 工作的 dispatch ledger
-  拥有工作状态与唯一的 DispatchSnapshot
-  admission：eligibility 预检选 runner，单事务写入
-    AssignedRunnerId + ReadySince + DispatchSnapshot；不调用其他组件
-  ClaimNext：原子 Pending→Running；幂等
-  消费 report；幂等（终态工作再报 → Stale）
-  reminder 只做一件事：ReadySince 过老仍 Pending → Failed(RunnerUnavailable)
+AgentJobGrain / AgentJob          AgentJob work dispatch ledger
+  owns work state and the sole DispatchSnapshot
+  admission: eligibility precheck selects a Runner, then one transaction writes
+    AssignedRunnerId + ReadySince + DispatchSnapshot; no other component call
+  ClaimNext: atomic Pending -> Running; idempotent
+  consumes reports idempotently: report for terminal work -> Stale
+  reminder does one thing:
+    Pending with an old ReadySince -> Failed(RunnerUnavailable)
 
 RunnerGrain
-  presence、slots、closeout（见上节）
-  不持有任何 work 记录
+  owns presence, slots, and closeout
+  holds no work records
 
-DispatchService（无状态，不是 grain）
-  每次 poll：desired − reported → dispatches
-  全部来自持久化状态；无 cursor、无 cache、无 ledger
+DispatchService                  stateless; not a grain
+  each poll: desired - reported -> dispatches
+  reads everything from persisted state; no cursor, cache, or ledger
 
-runner 进程（物理）
-  一个进程级关键循环，拥有 polling + report retry
-  并发执行工作；progress-aware timeout
-  每次 poll 上报完整状态：inFlight + awaitingAck
-  到期 report 按固定间隔重试直至被 ack
+Runner process                   physical process
+  one process-level critical loop owns polling and report retry
+  executes work concurrently with progress-aware timeout
+  each poll reports the full inFlight + awaitingAck set
+  retries due reports at a fixed interval until acknowledged
 ```
 
-### 传输方式
+### Transport
 
-| 内容 | 方式 |
+| Content | Transport |
 |---|---|
-| 所有工作（workflow 与 agent-job） | pull-only；DispatchService 按 poll 计算；report 直达 owner grain |
-| presence | poll 即 heartbeat（TouchPresence） |
-| info | register/unregister/heartbeat-repair；绝不随 poll |
+| all work, both Workflow and AgentJob | pull-only; DispatchService computes on poll; reports go directly to the owner grain |
+| presence | poll is the heartbeat (`TouchPresence`) |
+| info | register / unregister / heartbeat-repair; never updated by poll |
 
-### Poll 计算
+### Poll Computation
 
-```
-runner 进程                     DispatchService                      store/grains
+```text diagram
+Runner process                  DispatchService                    store / grains
     | POST poll {inFlight, awaitingAck}                                  |
-    |------------------------------>|                                    |
-    |                               | ⓪ BeginPoll：捕获 slots + gate     |
-    |                               | ① TouchPresence（poll=heartbeat）  |
-    |                               | ② desired ← 两类 owner 的           |
-    |                               |    Running assigned=me              |
-    |                               | ③ redelivery = desired − reported   |
-    |                               |    每项从 owner 的持久状态重建       |
-    |                               | ④ spare = slots − |active works|    |
-    |                               |    while spare > 0:                 |
-    |                               |      Pending assigned=me，再         |
-    |                               |      可 claim 的 Pending            |
-    |                               |      各自 ORDER BY ReadySince ASC   |
-    |                               |      ClaimNext ------------------->| Pending→Running
-    |                               |        ok → 构造 dispatch, spare--  |   (+ stage lock)
-    |                               |        null → 下一个候选            |
-    | { dispatches[] }              |                                    |
-    |<------------------------------|                                    |
-    |                               | EndPoll：释放 gate                 |
-    | inFlight.add(dispatches)      |                                    |
-    | 并发执行                       |                                    |
+    |---------------------------->|                                      |
+    |                             | 0 BeginPoll: capture slots + gate     |
+    |                             | 1 TouchPresence (poll = heartbeat)    |
+    |                             | 2 desired = Running assigned to me    |
+    |                             |   from both owner types               |
+    |                             | 3 redelivery = desired - reported     |
+    |                             |   rebuild each from owner state       |
+    |                             | 4 spare = slots - active work count   |
+    |                             |   while spare > 0:                    |
+    |                             |     Pending assigned to me, then      |
+    |                             |     claimable Pending                 |
+    |                             |     each ORDER BY ReadySince ASC      |
+    |                             |     ClaimNext ----------------------->| Pending -> Running
+    |                             |       ok: build dispatch; spare--     | (+ stage lock)
+    |                             |       null: try next candidate        |
+    | { dispatches[] }            |                                      |
+    |<----------------------------|                                      |
+    |                             | EndPoll: release gate                 |
+    | inFlight.add(dispatches)    |                                      |
+    | execute concurrently        |                                      |
 ```
 
-顺序：redelivery 优先（先还欠账）→ assigned 给本 runner 的 Pending → 可 claim
-的 Pending。先保住手上的，再扩张。
+Ordering is redelivery first, then Pending assigned to this Runner, then
+claimable Pending. Repay existing obligations before expanding.
 
-`reported − desired`（owner 已越过该工作停止）：不采取动作。进程执行到完成，
-report 得到 `Stale` 应答 = ack，结果丢弃。
+For `reported - desired`, where the owner has already moved beyond the work,
+take no action. The process executes it to completion, receives `Stale` for the
+report as its acknowledgement, and discards the result.
 
-免竞态：进程在收到 dispatch 与下一次 poll 之间同步把工作加进 inFlight。
-刚送达的 dispatch 绝不会被误判为丢失。
+Race avoidance: the process adds received dispatches to inFlight synchronously
+before the next poll. A newly delivered dispatch can never be mistaken for lost
+work.
 
 ### Claim
 
-`ClaimNextAsync`：取下一个 pending 工作（workflow 带 stage lock），以 runner
-身份标记 Running，持久化。一次原子写。无 offer 阶段，无 runner 侧预注册。
+`ClaimNextAsync` takes the next Pending work item, including the Workflow stage
+lock, marks it Running under the Runner identity, and persists it in one atomic
+write. There is no offer phase and no Runner-side preregistration.
 
-```
+```text diagram
 PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
 ```
 
-claim 失败（stage lock 竞争、状态已变）→ null → 本次 poll 的下一个候选。
-claim 成功但 dispatch 丢失 → 工作处于 Running 且未上报 → 下一次 poll 重投。
+A failed claim, from stage-lock contention or changed state, returns null and
+moves to the next candidate in the same poll. If claim succeeds but the
+dispatch is lost, the work remains Running and unreported, so the next poll
+redelivers it.
 
-dispatch 构造失败分两类。外部依赖或可变配置导致的普通失败保留 Running，由下一次
-poll 重试；持久 WorkItem 的 `uses` 命中退役 Action 时，translator 返回明确的不可重试
-拒绝，DispatchService 用 `workerId + workId` 命令 owner 将该工作记为 Failed。该命令
-必须核对当前 active work，不能用“失败当前任务”误伤已经推进后的新工作。Action 输入契约
-（未知键、缺 required、类型错）由 Runner 在渲染后 manifest 校验阶段判定，按
-[`actions.md`](workflow/actions.md) 与 [`task-dispatch.md`](workflow/task-dispatch.md)
-执行，不归 dispatcher 处理。
+Dispatch construction has two failure classes. Ordinary failures caused by an
+external dependency or mutable configuration leave the work Running for retry
+on the next poll. If a persisted WorkItem `uses` a retired Action, the
+translator returns an explicit non-retryable rejection. DispatchService then
+commands the owner, using `workerId + workId`, to mark that work Failed. The
+command must verify the currently active work; a generic "fail current task"
+operation could damage newer work after the owner advances. The Runner decides
+Action input contract errors, including unknown keys, missing required values,
+and wrong types, during post-render manifest validation as specified by
+[`actions.md`](workflow/actions.md) and
+[`task-dispatch.md`](workflow/task-dispatch.md). They are not dispatcher
+concerns.
 
-### 公平性
+### Fairness
 
-工作（重新）进入 Ready 时打 `ReadySince` 时间戳。同一候选层级内 workflow 与
-agent-job 按 `ORDER BY ReadySince ASC` 混排服务 = 零调度器状态的 round-robin：
+Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
+tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
+round-robin service with no scheduler state:
 
+```text diagram
+work completes -> owner advances -> next work becomes Pending -> ReadySince := now
+the just-served item moves to the tail; the longest-waiting item is at the head
 ```
-工作完成 → owner 推进 → 下一个工作 pending → ReadySince := now
-刚被服务的排到队尾；等最久的在队头
-```
 
-可插拔策略点：默认纯 FIFO。交互触发的 agent-job 如需优先于后台 workflow，
-扩展为 `Priority DESC, ReadySince ASC`——优先级必须是显式策略，不做隐式偏袒。
+The policy extension point defaults to strict FIFO. If interactive AgentJobs
+must take priority over background Workflows, extend it explicitly to
+`Priority DESC, ReadySince ASC`; priority must be a declared policy, not an
+implicit bias.
 
-### 容量
+### Capacity
 
-`slots` 约束一个 runner 拥有的所有并发执行工作（workflow 与 agent-job 合计）。
-容量裁定只有一处：每次新的 claim 都在 runner lifecycle gate 下复查 runner 的
-实时注册与容量。`BeginPoll` 防止 poll 重叠，但其容量快照只是参考。容量下调只
-约束后续 claim，不取消已在执行的工作；排在 claim 之前的 unregister 拒绝该
-claim，排在 claim 之后的 unregister 将其 closeout。进程不执行任何容量约束。
+`slots` limits all work executing concurrently on a Runner, Workflow and
+AgentJob combined. There is one final capacity decision: every new claim
+rechecks the Runner's live registration and capacity under the Runner lifecycle
+gate. `BeginPoll` prevents overlapping polls, but its capacity snapshot is only
+advisory. Lowering capacity constrains subsequent claims without cancelling
+running work. Unregister ordered before a claim rejects the claim; unregister
+ordered after a claim closes it out. The process enforces no capacity rule.
 
-AgentJob admission 的容量检查是预检：选 runner 时以 eligibility 过滤实时容量
-已满者，全部已满则同步拒绝——调用方立即看到背压。预检通过不承诺容量；终审
-在 claim。预检到终审之间容量可能被其他工作占用，此时 job 留在 Pending，由
-下一次 poll 再审。容量的同步承诺本来就无法兑现（任何裁定与真正执行之间都
-存在窗口），两段式把承诺收窄到能兑现的范围。
+The AgentJob admission capacity check is a precheck. Runner selection filters
+out live Runners already at capacity; when all are full, it rejects
+synchronously so the caller sees backpressure immediately. Passing the
+precheck does not promise capacity; claim is the final decision. Another work
+item may consume capacity between precheck and claim, in which case the job
+remains Pending for the next poll. No synchronous capacity promise could be
+kept because every decision has a window before actual execution. The two-step
+design narrows the promise to one the system can uphold.
 
 ### Report
 
-report 直达 owning grain。翻译服务无状态，不设中继：
+Reports go directly to the owning grain through a stateless translation path:
 
+```text diagram
+Runner -> API route -> stateless translation -> owner grain -> Accepted | Stale
+                                                                  both acknowledge
 ```
-runner → api route → 翻译（无状态） → owner grain → Accepted | Stale（都是 ack）
-```
 
-At-least-once：完成的工作 → `awaitingAck` → 按固定间隔重试原始结果 → 仍在
-poll report 中 → 绝不被误判为丢失。`Accepted` 与 `Stale` 都终止重试。
+At-least-once delivery moves completed work to `awaitingAck`, retries the
+original result at a fixed interval, and continues to include it in poll
+reports. It can never be mistaken for lost work. Both `Accepted` and `Stale`
+stop retry.
 
-report 的产生者对 owner 不可区分：执行进程（正常或 timeout 失败）或
-RunnerGrain closeout。
+The owner cannot distinguish who produced a report: the execution process,
+whether normally or after a timeout, or RunnerGrain closeout.
 
-## Supervision 与 runner-lost closeout
+## Supervision and Runner-Lost Closeout
 
-| 情形 | 负责者 | 处理 |
+| Condition | Owner | Handling |
 |---|---|---|
-| poll 传输不可用 | runner 进程 | 有界尝试 → 在同一循环内重试 |
-| 循环意外退出 | runner 进程 | 终止进程 → 服务 supervisor 重启 |
-| 工作卡死/失控 | runner 进程 | progress-aware timeout → kill，报告 FAILED |
-| runner 消失 | RunnerGrain | poll 新鲜度过期 → offline → closeout：对两类 owner 查询 `Running assigned=me`，逐个向 owner 报告 FAILED("runner-lost") |
-| 工作超时 | 无 server 侧计时 | 上报中的 in-flight 工作视为存活；只有进程判断快慢。owner 自有计时（AgentJob 的执行超时与 dispatch 超时）由各自 reminder 裁定，与调度无关 |
+| poll transport unavailable | Runner process | bounded attempt, then retry in the same loop |
+| loop exits unexpectedly | Runner process | terminate process; service supervisor restarts it |
+| work hangs or escapes control | Runner process | progress-aware timeout, kill, report FAILED |
+| Runner disappears | RunnerGrain | poll freshness expires, mark offline, query both owner types for `Running assigned=me`, and report `FAILED("runner-lost")` for each |
+| work times out | no Server-side timer | reported in-flight work is alive; only the process judges progress. Owner timers, including AgentJob execution and dispatch timeouts, are decided by owner reminders and are unrelated to dispatch |
 
-Register 建立初始 presence，并持久记录最后一次注册档案。HTTP heartbeat 只是
-info 刷新通道，绝不能刷新 presence。activation 丢失后，第一次成功 poll 用该
-持久档案恢复 presence 与 registry，不需要额外 heartbeat。显式 unregister 清除
-持久档案。registry 只在 state/info 变化时写入，绝不随 poll 写。
+Register establishes initial presence and persists the last registration
+profile. HTTP heartbeat is an info-repair channel and must never refresh
+presence. After activation loss, the first successful poll uses the persisted
+profile to restore presence and registry state without an additional heartbeat.
+Explicit unregister clears the profile. The registry is written only when
+state or info changes, never on each poll.
 
-`runner-lost` 是失败原因，不是 owner 状态。owner 把受影响工作记为失败：
-WorkflowRun 进入既有 `Failed` 状态，Issue 投影为 `blocked`；AgentJob 对称地
-进入既有 `Failed` 状态。没有 `Interrupted` 状态。
+`runner-lost` is a failure reason, not an owner state. The owner marks affected
+work failed: WorkflowRun enters its existing `Failed` state and projects the
+Issue as `blocked`; AgentJob symmetrically enters its existing `Failed` state.
+There is no `Interrupted` state.
 
-### 失败处理
+### Failure Handling
 
-| 失败 | 处理 |
+| Failure | Handling |
 |---|---|
-| poll 传输失败 | 同一 runner 进程重试；reported set 存续 |
-| dispatch 响应丢失 | 下一次 poll：desired − reported → 重投 |
-| 进程重启 | 空 report → 全量重投 |
-| claim 后构造 dispatch 发生普通失败 | 保持 Running；每次 poll 重试 |
-| 持久 WorkItem 命中退役 Action | 按 `workerId + workId` 拒绝该工作；owner 记为 FAILED |
-| Runner 渲染或 manifest 校验失败 | attempt 失败 `invalid-input`，不重投 |
-| report 传输失败 | awaitingAck 重试；仍在上报中，绝不重投 |
-| 重复/迟到 report | owner 幂等 → Stale |
-| 工作卡死 | 进程 timeout → FAILED |
-| runner 丢失 | closeout 报告 FAILED("runner-lost")；owner 进入 Failed |
-| closeout 后 runner 回归 | report 得到 Stale 应答；工作不再是 desired，自然排空 |
-| 工作执行中 run/job 被停止 | 不取消；report 得到 Stale 应答 |
-| agent-job 长期无可用 runner | owner 的 ReadySince 超时 → FAILED(RunnerUnavailable) |
+| poll transport fails | retry in the same Runner process; retain the reported set |
+| dispatch response is lost | next poll computes `desired - reported` and redelivers |
+| process restarts | an empty report causes full redelivery |
+| ordinary dispatch construction failure after claim | remain Running; retry every poll |
+| persisted WorkItem references a retired Action | reject that work by `workerId + workId`; owner marks it FAILED |
+| Runner rendering or manifest validation fails | attempt fails as `invalid-input`; do not redeliver |
+| report transport fails | retry awaitingAck; it remains reported and is never redelivered |
+| duplicate or late report | owner idempotently returns Stale |
+| work hangs | process timeout produces FAILED |
+| Runner is lost | closeout reports `FAILED("runner-lost")`; owner enters Failed |
+| Runner returns after closeout | report receives Stale; work is no longer desired and drains naturally |
+| run or job is stopped while work executes | do not cancel; report receives Stale |
+| AgentJob has no available Runner for too long | owner ReadySince timeout produces `FAILED(RunnerUnavailable)` |
 
-## 进程契约
+## Process Contract
 
-runner 进程只有一个进程级关键循环，拥有 poll 节奏与未 ack report 的有界
-重试。传输失败不结束循环；循环意外退出则进程退出，交给服务 supervisor 重启。
-辅助的 heartbeat 或 SignalR 循环绝不能让一个不 poll 的 runner 进程活着。
+The Runner process has exactly one process-level critical loop, which owns poll
+cadence and bounded retry of unacknowledged reports. Transport failure does not
+end the loop. Unexpected loop exit terminates the process so the service
+supervisor can restart it. Auxiliary heartbeat or SignalR loops must never keep
+a Runner process alive when it is not polling.
 
-reported set（`inFlight ∪ awaitingAck`）属于进程生命周期，必须在 poll 异常与
-连接恢复后存续——否则一次瞬时 poll 失败 = 手上所有工作从 report 中消失 =
-重投风暴。report 重试是由同一循环调度的有界操作，不是独立生命周期的循环。
+The reported set, `inFlight` union `awaitingAck`, belongs to the process
+lifecycle and must survive poll failures and reconnection. Otherwise one
+transient poll failure would remove every held work item from the report and
+cause a redelivery storm. The same critical loop schedules bounded report
+retry; it is not a separate lifecycle loop.
 
-随 runner 一起丢失的工作以 `FAILED("runner-lost")` 报告给其 owner，由 owner
-决定后续；没有 `Interrupted` 状态。
+Work lost with a Runner is reported to its owner as
+`FAILED("runner-lost")`. The owner decides what follows. There is no
+`Interrupted` state.
 
-## 本地 workspace 生命周期
+## Local Workspace Lifecycle
 
-Runner 拥有可物化的本地 workspace，它是可重建执行状态、只由 Runner 接触文件系统。
-身份由 `WorkflowRunId` 推导（Issue-backed），终态信号是 WorkflowRun 进入不可恢复终态——
-该身份模型将随 [`workspace.md`](workspace.md) 迁移为 Workspace 实体视角（回收守卫见该文）。
-本节以下描述的生命周期 phase、single-flight 维护与 Runtime/磁盘双重回收针对当前
-WorkflowRun workspace。
+The Server owns the logical Workspace and its lifecycle. The Runner owns only
+its local materialization and is the only component that touches that
+filesystem. This split keeps loss of a reconstructible directory from deleting
+the durable environment identity or changing which Sessions belong to it. The
+identity, Origin, Home, and reclamation rules are authoritative in
+[`workspace.md`](workspace.md).
 
-Runner 拥有自己物化的 workspace 与本地 `WorkspaceRegistry`。注册表只是可重建的
-生命周期索引，不是 WorkflowRun 状态权威。每个条目只有三种 phase：
+The Runner records each materialization in a reconstructible
+`NamedWorkspaceRegistry`, keyed by `(ProjectId, WorkspaceName)`. The registry is
+a local maintenance index, not a second Workspace store. Every entry has one
+phase:
 
-| phase | 含义 |
+| Phase | Meaning |
 |---|---|
-| `active` | Runner 尚未观察到 WorkflowRun 的不可恢复终态；禁止自动回收 |
-| `eligible` | 已观察到 `Completed` 或 `Stopped`；可以释放 Runtime 资源，并按磁盘策略删除 workspace |
-| `stuck` | WorkflowRun 已终结，但磁盘删除安全检查确定性拒绝；保留目录与所有权记录，不再重复尝试自动删除 |
+| `active` | Runner has not received a current Server grant for reclamation |
+| `eligible` | Server reports the Workspace archived or active with no active bound Session; disk policy may delete the materialization |
+| `stuck` | deletion safety checks rejected deterministically; retain the directory and index entry and do not retry automatic deletion |
 
-`Failed` 是可由 Retry / Rerun 恢复的中间态，不进入 `eligible`。未知状态同样保持
-`active`。终态 push 只优化延迟；Runner 在启动、重连和周期收敛时只向 Server 批量查询
-本地仍为 `active` 的 WorkflowRun。它不扫描 Server 的完整 Workflow 历史，也不重新查询
-已经进入 `eligible` 或 `stuck` 的条目。
+The Runner periodically asks the Server whether each `active` entry is
+reclaimable. Transport failure or an unknown answer keeps it `active`. An
+archived Workspace is reclaimable. An active Workspace is reclaimable only
+while it has no active bound Session; deletion removes only the local directory,
+and later use rematerializes the same logical Workspace. The Runner never
+derives this grant from WorkflowRun status.
 
-一个 workflow workspace 同时关联两类可回收资源：
+One Workspace has two independently reclaimable local resources:
 
-- 磁盘 workspace 是 Git worktree，按 retention 与 storage budget 回收；
-- Runtime directory resource 是外部 Runtime 为该目录保留的进程内资源，按 Runtime
-  自己的安全条件尽快释放。
+- the materialized directory is reclaimed by retention and storage budget;
+- a Runtime directory resource is in-process state retained by an external
+  Runtime and released as soon as that Runtime's own safety conditions permit.
 
-两者只有目录身份相同，生命周期彼此独立。释放 Runtime directory resource 不删除
-worktree；删除 worktree 也不能替代 Runtime 释放。两类回收共用 Runner 已有的 workspace
-维护周期，默认每 2 分钟执行一次，不增加按 WorkflowRun 独立运行的 timer 或新的用户配置。
-每轮 single-flight：上一轮未结束时不重叠执行下一轮。周期维护先执行 Runtime 释放，再执行
-磁盘策略；Runtime 释放不依赖 retention、storage budget 或 Server 配置读取成功。
+The resources share only directory identity. Releasing the Runtime directory
+resource does not delete the worktree, and deleting the worktree does not
+replace Runtime release. Both use the Runner's existing Workspace maintenance
+cycle, once every two minutes by default, without a per-Workspace timer or new
+user configuration. Each pass is single-flight: if one pass is still running,
+the next does not overlap. Periodic maintenance releases Runtime resources
+before applying disk policy. Runtime release does not depend on retention,
+storage budget, or successful Server configuration reads.
 
-磁盘删除有额外并发约束。周期 Runtime 回收成功只说明当时已经释放，不授权稍后的磁盘
-删除；两者之间可能有新操作重新使用该目录。每次自动或手动删除都必须重新取得该目录的
-Runtime removal fence，并在同一独占边界内完成必要的 Runtime 释放、目录删除和注册表
-移除。即使 Runtime 尚未记录该目录，也要用临时 fence 阻止删除期间进入新操作，但不能
-为了确认而创建 Runtime resource。Runtime 确认目录仍忙、无法判断或释放失败时，本次删除
-明确失败或延后。OpenCode 的具体条件见
-[`runtimes/opencode.md`](runtimes/opencode.md#directory-instance-回收)。
+Disk deletion has an additional concurrency constraint. Successful periodic
+Runtime reclamation proves only that the resource was released at that moment;
+it does not authorize a later disk deletion because a new operation may reuse
+the directory in between. Every automatic or manual deletion must reacquire the
+directory's Runtime removal fence. Within one exclusive boundary it performs
+any required Runtime release, directory deletion, and registry removal. Even
+when the Runtime has no record for the directory, a temporary fence blocks new
+operations during deletion, but it must not create a Runtime resource merely
+to check. If the Runtime reports the directory busy, cannot decide, or cannot
+release it, deletion fails explicitly or is deferred. See the OpenCode-specific
+conditions in
+[`runtimes/opencode.md`](runtimes/opencode.md#directory-instance-reclamation).
 
-## 落盘状态
+## Persisted State
 
-runner 在 `<runnerRoot>/.mohist/runner-state/` 下持久化四类状态，全部原子写
-（临时文件 + rename），启动时载入。四类状态的损坏语义不同，由「丢了能不能
-重建」决定：
+The Runner persists operational state under `<runnerRoot>/.mohist/runner-state/`.
+Each file is written atomically with a temporary file plus rename and loaded at
+startup. Corruption semantics differ based on whether lost state can be
+reconstructed:
 
-| 文件 | 内容 | 损坏语义 |
+| File | Content | Corruption semantics |
 |---|---|---|
-| `runtime-events.json` | 运行时事件 outbox：待投递到 server 的 session 事件队列；每产生一个事实即快照写入 | 不可读 → outbox 不健康并按本地重试节奏重载，绝不改写不可读文件；超出保留上限时最先丢弃可重建的流式增量 |
-| `followup-operations.json` | followup 操作幂等日志：operationId → claimed / submitted；状态迁移即写入 | 版本或形状不符 → 日志不可用并拒绝新操作（fail-closed）；文件不存在视为全新开始 |
-| `session-commands.json` | session 命令幂等日志：operationId → started / completed + result；同上 | 同上：损坏 fail-closed，缺失视为全新开始 |
-| `workspaces.json` | runner 本地 workspace 注册表：已物化 worktree 及其身份；物化与终态迁移即写入，active 条目存续到观察到终态 | 不可读或损坏 → 当作空表启动（fail-open），下次写入时重建——磁盘上的 worktree 才是事实，注册表只是索引 |
+| `runtime-events.json` | Runtime event outbox: Session events pending delivery to Server; snapshot written for each new fact | unreadable: mark outbox unhealthy and reload at local retry cadence; never overwrite the unreadable file. If retention is exceeded, discard reconstructible streaming increments first |
+| `followup-operations.json` | Follow-up operation idempotency log: operationId -> claimed / submitted; written on each transition | wrong version or shape: log unavailable and reject new operations (fail closed); missing file means a fresh start |
+| `session-commands.json` | Session command idempotency log: operationId -> started / completed plus result; same write behavior | same: corruption fails closed; missing file means a fresh start |
+| `named-workspaces.json` | current named Workspace materialization index: Project, Workspace name, path, phase, and materialization times | unreadable or corrupt: start with an empty index and rebuild on later materialization; Server remains the logical authority |
+| `workspaces.json` | legacy per-WorkflowRun materialization index used only by the fallback execution path | same fail-open behavior; remove with the fallback rather than treating it as a second identity model |
 
-幂等日志 fail-closed 是因为丢了就可能重复执行；注册表 fail-open 是因为它能
-从磁盘重建。四类状态都是 runner 私有：server 从不直接读写，跨进程一致性靠
-事件投递与 poll 重算，不靠共享文件。
+Idempotency logs fail closed because losing them can repeat effects. The
+registries fail open because they can be reconstructed from disk. These files
+are Runner-private. The Server never reads or writes them directly;
+cross-process consistency comes from event delivery and poll recomputation, not
+shared files.
 
-## 决策记录：单一 ledger，无 reconcile
+The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
+implementation gap for dispatches that still lack a named Workspace. New code
+must not extend that fallback. Removing it does not require a compatibility
+model because Runner materializations are reconstructible.
 
-agent-job 工作曾经经 push 通道投递：AgentJobGrain 把 DispatchSnapshot 跨 grain
-推给 Runner 聚合暂存，Runner 侧持久化第二份 work 记录，再靠周期性的
-reconcile 核对暂存与 owner 之间的漂移。该形态违反本文开头的不变量（没有
-第二份副本）：reconcile 不是设计，而是冗余副本的维持成本——连同它带来的
-跨 grain 回调环、assignment 与 poll 的互斥竞态、activation 时的 ledger
-hydrate，全都是同一笔赎金。
+## Decision Record: One Ledger, No Reconciliation
 
-统一为：AgentJob 与 WorkflowRun 一样是自己的 dispatch ledger。调度所需字段
-（Status、AssignedRunnerId、ReadySince、DispatchSnapshot）以可查询投影
-持久化，DispatchService 对两类 owner 做同一组 desired 计算，claim 由 owner
-原子完成。Runner 聚合回归 presence / slots / closeout，不持有任何 work
-记录；assign 回调与 runnable 反查构成的跨 grain 环随之消失；容量裁定收敛到
-claim 一处。原 push 通道的 Runner 侧暂存、reconcile 循环与 dispatch 重试
-状态机（DispatchAttempts / retry bound / acceptance fence）整体删除；agent-job
-长期无可用 runner 的失败语义由 owner 自己的 ReadySince 超时承接。
+AgentJob work was previously delivered over a push channel. AgentJobGrain
+pushed DispatchSnapshot across grains into staging in the Runner aggregate,
+which persisted a second work record. Periodic reconciliation then compared
+the staged record with its owner. That form violated the opening invariant of
+no duplicate copy. Reconciliation was not a design feature; it was the carrying
+cost of redundant state, together with cross-grain callback cycles, races
+between assignment and poll, and ledger hydration on activation.
+
+The unified design makes AgentJob, like WorkflowRun, its own dispatch ledger.
+Dispatch fields (`Status`, `AssignedRunnerId`, `ReadySince`, and
+`DispatchSnapshot`) are persisted in a queryable projection. DispatchService
+computes desired work identically for both owner types, and the owner completes
+claim atomically. The Runner aggregate returns to presence, slots, and closeout
+without work records. The cross-grain cycle of assignment callbacks and
+runnable reverse lookups disappears, and capacity decisions converge at claim.
+The old push channel's Runner-side staging, reconciliation loop, and dispatch
+retry state machine (`DispatchAttempts`, retry bound, and acceptance fence) are
+deleted together. The owner handles the case of an AgentJob with no available
+Runner through its own ReadySince timeout.

@@ -1,39 +1,46 @@
 # Git Actions
 
-Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定；Action 不会从 Variables 读取隐式回退值，Git 命令始终使用主机提供的工作区。
+Git Action repositories, branches, and remotes are determined by explicit
+`with` inputs. An Action does not read implicit fallback values from Variables,
+and Git commands always use the workspace supplied by the host.
 
-以下示例中的 `${{ repository.baseBranch }}` 和 `${{ workspace.branch }}` 来自当前运行的仓库与工作区，`origin` 是显式指定的远程仓库名。表达式的完整规则见 [Workflow Definition 参考](../workflow-definition.md#模板表达式)。
+In these examples, `${{ repository.baseBranch }}` and
+`${{ workspace.branch }}` come from the repository and workspace for the
+current run. `origin` is an explicitly selected remote name. See
+[Workflow Definition Reference](../workflow-definition.md#template-expressions)
+for the complete expression rules.
 
 ## `mohist/workspace-prepare`
 
-将工作区重置到预期分支，并清理残留的本地 Git 状态。
+Resets the workspace to the expected branch and removes residual local Git
+state.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `expectedBranch` | 是 | — | 预期的工作区分支。类型为文本。 |
+| `expectedBranch` | Yes | - | Expected workspace branch. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `status` | 状态标识。 |
-| `expectedBranch` | 预期的分支名。 |
-| `head` | 准备完成后的 HEAD 快照。 |
-| `residual` | 准备完成后的残留状态快照。 |
-| `porcelain` | 准备完成后的 Porcelain 状态。 |
-| `step` | 失败时产生快照的步骤。 |
-| `workDir` | 工作区目录。 |
+| `kind` | Output type identifier. |
+| `status` | Status identifier. |
+| `expectedBranch` | Expected branch name. |
+| `head` | HEAD snapshot after preparation. |
+| `residual` | Residual-state snapshot after preparation. |
+| `porcelain` | Porcelain status after preparation. |
+| `step` | Step that produced the snapshot on failure. |
+| `workDir` | Workspace directory. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `workspace-setup` | 工作区准备失败。 |
+| `workspace-setup` | Workspace preparation failed. |
 
-### 示例
+### Example
 
 ```yaml
 - id: prepare-workspace
@@ -44,51 +51,52 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 
 ## `mohist/rebase`
 
-将当前分支变基到基础分支，并可选地把变基后的提交压缩为一个提交。
+Rebases the current branch onto the base branch and can optionally squash the
+rebased commits into one commit.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `baseBranch` | 是 | — | 基础分支名。类型为文本。 |
-| `remote` | 否 | — | Git 远程仓库名。类型为文本。 |
-| `squash` | 否 | `false` | 是否把变基后的提交压缩为一个提交。类型为布尔。 |
-| `message` | 否 | — | 直接指定的压缩提交消息。类型为文本。 |
-| `messageFrom` | 否 | — | 压缩提交消息的 Issue 字段来源。类型为文本。 |
+| `baseBranch` | Yes | - | Base branch name. The value is text. |
+| `remote` | No | - | Git remote name. The value is text. |
+| `squash` | No | `false` | Whether to squash the rebased commits into one commit. The value is Boolean. |
+| `message` | No | - | Explicit squash commit message. The value is text. |
+| `messageFrom` | No | - | Issue field used as the squash commit message. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `status` | 变基状态标识。 |
-| `baseBranch` | 基础分支名。 |
-| `remote` | Git 远程仓库名。 |
-| `baseRef` | 解析后的基础引用。 |
-| `rebasedOntoSha` | 变基开始时基础引用的顶端提交 SHA。 |
-| `beforeHeadSha` | 变基前的 HEAD SHA。 |
-| `afterHeadSha` | 变基后的 HEAD SHA。 |
-| `squashed` | 是否执行了压缩步骤。 |
-| `squashedHeadSha` | 压缩后的 HEAD SHA。 |
-| `rebased` | 变基是否成功。 |
-| `conflicts` | 尚未解决冲突的文件。 |
-| `rebaseLeftInProgress` | 是否留下了进行中的变基。 |
-| `output` | 聚合后的 Git 输出。 |
-| `steps` | 每个步骤的 Git 命令结果。 |
+| `kind` | Output type identifier. |
+| `status` | Rebase status identifier. |
+| `baseBranch` | Base branch name. |
+| `remote` | Git remote name. |
+| `baseRef` | Resolved base reference. |
+| `rebasedOntoSha` | Tip commit SHA of the base reference when rebase started. |
+| `beforeHeadSha` | HEAD SHA before rebase. |
+| `afterHeadSha` | HEAD SHA after rebase. |
+| `squashed` | Whether the squash step ran. |
+| `squashedHeadSha` | HEAD SHA after squash. |
+| `rebased` | Whether rebase succeeded. |
+| `conflicts` | Files with unresolved conflicts. |
+| `rebaseLeftInProgress` | Whether a rebase was left in progress. |
+| `output` | Aggregated Git output. |
+| `steps` | Git command results for each step. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `abort-failed` | 中止已有变基失败。 |
-| `fetch-failed` | 获取基础分支失败。 |
-| `base-resolve-failed` | 解析基础引用失败。 |
-| `prepare-failed` | 变基前准备工作区失败。 |
-| `rebase-failed` | 变基因未指明的原因失败。 |
-| `conflict` | 变基遇到冲突。 |
-| `squash-failed` | 压缩步骤失败。 |
+| `abort-failed` | Aborting an existing rebase failed. |
+| `fetch-failed` | Fetching the base branch failed. |
+| `base-resolve-failed` | Resolving the base reference failed. |
+| `prepare-failed` | Preparing the workspace before rebase failed. |
+| `rebase-failed` | Rebase failed for an unspecified reason. |
+| `conflict` | Rebase encountered conflicts. |
+| `squash-failed` | The squash step failed. |
 
-### 示例
+### Example
 
 ```yaml
 - id: rebase-onto-base
@@ -101,38 +109,38 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 
 ## `mohist/rebase-status`
 
-报告工作区当前的变基状态。
+Reports the current rebase state of the workspace.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `baseBranch` | 是 | — | 基础分支名。类型为文本。 |
-| `remote` | 否 | — | Git 远程仓库名。类型为文本。 |
+| `baseBranch` | Yes | - | Base branch name. The value is text. |
+| `remote` | No | - | Git remote name. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `status` | 状态标识（已验证或失败）。 |
-| `baseBranch` | 基础分支名。 |
-| `remote` | Git 远程仓库名。 |
-| `baseRef` | 解析后的基础引用。 |
-| `rebaseInProgress` | 是否有正在进行的变基。 |
-| `conflicts` | 尚未解决冲突的文件。 |
-| `baseSha` | 基础引用的顶端提交 SHA。 |
-| `headSha` | 当前 HEAD SHA。 |
-| `mergeBaseSha` | HEAD 与基础引用的合并基点 SHA。 |
-| `output` | 聚合后的 Git 输出。 |
+| `kind` | Output type identifier. |
+| `status` | Status identifier: verified or failed. |
+| `baseBranch` | Base branch name. |
+| `remote` | Git remote name. |
+| `baseRef` | Resolved base reference. |
+| `rebaseInProgress` | Whether a rebase is in progress. |
+| `conflicts` | Files with unresolved conflicts. |
+| `baseSha` | Tip commit SHA of the base reference. |
+| `headSha` | Current HEAD SHA. |
+| `mergeBaseSha` | Merge-base SHA of HEAD and the base reference. |
+| `output` | Aggregated Git output. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `rebase-incomplete` | 变基未完成或工作区不干净。 |
+| `rebase-incomplete` | Rebase is incomplete or the workspace is not clean. |
 
-### 示例
+### Example
 
 ```yaml
 - id: check-rebase
@@ -144,37 +152,37 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 
 ## `mohist/merge-ready`
 
-报告当前工作区是否可以合并到基础分支。
+Reports whether the current workspace can merge into the base branch.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `baseBranch` | 是 | — | 基础分支名。类型为文本。 |
-| `remote` | 是 | — | Git 远程仓库名。类型为文本。 |
-| `source` | 是 | — | 源分支名。类型为文本。 |
+| `baseBranch` | Yes | - | Base branch name. The value is text. |
+| `remote` | Yes | - | Git remote name. The value is text. |
+| `source` | Yes | - | Source branch name. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `targetBranch` | 基础分支名。 |
-| `strategy` | 合并策略标识。 |
-| `baseSha` | 基础引用的顶端提交 SHA。 |
-| `candidateHeadSha` | 源引用的顶端提交 SHA。 |
-| `mergeBaseSha` | 源分支与基础分支的合并基点 SHA。 |
-| `canMerge` | 是否可以合并。 |
-| `conflictFiles` | 尚未解决冲突的文件。 |
-| `checkedAt` | 检查时间的 ISO 时间戳。 |
+| `kind` | Output type identifier. |
+| `targetBranch` | Base branch name. |
+| `strategy` | Merge strategy identifier. |
+| `baseSha` | Tip commit SHA of the base reference. |
+| `candidateHeadSha` | Tip commit SHA of the source reference. |
+| `mergeBaseSha` | Merge-base SHA of the source and base branches. |
+| `canMerge` | Whether the branches can merge. |
+| `conflictFiles` | Files with unresolved conflicts. |
+| `checkedAt` | ISO timestamp of the check. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `merge-not-ready` | 当前状态尚未满足合并条件。 |
+| `merge-not-ready` | The current state does not meet merge conditions. |
 
-### 示例
+### Example
 
 ```yaml
 - id: verify-merge-ready
@@ -187,44 +195,44 @@ Git Action 的仓库、分支和远程仓库都通过显式 `with` 输入确定�
 
 ## `mohist/push`
 
-将工作区的源分支推送到目标分支。
+Pushes the workspace source branch to a target branch.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `source` | 是 | — | 源分支。类型为文本。 |
-| `target` | 是 | — | 目标分支。类型为文本。 |
-| `remote` | 是 | — | Git 远程仓库名。类型为文本。 |
-| `force` | 否 | `false` | 是否使用 `--force` 推送。类型为布尔。 |
-| `forceWithLease` | 否 | `false` | 是否使用 `--force-with-lease` 推送。类型为布尔。 |
+| `source` | Yes | - | Source branch. The value is text. |
+| `target` | Yes | - | Target branch. The value is text. |
+| `remote` | Yes | - | Git remote name. The value is text. |
+| `force` | No | `false` | Whether to push with `--force`. The value is Boolean. |
+| `forceWithLease` | No | `false` | Whether to push with `--force-with-lease`. The value is Boolean. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `status` | 推送状态标识。 |
-| `source` | 源分支。 |
-| `target` | 目标分支。 |
-| `remote` | Git 远程仓库名。 |
-| `refspec` | 解析后的引用规格。 |
-| `workDir` | 工作区目录。 |
-| `landedCommit` | 被推送的顶端提交。 |
-| `pushed` | 推送是否成功。 |
-| `force` | 是否使用了强制模式。 |
-| `forceWithLease` | 是否使用了带租约的强制模式。 |
-| `output` | 聚合后的 Git 推送输出。 |
-| `steps` | 每个步骤的 Git 命令结果。 |
+| `kind` | Output type identifier. |
+| `status` | Push status identifier. |
+| `source` | Source branch. |
+| `target` | Target branch. |
+| `remote` | Git remote name. |
+| `refspec` | Resolved refspec. |
+| `workDir` | Workspace directory. |
+| `landedCommit` | Tip commit that was pushed. |
+| `pushed` | Whether the push succeeded. |
+| `force` | Whether force mode was used. |
+| `forceWithLease` | Whether force-with-lease mode was used. |
+| `output` | Aggregated Git push output. |
+| `steps` | Git command results for each step. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `base-moved` | 目标分支已移动，推送不是快进更新。 |
-| `push-failed` | 推送因未指明的原因失败。 |
+| `base-moved` | The target branch moved, so the push is not a fast-forward update. |
+| `push-failed` | Push failed for an unspecified reason. |
 
-### 示例
+### Example
 
 ```yaml
 - id: push-branch

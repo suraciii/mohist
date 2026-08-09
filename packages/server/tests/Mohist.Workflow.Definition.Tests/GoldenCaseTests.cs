@@ -73,7 +73,7 @@ public sealed class GoldenCaseTests
 
     private static string ExtractCompleteDocumentationExample(string markdown)
     {
-        const string heading = "## 完整示例";
+        const string heading = "## Complete Example";
         var headingIndex = markdown.IndexOf(heading, StringComparison.Ordinal);
         Assert.True(headingIndex >= 0, "The complete example heading is missing.");
 

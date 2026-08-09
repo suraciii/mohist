@@ -1,113 +1,100 @@
 # Task Log
 
-Task execution log. Like GitHub Actions step log: collapsible, line-by-line, streamable.
+TaskLog preserves the execution evidence needed to explain a Task without
+turning high-volume process output into Workflow state.
 
-## Problem
+## Design Drivers
 
-stdout/stderr from git clone, rebase, branch check, workspace cleanup is discarded. Only `runCommand` captures `combinedOutput`. Users see final status, not the process.
+- A WorkResult answers whether work succeeded. A TaskLog explains how execution
+  reached that result. Combining them would make a large or failed log upload
+  threaten result reliability.
+- Transcript records what an Agent said, and Artifacts record files it produced.
+  Process output has a different owner, retention policy, and access pattern.
+- Every line must pass one ordering and redaction boundary before buffering.
+  Allowing each Action to invent a log path would make sequence and secret
+  handling inconsistent.
+- Logs are bounded evidence. When the cap is reached, recent error context is
+  more useful than early setup chatter, so retention keeps the tail.
 
 ## Boundary
 
-TaskLog belongs to Runner domain. Never in WorkflowRun.
+TaskLog belongs to Runner execution. It is associated with Workflow or Agent
+work but never stored inside WorkflowRun or AgentJob result state.
 
-```
-POST /api/{ownerKind}/{ownerId}/work/{workId}/task-log  →  TaskLogStore  →  independent
-POST /api/runner/{runnerId}/report                       →  WorkResult   →  WorkflowGrain
+```text diagram
+task execution -> ordered/redacted log sink -> bounded buffer -> TaskLog channel -> store
+       |
+       +---------------------------------------> WorkResult channel -> work owner
 ```
 
-Owner = `workflow-runs` | `agent-jobs`. Same pattern as artifact upload.
+The two channels are separate facts. TaskLog may be associated with
+`workflow-runs` or `agent-jobs`; owner, work ID, and sequence identify its read
+boundary.
 
 ## Model
 
-```
-TaskRun (existing, in WorkflowRun)
- ├─ status / message / output        ← final result
- ├─ Artifacts                        ← outputs
- ├─ AgentSession transcript          ← agent conversation
- └─ TaskLog                          ← execution trace
-      └─ LogEntry[]
-           ├  seq          monotonic, cursor pagination + jump anchor
-           ├  timestamp
-           ├  source       workspace-prep | action:rebase | cleanup | ...
-           └  text
+```text diagram
+Work
+ |-- status / message / output       <- final result
+ |-- Artifacts                       <- produced files
+ |-- AgentSession transcript         <- Agent conversation
+ `-- TaskLog                         <- execution trace
+      `-- LogEntry[]
+           |-- seq        monotonic, cursor pagination + jump anchor
+           |-- timestamp
+           |-- source     workspace-prep | action:rebase | cleanup | ...
+           `-- text
 ```
 
-No stdout/stderr split. Same as GA.
+stdout and stderr share one ordered stream. `source` preserves the meaningful
+execution boundary without claiming that operating-system streams have separate
+product semantics.
 
-## Collection (runner side)
+## Collection
 
 ### Single funnel
 
-```ts
-ActionContext.log.write(source, text)  →  seq
-```
+All output enters one sink. The sink masks configured secrets before text can
+enter a buffer, assigns a monotonic sequence, records injected time and source,
+and appends to the per-work collector.
 
-All output enters here. Secret masking, sequence, buffering. One method.
-
-### Secret masking
-
-```ts
-write(source, text): number {
-  const masked = this.maskSecrets(text)
-  const seq = ++this._seq
-  this._collector.append({ seq, timestamp: this._clock.now(), source, text: masked })
-  return seq
-}
-```
-
-### runCommand line-by-line
-
-```ts
-interface RunCommandOptions {
-  onLine?: (line: string) => void   // stdout+stderr merged
-}
-```
-
-Must guarantee: capture last line without trailing newline, drain after process exit, timeout-kill stuck read.
+Process collection must capture the final line even without a trailing newline,
+drain readable output after process exit, and terminate a stuck read when the
+process timeout kills execution. These are evidence-completeness rules, not an
+Action-specific logging API.
 
 ### Collector
 
-```
-TaskLogCollector (per work)
-  buffer: LogEntry[]           ← append only
-  flush()                      ← batch POST (end-of-task or periodic)
-  capacity limit               ← drop head, keep tail (error context)
-```
+The per-work collector is append-only between flushes. Its capacity is bounded;
+overflow removes the oldest retained entries while sequence numbers continue
+to increase. This makes truncation compatible with cursor reads and preserves
+the most recent failure context.
 
-## Report channel
+## Delivery and Failure Isolation
 
-Separate endpoint. Never in report payload.
+TaskLog uses a separate upload channel and never enters the WorkResult payload.
 
 | Phase | When |
 |---|---|
-| Phase 1 | batch flush before report. full log on task complete. |
-| Phase 2 | periodic flush + SignalR. real-time, best-effort. store is authority. |
+| Terminal flush | Flush retained entries before the final work report so completed work has its available evidence. |
+| Incremental flush | Periodically publish batches for live viewing; live delivery is best effort and the store remains authoritative. |
 
-## Storage (server side)
+Log delivery failure is diagnostic state and must not rewrite TaskRun or
+AgentJob success. Conversely, a successful WorkResult does not imply that every
+live log delta reached every viewer.
 
-```
-TaskLogEntries
-  Id (PK)
-  OwnerKind       "workflow" | "agent-job"
-  OwnerId         workflowRunId or agentJobId
-  WorkId
-  Seq             monotonic per task
-  Timestamp
-  Source
-  Text
-```
+## Read Contract
 
-No stream column. Index: (OwnerKind, OwnerId, WorkId, Seq).
-
-Query: `GET /api/projects/{pid}/issues/{num}/workflow/tasks/{tid}/logs?cursor=&limit=`
-
-Capacity: cap per task (e.g. 256KB / 5000 lines). Truncate head, keep tail. Seq stays monotonic.
+Each entry exposes only monotonic `seq`, timestamp, source, and redacted text.
+Reads are scoped by owner and work identity and use sequence as the cursor and
+jump anchor. Storage layout and index names are implementation details; the
+durable contract is ordered, bounded, redacted evidence with monotonic sequence.
 
 ## Relationship to existing
 
 | Concept | Answers | Domain |
 |---|---|---|
-| TaskLog | what happened during execution | Runner |
-| Transcript | what agent said | Session |
-| Artifact | what files were produced | Workflow |
-| task output | structured result | Workflow |
+| TaskLog | Why did execution reach this result? | Runner execution |
+| Transcript | What did the Agent say and do conversationally? | Session |
+| Artifact | Which files were produced? | Workflow |
+| WorkResult | Did the work succeed, and what structured result did it return? | TaskRun or AgentJob |

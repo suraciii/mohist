@@ -4,34 +4,43 @@ status: wip
 
 # Workspace
 
-Workspace 是 Project 下的一等命名执行环境资源：持久的目录与一组仓库访问权，
-生命周期独立于任何 AgentSession 与 WorkflowRun。
+A Workspace is a first-class named execution-environment resource under a
+Project: a persistent directory plus access to a set of repositories. Its
+lifecycle is independent of any AgentSession or WorkflowRun.
 
-边界：Workspace 只持有身份、来源、仓库引用、状态与物化路由事实。目录内容、
-git 组织（clone / branch / worktree）是 Agent 的行为，不是平台的 schema。
+Boundary: a Workspace holds only identity, origin, Repository references,
+status, and materialization routing facts. Directory contents and Git layout
+(clone / branch / worktree) belong to Workflow preparation or Agent behavior,
+not Workspace entity schema.
 
-Workspace 是“工作”的家，仓库是材料：仓库检出位于 workspace 之下（约定 `repos/`），
-计划、调研等工作产物属于 workspace 层。这层语义由 prompt 约定承载，不进入平台
-schema；它使跨仓库工作的产物始终有不属于任何单一仓库的安放之处。
+A Workspace is the home of the work, while repositories are its materials.
+Repository checkouts live under the Workspace (by convention, in `repos/`), and
+work products such as plans and research belong at the Workspace level. This
+meaning is carried by prompt conventions rather than platform schema. It gives
+cross-repository work a place for artifacts that do not belong to any one
+repository.
 
-参考对应（仅帮助理解，不是术语来源）：Runner ≈ Node，WorkflowRun ≈ Pod，
-AgentSession ≈ Container，Workspace ≈ local PersistentVolume——生命周期独立于
-消费者、物化位置决定调度亲和、随节点丢失、同一消费者组内共享。
+Reference analogy, for explanation only and not as a terminology source:
+Runner ~= Node, WorkflowRun ~= Pod, AgentSession ~= Container, and Workspace ~=
+local PersistentVolume. Its lifecycle is independent of its consumers, its
+materialization location determines scheduling affinity, it is lost with its
+node, and it is shared within one consumer group.
 
 ## Model
 
-```text
+```text literal
 Project.Workspace
-  Name                 # Project 内唯一；默认从 Origin 派生
-  Origin               # 来源绑定，见下
-  RepositoryNames[]    # 对 Project Repository 资源的引用（访问授权）
+  Name                 # Unique within the Project; derived from Origin by default
+  Origin               # Source binding; see below
+  RepositoryNames[]    # References to Project Repository resources (access grants)
   Status               # active | archived
-  Home                 # 物化路由事实：runnerId + path；未物化时为空
+  Home                 # Materialization route: runnerId + path; empty before materialization
 ```
 
-Origin 是 Workspace 的创建来源与唯一解析键：
+Origin is both the source from which the Workspace was created and its unique
+resolution key:
 
-```text
+```text literal
 Origin = { kind: issue, issueNumber }
        | { kind: slack, teamId, channelId }
        | { kind: web,   conversationId }
@@ -39,107 +48,141 @@ Origin = { kind: issue, issueNumber }
        | { kind: manual }
 ```
 
-- 同一 Project 内，同一 Origin 同时最多一个 active Workspace。
-- workspace 创建与归档发射 `com.mohist.workspace.created` / `com.mohist.workspace.archived`
-  事件，谱系见 [`event-protocol.md`](event-protocol.md) 的 workspace 族。
-- workflow 路径的反向解析走 Issue：Issue 持有 WorkspaceName，Workspace 不重复
-  持有 issue 引用之外的状态。
-- AgentSession 持有 WorkspaceName；Workspace 不持有 session 列表。"当前绑定哪些
-  session" 是对 Session 的查询结果。
-- RepositoryNames 是访问授权与默认检出目标，不代表已物化的 checkout；clone 由
-  Agent 在目录内自助完成。
+- At most one active Workspace may have a given Origin within a Project.
+- Workspace creation and archival emit `com.mohist.workspace.created` and
+  `com.mohist.workspace.archived`. See the Workspace family in
+  [`event-protocol.md`](event-protocol.md) for event lineage.
+- Reverse resolution for the Workflow path goes through the Issue: the Issue
+  holds WorkspaceName, while the Workspace does not duplicate Issue state.
+- An AgentSession holds WorkspaceName. A Workspace does not hold a Session
+  list; "which Sessions are currently bound" is a query over Sessions.
+- RepositoryNames are access grants and default checkout targets, not evidence
+  of materialized checkouts. Workflow preparation owns the clean Issue checkout;
+  an interactive Agent organizes its own checkout layout.
 
 ## Semantics
 
-### 创建（动态供应）
+### Creation (Dynamic Provisioning)
 
-Workspace 在 Origin 首次需要执行时被动态创建，没有独立的全局创建流程：
+A Workspace is provisioned dynamically when its Origin first needs to execute;
+there is no separate global creation flow:
 
-- workflow 路径：Issue 首次启动 run 时创建 `Origin = { issue, n }`，Name 派生为
-  `issue-<n>`；retry / rerun 复用同一 workspace。
-- 交互路径：入口上下文（Slack channel、Web 对话）的首条触发创建对应 Origin，
-  Name 从上下文派生并在 Project 内唯一化。
-- manual：`mo workspace create <name>` 显式创建，`Origin = { manual }`。
+- Workflow path: starting an Issue's first run creates
+  `Origin = { issue, n }`, with Name derived as `issue-<n>`. Retry and rerun
+  reuse the same Workspace.
+- Interactive path: the first trigger from an ingress context, such as a Slack
+  channel or Web conversation, creates the corresponding Origin. Its Name is
+  derived from the context and made unique within the Project.
+- Manual path: `mo workspace create <name>` creates a Workspace explicitly with
+  `Origin = { manual }`.
 
-创建只建立实体与仓库引用；目录在首次调度时由 Runner 物化。manual 名称由用户
-提供，Project 内唯一。
+Creation establishes only the entity and Repository references. The Runner
+materializes the directory on first dispatch. A manual Name is supplied by the
+user and must be unique within the Project.
 
-### 仓库成员
+### Repository Membership
 
-- `mo workspace repo add/remove <name> <repo>` 修改 RepositoryNames；workspace 存在
-  活跃绑定 session 时拒绝修改，错误给出停止会话或等待的下一步。
-- workflow 路径初始成员 = Issue 的 RepositoryName；复合 Issue 跨仓库交付经
-  `repo add` 挂载（attach 时机见 Status 开放问题）。
-- 物化时 Runner 按 RepositoryNames 为 workspace 注入仓库访问凭据，与 workflow
-  prepare 复用同一注入通道（`GH_TOKEN` / git credential，见
-  [`github-integration.md`](github-integration.md)）；Agent 自助 clone 不感知凭据细节。
+- `mo workspace repo add/remove <name> <repo>` changes RepositoryNames. Reject
+  the change while the Workspace has active bound Sessions, and tell the user
+  to stop those Sessions or wait.
+- The Workflow path initially contains the Issue's RepositoryName. A compound
+  Issue can attach additional repositories with `repo add`; the attachment
+  timing remains an open question under Status.
+- During materialization, the Runner injects Repository access credentials for
+  RepositoryNames through the same channel used by Workflow prepare
+  (`GH_TOKEN` / Git credentials; see
+  [`github-integration.md`](github-integration.md)). Agent-managed clones do not
+  need to know credential details.
 
-### 绑定与解析
+### Binding and Resolution
 
-- workflow task dispatch：经 Issue 持有的 WorkspaceName 绑定。
-- root session 启动：经入口上下文解析 Origin → active workspace；无则动态创建。
-  Slack 路径的 workspace 归属被触发 Agent 的 Project；同一 channel 被不同 Project
-  的 Agent 使用时，各 Project 持有各自独立的 workspace。
-- 被邀请或被委托产生的 session：继承父 session（或所在入口）的 workspace。
-- 显式覆盖：`mo agent launch <agent> --workspace <name>` 把新 session 绑定到既有
-  workspace；省略 `--workspace` 时绑定当前 Project 的 CLI 默认 workspace（必要时动态创建），
-  其实际名称随 launch response 返回。
+- Workflow task dispatch binds through the WorkspaceName held by the Issue.
+- Starting a root Session resolves the ingress context to an Origin and then to
+  an active Workspace, provisioning one if none exists. For Slack, the
+  Workspace belongs to the triggered Agent's Project. If Agents from different
+  Projects use the same channel, each Project owns a separate Workspace.
+- An invited Agent joins the Workspace of the enclosing Session or ingress
+  context.
+- A delegated child Session always inherits its parent Session's Workspace. A
+  spawn request cannot select another Workspace.
+- Explicit override: `mo agent launch <agent> --workspace <name>` binds a new
+  Session to an existing Workspace. Without `--workspace`, it binds to the
+  current Project's default CLI Workspace, provisioning one when necessary;
+  the launch response returns its actual Name.
 
-### 调度亲和与重新物化
+### Scheduling Affinity and Rematerialization
 
-- Workspace 一旦在 runner R 物化，绑定它的后续 dispatch 一律路由到 R。
-- R 不可达或目录已被回收时，Workspace 重新物化到可用 runner：改写 Home，从空
-  目录重新开始。未推送的 git 状态与未落盘产物随旧目录丢失；平台不承诺目录
-  连续性。
-- workflow 路径的恢复语义不变：profile 的 push 纪律是恢复点，prepare 在新目录
-  重新 clone / checkout。
+- Once a Workspace is materialized on Runner R, all subsequent dispatches bound
+  to it route to R.
+- If R is unreachable or the directory has been reclaimed, rematerialize the
+  Workspace on an available Runner: replace Home and start from an empty
+  directory. Unpushed Git state and unpersisted artifacts in the old directory
+  are lost; the platform does not guarantee directory continuity.
+- Workflow recovery semantics stay unchanged: the Profile's push discipline is
+  the recovery point, and prepare clones and checks out again in the new
+  directory.
 
-### 初始化
+### Initialization
 
-- workflow 路径：干净初始化。prepare 从仓库资源全新 clone；并行 Issue 的
-  workspace 目录互不相邻，无共享 checkout / 依赖缓存。
-- 交互路径：空目录 + 仓库访问权。Agent 按约定自助组织，平台不预建任何结构。
+- Workflow path: clean initialization. Prepare performs a fresh clone from the
+  Repository resource. Workspaces for parallel Issues use separate directories
+  with no shared checkout or dependency cache.
+- Interactive path: an empty directory plus Repository access. The Agent
+  organizes it according to convention; the platform creates no internal
+  layout in advance.
 
-### 归档
+### Archival
 
-归档是 Workspace 唯一的终态操作：
+Archival is the Workspace's only terminal operation:
 
-- workflow 路径：Issue 到 done / cancelled 时自动归档。
-- 交互路径：显式 `mo workspace close <name>`；入口消亡（如 Slack channel 归档）
-  触发归档。Origin 随归档解除占用：该 channel 的下一条触发动态创建全新 workspace。
-- `mo workspace close` 拒绝仍有活跃绑定 session 的 workspace，错误给出停止会话或
-  等待的下一步；Origin 为 issue 的 workspace 不受理手动 close（指引 `issue done /
-  close`），其归档只由 Issue 终态触发。
-- 归档后：实体保留可查，禁止新绑定，Runner 获得目录回收授权。
+- Workflow path: archive automatically when the Issue becomes done or
+  cancelled.
+- Interactive path: `mo workspace close <name>` archives explicitly. Loss of an
+  ingress, such as Slack channel archival, also triggers archival. Archival
+  releases the Origin, so the next trigger in that channel provisions a new
+  Workspace.
+- Reject `mo workspace close` while active Sessions remain bound and tell the
+  user to stop them or wait. A Workspace whose Origin is an Issue does not
+  accept manual close; direct the user to `issue done / close`, because only an
+  Issue terminal transition may archive it.
+- After archival, retain the entity for queries, reject new bindings, and grant
+  the Runner permission to reclaim the directory.
 
-### Runner 侧目录回收
+### Runner-Side Directory Reclamation
 
-Runner 保留现有 retention / storage budget 周期维护；回收守卫从"WorkflowRun
-终态"改为 Workspace 视角：
+The Runner keeps its existing periodic retention and storage-budget
+maintenance. The reclamation guard changes from "WorkflowRun is terminal" to
+the Workspace view:
 
-| Workspace 状态 | 目录处理 |
+| Workspace status | Directory handling |
 |---|---|
-| active 且有活跃绑定 session | 禁止回收 |
-| active 但无活跃绑定 | 可按磁盘策略回收；实体存活，下次绑定重新物化 |
-| archived | 按回收授权删除 |
+| active with active bound Sessions | reclamation forbidden |
+| active without active bindings | may be reclaimed by disk policy; the entity remains and the next binding rematerializes it |
+| archived | delete under the reclamation grant |
 
-每次删除仍需取得该目录的 Runtime removal fence——现有不变量不变。
+Every deletion must still acquire the directory's Runtime removal fence; that
+invariant does not change.
 
-### Prompt 锚定
+### Prompt Anchoring
 
-Runner 为绑定 workspace 的执行注入工作目录锚定段：绝对路径 + "workspace 文件都
-在这里，不要搜索 `$HOME`"。目录内部布局约定由 AGENTS.md / prompt 承载，不进入
-平台 schema。
+For execution bound to a Workspace, the Runner injects a working-directory
+anchor containing the absolute path and the instruction "all Workspace files
+are here; do not search `$HOME`". AGENTS.md and prompt conventions define the
+internal layout; it is not platform schema.
 
 ## Status
 
-- 本文取代 `repositories.md` 中"Workspace 无独立业务身份、由 WorkflowRunId 标识"
-  的旧教条。旧模型的 worktree 物化、WorkspaceRegistry 与终态回收语义由本模型
-  重新承接：回收守卫改为上表，Registry 条目身份改为 WorkspaceName。
-- 开放问题：复合 Issue 多仓库 attach 的时机；workflow 干净初始化与现有
-  `workspace-prepare` action 的衔接；Slack channel 归档事件到 workspace 归档的接线；
-  workspace 重新物化后绑定 session 的 Runtime Binding 重指语义；workflow 的 openspec 产物
-  位置——现位于 repo 检出内部（`openspec/changes/issue-<n>/`），是否随“工作产物属于
-  workspace 层”迁到 workspace 根（复合 Issue 场景下该产物不属于任何单一仓库）。
-- 已退役：subagent 的 Managed worktree（交付增量 4）概念——git worktree 属 git 范畴，
-  不是平台概念；spawn 的目录来源统一为继承 parent workspace 或绑定命名 Workspace。
+Workspace identity and explicit create/archive lifecycle are implemented.
+Issue, Slack, Web, and CLI origins resolve or provision Workspaces; named Runner
+materialization, cross-Session reuse, home affinity, and Workspace-aware
+reclamation guards are also implemented for their current owners. AgentJob
+scheduling can clear an offline Home and rematerialize elsewhere. WorkflowRun
+assignment remains pinned to its original Runner, so the cross-Runner Workflow
+rematerialization target above is not implemented. The Slack adapter also does
+not yet propagate a provider channel-archive event to the Server's archive
+boundary.
+
+Open questions concern compound-Issue repository attachment, Runtime Binding
+after rematerialization, and whether Workflow OpenSpec artifacts belong at the
+Workspace root. Git worktrees remain a Git implementation detail; a spawned
+Session always inherits its parent Workspace.

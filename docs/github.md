@@ -1,119 +1,207 @@
 # GitHub
 
-GitHub 集成把 GitHub 变成 Mohist 的需求入口、进度公告板与审批来源：需求以 GitHub issue 的形式进入产线，进度与结果回写到同一个 issue 上，审批可以直接在 PR review 上完成。Mohist 始终是状态的唯一裁判——GitHub 上看到的是产线的投影，不是第二份状态。
+The GitHub integration makes GitHub a requirement intake, progress board, and
+Approval source for Mohist. A GitHub Issue enters the production system as a
+requirement. Progress and results are written back to that Issue. A Pull
+Request review can decide an Approval. Mohist remains the sole authority for
+state; GitHub shows a projection of the production system, not a second copy of
+its state.
 
-交付维度（Integrate 阶段走 GitHub PR）是另一条线，见 [Workflow Profile](workflow-profiles.md) 与 [GitHub PR Action](actions/github-pr.md)，本篇不重复。
+Delivery through a GitHub Pull Request during the Integrate stage is separate.
+See [Workflow Profiles](workflow-profiles.md) and
+[GitHub PR Actions](actions/github-pr.md).
 
-## 心智模型
+## Mental Model
 
-- **GitHub 管「要什么」，Mohist 管「做出来」**：GitHub issue 是需求单；进入 Mohist 后由产线负责执行与状态。
-- **人在 GitHub 的三个动作驱动产线**：打供料标签（喂需求）、PR review（做审批）、关闭 issue（撤需求）。
-- **Mohist 在 GitHub 的留痕**：状态标签、关键节点评论、完成时关闭 issue。
-- **Mohist 以独立 bot 身份留痕**：评论、标签、PR 都是 bot 所为，与你的手工作区分——branch protection 的 review 门槛因此对产线产出同样有效（bot 不能批准自己的 PR）。
-- **快照即独立**：Mohist issue 创建时照搬 GitHub issue 的标题与正文，之后两边各自演化、互不回读。要改需求，在 Mohist issue 上改。
+- **GitHub owns what is wanted; Mohist owns producing it.** A GitHub Issue is a
+  requirement. Mohist executes and tracks it after intake.
+- **Three GitHub actions drive the production system:** Applying a feed label
+  supplies a requirement, a Pull Request review decides an Approval, and
+  closing an Issue withdraws the requirement.
+- **Mohist leaves a GitHub record:** State labels, comments at important
+  moments, and closing the Issue on completion.
+- **Mohist records work under a separate bot identity:** Comments, labels, and
+  Pull Requests are distinct from the administrator's manual work. Branch
+  protection therefore applies equally to production output because a bot
+  cannot approve its own Pull Request.
+- **A snapshot becomes independent:** Mohist copies the GitHub Issue title and
+  body when creating its Issue. After that, both evolve independently and do
+  not read changes back. Change the requirement on the Mohist Issue.
 
-## 连接仓库
+## Connecting a Repository
 
-前提：仓库已注册为 Project 的仓库（见[仓库](repositories.md)）。然后一条命令建立连接：
+First register the Repository with the Project; see
+[Repositories](repositories.md). Then create a Connection:
 
 ```bash
 mo github connect owner/repo
 ```
 
-连接按仓库地址自动匹配已注册的仓库资源；匹配不到时报错并提示先注册。连接需要两样 GitHub 侧配置（向导会打印步骤）：
+Mohist matches the URL to a registered Repository resource. If no resource
+matches, the command explains that it must be registered first. The guide
+prints steps for two GitHub-side configurations:
 
-1. **事件推送**：在仓库设置里添加 Webhook，指向你的 Mohist 服务地址——GitHub 上的动作才能实时到达 Mohist。
-2. **GitHub 身份**：Mohist 在 GitHub 留痕所用的身份，两种形态（向导引导配置）：
-   - **GitHub App（推荐）**：一个属于这套部署的 bot（`your-mohist[bot]`），安装到仓库即可。Mohist 按需换取按仓库收窄的短命令牌，不长期持有 GitHub 访问令牌；回写与交付（push、PR）都以 bot 身份完成，Runner 不再长期保存 GitHub 凭据。
-   - **fine-grained PAT（降级）**：只需 Issues 读写权限，仅供回写；它不能触碰代码——clone、push、PR 仍走 Runner 上已有的登录（见 [Runner 指南](runner.md)），留痕身份是你或 Runner 自有账号。
+1. **Event delivery:** Add a Repository webhook that targets the Mohist Server
+   URL so GitHub actions reach Mohist in real time.
+2. **GitHub identity:** Configure the identity used by Mohist on GitHub in one
+   of two forms:
 
-可选配置：
+   - **GitHub App, recommended:** Install a deployment-specific bot such as
+     `your-mohist[bot]` in the Repository. Mohist obtains short-lived,
+     Repository-scoped tokens as needed instead of retaining a long-lived
+     GitHub access token. Write-back and delivery, including push and Pull
+     Request creation, use the bot identity. Runner does not retain GitHub
+     credentials.
+   - **Fine-grained PAT, fallback:** Give it only Issues read and write access
+     for write-back. It cannot modify code. Clone, push, and Pull Request
+     delivery continue to use the existing Runner login; see
+     [Runner Guide](runner.md). Records appear under the administrator or
+     Runner account.
 
-| 配置 | 默认 | 说明 |
+Optional configuration:
+
+| Setting | Default | Meaning |
 |---|---|---|
-| 供料标签 | `mohist` | 打上它即视为需求进入 |
-| 供料方式 | 直接启动 | 可改为仅入 backlog（`--feed-mode backlog`），人工再启动 |
-| 审批者名单 | 空（关闭） | 名单内 GitHub 用户的 PR review 才算审批 |
+| Feed label | `mohist` | Applying it supplies the requirement |
+| Feed mode | Start immediately | Use `--feed-mode backlog` to create only a backlog Issue for a later manual start |
+| Approver list | Empty, disabled | Only Pull Request reviews from listed GitHub users decide an Approval |
 
-一个 GitHub 仓库只能连接到一个 Project；一个 Project 可以连接多个仓库。
+One GitHub Repository can connect to only one Project. A Project can connect to
+several Repositories.
 
-## 需求入口：打标签即供料
+## Requirement Intake by Label
 
-给 GitHub issue 打上供料标签，Mohist 创建对应 issue：标题、正文照搬；目标仓库取连接绑定的仓库；`p0`–`p4` 标签映射为 Mohist 优先级，其余标签不带入。供料方式默认直接启动——从打标签到进产线，不需要离开 GitHub。
+Applying the feed label to a GitHub Issue creates a corresponding Mohist Issue.
+Mohist copies its title and body, selects the Repository bound to the
+Connection, maps labels `p0` through `p4` to Mohist priority, and ignores other
+labels. The default feed mode starts work immediately, without leaving GitHub.
 
-规则：
+Rules:
 
-- **一个 GitHub issue 只供料一次**：取消标签再打上，不会重复创建。
-- **来源可追**：Mohist issue 上能看到它来自哪个 GitHub issue，可跳转回去。
-- **撤销即取消**：GitHub issue 被关闭而 Mohist issue 尚未完成时，Mohist issue 取消——需求方撤回了需求，产线不白跑。
-- **谁能供料由 GitHub 仓库权限决定**：能往仓库打标签的人就是能供料的人，Mohist 不再加一层名单（名单只用于审批，见下节）。
+- **A GitHub Issue is supplied once.** Removing and reapplying the label does
+  not create a duplicate.
+- **Origin is traceable.** The Mohist Issue links to its GitHub origin.
+- **Withdrawal cancels work.** Closing the GitHub Issue cancels the Mohist
+  Issue if it is not complete. The production system does not continue work
+  after the requester withdraws it.
+- **Repository permission controls intake.** Anyone who can apply labels can
+  supply a requirement. Mohist adds no additional intake list. The separate
+  list controls only Approvals.
 
-## 进度回写
+## Progress Write-back
 
-有 GitHub 来源的 issue，Mohist 把进度投影回 GitHub issue。
+Mohist projects progress from an Issue with a GitHub origin back to that GitHub
+Issue.
 
-**状态标签**（`mohist:` 前缀，互斥，同一时刻最多一个）：
+**State labels** use the mutually exclusive `mohist:` prefix, with at most one
+present at a time:
 
-| 标签 | 含义 |
+| Label | Meaning |
 |---|---|
-| `mohist:in-progress` | 产线运行中 |
-| `mohist:awaiting-approval` | 停在审批点，等人决策 |
-| `mohist:blocked` | 阻塞，需要人介入 |
-| `mohist:done` | 完成（同时关闭 GitHub issue） |
+| `mohist:in-progress` | The production system is running |
+| `mohist:awaiting-approval` | Work is waiting at an Approval point |
+| `mohist:blocked` | Work is blocked and needs intervention |
+| `mohist:done` | Work is complete; the GitHub Issue closes at the same time |
 
-**关键节点评论**（四类，不刷屏）：供料确认（附 Mohist issue 链接）、到达审批点、完成（交付摘要 + PR 链接）、取消（原因）。失败细节走通知渠道（见 [Hermes 通知](hermes-notifications.md)），不回刷 GitHub。
+Mohist writes four types of low-volume comments: intake confirmation with the
+Mohist Issue link, arrival at an Approval point, completion with a delivery
+summary and Pull Request link, and cancellation with a reason. Failure details
+go through a notification channel; see
+[Hermes Notifications](hermes-notifications.md). They are not repeated on
+GitHub.
 
-回写失败不阻塞产线：回写是公告板，不是产线状态本身；失败在 Mohist 侧留记录、可见可查。
+A write-back failure does not block production. GitHub is a progress board, not
+the production state. Mohist records the failure for inspection.
 
-## PR review 即审批
+## Pull Request Review as Approval
 
-连接配置了审批者名单后，Check 审批门接受 GitHub PR review 作为审批：
+When a Connection has an approver list, a Check Approval point accepts GitHub
+Pull Request reviews:
 
-| Review 结论 | 产线动作 |
+| Review result | Production action |
 |---|---|
-| Approve | 审批通过 |
-| Request changes | 打回，review 正文作为打回理由 |
-| Comment | 不产生审批 |
+| Approve | Approve |
+| Request changes | Reject, using the review body as the reason |
+| Comment | No Approval action |
 
-- 只有名单内的 GitHub 用户作出的 review 算数；名单为空即关闭此能力。
-- 审批留痕署名 GitHub 用户身份；`mo run approve` 的归属则是调用者的认证身份。
-- 适用范围是 Check 门（代码审核）；Plan 门审的是计划，彼时还没有 PR，不适用。
-- 已知边界：按事件到达时的状态决策；之后 review 被 dismiss 或因新 push 过期，不追溯。
+- Only a review by a listed GitHub user counts. An empty list disables the
+  capability.
+- The Approval record attributes the GitHub user. `mo run approve` attributes
+  its authenticated caller instead.
+- This applies to Check Approval points for code review. A Plan Approval occurs
+  before a Pull Request exists and does not use this path.
+- Mohist decides from state at event arrival. It does not reverse a decision if
+  a review is later dismissed or becomes stale after a push.
 
-## GitHub 事件进入事件路由
+## GitHub Events and Event Routing
 
-连接建立后，GitHub 上的动作（打标签、关闭、review、PR checks 结果）以 Mohist 事件的形式实时到达，可以被[事件路由](event-routing.md)的表达式直接订阅——例如「PR checks 一变红就叫监管 Agent 来看」。有来源链接的 GitHub 事件挂在对应 issue 的谱系下，「订阅 issue #42 名下的一切」自然覆盖它们。
+After a Connection is established, GitHub actions such as label changes,
+closure, review, and Pull Request check results reach Mohist as events in real
+time. [Event routing](event-routing.md) expressions can subscribe directly. A
+rule can, for example, ask a supervising Agent to inspect a newly failing Pull
+Request check. A GitHub event with an origin link belongs to the corresponding
+Issue lineage, so subscribing to every event under Issue #42 includes it.
 
-## 非目标
+## Non-goals
 
-- **双向同步**：GitHub 侧对标题、正文的编辑不回读；状态只从 Mohist 单向投影到 GitHub，两份真源必然腐坏。
-- **GitHub Projects**：看板列与自定义字段不读不写。Projects 的 Status 字段是 project 级数据（同一 issue 在两个看板里可有两个状态），与「Mohist 是唯一状态裁判」冲突；而回写到 issue 的标签与状态在 Projects 看板上自然可见，无需专门集成。
-- **GitHub 评论 @ 触发 Agent**：后续阶段按真实需求评估。
-- **层级映射**：GitHub sub-issues、milestone 与 Mohist 父子 issue、Epic 不做映射；需求层级在 Mohist 侧管理。
-- **GitHub 上的运行控制**：pause / stop / retry 等例外操作留在 Mohist 各入口（CLI、Web、Slack、通知建议动作）。
+- **Bidirectional synchronization:** GitHub title and body edits are not read
+  back. State projects only from Mohist to GitHub. Two state authorities would
+  diverge.
+- **GitHub Projects:** Mohist does not read or write board columns or custom
+  fields. A Projects Status field belongs to a board, and one Issue can have
+  different status in two boards. That conflicts with Mohist as sole state
+  authority. GitHub labels and Issue state already appear naturally in a
+  Projects board.
+- **Agent triggers from GitHub comment mentions:** Evaluate this in a later
+  phase when a real requirement exists.
+- **Hierarchy mapping:** GitHub sub-issues and milestones do not map to Mohist
+  child Issues or Epics. Manage requirement hierarchy in Mohist.
+- **Runtime control on GitHub:** Exceptional operations such as pause, stop,
+  and retry remain in Mohist interfaces such as CLI, Web, Slack, and suggested
+  notification actions.
 
-## 实装差距
+## Status
 
-> **当前实装差距：** 连接仓库与事件入站已实装：`mo github connect` 建立连接并打印
-> GitHub 侧配置清单，打标签、关闭 issue、PR review、check suite 完成等事件验签后实时
-> 进入事件路由，可被订阅。供料与撤销已实装：打供料标签创建并启动 Mohist issue
-> （标题/正文快照、p0–p4 优先级映射、来源可追、`--feed-mode backlog` 仅入 backlog），
-> 同一 GitHub issue 重复供料只建一次；关闭 GitHub issue 会取消对应 Mohist issue，
-> 已终态时无动作。启动被拒（前置未满足 / 仓库不可用）时留在 backlog，并通过最小评论
-> 回写通道（PAT 身份）在 GitHub 上留说明。PR review 审批已实装：连接创建/更新
-> （`mo github connect --approver` / `mo github update`）可配置审批者名单，名单内用户
-> 在 PR 上的 Approve / Request changes 分别通过 / 打回 Check 审批门（署名
-> `github:<login>`，打回理由为 review 正文），Comment 与名单外用户无动作；按事件到达时
-> 状态决策，不追溯 dismiss 或过期 review。进度回写（issue 级）已实装：工作开始、
-> 到达审批点、运行失败、完成、取消五类事件投影为互斥状态标签与关键节点评论，
-> 完成 / 取消同时关闭 GitHub issue；评论与标签幂等，单个操作失败不阻塞其余操作，
-> 失败落库（连接 401/403 时同时标记连接待运维）。仍未实装：写回失败的可见可查入口
-> （Web / CLI 查询）、GitHub App 身份（当前以 PAT 身份回写，App 安装与按仓库短令牌
-> 交换未交付）。
+Repository Connection and inbound events are implemented. `mo github connect`
+creates a Connection and prints the GitHub configuration checklist. Signed
+events for label changes, Issue closure, Pull Request reviews, and completed
+check suites reach event routing in real time and can be subscribed to.
 
-当前 GitHub 仍是交付目标（`mohist/github-pr` profile），App 身份与写回失败的可见可查入口由
-后续 issue 推进落地。
+Intake and withdrawal are implemented. A feed label creates and starts a
+Mohist Issue with title and body snapshot, `p0` through `p4` priority mapping,
+traceable origin, and optional backlog-only mode through
+`--feed-mode backlog`. Repeated intake creates only one Mohist Issue. Closing
+the GitHub Issue cancels its Mohist Issue unless that Issue is already terminal.
+When start is rejected because prerequisites are unmet or the Repository is
+unavailable, the Issue remains in the backlog and a minimal PAT-authored comment
+explains the result on GitHub.
+
+Pull Request review Approval is implemented. `mo github connect --approver`
+and `mo github update` configure the approver list. Approve and Request changes
+reviews from listed users approve or reject a Check Approval point, attributed
+to `github:<login>`, with the review body as a rejection reason. Comment reviews
+and unlisted users have no effect. Mohist decides from state at event arrival
+and does not revisit dismissed or stale reviews.
+
+Issue-level progress write-back is implemented. Work start, arrival at an
+Approval point, run failure, completion, and cancellation project to mutually
+exclusive state labels and comments. Completion and cancellation also close
+the GitHub Issue. Comments and labels are idempotent. Failure of one operation
+does not block another. Failures are persisted, and a 401 or 403 also marks the
+Connection as needing operations attention.
+
+The Web and CLI do not yet expose persisted write-back failures. GitHub App
+identity is also not implemented; write-back currently uses a PAT, without App
+installation or Repository-scoped short-lived token exchange. GitHub remains a
+delivery target through the `mohist/github-pr` Profile. Future Issues will
+deliver App identity and failure inspection.
+
+PR review Approval and completion-comment PR lookup still recognize the old
+`mo/issue-N` branch form. The current Issue Workspace branch is
+`mohist/ws-issue-N`, so do not rely on those two correlations until the GitHub
+reader uses the Workspace branch convention.
 
 ---
 
-设计边界与协议细节见 [`design/github-integration.md`](../design/github-integration.md)。
+See [`design/github-integration.md`](../design/github-integration.md) for design
+boundaries and protocol details.
