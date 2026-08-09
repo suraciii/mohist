@@ -1,34 +1,45 @@
 # Pi Runtime
 
-## 决策
+## Decision
 
-`mohist/pi` 是基于 `@earendil-works/pi-coding-agent` SDK **进程内**实现的 Runtime 特有
-Action。它与 Agent / Session 的所有权模型（Inline Agent、工作所有者、共享 Runtime
-不制造依赖等不变量）见 [`agent-execution.md`](../agent-execution.md)；与
-`OpenCodeRuntime` 的关系是平行深模块，不共享接口、不互相包装。
+`mohist/pi` is a Runtime-specific Action implemented **in process** with the
+`@earendil-works/pi-coding-agent` SDK. See
+[`agent-execution.md`](../agent-execution.md) for the Agent / Session ownership
+model and its invariants, including Inline Agents, work ownership, and the rule
+that a shared Runtime creates no dependency. `PiRuntime` and
+`OpenCodeRuntime` are parallel deep modules: they share no interface and wrap
+neither one around the other.
 
-接入方式的取舍：
+Integration choices:
 
-- **不用 ACP**。Pi 不原生支持 ACP；现存的 ACP 通路全部是社区 adapter（桥到
-  `pi --mode rpc` 或内嵌 SDK），引入它等于在 SDK 之上再加一层第三方移动部件。这与
-  移除 `mohist/acp-agent`、不保留 ACP fallback 的既有决策一致。
-- **不用 `--mode rpc`**。RPC 模式的 `prompt` 响应只确认受理，完成要靠事件流判断；
-  一个 RPC 进程同时只持有一个活跃 Session，多会话并发要管理多个子进程；并且没有
-  类型安全。SDK 的 `session.prompt()` 直接 await 到执行结束，与 `OpenCodeRuntime`
-  的「prompt 响应即唯一完成判据」语义同构。若未来出现进程隔离的硬需求（Pi 崩溃
-  不拖垮 Runner），可以再评估 RPC 模式；换底只改变 `PiRuntime` 内部，不改变
-  Workflow Action 或 Session 产品契约。
-- **不引入通用 `AgentRuntime` 接口**。稳定边界是 Workflow Action 契约、AgentJob
-  执行契约和 Session 命令。`PiRuntime` 的 boundary types 独立一份
-  （`runtime: "pi"`），与 `runtime/opencode/types.ts` 形状平行是有意的冗余，不是
-  遗漏的抽象。
+- **No ACP.** Pi has no native ACP support. Every existing ACP path is a
+  community adapter, either bridging to `pi --mode rpc` or embedding the SDK.
+  Adding one would put another third-party moving part above the SDK and would
+  conflict with the existing decision to remove `mohist/acp-agent` without an
+  ACP fallback.
+- **No `--mode rpc`.** The RPC `prompt` response confirms only acceptance;
+  completion must be inferred from the event stream. One RPC process holds only
+  one active Session, so concurrent Sessions require child-process management,
+  and the interface is not type-safe. SDK `session.prompt()` awaits execution
+  completion directly, matching the `OpenCodeRuntime` rule that the prompt
+  response is the sole completion decision. If process isolation later becomes
+  a hard requirement, for example to prevent a Pi crash from terminating the
+  Runner, RPC can be reconsidered. That change would stay inside `PiRuntime`
+  and would not affect the Workflow Action or Session product contract.
+- **No generic `AgentRuntime` interface.** The stable boundaries are the
+  Workflow Action contract, AgentJob execution contract, and Session commands.
+  `PiRuntime` deliberately owns a separate set of boundary types with
+  `runtime: "pi"`. Their shape parallels `runtime/opencode/types.ts`; that is
+  intentional duplication, not a missing abstraction.
 
-与 OpenCode 的责任边界差异：Pi 是 Runner 的 npm 依赖，随 Runner 发布并锁定版本，
-安装者不需要提供 Pi CLI。provider 凭证走 Pi 自己的机制（环境变量与 Pi auth
-存储），Mohist 不管理 API key。SDK authentication manager 是凭证值的唯一读取者；
-Mohist 自有 request/result、事件、注册和 smoke artifact 都不携带凭证字段。
+The responsibility difference from OpenCode is that Pi is an npm dependency of
+the Runner, shipped and version-locked with it. The operator need not install a
+Pi CLI. Provider credentials follow Pi's own environment-variable and auth
+storage mechanisms; Mohist does not manage API keys. The SDK authentication
+manager is the only reader of credential values. Mohist request/result types,
+events, registration, and smoke artifacts contain no credential fields.
 
-## Action 输入输出契约
+## Action Input and Output Contract
 
 ```ts
 type PiActionInput = {
@@ -45,378 +56,483 @@ type PiActionOutput = null | {
 }
 ```
 
-输入形状、展开时机、输出投影与 `mohist/opencode` 完全一致（见
-[`opencode.md`](opencode.md) 的「Action 输入输出契约」），差异只有两点：
+The input shape, expansion timing, and output projection are identical to
+`mohist/opencode`; see the Action input and output contract in
+[`opencode.md`](opencode.md). There are only two differences:
 
-- `model` 使用 Pi 的 `provider/model` 形式，同样只按第一个 `/` 分割；模型是否合法
-  由 Pi 最终校验。
-- `variant` 映射为 Pi 的 thinking level（`off` / `minimal` / `low` / `medium` /
-  `high` / `xhigh` / `max`）。它始终是独立字段，不能拼进 model ID；非法取值由 Pi
-  拒绝并规范化为执行失败，Mohist 不预校验档位集合。
+- `model` uses Pi's `provider/model` form and is likewise split only at the
+  first `/`. Pi remains the final authority on whether the model is valid.
+- `variant` maps to a Pi thinking level: `off`, `minimal`, `low`, `medium`,
+  `high`, `xhigh`, or `max`. It remains a separate field and must not be joined
+  to the model ID. Pi rejects invalid values, which Mohist normalizes as an
+  execution failure; Mohist does not prevalidate the set.
 
-`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使执行失败；这让
-含有 `runtime` 键（供 Mohist Agent 路径读取）或遗留键的已持久化 `vars.agent` 可以
-继续绑定到本 Action。`options` 不携带 `runtime`：Workflow 路径的后端选择点就是
-`uses`。
+Keys in `options` other than `model` and `variant` are ignored with a diagnostic
+and do not fail execution. This allows persisted `vars.agent` values containing
+a `runtime` key, used by the Mohist Agent path, or legacy keys to remain
+bindable to this Action. `options` does not carry `runtime`; the Workflow path
+selects its backend through `uses`.
 
-## SDK 调用面
+## SDK Surface
 
-依赖包是 `@earendil-works/pi-coding-agent`（npm scope 已从 `@mariozechner/*` 迁至
-`@earendil-works/*`），要求 Node ≥ 22.19。SDK 为纯进程内调用：LLM 请求与内置工具
-执行都发生在 Runner 进程内，没有独立 Server 进程。
+The dependency is `@earendil-works/pi-coding-agent`; its npm scope migrated from
+`@mariozechner/*` to `@earendil-works/*`. It requires Node >= 22.19. The SDK is
+purely in process: LLM requests and built-in tool execution occur inside the
+Runner process, with no separate Server process.
 
-| 能力 | SDK operation |
+| Capability | SDK operation |
 |---|---|
-| 创建物理 Session | `SessionManager.create(cwd, sessionDir?)`，配合 `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
-| 恢复物理 Session | `SessionManager.open(sessionFile)`，配合同一组显式服务创建 `AgentSession` |
-| 执行并等待 Workflow / AgentJob Prompt | `await session.prompt(text, { expandPromptTemplates: false })` |
-| 执行中注入收尾警告 | `session.steer(text)` |
-| 提交用户 Follow-up（执行中） | `session.steer(text)` |
-| 提交用户 Follow-up（Session 空闲） | `session.prompt(text)`，不等待其完成 |
-| 中断执行 | `await session.abort()`；停止确认读取 `session.isStreaming`，不是 abort 返回值 |
-| 压缩 context | `session.compact()` |
-| 应用执行模型与推理档位 | `session.setModel()`、`session.setThinkingLevel()` |
-| 读取 Session 状态与消息 | `session.sessionId`、`session.sessionFile`、`session.messages`、`session.isStreaming` |
-| 接收实时事件 | `session.subscribe(listener)` |
-| 读取 model catalog | `ModelRuntime.create({ ... })` 后 `await modelRuntime.getAvailable()` |
+| create a physical Session | `SessionManager.create(cwd, sessionDir?)`, then `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
+| restore a physical Session | `SessionManager.open(sessionFile)`, then create `AgentSession` with the same explicit services |
+| execute and await a Workflow / AgentJob Prompt | `await session.prompt(text, { expandPromptTemplates: false })` |
+| inject a closeout warning during execution | `session.steer(text)` |
+| submit a user Follow-up during execution | `session.steer(text)` |
+| submit a user Follow-up while the Session is idle | `session.prompt(text)` without awaiting completion |
+| interrupt execution | `await session.abort()`; confirm stop through `session.isStreaming`, not the abort return value |
+| compact context | `session.compact()` |
+| apply execution model and reasoning level | `session.setModel()`, `session.setThinkingLevel()` |
+| read Session state and messages | `session.sessionId`, `session.sessionFile`, `session.messages`, `session.isStreaming` |
+| receive real-time events | `session.subscribe(listener)` |
+| read the model catalog | create `ModelRuntime` with `ModelRuntime.create({ ... })`, then `await modelRuntime.getAvailable()` |
 
-实现开始时必须先锁定 SDK package 版本，并对上表断言的调用面在真实 Pi 上做一次冒烟
-验证（含事件载荷形状）；发现漂移时先修订本表，再进入实现。0.80.10 的真实验证记录在
-`openspec/changes/issue-450/sdk-smoke-verification.json`，冒烟记录参照
-[`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)
-的做法留存。
+Before implementation, lock the SDK package version and smoke-test every SDK
+claim in this table against a real Pi installation, including event payload
+shapes. If the surface has drifted, revise this table before implementing. The
+real 0.80.10 verification is stored at
+`openspec/changes/issue-450/sdk-smoke-verification.json`, following the artifact
+practice demonstrated by
+[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).
 
-## 深模块边界
+## Deep Module Boundary
 
-`PiRuntime` 是 Runner 内部的深模块，负责：
+`PiRuntime` is a deep module inside the Runner. It owns:
 
-- SDK 服务装配（`ModelRuntime`、`SettingsManager`、`DefaultResourceLoader`）与
-  model catalog；
-- 就绪状态与兼容性诊断；
-- 物理 Session 创建、按绑定恢复、实例缓存与中断；
-- Prompt 执行、Follow-up、Compact 与 Reset；
-- 事件订阅与规范化投影；
-- Pi error 与版本兼容性诊断。
+- SDK service assembly (`ModelRuntime`, `SettingsManager`, and
+  `DefaultResourceLoader`) and the model catalog;
+- readiness and compatibility diagnostics;
+- physical Session creation, restoration by binding, instance caching, and
+  interruption;
+- Prompt execution, Follow-up, Compact, and Reset;
+- event subscription and normalized projection;
+- Pi errors and version-compatibility diagnostics.
 
-边界规则与 `OpenCodeRuntime` 相同：`mohist/pi` Action、AgentJob execution adapter 与
-Session command handler 只依赖 Mohist 定义的 request / result 类型
-（`runtime/pi/types.ts`，`runtime` 字面量为 `"pi"`），不暴露 SDK 类型。Runtime 接收
-已经组装好的执行输入与 Session 绑定；它不接收 Mohist Agent ID / name，也不加载
-Mohist Agent 定义。model string 解析、`Model` 对象构造、调用顺序、实例缓存和 Pi
-error 解释全部封装在该模块内。
+Its boundary follows the same rule as `OpenCodeRuntime`: the `mohist/pi`
+Action, AgentJob execution adapter, and Session command handler depend only on
+Mohist request/result types in `runtime/pi/types.ts`, whose `runtime` literal is
+`"pi"`. They expose no SDK types. The Runtime receives fully assembled execution
+input and a Session binding. It receives no Mohist Agent ID or name and does not
+load a Mohist Agent definition. Model-string parsing, `Model` object creation,
+call ordering, instance caching, and Pi error interpretation remain inside the
+module.
 
-它不是逐方法透传的 SDK wrapper。调用者请求 execute prompt、follow up、compact、reset 等
-Mohist 能力，由模块决定使用哪些 SDK operation 才能完成该能力。
+This is not a method-by-method SDK wrapper. Callers request Mohist capabilities
+such as execute Prompt, Follow-up, Compact, and Reset. The module decides which
+SDK operations implement each capability.
 
-执行输入按纯文本提交：`PiRuntime` 不加载 prompt templates，也不做斜杠命令展开——
-以 `/` 开头的工作流 prompt 仍须原样进入模型。0.80.10 的 `prompt()` 默认会展开
-文件型 prompt template，因此每次 Workflow 调用必须显式传入
-`{ expandPromptTemplates: false }`。
+Execution input is submitted as plain text. `PiRuntime` does not load Prompt
+templates or expand slash commands; a Workflow Prompt beginning with `/` must
+reach the model unchanged. In 0.80.10, `prompt()` expands file-based Prompt
+templates by default, so every Workflow call must explicitly pass
+`{ expandPromptTemplates: false }`.
 
-## 进程拓扑与就绪
+## Process Topology and Readiness
 
-每个 Runner 进程拥有一个 `PiRuntime`，由所有 Pi Session 共享。每个活跃物理 Session
-对应一个进程内 `AgentSession` 实例：按绑定首次使用时创建并缓存，Runner 重启后从
-持久化绑定 lazy 恢复。不为每个 Action 创建独立进程，也不为每次执行重建 Session
-实例。
+Each Runner process owns one `PiRuntime`, shared by all Pi Sessions. Every
+active physical Session has one in-process `AgentSession` instance. It is
+created and cached on first use of a binding and lazily restored from the
+persisted binding after a Runner restart. The Runtime does not create a process
+per Action or recreate the Session instance for each execution.
 
-Mohist 认为逻辑 AgentSession 的 workDir 与物理 Session 的 directory 都不可变。工作目录
-变化时拒绝本次执行；调用者必须使用新的逻辑 Session 身份，不能在原 AgentSession 上创建
-替代绑定。Pi 的 session 文件按 cwd 分目录存放（默认
-`~/.pi/agent/sessions/<cwd 编码>/`），与目录不可变语义天然一致；Mohist 不引入独立
-的 session-dir 配置。
+Mohist treats both the logical AgentSession workDir and the physical Session
+directory as immutable. If the working directory changes, reject the execution;
+the caller must use a new logical Session identity rather than create a
+replacement binding on the existing AgentSession. Pi naturally stores Session
+files by cwd, under `~/.pi/agent/sessions/<encoded-cwd>/` by default. Mohist does
+not add a separate session-directory setting.
 
-Runner 注册或领取工作前必须：
+Before the Runner registers or claims work, it must:
 
-1. 完成 SDK 服务装配；
-2. 成功加载 model catalog。
+1. assemble SDK services successfully;
+2. load the model catalog successfully.
 
-catalog 加载成功即 ready；catalog 为空（没有任何已配置凭证的 provider）记 warning
-诊断但不阻止 ready——模型合法性始终由 Pi 在执行时最终校验。服务装配失败或 catalog
-加载失败时，`PiRuntime` 不 ready，Runner 停止领取新工作并重建；这与
-`OpenCodeRuntime` 的就绪 gate 对齐，两个 Runtime 的就绪状态都纳入领活条件。
+A successful catalog load makes the Runtime ready. An empty catalog, meaning no
+provider with configured credentials, emits a warning diagnostic but does not
+block readiness; Pi remains the final model-validity authority at execution.
+If service assembly or catalog loading fails, `PiRuntime` is not ready and the
+Runner stops claiming new work while it rebuilds. This matches the
+`OpenCodeRuntime` readiness gate; both Runtime readiness states participate in
+work admission.
 
-与 OpenCode 的进程拓扑差异及其语义：Pi 在 Runner 进程内执行，Runner 进程终止时所有
-执行中的 Pi Prompt 随之终止——不存在独立 Server 的退出、重建与事件流重连。持久化的
-物理 Session（JSONL 文件）不受影响，Runner 重启后按绑定恢复；已终止的执行不自动
-replay，由工作所有者的 redelivery 语义兜底。
+Pi's different topology has one important consequence: it runs inside the
+Runner, so terminating the Runner process terminates every running Pi Prompt.
+There is no independent Server exit, rebuild, or event-stream reconnection. The
+persisted physical Sessions, stored as JSONL files, survive. The Runner restores
+them by binding after restart, but it does not replay terminated execution;
+the work owner's redelivery semantics decide what follows.
 
-## Session 绑定
+## Session Binding
 
-AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)，Runtime 身份
-字段命名见 [`conventions.md`](../conventions.md)。逻辑 Session 目标解析、绑定创建时序
-（先创建物理 Session，持久化绑定成功后才提交首个 Prompt；持久化幂等）、复用不变量
-（跨 task、retry 与 Runner 重启解析到当前绑定；工作目录不同则在提交 Prompt 前以可
-操作错误拒绝）以及缺失恢复的 expected binding 裁决与操作矩阵以
-[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 为唯一权威，本节
-只定义 Pi 特有部分。
+See [`agent-execution.md`](../agent-execution.md) for AgentSession ownership and
+origin and [`conventions.md`](../conventions.md) for Runtime identity field
+names. The shared rules for logical Session target resolution, binding creation
+ordering, reuse, and missing recovery are authoritative in
+[`agent-execution.md`](../agent-execution.md#runtime-session-missing-recovery).
+Those rules require creating the physical Session before persisting the binding,
+submitting the first Prompt only after idempotent persistence succeeds,
+resolving to the current binding across tasks, retries, and Runner restarts, and
+rejecting a changed working directory before Prompt submission with an
+actionable error. This section defines only Pi-specific behavior.
 
-物理绑定的 `runtimeSessionId` 持久化 **Pi session 文件的绝对路径**
-（`session.sessionFile`；`SessionManager.create()` 路径下必有值，取不到文件路径视为
-`incompatible-runtime`）。SDK 的恢复入口 `SessionManager.open()` 以文件路径为键，
-没有按 uuid 打开的调用面；session uuid（`session.sessionId`）只进入诊断信息。
+The physical binding `runtimeSessionId` persists the **absolute path to the Pi
+Session file**, `session.sessionFile`. A path must exist for a Session created by
+`SessionManager.create()`; absence of the file path is
+`incompatible-runtime`. The SDK restoration entry point
+`SessionManager.open()` is keyed by file path and has no open-by-UUID surface.
+The Session UUID, `session.sessionId`, is diagnostic only.
 
-物理 Session 实例的恢复是 lazy 的：只有绑定的 `runnerId` 对应的 PiRuntime 可以从进程内
-缓存或绑定中的 session 文件路径恢复；请求落在其它 Runner 时必须先路由回绑定所属 Runner
-或明确失败，其本地文件不存在不构成 missing 证据。绑定所属 Runner 缓存未命中时用
-`SessionManager.open()` 恢复，messages、model 与 thinking level 由 SDK 自动还原。只有
-绑定路径明确不存在，才产生 `definitely-missing` 事实并允许在提交新的独立输入前自动创建
-replacement。文件存在但无法打开、JSONL 损坏、权限失败或 SDK 返回无法分类的错误时，
-本次工作失败，不能用空 Session 掩盖数据或兼容性问题。
+Physical Session restoration is lazy. Only the PiRuntime on the binding's
+`runnerId` may restore from its in-process cache or the bound Session-file path.
+A request reaching another Runner must route back to the bound Runner or fail
+explicitly; a missing local file on that other Runner is not evidence that the
+binding is missing. On a cache miss, the bound Runner uses
+`SessionManager.open()`, which restores messages, model, and thinking level.
+Only an explicitly absent binding path yields a `definitely-missing` fact and
+permits automatic replacement before a new independent input is submitted. If
+the file exists but cannot be opened, its JSONL is corrupt, permission fails, or
+the SDK error cannot be classified, fail the work instead of hiding data or
+compatibility failure with an empty Session.
 
-Pi 在 session 出现第一条 assistant 消息之前不落盘 session 文件。首个 Prompt 执行中
-Runner 崩溃会留下「绑定存在、文件从未生成」的状态，重启后的恢复因此按上段的文件
-缺失规则处理。原 Prompt 的提交状态仍由工作所有者裁决，Runtime 不自动重放；
-只有后续独立输入才能建立 replacement。丢失的至多是一次提交状态本就不确定的
-未完成执行，与 redelivery 可能重复执行的限制同属一类。
+Pi does not write its Session file until the first assistant message appears.
+A Runner crash during the first Prompt can therefore leave a binding whose file
+never existed. Restoration after restart treats that condition under the
+missing-file rule above. The work owner still decides the original Prompt's
+submission state and the Runtime never replays it automatically. Only a later,
+independent input may establish a replacement. At most one unfinished execution
+with already-uncertain submission state is lost, matching the accepted
+redelivery duplicate-execution limitation.
 
-Runtime 变化与 Reset 会创建新物理 Session，并原子替换 current binding，不迁移上下文；
-Compact 与 model / variant 变化必须保持同一 session 文件。model 与 thinking level 是执行
-参数：复用已有 Session 时，Runtime 在原物理 Session 上 `setModel()` /
-`setThinkingLevel()` 应用本次选择后执行 Prompt，不触发 binding replacement。
+A Runtime change or Reset creates a new physical Session and atomically replaces
+the current binding without migrating context. Compact and changes to model or
+variant keep the same Session file. Model and thinking level are execution
+parameters: when reusing a Session, call `setModel()` and
+`setThinkingLevel()` on the existing physical Session before the Prompt. They
+do not trigger binding replacement.
 
-worktree cleanup follow-up 的处理与 `OpenCodeRuntime` 相同：executor 再次调用原
-task 已解析的 Action，走同一 Runtime 和物理 Session，不得替换绑定。
+Worktree-cleanup Follow-up behaves exactly as in `OpenCodeRuntime`: the executor
+invokes the original task's resolved Action again, using the same Runtime and
+physical Session, without replacing the binding.
 
-## Prompt 执行
+## Prompt Execution
 
-Workflow Action adapter 或 AgentJob executor 请求的 Prompt 按以下顺序执行：
+A Prompt requested by a Workflow Action adapter or AgentJob executor runs in
+this order:
 
-1. 解析可选 model string；
-2. 无 binding 时创建物理 Session；有 binding 时从缓存或 `SessionManager.open()` 恢复，
-   并按通用缺失恢复规则选择原路径或一个已重新绑定的新路径；
-3. 等待 Session 确认当前 binding 已持久化；
-4. 以确认后的 Runtime Session ID 记录并持久化本次输入；
-5. 在 Session 上应用本次 model 与 thinking level；
-6. 调用并等待 `session.prompt(text)`；
-7. 把收到的事件投影到 AgentSession；
-8. 从 `session.messages` 最后一条 assistant 消息提取最终文本；
-9. 向调用者返回规范化完成事实。
+1. Parse the optional model string.
+2. With no binding, create a physical Session. With a binding, restore it from
+   cache or `SessionManager.open()`, then apply shared missing-recovery rules to
+   choose either the original path or a newly rebound path.
+3. Wait until the Session confirms that the current binding is persisted.
+4. Record and persist this input using the confirmed Runtime Session ID.
+5. Apply this execution's model and thinking level to the Session.
+6. Call and await `session.prompt(text)`.
+7. Project received events into AgentSession.
+8. Read final text from the last assistant message in `session.messages`.
+9. Return a normalized completion fact.
 
-`session.prompt()` resolve 即整个 agent run（含工具循环与自动重试）结束，它就是
-唯一完成判据，不存在第二次 wait；`agent_end` 事件只用于投影，不作为完成权威。
-`PiRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。调用者必须声明工作
-执行的 duration。issue #450 的 Workflow task executor 通过 Runner-private Action context
-固定提供 60 分钟，`mohist/pi` Action Input 不可见也不能覆盖。Action 完成 open/bind、输入
-报告与 model/thinking 应用后，把 duration 交给 `executePrompt`；Runtime 在调用
-`session.prompt()` 前读取注入时钟并形成绝对 deadline。队列等待、绑定与输入报告不占 Prompt
-预算；cleanup Prompt 是独立执行并取得新的 60 分钟。AgentJob executor 的期限由其所属
-issue 单独定义。
+Resolution of `session.prompt()` means the entire Agent run, including tool
+loops and automatic retries, has ended. It is the sole completion decision;
+`agent_end` projects state but is not authoritative. `PiRuntime` does not
+evaluate Workflow expectations or decide AgentJob success. The caller must
+declare execution duration. For issue #450, the Workflow task executor supplies
+a fixed 60 minutes through Runner-private Action context, invisible to and not
+overridable by `mohist/pi` Action input. After open/bind, input reporting, and
+model/thinking application, the Action passes the duration to `executePrompt`.
+Immediately before `session.prompt()`, the Runtime reads the injected clock and
+creates an absolute deadline. Queueing, binding, and input reporting consume no
+Prompt budget. A cleanup Prompt is a separate execution with a fresh 60-minute
+duration. The AgentJob executor's deadline belongs to its own Issue.
 
-in-process 调用没有 transport timeout；executor 的 AbortSignal 与声明的期限是单一
-执行期限权威。期限到达时 Runtime 将执行结果固定为 `deadline-exceeded`，随后调用
-`session.abort()` 收尾；迟到 resolve 的 `prompt()` 不能翻转该结果。任何失败都不
-自动重放提交状态不确定的 Prompt；redelivery 在 crash window 内可能造成重复执行，
-这是与 OpenCode 一致的已接受限制。
+There is no transport timeout for this in-process call. The executor AbortSignal
+and declared deadline are the single execution-deadline authority. At deadline,
+the Runtime fixes the result as `deadline-exceeded` and then calls
+`session.abort()` to close out. A late resolution of `prompt()` cannot reverse
+that result. No failure automatically replays a Prompt with uncertain
+submission state. Redelivery can duplicate execution inside the crash window;
+this is the same accepted limitation as OpenCode.
 
-## Prompt 期限与两段式收尾
+## Prompt Deadline and Two-Phase Closeout
 
-期限协议与 [`opencode.md`](opencode.md) 的「Prompt 期限与两段式收尾」相同：期限前 5
-分钟注入一次任务无关的收尾警告（期限不足 5 分钟时执行开始即注入），期限到达先
-固定 `deadline-exceeded` 再中断收尾。Pi 侧的差异只是通道：
+The deadline protocol matches the corresponding OpenCode protocol in
+[`opencode.md`](opencode.md): inject one task-independent closeout warning five
+minutes before the deadline, or immediately at execution start when the total
+deadline is under five minutes; at the deadline, first fix
+`deadline-exceeded`, then interrupt for closeout. Only the Pi channels differ:
 
-- 警告注入使用 `session.steer(text)`。steer 消息在当前执行的迭代边界（当前模型
-  调用及其工具调用完成后）被拾取，语义与 OpenCode 的 `promptAsync` 注入一致；
-  正在执行的长工具调用会延迟拾取，期限到达仍 abort。
-- 终止使用 `await session.abort()`，并通过 Session 事件与 `isStreaming` 核对确认停止；
-  无法确认时返回中断未确认诊断，不声称执行已经安全停止。
+- Warning injection uses `session.steer(text)`. The current execution receives
+  the steer message at an iteration boundary, after the current model call and
+  its tool calls, matching OpenCode `promptAsync` injection. A long-running tool
+  call can delay receipt; the deadline still aborts.
+- Termination uses `await session.abort()`, then confirms stop through Session
+  events and `isStreaming`. If confirmation fails, return an
+  interruption-unconfirmed diagnostic without claiming execution stopped
+  safely.
 
-0.80.10 没有独立的 stop-confirmation operation，也没有布尔型 `abort()` 返回值；
-`abort()` 的 Promise 只表示中断请求已处理，停止确认必须观察 `isStreaming` 与事件序列。
+Version 0.80.10 has neither a separate stop-confirmation operation nor a
+Boolean `abort()` result. The Promise from `abort()` means only that the
+interrupt request was handled. Stop confirmation must observe `isStreaming`
+and the event sequence.
 
-## 事件与状态核对
+## Events and State Reconciliation
 
-共同的 activity 与 transcript 契约以
-[`agent-execution.md`](../agent-execution.md#activity-与-transcript) 为准；本节只定义
-Pi 信号如何成为这些规范事实。
+The shared activity and transcript contract is authoritative in
+[`agent-execution.md`](../agent-execution.md#activity-and-transcript). This
+section defines only how Pi signals become those canonical facts.
 
-`PiRuntime` 对每个活跃 `AgentSession` 实例维护一个 `session.subscribe()` 订阅。
-已知事件被规范化为 Mohist 稳定的 transcript、tool、usage、model、status 与
-compaction 事实：
+`PiRuntime` maintains one `session.subscribe()` subscription for each active
+`AgentSession` instance. Known events normalize into stable Mohist transcript,
+tool, usage, model, status, and compaction facts:
 
-- `message_start` / `message_update`（`text_delta`、`thinking_delta`、
-  `toolcall_start` / `delta` / `end`）/ `message_end` → transcript 与 tool 事实；
-- `tool_execution_start` / `update` / `end` → 工具执行事实（按 `toolCallId` 关联）；
-- assistant message 上的 `usage`（input / output / cacheRead / cacheWrite / thought / cost）
-  → usage 事实；
-- `compaction_start` / `compaction_end` → compaction 事实；
-- `auto_retry_start` / `auto_retry_end` → provider 重试事实（见下节）。
+- `message_start`, `message_update` (`text_delta`, `thinking_delta`,
+  `toolcall_start` / `delta` / `end`), and `message_end` become transcript and
+  tool facts;
+- `tool_execution_start` / `update` / `end` become tool-execution facts
+  correlated by `toolCallId`;
+- assistant-message `usage`, including input, output, cacheRead, cacheWrite,
+  thought, and cost, becomes usage facts;
+- `compaction_start` and `compaction_end` become compaction facts;
+- `auto_retry_start` and `auto_retry_end` become provider-retry facts as
+  described below.
 
-投影使用 Pi 的 message id 与 `toolCallId` 保证幂等。未知事件只进入诊断信息，不
-改变 Workflow 或 Session 状态。
+Projection is idempotent by Pi message ID and `toolCallId`. Unknown events enter
+diagnostics only and do not change Workflow or Session state.
 
-事件通道是进程内回调，没有传输层，因此不存在 OpenCode 侧的断流重连与 snapshot
-核对机制；执行的最终状态以 `prompt()` 的 resolve 值与 `session.messages` 为准。
-Runner 进程终止即事件通道与当前执行一并终止（见「进程拓扑与就绪」），重启后不
-重建“仍在执行”的假象。
+The event channel is an in-process callback, so it has no OpenCode-style
+transport reconnection or snapshot reconciliation. Final execution state comes
+from the resolved `prompt()` value and `session.messages`. Terminating the
+Runner process terminates the event channel and current execution together; a
+restart does not reconstruct a fiction that execution is still active.
 
-## Provider 错误失败策略
+## Provider Error Failure Policy
 
-判定规则与 [`opencode.md`](opencode.md) 的「Provider 错误失败策略」相同：可恢复
-错误交 Pi 重试，不可恢复错误 abort 当前执行并失败。Pi 侧的信号来源：
+The decision rules match the OpenCode provider error policy in
+[`opencode.md`](opencode.md): Pi retries recoverable errors; an unrecoverable
+error aborts and fails the current execution. Pi provides these signals:
 
-- `auto_retry_start` 事件携带 `attempt`、`maxAttempts`、`delayMs` 与 `errorMessage`，
-  是重试事实的唯一来源；不扫描日志。
-- 按性质不可恢复：`errorMessage` 命中 quota、credit、billing、usage limit、额度、
-  余额、使用上限或重置限额等模式即 abort+失败（默认模式集与 OpenCode 相同，覆盖
-  中英文额度措辞，runner 级可配置追加）。普通 rate limit 不因文案兜底在首次出现
-  时失败。
-- 按证据不可恢复：可恢复错误连续重试，`attempt` 达到阈值 N（默认 5，runner 级可
-  配置）而执行仍未完成，abort+失败。计数直接消费事件的 `attempt` 字段，不另建
-  状态。
-- Pi 自己判不可恢复的错误（auth、invalid request、context overflow 等）结束自动
-  重试并以 `stopReason: "error"` 完成执行，`prompt()` 正常 resolve；Runtime 从末条
-  assistant 消息的 error 信息规范化出 `execution-failed`，不额外处理。
+- `auto_retry_start`, carrying `attempt`, `maxAttempts`, `delayMs`, and
+  `errorMessage`, is the sole retry-fact source. Do not scan logs.
+- Intrinsically unrecoverable: if `errorMessage` matches quota, credit, billing,
+  usage limit, allowance, balance, or limit-reset patterns, abort and fail. The
+  default pattern set matches OpenCode's and covers common English and Chinese
+  provider wording; Runner configuration may add patterns. A plain rate-limit
+  message does not fail on first sight through this fallback.
+- Unrecoverable by evidence: if recoverable errors reach consecutive retry
+  threshold N, five by default and Runner-configurable, while execution remains
+  incomplete, abort and fail. Consume `attempt` directly instead of storing a
+  second counter.
+- Errors Pi itself classifies as unrecoverable, such as auth, invalid request,
+  or context overflow, end automatic retry and resolve `prompt()` normally with
+  `stopReason: "error"`. The Runtime reads the last assistant message's error
+  information and normalizes it to `execution-failed`.
 
-命中不可恢复判定时执行 `session.abort()` 并确认停止（见上节），随后向调用者返回
-带原始 provider message 的失败事实。AgentSession 与物理 Session 绑定保持不变，不
-提示 Reset。
+When either unrecoverable rule matches, call `session.abort()`, confirm stop as
+above, and return a failure fact containing the original provider message. Keep
+the AgentSession and physical Session binding unchanged and do not suggest
+Reset.
 
-## Session 命令
+## Session Commands
 
-Session command 的通用语义（`notStarted` 与 `unavailable` 的区分、expected current
-binding、不轮换 AgentSession ID）与 [`opencode.md`](opencode.md) 的「Session 命令」
-相同。Pi 侧的通道映射：
+The generic Session-command rules, including the distinction between
+`notStarted` and `unavailable`, expected-current-binding checks, and stable
+AgentSession IDs, match the Session Commands contract in
+[`opencode.md`](opencode.md). Pi maps them to these channels.
 
 ### Follow-up
 
-- 执行中：`session.steer(text)` 注入当前执行；Session 空闲：
-  `session.prompt(text, { preflightResult })`；preflight 回调是「确认 Pi 已接收」的
-  落点（Pi 的 RPC 模式使用同一钩子），preflight 拒绝（如 model 或凭证缺失）作为
-  命令失败返回给用户；受理后立即返回，完成过程继续通过 Session 事件呈现。
-- 可选的当前 model / variant 选择在注入前应用到 Session（`setModel()` /
-  `setThinkingLevel()`），物理 Session 不轮换。
-- AgentSession idle 时，Follow-up 在受理输入前走通用 binding 准备；绑定路径明确不存在
-  时先创建并持久化 replacement。AgentSession active 或 unknown 时不得替换。
-- Routing 或 admission 失败必须返回给用户，不能自动 retry 或 replay。
+- While executing, use `session.steer(text)` to inject into the current
+  execution. While idle, call `session.prompt(text, { preflightResult })`.
+  The preflight callback is the point at which Pi confirms acceptance, and its
+  RPC mode uses the same hook. Return preflight rejection, such as a missing
+  model or credentials, to the user as command failure. Return immediately
+  after acceptance; completion continues through Session events.
+- Apply any selected current model / variant to the Session with `setModel()` /
+  `setThinkingLevel()` before injection. Do not rotate the physical Session.
+- An idle AgentSession performs shared binding preparation before accepting the
+  input; if the binding path is definitely absent, create and persist a
+  replacement first. An active or unknown AgentSession must not replace it.
+- Routing or admission failure is returned to the user and is never retried or
+  replayed automatically.
 
 ### Compact
 
-只有逻辑 Session idle 时才允许 Compact，与 Reset 使用同一并发边界。调用
-`session.compact()` 使用 Pi 原生压缩；压缩使用 Session 当前 model。Compact 不创建
-新的物理 Session，session 文件身份不变，也没有 Mohist 侧的 synthetic summary
-fallback。Pi 压缩失败时明确报错，不静默降级。产生的 compaction 事件继续核对进
-transcript。
+Compact is allowed only while the logical Session is idle and shares the Reset
+concurrency boundary. `session.compact()` performs native Pi compaction with
+the Session's current model. It does not create a physical Session, change the
+Session-file identity, or fall back to a Mohist synthetic summary. A Pi
+compaction failure is explicit. Resulting compaction events continue to project
+into the transcript.
 
 ### Reset
 
-只有逻辑 Session idle 时才允许 Reset。先读取当前 model / thinking level（如果存
-在），再在同一工作目录用 `SessionManager.create(cwd)` 建立新的空 Pi Session。创建
-成功后才替换逻辑 Session 的 current binding（新 session 文件路径）。AgentSession 不保存
-旧 binding；已有 transcript 保留，新物理 Session 的上下文为空。旧路径已经不存在时跳过
-model / thinking level 继承并继续创建；其它读取失败仍明确失败。
+Reset is allowed only while the logical Session is idle. Read the current model
+and thinking level if available, then call `SessionManager.create(cwd)` to
+create an empty Pi Session in the same working directory. Replace the logical
+Session's current binding with the new Session-file path only after creation
+succeeds. AgentSession does not retain old bindings. The existing transcript
+remains, while the new physical Session starts with empty context. If the old
+path is already absent, skip model/thinking inheritance and continue creation;
+other read failures remain explicit.
 
 ### Cancel
 
-对当前执行调用 `session.abort()`。`cancelled: true` 只表示中断请求已被 Runtime
-接受并执行；执行是否立刻停下由 Pi 决定，Runtime 如实报告这次尝试。
+Call `session.abort()` for the current execution. `cancelled: true` means only
+that the Runtime accepted and executed the interrupt request. Pi decides when
+execution actually stops, and the Runtime reports the attempt exactly.
 
-## 权限、项目信任与错误
+## Permissions, Project Trust, and Errors
 
-Pi 没有 per-tool 批准机制，也不提供沙箱：已配置的工具以 Runner 进程权限直接执行，
-headless 下不存在人机交互阻塞。`OpenCodeRuntime` 的 `permission.asked` → 一次性
-reply 路径在 Pi 侧不存在，对应的 `permission-required` 错误也不属于 Pi 的规范化
-错误集合。
+Pi has no per-tool approval mechanism and provides no sandbox. Configured tools
+execute directly with Runner-process permissions, with no interactive prompt in
+headless mode. Pi therefore has no equivalent of OpenCode's
+`permission.asked` -> one-time reply path, and `permission-required` is not a Pi
+normalized error.
 
-Pi 唯一的「批准」概念是 project trust：是否加载工作目录项目级 `.pi/` 资源
-（settings、extensions、skills、prompts 等）。`PiRuntime` 固定以
-`SettingsManager.create(cwd, agentDir, { projectTrusted: false })` 装配 `SettingsManager`，
-并把同一个 manager、显式 `cwd` / `agentDir` 传给 `DefaultResourceLoader` 和
-`createAgentSession`：项目级 `.pi/` 内的可执行资源不进入
-执行，工作仓库无法通过携带 Pi 配置改变 Runner 的执行行为。仓库根部的 `AGENTS.md` /
-`CLAUDE.md` 与 project trust 无关，仍作为上下文提供给模型——这与 OpenCode 的行为
-一致：它们影响提示词上下文，不改变 Runner 的执行配置。Runner 用户的全局配置
-（`~/.pi/agent`）正常加载。该取值不提供配置项，是无人值守执行的确定性保证。
+Pi's only approval-like concept is project trust: whether it loads project-level
+`.pi/` resources such as settings, extensions, skills, and prompts from the
+working directory. `PiRuntime` always constructs its `SettingsManager` with
+`SettingsManager.create(cwd, agentDir, { projectTrusted: false })` and passes
+that same manager plus explicit `cwd` and `agentDir` to
+`DefaultResourceLoader` and `createAgentSession`. Executable resources under a
+repository's `.pi/` directory never enter execution, so a work repository
+cannot alter Runner behavior by carrying Pi configuration. Root `AGENTS.md` and
+`CLAUDE.md` files are unrelated to project trust and remain model context, as in
+OpenCode: they affect Prompt context, not Runner execution configuration. The
+Runner user's global configuration under `~/.pi/agent` loads normally. This is
+not configurable; it is a determinism guarantee for unattended execution.
 
-Pi 边界复用 Runner 现有的 credential masking：SDK/provider 文本进入 task log、
-diagnostic 或 runtime event 前统一脱敏，结构化 request/result 与 Runner registration
-使用 Mohist 字段白名单而非序列化 SDK 对象。Action output 不含 diagnostic。真实 smoke
-只记录版本、operation 名、布尔结果和脱敏后的字段名/类型摘要；不记录环境值、auth 文件、
-原始 provider 响应、Prompt 或消息正文。
+The Pi boundary reuses Runner credential masking. Before SDK or provider text
+enters a task log, diagnostic, or Runtime event, it is redacted. Structured
+requests/results and Runner registration use Mohist field allowlists rather
+than serializing SDK objects. Action output contains no diagnostic. A real
+smoke artifact records only versions, operation names, Boolean results, and a
+redacted field-name/type summary. It does not record environment values, auth
+files, raw provider responses, Prompts, or message bodies.
 
-在 `PiRuntime` 边界把 SDK error 规范化为少量 Mohist result（kebab-case，与 wire 值
-一致）：`invalid-input`、`unavailable-runtime`、`missing-session`、
-`incompatible-runtime`、`deadline-exceeded`、`interrupted` 与 `execution-failed`。
-Provider-specific detail 只作为诊断信息，不成为 Action output 字段。
+At the `PiRuntime` boundary, normalize SDK errors to the small set of Mohist
+kebab-case wire results: `invalid-input`, `unavailable-runtime`,
+`missing-session`, `incompatible-runtime`, `deadline-exceeded`, `interrupted`,
+and `execution-failed`. Provider-specific details remain diagnostics and never
+become Action output fields.
 
-## 模型目录
+## Model Catalog
 
-通过 `modelRuntime.getAvailable()` 加载 model catalog；它只返回已配置凭证的
-provider 模型，这正是配置辅助需要的语义。catalog 中每个模型的 variant 列表是 Pi
-的 thinking level 档位。Runner registration 把 Pi catalog 与 OpenCode catalog 按
-runtime 并列上报，Server 与 Web 按执行后端分组展示。省略 model 时使用 Session 当前
-选择或 Pi 默认值；选定 model 是否有效仍由 Pi 最终校验。
+Load the model catalog through `modelRuntime.getAvailable()`. It returns only
+models from providers with configured credentials, which is exactly the
+configuration-assistance meaning required. Each catalog model's variants are
+Pi thinking levels. Runner registration reports the Pi and OpenCode catalogs
+side by side, grouped by Runtime in Server and Web. When model is omitted, use
+the Session's current choice or Pi default; Pi still makes the final validity
+decision for a selected model.
 
-## Server 与 Web 触及面
+## Server and Web Touchpoints
 
-Pi 是第二个 Runtime，以下既有单 Runtime 假设需要泛化（均不改变产品契约）：
+Pi is the second Runtime, so these existing single-Runtime assumptions must be
+generalized without changing product contracts:
 
-- Server 的 runtime 注册表：`AgentSessionGrain` 的 `IsRuntimeRegistered` 注册
-  `"pi"`；Reset 对未注册历史 runtime 的 fallback 行为不变。
-- Agent launch：`AgentLauncher` 从 Agent 配置读取执行后端，不再硬编码
-  `"opencode"`；后端随 Agent snapshot 固定到 AgentJob input。
-- AgentJob executor：按 dispatch 携带的 runtime 分派到 `OpenCodeRuntime` 或
-  `PiRuntime`，两条路径共享 Session 基础设施但不共享 Runtime 实例。
-- Runner 的 open / attach 回写：runtime 值来自调用方解析结果，不再写死。
-- Session usage：`AgentUsageSummary`、grain state/surrogate、runtime-event parser、API/read
-  model 与 Web 共用类型新增独立 `cachedWriteTokens`；新增 Orleans field id 只追加不重排，
-  缺省为 null/0 语义并与 `cachedReadTokens` 分别累加。
-- TaskRun 分类：`mohist/pi` 与 `mohist/opencode` 同样归为 UserFacing。
-- 模型 catalog API：opencode 专属路由泛化为按 runtime 查询，或并列新增 Pi 路由。
-- Session 命令 handler（Follow-up / Cancel / Compact / Reset）：按 AgentSession 当前
-  绑定的 runtime 路由到对应 Runtime。
-- Runner host：构造并启动 `PiRuntime`，由 manifest 声明的 `agent-execution` capability 向
-  Workflow Action 注入执行能力，并向 `AgentJobExecutor` 注入 Runtime；promise 投影按
-  capability 驱动。#450 若先于能力收窄 issue #447 落地，会暂时沿用当前 runtime-bearing
-  `ActionContext` 与按名投影机制；这是 #447 明确拥有的实现差距，不是本设计的目标接口。
-- Web：Mohist Agent 编辑与 issue 模型选择增加执行后端维度；模型列表按所选后端
-  出（OpenCode catalog / Pi catalog）。
+- Server Runtime registry: `AgentSessionGrain` method `IsRuntimeRegistered`
+  registers `"pi"`; Reset fallback for an unregistered historical Runtime stays
+  unchanged.
+- Agent launch: `AgentLauncher` reads the execution backend from Agent
+  configuration instead of hard-coding `"opencode"`; the backend is fixed into
+  AgentJob input with the Agent snapshot.
+- AgentJob executor: dispatch by the Runtime carried in dispatch to
+  `OpenCodeRuntime` or `PiRuntime`. Both paths share Session infrastructure but
+  not Runtime instances.
+- Runner open / attach write-back: use the Runtime resolved by the caller
+  instead of hard-coding one.
+- Session usage: add independent `cachedWriteTokens` across
+  `AgentUsageSummary`, grain state and surrogate, Runtime event parser, API/read
+  model, and shared Web types. Append new Orleans field IDs without reordering;
+  absent values mean null/0 and are accumulated separately from
+  `cachedReadTokens`.
+- TaskRun classification: classify `mohist/pi` as UserFacing, like
+  `mohist/opencode`.
+- Model catalog API: generalize the OpenCode-only route to query by Runtime, or
+  add a parallel Pi route.
+- Session command handlers for Follow-up, Cancel, Compact, and Reset: route by
+  the AgentSession's current binding Runtime.
+- Runner host: construct and start `PiRuntime`; inject execution capability into
+  the Workflow Action through the manifest's `agent-execution` capability and
+  inject the Runtime into `AgentJobExecutor`; drive promise projection by
+  capability. If #450 lands before capability-narrowing issue #447, it will
+  temporarily retain the current Runtime-bearing `ActionContext` and named
+  projection mechanism. That is an implementation gap explicitly owned by
+  #447, not the target interface in this design.
+- Web: add execution backend to Mohist Agent editing and Issue model selection;
+  list models for the selected backend from the OpenCode or Pi catalog.
 
-## 测试
+## Tests
 
-默认测试不能启动真实 Pi，也不能使用真实 process、network、filesystem config 或
-clock。SDK 的全部依赖锁在 `PiRuntime` 模块内，经 factory seam 注入 fake
-`PiRuntime` 或 fake SDK 工厂，确定性驱动事件、完成状态、进程终止与 error。
+Default tests must not start real Pi or use a real process, network, filesystem
+configuration, or clock. All SDK dependencies remain inside the `PiRuntime`
+module and are replaced through a factory seam with a fake `PiRuntime` or fake
+SDK factory. Tests drive events, completion state, process termination, and
+errors deterministically.
 
-覆盖至少包括：
+Coverage includes at least:
 
-- Action Input expansion，并确认不存在隐藏 `vars.agent` fallback；
-- `options` 未知键（含 `runtime`）忽略并记诊断，不使执行失败；
-- model string 内含多层 `/`，variant 保持独立并映射 thinking level；
-- Workflow 与 AgentJob 的执行共享 Runtime code，但不共享工作 / Session 身份；
-- 物理 Session 复用与 rotation 不变量；model / thinking level 变化不触发 rotation；
-- 绑定恢复：缓存命中、lazy open、路径明确不存在时只 create 一次，并在 input / Prompt
-  前持久化 expected binding replacement；
-- 文件损坏、权限失败与无法分类的 open error 不 create，stale binding 不提交 Prompt；
-- 非绑定 Runner 不打开或替换 session 文件，其本地路径不存在不触发 create；
-- prompt 完成、中断、提交状态不确定与 no-replay 行为；
-- `steer` 注入（运行中 Follow-up 与期限警告）、空闲 Follow-up（含 missing recovery）、
-  原生 compact、Reset（含旧路径 missing）、stale-binding rejection；
-- `projectTrusted: false` 装配断言：项目级 `.pi/` 资源不进入执行；
-- provider 错误策略：模式命中即失败、阈值失败、Pi 自判不可恢复的 `execution-failed`
-  规范化；
-- 两段式收尾：期限前 steer 警告（仅一次）、期限不足 5 分钟时执行开始即警告、期限
-  到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动；
-- 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义。
+- Action input expansion with no hidden `vars.agent` fallback;
+- ignored and diagnosed unknown `options` keys, including `runtime`, without
+  execution failure;
+- model strings containing multiple `/` characters, with variant independent
+  and mapped to thinking level;
+- shared Runtime code for Workflow and AgentJob execution without shared work
+  or Session identity;
+- physical Session reuse and rotation invariants, including no rotation on
+  model or thinking-level change;
+- binding restoration through cache hit, lazy open, and exactly one create for
+  a definitely absent path, with expected-binding replacement persisted before
+  input or Prompt;
+- no create for file corruption, permission failure, or unclassified open
+  error, and no Prompt submission through a stale binding;
+- a non-bound Runner neither opens nor replaces the Session file, and its local
+  absence does not trigger create;
+- Prompt completion, interruption, uncertain submission, and no replay;
+- `steer` for active Follow-up and deadline warning, idle Follow-up with missing
+  recovery, native Compact, Reset including a missing old path, and stale
+  binding rejection;
+- assembly with `projectTrusted: false`, proving project-level `.pi/` resources
+  do not enter execution;
+- provider policy for immediate pattern failure, threshold failure, and Pi's
+  own unrecoverable-error normalization to `execution-failed`;
+- two-phase closeout with one steer warning, immediate warning for deadlines
+  under five minutes, abort at deadline, and no abort after an early normal end;
+  all driven by a fake clock;
+- minimal `{ promise }` Workflow Action output with existing expectation
+  semantics.
 
-## 上游边界
+## Upstream Boundary
 
-Pi 是 0.x 快速演进的依赖（约每周一个 minor），SDK 的 breaking change 集中在创建
-与服务装配层（scope 迁移、runtime 装配重构、参数类型变更），事件协议相对稳定。
-应对策略：
+Pi is a rapidly evolving 0.x dependency, with roughly one minor release each
+week. Breaking changes concentrate in creation and service assembly, including
+scope migration, Runtime assembly refactoring, and parameter-type changes; the
+event protocol is relatively stable. The response is to:
 
-- 锁定 SDK package 版本，升级时逐条阅读 CHANGELOG 的 Breaking / Changed 节并跑
-  集成冒烟；
-- SDK access 全部封装在 `PiRuntime` 内，升级漂移只改变这一个深模块；
-- 本表撰写时的参考版本是 `@earendil-works/pi-coding-agent` 0.80.10；实现开始时按
-  「SDK 调用面」的要求重新锁定并冒烟验证。
+- lock the SDK package version, read every Breaking / Changed entry in the
+  CHANGELOG during upgrades, and run an integration smoke test;
+- keep all SDK access inside `PiRuntime`, so upgrade drift changes one deep
+  module;
+- treat `@earendil-works/pi-coding-agent` 0.80.10 as the reference version when
+  this table was written, then lock and smoke-test again at implementation time
+  as required by SDK Surface.
 
-## 实装差距
+## Implementation Gaps
 
-Workflow 与 AgentJob 两条路径均已实装：`PiRuntime`、`mohist/pi` Action、AgentJob runtime
-选择、runtime-aware Session binding、模型目录 API 与 Web 选择器，以及现有 Session
-transcript/tool/status/compaction/model/usage/cost 展示均已落地。
+Both Workflow and AgentJob paths are implemented: `PiRuntime`, the `mohist/pi`
+Action, AgentJob Runtime selection, Runtime-aware Session binding, the model
+catalog API and Web selector, and the existing Session transcript, tool,
+status, compaction, model, usage, and cost views.
 
-缺失的 Pi session 文件目前仍直接形成 `missing-session`；新的独立输入尚未执行
-`definitely-missing → create → expected binding replacement`。对应实施 issue 待从本
-spec 创建。
+A missing Pi Session file still produces `missing-session` directly. A new
+independent input does not yet perform
+`definitely-missing -> create -> expected binding replacement`. An
+implementation Issue still needs to be created from this specification.

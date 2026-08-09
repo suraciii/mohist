@@ -1,20 +1,25 @@
 # OpenCode Runtime
 
-## 决策
+## Decision
 
-`mohist/opencode` 是直接基于 `@opencode-ai/sdk/v2` 实现的 Runtime 特有 Action。它与
-Agent / Session 的所有权模型（Inline Agent、工作所有者、共享 Runtime 不制造依赖等
-不变量）见 [`agent-execution.md`](../agent-execution.md)。
+`mohist/opencode` is a Runtime-specific Action implemented directly with
+`@opencode-ai/sdk/v2`. See
+[`agent-execution.md`](../agent-execution.md) for the Agent / Session ownership
+model and its invariants, including Inline Agents, work ownership, and the rule
+that a shared Runtime creates no dependency.
 
-ACP adapter 直接移除，不保留 fallback。现有 AgentJob 执行也必须离开 ACP，通过
-由 Agent 拥有的 executor 使用同一个 `OpenCodeRuntime` 能力，而不是依赖 Workflow Action
-契约。本设计不定义 `mohist/agent` Action，也不重新设计 Mohist Agent 产品。
+Remove the ACP adapter directly, with no fallback. Existing AgentJob execution
+must also leave ACP. An Agent-owned executor uses the same `OpenCodeRuntime`
+capability instead of depending on the Workflow Action contract. This design
+does not define a `mohist/agent` Action and does not redesign the Mohist Agent
+product.
 
-OpenCode 与 Pi 各自实现独立的 Runtime 深模块，不引入通用 `AgentRuntime` 接口。稳定
-边界是 Workflow Action 契约、AgentJob 执行契约和 Session 命令，不是假想的跨 Runtime
-SDK wrapper。
+OpenCode and Pi each implement an independent deep Runtime module. Do not add a
+generic `AgentRuntime` interface. The stable boundaries are the Workflow Action
+contract, AgentJob execution contract, and Session commands, not a speculative
+cross-Runtime SDK wrapper.
 
-## Action 输入输出契约
+## Action Input and Output Contract
 
 ```ts
 type OpenCodeActionInput = {
@@ -31,158 +36,190 @@ type OpenCodeActionOutput = null | {
 }
 ```
 
-Runner 在调用 Action 前的执行入口把 `prompt` 渲染为非空字符串后再交给 OpenCode Runtime
-处理；本节只描述 Action 接收的输入形状与 Runtime 行为，不承担渲染权威（见
-[`task-dispatch.md`](../workflow/task-dispatch.md)）。`model` 使用
-OpenCode 的 `providerID/modelID` 形式。OpenCode model ID 自身可能继续包含 `/`，因此
-Runtime 只按第一个 `/` 分割。`variant` 始终是独立字段，不能拼进 model ID。
+Before invoking the Action, the Runner execution entry point renders `prompt`
+to a non-empty string and passes it to OpenCode Runtime. This section defines
+only the Action input shape and Runtime behavior; rendering authority belongs to
+[`task-dispatch.md`](../workflow/task-dispatch.md). `model` uses OpenCode's
+`providerID/modelID` form. An OpenCode model ID may itself contain `/`, so the
+Runtime splits only at the first `/`. `variant` always remains a separate field
+and must not be joined to the model ID.
 
-输入没有 OpenCode `agent`，也没有 `kind` 或 `type`。`uses: mohist/opencode` 已经选择
-Runtime。OpenCode 的默认 agent、tools、plugins、permissions 与自动压缩策略
-继续由 OpenCode 原生配置负责。
+There is no OpenCode `agent` input and no `kind` or `type`. Selecting
+`uses: mohist/opencode` already chooses the Runtime. OpenCode's native
+configuration remains authoritative for its default Agent, tools, plugins,
+permissions, and automatic compaction policy.
 
-`options` 中除 `model` 与 `variant` 之外的键被忽略并记入诊断，不使执行失败；这让
-仍含遗留键（如 `type`、liveness 配置）的已持久化 `vars.agent` 可以继续绑定，直到
-写入路径完成收敛。`model` 或 `variant` 存在但不是字符串时，返回 invalid input。
+Keys in `options` other than `model` and `variant` are ignored with a diagnostic
+and do not fail execution. This lets persisted `vars.agent` values containing
+legacy keys such as `type` or liveness settings remain bindable until their
+write paths converge. If present, `model` and `variant` must be strings;
+otherwise return invalid input.
 
-Action 不读取 Workflow variables。模板求值时机由 [`task-dispatch.md`](../workflow/task-dispatch.md)
-统一规定：Server dispatch 不再展开 `with` / `expect`，Runner 在调用 Action 前的执行入口
-按 attempt 快照渲染原始 `with`，再交给 manifest 校验和 Action 输入。本节只描述 OpenCode
-Action 接收的输入形状与 Runtime 行为，不承担渲染权威。
+The Action does not read Workflow variables. Template evaluation timing is
+defined once by [`task-dispatch.md`](../workflow/task-dispatch.md): Server
+dispatch no longer expands `with` or `expect`. The Runner execution entry point
+renders raw `with` against the attempt snapshot before manifest validation and
+Action input. This section describes only the input accepted by the OpenCode
+Action and Runtime.
 
-`variant` 可以和 `model` 一起提供，也可以单独提供；省略 `model` 时，OpenCode
-把它应用到当前或默认 model。
+`variant` may accompany `model` or appear alone. Without `model`, OpenCode
+applies it to the current or default model.
 
-创建新的物理 Session 时，把显式 model 传给 Session creation 和第一个 Prompt。复用
-现有物理 Session 时，每个 Prompt 携带本次指定的 model 与 variant；成熟 Session API
-会在创建 user message 时更新 Session 选择，不需要单独调用 switch。省略 options
-时保留当前 Session 选择；首次没有选择时使用 OpenCode 默认值。改变 model
-或 variant 不会轮换物理 Session。
+When creating a physical Session, pass an explicit model to Session creation
+and to the first Prompt. When reusing a physical Session, each Prompt carries
+the model and variant selected for that execution. The mature Session API
+updates the Session selection while creating the user message, so no separate
+switch call is needed. Omitting options preserves the current Session selection;
+if there is no prior selection, OpenCode uses its defaults. Changing model or
+variant does not rotate the physical Session.
 
-Runner 的 Workflow task executor 在 attempt 快照上渲染 `with`，把渲染并 manifest 校验
-后的结果作为 `OpenCodeActionInput` 交给 Action；`expect` 与 artifact 声明独立于 Action
-输入，由 executor 在 Action 返回后应用。Action 与 Runtime 都不读取 Workflow Variables
-或完整 dispatch context。只有命中 promise 时才把对应值作为 Action Output 暴露；`{ promise }`
-由 task executor 依据 Workflow 拥有的 `expect` 合成，Action 与 Runtime 都不产生该字段。
-Runtime 身份、transcript、model、usage、诊断信息与 expectation 明细保存在原有 state /
-read model 中，不塞进 Action output。
+The Runner Workflow task executor renders `with` against the attempt snapshot
+and passes the manifest-validated result to the Action as
+`OpenCodeActionInput`. The executor applies `expect` and artifact declarations
+independently after the Action returns. Neither Action nor Runtime reads
+Workflow Variables or the complete dispatch context. Only a matched promise is
+exposed as Action output. The task executor synthesizes `{ promise }` from the
+Workflow-owned `expect`; neither Action nor Runtime produces that field.
+Runtime identity, transcript, model, usage, diagnostics, and expectation detail
+remain in existing state and read models rather than Action output.
 
-规范化执行事实包含最终 assistant 文本。task executor 用它评估
-`path: _output` 的 expect marker；该文本经由 Action result 的执行事实提供，
-不经由 Action Output。
+The normalized execution facts include final assistant text. The task executor
+uses it to evaluate an expect marker at `path: _output`. This text is carried by
+the Action result's execution facts, not Action output.
 
-## SDK 调用面
+## SDK Surface
 
-OpenCode 1.17.18 同时导出成熟兼容 API `client.session.*` 和新协议
-`client.v2.*`。OpenCode 自己的 Web UI 与 TUI 仍使用 `client.session.*` 执行关键 Session
-操作。生成的 `client.v2.session.wait()` 与 `client.v2.session.compact()` 方法虽然存在，
-当前 Server 实现仍会报告 `operation unavailable`。
+OpenCode 1.17.18 exports both the mature compatibility surface
+`client.session.*` and the newer protocol surface `client.v2.*`. OpenCode's own
+Web UI and TUI still use `client.session.*` for key Session operations. Although
+generated `client.v2.session.wait()` and `client.v2.session.compact()` methods
+exist, the current Server reports `operation unavailable` for them.
 
-因此 Mohist 使用以下调用：
+Mohist therefore uses:
 
-| 能力 | SDK operation |
+| Capability | SDK operation |
 |---|---|
-| 创建 Session | `client.session.create()` |
-| 执行并等待 Workflow / AgentJob Prompt | `client.session.prompt()` |
-| 提交用户 Follow-up 并立即返回 | `client.session.promptAsync()` |
-| 中断执行 | `client.session.abort()` |
-| 压缩 context | `client.session.summarize()` |
-| 读取 Session 状态 | `client.session.get()`、`client.session.messages()`、`client.session.status()` |
-| 接收实时事件 | `client.global.event()` |
-| 回应一次性权限 | `client.permission.reply()` |
-| 释放 directory Instance | `client.instance.dispose()` |
+| create a Session | `client.session.create()` |
+| execute and await a Workflow / AgentJob Prompt | `client.session.prompt()` |
+| submit a user Follow-up and return immediately | `client.session.promptAsync()` |
+| interrupt execution | `client.session.abort()` |
+| compact context | `client.session.summarize()` |
+| read Session state | `client.session.get()`, `client.session.messages()`, `client.session.status()` |
+| receive real-time events | `client.global.event()` |
+| answer a one-time permission request | `client.permission.reply()` |
+| release a directory Instance | `client.instance.dispose()` |
 
-依赖仍然是 `@opencode-ai/sdk/v2`。选择成熟 Session namespace 是隐藏在
-`OpenCodeRuntime` 内部的实现决策，不构成另一套产品契约。在新 V2 Session 执行接口
-足以替换上表之前，Mohist 不调用
-`client.v2.session.prompt/wait/compact/interrupt`。
+The dependency remains `@opencode-ai/sdk/v2`. Choosing the mature Session
+namespace is an implementation decision hidden inside `OpenCodeRuntime`, not a
+second product contract. Until the new V2 Session execution surface can replace
+this table, Mohist does not call
+`client.v2.session.prompt/wait/compact/interrupt`.
 
-## 深模块边界
+## Deep Module Boundary
 
-`OpenCodeRuntime` 是 Runner 内部的深模块，负责：
+`OpenCodeRuntime` is a deep module inside the Runner. It owns:
 
-- OpenCode Server 与 Client 生命周期；
-- 就绪状态；
-- directory Instance 的使用跟踪、空闲判定与释放；
-- 物理 Session 创建、查询、复用与中断；
-- Prompt 执行、Follow-up、Compact 与 Reset；
-- event subscription、message snapshot 核对和事件规范化；
-- OpenCode error 与兼容性诊断。
+- OpenCode Server and Client lifecycles;
+- readiness;
+- directory Instance usage tracking, idleness decisions, and release;
+- physical Session creation, lookup, reuse, and interruption;
+- Prompt execution, Follow-up, Compact, and Reset;
+- event subscription, message snapshot reconciliation, and event
+  normalization;
+- OpenCode errors and compatibility diagnostics.
 
-`mohist/opencode` Action、AgentJob execution adapter 与 Session command handler 只依赖
-由 Mohist 定义的 request / result 类型，不暴露生成的 SDK 类型。Runtime 接收已经组装
-好的执行输入与 Session 绑定；它不接收 Mohist Agent ID / name，也不加载 Mohist Agent
-定义。Model string 解析、SDK DTO 构造、调用顺序、重连和 OpenCode error 解释
-全部封装在该模块内。
+The `mohist/opencode` Action, AgentJob execution adapter, and Session command
+handler depend only on Mohist request/result types, never generated SDK types.
+The Runtime receives fully assembled execution input and a Session binding. It
+does not receive a Mohist Agent ID or name and does not load a Mohist Agent
+definition. Model-string parsing, SDK DTO construction, call ordering,
+reconnection, and OpenCode error interpretation all stay in this module.
 
-它不是逐方法透传的 SDK wrapper。调用者请求 execute prompt、follow up、compact、reset 等
-Mohist 能力，由模块决定使用哪些 SDK operation 和状态核对步骤才能完成该能力。
+This is not a method-by-method SDK wrapper. Callers request Mohist capabilities
+such as execute Prompt, Follow-up, Compact, and Reset; the module decides which
+SDK operations and state-reconciliation steps implement each capability.
 
-## 进程拓扑与就绪
+## Process Topology and Readiness
 
-每个 Runner 进程拥有一个 OpenCode Server 和一个 Client，由所有 OpenCode Session
-共享。OpenCode Server 在同一进程内按 resolved directory 缓存多个 Instance；Instance
-持有该目录的配置、plugin、LSP、MCP 等运行资源。它不是 Runner 的 Git workspace，也不是
-AgentSession 或物理 Session。
+Each Runner process owns one OpenCode Server and one Client, shared by all
+OpenCode Sessions. Within that process, the OpenCode Server caches multiple
+Instances by resolved directory. An Instance holds configuration, plugins,
+LSP, MCP, and other runtime resources for that directory. It is not a Runner
+Git Workspace, AgentSession, or physical Session.
 
-使用官方 `createOpencodeServer()` 与 `createOpencodeClient()` API，不直接 spawn 或解析
-OpenCode 进程。每次 Session SDK 调用显式传递工作目录，并启用 `throwOnError` 让失败进入
-统一错误规范化；不为每个 Action 创建独立进程。
+Use the official `createOpencodeServer()` and `createOpencodeClient()` APIs.
+Do not spawn or parse an OpenCode process directly. Pass the working directory
+explicitly on every Session SDK call and enable `throwOnError` so all failures
+enter one normalization boundary. Do not create a process per Action.
 
-Mohist 认为物理 Session 的 directory 不可变。工作目录变化时创建新的物理 Session，
-不移动现有 Session。
+Mohist treats a physical Session's directory as immutable. A changed working
+directory creates a new physical Session rather than moving the existing one.
 
-Runner 注册或领取工作前必须：
+Before the Runner registers or claims work, it must:
 
-1. 启动共享 OpenCode Server；
-2. 通过 OpenCode health check；
-3. 建立全局 event subscription。
+1. start the shared OpenCode Server;
+2. pass the OpenCode health check;
+3. establish the global event subscription.
 
-OpenCode Server 退出后，Runner 停止领取新工作，并重建 Server、Client 与全局事件
-订阅。受影响的执行直接失败，不能自动 replay。替换 Server 重新通过 health
-并建立事件订阅后，Runner 即恢复 ready，不等待模型发现。
+After the OpenCode Server exits, the Runner stops claiming new work and rebuilds
+the Server, Client, and global event subscription. Affected execution fails
+directly and is never replayed automatically. Once the replacement Server is
+healthy and the event subscription exists, the Runner is ready again without
+waiting for model discovery.
 
-Mohist 固定 SDK package 版本，OpenCode CLI 由安装者提供。Mohist 不安装、升级或强制
-CLI 精确匹配 SDK 版本；Server / SDK 不兼容必须形成可操作的 readiness error，CLI
-模型发现不兼容只记录诊断并保留 best-effort 语义。原生 workspace 配置和 plugins
-正常加载，不使用 `--pure`，也不清理 `.opencode` lockfile。若 plugin 持有的资源导致
-CLI 在截止时间前未退出，但 stdout 已包含可解析的非空目录，该结果只能标记为不完整
-快照并记录诊断，不能伪装成一次正常完成的发现。
+Mohist locks the SDK package version; the operator supplies the OpenCode CLI.
+Mohist does not install or upgrade the CLI or require it to match the SDK
+exactly. Server/SDK incompatibility must produce an actionable readiness error.
+CLI model-discovery incompatibility records diagnostics under best-effort
+semantics. Native Workspace configuration and plugins load normally; do not use
+`--pure` or remove the `.opencode` lockfile. If plugin-held resources keep the
+CLI alive past its deadline but stdout already contains a parseable, non-empty
+catalog, mark the snapshot incomplete with a diagnostic. Do not present it as a
+normal completed discovery.
 
-## Directory Instance 回收
+## Directory Instance Reclamation
 
-共享 Server 不以 WorkflowRun 终态自动释放 directory Instance。Runner 因此在现有
-workspace 周期维护中回收已终结 WorkflowRun 的 OpenCode Instance。此回收是执行平面的
-资源治理，不是 Workflow 状态变化，也不删除磁盘 workspace。
+A WorkflowRun terminal state does not make the shared Server release its
+directory Instance automatically. The Runner therefore reclaims OpenCode
+Instances for terminated WorkflowRuns during existing periodic Workspace
+maintenance. This is execution-plane resource governance, not a Workflow state
+transition, and it does not delete the disk Workspace.
 
-### 候选与成本
+### Candidates and Cost
 
-一次 OpenCode Server generation 指共享 Server 从启动成功到退出或关闭的生命周期。
-`OpenCodeRuntime` 按当前 generation 跟踪自己实际访问过的 resolved directory。任何带
-directory 的 SDK 操作在进入 OpenCode 前都把该目录记为已使用。一次
-成功的 `client.instance.dispose({ directory })` 清除该 generation 的使用记录；之后同一
-目录再次收到 Runtime 请求时重新记入。Server 退出、关闭或完成重建时，旧 generation
-的全部记录一起清空，因为旧进程中的 Instance 已经不存在。使用记录只属于 Runner 进程
-内存，不写入 `WorkspaceRegistry`；Runner 重启会同时失去旧 Server 进程和对应记录，无需恢复。
+An OpenCode Server generation is the lifetime from one successful shared Server
+start until its exit or shutdown. `OpenCodeRuntime` tracks every resolved
+directory it actually accessed in the current generation. Any SDK operation
+with a directory records it before entering OpenCode. A successful
+`client.instance.dispose({ directory })` removes it from that generation's used
+set; a later Runtime request records it again. Server exit, shutdown, or
+completed rebuild clears all records for the old generation because those
+Instances no longer exist. This usage set belongs only to Runner process memory,
+not `WorkspaceRegistry`. Restarting the Runner loses both the old Server process
+and the matching records, so nothing must be restored.
 
-周期维护只遍历这个“当前 generation 已使用且尚未成功释放”的集合，并按 resolved path
-在 [`WorkspaceRegistry`](../runner.md#本地-workspace-生命周期) 做身份查询。只有 phase 为
-`eligible` 或 `stuck` 的 workflow
-workspace 才是回收候选。`active`、未注册目录、普通 AgentJob 目录和 Runtime 启动目录都
-不回收。
+Periodic maintenance iterates only directories used but not successfully
+released in the current generation. It resolves each path through
+[`WorkspaceRegistry`](../runner.md#local-workspace-lifecycle). Only Workflow
+Workspaces in `eligible` or `stuck` phase are candidates. Do not reclaim
+`active` Workspaces, unregistered directories, ordinary AgentJob directories,
+or the Runtime startup directory.
 
-不能每轮扫描全部历史 WorkflowRun 或全部 `eligible` 注册表条目，也不能对当前 generation
-未使用的目录调用 dispose。OpenCode 会按 directory 建立 Instance；盲目探测或重复 dispose
-可能为了“清理”反而创建待清理的 Instance。一次成功回收后，该目录不再产生周期成本；
-后来确有新请求时才重新进入集合。
+Do not scan all historical WorkflowRuns or every `eligible` registry entry on
+each pass, and do not call dispose for a directory unused in this generation.
+OpenCode creates an Instance by directory; blind probing or repeated disposal
+could create a resource in the name of cleanup. After successful reclamation,
+the directory has no periodic cost until a real new request records it again.
 
-### 空闲与并发
+### Idleness and Concurrency
 
-WorkflowRun 终态只提供回收资格，不证明 OpenCode 已空闲。`Stopped` 不隐含 Runner 已经
-中断旧工作，成功返回的 async Follow-up 也可能仍在 OpenCode 内执行。
+A WorkflowRun terminal state grants reclamation eligibility but does not prove
+OpenCode is idle. `Stopped` does not imply that the Runner interrupted old work,
+and a successfully accepted asynchronous Follow-up may still be running inside
+OpenCode.
 
-Runtime 必须把同一 directory 的 SDK 操作 admission 与 Instance dispose 串行化。回收在
-该 directory 的独占边界内按以下顺序执行：
+The Runtime serializes SDK operation admission and Instance disposal for one
+directory. Reclamation holds that directory's exclusive boundary while it does:
 
 ```text
 if directory has an admitted local operation:
@@ -199,414 +236,549 @@ if disposed is not exactly true:
 forget directory for this Server generation
 ```
 
-状态 map 为空或只包含 `idle` 才允许 dispose。独占边界保持到 dispose 响应确认；新的
-Prompt、Follow-up、Cancel、Compact、Reset 或 Session 查询只能在它结束后进入。新请求
-进入时会重新记录该 directory，因此 dispose 不会永久禁止后续使用。
+Only an empty status map or a map containing exclusively `idle` allows disposal.
+Keep the exclusive boundary until the dispose response is confirmed. New
+Prompt, Follow-up, Cancel, Compact, Reset, or Session query operations enter
+only after it ends. A new request records the directory again, so disposal does
+not prevent future use permanently.
 
-### Session 与删除边界
+### Session and Deletion Boundary
 
-Instance dispose 只释放该 directory 的进程内资源。它不删除 OpenCode Session、
-AgentSession、current binding、transcript 或磁盘 workspace，也不能据此把 Session activity
-改成 `idle` 或 closed。后续请求仍使用持久 binding；OpenCode 重新建立 directory Instance
-后，按既有 Session resolve 与 missing recovery 规则继续。
+Instance disposal releases only process memory for that directory. It does not
+delete the OpenCode Session, AgentSession, current binding, transcript, or disk
+Workspace, and does not change Session activity to `idle` or closed. A later
+request uses the persisted binding. After OpenCode recreates the directory
+Instance, existing Session resolution and missing-recovery rules continue.
 
-同一轮 Runner workspace 维护必须先尝试 Instance 回收，再应用磁盘 retention / budget。
-这次回收结果只用于尽快释放内存和排除当时仍 busy / failed 的目录，不是稍后删除的授权；
-回收后可能有新 Runtime 请求重新记录同一 directory。
+One Runner Workspace-maintenance pass attempts Instance reclamation before disk
+retention and budget policy. Its result promptly releases memory and excludes a
+directory that was busy or failed at that moment; it does not authorize a later
+deletion. A new Runtime request may record the directory again after the pass.
 
-每次自动或手动 workspace 删除都必须重新取得该 directory 的 removal fence。fence 与普通
-Runtime operation 使用同一个 directory admission 边界，并从重新检查本地 operation、读取
-status、必要时 dispose 开始，持续到磁盘删除和注册表移除 callback 结束后才释放。fence
-期间到达的新 operation 等待，不能在 dispose 与删除之间重新建立 Instance。
+Every automatic or manual Workspace deletion must reacquire the directory's
+removal fence. The fence shares the directory-admission boundary with ordinary
+Runtime operations. It rechecks local operations, reads status, and disposes if
+required, then remains held until the disk-deletion and registry-removal callback
+finishes. New operations wait while the fence is held and cannot recreate an
+Instance between disposal and deletion.
 
-当前 generation 没有使用记录时，removal fence 仍建立一个临时独占 entry 并直接执行删除
-callback；它不能调用 status 或 dispose，因为盲目确认可能创建 Instance。若 fence 开始时
-目录已经 busy、状态未知或 dispose 失败，callback 不执行，本次删除延后或明确失败。Runtime
-generation 在 callback 开始前被替换时，旧结果不能启动删除；callback 已经开始时，removal
-fence 独立存续到 callback settle，不能因 generation reset 提前放入等待操作。
+If the current generation has no usage record, the removal fence still creates
+a temporary exclusive entry and invokes the deletion callback directly. It
+must not call status or dispose, because blind confirmation could create an
+Instance. If the directory is busy, status is unknown, or disposal fails when
+the fence begins, do not call the callback; defer or fail deletion explicitly.
+If the Runtime generation changes before the callback starts, old results
+cannot authorize deletion. Once the callback starts, its removal fence survives
+until callback settlement and generation reset cannot release waiting
+operations early.
 
-### 失败与范围
+### Failure and Scope
 
-状态读取或 dispose 失败时保留使用记录，由后续周期重试。单目录回收失败不改变
-WorkflowRun、TaskRun 或 AgentSession 结果，也不调用 `/global/dispose`，不打断其它目录。
-transport failure 仍按共享 Server 的既有规则触发 Runtime rebuild；旧 Server generation
-结束后，对应 Instance 与使用记录一起消失。
+If status read or dispose fails, retain the usage record for a later periodic
+retry. Failure to reclaim one directory changes no WorkflowRun, TaskRun, or
+AgentSession result, does not call `/global/dispose`, and does not interrupt
+other directories. A transport failure still triggers Runtime rebuild under
+the existing shared-Server rule; when that old generation ends, its Instances
+and usage records disappear together.
 
-回收 pass 必须 single-flight；上一轮未结束时不重叠启动下一轮。每轮只记录有界的候选数、
-busy / failed / disposed 数量和聚合诊断，避免一个持续失败的目录制造无界日志。
+The reclamation pass is single-flight; a still-running pass prevents the next
+from starting. Log bounded candidate, busy, failed, and disposed counts plus
+aggregate diagnostics, so one persistently failing directory cannot produce
+unbounded logs.
 
-本设计不承诺 `instance.dispose` 后进程 RSS 立即归还给操作系统，也不新增按目录空闲时长、
-mtime 或 Workflow 历史推断终态的 TTL。若 per-directory dispose 后共享 Server 仍持续增长，
-进程级 idle recycle 是独立的后续保护，不用 `/global/dispose` 冒充。
+This design does not promise that process RSS returns to the operating system
+immediately after `instance.dispose`. It adds no TTL derived from per-directory
+idle time, mtime, or Workflow history. If the shared Server continues growing
+after per-directory disposal, process-level idle recycling is a separate future
+guard; `/global/dispose` must not impersonate it.
 
-## Session 绑定
+## Session Binding
 
-AgentSession 所有权与来源见 [`agent-execution.md`](../agent-execution.md)，Runtime 身份
-字段命名见 [`conventions.md`](../conventions.md)。`OpenCodeRuntime` 接收已经解析好的逻辑
-Session 目标，不能创建或改变其来源。逻辑 Session 目标解析、绑定创建时序（先创建物理
-Session、持久化绑定成功后才提交首个 Prompt；持久化幂等）、复用不变量（跨 task、retry
-与 Runner 重启解析到当前绑定；工作目录不同则在提交 Prompt 前以可操作错误拒绝）以及
-缺失恢复的 expected binding 裁决与操作矩阵以
-[`agent-execution.md`](../agent-execution.md#runtime-session-缺失恢复) 为唯一权威，本节
-只定义 OpenCode 特有部分。
+See [`agent-execution.md`](../agent-execution.md) for AgentSession ownership and
+origin and [`conventions.md`](../conventions.md) for Runtime identity field
+names. `OpenCodeRuntime` receives a resolved logical Session target and cannot
+create or change its origin. The shared rules for logical target resolution,
+binding creation ordering, reuse invariants, and missing recovery are
+authoritative in
+[`agent-execution.md`](../agent-execution.md#runtime-session-missing-recovery).
+Those rules create the physical Session first, submit the first Prompt only
+after idempotent binding persistence succeeds, resolve to the current binding
+across tasks, retries, and Runner restarts, reject working-directory changes
+before Prompt submission, and arbitrate expected binding replacement. This
+section defines only OpenCode-specific behavior.
 
-提交新的独立输入前，只有 current binding 的 `runnerId` 对应的 `OpenCodeRuntime` 可以用
-`client.session.get()` 核对持久绑定。请求落在其它 Runner 时必须先路由回绑定所属 Runner
-或明确失败，其本地 404 不构成该 binding 的 missing 证据。只有绑定所属 Runner 上的
-OpenCode 返回结构化 Session-not-found / HTTP 404，才产生 `definitely-missing` 事实。
-网络失败、超时、认证或权限失败、5xx，以及成功响应缺少预期 ID 都不能归类为 missing；
-缺少 ID 是 SDK / Server 不兼容证据，必须失败，不能创建 replacement。
+Before submitting a new independent input, only the `OpenCodeRuntime` on the
+current binding's `runnerId` may verify the persisted binding through
+`client.session.get()`. A request on another Runner must route back to the bound
+Runner or fail explicitly; a local 404 there is not evidence that the binding
+is missing. Only a structured Session-not-found / HTTP 404 from OpenCode on the
+bound Runner produces a `definitely-missing` fact. Network failure, timeout,
+authentication or permission failure, 5xx, and a successful response without
+the expected ID are not missing. An absent ID is evidence of SDK/Server
+incompatibility and must fail rather than create a replacement.
 
-收到 `definitely-missing` 后，Runtime 在同一 directory 调用 `client.session.create()`。
-创建时使用本次输入已解析的 model；本次没有显式 model 时使用 OpenCode 默认值，variant
-仍在 Prompt 上应用。新 Session 立即再次 missing、创建失败或 binding 被并发改变时，
-本次执行失败，不做第二轮 create。
+After `definitely-missing`, call `client.session.create()` in the same
+directory. Creation uses the model resolved for this input. Without an explicit
+model, use the OpenCode default; variant is still applied to the Prompt. If the
+new Session is immediately missing, creation fails, or a concurrent operation
+changes the binding, fail this execution and do not attempt a second create.
 
-Model 与 variant 是执行参数，不能进入 Session cache key，不能作为是否调用
-`resumeSession` 的门槛，也不能触发 binding replacement。复用已有 Session 时，Runtime
-在原物理 Session 上应用本次 model / variant 后执行 Prompt。
+Model and variant are execution parameters. They do not enter the Session cache
+key, gate `resumeSession`, or trigger binding replacement. Reuse applies the
+current model / variant on the existing physical Session before executing the
+Prompt.
 
-worktree cleanup follow-up 是原 task 的后续执行。executor 必须再次调用原 task 已解析的
-Action，并保留相同 WorkflowRun、session name、Work ID 与工作目录，让它走同一 Runtime
-和物理 Session；不得把 cleanup 硬编码到另一种 Action 或 ACP fallback。cleanup 不是
-Reset，也不能以 housekeeping 为理由替换绑定。
+A worktree-cleanup Follow-up is subsequent execution of the original task. The
+executor invokes the original resolved Action again and preserves WorkflowRun,
+Session name, Work ID, and working directory so it reaches the same Runtime and
+physical Session. It must not hard-code cleanup to another Action or ACP
+fallback. Cleanup is not Reset and does not replace a binding for housekeeping.
 
-每个逻辑 AgentSession 同时最多运行一个由工作发起的 Prompt，无论工作所有者是 TaskRun
-还是 AgentJob。不同逻辑 Session 可以并行。用户 Follow-up 是 Session 命令，可以在
-工作执行期间被接收。
+At most one work-originated Prompt may run in a logical AgentSession at once,
+whether TaskRun or AgentJob owns the work. Different logical Sessions may run
+concurrently. A user Follow-up is a Session command and may be accepted while
+work is executing.
 
-## Prompt 执行
+## Prompt Execution
 
-Workflow Action adapter 或 AgentJob executor 请求的 Prompt 按以下顺序执行：
+A Prompt requested by a Workflow Action adapter or AgentJob executor runs in
+this order:
 
-1. 解析可选 model string，并在 Runtime 内构造 SDK model DTO；
-2. 无 binding 时创建物理 Session；有 binding 时用 `client.session.get()` 核对，并按
-   通用缺失恢复规则选择原 ID 或一个已重新绑定的新 ID；
-3. 等待 Session 确认当前 binding 已持久化；
-4. 以确认后的 Runtime Session ID 记录并持久化本次输入；
-5. 调用并等待 `client.session.prompt()`，传入 Session ID、directory、prompt parts、
-   可选 model 与可选 variant；
-6. 把返回的 assistant message 和收到的 events 投影到 AgentSession；
-7. 需要确认最终 transcript snapshot 时，读取 `client.session.messages()` 核对；
-8. 向调用者返回规范化完成事实。
+1. Parse the optional model string and construct the SDK model DTO inside the
+   Runtime.
+2. With no binding, create a physical Session. With a binding, verify it through
+   `client.session.get()`, then apply shared missing-recovery rules to select the
+   original ID or a newly rebound ID.
+3. Wait until the Session confirms that the current binding is persisted.
+4. Record and persist this input using the confirmed Runtime Session ID.
+5. Call and await `client.session.prompt()` with Session ID, directory, Prompt
+   parts, optional model, and optional variant.
+6. Project the returned assistant message and received events to AgentSession.
+7. If final transcript confirmation is needed, reconcile through
+   `client.session.messages()`.
+8. Return a normalized completion fact.
 
-`client.session.prompt()` 本身就是携带完成结果的请求，不存在第二次 `wait()`。
-`OpenCodeRuntime` 不执行 Workflow expectations，也不判断 AgentJob 成功。Workflow task
-executor 只在 Action 成功后应用 `expect`、artifacts、`failIf`、Action Output 与 recovery
-语义；Action 失败、取消或超时时保留原始失败，不读取文件或 marker。AgentJob executor
-通过由 Agent 拥有的契约校验和报告自己的结果。
+`client.session.prompt()` is the request that carries the completion result;
+there is no second `wait()`. `OpenCodeRuntime` does not evaluate Workflow
+expectations or decide AgentJob success. After Action success, the Workflow task
+executor applies `expect`, artifacts, `failIf`, Action output, and recovery
+semantics. On Action failure, cancellation, or timeout, it preserves the
+original failure and does not read files or markers. The Agent-owned contract
+validates and reports AgentJob results independently.
 
-SSE 沉默不表示失败，`idle` event 也不是完成权威。等待完成的 Prompt 响应决定执行
-是否结束。工作执行的期限由 Workflow task executor 与 AgentJob executor 各自
-声明：未显式指定时，单个 Prompt 的默认期限为 60 分钟，显式期限可以覆盖该默认值。
-期限的收尾与终止按「Prompt 期限与两段式收尾」执行。移除 ACP liveness probe
-后，`OpenCodeRuntime` 不做静默/空闲检测；悬挂执行由 executor 期限兜底，而 provider 错误可在到达期限前按 `session.status` retry 事实提前失败（见「Provider 错误失败策略」）。
+SSE silence is not failure, and an `idle` event is not completion authority.
+The completed Prompt response decides when execution ends. Workflow task and
+AgentJob executors declare their own execution deadlines. Without an explicit
+value, one Prompt defaults to 60 minutes; an explicit value overrides it.
+Closeout and termination follow Prompt Deadline and Two-Phase Closeout. After
+removing ACP liveness probes, `OpenCodeRuntime` performs no silence or idleness
+detection. Executor deadline covers a hung execution, while a provider error may
+fail sooner based on `session.status` retry facts under Provider Error Failure
+Policy.
 
-`prompt()` 到本机 OpenCode Server 的 HTTP client 不得另设比 executor 更短的 header 或
-body timeout；executor 的 AbortSignal 是单次执行期限权威。该设置只属于 OpenCode Client，
-不得改变 Runner 其它 HTTP 调用的全局 dispatcher。任何 transport failure 都必须先请求
-abort 并确认当前物理 Session 已停止，随后才向调用者报告失败；不自动重放提交状态不确定
-的 Prompt。
+The HTTP client used by `prompt()` against the local OpenCode Server must not set
+a header or body timeout shorter than the executor deadline. The executor
+AbortSignal is the single per-execution deadline authority. This setting belongs
+only to the OpenCode Client and must not change the global dispatcher for other
+Runner HTTP calls. Any transport failure first requests abort and confirms that
+the current physical Session stopped before reporting failure. Never replay a
+Prompt whose submission state is uncertain.
 
-Runner 生命周期内可以 retry startup 与 readiness 操作。Prompt submission 以及任何
-接收状态不确定的响应都不能盲目 retry。保留现有 in-process dispatch deduplication；
-redelivery 在 crash window 内可能造成重复执行，这是已接受限制，不增加 deterministic
-Prompt ID 或 replay reconstruction。
+Startup and readiness operations may retry during the Runner lifecycle. Prompt
+submission and any response with uncertain acceptance must not retry blindly.
+Keep existing in-process dispatch deduplication. Redelivery can duplicate
+execution inside the crash window; that limitation is accepted and does not
+justify a deterministic Prompt ID or replay reconstruction.
 
-## Prompt 期限与两段式收尾
+## Prompt Deadline and Two-Phase Closeout
 
-期限值由 executor 声明，`OpenCodeRuntime` 对每个声明了期限的 Prompt 执行两段式
-收尾协议。时钟粒度是单次 Prompt 执行，不是 TaskRun 或 Stage。
+The executor declares the deadline. `OpenCodeRuntime` applies a two-phase
+closeout protocol to every Prompt with a deadline. The clock scope is one Prompt
+execution, not a TaskRun or Stage.
 
-1. 期限前 5 分钟，对当前物理 Session 调用 `client.session.promptAsync()` 注入一条
-   收尾警告后立即返回，不等待其完成。期限不足 5 分钟时，警告在执行开始即注入。
-2. 期限到达时 runner 立即将执行结果固定为 `deadline-exceeded`，随后调用
-   `client.session.abort()` 收尾。abort 与状态核对只能补充诊断，不能改变 timeout 主结果；
-   迟到的 Prompt 响应也不能翻转该结果。
+1. Five minutes before the deadline, call `client.session.promptAsync()` on the
+   current physical Session to inject one closeout warning, then return
+   immediately without awaiting it. If the entire deadline is under five
+   minutes, inject the warning when execution begins.
+2. At the deadline, the Runner immediately fixes the result as
+   `deadline-exceeded`, then calls `client.session.abort()` for closeout. Abort
+   and status verification add diagnostics only; they cannot change the timeout
+   result. A late Prompt response cannot reverse it.
 
-警告文案任务无关，大意固定、措辞由实现维护：你将在约 5 分钟后被中断——立即停止
-新工作，提交当前改动，在本任务的进度渠道留下记录，然后结束。警告不引用具体
-marker 或文件名；`unfinished`、progress.txt 等收尾契约由各任务自己的 prompt
-定义，警告不复述。
+The warning is task-independent, with implementation-owned wording equivalent
+to: interruption will occur in about five minutes; stop new work immediately,
+commit current changes, leave a record in the task's progress channel, and end.
+It names no marker or file. Task-specific Prompt contracts define `unfinished`,
+progress.txt, or other closeout artifacts; the warning does not repeat them.
 
-注入的消息作为 user Follow-up 写入 Session 消息流，由当前执行在迭代边界
-（当前模型调用及其工具调用完成后）拾取处理——这与用户 Follow-up 的接收路径相同
-（见「Session 命令 / Follow-up」）。正在执行的长工具调用会延迟拾取；期限到达仍
-abort，最坏情况退化为无警告的直接终止。警告与终止都投影进 transcript，在 UI
-可见。
+The injected message enters the Session message stream as a user Follow-up and
+is picked up at the current execution's next iteration boundary, after the
+current model call and its tool calls. This is the same path as a user Follow-up
+under Session Commands / Follow-up. A long-running tool call can delay receipt;
+the deadline still aborts, so the worst case degrades to termination without a
+warning. Both warning and interruption project into the transcript and remain
+visible in the UI.
 
-每个 Prompt 执行只警告一次。agent 被警告后提前正常结束执行的，不再 abort；其
-结果按各任务自己的完成契约评估（如报 `unfinished` 则任务失败、按现有 retry
-语义处理），但现场是已提交、有记录的。
+Warn once per Prompt execution. If the Agent ends normally after the warning,
+do not abort. Evaluate its result under the task's own completion contract; for
+example, an `unfinished` report fails under existing retry semantics, while the
+workspace remains committed and recorded.
 
-不做的事：
+Do not:
 
-- 不把期限值暴露给 prompt：agent 没有可靠时钟，静态数字不可执行；可执行的
-  「即将终止」信号由警告在需要时送达。
-- 不在终止后自动提交或回滚残留现场；现场处理维持现状。
-- 不在终止后替换、清除或重建 Runtime Session 绑定；此时只有用户显式 Reset 可以主动
-  换绑。后续独立输入仍在提交前按缺失恢复规则准备 binding。
-- 不为 housekeeping prompt（如 worktree cleanup follow-up）引入额外的执行类别
-  概念：警告文案与其指令（提交或还原）语义相容，统一适用。
+- expose the deadline value in the Prompt. An Agent has no reliable clock; a
+  static number is not actionable. Deliver the actionable "termination is
+  imminent" signal when needed;
+- commit or roll back residual work automatically after termination; existing
+  workspace handling remains authoritative;
+- replace, clear, or rebuild the Runtime Session binding after termination.
+  Only explicit user Reset intentionally replaces it. Later independent input
+  still prepares the binding under missing-recovery rules;
+- create a separate execution-category concept for housekeeping Prompts such as
+  a worktree-cleanup Follow-up. The warning is compatible with instructions to
+  commit or restore and applies uniformly.
 
-## 事件与状态核对
+## Events and State Reconciliation
 
-共同的 activity 与 transcript 契约以
-[`agent-execution.md`](../agent-execution.md#activity-与-transcript) 为准；本节只定义
-OpenCode 信号如何成为这些规范事实。
+The shared activity and transcript contract is authoritative in
+[`agent-execution.md`](../agent-execution.md#activity-and-transcript). This
+section defines only how OpenCode signals become those canonical facts.
 
-Runner 为共享 OpenCode Server 维护一个 `client.global.event()` 订阅。`OpenCodeRuntime`
-按 Session ID 与 directory 路由事件。已知 typed event 被规范化为 Mohist 稳定的
-transcript、tool、usage、model、status 与 compaction 事实；未知 OpenCode event 只进入
-诊断信息，不改变 Workflow 或 Session 状态。
+The Runner maintains one `client.global.event()` subscription for the shared
+OpenCode Server. `OpenCodeRuntime` routes events by Session ID and directory.
+Known typed events normalize into stable Mohist transcript, tool, usage, model,
+status, and compaction facts. Unknown OpenCode events enter diagnostics only and
+do not change Workflow or Session state.
 
-实时 event 只优化展示延迟，不作为持久化执行协议：
+Real-time events reduce display latency but are not a persistent execution
+protocol:
 
-- 使用 OpenCode message ID 与 part ID 保证投影幂等；
-- event stream 在仍有订阅者时断开，订阅层重新建立唯一的 global event stream；
-- 新 stream 连接后，当前执行按自己的 Session ID 与 directory 读取
-  `session.status()`，并与相关 `session.get/messages()` snapshot 核对；
-- 一次执行只消费属于自己 Session ID 的 retry 事实，其他 Session 的事件不能改变其
-  provider 错误判定；
-- Prompt 完成后，如 event 缺失或需要确认最终用户可见 transcript，再核对 messages。
+- use OpenCode message ID and part ID for idempotent projection;
+- if the event stream disconnects while subscribers remain, re-establish one
+  global event stream;
+- after a new stream connects, each current execution reads
+  `session.status()` for its own Session ID and directory and reconciles with
+  relevant `session.get/messages()` snapshots;
+- one execution consumes only retry facts for its Session ID; another Session's
+  events cannot affect its provider-error decision;
+- after Prompt completion, reconcile messages when events are missing or the
+  final user-visible transcript needs confirmation.
 
-Mohist 不保存 V2 history cursor、aggregate sequence 或 event replay state。Workflow
-task executor 根据 Action result，再应用 Mohist expectation、artifact、`failIf` 与
-recovery 语义判断 Workflow 成功；AgentJob 是否完成由其 executor 独立判断。
+Mohist does not persist a V2 history cursor, aggregate sequence, or event replay
+state. The Workflow task executor applies Mohist expectation, artifact,
+`failIf`, and recovery semantics after the Action result. The AgentJob executor
+decides AgentJob completion independently.
 
-## Provider 错误失败策略
+## Provider Error Failure Policy
 
-provider 错误仅当判为不可恢复时让执行失败；可恢复错误（瞬时 429、5xx、网络抖动）交
-OpenCode 重试，Mohist 不主动失败。失败信号来自 `session.status` 事件（`type:"retry"`，
-携带 `attempt`、`message`、`action`、`next`）、重连后的 status snapshot 与执行最终的
-prompt reject，不扫描日志。两类不可恢复判定都归一到 abort 当前执行并失败：
+A provider error fails execution only when it is classified unrecoverable.
+OpenCode retries recoverable errors such as transient 429, 5xx, or network
+failure; Mohist does not fail early. Failure signals come from
+`session.status` events with `type:"retry"` carrying `attempt`, `message`,
+`action`, and `next`, from status snapshots after reconnection, and from final
+Prompt rejection. Do not scan logs. Two unrecoverable decisions both normalize
+to aborting and failing the current execution:
 
-- 按性质不可恢复：优先使用 retry status 的结构化 `action.reason`；没有可用分类时，
-  `message` 命中 quota、credit、billing、usage limit、额度、余额、使用上限或重置限额等
-  模式即 abort+失败。普通 rate limit / too many requests 不因文案兜底在首次出现时失败。
-  默认模式集覆盖常见 provider 的中英文额度措辞，runner 级可配置追加。
-- 按证据不可恢复：可恢复错误连续重试，`attempt` 达到阈值 N（默认 5，runner 级可配置）
-  而执行仍未完成，重新判为不可恢复，abort+失败。
+- Intrinsically unrecoverable: prefer structured `action.reason` from retry
+  status. Without a usable classification, match `message` against quota,
+  credit, billing, usage limit, allowance, balance, and limit-reset patterns.
+  The default set covers common provider wording in English and Chinese, and
+  Runner configuration may add patterns. A plain rate-limit / too-many-requests
+  message does not fail on first sight through this fallback.
+- Unrecoverable by evidence: if recoverable errors continue until `attempt`
+  reaches threshold N, five by default and Runner-configurable, while execution
+  remains incomplete, reclassify them as unrecoverable and abort.
 
-可恢复错误在 N 次内恢复（执行完成）则继续，不失败。OpenCode 自身已判不可恢复的错误
-（auth、invalid-request、context-overflow、content-policy）由 OpenCode 直接 reject
-prompt，Mohist 不额外处理。连 retry 事件都不产生的静默卡死仍由 executor 期限兜底。
+If a recoverable error clears within N attempts and execution completes,
+continue without failure. Errors OpenCode already classifies as unrecoverable,
+including auth, invalid request, context overflow, and content policy, reject
+the Prompt directly and need no additional Mohist rule. A silent hang with no
+retry event remains covered by the executor deadline.
 
-计数直接用 retry 事件的 `attempt` 字段（OpenCode 维护、每次 Prompt 执行重置）；runner 重启或
-event stream 重连后用 `session.status()` snapshot 恢复，不另建状态。命中或超阈值时，
-Runtime 使用当前锁定 SDK 的类型化调用面执行
-`client.session.abort({ sessionID, directory }, { throwOnError: true })`。只有 abort 返回
-`data: true`，且同一 directory 的 status snapshot 中该 Session 不存在或为 idle，才算
-确认停止；随后向调用者返回带原始 provider message 的失败事实。AgentSession 与物理
-Session 绑定保持不变，不提示 Reset。
+Use the retry event's `attempt` field directly. OpenCode resets it per Prompt
+execution. After Runner restart or event-stream reconnection, restore from a
+`session.status()` snapshot instead of maintaining a second counter. On a
+classification or threshold match, use the locked SDK's typed call:
+`client.session.abort({ sessionID, directory }, { throwOnError: true })`.
+Stopping is confirmed only when abort returns exactly `data: true` and the same
+directory's status snapshot either omits the Session or marks it idle. Then
+return a failure fact containing the original provider message. Keep the
+AgentSession and physical Session binding unchanged and do not suggest Reset.
 
-abort 请求失败、返回值不确认成功，或 status 仍为 busy/retry 时，Runtime 返回
-`abort-unconfirmed` 诊断，不声称执行已经停止。对 runner deadline，该诊断附加在
-`deadline-exceeded` 结果上，不覆盖 timeout。OpenCode 是第三方依赖；Mohist 不修改其
-重试实现，因此结构化分类不足时长期保留 message 兜底与 Mohist 自己的重试上限。
+If abort throws, does not confirm success, or status remains busy/retry, return
+an `abort-unconfirmed` diagnostic without claiming execution stopped. For a
+Runner deadline, attach that diagnostic to `deadline-exceeded` rather than
+overriding the timeout result. OpenCode is a third-party dependency; Mohist does
+not modify its retry implementation. Until structured classification is
+complete, retain both the message fallback and Mohist retry ceiling.
 
-## Session 命令
+## Session Commands
 
-Session command 是从 Web 或 CLI 经 Server 到 Runner 的请求 / 响应操作。持久化的
-Runtime 绑定是路由事实，Runner 内存 cache 只是优化。
+A Session command is a request/response operation from Web or CLI through Server
+to Runner. The persisted Runtime binding is a routing fact; the Runner memory
+cache is only an optimization.
 
-命令结果必须区分「确定没有开始」与「可能已经开始但结果未知」。Server 未找到目标
-Runner 连接、Runner 尚未取得 Runtime connection，或命令在进入 Runtime 前被拒绝时，
-返回 `notStarted`；Server 可以结束这次 reservation，让后续请求创建新 operation。
-一旦 Runtime 调用可能已经开始，timeout、连接丢失和无法确认的 Runtime reply 都返回
-`unavailable`；Server 必须保留原 operation，后续投递继续使用同一 operation id，不能
-通过放弃 reservation 来猜测副作用没有发生。
+Command results distinguish "definitely did not start" from "may have started,
+result unknown." If Server cannot find the target Runner connection, the Runner
+has not acquired the Runtime connection, or the command is rejected before
+entering the Runtime, return `notStarted`. Server may end that reservation and
+allow a later request to create a new operation. Once a Runtime call may have
+started, timeout, connection loss, or an unconfirmed Runtime reply returns
+`unavailable`. Server must retain the original operation so later delivery uses
+the same operation ID. It must not abandon the reservation and guess that no
+side effect occurred.
 
 ### Follow-up
 
-- 对当前物理 Session 调用 `client.session.promptAsync()`，传入 prompt 和可选的当前
-  model / variant 选择。
-- AgentSession idle 时，Follow-up 在受理输入前走通用 binding 准备；当前物理 Session
-  明确缺失时先创建并持久化 replacement。AgentSession active 或 unknown 时不得替换，
-  因为 Follow-up 的目标仍是当前执行。
-- Endpoint 接收请求后立即返回；完成过程继续通过 Session events 呈现。
-- Session active 时接收的 Follow-up 加入当前 OpenCode execution；Session idle 时立即
-  开始处理。
-- Routing 或 admission 失败必须返回给用户，不能自动 retry 或 replay。
+- Call `client.session.promptAsync()` on the current physical Session with the
+  Prompt and any selected current model / variant.
+- While AgentSession is idle, perform shared binding preparation before
+  accepting input; if the physical Session is definitely missing, create and
+  persist a replacement first. While activity is active or unknown, do not
+  replace it because the Follow-up still targets current execution.
+- Return immediately after the endpoint accepts the request; completion
+  continues through Session events.
+- While active, the Follow-up joins current OpenCode execution. While idle, it
+  begins processing immediately.
+- Return routing or admission failure to the user. Never retry or replay it
+  automatically.
 
 ### Compact
 
-只有逻辑 Session idle 时才允许 Compact；Session 有工作正在执行时返回 conflict，
-与 Reset 使用同一并发边界。先从 OpenCode Session 读取当前 model，再调用
-`client.session.summarize({ sessionID, providerID, modelID })`。Compact 不创建新的物理
-Session，也没有 Mohist 侧的 synthetic summary fallback。Session 没有当前 model 时返回
-可操作错误，不能猜测。产生的 Session 与 message events 继续核对进 transcript。
+Compact is allowed only while the logical Session is idle. Active work returns
+conflict under the same concurrency boundary as Reset. Read the current model
+from the OpenCode Session, then call
+`client.session.summarize({ sessionID, providerID, modelID })`. Compact neither
+creates a physical Session nor falls back to a Mohist synthetic summary. If the
+Session has no current model, return an actionable error rather than guessing.
+Resulting Session and message events continue to project into the transcript.
 
 ### Reset
 
-只有逻辑 Session idle 时才允许 Reset。先读取当前 model / variant（如果存在），再在同一
-工作目录创建新的空 OpenCode Session。创建成功后才替换逻辑 Session 的 current binding。
-AgentSession 不保存旧 binding；已有 transcript 保留，新物理 Session 的上下文为空。
+Reset is allowed only while the logical Session is idle. Read the current model
+and variant if present, then create an empty OpenCode Session in the same working
+directory. Replace the logical Session's current binding only after creation
+succeeds. AgentSession retains no old binding. Its existing transcript remains,
+while the new physical Session has empty context.
 
-每个命令携带完整的 expected current binding。Server 只在该绑定仍是 current 时应用返回的
-replacement，防止过期 Reset result 覆盖更新的绑定。读取旧 Session 时收到结构化 missing
-不阻止 Reset：Runtime 跳过 model / variant 继承并用 OpenCode 默认值创建新 Session；
-其它读取失败仍明确失败。
+Every command carries the full expected current binding. Server applies a
+returned replacement only if that binding is still current, preventing a stale
+Reset result from overwriting a newer binding. A structured missing response
+while reading the old Session does not block Reset: skip model/variant
+inheritance and create with OpenCode defaults. Other read failures remain
+explicit.
 
-Compact 与 Reset 都不轮换 AgentSession ID：命令响应返回同一稳定 `sessionId`，只有
-Reset 替换 Runtime 绑定。API 响应形状与 CLI 文案不得再表述为"返回新 session id"。
+Neither Compact nor Reset rotates the AgentSession ID. Command responses return
+the same stable `sessionId`; only Reset replaces the Runtime binding. API shape
+and CLI text must not claim that these commands return a new Session ID.
 
-## 权限与错误
+## Permissions and Errors
 
-OpenCode 原生 permission 配置是权威。它已经允许的操作由 OpenCode 直接执行，明确
-拒绝的操作保持拒绝。`ask` 表示 OpenCode 将本次操作的选择交给调用方；对属于当前
-headless 执行中的 `permission.asked`，`OpenCodeRuntime` 使用
-`client.permission.reply({ requestID, directory, reply: "once" })` 回应。
+OpenCode native permission configuration is authoritative. Allowed operations
+execute directly and explicit denials remain denied. `ask` delegates one
+operation's choice to the caller. For a `permission.asked` belonging to the
+current headless execution, `OpenCodeRuntime` replies with
+`client.permission.reply({ requestID, directory, reply: "once" })`.
 
-这个回应只影响该 permission request，不写入 OpenCode 配置或 Session permission
-规则，也不建立 Workflow Approval。事件必须按当前物理 Session ID 路由；event 携带
-directory 时还必须与当前 workDir 一致。相同 request ID 在同一次执行中最多回应一次。
+The reply affects only that permission request. It does not write OpenCode
+configuration or Session permission rules and does not create a Workflow
+Approval. Route the event by current physical Session ID; when the event carries
+a directory, it must also match current workDir. Reply at most once to a request
+ID in one execution.
 
-回应调用抛错或未确认成功时，Runtime 立即 abort 当前执行并在确认停止后返回
-`permission required`；不能把 permission request 留到 executor deadline 才显示为
-`interrupted`。OpenCode 负责单个工具的 timeout 与 retry；Mohist 只保留执行 deadline
-和 abort 确认。
+If reply throws or does not confirm success, immediately abort current execution
+and, after confirming it stopped, return `permission required`. Do not leave the
+request blocked until the executor deadline and present it as `interrupted`.
+OpenCode owns per-tool timeout and retry; Mohist owns only the execution deadline
+and abort confirmation.
 
-在 `OpenCodeRuntime` 边界把 SDK error 规范化为少量 Mohist result：`invalid input`、
-`unavailable runtime`、`missing Session`、`incompatible runtime`、
-`permission required`、`deadline exceeded`、`interrupted` 与 `execution-failed`。Provider-specific detail 只作为
-诊断信息，不成为 Action output 字段。不要建立全局 Workflow error enum；各调用者通过
-自己的 TaskRun 或 AgentJob 契约报告失败。
+At the `OpenCodeRuntime` boundary, normalize SDK errors to the small set of
+Mohist results: `invalid input`, `unavailable runtime`, `missing Session`,
+`incompatible runtime`, `permission required`, `deadline exceeded`,
+`interrupted`, and `execution-failed`. Provider-specific details remain
+diagnostics and never become Action output fields. Do not create a global
+Workflow error enum; each caller reports failure through its own TaskRun or
+AgentJob contract.
 
-已知的本地 transport code（例如 header/body timeout）映射为稳定、可操作的失败文案；
-完整 SDK / provider payload 只保留在 diagnostics，避免把未审查的外部内容带入 TaskRun。
+Map known local transport codes, such as header/body timeout, to stable,
+actionable failure text. Retain complete SDK/provider payloads only in
+diagnostics to keep unreviewed external content out of TaskRun.
 
-## 模型目录
+## Model Catalog
 
-模型目录属于 `RunnerHost`，不属于 `OpenCodeRuntime`。Host 在首次注册前 best-effort 执行
-`opencode models --verbose`，由 `runtime/opencode-models.ts` 一次解析模型与 provider 定义的
-variant key，并直接保存到 host 的 `coderModels` / `coderModelVariants` 字段。正常退出产生
-完整快照；超时后留下的可解析非空 stdout 产生不完整快照。发现失败或结果为空时，首次注册
-上报空字段；不完整非空快照可以作为首次注册的 best-effort 目录。两种情况都不影响健康
-Runtime 继续领取工作。
+The model catalog belongs to `RunnerHost`, not `OpenCodeRuntime`. Before first
+registration, Host runs `opencode models --verbose` on a best-effort basis.
+`runtime/opencode-models.ts` parses model names and provider-defined variant keys
+once and writes them directly to Host `coderModels` and `coderModelVariants`.
+Normal process exit produces a complete snapshot. Parseable non-empty stdout
+remaining after timeout produces an incomplete snapshot. Failure or an empty
+result reports empty fields at first registration; a non-empty incomplete
+snapshot may serve as the initial best-effort catalog. Neither prevents a
+healthy Runtime from claiming work.
 
-命令边界使用不经过 shell 的异步缓冲执行，并在进程关闭后才解析一次 stdout；这同时保留
-退出前写入的尾部数据并避免阻塞 Runner event loop。单次发现的 deadline 是 3 秒。
+The command boundary uses asynchronous buffered execution without a shell and
+parses stdout once, only after process termination. This preserves trailing
+output written before exit without blocking the Runner event loop. One discovery
+has a three-second deadline.
 
-首次注册与启动 convergence 完成后，Host 注册独立的周期发现 timer；默认周期 30 分钟、
-最小 60 秒，首次触发从 timer 注册时刻起算。周期发现不检查 Runtime readiness。空结果或
-失败保留最后一次非空快照；完整非空结果替换旧快照。不完整非空结果只能把新模型和 variant
-并入旧快照，不能据此删除旧成员。合并后的模型与 variant 集合确实变化时才替换两个字段并
-尝试一次即时 heartbeat。run loop 终止时由 Host 清理 timer。
+After first registration and startup convergence, Host registers an independent
+periodic-discovery timer. The default interval is 30 minutes with a 60-second
+minimum, and the first trigger occurs one interval after timer registration.
+Periodic discovery does not inspect Runtime readiness. Empty or failed results
+retain the last non-empty snapshot. A complete non-empty result replaces it. An
+incomplete non-empty result may merge new models and variants into the old
+snapshot but cannot delete old members. Only an actual change to the merged
+model or variant sets replaces both fields and attempts one immediate heartbeat.
+Host disposes the timer when the run loop ends.
 
-目录只用于 Server 与 Web 的配置辅助，不是执行合法性的最终权威。省略 model 时使用当前
-OpenCode 选择或默认值；选定 model / variant 是否有效仍由 OpenCode 在执行时校验。
-`OpenCodeRuntime` 不加载、存储或刷新目录，也不调用 SDK model / provider list API 或 CLI
-发现命令，模型发现状态不参与 Runtime readiness。
+The catalog assists Server and Web configuration; it is not final execution
+authority. Omitting model uses the current OpenCode selection or default.
+OpenCode validates selected model and variant at execution. `OpenCodeRuntime`
+does not load, store, or refresh the catalog and calls neither SDK model/provider
+list APIs nor CLI discovery. Catalog state does not affect Runtime readiness.
 
-## 测试
+## Tests
 
-默认测试不能启动真实 OpenCode，也不能使用真实 process、network、filesystem config
-或 clock。Runtime 测试注入 fake generated Client / Server factory；Host 模型发现与周期
-workspace 维护测试注入 fake discovery / Runtime 并使用 fake timer，确定性驱动事件、
-snapshot、完成状态、process loss、回收 tick 与 error。
+Default tests must not start real OpenCode or use real process, network,
+filesystem configuration, or clock. Runtime tests inject fake generated Client
+and Server factories. Host model-discovery and periodic Workspace-maintenance
+tests inject fake discovery and Runtime implementations and use fake timers to
+drive events, snapshots, completion, process loss, reclamation ticks, and errors
+deterministically.
 
-覆盖至少包括：
+Coverage includes at least:
 
-- Action Input expansion，并确认不存在隐藏 `vars.agent` fallback；
-- model string 内含多层 `/`，variant 保持独立；
-- CLI 模型发现的完整 stdout、variant key、失败恢复、周期 cadence 与变更 heartbeat；
-- Workflow 与 AgentJob 的执行共享 Runtime code，但不共享工作 / Session 身份；
-- 物理 Session reuse 与 rotation 不变量；
-- model / variant 变化不触发 rotation；
-- `session.get()` 的结构化 404 触发一次 create，且 binding 持久化与 input 都先于 Prompt；
-- timeout、5xx、权限失败和畸形成功响应不触发 create，stale binding 不提交 Prompt；
-- 非绑定 Runner 不探测或替换 Session，其本地 404 不触发 create；
-- Prompt 调用开始后的 missing 或 transport failure 不 create、不 replay；
-- 全局 event routing、duplicate suppression 与 snapshot reconciliation；
-- Prompt completion、interruption、uncertain admission 与 no-replay 行为；
-- async Follow-up（含 idle missing recovery）、原生 summarize、Reset（含旧 Session
-  missing）、restart routing 与 stale-binding rejection；
-- permission 一次性回应、重复 suppression、回应失败、missing Session、compatibility 与 process-loss failure；
-- directory Instance 回收：只处理当前 Server generation 已使用且 WorkflowRun 为
-  `Completed` / `Stopped` 的目录；busy、retry、未知状态与并发请求均延后；成功 dispose
-  后不重复调用，后续新请求会重新跟踪；Server rebuild 清空旧 generation；
-- Instance 周期回收先于 workspace 磁盘策略；每次自动与手动删除还要在同一 directory
-  removal fence 内完成必要的 dispose、磁盘删除和注册表移除，未确认释放时保留身份；
-  untracked 目录只建立临时 fence，不调用 status / dispose；
-- 周期成本不随无关历史 WorkflowRun 或已释放目录增长；
-- 最小 `{ promise }` Workflow Action Output 与现有 expectation 语义；
-- 两段式收尾：期限前警告注入（仅一次、fire-and-forget）、期限不足 5 分钟时执行
-  开始即警告、期限到达 abort、被警告后提前结束不再 abort；全部以 fake clock 驱动。
+- Action input expansion with no hidden `vars.agent` fallback;
+- model strings containing multiple `/` characters, with variant independent;
+- complete CLI model-discovery stdout, variant keys, failure recovery, periodic
+  cadence, and change heartbeat;
+- shared Runtime code for Workflow and AgentJob execution without shared work or
+  Session identity;
+- physical Session reuse and rotation invariants;
+- no rotation on model / variant change;
+- one create after structured 404 from `session.get()`, with binding persistence
+  and input both preceding Prompt;
+- no create on timeout, 5xx, permission failure, or malformed successful
+  response, and no Prompt through a stale binding;
+- a non-bound Runner neither probes nor replaces a Session, and its local 404
+  does not trigger create;
+- no create or replay after missing or transport failure once Prompt starts;
+- global event routing, duplicate suppression, and snapshot reconciliation;
+- Prompt completion, interruption, uncertain admission, and no replay;
+- asynchronous Follow-up including idle missing recovery, native summarize,
+  Reset including a missing old Session, restart routing, and stale-binding
+  rejection;
+- one-time permission reply, duplicate suppression, reply failure, missing
+  Session, compatibility failure, and process-loss failure;
+- directory Instance reclamation only for directories used in the current
+  Server generation whose WorkflowRun is `Completed` or `Stopped`; deferral for
+  busy, retry, unknown, or concurrent operations; no repeated dispose after
+  success; tracking after later reuse; and old-generation clearing on rebuild;
+- Instance reclamation before disk policy in a periodic pass; each automatic or
+  manual deletion performing required dispose, disk deletion, and registry
+  removal under one directory removal fence; identity retained when release is
+  unconfirmed; and an untracked directory using a temporary fence without
+  status or dispose;
+- periodic cost independent of unrelated historical WorkflowRuns or already
+  released directories;
+- minimal `{ promise }` Workflow Action output with existing expectation
+  semantics;
+- two-phase closeout: exactly one fire-and-forget warning before deadline,
+  immediate warning for deadlines under five minutes, abort at deadline, and no
+  abort after an early normal end; all driven by a fake clock.
 
-## 完整替换
+## Complete Replacement
 
-实现改动直接移除，而不是保留 deprecated 路径：
+Implementation removes these paths directly instead of retaining deprecated
+forms:
 
-- `@agentclientprotocol/sdk`；
-- `mohist/acp-agent` 与 ACP Action tree；
-- 共享 ACP connection / session management；
-- ACP liveness probes 及其配置；
-- OpenCode log scanning；
-- ACP private compaction metadata 与 synthetic Session rebinding；
-- `.opencode` lockfile cleanup；
-- 所有 `acpSessionId` wire、Server 与 Web 术语。
+- `@agentclientprotocol/sdk`;
+- `mohist/acp-agent` and the ACP Action tree;
+- shared ACP connection / Session management;
+- ACP liveness probes and their configuration;
+- OpenCode log scanning;
+- ACP private compaction metadata and synthetic Session rebinding;
+- `.opencode` lockfile cleanup;
+- every `acpSessionId` wire, Server, and Web term.
 
-内置 Workflow 原子切换为 `mohist/opencode` 与 `options: ${{ vars.agent }}`。现有
-AgentJob dispatch 移除硬编码的 `mohist/acp-agent` Action name；Agent launch 组装 Agent
-snapshot 与 prompt 后，携带由 Agent 拥有的 OpenCode execution request，由 executor
-直接调用 `OpenCodeRuntime`。这不会引入 `mohist/agent`，也不提供 feature flag、
-compatibility alias 或 ACP fallback。
+Built-in Workflows switch atomically to `mohist/opencode` with
+`options: ${{ vars.agent }}`. Existing AgentJob dispatch removes the hard-coded
+`mohist/acp-agent` Action name. After Agent launch assembles the Agent snapshot
+and Prompt, it carries an Agent-owned OpenCode execution request, and the
+executor calls `OpenCodeRuntime` directly. This introduces no `mohist/agent`,
+feature flag, compatibility alias, or ACP fallback.
 
-### 存量数据与配置的过渡行为
+### Transition Behavior for Existing Data and Configuration
 
-不做存量数据重写，过渡行为必须明确而不是静默：
+Do not rewrite existing data. Transition behavior must be explicit:
 
-- 存量 AgentSession 数据只需收敛到 current binding 结构，不复制或保留物理 Session 历史。
-  ACP 时代的 current binding 在替换后视为“当前 Runtime Session 不存在”；提交新的独立
-  输入时按 missing recovery 建立 OpenCode binding。Compact / Cancel 仍明确失败，Reset
-  可以直接建立新绑定。
-- 旧结构 Workflow Profile 不被静默忽略，也不自动改写：`uses: mohist/acp-agent` 的任务
-  在 dispatch 时以可操作错误失败——该 Action 已移除。`with.expect`、`with.agent` 等旧
-  输入键归 Action 契约处理，definition 校验不检查 `with` 内部。
-- 切换前已开始的 WorkflowRun 不自动迁移；其后续 agent task dispatch 以可操作错误
-  失败，由用户 rerun 受影响 stage。
-- issue 级 `agentConfig` 配置面收敛为 model / variant（`type` 与 ACP liveness 字段从
-  API / CLI / Web 移除）；已持久化 `vars.agent` 中的遗留键由 Action Input 的
-  忽略 + 诊断规则兜底。
+- Existing AgentSession data converges to the current-binding structure without
+  copying or retaining physical Session history. After replacement, an ACP-era
+  current binding is treated as a missing current Runtime Session. A new
+  independent input establishes an OpenCode binding through missing recovery.
+  Compact / Cancel fail explicitly; Reset may create a new binding directly.
+- Do not silently ignore or rewrite old Workflow Profile structures. A task
+  with `uses: mohist/acp-agent` fails at dispatch with an actionable error
+  because the Action was removed. The Action contract handles old input keys
+  such as `with.expect` and `with.agent`; definition validation does not inspect
+  inside `with`.
+- Do not migrate a WorkflowRun already started before the switch. A later Agent
+  task dispatch fails actionably, and the user reruns the affected Stage.
+- Narrow Issue-level `agentConfig` to model / variant, removing `type` and ACP
+  liveness fields from API, CLI, and Web. The Action input ignore-plus-diagnostic
+  rule covers legacy keys in persisted `vars.agent`.
 
-## 上游边界
+## Upstream Boundary
 
-决策时使用的依赖是 `@opencode-ai/sdk/v2` 1.17.18，但其中两个 namespace 的成熟度不同。
-OpenCode Web UI 与 TUI 使用 `client.session.*` 完成 create、Prompt、abort、summarize 与
-Session synchronization；新的 V2 Session execution core 仍把 `wait` 和 `compact` 报告为
-unavailable，完成与恢复能力也尚未完整。
+The dependency used when deciding this design was `@opencode-ai/sdk/v2`
+1.17.18, but its two namespaces had different maturity. OpenCode Web UI and TUI
+used `client.session.*` for create, Prompt, abort, summarize, and Session
+synchronization. The newer V2 Session execution core still reported `wait` and
+`compact` unavailable and did not yet provide complete completion and recovery.
 
-Mohist 跟随这些真实内部调用路径，而不是假设每个生成的 V2 方法都可用。SDK access
-封装在 `OpenCodeRuntime` 内；以后迁移到完整 V2 Session 执行接口时，只改变
-一个深模块，不改变 Workflow Action 或 Session 产品契约。
+Mohist follows those real internal call paths instead of assuming every
+generated V2 method is usable. SDK access remains inside `OpenCodeRuntime`.
+Moving to the complete V2 Session execution surface later changes one deep
+module without changing the Workflow Action or Session product contract.
 
-实现开始时必须先锁定 SDK package 版本，并对使用的调用面在真实 OpenCode 上做一次冒烟
-验证；发现漂移时先修订本表，再进入实现。T-001 已在真实 OpenCode 1.18.3 服务器上对
-Session 与 global event 调用做了一次冒烟验证（详见
-[`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)）：
-表内 `client.session.*` 与 `client.global.event()` 调用可用；
-`client.v2.session.wait()` 与 `client.v2.session.compact()` 仍返回
-`ServiceUnavailableError`，确认不进入执行链。
-2026-07-31 又使用锁定的 `@opencode-ai/sdk/v2` 1.18.3 和 OpenCode CLI 1.18.10，
-通过 Runner 的 OS-assigned loopback Server factory，在临时 directory 上验证了
-`client.global.health()` 返回 healthy、`client.session.status({ directory })` 返回空
-status map，以及 `client.instance.dispose({ directory })` 返回 `data: true`；finally
-关闭 Server 与 dispatcher 后临时 directory 无残留，现有 4096 端口 Server 未受影响。
-实际锁定的 SDK 版本见实装差距小节。`client.instance.dispose()` 的 smoke 证据已补齐。
+Before implementation, lock the SDK package version and smoke-test the used
+surface against real OpenCode. If it has drifted, revise the table before
+implementing. T-001 smoke-tested Session and global-event calls against a real
+OpenCode 1.18.3 Server; see
+[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).
+The listed `client.session.*` and `client.global.event()` calls worked, while
+`client.v2.session.wait()` and `client.v2.session.compact()` still returned
+`ServiceUnavailableError`, confirming they do not enter execution.
 
-## 实装差距
+On 2026-07-31, another smoke test used locked
+`@opencode-ai/sdk/v2` 1.18.3 and OpenCode CLI 1.18.10 with the Runner's
+OS-assigned loopback Server factory in a temporary directory. It verified that
+`client.global.health()` returned healthy,
+`client.session.status({ directory })` returned an empty status map, and
+`client.instance.dispose({ directory })` returned `data: true`. After finally
+closing Server and dispatcher, the temporary directory had no residue and the
+existing Server on port 4096 was unaffected. The actual locked SDK version is
+recorded under Implementation Gaps. This completes smoke evidence for
+`client.instance.dispose()`.
 
-「Prompt 期限与两段式收尾」在 `OpenCodeRuntime` 落地后由独立 issue 跟进；当前期限
-到达直接终止执行，agent 没有收尾机会。
+## Implementation Gaps
 
-缺失恢复尚未落地：当前 `client.session.get()` 的 missing 直接结束执行，Workflow 与
-AgentJob 尚未共用“创建 candidate → expected binding 替换 → 记录输入”的准备流程；
-OpenCode 的 `SessionCommand` dispatch 当前对 Compact 和 Reset 都返回 `unavailable`。
-缺失恢复的实施 issue 必须同时让 Reset 复用同一 expected-binding replacement；Compact
-保持独立实装差距，不进入该 issue。对应实施 issue 待从本 spec 创建。
+Prompt Deadline and Two-Phase Closeout will be implemented in
+`OpenCodeRuntime` by a separate Issue. Today the deadline terminates execution
+directly and gives the Agent no closeout opportunity.
 
-T-001 完成时实际锁定的 SDK 版本是 `@opencode-ai/sdk@1.18.3`（与安装在 PATH 上的
-`opencode` CLI 版本一致），不是 1.17.18。决策文本保留 1.17.18 作为该节撰写时点的
-参考版本；后续 T-002+ 实现时按 1.18.3 进行。冒烟记录在
-[`openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json)。
+Missing recovery is not implemented. A missing result from current
+`client.session.get()` ends execution directly. Workflow and AgentJob do not
+yet share the preparation sequence
+`create candidate -> replace expected binding -> record input`. OpenCode
+`SessionCommand` dispatch currently returns `unavailable` for both Compact and
+Reset. The missing-recovery implementation Issue must make Reset reuse the same
+expected-binding replacement. Compact remains an independent implementation
+gap and is outside that Issue. The implementation Issue still needs to be
+created from this specification.
+
+T-001 actually locked `@opencode-ai/sdk@1.18.3`, matching the `opencode` CLI on
+PATH, rather than 1.17.18. The earlier decision text retains 1.17.18 as its
+point-in-time reference; T-002 and later implementation uses 1.18.3. The smoke
+record is
+[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).

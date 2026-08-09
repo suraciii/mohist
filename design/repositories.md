@@ -2,10 +2,12 @@
 status: wip
 ---
 
-# Repository 执行
+# Repository Execution
 
-Repository 是 Project Space 拥有的命名执行资源。Issue 只保存目标 Repository 的资源名；
-WorkflowRun 不复制 Repository，Runner workspace 也不成为 Repository 身份的第二份真源。
+A Repository is a named execution resource owned by a Project Space. An Issue
+stores only the target Repository resource name. A WorkflowRun does not copy
+the Repository, and a Runner Workspace does not become a second source of truth
+for Repository identity.
 
 ## Model
 
@@ -27,42 +29,52 @@ WorkflowRun
   IssueNumber
 ```
 
-- Project Repository 是 `GitUrl` 与 `BaseBranch` 的唯一写入权威。
-- Issue 的 `RepositoryName` 是对 Project Repository 的稳定引用。Issue 首次启动后不能改绑。
-- WorkflowRun 只保存定位 Issue 所需的标量，不保存 Repository snapshot、workspace path 或
-  branch。
-- Workspace 是 Project 下的一等执行环境资源，持有独立身份、来源与生命周期；它对
-  Repository 的引用是访问授权，不复制 Repository 定义。模型见
-  [`workspace.md`](workspace.md)。
-- Git remote 的规范化结果是校验过程中的临时值，不是领域字段。系统不持久化
-  `RemoteFingerprint` 或 `RemoteIdentityVersion`。
+- Project Repository is the only write authority for `GitUrl` and
+  `BaseBranch`.
+- An Issue's `RepositoryName` is a stable reference to a Project Repository.
+  The Issue cannot be rebound after its first start.
+- A WorkflowRun stores only the scalars needed to locate its Issue. It stores
+  no Repository snapshot, Workspace path, or branch.
+- A Workspace is a first-class execution-environment resource under a Project,
+  with its own identity, origin, and lifecycle. Its Repository references are
+  access grants, not copies of Repository definitions. See
+  [`workspace.md`](workspace.md).
+- A normalized Git remote is a temporary validation value, not a domain field.
+  The system does not persist `RemoteFingerprint` or
+  `RemoteIdentityVersion`.
 
 ## Semantics
 
-### Repository 变更
+### Repository Changes
 
-Project 可以新增 Repository、切换 default，并在没有未完成 Issue 使用时修改 `GitUrl`、
-`BaseBranch` 或删除 Repository。
+A Project may add a Repository, change the default, and modify `GitUrl` or
+`BaseBranch` or delete a Repository when no unfinished Issue uses it.
 
-backlog 与 `in_progress` Issue 都会占用其目标 Repository：
+Both backlog and `in_progress` Issues occupy their target Repository:
 
-- 修改该 Repository 的 `GitUrl` 或 `BaseBranch` 被拒绝；
-- 删除该 Repository 被拒绝；
-- 切换 Project default 不受影响，因为 Issue 已保存明确的 `RepositoryName`；
-- done 与 cancelled Issue 只保留历史资源名，不阻止修改或删除。
+- changing that Repository's `GitUrl` or `BaseBranch` is rejected;
+- deleting that Repository is rejected;
+- changing the Project default is unaffected because the Issue stores an
+  explicit `RepositoryName`;
+- done and cancelled Issues retain only the historical resource name and do not
+  block modification or deletion.
 
-Repository 更新与 Issue create、reassign、reopen、remove 必须经过同一个 Project-scoped
-协调边界。它先查询未完成 Issue blocker，再提交 Project 修改。现有
-`IssueRepositoryCoordinator` 已串行化这些绑定变化；把 metadata update 加入同一边界即可，
-不需要为 Issue start 新增协调协议，因为 Issue 在 backlog 时已经构成 blocker。
+Repository update and Issue create, reassign, reopen, and remove must pass
+through the same Project-scoped coordination boundary. It queries blockers
+among unfinished Issues before committing a Project change. The existing
+`IssueRepositoryCoordinator` already serializes these binding changes; adding
+metadata update to the same boundary is sufficient. Issue start needs no new
+coordination protocol because a backlog Issue is already a blocker.
 
-同一 Project 不允许两个 Repository 名称指向等价的 Git remote。别名检查可以在写入时
-临时规范化 URL 后比较，但不保存 hash。集成锁继续使用 `(ProjectId, RepositoryName)`；
-资源名唯一对应一个 remote，使该锁不会把同一个物理仓库拆成两把锁。
+Two Repository names in one Project may not point to equivalent Git remotes.
+The alias check may normalize URLs temporarily during a write, but it does not
+persist a hash. Integration locks remain keyed by
+`(ProjectId, RepositoryName)`. Because a resource name identifies exactly one
+remote, the lock cannot split one physical repository into two locks.
 
 ### Dispatch
 
-每次 task dispatch 按下面顺序构造 runtime context：
+Each task dispatch constructs its Runtime context in this order:
 
 ```text
 WorkflowRun.(ProjectId, IssueNumber)
@@ -71,16 +83,20 @@ WorkflowRun.(ProjectId, IssueNumber)
   -> repository.{name, gitUrl, baseBranch}
 ```
 
-解析结果只进入本次 dispatch。它不是 Run Variables，也不写回 WorkflowRun。不存在 Project
-default、`main` 或旧变量的 fallback。目标资源缺失时，task 以可操作的 Repository 错误
-失败；修复 Project Repository 后可以 retry。
+The resolved value belongs only to that dispatch. It is not a Run Variable and
+is not written back to WorkflowRun. There is no fallback to the Project
+default, `main`, or legacy variables. If the target resource is missing, the
+task fails with an actionable Repository error; it may be retried after the
+Project Repository is repaired.
 
-未完成 Issue 已锁定 Repository 执行属性，因此同一个 WorkflowRun 的各次 dispatch 会看到
-稳定的 `GitUrl` 与 `BaseBranch`，不需要 snapshot。
+An unfinished Issue locks the Repository's execution properties, so every
+dispatch in one WorkflowRun sees stable `GitUrl` and `BaseBranch` values without
+a snapshot.
 
 ### Workspace
 
-Issue-backed workspace 使用系统生成的 `WorkflowRunId` 直接推导：
+The system derives an Issue-backed Workspace directly from its generated
+`WorkflowRunId`:
 
 ```text
 path   = <runnerRoot>/workspaces/<workflowRunId>
@@ -88,40 +104,51 @@ branch = mohist/run-<workflowRunId>
 marker = { "workflowRunId": "<workflowRunId>" }
 ```
 
-Runner 只接受符合系统 ID 语法的 `WorkflowRunId`，然后检查目标路径位于 `runnerRoot` 下且
-不是符号链接。Repository 名称、Issue 标题和其他用户输入不进入路径或 branch。
+The Runner accepts only a `WorkflowRunId` that matches the system ID syntax,
+then verifies that the target path is under `runnerRoot` and is not a symbolic
+link. Repository names, Issue titles, and other user input never enter the path
+or branch.
 
-准备或复用 workspace 时，Runner 验证：
+When preparing or reusing a Workspace, the Runner verifies:
 
-1. 路径与 branch 均由 dispatch 的 `WorkflowRunId` 推导；
-2. marker 的 `WorkflowRunId` 与 dispatch 一致；
-3. 当前 checkout 是预期 branch；
-4. `git remote get-url origin` 与本次 dispatch 的 `repository.gitUrl` 一致。
+1. both path and branch are derived from the dispatch `WorkflowRunId`;
+2. the marker `WorkflowRunId` matches the dispatch;
+3. the current checkout is on the expected branch;
+4. `git remote get-url origin` equals this dispatch's `repository.gitUrl`.
 
-Git URL 比较只需 trim 后精确相等。workspace 由该值 clone，Issue 未完成期间该值又禁止修改；
-不需要跨 Server/Runner 维护另一套 URL 等价算法。用户手工修改 workspace 的 `origin` 属于
-损坏，系统明确失败，不猜测两个不同写法是否指向同一仓库。
+Git URLs require only trimmed exact equality. The Workspace was cloned from
+that value, and the value cannot change while the Issue is unfinished, so
+Server and Runner do not need another URL-equivalence algorithm. A user who
+manually changes the Workspace `origin` has corrupted it; the system fails
+explicitly rather than guessing whether two spellings refer to the same
+repository.
 
-workspace marker 不保存 Project、Issue、Repository、base branch、run branch、remote hash
-或算法版本。它们要么可以从权威状态读取，要么可以从 `WorkflowRunId` 推导。
+The Workspace marker does not store Project, Issue, Repository, base branch,
+run branch, remote hash, or algorithm version. Each is either readable from its
+authority or derivable from `WorkflowRunId`.
 
-首次创建或丢失后重建 workspace 时，Runner 先查询远端同名 run branch：
+When first creating a Workspace, or rebuilding one after it is lost, the Runner
+first checks for the remote run branch:
 
 ```text
-origin/mohist/run-<workflowRunId> exists -> checkout 远端 branch
-otherwise                                 -> 从 Repository.BaseBranch 创建 branch
+origin/mohist/run-<workflowRunId> exists -> check out the remote branch
+otherwise                                 -> create from Repository.BaseBranch
 ```
 
-因此已推送的 run branch 是 workspace 重建来源。尚未推送的本地提交不是持久状态；workspace
-损坏或 Runner root 丢失后，Workflow 重新执行相应 task。
+The pushed run branch is therefore the Workspace rebuild source. Unpushed local
+commits are not durable state. If the Workspace is corrupted or the Runner root
+is lost, the Workflow executes the corresponding task again.
 
-### Workspace 查询与清理
+### Workspace Queries and Cleanup
 
-diff、commits、文件读取、rebase 和手动清理以 `WorkflowRunId` 寻址。Server 使用 ProjectId
-选择 Runner，但 ProjectId 不进入 workspace identity。Runner 自己推导 path 与 run branch；
-需要 base branch 的操作使用 dispatch 时解析出的 Project Repository。
+Diffs, commits, file reads, rebase, and manual cleanup are addressed by
+`WorkflowRunId`. The Server uses ProjectId to select a Runner, but ProjectId is
+not part of Workspace identity. The Runner derives path and run branch itself;
+operations that need a base branch use the Project Repository resolved for the
+dispatch.
 
-Runner registry 只保存清理无法从其他地方推导的生命周期事实：
+The Runner registry stores only lifecycle facts that cleanup cannot derive
+elsewhere:
 
 ```text
 WorkspaceRegistryEntry
@@ -131,51 +158,64 @@ WorkspaceRegistryEntry
   TerminalAt?
 ```
 
-清理只删除由 `WorkflowRunId` 推导、位于 runner root 下、且 marker 匹配的目录。清理不要求
-Repository 仍存在，也不校验 remote；Repository 内容不参与“这个目录是否可以删除”的判断。
+Cleanup deletes only a directory derived from `WorkflowRunId`, located under
+the Runner root, and carrying a matching marker. Cleanup does not require the
+Repository to still exist and does not validate the remote; Repository content
+does not decide whether the directory is safe to delete.
 
 ## Failure Semantics
 
 | Failure | Result |
 |---|---|
-| 未完成 Issue 使用 Repository 时修改 git URL / base branch | 拒绝 Project 更新，指出阻塞 Issue |
-| dispatch 无法解析 Issue 的 Repository | task 失败，修复 Project 后 retry |
-| workspace marker 缺失或 run ID 不符 | `workspace_corrupt`，不修改目录 |
-| workspace branch 不符 | `workspace_branch_mismatch`，不自动切换未知 workspace |
-| workspace origin 与 Project Repository 不符 | `workspace_repository_mismatch`，不 fetch/push/rebase |
-| cleanup 目标不在 runner root 或 marker 不符 | 拒绝删除并将 registry entry 标为 stuck |
+| change Git URL / base branch while an unfinished Issue uses the Repository | reject the Project update and identify the blocking Issue |
+| dispatch cannot resolve the Issue's Repository | fail the task; retry after repairing the Project |
+| Workspace marker missing or run ID differs | `workspace_corrupt`; do not modify the directory |
+| Workspace branch differs | `workspace_branch_mismatch`; do not switch an unknown Workspace automatically |
+| Workspace origin differs from the Project Repository | `workspace_repository_mismatch`; do not fetch, push, or rebase |
+| cleanup target is outside the Runner root or marker differs | reject deletion and mark the registry entry stuck |
 
 ## Rollout
 
-本项目不保留旧 workspace 协议兼容层。Server 与 Runner 必须作为同一版本部署：
+The project keeps no compatibility layer for the old Workspace protocol. Server
+and Runner must be deployed as one version:
 
-1. 部署前停止 Server 与 Runner，并备份数据库和 Runner root；
-2. 清空 Runner workspace registry；
-3. 删除没有需要保留提交的旧 workspace；
-4. 对仍有未合入提交的旧 run，先确认远端 branch 已包含提交；
-5. 启动同一版本的 Server 与 Runner；
-6. retry 原 run，确认 Runner 从远端同名 branch 重建 workspace，且新 marker 只含
-   `workflowRunId`。
+1. Stop Server and Runner, then back up the database and Runner root.
+2. Clear the Runner Workspace registry.
+3. Delete old Workspaces that have no commits to preserve.
+4. For an old run with unmerged commits, first confirm that its remote branch
+   contains those commits.
+5. Start Server and Runner at the same version.
+6. Retry the original run and confirm that the Runner rebuilds the Workspace
+   from the same-named remote branch and that the new marker contains only
+   `workflowRunId`.
 
-不增加 legacy snapshot 回填、旧 marker 升级或 fingerprint fallback。可重建状态直接重建；
-必须保留的 Git 工作先通过远端 branch 保存。
+Do not add legacy snapshot backfill, old-marker upgrade, or fingerprint
+fallback. Rebuild reconstructible state. Preserve required Git work through a
+remote branch first.
 
 ## Status
 
-当前实现与目标设计的主要差距：
+The main gaps between the current implementation and the target design are:
 
-- `WorkflowRun` 持有 `WorkflowRepositoryContext` 与 `WorkspaceIdentity`；
-- `IssueWorkStarted`、dispatch overlay、workspace API 在多层复制 Repository snapshot；
-- workspace 查询 wire 仍携带完整身份（Project、Issue、Repository、path、branch），而非
-  以 `WorkflowRunId` 寻址、由 Runner 自行推导；
-- Runner registry entry 仍保存可从 `WorkflowRunId` 推导的 `issueNumber`、`workspacePath`
-  与 `runBranch`；marker 多存一个 `runBranch`。
+- `WorkflowRun` holds `WorkflowRepositoryContext` and `WorkspaceIdentity`;
+- `IssueWorkStarted`, the dispatch overlay, and Workspace APIs copy a Repository
+  snapshot across multiple layers;
+- Workspace query wire types still carry full identity (Project, Issue,
+  Repository, path, and branch) instead of addressing by `WorkflowRunId` and
+  letting the Runner derive the rest;
+- Runner registry entries still store `issueNumber`, `workspacePath`, and
+  `runBranch`, all derivable from `WorkflowRunId`; the marker also stores an
+  extra `runBranch`.
 
-已落地：Repository 占用锁定（`GitUrl` / `BaseBranch` 更新与删除均先查未完成 Issue
-blocker）；workspace path 与 run branch 由 `WorkflowRunId` 直接推导；marker 不再保存完整
-身份；fingerprint 与算法版本不再持久化（Runner 侧的 `git-remote-identity` 模块已成为
-死代码，随差距收敛一并删除）。
+Implemented: Repository occupancy locking (`GitUrl` / `BaseBranch` updates and
+deletion first query blockers among unfinished Issues); Workspace path and run
+branch derive directly from `WorkflowRunId`; the marker no longer stores full
+identity; fingerprints and algorithm versions are no longer persisted. The
+Runner-side `git-remote-identity` module is now dead code and will be deleted as
+the remaining gap closes.
 
-剩余落地顺序：先删 `WorkflowRun` 的 Repository snapshot 与多层复制，再把 workspace 查询
-切换为 `WorkflowRunId` 寻址，最后精简 registry 与 marker。Server 与 Runner 的协议切换
-仍须同一版本部署，不能拆成两个独立部署。
+Remaining implementation order: first remove the Repository snapshot from
+`WorkflowRun` and the multi-layer copies, then address Workspace queries by
+`WorkflowRunId`, and finally reduce the registry and marker. The Server/Runner
+protocol switch still requires a single-version deployment and cannot be split
+into two independent deployments.
