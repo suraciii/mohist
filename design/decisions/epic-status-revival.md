@@ -1,40 +1,59 @@
-# Epic 状态反映现实（issue-392）
+# Epic State Reflects Reality (issue-392)
 
-> 本文的产品决策仍有效。membership 的写入权威与事务实现已由
-> [`issue-owns-epic-membership.md`](issue-owns-epic-membership.md) 取代：Issue 在自己的
-> 事务中提交 `EpicNumber?`，Epic 通过持久事件重算并收敛状态，不再与 membership row
-> 共用事务。
+> The product decision in this record remains valid. The write authority and
+> transaction design for membership are superseded by
+> [`issue-owns-epic-membership.md`](issue-owns-epic-membership.md). Issue commits
+> `EpicNumber?` in its own transaction. A durable event makes Epic recompute
+> and converge state. Membership and Epic no longer share one transaction.
 
-## 背景
+## Background
 
-Epic 有两个终态：`done`（正常完成）与 `closed`（放弃）。之前 `LinkIssueAsync` 对终态 epic 走"归档式 link"（只记录关联、不改变状态），导致 epic 在有新 open issue 加入后状态与现实脱节。
+Epic has two terminal states: `done` for normal completion and `closed` for an
+abandoned goal. Previously, `LinkIssueAsync` treated a terminal Epic link as an
+archival link that recorded membership without changing state. Adding an open
+Issue therefore left Epic state inconsistent with reality.
 
-## 决策
+## Decision
 
-### 1. done 自动唤醒
+### 1. Revive Done Automatically
 
-link 到 `done` epic 不再是纯归档操作。若 linked issue 是 open（非终态），epic 自动从 `done` 转回 `running`；若 linked issue 已终态，保持 `done`。
+Linking to a `done` Epic is not purely archival. An open, nonterminal linked
+Issue moves Epic from `done` to `running`. A terminal linked Issue leaves Epic
+`done`.
 
-理由：
+Reasons:
 
-- `done` 语义必须为"当前没有未完成工作"。一旦又有 open issue 进来，状态须立即反映。
-- 唤醒后直接到 `running`（不是 `idle`），因为新 link 的 open issue 本身就是 active work。
-- 终态 issue 不引入新工作，不触发唤醒——保留"往 done epic 追加历史记录"的最小能力。
+- `done` must mean that no incomplete work currently remains. State must change
+  as soon as open work joins.
+- Revival goes directly to `running`, not `idle`, because the new open Issue is
+  active work.
+- A terminal Issue introduces no work and does not revive the Epic. Historical
+  records can still be added to a Done Epic.
 
-### 2. closed 拒绝 link
+### 2. Reject Links to Closed
 
-`closed` 是真正的终态（被放弃的里程碑）。任何 issue 都不能再 link 到 `closed` epic；调用方须先 `Reopen`。
+`closed` is a true terminal state for an abandoned goal. No Issue can link to a
+`closed` Epic. The caller must Reopen first.
 
-理由：`done` 与 `closed` 须有语义区分——`closed` 不能被新 issue 唤醒，否则两者行为一致。`Reopen` 是退出 `closed` 的唯一显式通道。
+This distinguishes `done` from `closed`. If an Issue could revive both, the
+states would behave identically. Reopen is the only explicit exit from
+`closed`.
 
-### 3. 历史数据不自动修复
+### 3. Do Not Rewrite Historical Data Automatically
 
-已处于 `done` 且已 link open issue 的历史 epic（如 #40）保持原状。operator 可通过 `unlink + relink` 或 `reopen + start` 手动恢复。避免对既有数据做静默大规模状态重写。
+Historical Epics that are `done` but already link an open Issue remain
+unchanged. An operator can repair them with unlink plus relink, or Reopen plus
+Start. Do not silently rewrite existing state at scale.
 
-## 实现要点
+## Implementation
 
-- 新增领域迁移 `WakeFromDone`（`done` → `running`），确认 linked issue 为 open 后调用。
-- `closed` link 拒绝以 `EpicClosedCannotLinkException` 在领域层抛出，API 映射为 `409 EPIC_CLOSED_CANNOT_LINK`。
-- Issue 先在自己的事务中提交归属；`IssueEpicChanged` 触发 Epic 重算。Epic 唤醒保存
-  失败时由事件重投恢复，不回滚已经提交的 Issue 归属。
-- 单条与批量 link 均遵循同一规则；批量下 closed 整批拒绝，done + open 在首个 open item 处唤醒一次。
+- Add the `WakeFromDone` domain transition from `done` to `running` and call it
+  after confirming that the linked Issue is open.
+- Reject a `closed` link with `EpicClosedCannotLinkException` in the domain and
+  map it to `409 EPIC_CLOSED_CANNOT_LINK` at the API.
+- Issue commits membership first in its transaction. `IssueEpicChanged`
+  triggers Epic recomputation. If Epic save fails, event redelivery recovers it
+  without rolling back committed Issue membership.
+- Single and bulk link follow the same rules. A Closed Epic rejects the complete
+  bulk operation. A Done Epic with open items revives once at the first open
+  item.

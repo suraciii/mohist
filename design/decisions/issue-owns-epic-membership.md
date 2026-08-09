@@ -1,86 +1,101 @@
-# Issue 持有 Epic 归属（issue-412）
+# Issue Owns Epic Membership (issue-412)
 
-## 背景
+## Background
 
-旧模型同时保留 Issue/Epic 的随机 id 与 Project 内 number，并把 Epic membership 放在
-Epic 侧关系表。事件路由又需要把 Issue、Epic 谱系复制到 Issue 和 WorkflowRun。结果是
-同一个事实有多种身份、多个写入入口，还需要 binding、revision 和补偿协议维持副本。
+The old model kept both random IDs and Project-scoped numbers for Issue and
+Epic. It stored Epic membership in an Epic-side relation table. Event routing
+also copied Issue and Epic lineage into Issue and WorkflowRun. One fact
+therefore had several identities and write paths, with binding, revision, and
+compensation protocols to synchronize copies.
 
-需要在以下约束下收敛模型：
+The model must converge under these constraints:
 
-- 聚合是强一致性和数据库事务边界；
-- Issue 与 Epic 位于同一限界上下文，允许相互依赖；
-- 一个业务事实只能有一个写入权威；
-- 模型只保留实际需要的概念和属性。
+- An aggregate is a strong-consistency and database-transaction boundary.
+- Issue and Epic belong to one bounded context and may depend on each other.
+- One business fact has one write authority.
+- The model contains only concepts and properties required now.
 
-## 决策
+## Decision
 
-### 1. number 就是 Issue / Epic 身份
+### 1. Number Is Issue and Epic Identity
 
-Issue 身份为 (`ProjectId`, `IssueNumber`)，Epic 身份为 (`ProjectId`, `EpicNumber`)。
-删除它们的随机 `IssueId` / `EpicId`，不再把 number 当成需要解析到另一身份的别名。
-Orleans GrainKey 和资源路径都从该领域身份统一派生。
+Issue identity is `(ProjectId, IssueNumber)`. Epic identity is
+`(ProjectId, EpicNumber)`. Remove random `IssueId` and `EpicId`; number is not
+an alias that resolves to another identity. Orleans GrainKey and resource paths
+derive from this domain identity.
 
-### 2. Issue 是当前 Epic 归属的唯一写入权威
+### 2. Issue Is the Sole Write Authority for Current Epic Membership
 
-Issue 直接持有 nullable `EpicNumber`。一个 Issue 同时最多属于一个 Epic，迁移时在
-Issue 自己的事务中把旧值替换为新值。Epic 不保存可独立写入的 membership row 或成员
-集合；成员列表、进度和推进候选都是对 Issue 当前状态的查询。
+Issue holds nullable `EpicNumber` directly. An Issue belongs to at most one Epic
+at a time and replaces its old value in the Issue transaction. Epic stores no
+independently writable membership row or member collection. Member list,
+progress, and advancement candidates query current Issue state.
 
-关联入口仍可以是 `Epic.LinkIssue`。Epic 先读取 Issue 当前归属；已经属于该 Epic 时按
-幂等成功返回，否则校验自己是否接受关联，再同步命令 Issue 执行 `AssignEpic`。真正的
-归属只在 Issue 事务中提交。取消关联携带 expected Epic number，避免旧 Epic 的迟到命令
-清掉已经迁移的新归属。
+The entry point can remain `Epic.LinkIssue`. Epic first reads current Issue
+membership. It returns idempotent success when the Issue already belongs to
+that Epic. Otherwise, it validates that the link is acceptable and synchronously
+commands Issue to run `AssignEpic`. Only the Issue transaction commits
+membership. Unlink includes the expected Epic number so a delayed command from
+an old Epic cannot clear newer membership.
 
-### 3. 同一上下文允许相互依赖，但不共享事务
+### 3. One Context Can Have Mutual Dependency without a Shared Transaction
 
-Epic 可以命令 Issue 关联或启动；Issue 的归属、启动、完成事件也可以异步触发 Epic
-重算。这个业务闭环不等于同步调用环：一次调用栈只有 Epic → Issue，反向路径必须在
-Issue 提交后由 durable event 发起。
+Epic can command Issue to link or start. Issue membership, start, and completion
+events can asynchronously trigger Epic recomputation. This business loop is not
+a synchronous call cycle. A call stack has only the `Epic -> Issue` direction.
+The reverse path starts from a durable event after Issue commits.
 
-任何数据库事务都只能包含一个聚合状态及该聚合自己的领域事件。Epic 状态变化、Issue
-归属变化和 WorkflowRun 变化分别提交。跨聚合中途失败不回滚已经提交的聚合，而是依靠
-事件重投和幂等命令收敛。
+One database transaction contains only one aggregate state and that aggregate's
+domain events. Epic state, Issue membership, and WorkflowRun changes commit
+separately. A failure between aggregates does not roll back committed state.
+Event redelivery and idempotent commands converge the process.
 
-### 4. WorkflowRun 只保存最小 Issue 上下文
+### 4. WorkflowRun Stores Minimal Issue Context
 
-WorkflowRun 需要为事件 stamping 保存
-`{ ProjectId, IssueNumber, EpicNumber? }`。这是运行所需的本地上下文，不是归属权威。
-Issue 启动 run 时一次提供；归属变化后，handler 重新读取 Issue 当前状态并幂等刷新
-active WorkflowRun。
+WorkflowRun stores `{ ProjectId, IssueNumber, EpicNumber? }` for event stamping.
+This is local run context, not membership authority. Issue supplies it when
+starting the run. After membership changes, a handler rereads current Issue
+state and idempotently refreshes the active WorkflowRun.
 
-不增加 `AwaitingBinding`、`WorkflowBindingPending`、lineage revision 或 binding 协议。
-`IssueWorkStarted` 本身是可靠交接：handler 用 Issue 已保存的 `WorkflowRunId` 调用
-`WorkflowRun.EnsureStarted`，重复投递由 run identity 幂等处理。
+Do not add `AwaitingBinding`, `WorkflowBindingPending`, lineage revision, or a
+binding protocol. `IssueWorkStarted` is the reliable handoff. Its handler uses
+the persisted `WorkflowRunId` to call `WorkflowRun.EnsureStarted`. Run identity
+makes repeated delivery idempotent.
 
-### 5. 不引入通用 owner / controller 模型
+### 5. Do Not Add a Generic Owner or Controller Model
 
-Kubernetes 的 `ownerReferences` 与 controller 解决通用资源级联管理；这里的业务关系只有
-一个明确含义：Issue 当前属于哪个 Epic。`EpicNumber?` 已经完整表达该事实。泛化为
-`OwnerRef { Type, Id }` 会引入未使用的多 owner、级联删除、controller 仲裁和通用协议，
-同时隐藏领域语言，因此不采用。
+Kubernetes `ownerReferences` and controllers solve generic resource lifecycle.
+This domain has one specific fact: the current Epic of an Issue. `EpicNumber?`
+expresses it completely. `OwnerRef { Type, Id }` would introduce unused
+multiple ownership, cascading deletion, controller arbitration, and generic
+protocol while hiding domain language.
 
-## 失败如何恢复
+## Failure Recovery
 
-| 失败位置 | 已提交事实 | 恢复方式 |
+| Failure point | Committed fact | Recovery |
 |---|---|---|
-| Epic 校验后、Issue 提交前 | 无新归属 | 重试 `LinkIssue` |
-| Issue 提交后、响应 Epic 前 | Issue 已有新 `EpicNumber` | 重试命中 `AssignEpic` 幂等结果；`IssueEpicChanged` 仍会投递 |
-| Epic 重算保存失败 | Issue 归属已成立 | durable handler 重投 `Epic.Recompute` |
-| Issue 启动后、WorkflowRun 创建前 | Issue 已保存 `WorkflowRunId` | `IssueWorkStarted` 重投 `EnsureStarted` |
-| 旧归属事件迟到 | Issue 可能已有更新归属 | handler 重读 Issue 当前状态，不使用旧 payload 覆盖 |
+| After Epic validation and before Issue commit | No new membership | Retry `LinkIssue` |
+| After Issue commit and before the Epic response | Issue has new `EpicNumber` | Retry reaches the idempotent `AssignEpic` result; `IssueEpicChanged` still delivers |
+| Epic recomputation save fails | Issue membership is committed | Durable handler redelivers `Epic.Recompute` |
+| Issue starts before WorkflowRun creation | Issue persisted `WorkflowRunId` | `IssueWorkStarted` redelivers `EnsureStarted` |
+| Old membership event arrives late | Issue can have newer membership | Handler rereads current Issue state instead of applying the old payload |
 
-没有一种恢复需要跨聚合事务、分布式锁或人工修复中间状态。
+No recovery needs a cross-aggregate transaction, distributed lock, or manual
+repair of intermediate state.
 
-## 后果
+## Consequences
 
-- Issue/Epic 命令、资源路径和事件只使用 Project-scoped number，模型与用户语言一致。
-- Epic 查询可能短暂过期；Issue 在命令入口重验不变量，因此过期只导致 no-op、拒绝或
-  重试，不会破坏一致性。
-- Epic 的进度和自动推进对 Issue 提交是最终一致的，而每个 Issue、Epic、WorkflowRun
-  自身状态仍保持强一致。
-- 旧 `EpicIssueRow`、`IssueId` / `EpicId` 以及为其副本同步引入的 binding/revision 状态
-  都应在迁移完成后删除，不保留双写兼容层。
+- Issue and Epic commands, resource paths, and events use only Project-scoped
+  numbers, matching user language.
+- Epic queries can be briefly stale. Issue revalidates invariants at its command
+  boundary, so staleness produces only a no-op, rejection, or retry and cannot
+  corrupt consistency.
+- Epic progress and automatic advancement are eventually consistent with Issue
+  commit. Each Issue, Epic, and WorkflowRun remains strongly consistent.
+- Remove old `EpicIssueRow`, `IssueId`, `EpicId`, and binding or revision state
+  introduced to synchronize their copies after migration. Do not retain a
+  dual-write compatibility path.
 
-本决策保留 [`epic-status-revival.md`](epic-status-revival.md) 的产品语义，但取代其中
-“唤醒与 membership row 同事务”的实现方式。
+This decision preserves product semantics from
+[`epic-status-revival.md`](epic-status-revival.md) but supersedes its design in
+which revival and the membership row shared one transaction.
