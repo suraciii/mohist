@@ -139,8 +139,13 @@ Both Workflow and AgentJob paths are implemented. A Workflow can use
 AgentSession and show transcripts, tools, state, compaction, model, usage, and
 cost on the existing Session page. Execution-backend selection for Agent and
 Issue, Runtime-specific model catalogs, and Web model selectors are also
-implemented.
+implemented. Pi Compact and Reset are available through the shared Session
+operations.
 
-Some new inputs still fail when their Pi Session file is missing. Automatic
-rebuild and rebinding are not implemented. The corresponding implementation
-issue must be created from this spec.
+Before a new Workflow input is submitted, Mohist automatically creates empty Pi
+context and replaces a binding that the owning Runner confirms is missing while
+the Session is safely idle. AgentJob launch and idle Follow-up do not yet use
+that recovery boundary. Ambiguous or unsafe absence still blocks instead of
+replaying input. The complete ownership lease, fencing, candidate reconciliation,
+and cleanup contract is not yet enforced at every boundary; see [Agents and
+AgentSessions](../agent-sessions.md#implementation-gaps).

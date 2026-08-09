@@ -235,7 +235,7 @@ but those have different lifetimes. Mohist keeps them separate so that a clear
 work result does not close a useful conversation, and a later follow-up does not
 rewrite the result of the original delegation.
 
-```text
+```text diagram
 [Mohist Agent]
       |
       +-- launch --> [AgentJob: result of this delegation]
@@ -319,7 +319,7 @@ Turn, the user must request Stop. Mohist reports it as cancelled only after the
 stop is confirmed. A lost or uncertain Stop response leaves the Turn and Session
 Unknown; it never turns them into Idle by assumption.
 
-An explicit force-reset is the escape path when reconciliation cannot resolve an
+The target contract uses an explicit force-reset when reconciliation cannot resolve an
 old Unknown. It requires the user to acknowledge that the old Runtime may still
 produce side effects. It preserves the unresolved Input, Turn, and operation in
 the audit record, starts a new context, and permits new work only after that new
@@ -405,7 +405,7 @@ arguments and operation keys.
 | Compact | Reduce Runtime context without starting over | Preserves the AgentSession and current Runtime Session |
 | Reset | Continue from empty Runtime context | Preserves AgentSession identity and transcript and records the context boundary |
 | Cancel / Stop | End queued work or active work in a session tree | Cancel affects one queued Turn; Stop fixes the attached subtree and requests interruption for its executing Turns; unconfirmed targets remain Unknown |
-| Force-reset | Continue after an Unknown that cannot be reconciled | Preserves unresolved history and starts a new context only after explicit risk acknowledgement |
+| Force-reset (target) | Continue after an Unknown that cannot be reconciled | Preserves unresolved history and starts a new context only after explicit risk acknowledgement |
 
 These operations change session execution, not work ownership. A follow-up does
 not turn a TaskRun into an AgentJob. Compact, Reset, and force-reset do not launch
@@ -424,18 +424,36 @@ runs is enforced for launches and follow-ups. See
 
 ## Implementation Gaps
 
-Automatic recovery after a missing Runtime Session is not fully implemented.
-Some current paths still fail and require the user to Reset the Session. Users
-cannot yet rely on every confirmed-missing Session to recover automatically.
+Automatic confirmed-missing recovery is implemented for a new Workflow input
+when the Session is safely idle. The owning Runner creates empty Runtime context
+and replaces the missing binding without changing the AgentSession or replaying
+prior input. Ambiguous or unsafe absence still blocks because it cannot prove
+that an old effect did not occur.
+
+AgentJob launch and idle Follow-up do not yet enter that same recovery boundary.
+The initial AgentJob Turn is already queued before missing-binding recovery can
+run. Reconnect reconciliation can also replace a binding for non-idle work
+without the complete proof that an old effect is absent. Callers must therefore
+not treat those paths as permission to replay input.
+
+Recovery does not yet apply the complete ownership lease, effect fence,
+candidate reconciliation, and cleanup contract at every boundary. This limits
+cross-boundary convergence without making confirmed-missing recovery itself an
+unimplemented capability.
+
+Force-reset, Runtime rebind, and Runner handoff are target recovery boundaries,
+but they have no public CLI, Web, or API operation today. A user cannot yet use
+them to escape an unresolved Unknown. Current public recovery is limited to
+Compact and Reset, and Reset is safe only when no old side effect remains
+uncertain.
 
 ### Caller-owned operation keys
 
 The product contract requires a caller-visible key for follow-up, Compact,
-Reset, recovery, handoff, rebind, Stop, and force-reset. Some current entry
-points still generate a hidden key when the caller omits one. Clients cannot
-rely on duplicate-request protection on those paths. An entry point satisfies
-the contract only when it requires the caller's key and lets the caller reuse
-that key to query or retry the original operation.
+Reset, recovery, handoff, rebind, and force-reset. Compact and Reset currently
+generate a hidden key. Clients cannot reliably retry those operations after a
+lost response. Cascade Stop already requires a caller-visible idempotency key;
+Server derives the tree operation identity from the root Session and that key.
 
 Agent Connection Readiness currently checks only whether the Agent has a Model
 and Runtime while keeping Connection health independent. An Agent that has not
@@ -447,11 +465,10 @@ return their stable IDs. The remaining gap is a uniform canonical read model:
 not every entry point yet exposes acceptance, dispatch, and Turn result as
 separate resumable facts after disconnection.
 
-Slack Agent Connections, Bot identities, access policies, and connection state
-are implemented. Remaining Slack gaps include reactive Configuration-token
-rotation and Agent-authored reply actions. The unified invocation interface also
-lacks complete caller authentication, caller-owned duplicate-request protection
-on every operation, and resumable execution events required by general external
-clients. See the target contracts in
+Slack Agent Connections, Bot identities, access policies, reactive
+Configuration-token rotation, and Agent-authored reply actions are implemented.
+The unified invocation interface still lacks caller-owned duplicate-request
+protection on every operation and a uniform resumable read model for general
+external clients. See the target contracts in
 [`design/agent-api.md`](../design/agent-api.md) and
 [`design/slack.md`](../design/slack.md).

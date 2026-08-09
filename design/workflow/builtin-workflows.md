@@ -40,7 +40,7 @@ mo issue create "..." --workflow-profile mohist/github-pr
 
 Both Workflows use the same main path:
 
-```text
+```text diagram
 plan -> approval -> build -> check -> approval -> integrate
                                                    sequential, with project-integration lock
 ```
@@ -112,14 +112,13 @@ The Profile declares the corresponding rebase, repair, publish, or retry work
 beside that Action. This keeps external failure handling visible and prevents a
 Stage hook from changing the branch without a Task record.
 
-- Pull Request checks appear at two explicit boundaries: the Check Stage
-  `verify-pr-checks` task for repair before delivery, and the internal
-  prerequisite of Integrate `merge-pr` immediately before merge. Both use the
-  same polling and classification functions and `pr-checks-failed` code, with
-  symmetric recovery.
-- The first check boundary enables repair before delivery. The second is an
-  internal merge prerequisite that protects against state changing after
-  Approval. It is not a Stage Check.
+- Pull Request checks appear at two explicit boundaries. The first runs after
+  Check work so a failed external check becomes visible repair work before
+  delivery. The second runs immediately before merge so external state that
+  changed after Approval cannot bypass the delivery gate; it is an internal
+  merge prerequisite, not a Stage Check.
+- Exact Task IDs, Action inputs, failure codes, ordering, and recovery behavior
+  belong only to the authoritative Profile YAML linked above.
 - Every publish and Pull Request side effect is an explicit task. No implicit
   Stage-boundary hook exists.
 - `push` has no business recovery. Failure indicates permission, network, or an
@@ -127,6 +126,5 @@ Stage hook from changing the branch without a Task record.
 - Conflict resolution, check repair, and publishing remain separate work. A
   repair Agent does not silently own a later push.
 
-Exact Task IDs, Action inputs, ordering, and recovery codes belong to the YAML
-definitions. See [`actions.md`](actions.md) for the Action contract and
+See [`actions.md`](actions.md) for the Action contract and
 [`recovery.md`](recovery.md) for recovery semantics.

@@ -76,8 +76,8 @@ and the set of emitted milestone comments. It is immutable after creation and
 is the feed idempotency key.
 
 A PR-to-Issue association has no independent record. It is parsed from the
-`pull_request` branch under the Workflow naming convention `mo/issue-N`. An
-unparseable branch causes the event to be ignored.
+`pull_request` branch under the named Workspace convention
+`mohist/ws-issue-N`. An unparseable branch causes the event to be ignored.
 
 ## Semantics
 
@@ -113,7 +113,7 @@ idempotent.
 
 A durable handler subscribes to `com.mohist.github.issues.labeled`:
 
-```text
+```text literal
 if event label != connection.IntakeLabel: skip
 if GitHubIssueLink exists: skip                          # idempotent
 issue = create Issue(title and body snapshot,
@@ -140,8 +140,8 @@ terminal check, without identifying who closed it.
 
 A handler subscribes to `com.mohist.github.pull-request.reviewed`:
 
-```text
-issue number = parse branch name mo/issue-N; if invalid, ignore
+```text literal
+issue number = parse branch name mohist/ws-issue-N; if invalid, ignore
 if reviewer.login not in connection.Approvers: ignore
 if Issue is not at the Check approval point: ignore
 APPROVED          -> approve(decidedBy = "github:" + login)
@@ -180,7 +180,7 @@ Runner requests a token when delivery needs a GitHub identity through
 `POST /api/github-connections/{connectionId}/delivery-token`. It requires the
 `runner` scope under the authentication model in [`auth.md`](auth.md):
 
-```text
+```text literal
 input: { permissions: ["contents:write", "pull-requests:write"] }
 server:
   if connection is not Active or IdentityKind != app:
@@ -223,15 +223,26 @@ Feed through completion with `FeedMode = start` and `alice` in Approvers:
 Routing subscriptions use the same semantics as Mohist domain events, without
 a special case:
 
-```text
+```text literal
 event.type == "com.mohist.github.check-suite.completed" && event.issue == "42"
 ```
 
 ## Status
 
-None of this design is implemented. Recommended delivery order for
-`mohist-explore` slices: inbound receipt and normalization, feed translator and
-GitHubIssueLink, write-back adapter, then Approval translator.
+Repository Connection, signed ingress, feed and withdrawal, Pull Request review
+Approval, and idempotent progress write-back are implemented. Server remains
+the Mohist state authority, while GitHub provides external identity and a
+projection of progress.
+
+The Web and CLI do not yet expose persisted write-back failures. Write-back
+also uses a PAT rather than GitHub App installation identity and short-lived,
+Repository-scoped tokens.
+
+PR review correlation and delivery-PR lookup still recognize the retired
+`mo/issue-N` branch form, while named Issue Workspaces create
+`mohist/ws-issue-N`. Until those readers converge on the Workspace convention,
+review Approval and completion comments cannot reliably associate a PR created
+by the built-in GitHub Profile.
 
 Open questions:
 

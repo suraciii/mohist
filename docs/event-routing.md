@@ -73,7 +73,7 @@ This model expresses three needs:
 A rule matches event attributes with a Boolean expression. Operators include
 `==`, `!=`, `&&`, `||`, `in`, and `startsWith`.
 
-```text
+```text literal
 # Approvals only for Issue #42
 event.type == "com.mohist.workflow.stage.approval-requested" && event.issue == "42"
 

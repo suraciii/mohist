@@ -2,7 +2,7 @@
 
 ## Boundary
 
-```text
+```text diagram
 User in Slack -> Slack Bot / mohist-slack -> Connection boundary --+
 User -> Web UI (backup operation + view) -> API -------------------+
 User -> direct CLI -> API -----------------------------------------+
@@ -61,7 +61,7 @@ User Project
 
 ## Facts and decisions
 
-```text
+```text diagram
 Task executes.
 Check verifies.
 Runner reports.
@@ -75,7 +75,7 @@ Runner may report a failure classification, including `retry-safe`, as an execut
 
 ## Report pipeline
 
-```text
+```text diagram
 Side effect
   |
   v

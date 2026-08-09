@@ -17,7 +17,7 @@ authoritative validator; it does not repeat the syntax.
 The semantic model is separate from its carrier syntax. YAML is parsed into the following types.
 The engine, Runner, and validator operate on these types, not on a syntax tree.
 
-```text
+```text literal
 WorkflowDefinition(Approval?, Stages[])
 Approval(FeedbackTasks: Task[])
 Stage(Name, RequiresApproval = false, LockBehavior?, Resources[], Tasks[], Checks[])
@@ -68,7 +68,7 @@ There is one entry point: `Parse(yaml) -> Definition | Error[]`.
 - Each error consists of a YAML path and a message in domain language, without a stack trace or
   implementation terminology:
 
-```text
+```text literal
 stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 ```
 
@@ -134,7 +134,7 @@ handlers:
     retryself: true
 ```
 
-```text
+```text literal
 stages[0].tasks[0].recovery.handlers[0]: unknown field retryself; did you mean retrySelf
 ```
 
@@ -146,7 +146,7 @@ stages[0].tasks[0].recovery.handlers[0]: unknown field retryself; did you mean r
   tasks: [ ... ]
 ```
 
-```text
+```text literal
 stages[1]: lockBehavior requires non-empty resources
 ```
 

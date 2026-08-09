@@ -35,7 +35,7 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 WorkflowProfile can reference a Variable, but it does not own, declare, or restrict Variable keys. A
 Variable affects execution only when a Profile, task, check, recovery, or Prompt references it.
 
-```text
+```text diagram
 Workflow merge:
   Project.vars -> Issue.vars -> Run.vars -> Effective Workflow Variables
 
@@ -61,7 +61,7 @@ Both kinds of Effective Variables are read-only derived values. They are not per
 
 Resolution merges Workflow Variables first and then the current Stage Variables:
 
-```text
+```text literal
 resolve(currentStage, project, issue, run):
   result = {}
 
@@ -82,7 +82,7 @@ resolve(currentStage, project, issue, run):
 
 The complete priority order, from lowest to highest, is:
 
-```text
+```text diagram
 project.vars
 -> issue.vars
 -> run.vars
@@ -128,7 +128,7 @@ scope is modified:
 
 Effective Variables are a separate read-only resource under Run:
 
-```text
+```text literal
 GET /api/workflow-runs/{workflowRunId}/variables/effective
 GET /api/workflow-runs/{workflowRunId}/variables/effective?stage={stage}
 GET /api/workflow-runs/{workflowRunId}/variables/effective/{keyPath}

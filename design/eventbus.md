@@ -84,7 +84,7 @@ per-source `Id`.
 
 ## Dispatcher
 
-```text
+```text diagram
 Producer transaction -- append row --> commit -- poke after commit --+
                                                                   |
                                                                   v

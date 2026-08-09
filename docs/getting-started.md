@@ -52,15 +52,23 @@ as `mo`.
 ## 4. Start the Core Processes
 
 The Server and Runner are the core processes required for Mohist execution.
-Start them in two terminals:
+Start Server in one terminal:
 
 ```bash
-# Terminal 1: control plane
 npm run dev:server
-
-# Terminal 2: execution plane; start it after the Server
-npm run dev:runner
 ```
+
+After Server is ready, install and start an authenticated Runner from a second
+terminal in the same repository:
+
+```bash
+mo install runner --repo-root "$PWD"
+mo runner status
+```
+
+The installer requests a one-time enrollment from Server, starts Runner as a
+managed service, and lets Runner keep its own machine credential. Later starts
+can use `mo service start runner` without enrolling again.
 
 Start the Web UI when you need the fallback operations and visualization plane:
 
@@ -152,7 +160,7 @@ Use a simple, clear, and verifiable Issue as the trial:
 
 You can say this directly to an External Agent:
 
-```text
+```text literal
 Create a ready Issue in my-app. Add GET /hello and return { "message": "hello" }.
 ```
 
@@ -161,7 +169,8 @@ To use the CLI directly, run:
 
 ```bash
 mo issue create "Add hello world endpoint" \
-  --body "Add a GET /hello endpoint that returns {\"message\":\"hello\"}."
+  --body "Add a GET /hello endpoint that returns {\"message\":\"hello\"}." \
+  --ready
 ```
 
 The fallback path is **New Issue** in the upper-right corner of the Web UI board.
@@ -179,7 +188,7 @@ then select **Start**.
 
 Mohist then:
 
-1. Creates a worktree on the `mo/issue-1` branch.
+1. Creates or reuses the named Workspace `issue-1` from the target Repository.
 2. Enters the **Plan** stage, where an Inline Agent analyzes the requirement and
    produces the proposal, design, specs, and tasks.
 
@@ -227,7 +236,7 @@ After Approval, the Workflow advances automatically:
   `tasks.json`.
 - **Check**: An Inline Agent reviews its output and can wait for another
   Approval.
-- **Integrate**: Mohist merges the `mo/issue-1` branch into the base branch.
+- **Integrate**: Mohist merges the Workspace branch into the base branch.
 
 If any stage fails, the Issue enters blocked state. See
 [Troubleshooting](troubleshooting.md) for recovery.
@@ -236,9 +245,9 @@ If any stage fails, the Issue enters blocked state. See
 
 After Integrate finishes, the Issue enters Done:
 
-- The `mo/issue-1` branch is merged into your base branch.
+- The Workspace branch is merged into your base branch.
 - Your repository contains the code changes.
-- All artifacts remain under `openspec/changes/1-<slug>/` as an audit record.
+- All artifacts remain under `openspec/changes/issue-1/` as an audit record.
 
 In your repository, verify that `GET /hello` works.
 

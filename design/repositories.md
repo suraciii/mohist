@@ -11,7 +11,7 @@ for Repository identity.
 
 ## Model
 
-```text
+```text literal
 Project.Repository
   Name
   GitUrl
@@ -21,7 +21,7 @@ Project.Repository
 Issue
   ProjectId
   RepositoryName
-  WorkflowRunId?
+  WorkspaceName
 
 WorkflowRun
   Id
@@ -60,11 +60,10 @@ Both backlog and `in_progress` Issues occupy their target Repository:
   block modification or deletion.
 
 Repository update and Issue create, reassign, reopen, and remove must pass
-through the same Project-scoped coordination boundary. It queries blockers
-among unfinished Issues before committing a Project change. The existing
-`IssueRepositoryCoordinator` already serializes these binding changes; adding
-metadata update to the same boundary is sufficient. Issue start needs no new
-coordination protocol because a backlog Issue is already a blocker.
+through the same Project-scoped coordination boundary. It evaluates unfinished
+Issue bindings and commits or rejects the change as one serialized decision.
+Issue start needs no new coordination protocol because a backlog Issue already
+occupies its Repository.
 
 Two Repository names in one Project may not point to equivalent Git remotes.
 The alias check may normalize URLs temporarily during a write, but it does not
@@ -76,7 +75,7 @@ remote, the lock cannot split one physical repository into two locks.
 
 Each task dispatch constructs its Runtime context in this order:
 
-```text
+```text diagram
 WorkflowRun.(ProjectId, IssueNumber)
   -> Issue.RepositoryName
   -> Project.Repository
@@ -95,73 +94,35 @@ a snapshot.
 
 ### Workspace
 
-The system derives an Issue-backed Workspace directly from its generated
-`WorkflowRunId`:
+Repository resolution answers which source material a dispatch may use.
+Workspace resolution answers where that work executes. Combining the two would
+make a WorkflowRun, checkout, or Runner directory a second authority for both
+resources.
 
-```text
-path   = <runnerRoot>/workspaces/<workflowRunId>
-branch = mohist/run-<workflowRunId>
-marker = { "workflowRunId": "<workflowRunId>" }
-```
+An Issue therefore holds both stable references: `RepositoryName` selects the
+Project Repository and `WorkspaceName` selects the Project Workspace. Dispatch
+resolves the Repository live through the chain above and passes the Workspace
+name independently. Workspace identity, Origin, materialization, affinity, and
+loss behavior are defined only in
+[`workspace.md`](workspace.md).
 
-The Runner accepts only a `WorkflowRunId` that matches the system ID syntax,
-then verifies that the target path is under `runnerRoot` and is not a symbolic
-link. Repository names, Issue titles, and other user input never enter the path
-or branch.
-
-When preparing or reusing a Workspace, the Runner verifies:
-
-1. both path and branch are derived from the dispatch `WorkflowRunId`;
-2. the marker `WorkflowRunId` matches the dispatch;
-3. the current checkout is on the expected branch;
-4. `git remote get-url origin` equals this dispatch's `repository.gitUrl`.
-
-Git URLs require only trimmed exact equality. The Workspace was cloned from
-that value, and the value cannot change while the Issue is unfinished, so
-Server and Runner do not need another URL-equivalence algorithm. A user who
-manually changes the Workspace `origin` has corrupted it; the system fails
-explicitly rather than guessing whether two spellings refer to the same
-repository.
-
-The Workspace marker does not store Project, Issue, Repository, base branch,
-run branch, remote hash, or algorithm version. Each is either readable from its
-authority or derivable from `WorkflowRunId`.
-
-When first creating a Workspace, or rebuilding one after it is lost, the Runner
-first checks for the remote run branch:
-
-```text
-origin/mohist/run-<workflowRunId> exists -> check out the remote branch
-otherwise                                 -> create from Repository.BaseBranch
-```
-
-The pushed run branch is therefore the Workspace rebuild source. Unpushed local
-commits are not durable state. If the Workspace is corrupted or the Runner root
-is lost, the Workflow executes the corresponding task again.
+Repository preparation still protects one local invariant: the materialized
+checkout must belong to the resolved `GitUrl`. If the Runner cannot confirm the
+remote, it fails preparation before fetch, push, or rebase. This validation does
+not make the remote URL, checkout path, or branch part of Workspace identity.
 
 ### Workspace Queries and Cleanup
 
-Diffs, commits, file reads, rebase, and manual cleanup are addressed by
-`WorkflowRunId`. The Server uses ProjectId to select a Runner, but ProjectId is
-not part of Workspace identity. The Runner derives path and run branch itself;
-operations that need a base branch use the Project Repository resolved for the
-dispatch.
+Workspace operations are addressed by `(ProjectId, WorkspaceName)`. A
+WorkflowRun ID may locate workflow history, but it never identifies a
+Workspace. The Server resolves the Workspace Home to a Runner; Repository data
+is supplied only to operations that need source control context.
 
-The Runner registry stores only lifecycle facts that cleanup cannot derive
-elsewhere:
-
-```text
-WorkspaceRegistryEntry
-  WorkflowRunId
-  Phase: active | eligible | stuck
-  MaterializedAt
-  TerminalAt?
-```
-
-Cleanup deletes only a directory derived from `WorkflowRunId`, located under
-the Runner root, and carrying a matching marker. Cleanup does not require the
-Repository to still exist and does not validate the remote; Repository content
-does not decide whether the directory is safe to delete.
+The Workspace lifecycle and reclamation grant come from the Workspace view, not
+Repository existence or WorkflowRun status. Runner-side registry and deletion
+fences are defined in [`runner.md`](runner.md#local-workspace-lifecycle) and the
+reclamation rules remain authoritative in
+[`workspace.md`](workspace.md#runner-side-directory-reclamation).
 
 ## Failure Semantics
 
@@ -169,53 +130,20 @@ does not decide whether the directory is safe to delete.
 |---|---|
 | change Git URL / base branch while an unfinished Issue uses the Repository | reject the Project update and identify the blocking Issue |
 | dispatch cannot resolve the Issue's Repository | fail the task; retry after repairing the Project |
-| Workspace marker missing or run ID differs | `workspace_corrupt`; do not modify the directory |
-| Workspace branch differs | `workspace_branch_mismatch`; do not switch an unknown Workspace automatically |
-| Workspace origin differs from the Project Repository | `workspace_repository_mismatch`; do not fetch, push, or rebase |
-| cleanup target is outside the Runner root or marker differs | reject deletion and mark the registry entry stuck |
-
-## Rollout
-
-The project keeps no compatibility layer for the old Workspace protocol. Server
-and Runner must be deployed as one version:
-
-1. Stop Server and Runner, then back up the database and Runner root.
-2. Clear the Runner Workspace registry.
-3. Delete old Workspaces that have no commits to preserve.
-4. For an old run with unmerged commits, first confirm that its remote branch
-   contains those commits.
-5. Start Server and Runner at the same version.
-6. Retry the original run and confirm that the Runner rebuilds the Workspace
-   from the same-named remote branch and that the new marker contains only
-   `workflowRunId`.
-
-Do not add legacy snapshot backfill, old-marker upgrade, or fingerprint
-fallback. Rebuild reconstructible state. Preserve required Git work through a
-remote branch first.
+| materialized checkout remote cannot be confirmed as the resolved Repository | fail preparation; do not fetch, push, or rebase |
 
 ## Status
 
-The main gaps between the current implementation and the target design are:
+Repository occupancy locking is implemented: `GitUrl` and `BaseBranch` updates
+and deletion first query blockers among unfinished Issues. Issue dispatch also
+passes the named `issue-N` Workspace, and the Runner materializes that Workspace
+through the first-class Workspace path.
 
-- `WorkflowRun` holds `WorkflowRepositoryContext` and `WorkspaceIdentity`;
-- `IssueWorkStarted`, the dispatch overlay, and Workspace APIs copy a Repository
-  snapshot across multiple layers;
-- Workspace query wire types still carry full identity (Project, Issue,
-  Repository, path, and branch) instead of addressing by `WorkflowRunId` and
-  letting the Runner derive the rest;
-- Runner registry entries still store `issueNumber`, `workspacePath`, and
-  `runBranch`, all derivable from `WorkflowRunId`; the marker also stores an
-  extra `runBranch`.
-
-Implemented: Repository occupancy locking (`GitUrl` / `BaseBranch` updates and
-deletion first query blockers among unfinished Issues); Workspace path and run
-branch derive directly from `WorkflowRunId`; the marker no longer stores full
-identity; fingerprints and algorithm versions are no longer persisted. The
-Runner-side `git-remote-identity` module is now dead code and will be deleted as
-the remaining gap closes.
-
-Remaining implementation order: first remove the Repository snapshot from
-`WorkflowRun` and the multi-layer copies, then address Workspace queries by
-`WorkflowRunId`, and finally reduce the registry and marker. The Server/Runner
-protocol switch still requires a single-version deployment and cannot be split
-into two independent deployments.
+The remaining gaps point in one direction only. `WorkflowRun` still retains
+legacy `WorkflowRepositoryContext` and `WorkspaceIdentity` copies, some
+Workspace query wires still carry Project, Issue, Repository, path, and branch,
+and the Runner retains a per-WorkflowRun Workspace manager and registry as a
+fallback when a dispatch lacks the named Workspace fact. These fields and the
+`workspaces.json` fallback are retired implementation paths. They do not define
+Workspace identity and must be removed as callers converge on
+`(ProjectId, WorkspaceName)`.

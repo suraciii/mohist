@@ -447,8 +447,9 @@ Prometheus or Uptime Kuma.
 
 ## Security
 
-- **Do not expose Mohist directly to the public internet.** Authentication is
-  not implemented. Use a VPN or a reverse proxy with authentication.
+- **Do not expose plain HTTP to the public internet.** Built-in authentication
+  protects Mohist, but bearer and browser-session credentials still require a
+  confidential transport. Use a VPN or a TLS-terminating reverse proxy.
 - **Runner has shell access.** Run it as a dedicated non-root user because an
   Agent can ask it to execute arbitrary commands.
 - **Limit SSH key scope.** Give Runner read and write access only to required
@@ -458,14 +459,13 @@ Prometheus or Uptime Kuma.
 
 ## Current Limitations
 
-- There is no built-in authentication. Any caller that reaches the Web UI or
-  API can access it. The finalized design in
-  [Authentication and Access](auth.md) is not implemented.
-- There is no multi-user model. Authentication is designed for one
-  Administrator.
+- Authentication is designed for one Administrator. There are no additional
+  users, roles, or enterprise identity providers.
+- Mohist does not terminate public TLS. Remote access requires a VPN or a
+  TLS-terminating reverse proxy as described above.
 
-The default deployment trusts the local network. Remote access requires an
-additional security layer described above.
+The default deployment listens on localhost and relies on host access as its
+outer trust boundary. Built-in credentials protect the application boundary.
 
 ---
 

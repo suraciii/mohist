@@ -18,7 +18,7 @@ WorkflowProfile stores only a Prompt key reference, such as `${{ prompts.proposa
 the Prompt body. At dispatch, the Server loads the body by Project and key into the immutable attempt
 snapshot. At the execution entry point, the Runner evaluates the body template before it calls the Action:
 
-```text
+```text diagram
 WorkflowProfile prompts.<key> -- projectId + key --> Prompt Resolver
 Project Prompts, key -> body --- configured body ---> Prompt Resolver
 Builtin Prompts, key -> body --- fallback on miss --> Prompt Resolver
@@ -27,7 +27,7 @@ Prompt Resolver -- load body by key at dispatch --> Attempt Snapshot
 Attempt Snapshot -- Runner renders before Action --> Rendered Prompt
 ```
 
-```text
+```text literal
 resolvePrompt(projectId, key):
   if Project configured key:
     return Project Prompt body
@@ -44,7 +44,7 @@ error. The dispatch snapshot freezes the Prompt body for that attempt. A later c
 
 ## Rendering
 
-```text
+```text literal
 PromptTemplateEngine.Render(body, attemptSnapshot)
   ${{ path.to.value }} -> attempt snapshot lookup
 ```
@@ -93,7 +93,7 @@ The same conventions apply to the SKILL.md that ships in the nupkg as CLI skill 
 
 The Prompt collection is a direct child resource of Project:
 
-```text
+```text literal
 GET    /api/projects/{projectRef}/prompts
 GET    /api/projects/{projectRef}/prompts/{key}
 PUT    /api/projects/{projectRef}/prompts/{key}

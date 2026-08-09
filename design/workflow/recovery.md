@@ -47,7 +47,7 @@ execution mechanism.
 The `recovery` configuration remains read-only. The number of recoveries left in the current round
 is execution state outside configuration and flows with the task in `recoveryRemaining`:
 
-```text
+```text diagram
 YAML budget: 2 --> TaskRun ------------> WorkItem / dispatch --> Runner tryRecovery
                    Recovery (read-only)                          null -> budget
                    RecoveryRemaining                                  |
@@ -107,7 +107,7 @@ Session arbitrates and persists the binding, and Workflow interprets only the fi
 
 ## Runner Executor Flow
 
-```text
+```text literal
 result = action.execute()
 context = { output: parseJSON(result.output), error: result.error }
 if recoveryRemaining is absent:
@@ -158,7 +158,7 @@ recovery task. A handler must not branch on the message.
 
 ## Engine Behavior
 
-```text
+```text diagram
 result.completed
   -> mark task completed
   -> addTasks non-empty? -> AddRuntimeTaskAttempts

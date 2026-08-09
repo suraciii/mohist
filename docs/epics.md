@@ -240,7 +240,7 @@ Issue to a Workflow. It does not define the Steps inside that Workflow.
 ## Relationship to Sub-Issues
 
 Epics and composite Issues are independent organization axes. See
-  [Composite Issues and Sub-issues](sub-issues.md). An Epic organizes multiple
+[Composite Issues and Sub-issues](sub-issues.md). An Epic organizes multiple
 deliverables under a product goal. A composite Issue divides the internal work
 for one deliverable. The boundary rules are:
 
@@ -251,12 +251,12 @@ for one deliverable. The boundary rules are:
   toward Epic progress. The Epic does not inspect the composite structure, and
   these rules do not otherwise change Epic behavior.
 
-## Implementation Gaps
+## Status
 
-Some current Epic commands still accept an internal ID. The CLI does not yet
-provide Reopen, and membership has not fully converged on a single Issue-owned
-association. Issue #412 tracks the target model. The main text describes the
-completed product behavior.
+Epic commands use the Project-scoped Epic number, including `reopen`. Each
+Issue owns its current Epic membership, while Epic reads derive progress and
+the next startable Issue from current Issue state. This keeps membership under
+one authority and avoids a second list that can drift.
 
 ## Current Limitations
 
@@ -267,4 +267,4 @@ completed product behavior.
 
 ---
 
-Source: `packages/server/src/Mohist.Server/Epic/` and `Api/EpicRoutes.cs`.
+Implementation source: `packages/server/src/Mohist.Server/Epic/` and `Api/EpicRoutes.cs`.

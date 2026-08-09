@@ -133,11 +133,13 @@ OpenCode drives execution directly, and the built-in Profiles use this Action.
 Configuration, Session, command results, and diagnostics for Workflow and Agent
 origins no longer contain historical ACP identity fields.
 
-Stable Session identity, origin resolution, Follow-up, and Cancel are
-implemented. Product entry points for Compact and Reset exist, but OpenCode
-cannot currently execute those two commands.
+Stable Session identity, origin resolution, Follow-up, Cancel, and Reset are
+implemented. Reset creates empty OpenCode context and replaces the binding while
+the AgentSession remains the same. Native Compact is still unavailable.
 
-Some new inputs still fail when their OpenCode Session is missing. Automatic
-rebuild, rebinding, and a usable OpenCode Reset are not implemented. The
-corresponding implementation issue must be created from this spec. Compact is
-a separate existing implementation gap and is outside missing-Session recovery.
+Before a new Workflow input is submitted, Mohist automatically replaces an
+OpenCode binding that the owning Runner confirms is missing while the Session
+is safely idle. AgentJob launch and idle Follow-up do not yet use that recovery
+boundary. Ambiguous or unsafe absence still blocks instead of replaying input.
+The remaining cross-boundary recovery limits are defined in [Agents and
+AgentSessions](../agent-sessions.md#implementation-gaps).

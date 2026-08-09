@@ -39,7 +39,7 @@ Skills to call the execution surface. Exploration especially needs to be:
 
 The daily interaction can remain external while Mohist executes the Agent:
 
-```text
+```text diagram
 User + Slack Bot ---- Agent Connection ---- Mohist Agent + configured Skills
                                                   |
 User + external Agent ---- Mohist Skill + mo -----+
@@ -130,7 +130,7 @@ Assume the user wants search in a task list but has not decided the details.
 
 1. **Talk to an external Agent in the current work environment.**
 
-   ```text
+   ```text literal
    I want search in the task list. Help me explore the product behavior.
    ```
 
@@ -163,7 +163,7 @@ Assume the user wants search in a task list but has not decided the details.
 
 4. **Use the `mohist` Skill to create the Issue.**
 
-   ```text
+   ```text literal
    Create this Issue in the mohist-local Project.
    ```
 
@@ -171,7 +171,7 @@ Assume the user wants search in a task list but has not decided the details.
 
 5. **Ask the external Agent to start and track the Issue.**
 
-   ```text
+   ```text literal
    Start this Issue and tell me when I need to act.
    ```
 
@@ -183,7 +183,7 @@ Assume the user wants search in a task list but has not decided the details.
 
 Ask directly in an external Agent:
 
-```text
+```text literal
 @mohist Which Issues are advancing, and does any need attention?
 ```
 
@@ -236,16 +236,16 @@ output of `mo skill view mohist-explore` as a structural example.
 Distributing a custom Skill currently requires manual copying into the external
 Agent directory. Unified management through `mo skill` remains on the roadmap.
 
-## Implementation Gaps
+## Status
 
-`mo skill install` and `mo skill view` serve external Agents. Skills can be
-configured on a Mohist Agent, but Runner does not yet load them from the
-AgentJob snapshot. Therefore, one Agent using the same Skills from every entry
-point remains target behavior. Implement execution semantics before Slack
-integration.
+`mo skill install` and `mo skill view` serve external Agents. Mohist snapshots
+an Agent's configured Skills with its execution definition, and Runner injects
+that same set for a direct launch, Workflow task, or follow-up. CLI, Web, and
+Slack entry points therefore do not change the Agent's capabilities. Custom
+Skill distribution remains manual as described above.
 
 ---
 
-Source: `packages/cli/Mohist.Cli/skill-data/`. See
+Implementation source: `packages/cli/Mohist.Cli/skill-data/`. See
 [`design/architecture.md`](../design/architecture.md) for the Agent Skill
 boundary.

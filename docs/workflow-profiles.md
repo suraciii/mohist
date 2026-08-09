@@ -184,9 +184,9 @@ Add a Stage after Integrate:
   requiresApproval: true
   tasks:
     - id: deploy
-      uses: core/shell
+      uses: core/script
       with:
-        command: ./scripts/deploy.sh
+        run: ./scripts/deploy.sh
 ```
 
 ### Pin a Model for One Task
@@ -228,22 +228,24 @@ required. It may contain `/`. Pass the complete ID as one CLI argument. Built-in
 Profiles use `mohist/<name>`. Custom Profiles must use an ID that describes
 their purpose and remains stable.
 
-## Implementation Gaps and Migration Constraints
+## Current Status and Remaining Gaps
 
+- Project-scoped Profile collections, Project defaults, explicit Issue
+  selection, and clearing back to the default are implemented. Server accepts a
+  selection change during an active Run for the next Run. Each active Run keeps
+  its Profile ID while later Stages read the current Definition.
 - Settings currently combines the default template, Variables, and Prompts in
   one Workflow configuration. The target UI separates these three resources.
-- Custom Workflow Definitions currently exist as a Project template or an
-  Issue inline template. The target model moves them into the Project's
-  Workflow Profile collection.
-- An Issue with an active Workflow cannot currently change its Profile. The
-  target behavior allows selecting the Profile for the next run without
-  changing the current run.
+- Legacy Project-template and Issue-inline Definition editors still overlap the
+  Profile collection. The Web Issue selector also remains locked during an
+  active Run even though a Server-side selection would affect only the next
+  Run.
 - Profile changes take effect at future Stage and Task boundaries so a
   configuration fix can help later work without changing an attempt that is
   already running. A retry rebuilds the declared Task before it reads current
   Variables and Prompts; it never treats one attempt's resolved input as future
-  configuration (issue #465). Profile collection migration must preserve both
-  live fixes and accepted-attempt stability. See
+  configuration. This boundary preserves both live fixes and accepted-attempt
+  stability. See
   [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.

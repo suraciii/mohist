@@ -53,7 +53,7 @@ product behavior of the command.
 
 Commands have only two shapes:
 
-```text
+```text literal
 resource-command = mo <area> [<subarea>] <action> [target] [flags]
 task-command     = mo <task> [target] [flags]
 ```
@@ -134,7 +134,7 @@ Root help groups commands by user task. It must not show one long, flat list.
 |---|---|---|
 | Work | `project`, `repo`, `workspace`, `issue`, `epic`, `label` | Project space, execution environments, work items, and organization relationships |
 | Automation | `workflow`, `run`, `agent`, `session`, `activity`, `routing` | Workflow definitions and execution, Agent work, conversations, and Project activity |
-| Operations | `runner`, `server`, `service`, `event`, `notification`, `otel`, `auth` | Execution resources, Server, local services, event delivery, observability, and credentials |
+| Operations | `runner`, `server`, `service`, `event`, `webhook`, `github`, `slack`, `notification`, `otel`, `auth` | Execution resources, Server, integrations, event delivery, observability, and credentials |
 | Tools | `help`, `skill`, `install`, `update`, `info` | Help topics, Skills, installation, and maintenance |
 
 ### Core Command Groups
@@ -153,9 +153,9 @@ enter the language.
 | `epic` | `list`, `view`, `create`, `edit`, `add`, `remove`, `start`, `pause`, `resume`, `done`, `close`, `reopen` |
 | `label` | `list`, `create`, `edit`, `delete` |
 | `workflow` | `list`, `view`, `create`, `edit`, `delete`, `validate`; `view --yaml` reads the raw Workflow Definition |
-| `run` | `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the Definition snapshot bound to the Run; `feedback list/view`; `variable list/get/set/unset`, where `list/get --effective` reads merged values |
-| `agent` | `list`, `view`, `create`, `edit`, `archive`, `restore`, `launch`, `install`; `job list/view`; `subscription list/create/edit/delete`; read-only `model list --runtime` |
-| `session` | `list`, `view`, `transcript`, `followup`, `compact`, `reset`, `cancel`; `schedule create/list/cancel` |
+| `run` | `list`, `view`, `watch`, `approve`, `reject`, `retry`, `rerun`, `pause`, `resume`, `stop`; `view --yaml` reads the current Definition of the Profile bound to the Run; `feedback list/view`; `variable list/get/set/unset`, where `list/get --effective` reads merged values |
+| `agent` | `list`, `view`, `create`, `edit`, `archive`, `restore`, `launch`, `spawn`, `install`; `job list/view`; `subscription list/create/edit/delete`; read-only `model list --runtime` |
+| `session` | `list`, `tree`, `view`, `transcript`, `followup`, `compact`, `reset`, `cancel`, `stop`, `detach`; `schedule create/list/cancel` |
 | `activity` | `list` |
 | `routing` | `rule list/view/create/edit/archive/move`; `test` evaluates the complete routing table |
 
@@ -163,11 +163,12 @@ enter the language.
 
 | Command Group | Canonical Actions |
 |---|---|
-| `runner` | `list`, `view`, `status` |
+| `runner` | `list`, `view`, `status`, `revoke` |
 | `auth` | `login`, `logout`, `status`; `token list/create/revoke` |
 | `server` | `status`, `health`, `info`, `logs` |
 | `service` | `start`, `stop`, `restart`, `status`, `logs`, `uninstall`, with target `server`, `runner`, or `slack` |
 | `event` | `tail`; `dead-letter list/redeliver` |
+| `webhook` | `event-types`; `subscription list/view/create/edit/enable/disable/delete/rotate-secret/failures` |
 | `github` | `connect`; `edit` for feed policy and approver list |
 | `notification` | `setup` |
 | `slack` | `setup`, `status`, `install-agent`; `list`, `view`, `claim-owner`, `edit`, `transfer-owner`, `enable`, `disable`, `remove-binding`, `permanent-delete`; `message send`; `deliveries`, `resend-delivery`, `clear-gap`, `reconcile-create`, `reconcile-delete` |
@@ -187,7 +188,7 @@ Agent subscription commands address an Agent by name or ID and use the same
 `--project` scope as other Agent commands. They provide one CLI view of Agent
 event-response configuration:
 
-```text
+```text literal
 mo agent subscription list <agent> [--project <project>]
 mo agent subscription create <agent> --name <name> --match <expression> \
   --response-prompt <prompt> [--continue] [--idempotency-key <key>] [--project <project>]
@@ -273,10 +274,11 @@ The positional argument is a WorkflowRun ID. `--issue` resolves the current Run
 bound to that Issue. Callers must provide exactly one. An Issue number is unique
 within a Project and can be used with `--project`.
 
-`mo run view --yaml` reads the Workflow Definition snapshot bound when the Run
-started. It is the Definition that this execution actually uses, not the
-current Profile content. Like `workflow view --yaml`, it is a resource source
-view and is mutually exclusive with `--json`.
+`mo run view --yaml` reads the current Definition of the Profile ID bound to the
+Run. It is not a historical snapshot: editing that Profile can change later
+Stages, so this view can also change during the Run. Like
+`workflow view --yaml`, it is a resource source view and is mutually exclusive
+with `--json`.
 
 Project, Issue, and WorkflowRun each own one set of Variables. All three scopes
 use the same `variable list/get/set/unset` key-value language.
@@ -620,7 +622,7 @@ with `--json` and does not imply YAML output for other resources.
 An error must let an Agent correct the next call directly and remain readable
 to a person:
 
-```text
+```text literal
 error: issue 42 has no active workflow run [run_not_found]
 hint: start it with `mo issue start 42`
 ```
@@ -701,12 +703,13 @@ generated by the current binary instead of a stale copy.
 
 ### Spec First, Implementation Follows
 
-- `agent restore`; typed `--runtime/--model/--variant/--avatar-file` flags for
-  `agent create/edit` and Readiness output; retirement of the `--agent-config`
-  passthrough.
+- `agent restore`.
 - The `github` command group declares `connect` and `edit` for connection
   changes. The current implementation uses `update`; it must converge on
   `edit` according to the verb vocabulary.
+- Root help currently omits `workspace`, `github`, and `slack` from its grouped
+  overview even though those command groups are available. It must expose the
+  same navigation map as this reference.
 
 ### Completed
 
@@ -714,6 +717,9 @@ generated by the current binary instead of a stale copy.
   `prereq`, `epic`, `createdAt`, and `updatedAt`. `issue list` supports the
   `--epic` filter. `issue edit` supports `--risk`, which `create` already had.
   Dependency Issue reads include Epic membership and prerequisites.
+- Agent create and edit use typed Runtime, model, variant, avatar, Skill, and
+  concurrency flags. Readiness reports the resolved configuration, and the old
+  `--agent-config` passthrough is retired.
 - The Epic field catalog reflects real fields and includes `progress`, with
   `nextIssueNumber` and `nextIssueReason`.
 - Input channels are unified. `workflow create/edit --file` replaces
@@ -743,9 +749,9 @@ generated by the current binary instead of a stale copy.
 - Agent launch and follow-up return stable SessionInput and AgentTurn identities.
   Slack input also retains the Server-generated reply anchor and collaboration
   context.
-- Every mutation that returns a resource accepts `--json`. Current gaps include
-  `agent create/edit/archive`. `issue rebase` returns a queued response instead
-  of a resource and is not in this category.
+- Every mutation that returns a resource accepts `--json`, including Agent
+  create, edit, and archive. `issue rebase` returns a queued response instead of
+  a resource and is not in this category.
 - `project repo set-default` replaces `repo set-default`.
 - JSON FIELDS for commands such as `project workflow prompt` use real field
   catalogs, with no fallback default field set.
@@ -781,11 +787,9 @@ generated by the current binary instead of a stale copy.
   relevant usage, and does not fall back to root help with a successful exit.
 - Project scope and output modes are unified. Project-scoped commands share
   `--project <name-or-id>`, and resource results share field-selecting `--json`.
-- Root help matches the Work, Automation, Operations, and Tools groups in this
-  document.
 - Project Prompt is implemented through
   `project workflow prompt get/set/clear/preview`.
-- `run view --yaml` reads the Definition snapshot bound to the Run and is
-  mutually exclusive with `--json`.
+- `run view --yaml` reads the current Definition of the Profile bound to the Run
+  and is mutually exclusive with `--json`.
 
 Implementation source: `packages/cli/`.

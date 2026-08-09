@@ -72,7 +72,7 @@ The following ASCII diagram is an orientation map. Its arrows show selected DDD 
 relationships. They do not show static source-code dependencies. The table after the diagram is the
 normative and complete relationship map.
 
-```text
+```text diagram
 DDD upstream ---> downstream (selected overview)
 
 Project Space ---> Workflow ---> Runner

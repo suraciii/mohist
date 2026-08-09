@@ -66,9 +66,13 @@ Do not let agents guess rules. Do not let the current code decide for the target
 - Prefer short sentences. One sentence states one rule.
 - Prefer domain nouns and product nouns. Use technical nouns only in implementation design.
 - Use canonical names. Keep casing, singular/plural, and field paths consistent.
-- Use a fenced `text` ASCII diagram only when it makes a boundary, ownership relation, dependency,
+- Every plain-text fence must choose exactly one semantic marker: `text diagram` or `text literal`.
+- Use `text diagram` only when an ASCII diagram makes a boundary, ownership relation, dependency,
   sequence, hierarchy, or state transition easier to understand. Do not draw when prose is already clear.
+- Use `text literal` for command output, syntax, protocols, pseudocode, data shapes, and other
+  preformatted text that is not a diagram. Bare `text` fences are invalid.
 - Use only ASCII characters in diagrams. Do not add PlantUML, Mermaid, Unicode line art, or Unicode arrows.
+- Do not use raw HTML. Markdown is the only document markup.
 - Draw only real concepts. Give every arrow a meaning.
 - Write key rules in prose. Do not make a diagram the only source of truth.
 - Use pseudocode for definite computations.
@@ -80,7 +84,7 @@ Do not let agents guess rules. Do not let the current code decide for the target
 
 Start from the structure below. Delete sections that have no content. Do not add empty sections for symmetry.
 
-```text
+```text literal
 # Name
 
 The problem and why a design decision is necessary.
@@ -136,7 +140,7 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 - [agent-execution.md](agent-execution.md) — Action, Inline Agent, Mohist Agent, AgentJob, SessionInput, AgentTurn, AgentSession, Runtime Session: layering, lifecycle ownership, activity and transcript DSL.
 - [agent-api.md](agent-api.md) — Agent call boundary shared by Web, CLI, and external integrations: unified capabilities, state, identity, reliability decisions.
 - [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
-- [scheduled-input.md](scheduled-input.md) — Scheduled input: why durable intent is separate from replaceable wake-up infrastructure, and how delivery reuses ordinary AgentSession follow-up.
+- [scheduled-input.md](scheduled-input.md) — Scheduled input (**WIP**): durable intent, recovery wake-ups, and ordinary follow-up delivery are implemented; due delivery still waits for another path to restore a definitely missing Runtime binding instead of initiating confirmed-missing recovery.
 - [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
 - [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
 - [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
@@ -162,13 +166,13 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 
 ## Supporting topics
 
-- [auth.md](auth.md) — Auth and identity (**finalized, pending implementation**): single admin plus service/agent principals, file-based and signed credentials, device authorization login, Runner machine credentials, attribution.
+- [auth.md](auth.md) — Auth and identity: single admin plus service/agent principals, file and signed credentials, device authorization login, Runner machine credentials, Scope enforcement, and attribution.
 - [repositories.md](repositories.md) — Repository execution: Project resource authority, Issue binding, live dispatch resolution (**WIP**).
-- [workspace.md](workspace.md) — Workspace: first-class persistent execution environment under a Project (**WIP**): Origin unique resolution, dynamic creation, binding and scheduling affinity, archival and runner directory reclamation.
+- [workspace.md](workspace.md) — Workspace (**WIP**): first-class persistent execution environment under a Project, with Origin resolution, named Runner materialization, binding affinity, archival, and reclamation; Workflow cross-Runner rematerialization and Slack channel-archive propagation remain gaps.
 - [hermes-webhook.md](hermes-webhook.md) — Hermes notification gateway: event types, payload, signature, delivery reliability.
-- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook (**WIP**): OHS + PL, CloudEvent as publication language, expression subscription + HMAC signing + best-effort delivery.
-- [github-integration.md](github-integration.md) — GitHub integration (**WIP**): inbound event reception and signature verification, feed/close/approval translators, write-back, credential boundaries; product behavior in [`docs/github.md`](../docs/github.md).
-- [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design (**finalized, pending implementation**): parent-child model, status aggregation, composite advancement, isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
+- [outbound-webhook.md](outbound-webhook.md) — Outbound webhook: implemented v1 general HTTP delivery with CloudEvents, event selection, configurable authentication, 2xx success, and failure inspection; retries, redelivery, attempt history, and Web management remain later capabilities.
+- [github-integration.md](github-integration.md) — GitHub integration: signed ingress, feed/close translation, and write-back are implemented; PR branch correlation, App identity, and failure inspection remain gaps; product behavior in [`docs/github.md`](../docs/github.md).
+- [issue-breakdown.md](issue-breakdown.md) — Composite Issue / sub-issue design: implemented parent-child model, status aggregation, composite advancement, and isolation constraints from Epic; multi-repo resources in `docs/repositories.md`.
 - [issue-templates.md](issue-templates.md) — Body structure and design rationale of the three issue templates (Feature / Bug / Refactor).
 - [prompt-management.md](prompt-management.md) — Project-scoped Prompt (**WIP**), builtin fallback, Workflow key reference.
 - [runner.md](runner.md) — Runner and scheduling: each owner is its own dispatch ledger (no second copy, no reconcile), pull-only claim / poll / report, presence and runner-lost closeout.

@@ -11,7 +11,7 @@ create, start, approve, and recover. See
 policies.
 
 Each stage stores its artifacts under
-`openspec/changes/<issue-number>-<slug>/`. These artifacts provide evidence for
+`openspec/changes/issue-<number>/`. These artifacts provide evidence for
 later decisions and audits. See the complete state machine near the end of this
 document.
 
@@ -29,7 +29,8 @@ capacity. In this state:
 Run:
 
 ```bash
-mo issue start <number>   # Start the Workflow and enter Plan.
+mo issue edit <number> --ready   # Move the requirement to Backlog.
+mo issue start <number>          # Start the Workflow and enter Plan.
 ```
 
 ## Plan
@@ -122,7 +123,7 @@ active execution. In this state:
 
 - The code is on the base branch.
 - All artifacts are archived under
-  `openspec/changes/<number>-<slug>/`.
+  `openspec/changes/issue-<number>/`.
 - You may archive the Issue to remove it from the board.
 
 ```bash
@@ -131,12 +132,14 @@ mo issue archive <number>
 
 ## Complete State Machine
 
-```text
-Draft --start--> Plan --approve--> Build --automatic--> Check
-                   |                                  |
-                   +--reject--> Plan                  +--reject--> Build
+```text diagram
+Draft --mark ready--> Backlog --start--> Plan
+Plan --approve--> Build --automatic--> Check
+Plan --reject--> Plan
+Check --approve--> Integrate --automatic--> Done
+Check --reject--> Build
 
-Check --approve--> Integrate --automatic--> Done --archive--> Archived
+Done --archive--> Archived
 
 Any stage --failure--> Blocked
 Blocked --retry/resume/rerun--> Workflow execution
@@ -148,12 +151,15 @@ After a failure in any stage, use `mo run retry`, `mo run resume`, or
 ## Health
 
 In addition to its Workflow stage, an Issue has a `health` field that describes
-execution health:
+execution health. These facts stay separate because one Stage can be waiting
+for capacity, executing, waiting for a decision, or stopped for recovery:
 
 | Health | Meaning |
 |---|---|
-| `active` | The Workflow is running or waiting for the system to continue automatically |
-| `paused` | Execution was stopped manually or is waiting for an approval decision |
+| `active` | The Workflow is assigned and executing or advancing normally |
+| `queued` | The Workflow has started but is waiting for Runner assignment |
+| `attention` | An approval decision is required before execution can continue |
+| `paused` | Execution was stopped explicitly and remains resumable |
 | `blocked` | The Workflow cannot continue without intervention |
 | `cancelled` | The Issue was cancelled and will not run again |
 | `done` | The Issue is complete |
@@ -167,7 +173,7 @@ Action is required in four situations:
 1. Plan is complete and needs an approve or reject decision.
 2. Check is complete and needs an approve or reject decision.
 3. The Issue is blocked and needs a retry, rerun, or stop decision.
-4. The Runner is unavailable and automatic recovery has failed.
+4. The Runner was lost and current work failed with `runner-lost`.
 
 The owner, a script, or a Mohist Agent may perform these actions. The Workflow
 only consumes the approval action and its result.

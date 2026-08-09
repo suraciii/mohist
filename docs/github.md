@@ -160,7 +160,7 @@ Issue lineage, so subscribing to every event under Issue #42 includes it.
   and retry remain in Mohist interfaces such as CLI, Web, Slack, and suggested
   notification actions.
 
-## Implementation Gaps
+## Status
 
 Repository Connection and inbound events are implemented. `mo github connect`
 creates a Connection and prints the GitHub configuration checklist. Signed
@@ -195,6 +195,11 @@ identity is also not implemented; write-back currently uses a PAT, without App
 installation or Repository-scoped short-lived token exchange. GitHub remains a
 delivery target through the `mohist/github-pr` Profile. Future Issues will
 deliver App identity and failure inspection.
+
+PR review Approval and completion-comment PR lookup still recognize the old
+`mo/issue-N` branch form. The current Issue Workspace branch is
+`mohist/ws-issue-N`, so do not rely on those two correlations until the GitHub
+reader uses the Workspace branch convention.
 
 ---
 

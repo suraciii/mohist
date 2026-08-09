@@ -79,14 +79,14 @@ database or HTTP query.
 
 Add under `/api/projects/{projectRef}/issues`:
 
-```text
+```text literal
 GET /parent-candidates
   data: [{ number, title }]
 ```
 
 Add under `/api/projects/{projectRef}/inbox`:
 
-```text
+```text literal
 GET /unread-count
   data: { unreadCount }
 ```
@@ -100,7 +100,7 @@ successful response.
 Web uses separate key factories rather than one `['issues']` prefix for every
 resource:
 
-```text
+```text literal
 issue-list       project + list filters
 issue-detail     project + issue number
 issue-workflow   project + issue number + workflow subresource

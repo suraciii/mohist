@@ -47,7 +47,7 @@ supervision but applies only to that Issue.
 
 `mo issue view 42` shows who supervises the Issue:
 
-```text
+```text literal
 Watching: supervisor   # This Agent is the Issue autopilot
 Muted:    -            # Agents explicitly told not to handle this Issue
 ```

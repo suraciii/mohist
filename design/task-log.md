@@ -21,7 +21,7 @@ turning high-volume process output into Workflow state.
 TaskLog belongs to Runner execution. It is associated with Workflow or Agent
 work but never stored inside WorkflowRun or AgentJob result state.
 
-```text
+```text diagram
 task execution -> ordered/redacted log sink -> bounded buffer -> TaskLog channel -> store
        |
        +---------------------------------------> WorkResult channel -> work owner
@@ -33,7 +33,7 @@ boundary.
 
 ## Model
 
-```text
+```text diagram
 Work
  |-- status / message / output       <- final result
  |-- Artifacts                       <- produced files

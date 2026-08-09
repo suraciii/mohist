@@ -123,10 +123,15 @@ page states this timing before save.
 
 ### Implementation Gaps
 
-The Agent list, edit, direct launch, and Session read surfaces exist. AgentJob,
-SessionInput, AgentTurn, concurrency, and queue information are not yet fully
-summarized on the Agent page. Avatar, Readiness, Slack Connection, and setup are
-not implemented.
+The Agent list and detail pages show Readiness, Availability, active and queued
+work, configuration, direct launch, and Session history. Slack Connections have
+guided setup, diagnostics, access policy management, identity facts, and
+uncertain-delivery recovery.
+
+Agent definitions still have no avatar setting or avatar display. AgentJob has
+no result view separate from its continuing AgentSession. The Web UI does not
+yet expose Slack Connection owner transfer, credential rotation or revalidation,
+Enable, Disable, or Delete.
 
 ## AgentSession
 
@@ -198,9 +203,9 @@ The current page is a conversational message view. Tool calls have categorized
 rendering, but entries do not yet use sentence phrasing, salience, or collapse
 rules. Mohist domain actions are not recognized for separate presentation.
 SessionInput acceptance and AgentTurn state have independent evidence but are
-not part of the timeline. There is no raw event view. Missing-Session recovery
-is not implemented, so the page cannot show that later work starts from empty
-context. Create the implementation Issue from the timeline spec.
+not part of the timeline. There is no raw event view. Confirmed-missing recovery,
+Compact, and Reset are implemented, and their context boundaries appear in the
+timeline.
 
 ## Epics
 

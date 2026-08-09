@@ -10,12 +10,12 @@ and Approval records.
 
 | Caller | Proof of identity | Access |
 |---|---|---|
-| Local `mo` on the Server host | Reads the administrator credential file automatically | Full |
-| Remote `mo` | Device authorization with `mo auth login` | Full |
-| Web UI | Exchanges an administrator-level token for a browser session | Full |
-| Scripts, CI, and external Agents | Personal access token in `MOHIST_TOKEN` | Full or read-only, selected at issue time |
+| Local `mo` on the Server host | Reads the administrator credential file automatically | Operator |
+| Remote `mo` | Device authorization with `mo auth login` | Operator |
+| Web UI | Exchanges an administrator-level token for a browser session | Operator |
+| Scripts, CI, and external Agents | Personal access token in `MOHIST_TOKEN` | Operator or read-only, selected at issuance |
 | Runner | Registers during installation and receives a machine credential | Runner surface only |
-| Local service processes, such as a Slack adapter | Service credential file | Full |
+| Local service processes, such as a Slack adapter | Service credential file | Operator |
 | Inbound integrations and external callbacks | Endpoint-specific token | Only that integration endpoint, scoped to a Project |
 | GitHub | Native GitHub HMAC signature | GitHub ingress endpoints only |
 
@@ -133,12 +133,12 @@ GitHub ingress uses native GitHub signatures instead; see [GitHub](github.md).
 
 | Scope | Access |
 |---|---|
-| Full | All reads, writes, and administration |
+| Operator | All reads, writes, and administration |
 | Read-only | View state and resources without modification |
 | Runner | Claim work and report heartbeats, results, and logs |
 | Integration | Invoke inbound integration endpoints for one Project |
 
-Administrator credentials and personal access tokens default to full scope. A
+Administrator credentials and personal access tokens default to operator scope. A
 personal access token can be narrowed to read-only when issued. Machine
 credential scopes are fixed and cannot be expanded.
 
@@ -156,10 +156,12 @@ configuration.
 - A public developer platform or third-party application registration.
 - Single sign-on or enterprise identity federation.
 
-## Implementation Gaps
+## Status
 
-None of the capabilities in this document are implemented. Except for Slack
-and a small number of operational endpoints that use shared deployment
-credentials, current APIs and the Web UI have no authentication. The security
-warning in [Self-hosting](self-host.md) remains in effect until implementation.
-Future Issues will deliver this design.
+The single-administrator model, local bootstrap, authenticated Web UI, remote
+CLI device authorization and renewal, personal access tokens, Runner and
+integration credentials, Scope enforcement, attribution, and audit records are
+implemented. API and SignalR access require authentication outside the closed
+exemption list described above. Multiple users, external identity federation,
+and public application registration remain Non-goals, not unfinished parts of
+this model.

@@ -96,10 +96,12 @@ referenced resource:
   conversation. Neither claims the other's state or result.
 - `workspace create/list/view/close` manages Workspace entities, while
   `workspace repo add/remove` manages repository membership. Session has one explicit Workspace
-  binding entry point: `agent launch --workspace`. When omitted, Session has no Workspace binding
-  and uses the Runner's default working directory. Issue and Slack or Web entry points resolve
-  bindings automatically from Origin; they do not duplicate Workspace commands under `issue` or
-  `session`. The Workspace field in `session list --workspace` and `session view` is read-only.
+  override entry point: `agent launch --workspace`. Without that override, the entry point resolves
+  the Workspace from its Origin; CLI launch uses the Project's `cli-current` Workspace. This is a
+  binding decision, not permission to pass a Runner directory. Origin resolution and
+  materialization are authoritative in [`workspace.md`](workspace.md). Issue, Slack, and Web do not
+  duplicate Workspace commands under `issue` or `session`. The Workspace field in
+  `session list --workspace` and `session view` is read-only.
 - `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
   manages the Slack access relationship of one Agent. `permanent-delete` permanently deletes its
   Agent App only when no active binding exists. These actions do not modify the Agent definition.
@@ -107,8 +109,10 @@ referenced resource:
   creates or recovers the Connection and Agent App. Access actions live directly under root-level
   `slack`; there is no generic connection subgroup.
 - `session transcript/followup/compact/reset/cancel/stop` reads or changes AgentSession. `cancel`
-  deterministically cancels a specified queued Turn, while `stop` asks Runtime to stop a specified
-  running Turn. Paths are not duplicated by Issue origin and Agent origin.
+  deterministically cancels one specified queued Turn. `stop` creates the durable cascade rooted at
+  the selected Session; it is not a public single-Turn Runtime command. Membership and retry are
+  authoritative in [`subagents.md#cascade-stop`](subagents.md#cascade-stop). Paths are not
+  duplicated by Issue origin and Agent origin.
 - `epic add/remove` expresses the user intent of Epic membership. Issue remains the sole write
   authority for current EpicNumber, and CLI does not expose cross-aggregate coordination.
 - `--issue`, `--run`, and `--agent` are resolution or filtering conditions. They do not transfer
@@ -167,14 +171,14 @@ its own repeated use cases appear.
 | Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--variant`, `--skills`, and `--avatar-file` |
 | Add storage or database audit commands for table size, freelist, and row counts | They cover internal Server audits, but those are development operations. Architectural prohibitions constrain domain operations and do not justify expanding the command surface for a one-off audit | Reject. `otel` is the telemetry entry point; direct database reads for an internal Server audit are a valid developer path |
 | Let `mo otel query` read local trace storage directly | Queries survive Server outage, but they bypass the API and query safeguards, couple the storage schema, have no query budget or size limit, and silently read local data when CLI points at a remote Server | Reject. `query` uses the Server query capability. Direct database access during Server failure is a developer path |
-| Give `run view` only `--json` | There is one less source view, but callers cannot answer which Definition a Run actually used | Reject. `run view --yaml` reads the Definition snapshot bound to the Run and parallels `workflow view --yaml` as a resource-content view |
+| Give `run view` only `--json` | There is one less source view, but callers cannot inspect the Definition that will govern later Stages | Reject. `run view --yaml` resolves the current Definition of the Profile ID bound to the Run and parallels `workflow view --yaml` as a resource-content view; it is not historical evidence |
 | Put `set-default` under the resource being made default as `repo set-default` or `workflow set-default` | The path is shorter, but a default reference is Project state and two conventions are less derivable than one | Reject. Use `project repo set-default` and `project workflow set-default` consistently |
 
 ## Context Architecture
 
 An Agent obtains context in this order:
 
-```text
+```text diagram
 Mohist Skill -> root/group help -> leaf help -> result or actionable error
 ```
 

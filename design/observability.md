@@ -186,11 +186,8 @@ Traces must show that amplification directly.
 
 ## Current Gaps
 
-Metrics, the bounded route diagnostic summary, and `mo otel status` runtime
-status are implemented. Remaining gaps:
+Metrics, the bounded route diagnostic summary, `mo otel status`, and the Server
+and Runner log line contract are implemented. One gap remains:
 
 - There is no automatic anomaly notification. Metrics find problems, but an
   anomalous route appears only in status and is not surfaced proactively.
-- The log line contract is not implemented. Server logs remain NDJSON,
-  template parameters are not extracted into keys, and retention does not
-  rotate. Runner diagnostics write only to the terminal and not to a file.

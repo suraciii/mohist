@@ -321,7 +321,7 @@ stages:
           expect: merged
 ```
 
-## Implementation Gaps
+## Validation Boundary
 
 The authoritative validator checks the Definition structure, field types, and
 template expressions when a Profile is saved. `mo workflow validate --file`

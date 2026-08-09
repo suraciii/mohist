@@ -113,23 +113,14 @@ with incomplete migration cannot enter the service phase. Acceptance requires
 zero historical-conversion calls on the read path. Migration code can remain at
 the cold-start boundary while old database upgrade remains supported.
 
-## Implementation Gaps
+## Status
 
-Measured during the Check stage of Issue #521:
+Dispatch snapshots are external to WorkflowRun State and follow the lifecycle
+defined in [`task-dispatch.md`](task-dispatch.md). List and status reads use
+small projections and a versioned status cache. A cold-start upgrader converts
+historical State before the service accepts traffic, so normal reads do not
+carry a legacy converter. These boundaries keep arbitration and observation
+cost proportional to current facts rather than execution history.
 
-- State averages 325 KiB per row and reaches 3.6 MiB. The 364-row table uses
-  118 MiB, an order of magnitude above budget. Repeated dispatch snapshots per
-  task are the primary cause; see the task-dispatch gap.
-- Every read calls `JSON.Deserialize<WorkflowRun>`. Combined with three-second
-  `mo run watch` polling and frequent Runner reports, this causes Server LOH
-  allocation pressure. More than 95 percent of measured LOH allocation came
-  from STJ string transcoding on this path, and RSS peaked at 2 GiB.
-- Legacy format detection still parses complete State on every read, violating
-  the write-time migration boundary. A measured database had 254 of 364 rows
-  still needing conversion: 221 completed, 26 failed, and 7 stopped. `failed`
-  is nonterminal in the WorkflowRun lifecycle, so migration cannot omit it.
-- Status observation has no versioned cache or conditional response even though
-  the row ETag can support one.
-- Write amplification also affects SQLite. `mohist.db` reached 9.2 GiB, without
-  a retention policy for events, transcripts, or telemetry. Existing
-  `CleanupPolicyOptions` covers only Workspace.
+Retention for events, transcripts, and telemetry is a database-wide lifecycle
+concern. It must not expand WorkflowRun State or its read path.

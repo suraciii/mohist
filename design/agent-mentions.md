@@ -51,7 +51,7 @@ does not trigger.
 
 ### Detection and Launch
 
-```text
+```text diagram
 Issue comment commit
         |
         v
@@ -100,7 +100,7 @@ Explicit feedback through system comment or inbox remains an open question.
 
 ## Example
 
-```text
+```text literal
 # The owner comments on Issue #42 through Web or mo issue comment create:
 @supervisor supervise and advance this Issue
 

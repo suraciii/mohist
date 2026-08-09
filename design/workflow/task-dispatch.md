@@ -39,7 +39,7 @@ do not change an already dispatched attempt.
 Runner applies the following evaluation rules to every attempt during rendering; dispatch does not
 participate in evaluation:
 
-```text
+```text literal
 ${{ path }} occupies the whole value  -> replace it and preserve the JSON type
 another resolvable expression         -> replace it from dispatch context
 ${{ prompts.<key> }}                  -> body was loaded by Project Prompt key at dispatch;
@@ -147,17 +147,11 @@ this section defines its **storage lifecycle**:
   output on demand, is a rendering-content optimization and does not alter these lifecycle rules.
   See [`variables.md`](variables.md).
 
-### Current Gap
+### Status
 
-The current implementation retains every attempt's complete dispatch snapshot inside the whole run
-State and does not clear it after terminal state. In a measured active run at the check Stage, State
-reached 3.5 MB, and 81% was repeated snapshots from superseded attempts. The complete 27 KB Prompt
-set was copied 65 times, and aggregated `tasks` output was copied as many as 34 times. Every read and
-state change therefore serializes or deserializes payloads that no current decision needs. This was
-the main source of the observed Server large-object allocation storm, accounting for more than 95%
-of measured large-object allocations. The migration must first stop terminal attempts from retaining
-snapshots, then place each active snapshot outside run State so arbitration cost does not grow with
-execution history.
+Active attempt snapshots are stored outside WorkflowRun State. The first dispatch fixes the snapshot,
+redelivery reuses it, and terminal or superseding transitions remove it. Startup removes orphaned
+snapshots. Arbitration therefore depends on current execution facts instead of payload history.
 
 ## Validation Timing
 

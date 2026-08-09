@@ -22,10 +22,14 @@ This separation matters because:
 ## Starting Runner
 
 ```bash
-npm run dev:runner
-# Or
+mo install runner --repo-root "$PWD"  # First registration and start
+# Later
 mo service start runner
 ```
+
+The first installation requests a one-time enrollment from the running Server.
+Runner exchanges it for a machine credential and stores that credential under
+its root. Later starts reuse the credential.
 
 After startup, Runner:
 
@@ -39,32 +43,32 @@ Start Runner **after Server**. It cannot connect while Server is unavailable.
 ## Checking Runner State
 
 ```bash
-mo server status
+mo runner status
 # Output includes Runner state
 ```
 
 The Web UI also shows Runner state:
 
 - The Runner-unavailable banner above the board.
-- Settings > Runtime.
+- The Runners page and each Runner detail page.
 - Runner heartbeat events on the Activity page.
 
 ## Concurrent Capacity
 
-Runner has a maximum concurrency limit of 8 by default:
+Server gives each Runner one shared execution slot by default:
 
-- At most eight tasks execute at once.
-- A ninth Issue waits for capacity after it starts.
+- At most one Workflow task or AgentJob executes on that Runner at once.
+- Additional work waits for capacity after it starts.
 
-Change capacity through Settings > Runtime in the Web UI or through Runner
-startup options. See `mo service start runner --help`.
+Change slots on the Runner detail page in the Web UI. Server owns this limit so
+the next dispatch observes a change without restarting Runner.
 
 Do not increase capacity without accounting for resource use:
 
 - Each executing AgentSession consumes CPU and memory.
 - Excess concurrency can trigger model API limits, overload the host, and cause
   Git lock conflicts.
-- A capacity of 4 to 8 is appropriate for a personal development machine.
+- Increase from the default only after observing the host and provider limits.
 
 ## Execution Ownership
 
@@ -82,35 +86,38 @@ Action contract is in [Action Contracts](actions/README.md).
 
 ## Workspace Location
 
-The default path is `workspaces/<workflow-run-id>/` under the Runner data
-directory. The WorkflowRun ID determines both path and branch. Neither includes
-the Issue title or Repository name.
+An Issue uses a named Workspace such as `issue-42`. Runner materializes it under
+its configured root and records the actual home Runner and path. Inspect that
+binding instead of guessing an internal directory:
 
-This is rebuildable execution state. Runner reclaims it after the WorkflowRun.
-Commit code that must be retained to the corresponding remote branch first. Do
-not manually delete or change the workspace branch, marker, or origin while a
-task runs.
+```bash
+mo workspace view issue-42 --json home
+```
+
+The directory persists across the Issue's Stages and bound Sessions, but it is
+rebuildable execution state. Commit and push work that must survive host loss.
+Do not manually delete or change its branch, marker, or origin while work runs.
 
 ## Runner Failure
 
 If the Runner process crashes:
 
 - A Workflow that has not begun execution waits for an available Runner.
-- Mohist first attempts to recover an executing task automatically.
-- When automatic recovery fails, the Issue enters blocked health and shows the
-  cause and recommended recovery action.
+- Executing Workflow work and AgentJobs fail with `runner-lost`; Mohist does not
+  claim that an unconfirmed external effect can continue transparently.
+- After Runner returns, retry or rerun blocked Workflow work explicitly. A later
+  AgentJob is a new work intent rather than an automatic replay.
 
 Workflow state is not lost because it lives in Server, not Runner.
 
-## Multiple Runners (Future)
+## Multiple Runners
 
-Mohist currently assumes one host and one Runner. Future support includes:
-
-- One Runner on each of several machines.
-- Server scheduling tasks across Runners.
-- Different Runner capabilities, such as Docker support.
-
-This work remains on the roadmap and is not supported today.
+Server can register multiple Runners and enforces each Runner's slots
+independently. New work uses eligible capacity. A materialized Workspace has a
+home Runner so later Sessions can reuse its files. AgentJob scheduling can clear
+an offline home and rematerialize on another Runner. A WorkflowRun remains
+assigned to its Runner and does not migrate automatically; restore that Runner
+before retrying the Workflow. Unpushed local files cannot move between hosts.
 
 ## Debugging Runner
 
@@ -133,20 +140,27 @@ mo session list --issue <number>     # AgentSessions for the Issue
 
 | Symptom | Cause | Resolution |
 |---|---|---|
-| The board shows "No runner is connected" | Runner is not running | Run `npm run dev:runner` |
+| The board shows "No runner is connected" | Runner is not running | Run `mo service start runner` |
 | An Issue waits after starting | No Runner has capacity | Start Runner; the Workflow continues automatically |
 | A task produces no output for a long time | OpenCode is stuck | Run `mo run pause --issue <number>` and inspect logs |
 | Workspace identity error | Marker, branch, or origin was changed manually | Preserve required commits, remove that workspace, and retry |
 | Git push failed | Remote Repository permission | Configure an SSH key or token |
 
+`mo service start runner` preserves the enrolled managed-service configuration.
+Use `npm run dev:runner` only when running Runner from a source checkout for
+development.
+
 ## Runner Configuration
 
-Configure Runner behavior with environment variables or a configuration file.
-See `mo service start runner --help`. Configurable values include:
+Configure host-local Runner behavior with environment variables installed by
+the service manager. Configurable values include:
 
-- Concurrent capacity.
 - Server URL.
-- Workspace path.
+- Runner identity and root directory.
+- Poll, heartbeat, and cleanup intervals.
+
+Dispatch slots are control-plane state and are changed from the Runner detail
+page, not through Runner startup options.
 
 Runner does not select a global Runtime backend through `type`. A Workflow
 task's `uses` value selects an execution-backend Action such as
@@ -160,5 +174,5 @@ For a long-running Runner managed as a service instead of foreground
 
 ---
 
-Source: `packages/runner/` and
+Implementation source: `packages/runner/` and
 `packages/server/src/Mohist.Server/Runner/`.

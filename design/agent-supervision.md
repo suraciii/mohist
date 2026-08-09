@@ -30,7 +30,7 @@ The preset contains:
 
 The two rule match expressions are:
 
-```text
+```text literal
 event.type == "com.mohist.workflow.stage.approval-requested"
 event.type == "com.mohist.workflow.run.failed"
 ```
@@ -166,7 +166,7 @@ reasoning trail.
 
 First installation in a new Project:
 
-```text
+```text literal
 $ mo agent install supervisor
 created agent: supervisor
 created routing rule: supervisor-approval (position 1)
@@ -178,7 +178,7 @@ warning: .agents/skills/mohist not found in repository 'web-app';
 Repeated installation after the user has edited the identity instructions does not overwrite
 them:
 
-```text
+```text literal
 $ mo agent install supervisor
 exists, skipped: agent supervisor
 exists, skipped: routing rule supervisor-approval
@@ -195,6 +195,3 @@ the actor (`--author` -> `decidedBy`).
 Agent Skills are pinned into each execution definition. The preset adds no Skills override;
 discovery of the `mohist` skill still depends on the stub file in the execution workspace, so
 installation only checks and reports it and cannot decide to modify the user's repository.
-
-Known gap: the current preflight warning prints the nonexistent command `mo skills install`. The
-target and actual command is singular: `mo skill install`, as shown above.

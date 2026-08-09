@@ -1,7 +1,3 @@
----
-status: wip
----
-
 # Observability
 
 Mohist should signal problems before they affect work and retain enough
@@ -57,9 +53,10 @@ manually to discover a problem.
 Run `mo otel status` to see whether observation is `healthy`, `degraded`, or
 `off`, and to inspect current resource protection.
 
-## Implementation Gaps
+## Status
 
-The built-in capability currently focuses on collecting and querying traces. It
-also reports collector state, resource use, and degradation. Metric-based
-detection and automatic anomaly notices are not complete. This document
-describes the target behavior.
+Built-in traces, metrics, bounded route diagnostics, runtime status, and the
+application log contract are implemented. They let a user detect and inspect a
+problem without making observation part of the work path. Automatic anomaly
+notifications are not implemented, so users must still inspect status instead
+of receiving a proactive notice.

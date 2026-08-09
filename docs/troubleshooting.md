@@ -34,7 +34,7 @@ This table maps each value to an operator action:
 | Scenario | Command | Meaning |
 |---|---|---|
 | An automated Check failed | `mo run retry --issue <n>` | Retry the current failure point |
-| Runner crashed and automatic recovery failed | `mo run retry --issue <n>` | Retry after Runner recovers |
+| Runner crashed and current work failed | `mo run retry --issue <n>` | Retry after Runner recovers |
 | Rebuild the current stage completely | `mo run rerun --issue <n> --from-stage <stage>` | Discard output from the target stage and later stages, then rerun |
 | The current stage is stuck | `mo run pause --issue <n>` | Pause current execution and resume later |
 | Work must not continue | `mo run stop --issue <n> --yes` | Stop the run permanently; it cannot resume |
@@ -124,8 +124,9 @@ mo issue rebase <n>
 
 If it also conflicts:
 
-1. Enter the worktree at `<repo>/.mohist/worktrees/issue-<n>/`.
-2. Resolve conflicts manually.
+1. Run `mo workspace view issue-<n> --json home` to find the actual Runner and
+   Workspace path.
+2. In that reported path, resolve conflicts manually.
 3. Run `git add` and `git rebase --continue`.
 4. Resume with `mo run resume --issue <n>`.
 
@@ -134,12 +135,13 @@ If it also conflicts:
 **Symptom:** A Workflow waits for a long time, or the Issue becomes blocked
 with `runner-lost`.
 
-**Cause:** Runner is stopped or disconnected, or automatic recovery failed.
+**Cause:** Runner is stopped or disconnected. Executing work fails explicitly
+with `runner-lost`; it is not replayed automatically.
 
 Verify Runner state:
 
 ```bash
-mo server status
+mo runner status
 ```
 
 A waiting Workflow continues automatically when Runner returns. For a blocked
@@ -206,10 +208,10 @@ Constant monitoring is not required. Mohist signals a problem through:
   easily, plan better, and execute concurrently.
 - **Avoid changing the base branch during Agent work.** A change can cause drift
   or conflict.
-- **Monitor capacity.** `mo server status` shows use. Work above capacity waits
+- **Monitor capacity.** `mo runner status` shows use. Work above capacity waits
   instead of failing.
-- **Reclaim worktrees periodically.** Inspect with `git worktree list` and
-  reclaim stale metadata with `git worktree prune`.
+- **Preserve important Workspace work remotely.** Runner materialization is
+  rebuildable; commit and push changes that must survive Runner loss or cleanup.
 - **Investigate repeated failure patterns.** When several Issues block on the
   same work, do not retry each one indefinitely. Common causes include an
   ambiguous input template, slow or unstable tests, unclear module boundaries,

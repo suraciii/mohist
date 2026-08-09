@@ -350,7 +350,7 @@ the same command reads durable progress and does not create a second App.
   connection state with one next step.
 - Manage Agent Connection resources with:
 
-```text
+```text literal
 mo slack list <agent>
 mo slack view <connection-id>
 mo slack edit <connection-id> --access-policy allowlist --allow-member <slack-member-id>
@@ -831,7 +831,7 @@ confirmation and cannot be hidden behind one ambiguous delete operation:
   creation, configuration, validation, and runtime connection around those
   required steps.
 
-## Implementation Gaps
+## Status
 
 The data plane for messages and Agent invocation is delivered. Channel root
 mentions, bound-thread follow-ups, multi-Bot ownership prompts, duplicate
@@ -861,8 +861,11 @@ or Web lifecycle actions. Low-level commands such as `configure-manager`,
 
 End-to-end acceptance has passed in an isolated real Slack workspace. The
 verified path includes `setup`, `install-agent`, Owner claim, DM task execution,
-and reply delivery through real Socket Mode. Reactive rotation of an expired
-Configuration token is not wired into production call sites. A public app
-marketplace, multi-tenant hosting, cross-Mohist-Server coordination, Slack's
-native Agent entry point, and a complete diagnostics console are also not
-delivered.
+and reply delivery through real Socket Mode. App-management calls reactively
+rotate an expired Configuration credential, and an Agent owns its reply body
+through the reply action while terminal handling owns liveness only.
+
+A public app marketplace, multi-tenant hosting, cross-Mohist-Server
+coordination, Slack's native Agent entry point, and a complete diagnostics
+console remain future phases rather than incomplete parts of the current
+boundary.

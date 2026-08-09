@@ -24,7 +24,7 @@ Delivery reuses ordinary follow-up admission because scheduling changes when an 
 not what an Input means. This preserves one permission boundary, queue policy, binding policy,
 transcript, and Runner protocol:
 
-```text
+```text diagram
 caller creates schedule
           |
           v
@@ -49,7 +49,7 @@ The target `AgentSession` owns each `SessionSchedule` alongside its Inputs and T
 record with the Session serializes delivery, cancellation, and Input acceptance without creating a
 second aggregate, inbox, or scheduler resource.
 
-```text
+```text literal
 SessionSchedule
   ScheduleId
   DueAt           Absolute due time (UTC)
@@ -61,7 +61,7 @@ SessionSchedule
   CancelledAt?
 ```
 
-```text
+```text diagram
 scheduled ---------> pending-delivery ---------> delivered
     |                       |
     +-----------------------+-------------------> cancelled
@@ -79,7 +79,7 @@ a due `scheduled` record and start the same delivery path.
 
 The Server surface is:
 
-```text
+```text literal
 POST /api/projects/{projectRef}/agent-sessions/{sessionId}/schedules
 Idempotency-Key: {key}
 { "text": "...", "dueAt": "2026-08-06T14:00:00Z" }
@@ -129,7 +129,7 @@ mo session schedule cancel <session-id> <schedule-id>
 Wake-ups are at least once, but each schedule may create at most one logical `SessionInput`. The
 Server derives a stable follow-up identity from the schedule:
 
-```text
+```text literal
 IdempotencyKey: session-schedule:{scheduleId}
 Source:         session-schedule
 Text:           schedule.Text
@@ -217,3 +217,16 @@ Server specifications use an injected fake clock, fake Runner, and in-memory sto
 - stop, detach, Reset, and Compact lifecycle boundaries, including delivery to a detached Session
   and a post-stop Turn outside the frozen snapshot;
 - unchanged Runner protocol: scheduled delivery is indistinguishable from an ordinary follow-up.
+
+## Status
+
+Creation, listing, cancellation, durable schedule state, one-shot and recovery
+reminders, stable follow-up identity, and the stop/detach/reset/compact
+lifecycle boundaries are implemented in Server and CLI.
+
+One target behavior remains open. When the physical Runtime Session is
+definitively absent, due delivery currently stays `pending-delivery` until
+another path restores the binding. Scheduled delivery does not yet initiate the
+automatic confirmed-missing recovery described above. That recovery must reuse
+the existing schedule and follow-up identities; it must not create a new intent
+or treat transport failure as proof of absence.

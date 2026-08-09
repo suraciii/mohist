@@ -21,5 +21,11 @@ agents who implement the design, not for readers tracing the current code.
 - Before writing, a reader must know: which problem is being solved, why this
   boundary was chosen, who owns it, how it changes, and what fails.
 - Body is the target design; implementation gaps go to Status.
+- Every plain-text fence must be either `text diagram` for an ASCII boundary,
+  relationship, sequence, hierarchy, or state diagram, or `text literal` for
+  command output, syntax, protocols, pseudocode, data shapes, and other
+  preformatted text. Bare `text` fences are invalid.
+- Diagrams use ASCII only. Do not use PlantUML, Mermaid, Unicode line art, or
+  Unicode arrows. Do not use raw HTML.
 
 Full conventions: [`design/README.md`](README.md).

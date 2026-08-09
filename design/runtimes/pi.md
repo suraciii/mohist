@@ -78,7 +78,7 @@ selects its backend through `uses`.
 
 ## Capability Boundary
 
-```text
+```text diagram
 Workflow Action ----+
 AgentJob executor ---+--> PiRuntime --> in-process SDK --> provider and tools
 Session commands ----+                    |
@@ -195,7 +195,7 @@ physical Session, without replacing the binding.
 Pi follows the same identity-before-effect rule as OpenCode, but restoration uses
 the bound Session-file path:
 
-```text
+```text diagram
 restore or create physical Session
                |
                v

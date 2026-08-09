@@ -44,7 +44,7 @@ record. The Web Inbox retains what happened; the Hermes HTTP request is one
 best-effort delivery attempt. Delivery failure never changes or blocks Issue,
 Workflow, AgentJob, or Approval state.
 
-```text
+```text diagram
                             +--> [Web Inbox: durable history]
                             |
 [Durable Mohist event] -----+
@@ -176,7 +176,7 @@ When `Secret` is configured, Mohist computes HMAC-SHA256 over the exact UTF-8
 bytes sent as the JSON request body. It encodes the digest as lowercase
 hexadecimal and sends the GitHub-compatible header:
 
-```text
+```text literal
 X-Hub-Signature-256: sha256=<lowercase-hex-hmac>
 ```
 

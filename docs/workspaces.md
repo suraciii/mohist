@@ -47,9 +47,9 @@ accumulates work over time, which enables reuse across Sessions.
 - An Agent invited into a Session or channel enters the same Workspace and sees
   the same files.
 - A delegated child Session inherits the same Workspace. To isolate a child,
-  bind another Workspace during delegation or let the Agent create a Git
-  worktree inside the directory. A Git worktree is a Git tool; Mohist does not
-  provide an "isolated workspace" primitive.
+  let the Agent create a Git worktree inside the inherited directory. Spawn
+  cannot select another Workspace. A Git worktree is a Git tool; Mohist does
+  not provide a child-specific Workspace primitive.
 - At any time, one interaction location maps to one active Workspace. There is
   always one answer to the question, "Which directory is the Agent using here?"
 
@@ -77,18 +77,24 @@ contract.
 
 ## Repositories
 
-A Workspace holds references to repositories declared as Project resources. A
-Workflow path starts with the Issue's target repository. An interactive path
-mounts repositories as needed. A mount grants access and provides a default
-checkout target. The Agent controls the actual clone, branch, and worktree
-layout inside the directory. Mohist does not prescribe the internal layout.
-Conventions such as placing checkouts under `repos/` and work products at the
-Workspace root belong in the Prompt and are not enforced by the platform.
+A Workspace holds references to repositories declared as Project resources. An
+Issue Workflow starts with the Issue's target repository. Runner owns that
+checkout's branch, marker, and layout so every Stage, retry, and integration
+step observes the same Workspace identity. Treat its recorded home as opaque
+and inspect it through `mo workspace view`.
+
+An interactive Workspace mounts repositories as needed. There, a mount grants
+access and provides a default checkout target, while the Agent controls the
+actual clone, branch, and worktree layout. Conventions such as placing checkouts
+under `repos/` and work products at the Workspace root belong in the Prompt and
+are not enforced by the platform.
 
 ## Lifecycle Endpoints
 
 - Completing or cancelling an Issue archives its Workflow Workspace.
-- `mo workspace close <name>` archives any Workspace.
+- `mo workspace close <name>` archives an interactive or manually created
+  Workspace. An Issue Workspace can end only through `mo issue done` or
+  `mo issue close` because the Issue lifecycle owns it.
 - Archiving a Slack channel archives its Workspace. The next message in that
   channel automatically starts a new Workspace. To discard a disordered
   environment and continue, close it and send another message.
@@ -97,8 +103,8 @@ Workspace root belong in the Prompt and are not enforced by the platform.
 
 ## Events
 
-Workspace creation and archival produce the `workspace.created` and
-`workspace.archived` platform events. Each event includes the Project,
+Workspace creation and archival produce the `com.mohist.workspace.created` and
+`com.mohist.workspace.archived` platform events. Each event includes the Project,
 Workspace name, and source: `issue`, `manual`, `slack`, `web`, or `cli`.
 Subscribers can filter by source. For example, a channel Agent can perform
 cleanup after an archive event, or a create event can trigger dependency
@@ -108,17 +114,20 @@ installation. See [Event Routing](event-routing.md) and
 ## Missing Directory
 
 The Runner that executes a Workspace hosts its directories. The Workspace still
-exists after a Runner failure or disk cleanup, but its directory contents are
-not guaranteed to return. The next use starts from an empty directory, and
-unpushed work is lost. A Workflow preserves completed work by pushing its
-Workflow branch to the remote. Important work in an interactive Workspace must
-be committed and pushed.
+exists after Runner failure or disk cleanup, but its directory contents are not
+guaranteed to return. A missing directory can be rematerialized empty on the same
+home Runner. AgentJob scheduling can clear an offline home and select another
+Runner, but a WorkflowRun remains assigned and does not migrate automatically.
+Unpushed work is lost in either case. A Workflow preserves completed work by
+pushing its Workflow branch to the remote. Important work in an interactive
+Workspace must be committed and pushed.
 
 ## Implementation Gaps
 
-Workspace identity and the create and archive lifecycle are implemented.
-Dynamic creation from Slack and Web entry points, and the connection from Slack
-channel archival to Workspace archival, are not implemented. Interactive entry
-points currently cover only the `manual` source. Directory materialization is
-still organized by WorkflowRun on the Runner. Migration to a Workspace view for
-cross-Session reuse and reclamation guards remains future work.
+Workspace identity, create and archive lifecycle, Issue and interactive source
+resolution, named Runner materialization, and cross-Session reuse are
+implemented. AgentJobs can replace an offline home; WorkflowRuns cannot yet move
+their assignment to another Runner. Slack channel archival also does not yet
+archive its Workspace; until that linkage exists, close the interactive
+Workspace explicitly when the channel should no longer retain an active
+environment.

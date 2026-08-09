@@ -100,8 +100,8 @@ Concept ownership and origin rules are defined in
   independent monotonic values; an unqualified `generation` in an implementation means
   `claimGeneration`, never `ContextGeneration`. The single `FenceToken` contract below is used
   by every phase write, candidate create/get/discard/cleanup, binding CAS, completion, Compact,
-  and Cancel/stop. Before any external effect, Server atomically rechecks that token, the current
-  owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
+  and Cancel/per-target stop. Before any external effect, Server atomically rechecks that token,
+  the current owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
   owner fails closed before the effect and before its result is persisted.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
   incrementing `ContextGeneration` for the new logical context. `rebind` cannot change `runnerId`;
@@ -119,7 +119,7 @@ Concept ownership and origin rules are defined in
 `AgentSessionRead` is the only Session admission projection. The durable Session row uses the same
 fields; callers use `admission=ready|blocked` and do not invent another safety field.
 
-```text
+```text literal
 AgentSessionRead {
   sessionId
   activity = idle | active | unknown
@@ -198,7 +198,7 @@ All launch and follow-up inputs use the same input identity contract. The first 
 the caller's `launchRequestId` into `requestId`; a follow-up caller must provide its own stable
 `requestId`. Server never invents one after a response is lost.
 
-```text
+```text literal
 SessionInputRead {
   sessionId
   inputId                   # null unless state=accepted
@@ -278,7 +278,7 @@ Every dispatch claim, takeover, enqueue/query, reschedule, blocked write, unknow
 write, and retry-work repair uses this predicate atomically. `dispatch.dispatchFence` is the same complete
 token, not a shortened owner or retry identity.
 
-```text
+```text literal
 claimDueOrTakeOver(record, work, previousFence, now, coordinatorId):
   atomically:
     require work.sessionId == record.sessionId
@@ -383,7 +383,7 @@ rescheduleDispatch(record, dispatchFence, work, dueAt):
     return retry_scheduled
 ```
 
-```text
+```text literal
 DispatchRetryWork {
   sessionId
   inputId
@@ -447,7 +447,7 @@ Dispatch states are deliberately not interchangeable:
 
 The only valid cross-projection combinations are:
 
-```text
+```text literal
 dispatchStatus=queued|blocked  -> Turn.status=queued, outcome=null
 dispatchStatus=retrying        -> Turn.status=queued, outcome=null
 dispatchStatus=unknown         -> Turn.status=unknown, outcome=null,
@@ -496,7 +496,7 @@ client invents a second reason schema.
 `BindingTuple` is either `null` or the complete tuple below. `null` is explicit and is not the same
 as an omitted field.
 
-```text
+```text literal
 BindingTuple = {
   runnerId,
   runtime,
@@ -526,7 +526,7 @@ FenceToken = {
 binding only for an explicitly post-CAS effect. It is never inferred from the same old token. The
 following predicate is the only `fenceMatch` definition:
 
-```text
+```text literal
 fenceMatch(session, operationFence, token, now) =
   session.id == token.sessionId
   && operationFence.sessionId == token.sessionId
@@ -557,7 +557,7 @@ returns `stale_operation_fence`; it cannot repair its token by changing only the
 
 The only binding replacement protocol is this atomic Server operation:
 
-```text
+```text literal
 compareAndSwapBinding(preToken, boundaryKind):
   atomically:
     require preToken.bindingAtEffect == preToken.expectedBinding
@@ -589,10 +589,10 @@ both old pre and old post tokens fail closed.
 
 Every non-CAS effect follows this shape, including `Runtime.resolve`, `Runtime.createOrGetEmpty`,
 `Runtime.submitInputExactlyOnce`, cleanup `Runtime.getByKey` and `Runtime.discardCandidate`,
-`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and Cancel/stop. Binding CAS uses
+`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and Cancel/per-target stop. Binding CAS uses
 `compareAndSwapBinding` above and does not use `effectWithFence` with a pre-CAS token:
 
-```text
+```text literal
 effectWithFence(token, effect):
   token = Server.recheckBeforeExternalEffect(token)
   result = effect(token)
@@ -610,13 +610,18 @@ is terminal `blocked` and a new binding operation may proceed.
 
 ### Canonical SessionOperationRead
 
-`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, `stop` and `steer` are durable
-Session operations. Their caller supplies a reusable `operationId`; Server never creates an
-unqueryable operation key for a command response. This is the only authoritative
-`SessionOperationRead` schema. `agent-api.md` and `agent-execution.md` link to it; they do not
-define another operation field list.
+`Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, and `steer` are
+durable Session operations whose caller supplies a reusable `operationId`; steer reuses its
+caller-provided `requestId`. Server never creates an unqueryable operation key for those commands.
+A cascade stop is different: the public caller supplies only root Session plus `Idempotency-Key`,
+and Server derives the tree operation identity, fingerprint, frozen membership, and stable
+per-target stop-operation identities. [`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the
+sole public stop authority. Each target still projects its derived internal operation through the
+same `SessionOperationRead` shape below. This is the only authoritative `SessionOperationRead`
+schema. `agent-api.md` and `agent-execution.md` link to it; they do not define another operation
+field list.
 
-```text
+```text literal
 SessionOperationRead {
   sessionId
   operationId
@@ -694,7 +699,7 @@ contract even while the current Runner routes and Runtime adapters remain on the
 implementation. `sessionId` is the logical target Session; `binding.runtimeSessionId` is the
 physical target Runtime Session.
 
-```text
+```text literal
 SteerEffectId = {
   sessionId,
   operationId                 # operationId == caller-provided requestId
@@ -772,7 +777,7 @@ projection; it never invokes `apply` for a second effect.
 When a target Turn is terminal before an adapter call, or a stop/force-reset transaction makes the
 target no longer admissible, the target operation is settled atomically under its current fence:
 
-```text
+```text literal
 settleSteerTargetTerminal(operation, fence, cause, adapterAttemptStarted):
   atomically:
     require operation.kind == steer
@@ -835,7 +840,7 @@ SessionOperationRead.candidateBinding)`. A candidate is ready for adoption only 
 operation's `candidateKey`, its binding is complete, and `candidateState=created`. The atomic
 adopted predicate is:
 
-```text
+```text literal
 candidateIsCurrent(operation, candidate, session) =
   candidate.key == operation.candidateKey
   && operation.candidateBinding == candidate.binding
@@ -891,7 +896,9 @@ from being claimed after the original operation is terminal.
 
 `kind=stop` uses the operation row itself as the durable Turn-stop fence. Its `targetTurnId`,
 `expectedBinding`, complete owner/claim/deadline fields and `reason` are queryable; there is no
-in-memory `stopFence` model. A queued target can be cancelled in the same Session transaction.
+in-memory `stopFence` model. The operation ID is the stable per-target identity derived by the
+cascade stop; it is not a second public caller key. A queued target can be cancelled in the same
+Session transaction.
 For a running target, the owner claims or takes over this operation, rechecks the complete
 `FenceToken` immediately before and immediately after `Runtime.stop`, and only then persists the
 Turn outcome. A lost or unknown Runtime response keeps the operation and Turn `unknown`, with an

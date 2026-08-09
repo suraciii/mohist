@@ -24,7 +24,7 @@ of facts that Epic can modify independently.
 
 ## Association and Migration
 
-```text
+```text diagram
 User / API -> Epic.LinkIssue(issueNumber)
               Epic reads the Issue's current affiliation
               Epic verifies it is not closed for a new association
@@ -61,7 +61,7 @@ redelivery therefore cannot write an old Epic number back.
 
 ## Epic Advances Issues
 
-```text
+```text diagram
 User -> Epic.Start
           |
           +-- transaction: Epic state + [EpicStarted]
@@ -93,7 +93,7 @@ before the response, or before handler acknowledgement.
 
 ## Workflow Results and Continued Advancement
 
-```text
+```text diagram
 Runner -> Report -> WorkflowRun
                     +-- transaction: WorkflowRun state + [WorkflowRunCompleted]
                     +-- transaction: WorkflowRun state + [WorkflowRunFailed]
@@ -144,7 +144,7 @@ contains exactly one aggregate.
 
 ## Other Interactions
 
-```text
+```text diagram
 Issue -> Cancel -> WorkflowRun
 Runner --[RunnerDisconnected]--> Session (fails affected sessions)
 

@@ -7,7 +7,7 @@ current store contents.
 
 Every fact has exactly one owner:
 
-```text
+```text diagram
 What work was dispatched to whom -> WorkflowRun / AgentJob
                                     (each is its own queryable dispatch ledger)
 What is executing right now      -> Runner process memory, reported on each poll
@@ -21,7 +21,7 @@ is no duplicate fact to reconcile.
 
 Invariants:
 
-```text
+```text literal
 Every WorkflowRun / AgentJob is its own dispatch ledger.
 Running => corrected within one poll as:
            reported | re-dispatched | rejected as invalid | closed out
@@ -37,7 +37,7 @@ Fields are grouped by update lifecycle, never by who reports them:
 | persistent | control plane | a few individual fields | never |
 | snapshot-replace | register / successful poll / unregister | replace as a whole | next successful poll |
 
-```text
+```text literal
 Runner
   runnerId                       identity
   slots                          persistent; owned by the control plane
@@ -66,7 +66,7 @@ maintained here:
 
 ### Behaviors
 
-```text
+```text literal
 Register(info)          state=online, lastSeen=now, populate info, write registry
 Unregister()            state=offline, clear info;
                         close out by reporting FAILED("runner-lost") to owners
@@ -91,7 +91,7 @@ activeWorks is a direct union of reads from the two owner stores:
 
 ## Dispatch Protocol: Claim / Pull / Report
 
-```text
+```text diagram
 WorkflowGrain / WorkflowRun       workflow work dispatch ledger
   owns Assignment and lifecycle: Pending / Running / terminal
   ClaimNext: atomic Pending -> Running plus stage lock
@@ -132,7 +132,7 @@ Runner process                   physical process
 
 ### Poll Computation
 
-```text
+```text diagram
 Runner process                  DispatchService                    store / grains
     | POST poll {inFlight, awaitingAck}                                  |
     |---------------------------->|                                      |
@@ -174,7 +174,7 @@ work.
 lock, marks it Running under the Runner identity, and persists it in one atomic
 write. There is no offer phase and no Runner-side preregistration.
 
-```text
+```text diagram
 PENDING --ClaimNext--> RUNNING --report(success|fail)--> COMPLETED|FAILED
 ```
 
@@ -202,7 +202,7 @@ Stamp `ReadySince` whenever work enters or re-enters Ready. Within a candidate
 tier, mix Workflow and AgentJob work by `ORDER BY ReadySince ASC`. This produces
 round-robin service with no scheduler state:
 
-```text
+```text diagram
 work completes -> owner advances -> next work becomes Pending -> ReadySince := now
 the just-served item moves to the tail; the longest-waiting item is at the head
 ```
@@ -235,7 +235,7 @@ design narrows the promise to one the system can uphold.
 
 Reports go directly to the owning grain through a stateless translation path:
 
-```text
+```text diagram
 Runner -> API route -> stateless translation -> owner grain -> Accepted | Stale
                                                                   both acknowledge
 ```
@@ -308,43 +308,41 @@ Work lost with a Runner is reported to its owner as
 
 ## Local Workspace Lifecycle
 
-The Runner owns materializable local Workspaces. They are reconstructible
-execution state, and only the Runner touches their filesystem. For the current
-Issue-backed model, identity derives from `WorkflowRunId` and the terminal
-signal is an irrecoverable WorkflowRun terminal state. That identity model will
-migrate to the first-class Workspace entity described in
-[`workspace.md`](workspace.md), including its reclamation guard. The lifecycle
-phases, single-flight maintenance, and independent Runtime/disk reclamation
-below describe the current WorkflowRun Workspace.
+The Server owns the logical Workspace and its lifecycle. The Runner owns only
+its local materialization and is the only component that touches that
+filesystem. This split keeps loss of a reconstructible directory from deleting
+the durable environment identity or changing which Sessions belong to it. The
+identity, Origin, Home, and reclamation rules are authoritative in
+[`workspace.md`](workspace.md).
 
-The Runner owns both its materialized Workspaces and a local
-`WorkspaceRegistry`. The registry is a reconstructible lifecycle index, not an
-authority for WorkflowRun state. Every entry has exactly one phase:
+The Runner records each materialization in a reconstructible
+`NamedWorkspaceRegistry`, keyed by `(ProjectId, WorkspaceName)`. The registry is
+a local maintenance index, not a second Workspace store. Every entry has one
+phase:
 
 | Phase | Meaning |
 |---|---|
-| `active` | Runner has not observed an irrecoverable WorkflowRun terminal state; automatic reclamation is forbidden |
-| `eligible` | Runner observed `Completed` or `Stopped`; Runtime resources may be released and disk policy may delete the Workspace |
-| `stuck` | WorkflowRun terminated, but disk deletion safety checks rejected deterministically; retain the directory and ownership record and do not retry automatic deletion |
+| `active` | Runner has not received a current Server grant for reclamation |
+| `eligible` | Server reports the Workspace archived or active with no active bound Session; disk policy may delete the materialization |
+| `stuck` | deletion safety checks rejected deterministically; retain the directory and index entry and do not retry automatic deletion |
 
-`Failed` is an intermediate state recoverable by Retry or Rerun, so it does not
-become `eligible`. Unknown states also remain `active`. A terminal push only
-reduces latency. On startup, reconnect, and periodic convergence, the Runner
-batch-queries the Server only for local WorkflowRuns still marked `active`. It
-does not scan complete Server Workflow history or requery entries already
-`eligible` or `stuck`.
+The Runner periodically asks the Server whether each `active` entry is
+reclaimable. Transport failure or an unknown answer keeps it `active`. An
+archived Workspace is reclaimable. An active Workspace is reclaimable only
+while it has no active bound Session; deletion removes only the local directory,
+and later use rematerializes the same logical Workspace. The Runner never
+derives this grant from WorkflowRun status.
 
-One Workflow Workspace has two independently reclaimable resources:
+One Workspace has two independently reclaimable local resources:
 
-- the disk Workspace is a Git worktree reclaimed by retention and storage
-  budget;
+- the materialized directory is reclaimed by retention and storage budget;
 - a Runtime directory resource is in-process state retained by an external
   Runtime and released as soon as that Runtime's own safety conditions permit.
 
 The resources share only directory identity. Releasing the Runtime directory
 resource does not delete the worktree, and deleting the worktree does not
 replace Runtime release. Both use the Runner's existing Workspace maintenance
-cycle, once every two minutes by default, without a per-WorkflowRun timer or new
+cycle, once every two minutes by default, without a per-Workspace timer or new
 user configuration. Each pass is single-flight: if one pass is still running,
 the next does not overlap. Periodic maintenance releases Runtime resources
 before applying disk policy. Runtime release does not depend on retention,
@@ -365,23 +363,29 @@ conditions in
 
 ## Persisted State
 
-The Runner persists four state files under
-`<runnerRoot>/.mohist/runner-state/`. Each is written atomically with a temporary
-file plus rename and loaded at startup. Their corruption semantics differ based
-on whether lost state can be reconstructed:
+The Runner persists operational state under `<runnerRoot>/.mohist/runner-state/`.
+Each file is written atomically with a temporary file plus rename and loaded at
+startup. Corruption semantics differ based on whether lost state can be
+reconstructed:
 
 | File | Content | Corruption semantics |
 |---|---|---|
 | `runtime-events.json` | Runtime event outbox: Session events pending delivery to Server; snapshot written for each new fact | unreadable: mark outbox unhealthy and reload at local retry cadence; never overwrite the unreadable file. If retention is exceeded, discard reconstructible streaming increments first |
 | `followup-operations.json` | Follow-up operation idempotency log: operationId -> claimed / submitted; written on each transition | wrong version or shape: log unavailable and reject new operations (fail closed); missing file means a fresh start |
 | `session-commands.json` | Session command idempotency log: operationId -> started / completed plus result; same write behavior | same: corruption fails closed; missing file means a fresh start |
-| `workspaces.json` | local Runner Workspace registry: materialized worktrees and identities; written on materialization and terminal transition; active entries remain until a terminal state is observed | unreadable or corrupt: start with an empty table (fail open) and rebuild on the next write. Disk worktrees are facts; the registry is only an index |
+| `named-workspaces.json` | current named Workspace materialization index: Project, Workspace name, path, phase, and materialization times | unreadable or corrupt: start with an empty index and rebuild on later materialization; Server remains the logical authority |
+| `workspaces.json` | legacy per-WorkflowRun materialization index used only by the fallback execution path | same fail-open behavior; remove with the fallback rather than treating it as a second identity model |
 
 Idempotency logs fail closed because losing them can repeat effects. The
-registry fails open because it can be reconstructed from disk. All four files
+registries fail open because they can be reconstructed from disk. These files
 are Runner-private. The Server never reads or writes them directly;
 cross-process consistency comes from event delivery and poll recomputation, not
 shared files.
+
+The per-WorkflowRun Workspace manager and `workspaces.json` registry remain an
+implementation gap for dispatches that still lack a named Workspace. New code
+must not extend that fallback. Removing it does not require a compatibility
+model because Runner materializations are reconstructible.
 
 ## Decision Record: One Ledger, No Reconciliation
 

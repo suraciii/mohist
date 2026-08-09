@@ -41,8 +41,10 @@ and take over manually.
   stages, tasks, checks, approval points, and failure recovery. Change the
   definition to change the line. The system does not change.
 - **An Issue is work in progress**: All work enters the line as an Issue. It
-  carries requirements, discussion, and history from Draft to Done. The default
-  line is `Draft -> Plan -> Build -> Check -> Integrate -> Done`.
+  carries requirements, discussion, and history from Draft to Done. Readiness
+  stays outside execution so incomplete requirements do not consume capacity:
+  the default line is `Draft --mark ready--> Backlog --start--> Plan -> Build ->
+  Check -> Integrate -> Done`.
 - **Agents are workers**: An Inline Agent executes a Workflow task directly. A
   predefined Mohist Agent can start from the Web UI, CLI, an Agent Connection,
   an event, or a comment mention. An AgentSession records the session

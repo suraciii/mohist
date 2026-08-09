@@ -12,7 +12,7 @@ Issue. Responses follow [`event-response.md`](event-response.md).
 
 ## Model
 
-```text
+```text literal
 WatchEntry
   ProjectId, IssueNumber, AgentId
   State: watching | muted
@@ -35,7 +35,7 @@ WatchEntry
 
 ### Command Surface
 
-```text
+```text literal
 mo issue watch add <issue> --agent <name>
   no declaration  -> create watching
   muted            -> change to watching
@@ -58,7 +58,7 @@ archived Agent.
 When an event with an `issue` attribute arrives, dispatch examines WatchEntry in
 addition to the routing table:
 
-```text
+```text literal
 for each Agent matched by a rule:       # Existing routing path
   if (Issue, Agent) is muted:
     treat as no match and write a structured log

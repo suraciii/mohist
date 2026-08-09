@@ -95,7 +95,7 @@ Tokens are not accepted in query strings. RFC 6750 Section 2.3 and RFC 9700 iden
 enter access logs, browser history, and proxy records. Neither SignalR hub has an exception: Web
 uses a same-origin cookie and the Runner SignalR client uses a header.
 
-```text
+```text diagram
 token FixedTimeEquals each file credential
   -> admin / service Principal
 otherwise query Credential by SHA-256(token)
@@ -115,7 +115,7 @@ other Scopes follow the table above. Insufficient Scope returns 403.
 
 ### Bootstrap
 
-```text
+```text diagram
 ~/.mohist/admin-token
   absent -> generate and write (0600, reject symlinks)  # admin Principal
 ~/.mohist/operator-token
@@ -143,7 +143,7 @@ Exempt endpoints are `POST /api/auth/device/code` and `POST /api/auth/token`. Th
 at `/device` requires an authenticated Web session. Both endpoints are rate-limited. Polling or
 code guessing beyond a small per-source, per-minute allowance returns `slow_down` or 429.
 
-```text
+```text diagram
 CLI   POST device/code {name}
       -> {device_code, user_code, verification_uri,
           verification_uri_complete, interval=5, expires_in=600}
@@ -182,7 +182,7 @@ specification for each inbound integration defines its issuance entry point.
 
 ### Runner Registration and Credentials
 
-```text
+```text diagram
 mo install runner (admin authenticated)
   -> POST /api/auth/runner-enrollments -> EnrollmentToken
 installer
@@ -218,14 +218,14 @@ EnrollmentToken issuance and consumption; device authorization approval; and Ses
 
 Local CLI:
 
-```text
+```text literal
 Server first start -> generate admin-token
 mo issue list -> match admin-token file -> admin Principal, operator
 ```
 
 Remote CI:
 
-```text
+```text literal
 mo auth token create --name ci --scope readonly --ttl 720h -> moh_pat_... (shown once)
 MOHIST_TOKEN=moh_pat_... mo issue list    -> readonly satisfies GET -> 200
 MOHIST_TOKEN=moh_pat_... mo issue create  -> insufficient Scope -> 403
@@ -233,33 +233,20 @@ MOHIST_TOKEN=moh_pat_... mo issue create  -> insufficient Scope -> 403
 
 Runner impersonation defense:
 
-```text
+```text literal
 Credential is bound to runner-a
 POST /api/runner/runner-b/heartbeat with runner-a Credential -> 403
 ```
 
 ## Status
 
-None of this design is implemented. Currently only the Slack adapter, Manager ingress, and
-dead-letter surfaces perform manual `OperatorCredential` validation. The primary API and both
-SignalR hubs are unauthenticated.
+Principal and Credential bootstrap, unified request and SignalR authentication, Web login,
+personal access tokens, CLI device authorization, rolling refresh-family protection, Runner
+enrollment, Project-constrained integration credentials, Scope enforcement, actor attribution,
+and audit events are implemented. The old operator header is retired; local deployment roots use
+Bearer authentication through the same resolution boundary as stored credentials.
 
-Implementation order for `mohist-explore`: **authentication first, authorization later**.
-
-1. P0 authentication: Principal and Credential, authentication resolution and exemptions,
-   bootstrap, Web login, CLI device authorization and PAT, retirement of
-   `X-Mohist-Operator-Token`, and actor attribution. This stage performs no Scope evaluation: every
-   valid Credential can reach every endpoint that requires authentication. Compared with the
-   current unauthenticated surface, it excludes strangers; constraining credential misuse waits for
-   P2. PAT issuance still records Scopes so the data model is ready, and P2 begins enforcing them.
-2. P1 machine identity: Runner enrollment and Credential issuance, plus implementation of
-   integration tokens. Binding data such as RunnerId and ProjectId is recorded normally, while
-   route gates still wait for P2.
-3. P2 authorization: Scope evaluation and 403, ownership of sensitive infrastructure surfaces,
-   Runner impersonation defense, and audit events.
-4. P3 candidate in a separate design: external OIDC and multiple users.
-
-Open question:
-
-- Decide during implementation whether Session renewal uses a 7-day absolute expiration or a
-  sliding window. This does not affect the model.
+The implementation keeps authentication and authorization as separate decisions even though both
+are now active. That separation preserves the core invariant: Mohist first establishes one trusted
+Principal, then decides whether that Principal's Scope can perform the requested capability.
+External identity federation and multiple users remain outside this single-administrator model.

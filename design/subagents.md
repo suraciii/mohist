@@ -1,5 +1,5 @@
 ---
-status: wip
+status: implemented
 ---
 
 # Subagent and Session Tree Design
@@ -13,16 +13,16 @@ AgentJob, AgentSession, SessionInput, and AgentTurn remain defined in
 [`agent-execution.md`](agent-execution.md); this document defines only how they compose in one
 spawn.
 
-```text
-Parent AgentSession
-        |
-        | SessionParentLink (child-owned)
-        v
+```text diagram
 Child AgentSession
-        ^
-        |
-SessionTreeMutationFence
-  attach / detach / stop snapshot
+  | owns
+  v
+SessionParentLink -- references --> Parent AgentSession
+  ^
+  | orders publication
+SessionTreeMutationFence (Project-scoped)
+  |
+  +-- freezes membership --> SessionTreeStopOperation snapshot
 ```
 
 The child-owned link is the topology truth, which avoids a second mutable child list on the parent.
@@ -60,7 +60,7 @@ configuration.
 
 Every Agent launch resolves that declaration into an immutable `AllowedSubagentSnapshot`:
 
-```text
+```text literal
 AllowedSubagentSnapshot
   AgentId
   NameAtLaunch
@@ -93,7 +93,7 @@ A child AgentSession owns an optional `SessionParentLink`. The child is the sole
 for the link because only it can gain or lose its one parent session. The parent aggregate does not
 store a mutable child list.
 
-```text
+```text literal
 SessionParentLink
   EdgeId
   ParentSessionId
@@ -130,7 +130,7 @@ attachment, detach, and cascade-stop snapshots and maintains a strictly increasi
 edge authority. The fence holds only `LinkReservation` values for unfinished plans, pending
 mutation commands, and the short transaction needed for one mutation.
 
-```text
+```text literal
 LinkReservation
   EdgeId
   ParentSessionId
@@ -243,36 +243,33 @@ The canonical CLI command is:
 
 ```bash
 mo agent spawn <agent-ref> --project <project-id> --parent-session <session-id> \
-  --prompt "<brief>" --idempotency-key <key> [--workspace <name>]
+  --prompt "<brief>" --idempotency-key <key>
 ```
 
 `--parent-session` is the explicit caller identity. The CLI cannot infer the parent from the
 current directory, Runtime Session, process environment, or most recent launch.
 `--idempotency-key` is the required invocation identity; after network failure the CLI retries
-with the same key. When `--workspace <name>` is omitted, the child inherits the parent's workspace
-binding. When present, it binds to that named Workspace, subject to the implementation in
-[`workspace.md`](workspace.md).
+with the same key. The child always inherits the parent's Workspace and working directory.
 
 The canonical Server surface is:
 
-```text
+```text literal
 POST /api/projects/{projectRef}/agent-sessions/{parentSessionId}/spawns
 Idempotency-Key: {key}
 
-{ "targetAgentRef": "reviewer", "prompt": "...", "workspace": "payment-refactor" }
+{ "targetAgentRef": "reviewer", "prompt": "..." }
 ```
 
 The path `parentSessionId` and idempotency header together define the caller and replay boundary
 for a spawn. The body accepts no `workDir`, `workspacePath`, Runner, Runtime, Instructions, Model,
-Skills, or arbitrary filesystem path. Within `(ProjectId, ParentSessionId)`, one key can express
-only one canonical request. A replay with a different prompt, target, caller, or workspace binding
-returns an HTTP 409 idempotency conflict.
+Skills, Workspace override, or arbitrary filesystem path. Within
+`(ProjectId, ParentSessionId)`, one key can express only one canonical request. A replay with a
+different prompt, target, or caller returns an HTTP 409 idempotency conflict.
 
-The child directory has only two sources: inherit the parent's workspace binding by default
-(`workDir = parent authoritative workDir`), or bind a named Workspace through the explicit
-`workspace` field, as implemented in [`workspace.md`](workspace.md). The platform provides no
-session-level isolation primitive. Git worktree is a Git-domain tool whose use is decided by the
-Agent and does not enter the spawn contract.
+The child directory comes only from the parent's Workspace binding
+(`workDir = parent authoritative workDir`). The platform provides no Session-level isolation
+primitive. Git worktree is a Git-domain tool whose use is decided by the Agent and does not enter
+the spawn contract.
 
 `parentSessionId` is the explicit identity of delegation authority, not a new bearer credential.
 Existing caller authentication first decides whether the caller can operate the Project. The
@@ -310,17 +307,10 @@ admission is pinned to the RunnerId of that parent binding. Copying only the pat
 the ordinary AgentJob on any eligible Runner is invalid because the directory may exist only on
 the parent's Runner.
 
-Current Agent Connection launch creates a Session with `WorkspacePath = null` and no usable
-authoritative workDir or parent Runner binding. It is therefore rejected under condition 5 or 6 as
-`parent_workdir_unavailable` or `parent_runner_binding_unavailable`. Slack conversation, caller
-path, or another Session's directory cannot fill the gap. If Agent Connection launch later gains
-both existing facts itself, it can become a parent under the same acceptance conditions without a
-Connection-specific path.
-
-By default, the child workDir inherits the parent's authoritative workDir from condition 5.
-Explicit named Workspace binding follows the materialization semantics in
-[`workspace.md`](workspace.md). Both forms pin the child AgentJob to the Runner in the parent
-binding.
+The parent source does not change these checks. An Agent Connection parent with both facts may
+spawn; one without them is rejected under condition 5 or 6. A Slack conversation, caller path, or
+another Session's directory cannot fill a missing fact. The child inherits the authoritative
+workDir from condition 5 and is pinned to the Runner in the parent binding.
 
 When these facts cannot be confirmed, reject rather than fall back:
 
@@ -344,7 +334,7 @@ Spawn extends the existing `AgentLaunchCoordinator` persisted by idempotency key
 a `SubagentLauncher` or a second Job pipeline. The coordinator key includes parentSessionId in its
 scope. It first persists a `SpawnRequestFence` without child identity:
 
-```text
+```text literal
 SpawnRequestFence
   ProjectId
   ParentSessionId
@@ -383,8 +373,8 @@ After writing the plan, the coordinator does not reread the mutable target Agent
 capability snapshot. It uses the existing `PrepareJob -> EnsureInitialLaunch -> SubmitJob` fences,
 extended into one launch pipeline with reservation, final check, and abort:
 
-```text
-persist request fence with fingerprint (incl. workspace binding)
+```text diagram
+persist request fence with target + exact prompt fingerprint
   -> pre-plan validation
   -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
        or persist launch plan and reserve EdgeId
@@ -458,7 +448,7 @@ execution definition, and supplies it to the Agent as Runtime-supported startup/
 before the first dispatch. It differs from user-provided read-only `AgentStartupContext` and cannot
 borrow the latter's external-discussion semantics.
 
-```text
+```text literal
 AgentSessionStartup
   ProjectId
   SessionId
@@ -504,7 +494,7 @@ that link is the sole state of the delivery obligation.
 
 The Server at-least-once event handler processes a terminal report in this order:
 
-```text
+```text diagram
 AgentJob terminal event
   -> child Session atomically claims report on its attached link
   -> append a normal parent SessionInput
@@ -662,8 +652,8 @@ ordinary Session API, but the tree link neither owns the schedule nor changes it
   planning, acceptance, or parent-agent patrol mechanisms.
 - Do not copy transcript, output, tool calls, or Runtime context into the parent. A terminal report
   carries references only.
-- Do not accept `--work-dir`, `workspacePath`, or any filesystem path input. The child directory
-  comes only from inherited parent workspace by default or a named Workspace binding
+- Do not accept `--work-dir`, `workspacePath`, a named Workspace override, or any filesystem path
+  input. The child directory comes only from the inherited parent Workspace
   ([`workspace.md`](workspace.md)).
 - Do not let the Runner infer parent/child identity by scanning working directory, environment
   variables, or Runtime Session, or choose a Runner for the child that differs from the parent
@@ -695,10 +685,10 @@ stores:
 - one parent, no reparent/cycle, indexed read cost for subtree query after detach, batching,
   revision-pinned stable BFS page/continuation, and concurrent attach/detach visible only to a new
   query;
-- current Agent Connection parent and Workflow inline parent are rejected for their respective
-  missing required facts. A Mohist Agent parent with authoritative workDir and current Runner
-  binding can spawn. When target Agent `MaxConcurrentRuns` is full, the child queues under ordinary
-  Job semantics instead of being rejected;
+- every otherwise eligible parent source is accepted when it has authoritative workDir and a
+  current Runner binding, while Workflow inline and any parent missing required facts are rejected.
+  When target Agent `MaxConcurrentRuns` is full, the child queues under ordinary Job semantics
+  instead of being rejected;
 - AgentJob terminal, not Session/Turn terminal, triggers one parent SessionInput, including handler
   replay, parent busy/capacity, unknown, and detach races;
 - the minimal deterministic tree lifecycle matrix: sequential coexistence of multiple `Reserved`

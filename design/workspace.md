@@ -10,7 +10,8 @@ lifecycle is independent of any AgentSession or WorkflowRun.
 
 Boundary: a Workspace holds only identity, origin, Repository references,
 status, and materialization routing facts. Directory contents and Git layout
-(clone / branch / worktree) are Agent behavior, not platform schema.
+(clone / branch / worktree) belong to Workflow preparation or Agent behavior,
+not Workspace entity schema.
 
 A Workspace is the home of the work, while repositories are its materials.
 Repository checkouts live under the Workspace (by convention, in `repos/`), and
@@ -27,7 +28,7 @@ node, and it is shared within one consumer group.
 
 ## Model
 
-```text
+```text literal
 Project.Workspace
   Name                 # Unique within the Project; derived from Origin by default
   Origin               # Source binding; see below
@@ -39,7 +40,7 @@ Project.Workspace
 Origin is both the source from which the Workspace was created and its unique
 resolution key:
 
-```text
+```text literal
 Origin = { kind: issue, issueNumber }
        | { kind: slack, teamId, channelId }
        | { kind: web,   conversationId }
@@ -56,7 +57,8 @@ Origin = { kind: issue, issueNumber }
 - An AgentSession holds WorkspaceName. A Workspace does not hold a Session
   list; "which Sessions are currently bound" is a query over Sessions.
 - RepositoryNames are access grants and default checkout targets, not evidence
-  of materialized checkouts. The Agent performs clones within the directory.
+  of materialized checkouts. Workflow preparation owns the clean Issue checkout;
+  an interactive Agent organizes its own checkout layout.
 
 ## Semantics
 
@@ -99,8 +101,10 @@ user and must be unique within the Project.
   an active Workspace, provisioning one if none exists. For Slack, the
   Workspace belongs to the triggered Agent's Project. If Agents from different
   Projects use the same channel, each Project owns a separate Workspace.
-- Invited or delegated Sessions inherit the parent Session's Workspace, or the
-  Workspace of the enclosing ingress context.
+- An invited Agent joins the Workspace of the enclosing Session or ingress
+  context.
+- A delegated child Session always inherits its parent Session's Workspace. A
+  spawn request cannot select another Workspace.
 - Explicit override: `mo agent launch <agent> --workspace <name>` binds a new
   Session to an existing Workspace. Without `--workspace`, it binds to the
   current Project's default CLI Workspace, provisioning one when necessary;
@@ -168,19 +172,17 @@ internal layout; it is not platform schema.
 
 ## Status
 
-- This document supersedes the old rule in `repositories.md` that a Workspace
-  has no independent business identity and is identified by WorkflowRunId. The
-  old model's worktree materialization, WorkspaceRegistry, and terminal
-  reclamation semantics move under this model: use the guard above and identify
-  registry entries by WorkspaceName.
-- Open questions: when a compound Issue attaches additional repositories; how
-  clean Workflow initialization connects to the existing `workspace-prepare`
-  Action; wiring Slack channel archival to Workspace archival; how a bound
-  Session's Runtime Binding is redirected after Workspace rematerialization;
-  and where Workflow OpenSpec artifacts belong. They currently live inside a
-  Repository checkout (`openspec/changes/issue-<n>/`), but moving them to the
-  Workspace root would match the rule that work products belong to the
-  Workspace, especially when a compound Issue spans repositories.
-- Retired: the subagent Managed worktree concept from delivery increment 4.
-  Git worktrees belong to Git, not the platform. A spawned Session's directory
-  source is uniformly either its parent Workspace or a named Workspace binding.
+Workspace identity and explicit create/archive lifecycle are implemented.
+Issue, Slack, Web, and CLI origins resolve or provision Workspaces; named Runner
+materialization, cross-Session reuse, home affinity, and Workspace-aware
+reclamation guards are also implemented for their current owners. AgentJob
+scheduling can clear an offline Home and rematerialize elsewhere. WorkflowRun
+assignment remains pinned to its original Runner, so the cross-Runner Workflow
+rematerialization target above is not implemented. The Slack adapter also does
+not yet propagate a provider channel-archive event to the Server's archive
+boundary.
+
+Open questions concern compound-Issue repository attachment, Runtime Binding
+after rematerialization, and whether Workflow OpenSpec artifacts belong at the
+Workspace root. Git worktrees remain a Git implementation detail; a spawned
+Session always inherits its parent Workspace.

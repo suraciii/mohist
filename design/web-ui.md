@@ -43,7 +43,7 @@ user intent.
 Push is observation, not a driver. SignalR uses `/hubs/events`. After reconnect,
 the UI reconciles its queries.
 
-```text
+```text diagram
 Workflow decision -> Server commit and publish -> SignalR -> query refresh
 ```
 

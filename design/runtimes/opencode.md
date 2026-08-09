@@ -80,7 +80,7 @@ promise; the Runtime itself produces execution facts, not that Workflow output.
 
 ## Capability Boundary
 
-```text
+```text diagram
 Workflow Action ----+
 AgentJob executor ---+--> OpenCodeRuntime --> official SDK --> shared Server
 Session commands ----+                                      |
@@ -167,7 +167,7 @@ could create an Instance in the name of cleanup.
 Reclamation and ordinary Runtime operations share one exclusive boundary per
 directory:
 
-```text
+```text diagram
 local operation admitted?                 yes -> defer
         | no
         v
@@ -253,7 +253,7 @@ work is executing.
 
 The safety order is identity before effect:
 
-```text
+```text diagram
 resolve current binding
         |
         +-- present ----------+

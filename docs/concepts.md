@@ -28,7 +28,7 @@ boundary in Mohist. It is not the user's chat or collaboration workspace.
 ```bash
 mo project create my-app --path /path/to/repo   # Register this as the default repository.
 mo project use my-app
-mo server status   # Show Server status, including Runners and capacity.
+mo runner status   # Show Runners and shared execution capacity.
 ```
 
 **Multiple-Project example**: Create one Project for side project A and another
@@ -65,28 +65,32 @@ sub-issue moves through its own Workflow. See
 | Property | Meaning |
 |---|---|
 | `status` | backlog / in-progress / done / cancelled |
+| `isDraft` | Whether the requirement is still being prepared and therefore cannot start |
 | `workflowStage` | plan / build / check / integrate / done, the position in the Workflow |
-| `health` | active / paused / blocked / cancelled / done, the execution health |
+| `health` | active / queued / attention / paused / blocked / cancelled / done, the execution health |
 | `approvalState` | Whether the Issue is at an approval point and waiting for an `approve` or `reject` decision |
 
 See [Issue Management](issues.md).
 
 ## Workflow
 
-A Workflow is the production line that moves an Issue from an idea to merged
-code. The default Mohist Workflow has five stages:
+A Workflow is the production line that moves a ready Issue from an idea to
+merged code. Draft and Backlog remain outside the Workflow so requirement
+readiness and execution state cannot be confused. The default Mohist Workflow
+has five stages:
 
-```text
-Draft -> Plan -> Build -> Check -> Integrate -> Done
-          ^               |          |
-          |               v          v
-        Backlog          Build      Build
-                         (rejected) (integrate failed)
+```text diagram
+Draft --mark ready--> Backlog --start--> Plan
+Plan --approve--> Build --automatic--> Check
+Plan --reject--> Plan
+Check --approve--> Integrate --automatic--> Done
+Check --reject--> Build
 ```
 
-Each stage has one purpose:
+Before the Workflow starts, Draft protects an incomplete requirement and
+Backlog identifies work that may start. Each Workflow stage then has one
+purpose:
 
-- **Draft**: The initial state after Issue creation. The Issue has not started.
 - **Plan**: An Inline Agent understands the requirement and produces the
   proposal, design, specs, and tasks.
 - **Build**: An Inline Agent writes code and runs tests according to the tasks.
@@ -214,7 +218,7 @@ and are fixed for the unit of work when it starts. See [Skills](skills.md).
 
 ## How the Concepts Fit Together
 
-```text
+```text diagram
 [Slack] -- Agent Connection --> [Mohist Agent]
                                       |
                                       | AgentJob + AgentSession

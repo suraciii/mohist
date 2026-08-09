@@ -103,3 +103,11 @@ domain design, rationale, and constraints.
    integration child Issue. Reevaluate only after a real requirement appears.
 2. **Web UI:** [`web-ui.md`](web-ui.md) owns exact parent-card placement by
    status without stage, progress indicators, and blocked presentation.
+
+## Status
+
+The parent-child model, derived parent state, composite advancement, Epic
+isolation, parent context for child planning, and CLI/Web surfaces are
+implemented. A final integration child remains the explicit product mechanism
+for cross-repository acceptance; coordinated multi-repository release is not
+part of this design.

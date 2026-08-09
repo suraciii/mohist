@@ -128,14 +128,26 @@ If you are new to Mohist, read the [repository README](../README.md) first.
   product terms, configuration fields, commands, identifiers, and code symbols.
   Use short sentences, active voice, and American spelling. Treat ASD-STE100 as
   a writing target, not a compliance claim.
-- **Diagrams**: Use fenced `text` blocks and ASCII characters. Add a diagram
-  only when it clarifies a boundary, ownership relation, dependency, sequence,
-  hierarchy, or state transition. Define the normative rule in prose. Use a
-  table for exact mappings and numbered steps for a linear procedure.
-- **No technical language**: Do not put API endpoints, field names, component
-  class names, or source paths in the body. They belong in `design/`. A single
-  `Implementation source:` footer that points to implementation entry points is
-  the only exception.
+- **Classify text fences**: Use `text diagram` for an ASCII visualization of a
+  boundary, ownership relation, dependency, sequence, hierarchy, or state
+  transition. Use `text literal` for command output, syntax, protocol examples,
+  pseudocode, or user text. Do not use a bare `text` fence. Define normative
+  rules in prose, use a table for exact mappings, and use numbered steps for a
+  linear procedure.
+- **Use technical detail only where users need it**: Conceptual and product
+  guidance must explain mental models and visible behavior without endpoints,
+  fields, component classes, source paths, or source call chains. Formal CLI,
+  DSL, and API contracts can preserve the exact commands, syntax, and fields
+  that users must use. Never narrate implementation classes or source control
+  flow. A single `Implementation source:` footer can point to implementation
+  entry points.
+- **Markdown only**: Do not use raw HTML, including HTML comments, in active
+  documentation.
+- **Know the automated boundary**: `npm run docs:check` enforces Latin-script
+  prose, Markdown-only structure, text-fence classification, ASCII diagrams,
+  and local links. It cannot prove that prose is English or that a command has
+  the documented effect. Verify CLI examples against current help and focused
+  command tests, and verify behavioral claims against the owning implementation.
 - **Consistent terms**: Use Project, Issue, Workflow, Epic, Inline Agent, Mohist
   Agent, Agent Connection, AgentSession, and Skill consistently.
 

@@ -110,7 +110,7 @@ stored expressions.
 
 ### Syntax
 
-```text
+```text literal
 expr       := or
 or         := and ( "||" and )*
 and        := unary ( "&&" unary )*
@@ -127,7 +127,7 @@ string     := double-quoted string literal
 
 Examples:
 
-```text
+```text literal
 event.type.startsWith("com.mohist.workflow.") && event.issue == "42"
 event.type == "com.mohist.workflow.run.failed" && event.stage != "plan"
 event.issue in ["42", "43"]

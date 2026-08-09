@@ -36,7 +36,7 @@ take over manually. It is not another daily workspace.
 
 The arrows show how a work request reaches the execution environment.
 
-```text
+```text diagram
 [Slack] -- Agent Connection --> [Mohist Agent] ---------+
 [IDE / Agent host] --> [External Agent] -- Skill + mo --+--> [Mohist Server]
 [Web UI / CLI] -- direct use ---------------------------+
@@ -56,9 +56,13 @@ A Workflow Profile defines how an Issue enters the production line. Its stages,
 tasks, checks, and approval points are configurable. The default Profile is
 `mohist/local`:
 
-```text
-Draft -> Plan -> Build -> Check -> Integrate -> Done
+```text diagram
+Draft --mark ready--> Backlog --start--> Plan -> Build -> Check -> Integrate -> Done
 ```
+
+Draft and Backlog belong to the Issue lifecycle rather than the Profile. This
+readiness boundary keeps incomplete requirements out of execution; the Profile
+begins at Plan only after the Issue is ready and explicitly started.
 
 Multiple Issues advance concurrently and independently. Key stages, such as
 Plan and Check, stop at approval points. The Workflow continues after it
@@ -77,15 +81,15 @@ the owner. See [Agent Event Routing](docs/event-routing.md) and
 
 | Available | Integration in progress | Not implemented or proposal |
 |---|---|---|
-| Five-stage Workflow, approval points, automatic Epic advancement | Workflow Profile collection migration | Composite Issues and sub-issues |
-| `mo` CLI, Web UI, direct Mohist Agent launch and sessions | Unified Agent API reliability contract | Mobile PWA and Web Push proposal |
-| Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Agent Skills execution and concurrency limits | |
-| OpenCode / Pi Runtime, GitHub PR Profile, Slack Agent Connections | Observability detection and log contract | |
+| Five-stage Workflow, approval points, Epics, composite Issues, and sub-issues | Workflow Profile UI migration | Mobile PWA and Web Push proposal |
+| `mo` CLI, authenticated Web UI, direct Mohist Agent launch and sessions | Unified Agent API reliability contract | |
+| Hermes notifications, event routing, Agent supervision, mentions, and Issue watch | Automatic observability anomaly notifications | |
+| Agent Skills execution and concurrency limits | | |
+| OpenCode / Pi Runtime, GitHub PR Profile, and Slack Agent Connections | | |
+| Metrics, route diagnostics, and the application log contract | | |
 
 The corresponding Issues track items that are in progress or have a finalized
 spec. See the "Implementation Gaps" section in each document.
-
-<!-- TODO: Add a Web UI screenshot. -->
 
 ## Documentation
 
@@ -96,7 +100,7 @@ Architecture and design documents are under [`design/`](design/README.md).
 
 ## Repository Structure
 
-```text
+```text diagram
 packages/
   server/    Control plane (ASP.NET Core + Orleans)
   runner/    Execution plane (TypeScript)

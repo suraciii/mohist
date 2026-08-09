@@ -12,7 +12,7 @@ second session record. The transcript contract and Session state authority remai
 It is derived locally by the client: it is not persisted, published to the event bus, or written
 back to the Server. Any client can implement the same rules independently.
 
-```text
+```text literal
 TimelineItem
   Id            # Determined by the source fact: toolCallId, InputId, fact sequence, and so on
   RenderClass   # Presentation class

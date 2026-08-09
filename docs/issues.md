@@ -13,7 +13,7 @@ multiple Issues into a milestone.
 ### CLI
 
 ```bash
-# Minimal form
+# Minimal form; a new Issue is a Draft by default.
 mo issue create "Add search feature"
 
 # Include a body
@@ -40,7 +40,13 @@ mo issue create "server: add subscription API" --repo server
 
 # Create a child of another Issue
 mo issue create "web: add subscription management" --parent 42 --repo web
+
+# Skip Draft only when the requirement is ready to execute.
+mo issue create "Document search API" --body-file ./issue-body.md --ready
 ```
+
+Draft protects incomplete requirements from consuming execution capacity. Mark
+an Issue ready only after its body and dependencies are usable.
 
 Without `--workflow-profile`, the Issue inherits the Project's default Profile.
 You may update the selection before the Workflow starts or later. An active
@@ -86,7 +92,7 @@ What verifiable conditions define completion?
 
 Do not use a body with too little context:
 
-```text
+```text literal
 Add search
 ```
 
@@ -153,20 +159,25 @@ UI. The details page shows:
 ## Start an Issue
 
 ```bash
+mo issue edit 42 --ready
 mo issue start 42
 ```
 
 After the Issue starts:
 
-1. Mohist creates a worktree on the `mo/issue-42` branch.
-2. The Workflow enters Plan.
-3. The Inline Agent starts.
+1. Mohist creates or reuses the named Workspace `issue-42`.
+2. The Workflow enters Plan and waits for Runner capacity when necessary.
+3. The Inline Agent starts when a Runner claims the work.
 
 The following conditions must be true:
 
 - The Issue is in `backlog`.
-- A Runner is connected. Use `mo server status` to inspect Runner status.
-- The concurrency limit has not been reached. The default limit is 8.
+- The Issue is marked ready rather than Draft.
+- Its prerequisites and Repository binding permit a start.
+
+Runner presence and free slots affect dispatch, not the Start decision. A
+started Workflow waits safely until eligible capacity is available. Use
+`mo runner status` to inspect that wait.
 
 ## Respond to an Approval Point
 
@@ -316,5 +327,5 @@ Use `mo issue <command> --help` for all options.
 
 ---
 
-Source: `packages/server/src/Mohist.Server/Issue/`, `Api/IssueRoutes.*`, and the
+Implementation source: `packages/server/src/Mohist.Server/Issue/`, `Api/IssueRoutes.*`, and the
 CLI under `packages/cli/`.

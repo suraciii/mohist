@@ -15,7 +15,7 @@ See [`variables.md`](variables.md) for Variable resolution,
 
 ## Model
 
-```text
+```text diagram
 Project { defaultWorkflowProfileId }
   -- owns 1..* --> WorkflowProfile { id, name, description, definition }
   -- default ---> WorkflowProfile
@@ -52,7 +52,7 @@ directly in `definition`.
 
 An Issue makes one selection when it starts a WorkflowRun:
 
-```text
+```text literal
 selectedProfileId =
   issue.workflowProfileId ?? project.defaultWorkflowProfileId
 ```
@@ -85,7 +85,7 @@ again. Its snapshot remains unchanged for the lifetime of that attempt.
 holds the default Profile reference. Issue holds an optional explicit Profile reference. Neither copies the
 Profile body.
 
-```text
+```text diagram
 Issue -> Workflow
 
 WorkflowRun stage initialization -> IWorkflowProfileProvider
@@ -101,7 +101,7 @@ The Provider does not read Variables or Prompts and does not select the Profile.
 
 The Profile collection is a child resource of Project:
 
-```text
+```text literal
 GET    /api/projects/{projectRef}/workflow-profiles
 POST   /api/projects/{projectRef}/workflow-profiles
 GET    /api/projects/{projectRef}/workflow-profiles/{*profileId}

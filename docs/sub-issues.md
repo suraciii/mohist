@@ -39,7 +39,17 @@ mo issue create "web: subscription management page"             --parent 42 --re
 
 # Add a prerequisite when order matters. The Web Issue waits for the server Issue.
 mo issue prereq add 44 43
+
+# The graph is complete. Mark the parent and every child ready before advancing it.
+mo issue edit 42 --ready
+mo issue edit 43 --ready
+mo issue edit 44 --ready
 ```
+
+Keep the parent and children as Drafts while assembling the split. This prevents
+partial structure from entering execution before every scope and prerequisite
+is visible. A Draft child remains intentionally excluded from composite
+advancement.
 
 - To attach an existing backlog Issue, use
   `mo issue edit 43 --parent 42`. To detach it, use
@@ -68,8 +78,8 @@ mo issue start 42    # Starting the parent starts composite advancement.
 After the parent starts:
 
 1. Mohist starts all startable child Issues in parallel. Each child must be in
-   `backlog` with all prerequisites satisfied. Each runs its own Workflow in
-   its own repository.
+   `backlog`, marked ready, and have all prerequisites satisfied. Each runs its
+   own Workflow in its own repository.
 2. Whenever a child reaches a terminal state, Mohist automatically starts any
    children that the completion unblocked. This continues until all children
    are terminal.
@@ -146,11 +156,11 @@ integration validation. When needed, create an integration-validation child as
 the final child and make it depend on all other children. Coordinated release
 of multi-repository changes is a Non-goal. See [Repositories](repositories.md).
 
-## Implementation Gaps
+## Status
 
-This document is a product specification. None of the described capability is
-implemented yet, including parent-child relationships, composite advancement,
-state aggregation, and parent context injection during Plan. Corresponding
-Issues track the work. See
-[`design/issue-breakdown.md`](../design/issue-breakdown.md) for the decision
-history.
+Parent-child relationships, composite advancement, derived parent state, Epic
+isolation, and read-only parent context during a child Plan are implemented in
+CLI, Web, Server, and Runner. Cross-repository integration remains an explicit
+final-child workflow when a requirement needs it; Mohist does not infer or hide
+that acceptance boundary. See
+[`design/issue-breakdown.md`](../design/issue-breakdown.md) for the design.

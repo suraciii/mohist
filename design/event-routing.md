@@ -26,7 +26,7 @@ Matching and rendering use only the envelope and perform no cross-domain query.
 
 ## Model
 
-```text
+```text literal
 RoutingRule (one ordered, Project-scoped table)
   Id, ProjectId, Name
   Position                  Unique position; evaluation uses this order
@@ -120,7 +120,7 @@ commands such as `mo workflow approve` and `mo issue comment`.
 
 ## Command Surface
 
-```text
+```text literal
 mo routing rule create --name <n> --match <expr> --agent <agent> \
     --response-prompt <p> [--continue] [--before <rule> | --after <rule>]
 mo routing rule list | view <n> | edit <n> | archive <n>

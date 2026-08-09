@@ -1,5 +1,5 @@
 ---
-status: wip
+status: implemented
 ---
 
 # Slack
@@ -47,7 +47,7 @@ share authoritative Server state but not responsibilities.
 
 ## System Boundary
 
-```text
+```text diagram
 Slack member
     | message / action
     v
@@ -274,7 +274,7 @@ not business facts; see
 AgentApp must store business facts and therefore cannot be that process manager.
 Binding across AgentApp and Connection advances as:
 
-```text
+```text diagram
 AgentApp commits fact -> durable handler -> idempotent Connection command
 ```
 
@@ -661,7 +661,7 @@ The reply action command surface is `mo slack message send`, a general CLI for
 people and Agents rather than an Agent-only black box. Its explicit destination
 matches Buzz `buzz messages send`:
 
-```text
+```text literal
 mo slack message send --conversation <id> --text "<body>"
 mo slack message send --conversation <id> --reply-to <ts> --text "<body>"        # reply in thread
 printf 'long body\n\nmultiple paragraphs\n' | mo slack message send --conversation <id> --text -
@@ -844,18 +844,11 @@ Socket leases, access admission, thread/DM Session mapping, Stop, and stable
 delivery projection are available. The local setup path has no OAuth callback or
 plaintext-token control path.
 
-Two target contracts remain incomplete:
-
-- Reactive rotation of an expired Configuration token is not connected at
-  production call sites; rotation currently occurs only as setup verification.
-  This is an App-management availability gap and must not affect installed Bot
-  data-plane operation.
-- Agent-authored reply body through reply action is not implemented. Server
-  still extracts and renders assistant text from Turn output and adds the link
-  block from Session plus the administrator-configured external Web URL. The
-  adapter still does not parse Agent text into control objects, but this remains
-  a transition away from the target ownership model. Valid silence and
-  Agent-authored failure reporting require the reply action.
+App-management calls reactively rotate an expired Configuration credential
+without changing the installed Bot data plane. The Agent-authored reply action
+owns reply content, and terminal handling owns only delivery liveness. This
+separation permits intentional silence and keeps the adapter from interpreting
+Agent text as control data.
 
 Public App Marketplace, multi-tenant hosting, coordination across Mohist
 Servers, Slack-native Agent ingress, App Home, and complete scale and operations

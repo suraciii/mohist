@@ -131,7 +131,7 @@ second transformation.
 
 ### Authentication and Sending
 
-```text
+```text literal
 body   = rendered CloudEvent JSON as UTF-8 bytes
 POST TargetUrl
   Content-Type: application/cloudevents+json
@@ -192,7 +192,7 @@ mo webhook subscription create my-fine-hook \
   --target-url 'https://ci.internal/mohist'
 ```
 
-```text
+```text literal
 mo webhook subscription list
 mo webhook subscription view <id>
 mo webhook subscription edit <id> --event ... --target-url '...'

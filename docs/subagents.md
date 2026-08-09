@@ -11,7 +11,7 @@ when a user starts it directly and a Subagent when another session spawns it.
 The parent-child relationship belongs to AgentSessions. This is like a process
 tree: programs have no parent-child relation, but processes do.
 
-```text
+```text diagram
 Control plane: flat Agent resources, with no parent-child relation
 
   [lead]   [terra]   [luna]   [e2e]   [reviewer]
@@ -26,8 +26,8 @@ Execution plane: a recorded session tree that grows during work
      |                 +-- spawn --> S5: e2e
      +-- spawn --> S4: reviewer
 
-  Child sessions share the parent working directory by default.
-  For isolation, bind another Workspace or use git in the shared directory.
+  Child sessions inherit the parent working directory.
+  For file isolation, the Agent can use git inside that directory.
 ```
 
 ## Division of Work with a Workflow
@@ -93,12 +93,11 @@ Agent's judgment. When it needs more information, the Agent can query
 mo agent spawn reviewer --project <project-id> --parent-session <session-id> --prompt "Review changes in the current working directory, focusing on the token storage path" --idempotency-key <key>
 ```
 
-A child session inherits the parent session's working directory by default and
-uses the same Workspace. For independent work, first use `mo workspace create`
-to create another Workspace and bind it during spawn with
-`--workspace <name>`. An Agent can instead create a git worktree in the shared
-directory. A git worktree is a git tool whose use the Agent decides; the
-platform has no "isolated workspace" primitive.
+A child session always inherits the parent session's working directory and uses
+the same Workspace. Spawn does not accept an alternate Workspace or path. When
+an assignment needs file isolation, the Agent can create a git worktree in the
+shared directory. A git worktree is a git tool whose use the Agent decides; the
+platform has no child-specific Workspace primitive.
 
 Spawn is a normal Agent launch plus an explicit parent-child relation.
 `--parent-session` names the delegating session because a working directory does
@@ -121,22 +120,20 @@ Context rules:
   context. Its only input is the spawn prompt and context references. The parent
   must put all necessary information in the brief; the child cannot read the
   parent's conversation history.
-- **Working directory inherited from the parent by default**: The child session
+- **Working directory inherited from the parent**: The child session
   starts with the parent's currently available working directory and uses the
   same Workspace. The caller cannot specify a path; the working directory must
   be the one currently available to the parent. If the parent has no such
   directory or usable execution environment, spawn is explicitly rejected and
-  does not silently run elsewhere. For isolation, bind another Workspace with
-  `mo workspace create` and `--workspace <name>`, or let the child create a git
-  worktree in the shared directory. The parent's assignment discipline must
-  still prevent file conflicts, and git is the final arbiter. A session started
-  through an Agent Connection currently has no working directory and execution
-  environment that a child can continue, so it cannot spawn as a parent. This
-  will become available only after its own session has those conditions.
+  does not silently run elsewhere. For isolation, the child can create a git
+  worktree in the inherited directory. The parent's assignment discipline must
+  still prevent file conflicts, and git is the final arbiter. Any parent without
+  an authoritative working directory and usable execution environment is
+  rejected; the source of the parent Session does not bypass that check.
 
 ## Messages Between Parent and Child
 
-```text
+```text diagram
                  terminal report (automatic pointer)
   [Child] ----------------------------------------------> [Parent]
 
@@ -144,7 +141,8 @@ Context rules:
   [Parent] <-- request help ----------------------------- [Child]
                     Both use mo session followup.
 
-  mo session stop S1    -> stop active work in the current subtree
+  mo session stop S1 --idempotency-key <key>
+                         -> stop active work in the current subtree
   mo session detach S3  -> detach S3 and exempt it from the cascade
 ```
 
@@ -182,11 +180,12 @@ Sessions added or detached during pagination appear only in a new read.
   When stop, attachment of a new child, and detach occur concurrently, the
   operation that actually completes first determines scope. A subtree detached
   first is outside the stop. A subtree recorded in stop scope first remains in
-  that stop even if it detaches later. An attached child is included. A
-  delegation not yet attached, and a new delegation during stop, is explicitly
-  rejected and does not start silently after stop. After stop finishes, the
-  parent can delegate again with a new request outside the old stop scope. A
-  retry always reuses the same scope.
+  that stop even if it detaches later. An attached child is included. A new
+  spawn request first observed during stop remains validation-pending with no
+  child artifacts; retry the same idempotency key after stop finishes. A spawn
+  plan that already reserved attachment but loses the final race to the stop is
+  rejected durably; a later delegation then needs a new key. Retrying the stop
+  itself always reuses its frozen scope.
 
 ```bash
 mo session stop <session-id> --idempotency-key <key>
@@ -251,9 +250,9 @@ a new session at the due time, or schedule display in `mo session view` or
 
 Capability declaration, startup awareness, `mo agent spawn`, terminal reports,
 `mo session tree`, cascade stop, detach, and scheduled input are implemented.
-A child inherits the parent Workspace unless the caller selects another named
-Workspace. Git isolation remains an Agent and Git concern rather than a second
-Session Tree workspace lifecycle.
+A child always inherits the parent Workspace and working directory. Git
+isolation remains an Agent and Git concern rather than a second Session Tree
+Workspace lifecycle.
 
 Temporary anonymous child sessions are intentionally excluded. A child
 session identity must come from a defined Agent so that configuration has one

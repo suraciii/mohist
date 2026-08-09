@@ -25,7 +25,7 @@ transport protocol, storage layout, or client SDK.
 | Can a retry create duplicate work? | It must not | Retrying the same intent must return to the original work or input |
 | Can accepted input be displaced by new input? | No | Insufficient capacity must reject or queue; it must never silently discard an accepted user delegation |
 
-```text
+```text diagram
 Web              \
 CLI               +--> Agent API --> Agent / AgentJob / AgentSession --> Runner
 Agent Connection /
@@ -189,7 +189,7 @@ The field and state vocabularies have one authority:
 This document does not repeat those fields or their transaction algorithms. It fixes the
 caller-visible invariants that every entry point must preserve:
 
-```text
+```text diagram
 caller intent + stable key
             |
             v
@@ -254,7 +254,7 @@ When Unknown or operation response loss blocks ordinary Compact, Reset, or recov
 first queries the original operation using its caller-provided `operationId`. Force-reset is the
 explicit product action for moving past Unknown:
 
-```text
+```text diagram
 unknown
   |
   +--> query original operation --> determinate --> continue
@@ -459,7 +459,7 @@ policy and a bounded queue. Mohist adopts both principles while retaining its ow
   organization tenant isolation.
 - This document does not fix HTTP paths, DTOs, database tables, lease protocols, or SDK versions.
 
-## Implementation gaps and order
+## Status
 
 The current Web UI and CLI have basic paths for creating and launching Agents and viewing and
 continuing sessions, but the cross-entry-point contract above is incomplete, especially for input
@@ -483,6 +483,11 @@ Server admission layer: all affected entry points must pass the caller key into 
 admission/operation path, which rejects null or empty keys before any state or external effect.
 Until that work lands, this target design remains the authority for new implementation and the gap
 must remain visible in delivery status.
+
+The current Server stop route also still accepts a legacy request body containing `turnId` and
+executes the pre-cascade single-Turn stop path. That body is not part of the target API and is not a
+compatibility contract. It must be removed so the route accepts only the bodyless cascade request
+with `Idempotency-Key` defined in [`subagents.md`](subagents.md#cascade-stop).
 
 Product dependencies determine implementation order:
 
