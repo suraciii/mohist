@@ -186,6 +186,66 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         Assert.Equal(0, idleEntry.GetProperty("queuedCount").GetInt32());
     }
 
+    [Fact]
+    public async Task GetAvailability_AndStatus_IncludeCanonicalFollowupGateWaiter()
+    {
+        var projectId = await CreateProjectAsync("availability-followup-gate");
+        var agent = await CreateAgentAsync(projectId, "followup-agent", maxConcurrentRuns: 1);
+        _fixture.SetOnlineRunners(
+        [
+            new RunnerStatusView(
+                Id: "runner-1",
+                Kind: "external",
+                Hostname: "host-1",
+                Scope: new RunnerScopeView("global"),
+                Status: "idle",
+                RegisteredAt: null,
+                LastHeartbeatAt: null,
+                ConnectionState: "connected",
+                Capabilities: Array.Empty<string>(),
+                CoderModels: Array.Empty<string>(),
+                CoderModelCount: 0,
+                Capacity: new RunnerCapacityView(0, 4),
+                ActiveWorks: Array.Empty<RunnerActiveWorkView>()),
+        ]);
+
+        var gate = _fixture.Services.GetRequiredService<Orleans.IGrainFactory>()
+            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id));
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(projectId, agent.Id, "job-active", "job-active", AgentConcurrencyPermitOwnerKind.Job));
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Waiting,
+            await gate.AcquireAsync(
+                projectId,
+                agent.Id,
+                "followup:queued",
+                "session-followup",
+                AgentConcurrencyPermitOwnerKind.Followup,
+                "followup:queued"));
+
+        using var availabilityResponse = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agents/availability");
+        Assert.Equal(HttpStatusCode.OK, availabilityResponse.StatusCode);
+        var availabilityPayload = await availabilityResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var entry = Assert.Single(availabilityPayload.GetProperty("data").EnumerateArray());
+        Assert.Equal(1, entry.GetProperty("activeRuns").GetInt32());
+        Assert.Equal(1, entry.GetProperty("queuedCount").GetInt32());
+        Assert.Equal("capacity-full", entry.GetProperty("waitingReason").GetString());
+
+        using var statusResponse = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/status");
+        Assert.Equal(HttpStatusCode.OK, statusResponse.StatusCode);
+        var statusPayload = await statusResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var status = statusPayload.GetProperty("data");
+        Assert.Equal(1, status.GetProperty("availability").GetProperty("activeRuns").GetInt32());
+        Assert.Equal("capacity-full", status.GetProperty("availability").GetProperty("waitingReason").GetString());
+        var waiting = status.GetProperty("waitingWork").EnumerateArray().ToArray();
+        var followup = Assert.Single(waiting);
+        Assert.Equal("session-followup", followup.GetProperty("jobId").GetString());
+        Assert.Equal("capacity-full", followup.GetProperty("waitingReason").GetString());
+    }
+
     private async Task SeedPendingJobAsync(string projectId, string agentId, string jobKey)
     {
         var store = _fixture.Services.GetRequiredService<IAgentJobStore>();
@@ -240,7 +300,7 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
             ?? throw new InvalidOperationException("Project create did not return an id");
     }
 
-    private async Task<AgentWire> CreateAgentAsync(string projectId, string name)
+    private async Task<AgentWire> CreateAgentAsync(string projectId, string name, int maxConcurrentRuns = 2)
     {
         var response = await _fixture.Client.PostAsJsonAsync(
             $"/api/projects/{projectId}/agents",
@@ -251,7 +311,7 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
                 instructions = $"instructions for {name}",
                 agentConfig = new { model = "openai/gpt-5.6" },
                 skills = new[] { "coding" },
-                maxConcurrentRuns = 2,
+                maxConcurrentRuns,
             });
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();

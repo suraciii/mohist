@@ -110,7 +110,10 @@ public interface IAgentJobGrain : IGrainWithStringKey, IRemindable
     Task MarkUnknownAsync(string reason) => Task.CompletedTask;
 
     Task ReconcileRunningAsync(string runnerId, string workId) => Task.CompletedTask;
-    Task ConcurrencyPermitGrantedAsync() => Task.CompletedTask;
+    Task ConcurrencyPermitGrantedAsync(
+        string? token = null,
+        string? permitId = null,
+        string? dispatchId = null) => Task.CompletedTask;
 }
 
 /// <summary>

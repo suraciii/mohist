@@ -38,4 +38,9 @@ public sealed class AgentJobState
     [Id(23)] public DateTimeOffset? ReadySince { get; set; }
     [Id(24)] public AgentLaunchVisibility LaunchVisibility { get; set; } = AgentLaunchVisibility.Visible;
     [Id(25)] public PendingSubagentTerminalEvent? PendingSubagentTerminalEvent { get; set; }
+    [Id(26)] public string? ConcurrencyPermitId { get; set; }
+    [Id(27)] public string? ConcurrencyDispatchId { get; set; }
+    [Id(28)] public long ConcurrencyGeneration { get; set; }
+    [Id(29)] public AgentConcurrencyPermitStatus ConcurrencyGateStatus { get; set; } = AgentConcurrencyPermitStatus.DispatchPending;
+    [Id(30)] public bool ConcurrencyReleasePending { get; set; }
 }
