@@ -400,18 +400,22 @@ Job completion as a closed conversation or a delivered user goal.
   does not affect the delivered input. See
   [Subagents and Session Trees](subagents.md) for the scheduled-input contract.
 - Subsequent read, follow-up, compact, reset, cancel, and stop operations use
-  the stable Session ID. Cancel and stop also require `--turn-id` to identify
-  the Turn. Cancel deterministically cancels a queued Turn. Stop asks the
-  Runtime to stop an executing Turn. Follow-up returns a new Input ID. It also
-  returns a Turn ID when the Input has joined the current Turn or a new Turn;
-  otherwise, read the Session later to find the assignment.
+  the stable Session ID. Cancel also requires `--turn-id` and deterministically
+  cancels that queued Turn. Stop requires `--idempotency-key` and requests a
+  cascade stop for active work in the attached session subtree. Follow-up
+  returns a new Input ID. It also returns a Turn ID when the Input has joined
+  the current Turn or a new Turn; otherwise, read the Session later to find the
+  assignment.
 
 Source is only a filter and convenient lookup condition. It does not create
 duplicate `mo issue session` and `mo agent session` capabilities.
 `session cancel` deterministically cancels a queued Turn without contacting the
-Runtime. `session stop` asks the Runtime to stop an executing Turn. Its result
-can be `stop-requested`, `stopped`, or `unknown`. For an unknown result, inspect
-the Session view. Both commands affect only the Turn selected by `--turn-id`.
+Runtime. `session stop` creates a durable operation over the subtree attached to
+the selected root Session. It requests Runtime stop only for executing Turns in
+that fixed scope; Sessions remain available for later continuation. Retry an
+unconfirmed request with the same idempotency key to recover the same operation
+instead of selecting the tree again. See
+[Subagents and Session Trees](subagents.md#lifecycle).
 
 ## Slack
 
