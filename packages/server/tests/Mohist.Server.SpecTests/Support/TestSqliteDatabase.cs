@@ -37,8 +37,15 @@ public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
     public async ValueTask DisposeAsync() => await Keeper.DisposeAsync();
 
     private static TestSqliteDatabase Create(Action<SqliteConnection> copySchema)
+        => Create(
+            () => new SqliteConnection($"Data Source=test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared"),
+            copySchema);
+
+    internal static TestSqliteDatabase Create(
+        Func<SqliteConnection> createKeeper,
+        Action<SqliteConnection> copySchema)
     {
-        var keeper = new SqliteConnection($"Data Source=test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
+        var keeper = createKeeper();
         try
         {
             keeper.Open();

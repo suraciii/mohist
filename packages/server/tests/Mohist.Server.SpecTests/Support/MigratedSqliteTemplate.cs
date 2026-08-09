@@ -88,8 +88,13 @@ public static class MigratedSqliteTemplate
     }
 
     private static SqliteConnection CreateTemplate(string? targetMigration)
+        => CreateTemplate(OpenInMemory, targetMigration);
+
+    internal static SqliteConnection CreateTemplate(
+        Func<SqliteConnection> openConnection,
+        string? targetMigration)
     {
-        var connection = OpenInMemory();
+        var connection = openConnection();
         try
         {
             using var db = CreateContext(connection);
