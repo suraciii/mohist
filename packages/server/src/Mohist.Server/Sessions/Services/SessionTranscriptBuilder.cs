@@ -207,8 +207,7 @@ internal static class SessionTranscriptBuilder
 
         foreach (var canonicalTurn in canonicalTurns.OrderBy(turn => turn.Sequence))
         {
-            if (canonicalTurn.Status is not (AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown)
-                || persistedSequences.Contains(canonicalTurn.Sequence))
+            if (persistedSequences.Contains(canonicalTurn.Sequence))
                 continue;
 
             var recordedAt = canonicalTurn.RecordedAt ?? session.Status.CreatedAt;

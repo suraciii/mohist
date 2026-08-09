@@ -216,4 +216,55 @@ public sealed class SessionTranscriptBuilderTests
                 Assert.Contains("Earlier context retained", compaction.Message, StringComparison.Ordinal);
             });
     }
+
+    [Theory]
+    [InlineData(AgentTurnStatus.Failed, "failed")]
+    [InlineData(AgentTurnStatus.Cancelled, "cancelled")]
+    [InlineData(AgentTurnStatus.Completed, "completed")]
+    public void Build_MissingCanonicalTerminalTurn_PreservesStatusAndResult(
+        AgentTurnStatus status,
+        string expectedStatus)
+    {
+        var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+        var session = CreateSession(at);
+        var result = new AgentTurnResult(
+            Message: "terminal message",
+            Output: "terminal output",
+            FailureReason: status == AgentTurnStatus.Failed ? "runner failed" : null,
+            FailureCategory: status == AgentTurnStatus.Failed ? "runtime" : null,
+            ExitCode: status == AgentTurnStatus.Failed ? 7 : null);
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Idle,
+            Inputs = [new AgentSessionInputRecord(
+                "input-1", 1, "terminal task", "agent-launch",
+                AgentSessionInputAcceptance.Accepted, at, JobId: "job-1")],
+            Turns = [new AgentTurnRecord(
+                "turn-1", 1, ["input-1"], status, JobId: "job-1", Result: result,
+                RecordedAt: at, UpdatedAt: at.AddSeconds(1))],
+        };
+
+        var transcript = new AgentSessionTranscriptData([], []);
+        var publicResponse = SessionTranscriptBuilder.Build(transcript, session);
+        var publicTurn = Assert.Single(publicResponse.Turns);
+
+        Assert.Equal(expectedStatus, publicResponse.Status);
+        Assert.Equal(expectedStatus, publicTurn.Status);
+        Assert.Equal("terminal task", publicTurn.User.Text);
+        Assert.Equal(result.Message, publicTurn.Result?.Message);
+        Assert.Equal(result.Output, publicTurn.Result?.Output);
+        Assert.Equal(result.FailureReason, publicTurn.Result?.FailureReason);
+        Assert.Equal(result.FailureCategory, publicTurn.Result?.FailureCategory);
+        Assert.Equal(result.ExitCode, publicTurn.Result?.ExitCode);
+
+        var rawResponse = SessionTranscriptBuilder.Build(transcript, session, "raw");
+        var rawTurn = Assert.Single(rawResponse.Turns);
+        Assert.Equal(expectedStatus, rawResponse.Status);
+        Assert.Equal(expectedStatus, rawTurn.Status);
+        Assert.Equal(result.Message, rawTurn.Result?.Message);
+        Assert.Equal(result.Output, rawTurn.Result?.Output);
+        Assert.Equal(result.FailureReason, rawTurn.Result?.FailureReason);
+        Assert.Equal(result.FailureCategory, rawTurn.Result?.FailureCategory);
+        Assert.Equal(result.ExitCode, rawTurn.Result?.ExitCode);
+    }
 }
