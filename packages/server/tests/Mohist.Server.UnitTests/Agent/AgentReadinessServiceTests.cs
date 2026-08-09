@@ -104,6 +104,19 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void GenericInvalidInput_IsUnknownAndDoesNotBlockLaunch()
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(),
+            History(AgentJobStatus.Failed, "invalid-input"));
+
+        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Empty(result.Gaps);
+        Assert.Null(result.Setup);
+        Assert.True(AgentConnectionDispatchDecision.For(result.Conclusion).Accepted);
+    }
+
+    [Fact]
     public void InconclusiveExecution_IsUnknown()
     {
         var result = AgentReadinessService.Evaluate(

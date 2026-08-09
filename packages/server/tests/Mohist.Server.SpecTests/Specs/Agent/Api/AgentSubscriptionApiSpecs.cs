@@ -56,8 +56,23 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
     [InlineData("unavailable-runtime")]
     public async Task List_RuntimeUnavailablePreservesUnknownInsteadOfUnconfigured(string failureCategory)
     {
-        var (projectId, agentId) = await CreateProjectAndAgentAsync($"subscription-{failureCategory}");
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("sub-readiness");
         await SeedFailedExecutionAsync(projectId, agentId, failureCategory);
+
+        using var response = await Client.GetAsync(Path(projectId, agentId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal(AgentReadinessConclusions.Unknown, data.GetProperty("readiness").GetString());
+        Assert.Equal("no_connection", data.GetProperty("state").GetString());
+        Assert.NotEqual("unconfigured", data.GetProperty("state").GetString());
+    }
+
+    [Fact]
+    public async Task List_InvalidInputPreservesUnknownInsteadOfUnconfigured()
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync("sub-invalid");
+        await SeedFailedExecutionAsync(projectId, agentId, "invalid-input");
 
         using var response = await Client.GetAsync(Path(projectId, agentId));
 

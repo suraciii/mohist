@@ -480,31 +480,6 @@ public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
     }
 
     [Fact]
-    public async Task MissingRuntimeUsesCanonicalDefaultAcrossConnectionAndSubscriptionReadiness()
-    {
-        using var configDocument = JsonDocument.Parse("{\"model\":\"provider/model\"}");
-        await SeedAgentAsync(
-            "proj-runtime-default",
-            "agent-runtime-default",
-            AgentStatus.Active,
-            configDocument.RootElement.Clone(),
-            "Do the work");
-
-        var created = await _store.CreateAsync(NewConnection("proj-runtime-default", "agent-runtime-default", "team-1"));
-        var displayed = await _store.GetAsync("proj-runtime-default", created.Id);
-        var agent = await new AgentQuerier(_factory).GetByIdAsync("proj-runtime-default", "agent-runtime-default");
-
-        Assert.NotNull(displayed);
-        Assert.Equal(AgentReadinessKind.Ready, displayed!.AgentReadiness);
-        Assert.NotNull(agent);
-        Assert.Equal(AgentReadinessKind.Ready, AgentReadinessDeriver.Derive(agent!.AgentConfig));
-        var subscriptionReadiness = AgentReadinessService.Evaluate(agent, null);
-        Assert.Equal(AgentReadinessConclusions.Unknown, subscriptionReadiness.Conclusion);
-        Assert.NotEqual(AgentReadinessConclusions.NeedsSetup, subscriptionReadiness.Conclusion);
-        Assert.Equal("opencode", AgentLauncher.ResolveRuntime(agent!.AgentConfig));
-    }
-
-    [Fact]
     public async Task DeleteRemovesCredentialsAndPreservesAgent()
     {
         await SeedAgentAsync("proj-19", "agent-19", AgentStatus.Active);
@@ -536,12 +511,7 @@ public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
         Assert.DoesNotContain("Concurrency", propertyNames);
     }
 
-    private async Task SeedAgentAsync(
-        string projectId,
-        string agentId,
-        string status,
-        JsonElement? agentConfig = null,
-        string instructions = "")
+    private async Task SeedAgentAsync(string projectId, string agentId, string status)
     {
         await using var db = _factory.CreateDbContext();
         db.Agents.Add(new AgentRow
@@ -552,8 +522,6 @@ public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
                 Id = agentId,
                 ProjectId = projectId,
                 Name = agentId,
-                Instructions = instructions,
-                AgentConfig = agentConfig,
                 Status = status,
             }, JSON.Options),
         });

@@ -126,7 +126,7 @@ public sealed class AgentReadinessService : IScopedService
 
         return value.Contains("api-key") || value.Contains("credential") || value.Contains("unauthorized")
             || value.Contains("model not found") || value.Contains("model-not-found")
-            || value.Contains("model-rejected") || value.Contains("preflight-rejected") || value.Contains("invalid-input")
+            || value.Contains("model-rejected") || value.Contains("preflight-rejected")
             || value.Contains("runtime-invalid") || value.Contains("invalid-runtime")
             || value.Contains("incompatible-runtime") || value.Contains("runtime-rejected");
     }
