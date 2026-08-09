@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative, resolve } from "node:path"
-import type { ActionError, ActionResult, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult } from "../core/types.js"
+import type { ActionError, ActionResult, JsonObject, JsonValue, DispatchWorkItem, WorkItemResult, AgentExecutionObservation } from "../core/types.js"
 import { isObject, stringInput } from "../core/json.js"
 import { errorMessage } from "../core/errors.js"
 import { stringAt } from "../core/json-path.js"
@@ -40,6 +40,7 @@ import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js
 import { createHash } from "node:crypto"
 import { SkillResolver } from "./skill-resolver.js"
 import { buildExecutionEnvelope } from "./execution-envelope.js"
+import { abandonWorkflowAgentTurn, agentObservation, reserveWorkflowAgentTurn, type WorkflowAgentTurnIdentity } from "../actions/workflow-agent-turn.js"
 
 const COMPLETED_STATUSES = new Set(["completed", "success", "succeeded", "pass", "passed"])
 const CHECK_STATUS_BY_ACTION_STATUS = new Map([
@@ -186,7 +187,7 @@ export class WorkExecutor {
           `Action '${definition.manifest.name}' threw before returning a result: ${errorMessage(thrown)}`,
         )
       }
-      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null } | null
+      const turnFact = (passThroughTurnFact(rawResult) ?? null) as { finalAssistantText?: string | null; agentObservation?: AgentExecutionObservation | null } | null
       const normalized = normalizeActionResult(rawResult, definition.manifest, caps)
       let effects: ActionEffects = {}
       let validatedResult: ActionResult
@@ -206,7 +207,7 @@ export class WorkExecutor {
       const completion = actionSucceeded
         ? await evaluateCompletion(renderedExpect, workDir, turnFact?.finalAssistantText ?? null)
         : null
-      const projected = projectTaskOutput(work, validatedResult, completion, caps)
+      const projected = projectTaskOutput(work, validatedResult, completion, caps, turnFact?.agentObservation ?? null)
       const resultForRecovery = projected
       const recoveryResult = tryRecovery(work, resultForRecovery, variables)
       if (recoveryResult) return recoveryResult
@@ -266,6 +267,16 @@ export class WorkExecutor {
       workDir,
       signal,
       log,
+      workflowRunId: work.workflowRunId,
+      workId: work.workId,
+      workType: work.workType,
+      stage: work.stage ?? null,
+      title: work.title ?? null,
+      projectId: work.projectId ?? null,
+      issueNumber: work.issueNumber ?? null,
+      epicNumber: work.epicNumber ?? null,
+      parentIssueContext: work.parentIssueContext ?? null,
+      serverConnection: this.connection,
       piRuntime: this.piRuntime,
       skillResolver: this.skillResolver,
       agentDefinition: work.agentDefinition,
@@ -296,24 +307,38 @@ export class WorkExecutor {
     return {
       async turn(request: AgentTurnRequest): Promise<ActionResult> {
         const definition = work.agentDefinition
+        const workflowIdentity: WorkflowAgentTurnIdentity = {
+          agentId: definition?.agentId ?? null,
+          sessionId: null,
+          inputId: null,
+          turnId: null,
+          operationId: null,
+        }
+        const failAgent = (code: string, message: string, nextAction = "retry") => actionFail(code, message, {
+          exitCode: 1,
+          turnFact: {
+            finalAssistantText: null,
+            agentObservation: agentObservation(workflowIdentity, "failed", "failed", code, nextAction, null),
+          },
+        })
         const skillNames = definition?.skills ?? []
         const resolvedSkills = await self.skillResolver.resolve(skillNames, workDir)
-        if (!resolvedSkills.ok) return actionFail(resolvedSkills.code, resolvedSkills.message)
+        if (!resolvedSkills.ok) return failAgent(resolvedSkills.code, resolvedSkills.message)
         const prompt = buildExecutionEnvelope(
           composeOpencodePrompt(request.prompt, work.parentIssueContext),
           definition?.instructions,
           resolvedSkills.skills,
         )
-        const modelName = definition?.model ?? request.options?.model
-        const variant = definition?.variant ?? request.options?.variant
+        const modelName = definition ? definition.model ?? null : request.options?.model
+        const variant = definition ? definition.variant ?? null : request.options?.variant
 
         const runtime = self.openCodeRuntime
         if (!runtime) {
-          return actionFail("runtime-unavailable", "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
+          return failAgent("runtime-unavailable", "agent-turn requires the OpenCode runtime; the runner has not yet established the runtime or it is rebuilding")
         }
         if (!runtime.ready()) {
           const diagnostic = runtime.diagnostic()
-          return actionFail("runtime-unavailable", `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
+          return failAgent("runtime-unavailable", `agent-turn requires the OpenCode runtime to be ready: ${diagnostic?.message ?? "no readiness diagnostic"}`)
         }
 
         const sessionName = request.session ?? work.workId
@@ -333,12 +358,15 @@ export class WorkExecutor {
                 epicNumber: work.epicNumber,
                 workDir,
                 runtime: "opencode",
+                agentId: definition?.agentId ?? null,
+                definition: definition ?? null,
               },
               signal,
             )
             if (opened.workDir && opened.workDir !== workDir) {
-              return actionFail("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
+              return failAgent("session-workspace-mismatch", "Workflow AgentSession is bound to a different workspace; rerun the stage with a new task attempt before retrying")
             }
+            workflowIdentity.sessionId = opened.sessionId ?? null
             binding = {
               runtimeSessionId: opened.runtimeSessionId ?? null,
               workDir: opened.workDir || "",
@@ -346,7 +374,7 @@ export class WorkExecutor {
               runtime: "opencode",
             }
           } catch (error) {
-            return actionFail("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`)
+            return failAgent("session-binding-failed", `Failed to resolve the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`)
           }
         }
         if (!binding) {
@@ -363,10 +391,10 @@ export class WorkExecutor {
           if (!created.ok) {
             const kind = created.error.kind
             const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
-            return actionFail(code, created.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            return failAgent(code, created.error.message)
           }
           try {
-            await self.connection.attachWorkflowAgentSession(
+            const attached = await self.connection.attachWorkflowAgentSession(
               work.projectId,
               work.workflowRunId,
               sessionName,
@@ -380,8 +408,9 @@ export class WorkExecutor {
               },
               signal,
             )
+            workflowIdentity.sessionId = attached.sessionId ?? workflowIdentity.sessionId
           } catch (error) {
-            return actionFail("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            return failAgent("session-binding-failed", `Failed to persist the Workflow AgentSession binding: ${error instanceof Error ? error.message : String(error)}`)
           }
           binding = {
             runtimeSessionId: created.value.runtimeSessionId,
@@ -423,7 +452,7 @@ export class WorkExecutor {
             coordinator: self.bindingRecoveryCoordinator ?? undefined,
           })
           if (!recovery.ok) {
-            return actionFail(recovery.kind, recovery.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+            return failAgent(recovery.kind, recovery.message)
           }
           binding = {
             ...recovery.binding,
@@ -432,6 +461,32 @@ export class WorkExecutor {
         }
 
         const selectedBinding = binding
+        if (definition && self.connection && work.projectId && selectedBinding.runtimeSessionId) {
+          try {
+            const reserved = await reserveWorkflowAgentTurn(
+              self.connection,
+              work,
+              sessionName,
+              { sessionId: workflowIdentity.sessionId, runtimeSessionId: selectedBinding.runtimeSessionId },
+              request.prompt,
+              signal,
+            )
+            workflowIdentity.sessionId = reserved.sessionId
+            workflowIdentity.inputId = reserved.inputId
+            workflowIdentity.turnId = reserved.turnId
+            workflowIdentity.operationId = reserved.operationId
+            if (!reserved.admissionReady) {
+              try {
+                await abandonWorkflowAgentTurn(self.connection, work, sessionName, workflowIdentity, signal)
+              } catch (rollbackError) {
+                return failAgent("turn-rollback-failed", `Workflow AgentSession turn is queued for concurrency capacity and could not be rolled back: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+              }
+              return failAgent("agent-concurrency-queued", "Workflow AgentSession turn is queued for Agent concurrency capacity; retry the Workflow task when capacity is available")
+            }
+          } catch (error) {
+            return failAgent("turn-reservation-failed", `Failed to durably reserve the Workflow AgentSession turn: ${error instanceof Error ? error.message : String(error)}`)
+          }
+        }
         const runtimeRequest = {
           target: {
             runtime: "opencode" as const,
@@ -460,22 +515,34 @@ export class WorkExecutor {
 
         if (reporter && selectedBinding.runtimeSessionId) {
           try {
-            await reporter.awaitInput(prompt, selectedBinding.runtimeSessionId)
+            await reporter.awaitInput(request.prompt, selectedBinding.runtimeSessionId, workflowIdentity)
           } catch (error) {
-            return actionFail("execution-unavailable", `failed to durably enqueue the Workflow AgentSession input: ${error instanceof Error ? error.message : String(error)}`)
+            try {
+              await abandonWorkflowAgentTurn(self.connection, work, sessionName, workflowIdentity, signal)
+            } catch (rollbackError) {
+              return failAgent("turn-rollback-failed", `failed to roll back the Workflow AgentSession turn after input enqueue failure: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
+            }
+            return failAgent("execution-unavailable", `failed to durably enqueue the Workflow AgentSession input: ${error instanceof Error ? error.message : String(error)}`)
           }
         }
 
         const observer = createWorkflowObserver(reporter)
         const result = await runtime.runTurn(runtimeRequest, signal, observer)
 
-        enqueueTerminalClose(reporter, result, selectedBinding.runtimeSessionId)
+        enqueueTerminalClose(reporter, result, selectedBinding.runtimeSessionId, workflowIdentity.turnId, signal.aborted || (!result.ok && result.error.kind === "interrupted"))
         await reporter?.settle()
 
         if (!result.ok) {
           const kind = result.error.kind
           const code = kind === "deadline-exceeded" ? "timeout" : kind === "missing-session" ? "runtime-session-missing" : kind
-          return actionFail(code, result.error.message, { exitCode: 1, turnFact: { finalAssistantText: null } })
+          const cancelled = signal.aborted || kind === "interrupted"
+          return actionFail(code, result.error.message, {
+            exitCode: 1,
+            turnFact: {
+              finalAssistantText: null,
+              agentObservation: agentObservation(workflowIdentity, cancelled ? "cancelled" : "failed", cancelled ? "cancelled" : "failed", code, cancelled ? "recover" : "retry", null),
+            },
+          })
         }
 
         const facts = result.value.facts
@@ -488,7 +555,15 @@ export class WorkExecutor {
           text: facts.finalAssistantText,
           diagnostics: result.value.diagnostics.map((d) => ({ code: d.code, message: d.message })),
         }
-        return actionSucceed(output, { exitCode: 0, turnFact: { finalAssistantText: facts.finalAssistantText } })
+        return actionSucceed(output, {
+          exitCode: 0,
+          turnFact: {
+            finalAssistantText: facts.finalAssistantText,
+            agentObservation: definition
+              ? agentObservation(workflowIdentity, "completed", "completed", null, null, facts.finalAssistantText)
+              : null,
+          },
+        })
       },
     }
   }
@@ -585,7 +660,7 @@ export class WorkExecutor {
 
 export function stripRunnerPrivateFacts(result: ActionResult): {
   publicActionResult: ActionResult
-  turnFact: { finalAssistantText?: string | null } | null
+  turnFact: { finalAssistantText?: string | null; agentObservation?: AgentExecutionObservation | null } | null
 } {
   if (!result || typeof result !== "object" || !("turnFact" in result)) {
     return { publicActionResult: result, turnFact: null }
@@ -595,19 +670,35 @@ export function stripRunnerPrivateFacts(result: ActionResult): {
   return { publicActionResult: rest as ActionResult, turnFact }
 }
 
-function projectTaskOutput(
+export function projectTaskOutput(
   work: DispatchWorkItem,
   result: ActionResult,
   completion: CompletionEvaluation | null,
   caps: ActionCapabilitySet,
+  observation: AgentExecutionObservation | null,
 ): WorkItemResult {
   if (isActionFailure(result)) {
-    return {
+    const projected: WorkItemResult = {
       status: failureStatus(work),
       message: result.error.message,
       error: result.error,
       exitCode: result.exitCode,
     }
+    if (observation) projected.output = observation as unknown as JsonObject
+    return projected
+  }
+  if (observation) {
+    if (completion !== null && !completion.satisfied) {
+      const failedObservation = { ...observation, status: failureStatus(work), outcome: "failed", reason: "expectation-failed", nextAction: "inspect-expectation" }
+      return {
+        status: failureStatus(work),
+        message: completion.message,
+        error: { code: "expectation-failed", message: completion.message },
+        output: failedObservation as unknown as JsonObject,
+        exitCode: result.exitCode,
+      }
+    }
+    return { status: "completed", output: observation as unknown as JsonObject, exitCode: result.exitCode }
   }
   if (caps.has("agent-turn")) {
     if (completion === null) return { status: "completed", output: null, exitCode: result.exitCode }
@@ -776,18 +867,21 @@ function enqueueTerminalClose(
   reporter: WorkflowAgentSessionReporter | null,
   result: any,
   runtimeSessionId: string | null,
+  turnId: string | null = null,
+  cancelled = false,
 ): void {
   if (!reporter) return
   if (reporter.inputWasRejected()) return
   if (runtimeSessionId === null) return
   if (result.ok) {
-    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId })
+    reporter.registerClose({ status: "completed", exitCode: 0, runtimeSessionId, turnId })
     return
   }
   reporter.registerClose({
-    status: "failed",
+    status: cancelled ? "cancelled" : "failed",
     exitCode: 1,
     failureReason: result.error.message,
     runtimeSessionId,
+    turnId,
   })
 }

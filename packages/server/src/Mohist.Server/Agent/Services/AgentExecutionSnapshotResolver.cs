@@ -37,6 +37,7 @@ public sealed class AgentExecutionSnapshotResolver(
             Model: AgentLauncher.ResolveModelAndVariant(config).Model,
             Variant: AgentLauncher.ResolveModelAndVariant(config).Variant,
             Skills: agent.Skills.ToArray(),
-            AllowedSubagents: allowedSubagents.ToArray());
+            AllowedSubagents: allowedSubagents.ToArray(),
+            AgentId: agent.Id);
     }
 }

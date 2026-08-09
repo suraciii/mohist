@@ -24,7 +24,8 @@ public sealed record AgentExecutionDefinition(
     [property: Id(2)] string? Model,
     [property: Id(3)] string? Variant,
     [property: Id(4)] IReadOnlyList<string> Skills,
-    [property: Id(5)] AllowedSubagentSnapshot[]? AllowedSubagents = null);
+    [property: Id(5)] AllowedSubagentSnapshot[]? AllowedSubagents = null,
+    [property: Id(6)] string? AgentId = null);
 
 [GenerateSerializer]
 public sealed record AllowedSubagentSnapshot(

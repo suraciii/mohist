@@ -277,6 +277,39 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
+  async recordWorkflowAgentTurn(
+    projectId: string,
+    workflowRunId: string,
+    sessionName: string,
+    body: { inputId: string; turnId: string; prompt: string; source?: string },
+    signal: AbortSignal,
+  ): Promise<WorkflowAgentTurnAcceptance> {
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/turn`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`session turn reservation failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<WorkflowAgentTurnAcceptance>
+  }
+
+  async abandonWorkflowAgentTurn(
+    projectId: string,
+    workflowRunId: string,
+    sessionName: string,
+    body: { inputId: string; turnId: string },
+    signal: AbortSignal,
+  ): Promise<void> {
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/turn/abandon`), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal,
+    })
+    if (!response.ok) throw new Error(`session turn rollback failed: ${response.status} ${await response.text()}`)
+  }
+
   async addTasks(workflowRunId: string, tasks: Array<{ id: string; title: string; uses?: string | null; with?: JsonObject | null; expect?: JsonObject | null }>) {
     const response = await this.fetchWithAuth(`${this.options.serverUrl.replace(/\/$/, "")}/api/workflow-runs/${encodeURIComponent(workflowRunId)}/tasks/batch`, {
       method: "POST",
@@ -545,11 +578,21 @@ export interface AgentSessionReconcileBinding {
 }
 
 export interface WorkflowAgentSession {
+  sessionId?: string | null
   runtimeSessionId?: string | null
   runtime?: string | null
   workDir?: string | null
   model?: string | null
   resolvedModel?: string | null
+}
+
+export interface WorkflowAgentTurnAcceptance {
+  sessionId: string
+  inputId: string
+  turnId: string
+  status: string
+  operationId?: string | null
+  admissionReady?: boolean
 }
 
 export interface AgentSessionRuntimeEventReceipt {

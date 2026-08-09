@@ -356,6 +356,37 @@ public class AgentTurnLifecycleT001Specs : AgentJobGrainTestSupport
     }
 
     [Fact]
+    public async Task TerminalSessionActivity_CancelledDrivesNonLaunchTurnToCancelled()
+    {
+        var sessionId = $"session-522-cancelled-activity-{Guid.NewGuid():N}";
+        var projectId = $"project-522-{Guid.NewGuid():N}";
+        var session = await OpenIdleSessionAsync(sessionId, projectId);
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        var inputId = $"input-{Guid.NewGuid():N}";
+        var turnId = $"turn-{Guid.NewGuid():N}";
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            InputId: inputId,
+            TurnId: turnId,
+            Prompt: "follow up please",
+            Source: "workflow"));
+        await session.MarkTurnExecutingAsync(turnId);
+
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[]
+            {
+                new AgentSessionRuntimeEventInput(
+                    RuntimeEventTypes.SessionActivity,
+                    $$"""{"activity":"idle","status":"cancelled","operationId":"op","turnId":"{{turnId}}","source":"workflow"}""")
+            },
+            "runtime-1"));
+
+        var turns = await session.ListTurnsAsync();
+        var turn = SingleTurn(turns);
+        Assert.Equal(AgentTurnStatus.Cancelled, turn.Status);
+    }
+
+    [Fact]
     public async Task TerminalSessionActivity_UnknownDrivesNonLaunchTurnToUnknown()
     {
         var sessionId = $"session-522-unknown-activity-{Guid.NewGuid():N}";

@@ -294,8 +294,103 @@ public static class RunnerRoutes
                 runnerId,
                 req.Runtime!,
                 WorkDir: req.WorkDir,
-                Metadata: WorkflowAgentSessionMetadata.Metadata(context)));
+                Metadata: WorkflowAgentSessionMetadata.Metadata(context),
+                Definition: req.Definition));
             return Results.Ok(ToRunnerAgentSession(projectId, workflowRunId, sessionName, session));
+        });
+
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/turn", async (
+            string projectId, string workflowRunId, string sessionName,
+            AgentSessionWorkflowTurnRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.InputId))
+                return ApiResults.BadRequest("inputId is required", "input_id_required");
+            if (string.IsNullOrWhiteSpace(req.TurnId))
+                return ApiResults.BadRequest("turnId is required", "turn_id_required");
+            if (string.IsNullOrWhiteSpace(req.Prompt))
+                return ApiResults.BadRequest("prompt is required", "prompt_required");
+
+            var sessionId = await sessions.ResolveByLabelsAsync(
+                WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
+            if (sessionId is null)
+                return ApiResults.NotFound($"Session {sessionName} not found");
+
+            try
+            {
+                var grain = sessions.GetGrain(sessionId);
+                var accept = await grain.AcceptFollowupAsync(new AcceptFollowupCommand(
+                    Text: req.Prompt,
+                    Source: string.IsNullOrWhiteSpace(req.Source) ? "workflow" : req.Source,
+                    IdempotencyKey: WorkflowTurnIdempotencyKey(workflowRunId, sessionName, req.InputId, req.TurnId),
+                    PreMintedInputId: req.InputId,
+                    PreMintedTurnId: req.TurnId));
+                return Results.Ok(new RunnerWorkflowTurnResponse(
+                    sessionId,
+                    req.InputId,
+                    req.TurnId,
+                    accept.TurnStatus.ToString().ToLowerInvariant(),
+                    accept.OperationId,
+                    accept.AdmissionReady));
+            }
+            catch (RuntimeSessionMissingException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "runtime_session_missing", new { sessionId = ex.SessionId });
+            }
+            catch (RecoveryOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "recovery_in_progress", new { sessionId = ex.SessionId });
+            }
+            catch (AgentSessionFollowupCapacityExceededException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "capacity_exceeded", new { sessionId = ex.SessionId });
+            }
+            catch (FollowupOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "followup_in_progress", new { sessionId = ex.SessionId });
+            }
+            catch (StopOperationInProgressException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "stop_in_progress", new { sessionId = ex.SessionId, turnId = ex.TurnId });
+            }
+            catch (SessionActivityUnknownException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "session_activity_unknown", new { sessionId = ex.SessionId });
+            }
+            catch (FollowupConcurrencyLimitException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "concurrency_limit", new { sessionId = ex.SessionId, agentId = ex.AgentId });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_turn_conflict");
+            }
+        });
+
+        group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/turn/abandon", async (
+            string projectId, string workflowRunId, string sessionName,
+            AgentSessionWorkflowTurnAbandonRequest req, AgentSessionResolver sessions,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(req.InputId))
+                return ApiResults.BadRequest("inputId is required", "input_id_required");
+            if (string.IsNullOrWhiteSpace(req.TurnId))
+                return ApiResults.BadRequest("turnId is required", "turn_id_required");
+
+            var sessionId = await sessions.ResolveByLabelsAsync(
+                WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
+            if (sessionId is null)
+                return ApiResults.NotFound($"Session {sessionName} not found");
+
+            try
+            {
+                await sessions.GetGrain(sessionId).AbandonFollowupTurnAsync(req.InputId, req.TurnId);
+                return Results.Ok(new RunnerWorkflowTurnResponse(sessionId, req.InputId, req.TurnId, "abandoned"));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResults.Conflict(ex.Message, "workflow_turn_rollback_conflict");
+            }
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/attach", async (
@@ -722,7 +817,8 @@ public static class RunnerRoutes
             req.WorkType,
             req.Stage,
             req.Title,
-            EpicNumber: req.EpicNumber is > 0 ? req.EpicNumber : null);
+            EpicNumber: req.EpicNumber is > 0 ? req.EpicNumber : null,
+            AgentId: req.Definition?.AgentId);
 
     private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
         new(
@@ -732,7 +828,8 @@ public static class RunnerRoutes
             session.WorkDir,
             session.Model,
             session.ResolvedModel,
-            session.Runtime);
+            session.Runtime,
+            session.Id);
 
     private static bool IsWorkflowRuntime(string? runtime) =>
         string.Equals(runtime, "opencode", StringComparison.OrdinalIgnoreCase)
@@ -744,6 +841,13 @@ public static class RunnerRoutes
         var trimmed = value.Trim();
         return trimmed.Length > 0 ? trimmed : null;
     }
+
+    private static string WorkflowTurnIdempotencyKey(
+        string workflowRunId,
+        string sessionName,
+        string inputId,
+        string turnId) =>
+        $"workflow:{workflowRunId}:{sessionName}:{inputId}:{turnId}";
 
     private static Dictionary<string, string[]>? NormalizeCoderModelVariants(Dictionary<string, string[]>? variants)
     {
@@ -878,7 +982,7 @@ public record RunnerAgentSessionReconcileResponse(
     string RuntimeSessionId,
     string WorkDir);
 public record RunnerAgentSessionKey(string ProjectId, string WorkflowRunId, string SessionName);
-public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null);
+public record RunnerAgentSessionResponse(RunnerAgentSessionKey Key, [property: JsonPropertyName("runtimeSessionId")] string? AgentSessionId, string Status, string? WorkDir = null, string? Model = null, string? ResolvedModel = null, string? Runtime = null, string? SessionId = null);
 public record AgentSessionOpenRequest(
     string? WorkId = null,
     string? WorkType = null,
@@ -887,7 +991,17 @@ public record AgentSessionOpenRequest(
     int? IssueNumber = null,
     string? WorkDir = null,
     int? EpicNumber = null,
-    string? Runtime = null);
+    string? Runtime = null,
+    AgentExecutionDefinition? Definition = null);
+public record AgentSessionWorkflowTurnRequest(string InputId, string TurnId, string Prompt, string? Source = null);
+public record AgentSessionWorkflowTurnAbandonRequest(string InputId, string TurnId);
+public record RunnerWorkflowTurnResponse(
+    string SessionId,
+    string InputId,
+    string TurnId,
+    string Status,
+    string? OperationId = null,
+    bool AdmissionReady = true);
 /// <summary>
 /// Body for the runner's <c>POST /api/runner/{runnerId}/agent-sessions/{projectId}/{sessionId}/open</c>
 /// call. Generic (non-workflow) AgentSessions are identified by

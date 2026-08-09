@@ -1,4 +1,4 @@
-import type { AgentExecutionDefinition, JsonObject, JsonValue } from "../core/types.js"
+import type { AgentExecutionDefinition, JsonObject, JsonValue, ParentIssueContext } from "../core/types.js"
 import type {
   ActionCapability,
   ActionManifest,
@@ -9,6 +9,7 @@ import type { ActionResult } from "../core/types.js"
 import type { IssueFields } from "./issue-fields.js"
 import type { PiRuntime } from "../runtime/pi/index.js"
 import type { SkillResolver } from "../runtime/skill-resolver.js"
+import type { ServerConnection } from "../server/connection.js"
 
 export const ALL_CAPABILITIES: ReadonlySet<ActionCapability> = new Set([
   "agent-turn",
@@ -49,6 +50,16 @@ export interface ActionHost {
   workDir: string
   signal: AbortSignal
   log: TaskLogger | null
+  workflowRunId?: string
+  workId?: string
+  workType?: string
+  stage?: string | null
+  title?: string | null
+  projectId?: string | null
+  issueNumber?: number | null
+  epicNumber?: number | null
+  parentIssueContext?: ParentIssueContext | null
+  serverConnection?: ServerConnection | null
   piRuntime?: PiRuntime | null
   skillResolver?: SkillResolver
   agentDefinition?: AgentExecutionDefinition | null

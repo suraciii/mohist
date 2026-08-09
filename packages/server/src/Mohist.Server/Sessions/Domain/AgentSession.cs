@@ -497,7 +497,13 @@ public sealed record AgentSessionFollowupAcceptResult(
     /// message. Append-only Orleans field id (next free after
     /// <see cref="Attachments"/>).
     /// </summary>
-    [property: Id(8)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    [property: Id(8)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    /// <summary>
+    /// Whether the accepted turn has passed the Agent concurrency gate.
+    /// A false value means the turn remains durably queued until capacity
+    /// is available; callers must not start runtime execution yet.
+    /// </summary>
+    [property: Id(9)] bool AdmissionReady = true);
 
 [GenerateSerializer]
 public sealed record AgentSessionFollowupDispatch(

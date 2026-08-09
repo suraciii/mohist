@@ -851,10 +851,15 @@ public static partial class AgentSessionExtensions
             turns.RemoveAt(turnIndex);
             var inputs = (session.Status.Inputs ?? []).Where(candidate =>
                 !string.Equals(candidate.Id, inputId, StringComparison.Ordinal)).ToList();
+            var remainingLeases = (session.Status.PendingFollowups ?? [])
+                .Where(lease => !string.Equals(lease.TurnId, turnId, StringComparison.Ordinal))
+                .ToArray();
             session.Status = session.Status with
             {
                 Turns = turns,
                 Inputs = inputs,
+                PendingFollowup = remainingLeases.Length == 0 ? null : session.Status.PendingFollowup,
+                PendingFollowups = remainingLeases,
                 Activity = AgentSessionActivity.Idle,
                 LastDataAt = now,
                 CurrentTurnEndedAt = now,
