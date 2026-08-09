@@ -261,7 +261,7 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             Assert.Equal("snapshot.txt", descriptor.OriginalFileName);
 
             var snapshot = await PollDispatchForSessionAsync(runnerId, sessionId);
-            var polled = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var polled = snapshot.Dispatch;
             using var withDoc = JsonDocument.Parse(polled.GetProperty("with").GetString()!);
             var attachments = withDoc.RootElement.GetProperty("attachments").EnumerateArray().ToArray();
             var dispatchAttachment = Assert.Single(attachments);

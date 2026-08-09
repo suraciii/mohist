@@ -120,6 +120,34 @@ describe('AgentListPage', () => {
       expect(screen.getByText('Alpha')).toBeInTheDocument()
     })
 
+    it('renders image avatars accessibly and keeps short avatar text as a fallback', async () => {
+      mockAgents([
+        makeAgent({ id: 'image-agent', name: 'Image Agent', avatar: 'https://example.test/avatar.png' }),
+        makeAgent({ id: 'text-agent', name: 'Text Agent', avatar: '🛠️' }),
+      ])
+      renderPage()
+
+      const imageRow = await screen.findByTestId('agent-row-image-agent')
+      expect(within(imageRow).getByRole('img', { name: 'Image Agent avatar' })).toHaveAttribute(
+        'src',
+        'https://example.test/avatar.png',
+      )
+      expect(within(screen.getByTestId('agent-row-text-agent')).getByRole('img', { name: 'Text Agent avatar' }))
+        .toHaveTextContent('🛠️')
+    })
+
+    it('keeps a broken image inside the fixed avatar frame', async () => {
+      mockAgents([makeAgent({ id: 'broken-agent', name: 'Broken Agent', avatar: 'https://example.test/broken.png' })])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-broken-agent')
+      fireEvent.error(within(row).getByRole('img', { name: 'Broken Agent avatar' }))
+
+      const avatar = within(row).getByTestId('agent-avatar-broken-agent')
+      expect(avatar).toHaveAttribute('data-avatar-state', 'fallback')
+      expect(avatar).toHaveClass('size-10', 'aspect-square')
+    })
+
     it('renders agent type, model, and variant for each row', async () => {
       mockAgents([makeAgent({
         name: 'Beta',

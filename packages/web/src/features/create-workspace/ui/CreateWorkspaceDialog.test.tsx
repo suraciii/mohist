@@ -110,4 +110,26 @@ describe('CreateWorkspaceDialog', () => {
     expect(await screen.findByTestId('create-workspace-repositories-error')).toBeInTheDocument()
     expect(screen.getByTestId('create-workspace-submit')).toBeDisabled()
   })
+
+  it('allows repository retry to recover from an error without enabling submit early', async () => {
+    let attempts = 0
+    server.use(
+      http.get('*/api/projects/:projectId/repositories', () => {
+        attempts += 1
+        return attempts === 1
+          ? HttpResponse.json({ success: false, error: 'repository service unavailable' }, { status: 503 })
+          : HttpResponse.json({ success: true, data: repositories })
+      }),
+    )
+
+    renderDialog()
+    const name = await screen.findByTestId('create-workspace-name')
+    fireEvent.change(name, { target: { value: 'recovered-workspace' } })
+    expect(screen.getByTestId('create-workspace-submit')).toBeDisabled()
+
+    fireEvent.click(screen.getByTestId('create-workspace-repositories-retry'))
+
+    expect(await screen.findByTestId('create-workspace-repository-main')).toBeInTheDocument()
+    expect(screen.getByTestId('create-workspace-submit')).not.toBeDisabled()
+  })
 })

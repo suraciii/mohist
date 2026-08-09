@@ -44,7 +44,9 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string runnerId,
         string expectedSessionId)
     {
-        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        var ready = await _fixture.AgentJobDispatches.WaitForAssignmentReadyForPollAsync(agentJobId);
+        Assert.Equal(runnerId, ready.RunnerId);
+        Assert.False(string.IsNullOrWhiteSpace(ready.WorkId));
         var dispatch = await PollDispatchOnceAsync(
             runnerId,
             expectedSessionId,

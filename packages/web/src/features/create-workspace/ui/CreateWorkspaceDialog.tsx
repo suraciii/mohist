@@ -127,7 +127,7 @@ export function CreateWorkspaceDialog({
             )}
           </div>
 
-          <fieldset className="space-y-2" disabled={createWorkspace.isPending || repositoriesLoading || repositoriesFailed}>
+          <fieldset className="space-y-2" disabled={createWorkspace.isPending || repositoriesLoading}>
             <legend className="text-sm font-medium">Repositories</legend>
             {repositoriesLoading && <p data-testid="create-workspace-repositories-loading">Loading repositories...</p>}
             {repositoriesFailed && (

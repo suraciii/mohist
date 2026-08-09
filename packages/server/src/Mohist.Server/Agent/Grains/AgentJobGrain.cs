@@ -1283,6 +1283,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             await PersistAsync();
         }
 
+        await SafeAssignmentReadyForPollAsync(runnerId, workId);
+
         return true;
     }
 
@@ -1296,6 +1298,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         {
             _log.LogWarning(ex,
                 "AgentJob {Id} dispatch observer AssignmentPrepared threw; ledger row remains authoritative",
+                Key);
+        }
+    }
+
+    private async Task SafeAssignmentReadyForPollAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.AssignmentReadyForPollAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer AssignmentReadyForPoll threw; ledger row remains authoritative",
                 Key);
         }
     }

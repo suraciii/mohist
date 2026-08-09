@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ProjectProvider } from '../../../entities/project'
@@ -260,6 +260,29 @@ describe('AgentDetailPage', () => {
       expect(screen.getByTestId('agent-detail-config')).toBeInTheDocument()
       expect(screen.getByText('gpt-4')).toBeInTheDocument()
       expect(screen.getByText('high')).toBeInTheDocument()
+    })
+
+    it('renders URL and data avatars with accessible alternatives', async () => {
+      mockAgent(makeAgent({ avatar: 'data:image/png;base64,AAAA' }))
+      renderPage()
+
+      const page = await screen.findByTestId('agent-detail-page')
+      expect(within(page).getByRole('img', { name: 'Test Agent avatar' })).toHaveAttribute(
+        'src',
+        'data:image/png;base64,AAAA',
+      )
+      expect(screen.getByTestId('agent-detail-avatar')).toHaveClass('size-12', 'aspect-square')
+    })
+
+    it('falls back without changing the detail avatar frame when an image breaks', async () => {
+      mockAgent(makeAgent({ avatar: 'https://example.test/broken-detail.png' }))
+      renderPage()
+
+      const page = await screen.findByTestId('agent-detail-page')
+      fireEvent.error(within(page).getByRole('img', { name: 'Test Agent avatar' }))
+
+      expect(screen.getByTestId('agent-detail-avatar')).toHaveAttribute('data-avatar-state', 'fallback')
+      expect(screen.getByTestId('agent-detail-avatar')).toHaveClass('size-12', 'aspect-square')
     })
 
     it('renders the archived Agent definition identity and lifecycle', async () => {

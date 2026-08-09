@@ -44,6 +44,21 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task Launch_CliInvalidInput_DoesNotCreateImplicitWorkspace()
+    {
+        var projectId = await CreateProjectAsync("launch-cli-invalid-input");
+        var agent = await CreateAgentAsync(projectId, "cli-invalid-input-agent");
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
+
+        using var launch = await LaunchCliAsync(projectId, agent.Id, new { prompt = "   " });
+
+        Assert.Equal(HttpStatusCode.BadRequest, launch.StatusCode);
+        var payload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("input_required", payload.GetProperty("code").GetString());
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    [Fact]
     public async Task Launch_WebRoute_RejectsSpoofedCliOriginHeaderWithoutCreatingWorkspace()
     {
         var projectId = await CreateProjectAsync("launch-spoofed-cli-origin");

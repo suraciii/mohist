@@ -178,7 +178,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: existing?.Completed == true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeAsync(AgentLaunchCoordinatorRequest request)
@@ -213,7 +214,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeExistingSpawnAsync(string spawnRequestFingerprint)

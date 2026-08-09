@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
-import { getAgentAvailabilityFeedback, useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
+import { PlusIcon, ArchiveIcon, CircleIcon, BotIcon } from 'lucide-react'
+import { AgentAvatar, getAgentAvailabilityFeedback, useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
 import type { AgentAvailabilitySummaryEntry, AgentInfo } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -59,10 +59,14 @@ function AgentRow({
         isArchived ? 'opacity-60' : ''
       }`}
     >
-      <div className="flex items-center gap-4">
-            <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
-          {agent.avatar?.trim() || <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />}
-        </div>
+        <div className="flex items-center gap-4">
+          <AgentAvatar
+            agentName={agent.name}
+            avatar={agent.avatar}
+            className="size-10 shrink-0 rounded-lg bg-muted"
+            iconClassName={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`}
+            testId={`agent-avatar-${agent.id}`}
+          />
 
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="min-w-0 flex-1">

@@ -194,7 +194,8 @@ public sealed record AgentLaunchResult(
     string TurnId,
     string AgentId,
     string AgentName,
-    string? ParentLinkEdgeId = null);
+    string? ParentLinkEdgeId = null,
+    string? WorkspaceName = null);
 
 /// <summary>
 /// Outcome of a routed launch. Carries the session id the AgentJob

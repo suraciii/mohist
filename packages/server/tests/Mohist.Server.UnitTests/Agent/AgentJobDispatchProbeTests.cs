@@ -7,6 +7,52 @@ namespace Mohist.Server.UnitTests.Agent;
 public sealed class AgentJobDispatchProbeTests
 {
     [Fact]
+    public async Task WaitForAssignmentReadyForPollAsync_CompletesWhenSignalArrivesBeforeWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+
+        await probe.AssignmentReadyForPollAsync("job", "runner", "work");
+
+        var ready = await probe.WaitForAssignmentReadyForPollAsync("job");
+        Assert.Equal("job", ready.AgentJobId);
+        Assert.Equal("runner", ready.RunnerId);
+        Assert.Equal("work", ready.WorkId);
+    }
+
+    [Fact]
+    public async Task WaitForAssignmentReadyForPollAsync_CompletesWhenSignalArrivesAfterWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+        var waiting = probe.WaitForAssignmentReadyForPollAsync("job");
+
+        await probe.WaitForReadyWaiterRegisteredAsync("job");
+        await probe.AssignmentReadyForPollAsync("job", "runner", "work");
+
+        var ready = await waiting;
+        Assert.Equal("work", ready.WorkId);
+    }
+
+    [Fact]
+    public async Task WaitForAssignmentReadyForPollAsync_CancellationReleasesWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+        using var cancellation = new CancellationTokenSource();
+        var waiting = probe.WaitForAssignmentReadyForPollAsync("job", cancellation.Token);
+
+        await probe.WaitForReadyWaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedReadySignalCount("job"));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        Assert.Equal(0, probe.RetainedReadySignalCount("job"));
+
+        var nextWaiting = probe.WaitForAssignmentReadyForPollAsync("job");
+        await probe.WaitForReadyWaiterRegisteredAsync("job");
+        await probe.AssignmentReadyForPollAsync("job", "runner", "work");
+        await nextWaiting;
+    }
+
+    [Fact]
     public async Task WaitForAssignmentPreparedAsync_WithoutTimeout_CompletesWhenSignalArrivesBeforeWaiter()
     {
         var probe = new AgentJobDispatchProbe();

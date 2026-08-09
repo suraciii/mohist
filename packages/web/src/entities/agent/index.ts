@@ -111,6 +111,8 @@ export {
   getAgentAvailabilityFeedback,
   getAgentLaunchErrorFeedback,
 } from './model/launch-feedback'
+export { AgentAvatar } from './ui/AgentAvatar'
+export type { AgentAvatarProps } from './ui/AgentAvatar'
 export type {
   AgentLaunchFeedback,
   AgentLaunchFeedbackKind,

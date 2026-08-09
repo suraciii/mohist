@@ -17,6 +17,10 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PreparedSignal> _preparedSignals =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DispatchReadyForPoll> _readySnapshots =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ReadySignal> _readySignals =
+        new(StringComparer.Ordinal);
 
     public AgentJobDispatchProbe(TimeProvider? timeProvider = null) =>
         _timeProvider = timeProvider ?? new FixedTimeProvider(TestTime.UtcNow);
@@ -32,6 +36,15 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
     public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId) =>
         Task.CompletedTask;
 
+    public Task AssignmentReadyForPollAsync(string agentJobId, string runnerId, string workId)
+    {
+        var snapshot = new DispatchReadyForPoll(agentJobId, runnerId, workId);
+        _readySnapshots[agentJobId] = snapshot;
+        if (_readySignals.TryGetValue(agentJobId, out var signal))
+            signal.Completion.TrySetResult(snapshot);
+        return Task.CompletedTask;
+    }
+
     public int PreparedCount(string agentJobId) =>
         _preparedCounts.GetValueOrDefault(agentJobId);
 
@@ -43,6 +56,38 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
             ? signal.WaiterRegistered.Task
             : throw new InvalidOperationException(
                 $"No assignment-prepared waiter is registered for AgentJob '{agentJobId}'.");
+
+    public int RetainedReadySignalCount(string agentJobId) =>
+        _readySignals.ContainsKey(agentJobId) ? 1 : 0;
+
+    public Task WaitForReadyWaiterRegisteredAsync(string agentJobId) =>
+        _readySignals.TryGetValue(agentJobId, out var signal)
+            ? signal.WaiterRegistered.Task
+            : throw new InvalidOperationException(
+                $"No dispatch-ready waiter is registered for AgentJob '{agentJobId}'.");
+
+    public async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollAsync(
+        string agentJobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_readySnapshots.TryGetValue(agentJobId, out var snapshot))
+            return snapshot;
+
+        var signal = AcquireReadySignal(agentJobId);
+        try
+        {
+            if (_readySnapshots.TryGetValue(agentJobId, out snapshot))
+                signal.Completion.TrySetResult(snapshot);
+
+            signal.WaiterRegistered.TrySetResult();
+            return await signal.Completion.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (signal.ReleaseWaiter())
+                RemoveReadySignal(agentJobId, signal);
+        }
+    }
 
     public async Task WaitForAssignmentPreparedAsync(
         string agentJobId,
@@ -124,6 +169,24 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
         ((ICollection<KeyValuePair<string, PreparedSignal>>)_preparedSignals)
             .Remove(new KeyValuePair<string, PreparedSignal>(agentJobId, signal));
 
+    private ReadySignal AcquireReadySignal(string agentJobId)
+    {
+        while (true)
+        {
+            var signal = _readySignals.GetOrAdd(
+                agentJobId,
+                static _ => new ReadySignal());
+            if (signal.TryAcquireWaiter())
+                return signal;
+
+            RemoveReadySignal(agentJobId, signal);
+        }
+    }
+
+    private void RemoveReadySignal(string agentJobId, ReadySignal signal) =>
+        ((ICollection<KeyValuePair<string, ReadySignal>>)_readySignals)
+            .Remove(new KeyValuePair<string, ReadySignal>(agentJobId, signal));
+
     private sealed class PreparedSignal
     {
         private readonly object _gate = new();
@@ -161,4 +224,44 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
             }
         }
     }
+
+    private sealed class ReadySignal
+    {
+        private readonly object _gate = new();
+        private int _waiters;
+        private bool _retired;
+
+        public TaskCompletionSource<DispatchReadyForPoll> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource WaiterRegistered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool TryAcquireWaiter()
+        {
+            lock (_gate)
+            {
+                if (_retired)
+                    return false;
+
+                _waiters++;
+                return true;
+            }
+        }
+
+        public bool ReleaseWaiter()
+        {
+            lock (_gate)
+            {
+                _waiters--;
+                if (_waiters != 0)
+                    return false;
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
 }
+
+public sealed record DispatchReadyForPoll(string AgentJobId, string RunnerId, string WorkId);

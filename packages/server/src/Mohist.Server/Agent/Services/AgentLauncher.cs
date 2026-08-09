@@ -468,7 +468,14 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Attachments: attachments,
             StartupContext: startupContext));
 
-        return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
+        return new AgentLaunchResult(
+            outcome.SessionId,
+            outcome.JobKey,
+            outcome.InputId,
+            outcome.TurnId,
+            outcome.AgentId,
+            outcome.AgentName,
+            WorkspaceName: outcome.WorkspaceName);
     }
 
     public async Task<AgentLaunchResult?> ResumeIdempotentAsync(
@@ -492,7 +499,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 InputId: outcome.InputId,
                 TurnId: outcome.TurnId,
                 AgentId: outcome.AgentId,
-                AgentName: outcome.AgentName);
+                AgentName: outcome.AgentName,
+                WorkspaceName: outcome.WorkspaceName);
     }
 
     private (string SessionId, string JobKey) ResolveSessionAndJobKeys(

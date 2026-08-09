@@ -57,7 +57,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.Equal("pi", sessionInfo!.Runtime);
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var polledDispatch = snapshot.Dispatch;
             Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
         }
         finally
@@ -94,7 +94,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.Equal("opencode", sessionInfo!.Runtime);
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var polledDispatch = snapshot.Dispatch;
             Assert.Equal("opencode", ReadRuntimeFromDispatch(polledDispatch));
         }
         finally
@@ -262,7 +262,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var firstDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var firstDispatch = snapshot.Dispatch;
             Assert.Equal("pi", ReadRuntimeFromDispatch(firstDispatch));
 
             await PatchAgentRuntimeAsync(projectId, agent.Id, "opencode");
@@ -274,23 +274,6 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
-    }
-
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
     }
 
     private static string ReadRuntimeFromDispatch(JsonElement dispatch)

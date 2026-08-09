@@ -121,7 +121,7 @@ public static class AgentSessionLaunchRoutes
             var launchOrigin = ReadLaunchOrigin(context);
             var suppliedWorkspace = body.Context?.Workspace?.Trim();
             var hasExplicitWorkspace = suppliedWorkspace is { Length: > 0 };
-            if (launchOrigin == "web" && !hasExplicitWorkspace)
+            if (launchOrigin == WebLaunchOrigin && !hasExplicitWorkspace)
             {
                 return ApiResults.BadRequest(
                     "context.workspace is required for Web agent launches",
@@ -129,75 +129,47 @@ public static class AgentSessionLaunchRoutes
                     new { fields = new[] { "context.workspace" } });
             }
 
+            // Resolve is read-only. The CLI workspace is materialized only
+            // after every validation that does not require a workspace has
+            // passed. Keep the fingerprint stable across derived CLI names so
+            // a replay can recover the persisted plan after the old workspace
+            // is archived.
             var workspaceName = hasExplicitWorkspace
                 ? suppliedWorkspace!
-                : launchOrigin == "cli"
+                : launchOrigin == CliLaunchOrigin
                     ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
-                    : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
-
-            // An implicit CLI launch is still scoped to the server-resolved
-            // workspace. Rebuild the validation context from the name returned
-            // by Ensure so repository membership and the dispatch snapshot use
-            // the same canonical workspace state.
+                    : string.Empty;
+            var workspaceFingerprintName = !hasExplicitWorkspace && launchOrigin == CliLaunchOrigin
+                ? "cli-current"
+                : workspaceName;
             var contextForValidation = body.Context;
-            if (!hasExplicitWorkspace)
-            {
-                workspaceName = launchOrigin == CliLaunchOrigin
-                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
-                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
-                contextForValidation = (body.Context ?? new AgentSessionLaunchContextRef()) with
-                {
-                    Workspace = workspaceName,
-                };
-            }
 
             // The fingerprint folds the caller-submitted attachment ids
             // (raw, in order) so a replay with a different attachment set
-            // is rejected as a conflicting idempotency replay. The
-            // accepted subset is what the dispatch envelope carries and
-            // is established later via ValidateAndBindAgentInputAsync.
-
-            var contextValidation = await ValidateContextAsync(
-                contextForValidation,
-                project.Id,
-                issueQuerier,
-                epicQuerier,
-                grains);
-            if (contextValidation.Error is not null)
-                return contextValidation.Error;
-
-            IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
-            if (contextValidation.Workspace is { RepositoryNames.Count: > 0 })
-            {
-                var repos = project.Repositories;
-                workspaceRepositories = contextValidation.Workspace.RepositoryNames
-                    .Select(name => repos.FirstOrDefault(r =>
-                        string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
-                    .Where(r => r is not null)
-                    .Select(r => new WorkspaceRepositorySnapshot(r!.Name, r.GitUrl, r.ResolvedBaseBranch))
-                    .ToList();
-            }
-
+            // is rejected as a conflicting idempotency replay. The accepted
+            // subset is established later via ValidateAndBindAgentInputAsync.
+            // Workspace repository membership is a mutable launch snapshot,
+            // so it is deliberately absent from the fingerprint.
             var launchRequest = new AgentLaunchCoordinatorRequest(
                 Prompt: prompt?.Trim() ?? string.Empty,
                 AgentRef: agentRef,
                 Runtime: null,
-                WorkspaceName: workspaceName,
+                WorkspaceName: workspaceFingerprintName,
                 WorkspacePath: body.Context?.WorkspacePath,
                 IssueNumber: body.Context?.IssueNumber,
                 EpicNumber: body.Context?.EpicNumber,
                 Repository: body.Context?.Repository,
                 Title: null,
                 AttachmentIds: body.Attachments?.ToArray(),
-                WorkspaceRepositories: workspaceRepositories,
+                WorkspaceRepositories: null,
                 Origin: launchOrigin,
                 TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
                     ? targetId
                     : agentRef.Trim());
 
-            // Resume first: a replay that conflicts on the existing
-            // fingerprint (prompt, attachments, context) must surface as
-            // 409 launch_idempotency_conflict, not a 400 input_required.
+            // Resume before mutable workspace validation. A completed replay
+            // must return its persisted Session/Job/Turn even when the named
+            // workspace was archived after the first response was lost.
             try
             {
                 var resumed = await launcher.ResumeIdempotentAsync(
@@ -206,7 +178,14 @@ public static class AgentSessionLaunchRoutes
                     launchRequest,
                     ct);
                 if (resumed is not null)
-                    return AcceptedLaunch(project.Id, project.Name, resumed, workspaceName, launchOrigin, resumed.AgentId, attachmentResults: null);
+                    return AcceptedLaunch(
+                        project.Id,
+                        project.Name,
+                        resumed,
+                        resumed.WorkspaceName ?? workspaceName,
+                        launchOrigin,
+                        resumed.AgentId,
+                        attachmentResults: null);
             }
             catch (LaunchIdempotencyConflictException ex)
             {
@@ -233,6 +212,18 @@ public static class AgentSessionLaunchRoutes
                     new { fields = new[] { "prompt", "attachments" } });
             }
 
+            // Issue/Epic validation is independent of Workspace materialization.
+            var referenceValidation = await ValidateContextAsync(
+                contextForValidation is null
+                    ? null
+                    : contextForValidation with { Workspace = null },
+                project.Id,
+                issueQuerier,
+                epicQuerier,
+                grains);
+            if (referenceValidation.Error is not null)
+                return referenceValidation.Error;
+
             var agent = await AgentRefResolver.ResolveAsync(agentQuerier, project.Id, agentRef);
             if (agent is null)
             {
@@ -252,111 +243,179 @@ public static class AgentSessionLaunchRoutes
                 return ReadinessRejected(ex);
             }
 
+            // An explicit Web workspace, or a CLI request that names a
+            // repository, can be fully checked against the read-only resolved
+            // workspace before any implicit CLI workspace is materialized.
+            (IResult? Error, WorkspaceState? Workspace) contextValidation = (null, null);
+            if (hasExplicitWorkspace
+                || (launchOrigin == CliLaunchOrigin
+                    && !string.IsNullOrWhiteSpace(body.Context?.Repository)))
+            {
+                contextForValidation = (contextForValidation ?? new AgentSessionLaunchContextRef()) with
+                {
+                    Workspace = workspaceName,
+                };
+                contextValidation = await ValidateContextAsync(
+                    contextForValidation,
+                    project.Id,
+                    issueQuerier,
+                    epicQuerier,
+                    grains);
+                if (contextValidation.Error is not null)
+                    return contextValidation.Error;
+            }
+
             // The route mints every identity used by attachment ownership.
             // The coordinator persists and adopts them as its canonical plan,
             // so a scoped content read always names the durable SessionInput.
-            AgentInputAttachmentAcceptanceBatch attachmentBatch;
-            try
-            {
-                attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
-                    project.Id,
-                    agentSessionId: preMintedSessionId,
-                    inputId: preMintedInputId,
-                    body.Attachments,
-                    ct);
-            }
-            catch (AttachmentLimitException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "attachment_limit_exceeded",
-                    new { fields = new[] { "attachments" } });
-            }
-            catch (AttachmentValidationException ex)
-            {
-                return ApiResults.BadRequest(ex.Message, "attachment_invalid",
-                    new { fields = new[] { "attachments" } });
-            }
-
-            if (attachmentBatch.AcceptedCount == 0 && !hasText)
-            {
-                // All attachments were rejected and there is no text: the
-                // input is unusable. Surface the per-file rejection
-                // reasons in the response so the caller sees exactly why.
-                return ApiResults.BadRequest(
-                    "input has no usable content: all attachments were rejected",
-                    "input_unusable",
-                    new
-                    {
-                        fields = new[] { "prompt", "attachments" },
-                        attachments = attachmentBatch.Results
-                            .Select(BuildAttachmentResultDto)
-                            .ToArray(),
-                    });
-            }
-
-            var launchContext = new AgentLaunchContext(
-                ProjectId: project.Id,
-                IssueNumber: body.Context?.IssueNumber,
-                EpicNumber: body.Context?.EpicNumber,
-                Repository: body.Context?.Repository,
-                WorkspacePath: body.Context?.WorkspacePath,
-                WorkspaceName: workspaceName,
-                Title: null,
-                Origin: launchOrigin,
-                TargetId: agent.Id);
-
-            AgentLaunchResult result;
+            AgentInputAttachmentAcceptanceBatch? attachmentBatch = null;
             var retainNewlyBoundAttachments = false;
-            Task RollbackNewlyBoundAttachmentsAsync() => attachments.UnbindAgentInputAsync(
-                project.Id,
-                preMintedSessionId,
-                preMintedInputId,
-                attachmentBatch.NewlyBoundAttachmentIds ?? [],
-                CancellationToken.None);
-            try
+            async Task RollbackNewlyBoundAttachmentsAsync()
             {
-                result = await launcher.LaunchIdempotentAsync(
-                    agent,
-                    prompt ?? string.Empty,
-                    launchContext,
-                    idempotencyKey,
-                    launchRequest,
-                    attachmentBatch.Results
-                        .Where(r => r.IsAccepted && r.Descriptor is not null)
-                        .Select(r => r.Descriptor!)
-                        .ToArray(),
+                if (attachmentBatch?.NewlyBoundAttachmentIds is not { Count: > 0 } newlyBound)
+                    return;
+                await attachments.UnbindAgentInputAsync(
+                    project.Id,
                     preMintedSessionId,
                     preMintedInputId,
-                    preMintedTurnId,
-                    ct);
-                retainNewlyBoundAttachments = true;
+                    newlyBound,
+                    CancellationToken.None);
             }
-            catch (ArgumentException ex)
+
+            try
             {
-                return ApiResults.BadRequest(ex.Message, "validation_failed");
-            }
-            catch (LaunchIdempotencyConflictException ex)
-            {
-                return ApiResults.Conflict(
-                    ex.Message,
-                    "launch_idempotency_conflict",
-                    new { idempotencyKey = ex.IdempotencyKey });
-            }
-            catch (LaunchSetupPendingException ex)
-            {
-                retainNewlyBoundAttachments = true;
-                return LaunchSetupPending(ex);
-            }
-            catch (AgentReadinessException ex)
-            {
-                return ReadinessRejected(ex);
+                try
+                {
+                    attachmentBatch = await attachments.ValidateAndBindAgentInputAsync(
+                        project.Id,
+                        agentSessionId: preMintedSessionId,
+                        inputId: preMintedInputId,
+                        body.Attachments,
+                        ct);
+                }
+                catch (AttachmentLimitException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "attachment_limit_exceeded",
+                        new { fields = new[] { "attachments" } });
+                }
+                catch (AttachmentValidationException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "attachment_invalid",
+                        new { fields = new[] { "attachments" } });
+                }
+
+                if (attachmentBatch!.AcceptedCount == 0 && !hasText)
+                {
+                    // All attachments were rejected and there is no text: the
+                    // input is unusable. Surface the per-file rejection
+                    // reasons in the response so the caller sees exactly why.
+                    return ApiResults.BadRequest(
+                        "input has no usable content: all attachments were rejected",
+                        "input_unusable",
+                        new
+                        {
+                            fields = new[] { "prompt", "attachments" },
+                            attachments = attachmentBatch.Results
+                                .Select(BuildAttachmentResultDto)
+                                .ToArray(),
+                        });
+                }
+
+                if (!hasExplicitWorkspace)
+                {
+                    workspaceName = await provisioner.EnsureCliWorkspaceAsync(
+                        project.Id,
+                        timeProvider.GetUtcNow());
+                    contextForValidation = (body.Context ?? new AgentSessionLaunchContextRef()) with
+                    {
+                        Workspace = workspaceName,
+                    };
+                }
+
+                // Re-read the canonical workspace after Ensure so both
+                // repository membership validation and the dispatch snapshot
+                // use the same workspace instance.
+                contextValidation = await ValidateContextAsync(
+                    contextForValidation,
+                    project.Id,
+                    issueQuerier,
+                    epicQuerier,
+                    grains);
+                if (contextValidation.Error is not null)
+                    return contextValidation.Error;
+
+                IReadOnlyList<WorkspaceRepositorySnapshot>? workspaceRepositories = null;
+                if (contextValidation.Workspace is { RepositoryNames.Count: > 0 })
+                {
+                    var repos = project.Repositories;
+                    workspaceRepositories = contextValidation.Workspace.RepositoryNames
+                        .Select(name => repos.FirstOrDefault(r =>
+                            string.Equals(r.Name, name, StringComparison.OrdinalIgnoreCase)))
+                        .Where(r => r is not null)
+                        .Select(r => new WorkspaceRepositorySnapshot(r!.Name, r.GitUrl, r.ResolvedBaseBranch))
+                        .ToList();
+                }
+
+                var launchContext = new AgentLaunchContext(
+                    ProjectId: project.Id,
+                    IssueNumber: body.Context?.IssueNumber,
+                    EpicNumber: body.Context?.EpicNumber,
+                    Repository: body.Context?.Repository,
+                    WorkspacePath: body.Context?.WorkspacePath,
+                    WorkspaceName: workspaceName,
+                    Title: null,
+                    Origin: launchOrigin,
+                    TargetId: agent.Id);
+
+                launchRequest = launchRequest with { WorkspaceRepositories = workspaceRepositories };
+
+                AgentLaunchResult result;
+                try
+                {
+                    result = await launcher.LaunchIdempotentAsync(
+                        agent,
+                        prompt ?? string.Empty,
+                        launchContext,
+                        idempotencyKey,
+                        launchRequest,
+                        attachmentBatch.Results
+                            .Where(r => r.IsAccepted && r.Descriptor is not null)
+                            .Select(r => r.Descriptor!)
+                            .ToArray(),
+                        preMintedSessionId,
+                        preMintedInputId,
+                        preMintedTurnId,
+                        ct);
+                    retainNewlyBoundAttachments = true;
+                }
+                catch (ArgumentException ex)
+                {
+                    return ApiResults.BadRequest(ex.Message, "validation_failed");
+                }
+                catch (LaunchIdempotencyConflictException ex)
+                {
+                    return ApiResults.Conflict(
+                        ex.Message,
+                        "launch_idempotency_conflict",
+                        new { idempotencyKey = ex.IdempotencyKey });
+                }
+                catch (LaunchSetupPendingException ex)
+                {
+                    retainNewlyBoundAttachments = true;
+                    return LaunchSetupPending(ex);
+                }
+                catch (AgentReadinessException ex)
+                {
+                    return ReadinessRejected(ex);
+                }
+
+                return AcceptedLaunch(project.Id, project.Name, result, workspaceName, launchOrigin, agent.Id, attachmentBatch.Results);
             }
             finally
             {
                 if (!retainNewlyBoundAttachments)
                     await RollbackNewlyBoundAttachmentsAsync();
             }
-
-            return AcceptedLaunch(project.Id, project.Name, result, workspaceName, launchOrigin, agent.Id, attachmentBatch.Results);
     }
 
     private static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>

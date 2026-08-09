@@ -172,9 +172,10 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
                 : null;
             if (match is null && polledSessionId == expectedSessionId)
             {
-                match = new PollSnapshot(
+                    match = new PollSnapshot(
                     WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: data.GetProperty("workId").GetString() ?? string.Empty);
+                    WorkId: data.GetProperty("workId").GetString() ?? string.Empty,
+                    Dispatch: data.Clone());
             }
             else
             {
@@ -218,26 +219,9 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
                 ExitCode: 0));
     }
 
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
-    }
-
     private sealed record AgentRef(string Id, string Name);
 
     private sealed record UploadResult(string Id, string FileName);
 
-    private sealed record PollSnapshot(string WorkflowRunId, string WorkId);
+    private sealed record PollSnapshot(string WorkflowRunId, string WorkId, JsonElement Dispatch);
 }

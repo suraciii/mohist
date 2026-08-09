@@ -1,7 +1,6 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  BotIcon,
   PencilIcon,
   ArchiveIcon,
   PlayIcon,
@@ -15,6 +14,7 @@ import {
   HourglassIcon,
 } from 'lucide-react'
 import {
+  AgentAvatar,
   useAgent,
   useAgentDetailStatus,
   useAgentSessions,
@@ -416,9 +416,13 @@ export function AgentDetailPage({
       <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4 min-w-0">
-            <div className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}>
-              {agent.avatar?.trim() || <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />}
-            </div>
+            <AgentAvatar
+              agentName={agent.name}
+              avatar={agent.avatar}
+              className={`size-12 shrink-0 rounded-xl ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}
+              iconClassName={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`}
+              testId="agent-detail-avatar"
+            />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-semibold text-foreground truncate">{agent.name}</h1>

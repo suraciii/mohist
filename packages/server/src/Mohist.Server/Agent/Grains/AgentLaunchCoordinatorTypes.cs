@@ -201,7 +201,8 @@ public sealed record AgentLaunchCoordinatorResult(
     [property: Id(4)] string AgentId,
     [property: Id(5)] string AgentName,
     [property: Id(6)] bool AlreadyPersisted,
-    [property: Id(7)] string? ParentLinkEdgeId = null);
+    [property: Id(7)] string? ParentLinkEdgeId = null,
+    [property: Id(8)] string? WorkspaceName = null);
 
 /// <summary>
 /// Raised when the supplied idempotency key has already accepted a
