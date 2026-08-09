@@ -2,7 +2,31 @@
 
 This document defines the shared abstraction boundaries for Workflow, Agent, Session, Runner, and
 Runtime adapters. Runtime-specific behavior belongs in [`runtimes/`](runtimes/README.md), for example
-[`runtimes/opencode.md`](runtimes/opencode.md)。
+[`runtimes/opencode.md`](runtimes/opencode.md).
+
+## Design Drivers
+
+Three forces shape the execution model:
+
+- **Stable identity.** A user follows one logical conversation even when its Runner process or physical
+  Runtime Session is replaced. Public identity therefore cannot be owned by an external Runtime.
+- **Unknown external effects.** A timeout or lost response does not prove that a Runtime command failed.
+  Mohist must preserve `Unknown` and reconcile before retrying, because replay can duplicate a turn or
+  apply a destructive context operation twice.
+- **Cross-aggregate convergence.** Work owners decide work lifecycle while AgentSession owns conversation
+  state. They do not share a transaction, so durable request identity and durable messages must converge
+  their observations without giving either aggregate authority over the other.
+
+Two identity models were considered. Option A exposes the physical Runtime Session as the public Session.
+It is initially simpler, but replacement changes the user's identity, leaks provider-specific lifecycle,
+and makes missing-session recovery indistinguishable from starting unrelated work. Option B exposes a
+stable logical AgentSession and treats the physical Runtime Session as its replaceable current binding.
+This requires fencing and recovery state, but it preserves one conversation identity and one ordering
+authority across Runtime loss. Mohist selects Option B.
+
+The canonical read schemas, `FenceToken`, fence comparison, and binding compare-and-swap contract are
+defined only in [`conventions.md`](conventions.md). This document explains why execution needs those
+mechanisms and where their authority applies.
 
 ## Layers
 
@@ -64,7 +88,7 @@ and no AgentJob is created. The Workflow domain holds only the name token. The d
 resolves it through the Agent read side, so Workflow does not reference Agent domain types. If resolution
 fails because the Agent does not exist or is archived, task dispatch fails. Each dispatch resolves again,
 so a retry gets the definition that exists at retry time. See the product contract in
-[`../docs/actions/agent.md`](../docs/actions/agent.md)。
+[`../docs/actions/agent.md`](../docs/actions/agent.md).
 
 The AgentJob path must not dispatch through the public Workflow Action contract. After the Agent definition
 is resolved and snapshotted, its executor receives an Agent-owned execution request. The Workflow Action
@@ -111,6 +135,35 @@ AgentJob must not wait for the complete conversation to end.
 Agent launch fixes Instructions, Runtime, Model, Variant, and Skills. Later input in that AgentSession
 continues to use them. Mohist applies Agent concurrency and scheduling policy uniformly. An entry point must
 not bypass it, and a policy change must not forcibly rewrite an execution that has already started.
+
+## Launch convergence
+
+AgentJob and AgentSession have separate write authorities, so launch cannot be made atomic with one
+cross-aggregate transaction. The design instead makes partial progress durable and queryable. That keeps
+work lifecycle in AgentJob while Session acceptance remains authoritative in AgentSession.
+
+```text
+caller identity
+      |
+      v
+AgentJob prepare ---- durable accept request ----> AgentSession
+      ^                                            |
+      +----------- durable accept result ----------+
+```
+
+- The caller supplies `launchRequestId` and a request fingerprint. Their first accepted use maps once to
+  a Server-owned `launchOperationId` and reserved Job, Session, Input, and Turn identities.
+- A durable request asks AgentSession to accept the launch. One Session transaction either materializes
+  the Session, first Input, first Turn, dispatch record, and durable accept-result message together, or
+  records a durable rejection tombstone with no live mapping.
+- A durable result maps the accepted identities or rejection outcome back to AgentJob. Reservation IDs
+  never appear as live IDs; a successful launch exposes Session, Input, and Turn only as one accepted set.
+- Retries and queries use the same caller identity. The same fingerprint converges on the same outcome;
+  reusing the key with different intent returns `rejected(idempotency_key_reused)` and never creates a
+  second work item or conversation.
+
+The public launch projection and its null rules are defined only in
+[`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
 
 ## AgentSession model
 
@@ -242,10 +295,10 @@ The following invariants apply:
   `rejected(idempotency_key_reused)` and writes no new record. Response loss and duplicate submission can
   only reread that mapping. Only a different key can create a new Input.
 - Capacity limits do not cause an accepted Input to be discarded, overwritten, or assigned a new ID. When
-  capacity is insufficient, a new `new-turn` Input is rejected before acceptance. `#382` owns capacity
-  claim/release and the capacity view across Sessions.
+  capacity is insufficient, a new `new-turn` Input is rejected before acceptance. Cross-Session capacity
+  claim, release, and capacity views belong to the global scheduling policy.
 - The bounded queue limit for one Session is an admission invariant in this design. Its specific value is
-  a runtime parameter. This document does not copy the global capacity policy from `#382`.
+  a runtime parameter. This document does not copy the global scheduling policy.
 - AgentSession has at most one `ActiveOperation`. It is the durable operation fence for recovery, Compact,
   Reset, force-reset, handoff, stop, steer, or rebind. It is not a new business entity. It can be cleared
   only after the operation definitely completes or is rejected.
@@ -492,8 +545,8 @@ without persisting an Input. A later call with the same `(SessionId, requestId)`
 The same fingerprint always returns the same rejection. A changed payload always returns
 `rejected(idempotency_key_reused)`. It must not be accepted during a later capacity recovery window. The
 caller can submit again when capacity is available only with a new requestId. This limit constrains only
-queued admission for one Session. `#382` owns max-concurrent-runs, capacity claim/release, and the capacity
-view across Sessions. This design does not copy that scheduling policy.
+queued admission for one Session. Cross-Session concurrency, capacity claim and release, and capacity views
+belong to the global scheduling policy. This design does not copy that policy.
 
 The `new-turn` admission transaction first persists the Input, Turn relation, and canonical dispatch record,
 then enqueues asynchronously. The `steer` admission transaction instead first persists the steer
@@ -2132,906 +2185,34 @@ cover these cases:
   Session data.
 - TaskRun / AgentJob results and AgentSession Activity do not overwrite each other.
 
-## #378 Target spec: Input/Turn lifecycle and Runtime recovery
-
-This section is the target definition of the AgentSession execution contract. It supplements and refines
-the AgentSession, Input, Turn, and Binding models above. The public projections defined below take priority
-over implementation-internal terms such as `executing`, `completed`, or `failed`. This section does not
-introduce a new endpoint, CLI syntax, or event DSL. CLI and Web consume the same canonical Server state.
-Workflow can reuse this state later. Clients do not derive the lifecycle independently.
-
-### Object relationships and responsibilities
-
-| Object | Domain responsibility | Relationship to other objects |
-|---|---|---|
-| Agent | Long-lived reusable named entity that stores definition and config references | One Agent can produce multiple AgentJobs and AgentSessions |
-| AgentJob | Owner and result arbiter of one launch work item | References one first Input/Turn; does not own the Follow-up lifecycle |
-| AgentSession | Public logical Session that can continue interaction | Stably owns Inputs, Turns, Transcript, context, usage, and current Binding |
-| Input | Execution intent submitted once by a user or the system | Has a stable Input ID and exactly one Turn; retry does not create a copy |
-| Turn | Queue, execution, observation, and result record for an Input | Has a stable Turn ID; Turns in the same Session are serialized |
-| Runtime Session | Physical execution context in Runner/Runtime | Can disappear, be rebuilt, or be rebound; does not change AgentSession identity |
-| AgentJob executor | Gives launch intent to Session and Runner | Does not bypass Session records or treat a Runtime event as a public result |
-
-AgentSession is the public logical identity. It is not an alias for Runtime Session or AgentJob. AgentJob
-represents only one launch work item. A Follow-up appends to the original AgentSession and does not create an
-AgentJob. Agent Instructions, Runtime, Model, Variant, and Skills are resolved and snapshotted at launch.
-Persona is not a new domain object created by #378. If #377 later defines it, this design consumes only the
-resolved execution snapshot and does not define Persona fields or configuration experience. `target` means
-only the target reference in the existing launch context. #378 does not create a target model. Snapshot
-changes do not write back to an existing Session. Runtime Session loss or reconstruction, Runner restart,
-and rebinding must all map back to the same AgentSession, Input, and Turn records.
-
-Each launch or Follow-up must have an explicit Workspace and target. Both enter the persisted record and
-canonical return value. When CLI omits Workspace, the entry point first resolves the actual default scope
-for the current Project, then returns and persists that scope. It must not return null, return only
-"default," or make Web guess the directory.
-
-### Stable identity and canonical projections
-
-The client must first provide `launchRequestId` and canonical `launchRequestFingerprint`, which are the
-idempotency key and complete request-envelope hash for this launch. In the admission transaction, the Server
-looks up an existing request by `(projectId, agentId, launchRequestId)`. After response loss, the same key
-and fingerprint must return the original launch rejection/operation. A changed payload must return
-`rejected(idempotency_key_reused)`. Only a new requestId can create a new launch. Only the first prepare
-generates and persists reservations for `launchOperationId`, `AgentJobId`, `AgentSessionId`, `InputId`, and
-`TurnId`. Session/Input/Turn IDs become addressable live mappings only after Session accept succeeds. Once a
-materialized ID is persisted, queueing, Runner restart, Binding replacement, retry, Compact, Reset, or
-force-reset does not change it. RuntimeSessionId identifies only the current physical Binding. It can be
-replaced and must not be the identity of the public logical Session. `launchRequestId` permanently maps to
-one `launchOperationId`. The client must not use the Server-generated `launchOperationId` as the first
-request identity. Duplicate submission finds the original Input/Turn through the same request identity. It
-must not create a second Input or side effect.
-
-Server is the authoritative source for the canonical read model and command result. CLI, Web, and other
-entry points are adapters. There is no authority direction in which CLI JSON is fixed first and Web then
-reuses it. Each returned fact carries at least a Server-produced `revision` and `observedAt`. Revision
-increases monotonically when the corresponding authoritative Job/Session state changes. ObservedAt is when
-the Server observed that fact. External resume-read cursors and authentication/transport semantics remain in
-#387. This issue does not create an endpoint.
-
-| Canonical fact | Question it must answer | Required fields |
-|---|---|---|
-| AgentJob status | Was this launch work queued, executed, completed, rejected, or failed? | Canonical `AgentJobLaunchRead`, including `launchRequestFingerprint`, status/outcome/reason/nextAction, mapping, `revision`, and `observedAt` |
-| Session Activity | Can the current Context of this Session continue, and are old facts still unknown? | Canonical `AgentSessionRead`, including `admission`, reason/nextAction, Activity, Binding, unresolved targets, `revision`, and `observedAt` |
-| Input acceptance | Did Mohist durably accept this Input, and which Turn owns it? | Canonical `SessionInputRead`: `sessionId`, `inputId`, `requestId`, `requestFingerprint`, `state`, `acceptanceReason`, `turnId`, `turnRelation`, `steerOperationId`, `steerStatus`, `steerRetryAllowed`, `steerNextAction`, `contextGeneration`, `revision`, `observedAt` |
-| Turn result | What are this Turn's execution state, dispatch state, and result? | Canonical `TurnResultRead`, with the sole `outcome`/`reason`/`nextAction` and nullable `result` rules, plus `TurnDispatchRead` |
-| Session operation | How does a current or historical Compact/Reset/recovery/handoff/rebind/stop/force-reset/steer converge? | Complete [`SessionOperationRead`](conventions.md#canonical-sessionoperationread); do not copy its field list here |
-| Launch context | Which Workspace and existing target did this work actually bind? | `workspace`, `target`, `launchRequestId`, `launchOperationId`, `revision`, `observedAt` |
-
-`unresolvedPrevious` summarizes operations, Inputs, Turns, and side effects that remain unknown in an old
-`ContextGeneration`. It must retain operationId, contextGeneration, outcome, and nextAction, and must not be
-merged into `currentContextActivity`. Job `sessionId`, `inputId`, and `turnId` are canonical mapping fields.
-When absent, they must be `null` and the corresponding `...Reason` must be a non-empty stable value, such as
-`session_rejected`, `input_not_accepted`, or `launch_failed_before_session`. A reservation ID must not be
-returned as a live mapping. When Session accept durably succeeds, all three mappings materialize together.
-There is no half-mapping with only Session or only Input.
-
-Input `state`, `requestId`, unique mapping, and `turnRelation` follow
-[`conventions.md#canonical-sessioninput-and-dispatch-schema`](conventions.md#canonical-sessioninput-and-dispatch-schema).
-Turn `dispatchStatus` can use only canonical `queued | retrying | blocked | dispatched | unknown |
-terminal`. `blocked` is temporarily retryable. Only `terminal` is terminal after reaching an
-attempt/deadline limit. `blockedReason` can be non-empty for `blocked` or
-`terminal/outcome=blocked`. Unknown dispatch must not be fabricated as blocked or terminal. `nextAction`,
-attempt count, attempt identity, and deadline are all required. A client must be able to distinguish
-continued coordination, querying the same attempt, and explicit requeue after termination.
-
-`accepted` is an Input admission fact. It does not replace Job status, Session Activity, or Turn result.
-`result` is populated only when the state is `terminal` and the Server persisted the final result, subject to
-the null rules in conventions. `queued`, `running`, `outcome_pending`, and `unknown` must not fabricate
-success, failure, or cancellation. `reason` and `nextAction` use stable, user-understandable semantics and
-do not expose a provider event name. CLI/Web can only translate these canonical facts for presentation. They
-must not calculate another "completion" from a local log, HTTP state, or Runtime event.
-
-`accepted` is an Input admission fact. `status` is a Turn observation fact. An accepted Input can temporarily
-be `queued`, `retrying`, or `blocked`. When the durable dispatch deadline arrives, a definitely-rejected
-attempt exists, and the retry budget reaches its boundary, `dispatchStatus=terminal` and Turn
-`outcome=blocked`; it must not remain queued forever. Runner unavailability can also make it `unknown`, in
-which case `Turn.status=unknown` must be synchronized. A Turn is `running` only after the Runtime confirms
-that execution started. Session-level `activity` can still be `idle`, `active`, or `unknown`, but it does not
-replace Turn status. `activity=idle` for the current `ContextGeneration` requires no non-terminal Turn and no
-incomplete operation. It does not mean that the latest Runtime process is idle and cannot coexist with an
-unarchived result.
-
-Turn status is defined as follows:
-
-| Status | Entry condition | Meaning and allowed transitions |
-|---|---|---|
-| `queued` | Input is accepted and Turn is persisted, but Runtime has not confirmed start. Dispatch can be `queued`, `retrying`, or temporarily `blocked`. | Can become `running`; becomes `terminal/outcome=blocked` when dispatch reaches its limit with a definitely-rejected attempt; becomes `unknown` when a side-effect fact is uncertain |
-| `running` | The Runtime at the current complete Binding confirmed that it accepted and executes this Turn | Can become `outcome_pending`, `terminal`, or `unknown` when the result is uncertain |
-| `outcome_pending` | Server knows that Input/submit was accepted, but Runtime is not currently executing and the final result is not archived | Can become `terminal` only from an authoritative result or `unknown` when observation loses certainty; must not be treated as success or idle |
-| `terminal` | Server persisted irreversible success, failure, cancellation, or a `blocked` result after the dispatch attempt/deadline limit | Terminal; no more automatic replay or result changes |
-| `unknown` | Input acceptance, side effect, or execution result cannot be confirmed. When dispatch is unknown, Turn must also be `unknown`. | Non-terminal; only authoritative observation of the same attempt, manual confirmation, or explicit force-reset can handle it; must not redeliver automatically |
-
-Turn has no `idle` state. `activity=idle` holds only when the Session has no non-terminal Turn or incomplete
-operation. `outcome_pending` and `unknown` both prevent an ordinary new Turn, Compact, Reset, and recovery.
-They differ only in the facts known to Server; they do not change the safety gate. Internal `Executing` maps
-to public `running`. Internal Completed/Failed/Cancelled maps to `terminal` only after the result is
-persisted. Internal enums must not be exposed directly to CLI/Web.
-
-Canonical AgentJob status is `preparing | queued | running | unknown | terminal`. Terminal `outcome` is
-`completed | rejected | failed | cancelled | blocked`. `rejected` means Server confirmed that Session did
-not accept this launch. `failed` means an unrecoverable launch/execution failure is confirmed. Both must be
-terminal and include stable `reason` and `nextAction`. While acceptance, dispatch, or a Runtime side effect
-cannot be confirmed, retain `unknown`; do not fabricate `failed` to clear a wait. Unknown is not queued and
-must include a next action such as querying the original operation, manual reconciliation, or force-reset.
-
-### Launch and Follow-up lifecycle
-
-Both call types follow the same logical sequence. They differ only in whether launch creates an AgentJob:
-
-```text
-request -> prepare-job -> accept-session -> queue -> execute -> result
-```
-
-1. `request` validates the Agent execution-definition snapshot, Workspace, existing target/context, Input
-   identity, and current Session. This step does not promise that the Runtime is available. Launch must
-   carry caller-generated `launchRequestId` and `launchRequestFingerprint`. They are the only idempotency
-   key/envelope hash that the client retains for the first request and every retry.
-2. `prepare-job` looks up `(projectId, agentId, launchRequestId)` in AgentJob's own transaction. The same
-   fingerprint returns the original Job/operation or rejection tombstone. A changed payload returns
-   `idempotency_key_reused` and creates no new reservation. Only a new requestId enters prepare. Only the
-   first request generates and persists `launchOperationId`, JobId, internal Session/Input/Turn reservations,
-   a fixed launch `deadline`, `launchRequestFingerprint`, `sessionAcceptance=pending`, and one
-   `accept-session` durable outbox command. It does not write Session. A reservation is only an idempotent
-   placeholder for the coordinator, not an addressable Session, Input, or Turn. Before accept succeeds, Job
-   read must return `null + reason` for all three mappings.
-3. `accept-session` is an idempotent command carrying `launchOperationId` and reservation IDs, sent by the
-   durable launch coordinator. The Session participant transaction writes only its own Session, Input, Turn
-   request map, dispatch record, and `SessionLaunchAccepted` / `SessionLaunchRejected` durable event/outbox.
-   It cannot update AgentJob in the same transaction. The Session side must make the accept/reject result
-   queryable as `pending | accepted | rejected`. Accept materializes the Session/Input/Turn relationship and
-   initial dispatch event together. Success returns `accepted=true` and stable InputId/TurnId. The state is
-   normally `queued` at this point and must not be written as `running`. Rejected must also persist a stable
-   `reason`; it must not exist only in the synchronous response. On definitive rejection, the Session side
-   retains an admission tombstone keyed by `launchOperationId` but creates no addressable Session/Input/Turn.
-4. `queue` advances the ordered execution queue through the Session event/outbox. Exactly one Turn in the
-   same Session can have confirmed execution. A Follow-up queues while the preceding Turn is non-terminal.
-   It does not jump the queue, merge, or overwrite. The Session queue limit belongs to this design. Capacity
-   claim/release and the view across Sessions belong to `#382`.
-5. `execute` has the bound Runner reconcile or recover the Runtime. Turn becomes `running` only after it
-   receives a start fact from the current complete Binding. Different AgentSessions can run in parallel.
-6. `result` is archived only by the Server from the current Binding, associated InputId/TurnId, and
-   authoritative result. A known final result makes the Turn `terminal`. If the Runtime reports idle before
-   the result is certain, the Turn remains `outcome_pending`; it must not become `idle`.
-
-Launch creates the first Input/Turn for one new AgentJob. It returns JobId, SessionId, InputId, and TurnId
-after the Job coordinator confirms the Session accept event. If Session has not accepted, these three
-mapping fields return `null` and their respective reasons, not reservation IDs. AgentJob, AgentSession,
-Input, and Turn do not share a cross-aggregate transaction. The AgentJob event/outbox drives an idempotent
-Session command. A Session event then drives the Job mapping write-back and first Turn dispatch. A Follow-up
-does not create an AgentJob; it only appends an Input/Turn.
-
-`LaunchCoordinator` uses `launchOperationId` as its sole durable identity. It stores only the command
-delivery fence, owner/claim lease, deadline, and current phase. It does not copy AgentJob or AgentSession
-business facts. After process restart, it scans Jobs with `sessionAcceptance=pending`, claims unexpired work,
-and takes over an expired lease after incrementing the owner fence. Every send, query, and Job write-back
-reuses the same `launchOperationId`. Retry or response loss first queries the durable Session launch result.
-Only when that result is unknown does it redeliver the same accept command. It must not generate a new Job,
-Session, Input, Turn, or launch identity.
-
-The launch coordinator must converge to these results:
-
-| Fact | Job result | Mapping and retention |
-|---|---|---|
-| Session definitively rejects | `terminal / rejected` | `sessionId`, `inputId`, and `turnId` are all null + reason; reservations remain only in the launch tombstone |
-| Unrecoverable prepare/outbox/Session failure with confirmed absence of a Session side effect | `terminal / failed` | All non-materialized mappings are null + reason; retain the launch tombstone and no executable outbox |
-| Session accepted | `queued` or later `running/terminal` (Job outcome=blocked when first Turn dispatch is terminal blocked) | Return all three live mappings together; later update only status and never replace an ID |
-| Response loss or uncertain acceptance/side effect | `unknown` or known current state | First use the original `launchRequestId` to find `launchOperationId`, then query/retry the original operation; do not create a Job, Session, Input, Turn, or submit |
-
-`reason` and `nextAction` are stable canonical Server product semantics, such as `agent_archived`,
-`needs_setup`, `invalid_input`, `queue_full`, `session_conflict`, and `launch_persistence_failed`. Temporary
-unavailability must continue the same operation and must not become permanent failure early. At the
-deadline, the state can become `terminal / failed` only when the Server proved that Session did not accept
-and no Runtime side effect is possible. Otherwise, retain `unknown` and provide a next action for manual
-reconciliation or force-reset. Do not create a false terminal state.
-
-After response loss or Server restart, a query must first use `launchRequestId` to find the unique
-`launchOperationId`, then read the durable acceptance records from Job and Session. Session `accepted`
-returns the original three mappings. `rejected` returns the terminal reason. `pending` redelivers the same
-accept command. If Session stored the accept record for the same operation but Job write-back failed, the
-coordinator writes the same mapping only in the AgentJob transaction. It can retry the same command only
-when Session has no record. Therefore, the original launch operation always corresponds to one reservation
-set and at most one live mapping set. It produces no dangling live ID or unbounded pending state. The client
-does not need to guess or know `launchOperationId` in advance.
-
-### Durable dispatch retry after accepted
-
-After `accept-session` commits Input/Turn, enqueue is not an instantaneous side effect. The same Session
-transaction must create `TurnDispatchRead` from
-[`conventions.md#canonical-sessioninput-and-dispatch-schema`](conventions.md#canonical-sessioninput-and-dispatch-schema),
-fix `dispatchDeadline`, and write durable retry work/outbox. The only key for this retry work is
-`dispatchRetryId`. The outbox command, timer, and coordinator claim all use it instead of generating
-separate identities. Each retry first atomically claims due work in the Server, increments
-`dispatchAttemptCount`, generates one unique `dispatchAttemptId`, and sets status to `retrying`. It then
-calls Runner with the complete `FenceToken`. Response loss queries only by the same `dispatchAttemptId` and
-does not create a second attempt.
-
-```text
-persistInitialDispatch(turn, input, deadline):
-  atomically:
-    retryId = stableRetryId(turn.id, retrySequence = 0)
-    operationId = stableDispatchOperationId(turn.id)
-    persist TurnDispatch(
-      sessionId = turn.sessionId,
-      dispatchStatus = queued, dispatchAttemptCount = 0,
-      dispatchAttemptId = null, dispatchDeadline = deadline,
-      dispatchOperationId = operationId, dispatchLastResult = none,
-      expectedBinding = session.currentBinding, candidateBinding = null,
-      dispatchRetryId = retryId, dispatchRetryKind = outbox,
-      retryAllowed = true,
-      dispatchRetryDueAt = now, dispatchRetryState = pending,
-      dispatchRetryOwnerId = null, dispatchRetryClaimGeneration = null,
-      dispatchRetryLeaseUntil = null, dispatchFence = null,
-      nextAction = dispatch_due)
-    append unique DispatchRetryWork(
-      sessionId = turn.sessionId, inputId = input.id, turnId = turn.id,
-      operationId = operationId, dispatchStatus = queued,
-      dispatchLastResult = none, dispatchAttemptId = null,
-      dispatchRetryId = retryId, retryAllowed = true,
-      dueAt = now,
-      attemptCount = 0, deadline = deadline,
-      ownerId = null, ownerFence = null, claimGeneration = null,
-      leaseUntil = null, revision = turn.revision,
-      expectedBinding = session.currentBinding, candidateBinding = null,
-      dispatchFence = null)
-
-reconcileAcceptedDispatch(record):
-  if record.dispatchStatus in {dispatched, terminal}:
-    return the stored result
-
-  if record.dispatchStatus == unknown and record.retryAllowed == false:
-    return stored unknown with nextAction = query_same_dispatch_attempt_or_manual_reconcile
-
-  # This check is before claimDueOrTakeOver: no expired lease is ever minted.
-  if now >= record.dispatchDeadline:
-    return persistDispatchDeadlineOutcomeIfFenceRecordMatches(
-      record, record.dispatchFence, now)
-
-  work = loadDurableRetryWork(record.dispatchRetryId)
-  if work is missing:
-    require record.dispatchRetryId != null
-    require record.retryAllowed == true
-    require record.dispatchRetryDueAt is valid
-    require record.dispatchStatus in {queued, blocked, unknown}
-    require record.sessionId != null and record.dispatchOperationId != null
-    require record.dispatchAttemptId is explicit (value or null)
-    require record.dispatchRetryId != null and record.retryAllowed == true
-    require record.dispatchDeadline != null
-    require record.expectedBinding is explicit (value or null)
-    require record.candidateBinding is explicit (value or null)
-    require record.revision != null
-    atomically recreate DispatchRetryWork from the complete canonical record,
-      preserving sessionId, operationId, owner/claim/revision, attempt/retry IDs,
-      expected/candidate binding, dueAt, deadline, and retryAllowed
-  claim = claimDueOrTakeOver(record, work, record.dispatchFence, now, coordinatorId)
-  if claim == retry_waiting:
-    return retry_waiting
-  { work, dispatchFence } = claim
-
-  if record.dispatchStatus == unknown:
-    if record.dispatchAttemptId == null:
-      return retainUnknownWithoutRetry(record, dispatchFence,
-                                       reason = dispatch_outcome_unknown)
-    result = effectWithFence(dispatchFence,
-      token => queryRunnerDispatch(record.dispatchAttemptId, fenceToken = token))
-    if result is unknown:
-      if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
-        return retainUnknownWithoutRetry(record, dispatchFence,
-                                         reason = dispatch_outcome_unknown)
-      return rescheduleDispatch(record, dispatchFence, work, nextDueAt(record))
-    if result is accepted_before_start:
-      return persistDispatchedIfFenceMatches(record, dispatchFence,
-        result, turnStatus = queued)
-    if result is accepted_and_started:
-      return persistDispatchedIfFenceMatches(record, dispatchFence,
-        result, turnStatus = running)
-    if result is terminal:
-      return persistTerminalResultIfFenceMatches(record, dispatchFence, result)
-    if result is definitely_rejected:
-      dispatchFence = persistDefinitelyRejectedIfFenceMatches(record, dispatchFence)
-      if now < record.dispatchDeadline and record.dispatchAttemptCount < maxDispatchAttempts:
-        return persistBlockedAndSchedule(record, dispatchFence,
-                                         reason = temporary_enqueue_blocked)
-      return terminalizeDispatchBlocked(record, dispatchFence,
-                                        reason = dispatch_retry_exhausted)
-
-  if now >= record.dispatchDeadline or record.dispatchAttemptCount >= maxDispatchAttempts:
-    if record.dispatchAttemptId == null or record.dispatchLastResult != definitely-rejected:
-      observationFence = dispatchFence
-      return retainUnknownWithoutRetry(record, observationFence,
-                                       reason = dispatch_outcome_unknown)
-    return terminalizeDispatchBlocked(record, dispatchFence,
-                                      reason = dispatch_retry_exhausted)
-
-  atomically:
-    require Input.acceptance == accepted
-    require record.dispatchStatus in {queued, blocked}
-    require record.retryAllowed == true
-    require record.dispatchRetryId != null
-    require work.dispatchRetryId == record.dispatchRetryId
-    require work.sessionId == record.sessionId
-    require work.operationId == record.dispatchOperationId
-    require work.dueAt <= now and work.deadline == record.dispatchDeadline
-    increment dispatchAttemptCount
-    dispatchAttemptId = stableAttemptId(record.turnId, record.dispatchAttemptCount)
-    dispatchFence = dispatchFence with
-      dispatchAttemptId = dispatchAttemptId,
-      revision = nextRevision(),
-      deadline = record.dispatchDeadline,
-      expectedBinding = record.expectedBinding,
-      candidateBinding = record.candidateBinding,
-      bindingAtEffect = currentBinding
-    persist dispatchStatus = retrying, dispatchAttemptId, dispatchFence,
-      dispatchLastResult = none,
-      dispatchRetryState = claimed, dispatchRetryOwnerId = work.ownerId,
-      dispatchRetryClaimGeneration = work.claimGeneration,
-      dispatchRetryLeaseUntil = work.leaseUntil,
-      revision = dispatchFence.revision, session.revision = dispatchFence.revision
-
-  result = effectWithFence(dispatchFence,
-    token => Runner.enqueue(record.inputId, record.turnId,
-                            record.dispatchAttemptId, token))
-  if result is accepted_before_start:
-    return persistDispatchedIfFenceMatches(record, dispatchFence,
-      result, turnStatus = queued)
-  if result is accepted_and_started:
-    return persistDispatchedIfFenceMatches(record, dispatchFence,
-      result, turnStatus = running)
-  if result is terminal:
-    return persistTerminalResultIfFenceMatches(record, dispatchFence, result)
-  if result is definitely_rejected:
-    dispatchFence = persistDefinitelyRejectedIfFenceMatches(record, dispatchFence)
-    if now < record.dispatchDeadline and record.dispatchAttemptCount < maxDispatchAttempts:
-      return persistBlockedAndSchedule(record, dispatchFence,
-                                       reason = temporary_enqueue_blocked)
-    return terminalizeDispatchBlocked(record, dispatchFence,
-                                      reason = dispatch_retry_exhausted)
-  return rescheduleDispatch(record, dispatchFence, work, nextDueAt(record))
-
-persistDefinitelyRejectedIfFenceMatches(record, dispatchFence):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    newRevision = nextRevision()
-    dispatchFence = dispatchFence with revision = newRevision
-    persist record.dispatchLastResult = definitely-rejected,
-      record.revision = newRevision, session.revision = newRevision,
-      record.dispatchFence = dispatchFence
-    update DispatchRetryWork(dispatchFence.dispatchRetryId).revision = newRevision
-    return dispatchFence
-
-persistTerminalResultIfFenceMatches(record, dispatchFence, result):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require result.attemptId == dispatchFence.dispatchAttemptId
-    require result.outcome in {completed, failed, cancelled}
-    newRevision = nextRevision()
-    persist dispatchStatus = terminal, dispatchLastResult = accepted,
-      retryAllowed = false, blockedReason = null,
-      Turn.status = terminal, Turn.outcome = result.outcome,
-      Turn.reason = result.reason, Turn.nextAction = inspect_turn,
-      Turn.result = if result.outcome == completed then result.result else null,
-      record.revision = newRevision,
-      session.revision = newRevision
-    mark DispatchRetryWork(dispatchFence.dispatchRetryId) = consumed
-    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-      dispatchRetryLeaseUntil, dispatchFence
-  return terminal
-
-persistDispatchedIfFenceMatches(record, dispatchFence, result, turnStatus):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require result is accepted and result.attemptId == dispatchFence.dispatchAttemptId
-    newRevision = nextRevision()
-    persist dispatchStatus = dispatched, dispatchLastResult = accepted,
-      blockedReason = null, Turn.status = turnStatus, Turn.outcome = null,
-      Turn.reason = null,
-      Turn.nextAction = if turnStatus == queued then await_dispatch else await_turn_result,
-      record.revision = newRevision, session.revision = newRevision
-    mark DispatchRetryWork(dispatchFence.dispatchRetryId) = consumed
-    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-      dispatchRetryLeaseUntil, dispatchFence
-  return dispatched
-
-persistBlockedAndSchedule(record, dispatchFence, reason):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require record.dispatchAttemptId != null
-    require record.dispatchLastResult == definitely-rejected
-    require now < record.dispatchDeadline
-    require record.dispatchAttemptCount < maxDispatchAttempts
-    retryId = stableRetryId(record.turnId, retrySequence = nextRetrySequence(record))
-    dueAt = calculateDueAt(record.dispatchAttemptCount, record.dispatchDeadline)
-    require dueAt <= record.dispatchDeadline
-    newRevision = nextRevision()
-    mark DispatchRetryWork(dispatchFence.dispatchRetryId) = consumed
-    persist dispatchStatus = blocked, blockedReason = reason,
-      dispatchLastResult = definitely-rejected, retryAllowed = true,
-      Turn.status = queued, Turn.outcome = null,
-      Turn.reason = dispatch_temporarily_rejected,
-      Turn.nextAction = retry_dispatch_at_durable_signal,
-      dispatchAttemptCount = record.dispatchAttemptCount,
-      dispatchAttemptId = record.dispatchAttemptId,
-      dispatchDeadline = record.dispatchDeadline,
-      dispatchRetryId = retryId, dispatchRetryKind = timer,
-      dispatchRetryDueAt = dueAt, dispatchRetryState = pending,
-      dispatchRetryOwnerId = null, dispatchRetryClaimGeneration = null,
-      dispatchRetryLeaseUntil = null, dispatchFence = null,
-      revision = newRevision,
-      nextAction = retry_dispatch_at_durable_signal
-    append unique DispatchRetryWork(
-      sessionId = record.sessionId, operationId = record.dispatchOperationId,
-      dispatchStatus = blocked, dispatchLastResult = definitely-rejected,
-      dispatchAttemptId = record.dispatchAttemptId, dispatchRetryId = retryId,
-      retryAllowed = true, inputId = record.inputId, turnId = record.turnId,
-      dueAt = dueAt, attemptCount = record.dispatchAttemptCount,
-      deadline = record.dispatchDeadline, ownerId = null,
-      ownerFence = null, claimGeneration = null, leaseUntil = null,
-      revision = newRevision, expectedBinding = dispatchFence.expectedBinding,
-      candidateBinding = dispatchFence.candidateBinding, dispatchFence = null)
-  return retry_scheduled
-
-retainUnknownWithoutRetry(record, dispatchFence, reason):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require record.dispatchStatus in {queued, retrying, unknown}
-    if record.dispatchRetryId != null:
-      mark DispatchRetryWork(record.dispatchRetryId) = cancelled
-    newRevision = nextRevision()
-    persist dispatchStatus = unknown, dispatchLastResult = unknown,
-      retryAllowed = false, Turn.status = unknown, Turn.outcome = null,
-      Turn.reason = reason,
-      Turn.nextAction = query_same_dispatch_attempt_or_manual_reconcile,
-      nextAction = query_same_dispatch_attempt_or_manual_reconcile,
-      dispatchFence = null, revision = newRevision, session.revision = newRevision
-    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-      dispatchRetryLeaseUntil
-  return unknown
-
-terminalizeDispatchBlocked(record, dispatchFence, reason):
-  atomically:
-    require fullDispatchFenceMatches(session, record, dispatchFence, now)
-    require Input.acceptance == accepted
-    require record.dispatchAttemptId != null
-    require record.dispatchLastResult == definitely-rejected
-    require now >= record.dispatchDeadline or
-            record.dispatchAttemptCount >= maxDispatchAttempts
-    if record.dispatchStatus == terminal:
-      return the stored terminal result
-    newRevision = nextRevision()
-    persist dispatchStatus = terminal, retryAllowed = false,
-      dispatchLastResult = definitely-rejected, revision = newRevision,
-      session.revision = newRevision
-    persist Turn.status = terminal, Turn.outcome = blocked
-    persist Turn.reason = dispatch_terminal_rejected,
-      Turn.nextAction = inspect_or_explicit_requeue,
-      Turn.result = null
-    persist blockedReason = reason, dispatchFence = null
-    persist nextAction = inspect_or_explicit_requeue
-    mark DispatchRetryWork(dispatchFence.dispatchRetryId) = cancelled
-    clear dispatchRetryId, dispatchRetryKind, dispatchRetryDueAt,
-      dispatchRetryState, dispatchRetryOwnerId, dispatchRetryClaimGeneration,
-      dispatchRetryLeaseUntil
-  return terminal_blocked
-```
-
-`claimDueOrTakeOver` returns a newly claimed complete `DispatchFenceToken`; `rescheduleDispatch` and
-every helper named above receive that full token, not only a retry ID or owner ID. Each atomically compares
-`sessionId/operationId/ownerId/ownerFence/claimGeneration/revision/dispatchAttemptId/
-dispatchRetryId/leaseUntil/deadline/expectedBinding/candidateBinding/bindingAtEffect` before the
-claim, external enqueue/query, reschedule, or result write. A stale owner, including Owner A after
-Owner B takeover or completion, returns `stale_operation_fence`; it cannot overwrite Turn/dispatch
-state or create retry work.
-
-The accepted Input and its Turn are never deleted, replaced, or changed to `rejected` by this
-path. A temporary `blocked` record is non-terminal and is legal only after a definitely-rejected
-attempt; it must schedule another coordinator wake-up;
-the coordinator cannot return just because it read `blocked`. A permanent enqueue refusal is
-`dispatchStatus=terminal` with Turn `status=terminal`, `outcome=blocked`, a durable
-`blockedReason`, fixed attempt/deadline evidence and `nextAction`; it requires the same attempt's
-definitely-rejected result, and no automatic retry follows. Unknown acceptance, missing outbox, or
-an absent attempt stays `dispatchStatus=unknown` and `Turn.status=unknown`, never terminal blocked.
-A coordinator restart scans durable `DispatchRetryWork`, claims due work, and takes over only after
-its persisted lease expires. Duplicate outbox delivery, timer firing or command consumption uses
-the same `dispatchRetryId` and is idempotent. `nextAction` is only a client instruction; it is never
-the durable wake-up and cannot replace the retry work.
-A later explicit requeue is a new bounded operation that references the same Input and Turn, and
-cannot silently create another Input, Turn, or launch.
-
-Rejected or failed Jobs, `launchRequestId`, launch operation, reason, nextAction, and
-unmaterialized reservations remain permanently as minimal tombstones. Existing retention policy
-may remove a full transcript or large payload, but it must not remove `launchRequestId`,
-`launchOperationId`, JobId, the three reservation/live mappings, terminal outcome, reason,
-nextAction, or revision. Reservation IDs are never reclaimed or reused, and they do not create an
-empty Session, Input, or Turn. An old `launchRequestId` or `launchOperationId` can only return its
-original outcome or an explicit permanent tombstone. A new launch cannot reinterpret it as a
-different set of mappings.
-
-The serial constraint within one Session is a lifecycle fact, not a global capacity policy. While
-the previous Turn is `queued`, `running`, `outcome_pending`, or `unknown`, a subsequent Input can
-only follow steer/queue semantics or be explicitly rejected. It cannot be submitted concurrently
-to the same Runtime. #382 owns max-concurrent-runs across Sessions, capacity claim/release, and the
-capacity view. #378 defines only the Session queue limit, ordering, and state facts.
-
-### Runtime Recovery State Machine
-
-The recovery state machine consists of Server-arbitrated state, Runner facts, and CAS against the
-current binding. It does not depend on client guesses, and it does not treat an HTTP timeout as a
-missing Runtime:
-
-```text
-Bound
-  | disconnect / runner restart / probe unavailable
-  v
-ObservationUnknown -- authoritative present --> Bound
-  | definitely-missing + current generation idle + admission=ready + no unknown effects
-  v
-RecoveryClaimed -> CandidateCreated -> CAS Rebound
-  | definitely-missing but running/outcome_pending/unknown/possible side effect
-  v
-RecoveryObservationOnly -- query/authoritative result --> ObservationUnknown | Bound
-  | concurrent claim / deadline / candidate cleanup failure
-  v
-RecoveryInProgress | RecoveryFailed | RecoveryExpired | CleanupPending
-```
-
-- `Bound`: The current binding is the only target. Normal retry, follow-up, Compact, Reset, and
-  Runner restart first reuse it. After reconnecting, the Runner reports the facts for the current
-  physical session again.
-- `ObservationUnknown`: A disconnect, timeout, unreachable Runner, authorization error, non-404
-  error, malformed response, or any result that cannot prove absence. Preserve the original
-  binding, do not create a candidate, and do not replay. When current admission cannot be
-  confirmed safely, persist `blocked` and a query next action.
-- `RecoveryClaimed`: The Runner has explicitly reported that the current Runtime Session does not
-  exist. The Server first persists the unique operation owner, ownerFence, claimGeneration,
-  deadline, and candidate key. It then creates an empty Session for the same AgentSession and uses
-  the full expected binding for CAS. This state is allowed only when the current generation has
-  `activity=idle`, has no unknown Input/Turn/dispatch/runtime effect, and has `admission=ready`. A
-  second recovery receives only `recovery_in_progress`.
-- `RecoveryObservationOnly`: The physical session is confirmed missing, but the current generation
-  is running, outcome_pending, or unknown, or an old side effect might have occurred. Preserve the
-  original binding, Turn, and operation facts. Set the Session to `admission=blocked` and
-  `nextAction=query_runtime_or_force_reset`. This state never creates a candidate, changes the
-  binding by CAS, or replays input. The new generation can become ready only after an explicit
-  force-reset commits a new binding and context.
-- `Rebound`: Candidate Runtime Session creation and atomic binding replacement succeed. Write one
-  `session.context_reset(reason=missing-recovery)` event and increment `ContextGeneration`. Keep
-  the old Input/Turn mappings, Workspace, target, and public transcript unchanged. Subsequent new
-  Inputs and Turns use only the new `ContextGeneration`.
-- `RecoveryFailed` / `RecoveryExpired`: Creation, Runner routing, CAS, deadline, or persistence
-  failed. Do not fabricate a replacement for the original binding. If the candidate was not
-  adopted, discard it idempotently with the same key. When the cleanup result is uncertain,
-  preserve `cleanup_pending` and do not allow a second recovery.
-
-Recovery requires authoritative confirmation that the Runtime is missing. A Runner restart,
-connection loss, or read timeout alone does not qualify. Each enters `ObservationUnknown` until a
-probe from the same Runner reports `present` or `definitely-missing`. If the physical Session
-exists, the system must continue using it and cannot create a new one merely because of a
-reconnection.
-
-The system can automatically create an empty Runtime Session, replace the binding, and allow later
-input only after confirmed absence, when the current generation has `activity=idle`, no unknown
-Input/Turn/dispatch/runtime effect, and `admission=ready`. If the current Turn is `running`,
-`outcome_pending`, or `unknown`, or if any old Runtime side effect might have occurred, recovery can
-only continue observation/query. It preserves the original binding and Turn, and persists
-`admission=blocked` and `nextAction=query_runtime_or_force_reset`; it cannot replace the binding
-automatically. New Inputs and Turns are allowed only after force-reset commits a new context and
-binding. The system never automatically replays an old Input, prompt, tool call, or side effect to
-the new Runtime.
-
-Recovery success does not mean that the original Turn succeeded. It means only that the public
-AgentSession has a new usable Runtime context. The original Turn becomes `terminal` only after an
-authoritative terminal result arrives from the old binding. Late events from the old binding are
-dropped because RuntimeSessionId does not match. Recovery failure does not close the AgentSession,
-generate a new SessionId, or collapse the error into `Session failed`.
-
-Missing recovery is not an exception for an Unknown Turn. If the old Turn might have produced a
-side effect, the Server preserves `unknown` or `outcome_pending`. It does not allow recovery,
-Compact, ordinary Reset, or a new Turn to use a gap left by the old Turn to enter the Runtime. Only
-an explicit user-selected `force-reset` can establish a new context boundary. The original Turn and
-side-effect risk remain, and the full binding tuple, ownerFence, and claimGeneration continue to
-guard against late events.
-
-A status query or a retry with the same request identity performs observation only:
-
-- A duplicate request in queued, running, outcome_pending, terminal, or unknown state returns the
-  original record without dispatching again.
-- Only an authoritative event or explicit user operation can advance unknown. A client retry
-  cannot change it to queued.
-- When the side-effect result is uncertain, do not replay automatically. The user first queries the
-  state. If it remains uncertain, the user follows `next action` to choose Reset or manual
-  verification.
-
-### Deterministic Rules for Disconnects, Duplicate Submissions, and Recovery Windows
-
-| Scenario | Preserved facts | Automatic action | Public result |
-|---|---|---|---|
-| Client disconnects after request | Persisted Input/Turn and original request identity | Do not resend; query after reconnecting | Original InputId/TurnId, with state from current Server facts |
-| Duplicate submission with the same request identity | Original Input/Turn | Return the original record; only queued can continue the same dispatch | `accepted` is not duplicated; a side effect is accepted at most once |
-| Same text submitted again with a different identity | Original record and distinct new request identity | Do not infer equivalence or deduplicate automatically | Validate the new request normally; reject it or create a new Input as required |
-| Runner restart | Current binding | Runner reconnects and probes; reuse if present | Session/Input/Turn IDs do not change |
-| Disconnect or timeout | Current binding and possible activity facts | Preserve the binding and enter observation unknown | An active Turn is `unknown`, not idle |
-| Runtime confirmed missing with no pending side effect | Session record | Create an empty Runtime, replace the binding by CAS, and start a new ContextGeneration | Same Session; subsequent Turn can be `queued` |
-| Absence confirmed but old Turn might have been submitted | Old Turn and its side-effect uncertainty | Do not replace the binding automatically; allow only explicit force-reset | Old Turn is `unknown`, with a query/force-reset next action |
-| Recovery failure | Original binding and records | Do not replace the binding or close the Session | `recovery_failed`, with a specific actionable reason |
-
-A recovery window cannot derive a conclusion by polling the wall clock. If the implementation
-needs a deadline, it must inject `TimeProvider` or an equivalent fake and persist window expiration
-as a recovery result. Tests cannot use sleep or the current time nondeterministically.
-
-Public recovery failures distinguish at least the following actionable semantics. These values are
-written to canonical `reason` and `nextAction`; they are not new command syntax:
-
-| Reason | User-visible meaning | Next action |
-|---|---|---|
-| `recovery_in_progress` | Another recovery operation for the same Session owns the window | Query the original Session/Input/Turn and wait for that operation's result; do not submit again |
-| `runtime_unavailable` | Runner or Runtime is temporarily unreachable, so absence is not proven | Wait until the Runner is ready, then query with the original request identity; do not create a new request |
-| `runtime_missing_unconfirmed` | The probe result does not prove that the physical session is absent | Continue querying or let the Runner reconnect and probe; do not substitute Reset for factual determination |
-| `recovery_failed` | Absence is confirmed, but create/CAS/persistence failed | Check the Runner, Workspace, and permissions; explicitly Reset when `admission=ready`, while preserving original Session diagnostics |
-| `turn_outcome_unknown` | The original Turn might have produced a side effect but has no authoritative result | Query the original Turn; if it remains Unknown, verify manually or explicitly force-reset, and never replay automatically |
-
-### Compact, Reset, and the Public Context Boundary
-
-Compact and Reset are AgentSession context-boundary operations. They are not Workflow Actions and
-do not create a new AgentSession, AgentJob, Input, or Turn. Both preserve the existing public
-transcript, stable IDs, Workspace, target, and accumulated usage. They change only the boundary of
-the subsequent Runtime context, and each has an operation fence with `operationId`, expected
-binding, owner, ownerFence, claimGeneration, and a bounded deadline.
-
-- Compact asks the Runtime to compact its current context when the Session can safely enter a
-  boundary. On success, it continues using the same binding and does not increment
-  `ContextGeneration`, but it must persist a ContextBoundary and operation result for that same
-  `ContextGeneration`. Subsequent input continues from this successful boundary.
-- Reset establishes an empty context. When necessary, it creates a new Runtime Session and replaces
-  the entire current binding. It increments `ContextGeneration` but preserves the old transcript,
-  old Input/Turn mappings, and logical Session identity.
-- Runtime change and confirmed missing recovery increment `ContextGeneration`, as Reset does. New
-  Inputs and Turns record only the new `ContextGeneration`. The `ContextGeneration`, TurnId, and
-  result of an old Input or Turn are never rewritten.
-- While running, `outcome_pending`, Unknown, or inside a recovery fence, the system cannot pretend
-  that Compact or Reset completed. It returns the current state and next action. If the provider
-  executed the operation but the response was lost, the operation is `unknown`. The system can
-  only query the same operation or explicitly retry with the same idempotency key; it cannot repeat
-  the operation implicitly.
-- By default, preserve the original Unknown facts and do not replay automatically. Only after the
-  user explicitly acknowledges the risk and supplies a new `force-reset` operationId can the system
-  increment `ContextGeneration` and establish a new context boundary and binding. The old Turn
-  remains `unknown`, while the new context can create new Inputs and Turns; neither replaces the
-  other. Drop late events from the old binding by checking the full runner/runtime/session/epoch
-  tuple and operation fence. The duplicate side-effect risk and next action must be visible.
-- If a Compact, Reset, or force-reset response is lost, query the durable operation result with the
-  original operationId. A completed operation returns its original ContextGeneration, boundary,
-  binding, and mappings. An incomplete operation continues its original phase. A query cannot
-  increment `ContextGeneration` again because the client disconnected.
-- A boundary record is a public domain fact. It does not put a provider raw event, internal session
-  ID, tool detail, or reconstruction diagnostic directly into the public transcript. #384 owns the
-  default public transcript projection. #385 owns history and Session timeline presentation. This
-  design specifies only that old records remain, boundaries are observable, and internal events do
-  not leak.
-
-### Six Acceptance Criteria and Their Scenario and Implementation Mapping
-
-The six acceptance criteria do not define six implementations. Each criterion maps to observable
-facts, failure scenarios, and one minimal implementation batch:
-
-| AC | Observable acceptance criterion | Scenario mapping | Implementation batch |
-|---|---|---|---|
-| AC1 Stable admission identity | Launch and follow-up both have a caller `requestId`. Launch also persists `launchRequestFingerprint`. After response loss, the same launch key and fingerprint return the original rejection/operation; a changed payload returns `idempotency_key_reused`. The unique `(SessionId, requestId)` mapping reliably returns the same Input/Turn. Steer can report accepted only when a replayable effect is persisted with the Input. | Harness, normal launch, same-key retry/response loss, launch-key reuse with changed payload, different key, accept rejection, steer effect response loss | Batch 1 |
-| AC2 Turn and input semantics | queued/retrying/blocked/dispatched/terminal/unknown are consistent with Turn status. blocked can retry; terminal blocked cannot. Steer references an existing Turn and converges through a durable steer operation/fence/reportable `pending|accepted|unknown|terminal` effect. Queue full is rejected before admission. | Normal follow-up, steer, steer response loss/restart/duplicate, queued follow-up, queue full, post-acceptance enqueue failure, permanent dispatch failure | Batch 2 |
-| AC3 Canonical Server facts | Job status, Session activity/admission, Input acceptance, and Turn result are returned separately. Turn result uses only outcome/reason/nextAction/nullable result. Input/dispatch uses the single schema from conventions. A missing Job mapping is null+reason. attempt/deadline/fence/reason/nextAction/revision/observedAt are traceable. | Canonical read, stale event, separate Job/Session result, dispatch unknown, current activity after force-reset | Batch 3 |
-| AC4 Cross-aggregate Launch convergence | AgentJob and Session do not share a transaction. A durable coordinator/outbox uses idempotent commands to converge partial failure to one Job/first Input/Turn mapping. | Launch partial failure, Server restart, Runner submit response loss | Batch 4 |
-| AC5 Binding and recovery fence | One Session has only one recovery owner. Every effect compares the full `FenceToken`: session/operation/owner/fence/generation/revision/expected/candidate/lease/deadline. Candidate response loss first calls `getByKey` with the same key; CAS occurs only after the complete identity is persisted. A mismatched candidate enters only independent cleanup. Candidate get/discard, CAS, cleanup deadline/CAS changed, and fail-closed behavior for an old owner are observable. | Concurrent recovery, lease expiry old owner, Server restart, candidate create response loss/get response loss/identity mismatch, candidate CAS failure, cleanup binding changed, Runner handoff, old event | Batch 5 |
-| AC6 Context operation and Unknown | Compact, Cancel/stop, and binding operations have fences before and after each effect. Compact does not increment generation. Reset/Runtime change/missing-recovery/force-reset do. Force-reset atomically preserves superseded targets, and `admission=blocked` remains until the binding commits. | Compact success/response loss, provider already executed, cancel stop uncertain, force-reset with ActiveOperation, force-reset with only unknown Turn/Input/dispatch | Batch 6 |
-
-### Observable Invariants and Scenario Matrix
-
-The implementation must make the following invariants observable through Server fakes and
-Runner/Runtime fakes:
-
-1. `accepted=true` always has durable InputId and TurnId values. The same key in the
-   `(SessionId, requestId)` map always refers to the same pair of IDs. Only a different key creates
-   a new Input.
-2. An Input belongs to exactly one Turn. Turn order within a Session is durable and cannot be
-   reordered.
-3. `running` comes only from execution facts for the current binding. An old Runtime event cannot
-   change current state.
-4. A Turn has no `idle` state. Neither `outcome_pending` nor `unknown` can be reported as terminal or
-   safely idle. When activity=idle, no unterminated Turn exists.
-5. `admission=blocked` prevents a new Turn, Compact, Reset, and recovery when a side effect is
-   unknown. Steer is the only exception, and only when running is known and the Runtime explicitly
-   supports steer.
-6. A Session has at most one confirmed Runtime execution at a time. Different Sessions can run in
-   parallel. This design makes no global capacity assertion from `#382`.
-7. Only confirmed missing allows a binding replacement on the same Runner/runtime. Handoff has an
-   independent operation. An uncertain error preserves the binding, and side effects are not
-   replayed automatically.
-8. The unique owner, ownerFence, claimGeneration, revision, expected/candidate binding, and
-   leaseUntil/deadline for a recovery/operation/cleanup/stop fence remain queryable after
-   concurrency, lease expiry, restart, or CAS failure. A bare generation is not confused with
-   ContextGeneration. The complete token is rechecked before and after every Runtime effect.
-9. Launch partial failure, enqueue failure after acceptance, and response loss all preserve
-   committed facts. A `blocked` retry does not return early. The attempt/deadline limit atomically
-   produces terminal blocked and cannot create a second Input, Turn, or side effect.
-10. Compact, Reset, and force-reset preserve the old transcript and stable Session ID. Force-reset
-    does not change an old unknown Turn. Old events are dropped by the fence, and the risk and next
-    action remain visible.
-11. Binding replacement does not change AgentSession, Input, Turn, Workspace, target, or the
-    existing transcript. Only a handoff operation can change RunnerId.
-12. Successful Compact does not increment ContextGeneration, but it has a durable ContextBoundary
-    and operation result. Reset, Runtime change, missing-recovery, and force-reset increment it.
-    Old Input/Turn mappings do not change.
-13. Compact/Reset response loss, active-operation force-reset, and unknown state from an old
-    `ContextGeneration` are queryable. Internal Runtime events do not directly become public
-    messages. Current activity does not include an old unknown state.
-14. Existing cancel/stop semantics do not change. When the stop result is uncertain, the state
-    remains Unknown and is not resubmitted automatically. A recovery failure has a specific reason
-    and next action, and the AgentSession remains queryable and diagnosable.
-
-| Scenario | Initial conditions | Key assertion |
-|---|---|---|
-| Normal launch | No binding and an empty Session | Returns stable Job, Session, Input, and Turn IDs; after acceptance, progresses through queued, running, and terminal |
-| Normal follow-up | Idle Session with a transcript | Creates no Job; a new Input and Turn execute serially in the same Session |
-| Steer | Current Turn is running and the Runtime explicitly supports steer | Associates the new Input with the existing Turn and commits a durable steer operation and effect in the same transaction; creates no second Turn |
-| Steer response loss or restart | Steer operation is durable but the Runtime reply is lost or the owner lease expires | Queries the same effect ID; retains accepted only with a replay path for the same identity, otherwise makes the effect Unknown and blocks admission without creating another Input or Turn |
-| Queued follow-up | Previous Turn is running | Later Turn remains queued and cannot run until the previous Turn terminates |
-| Queue full | Session queued limit reached | Returns `rejected(queue_full)`, persists a fingerprint tombstone, and persists no new Input; changed payload with the same key is always rejected |
-| Harness | Server store, Runner and Runtime fakes, outbox, and injectable time run a fixed event order | Uses no real network, process, Runtime, database, or wall clock; every assertion observes durable state and side-effect counts |
-| Definite enqueue rejection after acceptance | Session transaction committed and the dispatch attempt returned `definitely-rejected` | Preserves accepted and sets Turn queued plus nonterminal `dispatchStatus=blocked`; the same retry identity and due signal advances to retrying without losing input |
-| Unknown delivery after acceptance | Outbox not delivered, response loss, or no attempt evidence | Synchronizes Turn and dispatch to `unknown`, queries the same attempt or requires manual reconciliation, and does not write terminal blocked |
-| Permanent dispatch failure | Dispatch attempt reaches the maximum count or deadline | Preserves Input and Turn; persists `dispatchStatus=terminal`, terminal Turn with outcome blocked, attempt count, deadline, reason, and next action; performs no later retry |
-| Disconnect | Turn is running and Runner is unreachable | Preserves binding, makes Turn Unknown, and does not redeliver before recovery |
-| Duplicate submit | Same `(SessionId, requestId)` after response loss or duplicate submission, and a different key | Same key returns the original Input and Turn without duplicate dispatch; only a different key creates a new Input; changed payload with the same key is rejected |
-| Runtime disappears | Probe on the same Runner confirms missing while current generation is idle, has no unknown effect, and has `admission=ready` | Creates an empty Runtime, swaps binding by CAS, and records a context boundary in the same Session |
-| Ambiguous disappearance | Timeout, non-404 result, or Runner restart | Does not replace binding or replay; enters observation Unknown |
-| Recovery succeeds | Candidate creation and CAS succeed | Public Session remains queryable; the previous unresolved Turn remains terminal or Unknown according to its facts |
-| Recovery fails | Create, CAS, or Runner fails | Preserves original binding and returns a specific error and next action |
-| Concurrent recovery | Same binding receives two missing observations | Only one durable owner and candidate exist; the other result is `recovery_in_progress` |
-| Recovery restart or expiry | Fence is incomplete before restart | Reconciles by phase; after the deadline, original operation becomes terminal blocked or cleanup-pending, independent cleanup advances within a bound, and later recovery is not blocked forever |
-| Old owner after lease expiry | Old owner writes a phase, discard, or completion after lease expiry | Takeover increments ownerFence and claimGeneration; every old write returns `stale_operation_fence` and cannot delete an adopted candidate |
-| Candidate CAS failure | Candidate exists but expected binding changed | Marks candidate orphaned; independent cleanup compares candidate identity with adopted and current bindings, then safely discards or enters terminal cleanup-pending |
-| Force-reset candidate response loss | Create response is lost and candidate existence is unknown | Preserves `response_lost` and calls `getByKey` under the same fence; absent keeps the same operation pending for retry, a second loss remains Unknown, and CAS waits until the complete matching candidate is durable |
-| Force-reset candidate identity mismatch | `getByKey` returns a key or binding different from the persisted target | Constructs no CAS; complete provider identity enters independent cleanup, while an unconfirmed identity becomes Unknown and requires operator reconciliation |
-| Launch partial failure | Job committed but Session response was lost | Retry of the original request fingerprint and operation returns the same mapping or rejection; creates no second Session or first Turn |
-| Acceptance rejection | Prepare-job reserved identity and Session definitely rejects | Job becomes terminal rejected; Session, Input, and Turn are null with reasons; tombstone remains and no dangling live ID exists |
-| Submit response loss | Runner may have accepted the first Turn | Turn query returns terminal or Unknown; no implicit second submit occurs |
-| Compact | Safe boundary | Preserves transcript, establishes a later context boundary, and leaks no raw Runtime event |
-| Compact success boundary | Compact provider succeeds with a confirmed response | Binding and ContextGeneration do not change; persists ContextBoundary and operation result, and later Input uses the same `ContextGeneration` |
-| Reset | Safe boundary | Preserves Session and IDs with empty context; replaces binding through operation and CAS |
-| Compact or Reset response loss | Provider may have executed but Server cannot confirm | Operation is Unknown; query or explicit retry uses the same operation and does not duplicate implicitly |
-| Cancel and stop regression | One queued, running, and Unknown case | Compares the complete stop fence before and after Runtime stop; an uncertain stop remains Unknown and is not resubmitted automatically |
-| Unknown force-reset | Previous Turn is Unknown, no ActiveOperation exists, and Input or dispatch side effects exist | Persists the previous target as `UnresolvedTargetRead` in `supersededTargets` and `unresolvedPrevious`; new operation keeps `admission=blocked` until binding and boundary commit, then allows new Inputs and Turns |
-| Active-operation force-reset | Compact or Reset response loss makes ActiveOperation Unknown | After risk confirmation, atomically supersedes the operation and every unresolved target; old operation remains Unknown while an independent fence establishes new context and binding |
-| Handoff | Session is safely idle and user selects a new Runner | Only explicit handoff can change Runner; target, candidate, and expected binding become durable first, and old events are rejected |
-| Rebind | Session is safely idle on the same Runner | Replaces only a Runtime binding on that Runner; rejects Unknown or cross-Runner requests |
-
-### Architecture, Testing, and Implementation Batches
-
-The Server owns admission, IDs, the Session queue limit, binding and operation
-CAS, state projection, and recovery arbitration. The launch coordinator only
-advances durable events, outbox records, and idempotent commands across
-AgentJob and AgentSession. The Runner only executes, probes, creates, reads,
-discards, and submits, and it emits facts carrying the complete binding tuple.
-The Runtime adapter classifies SDK, file, and protocol errors as present,
-definitely missing, or uncertain failure. CLI and Web do not parse internal
-event names or reconstruct lifecycles from timestamps or local polling.
-
-Tests inject the Server store, Runner registry, Runtime probe, create, read,
-discard, and submit seams, event outbox, idempotency store, and a fake
-`TimeProvider`. They use no real network, process, Runtime SDK, file-backed
-Session, database, or wall clock. Each scenario fixes the input event order and
-asserts durable state, canonical projections, revision and observedAt, and
-side-effect counts. Spec tests cover cross-component behavior; unit and
-architecture tests cover state machines, binding and operation CAS, projection
-mapping, and dependency boundaries. Test duration follows
-[`design/testing.md`](testing.md).
-
-Implement in six independently acceptable value batches, one for each AC:
-
-1. **Batch 1 / AC1 stable admission record**: Implement AgentJob launch intent,
-   idempotent Session acceptance, stable Job, Session, Input, and Turn mappings,
-   and duplicate observation.
-2. **Batch 2 / AC2 serial Turns and follow-up**: Implement
-   queued, running, outcome_pending, terminal, and Unknown; steer and new-turn
-   relationships; the Session queue limit; and durable enqueue failure after
-   acceptance.
-3. **Batch 3 / AC3 canonical projection**: Server provides four separate facts,
-   revision and observedAt, and next action. CLI and Web adapt only the same read
-   model.
-4. **Batch 4 / AC4 launch coordinator**: AgentJob events and a durable outbox
-   drive idempotent Session commands, first-Turn dispatch, and convergence after
-   partial failure or Server restart. Aggregates do not share a transaction.
-5. **Batch 5 / AC5 deterministic recovery**: Add the complete binding epoch,
-   same-Runner confirmed missing, unique owner, deadline, restart
-   reconciliation, candidate idempotency, CAS-failure cleanup, and handoff fence.
-6. **Batch 6 / AC6 context boundary and Unknown**: Implement Compact and Reset
-   operation fences, response-loss Unknown, uncertain stop, and explicit
-   force-reset. Preserve the old transcript and Unknown facts and do not replay
-   automatically.
-
-#378 depends on the existing Agent configuration and launch contract, but does
-not include #377's Agent configuration and launch experience or define a new
-Persona or target model. #382 separately owns max-concurrent-runs capacity
-claim and release across Sessions, capacity queue views, and policy tests. #384
-owns the default public transcript projection. #385 owns history and Session
-timeline presentation. #387 owns external API authentication, idempotency, and
-resumable reads after disconnection. #378 provides only reusable internal
-canonical state at these boundaries and does not predefine their endpoints or
-UI.
-
-### Options and Decision
-
-Option A makes the Runtime Session the public Session. Clients query directly
-by RuntimeSessionId. When it disappears, Mohist creates a new physical Session
-and replays the old transcript. This makes short-term recovery simple but leaks
-provider IDs into the public contract, changes logical identity after a Runner
-restart, and can duplicate operations when a side effect is uncertain. It also
-cannot associate historical Inputs and Turns reliably.
-
-Option B uses AgentSession as the logical identity, with a current binding and
-canonical Server state. Inputs, Turns, and results always belong to the
-AgentSession. RuntimeSessionId is only the current physical route. Only an
-authoritative confirmed-missing result can replace the expected binding by CAS;
-old side effects are not replayed, and uncertain results remain Unknown. This
-requires additional probe classification, recovery windows, and CAS tests, but
-preserves stable IDs, serial execution within a Session, and consistent CLI and
-Web behavior. It can also reuse a Runtime that survived a Runner restart.
-
-#378 selects Option B. Its main failure modes are an unreachable Runner,
-uncertain probe, failed candidate creation, and CAS conflict. Each preserves the
-old binding and reports Unknown or an actionable recovery failure instead of
-guessing that recovery succeeded.
-
-## Current Gap
-
-The current implementation has SessionInput, AgentTurn, part of Activity and
-Unknown handling, launch and follow-up, and basic Runtime binding. It does not
-yet make this target contract canonical across every entry point:
-
-- Launch must still converge the durable client `launchRequestId` to Server
-  `launchOperationId` mapping, Job, Session, Input, and Turn reservations,
-  durable Session accept or reject outcome, null-with-reason mappings, and
-  rejection and failure tombstones into one durable flow. Clients cannot guess
-  after response loss.
-- Public Input and Turn states must converge on the accepted, turn relation,
-  dispatch status and blocked reason, outcome_pending, terminal, and Unknown
-  semantics defined here. One canonical Server read model must provide revision,
-  observedAt, and nextAction for Job, Session, Input, and Turn.
-- Missing-Runtime recovery still needs ownerFence and claimGeneration, lease
-  takeover, the complete expected-binding CAS, candidate create, read, discard,
-  and cleanup, adopted-candidate protection, restart reconciliation, and
-  fail-closed old owners. Same-Runner recovery and Runner handoff remain
-  separate.
-- Compact, Reset, Runtime change, missing recovery, and force-reset must converge
-  on the ContextGeneration and ContextBoundary rules here. ActiveOperation
-  operationId, kind, phase, outcome, owner, revision, deadline, and nextAction
-  must enter the canonical read model. Compact does not increment generation;
-  every other new logical context does. Old Unknown state cannot contribute to
-  current Activity after force-reset.
-- Web and CLI must adapt only canonical Server state and expose explicit
-  force-reset risk confirmation plus query and retry of the original operation.
-  They cannot infer results from local logs, HTTP state, or provider events.
-
-### Implementation Gap: Caller Key Is Required
-
-The target behavior requires a nonempty caller `requestId` for follow-up and a
-caller `operationId` for Compact, Reset, recovery, handoff, rebind, stop, and
-force-reset. A missing key is rejected before admission. Mohist generates no
-hidden identity and writes no operation, Input, Turn, candidate, or external
-effect. Current routes and Grains still contain paths that generate a hidden
-key when the caller omits it. That is follow-on implementation work, not an
-alternative to the target contract or evidence that implementation is
-complete. The migration boundary is the canonical Server admission and
-operation layer. Every entry point passes the caller key first, and that layer
-rejects null or empty values before any durable write or external effect. This
-gap remains visible until migration completes.
-
-These delivery gaps do not change ownership boundaries. #377 owns Agent
-configuration and launch experience and adds no new configuration model here.
-#382 owns max-concurrent-runs capacity claim and release across Sessions and the
-capacity view. #384 owns the default public transcript projection. #385 owns
-history and Session timeline presentation. #387 owns external API
-authentication, idempotency, and resumable reads after disconnection. #378
-provides only the reusable lifecycle and canonical-state contracts at these
-boundaries.
+## Status
+
+The stable AgentSession identity, Input and Turn records, Activity and Unknown handling, launch and
+follow-up paths, and a current Runtime Binding are implemented. The remaining gap is convergence:
+the same contract is not yet enforced at every ingress, aggregate boundary, and client.
+
+- Launch acceptance is not yet one durable convergence path from caller identity to the accepted Job,
+  Session, Input, and Turn outcome. Until it is, response loss can still leave callers without a
+  definitive mapping or rejection result.
+- Canonical Job, Session, Input, Turn, and operation projections are not yet the only source consumed by
+  clients. Parallel interpretations can still disagree about `Unknown`, blocked admission, or the next
+  safe action.
+- Confirmed-missing recovery does not yet enforce the complete ownership lease, stale-owner fence,
+  expected-binding comparison, candidate cleanup, and adopted-candidate protection at every boundary.
+  Until those checks converge, replacement cannot be treated as uniformly fail-closed.
+- Compact, Reset, Runtime change, missing recovery, and force-reset do not yet share one operation and
+  ContextGeneration projection everywhere. The distinction between an in-place context boundary and a
+  new logical context must remain observable to every client.
+- Web and CLI do not yet rely exclusively on canonical Server state for recovery, explicit force-reset
+  risk confirmation, and retry or query of the original operation.
+
+### Caller-owned idempotency keys
+
+Every Follow-up requires a non-empty caller `requestId`. Compact, Reset, recovery, handoff, rebind, stop,
+and force-reset require a caller `operationId`. Missing keys are rejected before admission, with no
+durable write or external effect.
+
+Some entry points still synthesize an internal key when the caller omits one. This is a safety gap: after
+response loss the caller cannot name and query the original intent, so a retry cannot be proven to refer
+to the same effect. The gap closes only when every ingress rejects a missing key before any durable or
+external side effect.
