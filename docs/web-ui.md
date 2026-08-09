@@ -1,294 +1,340 @@
-# Web UI 指南
+# Web UI Guide
 
-Web UI 是 Mohist 的备用操作和可视化平面，不是用户日常协作的工作站点。用户通常在
-Slack、IDE 或其他场所直接使用接入的 Mohist Agent，或通过外部 Agent 使用 Mohist；需要
-查看全局与复杂状态、核对执行证据、调整配置，或在外部入口不可用时人工接管，才进入
-Web UI。
+The Web UI is Mohist's fallback operations and visualization plane, not a daily
+collaboration workspace. Users normally interact with a connected Mohist Agent
+in Slack, an IDE, or another environment, or operate Mohist through an External
+Agent. Open the Web UI to inspect global or complex state, verify execution
+evidence, change configuration, or take over manually when an external entry
+point is unavailable.
 
-备用不等于功能残缺。启动、审批、拒绝、恢复、停止和配置等关键操作必须可以在 Web UI
-完成；Mohist Agent 也必须能在 Web 中直接配置、启动和继续对话。同一操作的结果仍由
-Mohist 裁决，Web UI 不建立另一套状态或规则。
+Fallback does not mean incomplete. Critical operations such as start, approve,
+reject, recover, stop, and configure must be available. A Mohist Agent must also
+be configurable and usable for direct conversation. Mohist remains the state
+authority for every operation. The Web UI adds no separate state or rules.
 
-打开 `http://localhost:3456`。进入任一页面时，应当能回答：发生了什么、为什么、是否需要
-人工处理，以及当前可以安全执行什么操作。
+Open `http://localhost:3456`. Every page should answer what happened, why it
+happened, whether a person must act, and which actions are currently safe.
 
-## 页面一览
+## Page Map
 
-| 页面 | 用途 |
+| Page | Purpose |
 |---|---|
-| **看板（Home）** | 默认页。查看全局推进情况和需要处理的 Issue |
-| **Issue 详情** | 查看单个 Issue 的执行状态、证据和人工操作 |
-| **Issue 改动文件** | 看一个 issue 改了哪些文件、diff |
-| **Agents** | 配置、测试和启动 Mohist Agent，查看 Jobs、Sessions 与外部接入 |
-| **AgentSession** | 理解执行会话的归属、状态、结果、诊断证据和恢复操作 |
-| **Epics** | Epic 列表和详情 |
-| **Activity** | 实时活动流 |
-| **Logs** | 系统日志 |
-| **Settings** | 项目级配置 |
-| **Archived** | 归档的 issue |
+| **Board (Home)** | Default page for global progress and Issues that need attention |
+| **Issue details** | Execution state, evidence, and manual operations for one Issue |
+| **Issue files** | Changed files and diff for one Issue |
+| **Agents** | Configure, test, and start Mohist Agents; inspect Jobs, Sessions, and external Connections |
+| **AgentSession** | Understand session ownership, state, result, diagnostic evidence, and recovery |
+| **Epics** | Epic list and details |
+| **Activity** | Live Activity feed |
+| **Logs** | System logs |
+| **Settings** | Project configuration |
+| **Archived** | Archived Issues |
 
-顶部导航栏切换。
+Use the top navigation to change pages.
 
-## 看板（Home）
+## Board (Home)
 
-### 看板列
+### Board Columns
 
-按 issue status 分组：
+The board groups Issues by status:
 
-- **Backlog** — 没启动的
-- **In Progress** — 正在 workflow 里跑的
-- **Done** — 完成的
-- **Cancelled** — 取消的（默认隐藏，可点 Show cancelled 展开）
+- **Backlog:** Not started.
+- **In Progress:** Running in a Workflow.
+- **Done:** Complete.
+- **Cancelled:** Cancelled and hidden by default. Select **Show cancelled** to
+  expand it.
 
-### 卡片上的信息
+### Card Content
 
-每张卡片显示：
+Each card shows:
 
-- Issue number 和 title
-- Priority chip（P0-P4）
-- Status pill（blocked / approval / running / waiting / drift）
-- Workflow stage pill（Plan / Build / Check / Integrate）
-- Health pill（active / paused / blocked 等）
-- Running indicator（脉冲蓝点，表示 Inline Agent 正在工作）
+- Issue number and title.
+- Priority from P0 through P4.
+- Status such as blocked, approval, running, waiting, or drift.
+- Workflow stage such as Plan, Build, Check, or Integrate.
+- Health such as active, paused, or blocked.
+- A pulsing running indicator while an Inline Agent works.
 
-### 筛选和排序
+### Filters and Sort
 
-看板顶部筛选栏：
+The toolbar above the board provides:
 
-- **Priority chips** — 点 P0/P1/P2/P3/P4 多选
-- **Labels** — 弹出列表选择
-- **Search** — 按 title 搜索
-- **Sort** — Priority / Number / Updated
+- **Priority:** Select one or more P0 through P4 values.
+- **Labels:** Select from a list.
+- **Search:** Search by title.
+- **Sort:** Sort by Priority, Number, or Updated.
 
-筛选条件包含在页面链接里，可以直接分享。
+The page URL contains the filters and can be shared directly.
 
-### Needs Attention 条
+### Needs Attention Banner
 
-如果某些 issue 需要你介入（blocked / awaiting approval），看板顶部会出现琥珀色的 **Needs attention** 条，点击直达。
+An amber **Needs attention** banner appears above the board when an Issue is
+blocked or waiting for an Approval. Select it to open the relevant work.
 
-### Runner 不可用条
+### Runner Unavailable Banner
 
-如果 Runner 没连上并影响 Workflow 推进，看板顶部会有警告条。Issue 仍可启动并等待可用 Runner。
+A warning appears above the board when Runner is disconnected and Workflow
+progress is affected. An Issue can still start and wait for an available Runner.
 
-## Issue 详情页
+## Issue Details
 
-查看和人工操作单个 Issue 的页面。分两栏（桌面）/ 单栏（移动）。
+This page shows one Issue and its manual operations. Desktop uses two columns;
+mobile uses one.
 
-### 顶部信息
+### Header
 
-- Number / Title
-- Priority / Workflow Stage / Health / Running pills
-- Labels
-- Primary Epic（如有，可点跳转）
-- 创建/更新时间
+- Number and title.
+- Priority, Workflow Stage, Health, and Running indicators.
+- Labels.
+- Primary Epic, with a link when present.
+- Creation and update time.
 
-### 左侧主区
+### Main Area
 
-按从上到下：
+From top to bottom:
 
-1. **Workflow 进度视图** — 当前 workflow stage 的进度和子任务
-2. **Workflow Profile 选择器** — 为这个 issue 选择或更换 Project 中的 profile
-3. **Diff 概览** — base/head 分支、ahead/behind、文件改动数
-4. **分支状态栏** — 分支状态、rebase 可用性
-5. **Description** — issue body（markdown 渲染）
-6. **Workflow 定义查看** — 查看本次 run 实际生效的 workflow 定义
-7. **Commits** — 本 issue 的 commit 列表
-8. **Comments** — 评论列表 + 新评论框
+1. **Workflow progress:** Current Workflow stage and task progress.
+2. **Workflow Profile selector:** Select a Project Profile for this Issue.
+3. **Diff summary:** Base and head branches, ahead and behind counts, and
+   changed-file count.
+4. **Branch state:** Branch status and rebase availability.
+5. **Description:** Rendered Markdown from the Issue body.
+6. **Workflow Definition:** Definition used by the current run.
+7. **Commits:** Commits for this Issue.
+8. **Comments:** Comment history and new-comment input.
 
-### 右侧侧栏
+### Sidebar
 
-按从上到下：
+From top to bottom:
 
-1. **Details** — Issue Stage / Workflow Stage / Project / Repository
-2. **最新产物面板** — Plan/Check 阶段产物（点开看 proposal.md、review.md 等）
-3. **Base Drift Detected**（如有）— base branch 漂移信息
-4. **Workflow Blocked**（如有）— blocked 原因和推荐恢复操作
-5. **收敛面板**（如有）— convergence 信息
-6. **Actions** — 主要操作区（Start / Approve / Retry / Stop / 等）
-7. **模型选择器** — 切换 AI 模型（整体或 per-stage）
-8. **Prerequisites**（如有）— 前置依赖列表 + Add Prerequisite 输入框
+1. **Details:** Issue Stage, Workflow Stage, Project, and Repository.
+2. **Latest artifacts:** Plan or Check artifacts such as `proposal.md` and
+   `review.md`.
+3. **Base Drift Detected:** Base-branch drift, when present.
+4. **Workflow Blocked:** Cause and recommended recovery, when present.
+5. **Convergence:** Convergence information, when present.
+6. **Actions:** Current operations such as Start, Approve, Retry, and Stop.
+7. **Model selector:** Model for the complete Workflow or individual stages.
+8. **Prerequisites:** Dependency list and Add Prerequisite input, when present.
 
-### 何时用什么按钮
+### Available Buttons
 
-| 状态 | 可见按钮 | 含义 |
+| State | Buttons | Meaning |
 |---|---|---|
-| Backlog | Start | 启动 workflow |
-| Running | Running indicator + Force Stop | Inline Agent 正在执行，可强停 |
-| Awaiting approval | Approve / Reject | 审批 |
-| Blocked | Retry / Resume / Rerun / Stop | 页面突出显示当前可用的推荐操作 |
-| Done | Close / Archive | 终态处理 |
+| Backlog | Start | Start the Workflow |
+| Running | Running indicator and Force Stop | An Inline Agent is executing and can be stopped forcibly |
+| Awaiting Approval | Approve and Reject | Decide the Approval |
+| Blocked | Retry, Resume, Rerun, and Stop | The page emphasizes the recommended action available now |
+| Done | Close and Archive | Handle terminal work |
 
-## Issue 改动文件页
+## Issue Files
 
 URL: `/issues/<number>/files`
 
-显示一个 issue 改动的所有文件，含 diff 视图。
+This page lists every file changed by one Issue and includes a diff view.
 
-## Agents 页
+## Agents
 
-Agent 列表用于发现和管理 Project 内的 Mohist Agent。列表首先显示头像、名称、描述、
-active / archived、Ready / Needs setup / Unknown、Runtime / Model、正在执行与排队的工作数，
-以及外部接入健康，不用用户先打开 Session 才能判断 Agent 是否可用。Runner 离线或容量
-不足作为单独的执行可用性显示，不能伪装成 Needs setup。
+The Agent list discovers and manages Mohist Agents in the Project. Before the
+user opens a Session, it shows avatar, name, description, active or archived
+state, Ready, Needs setup, or Unknown Readiness, Runtime and model, active and
+queued work counts, and external Connection health. Runner availability and
+capacity are shown separately and cannot appear as Needs setup.
 
-Agent 详情页包含四个连续区域：
+Agent details contain four continuous areas:
 
-1. **Definition**：头像、名称、描述、Instructions、Runtime、Model、Variant、Skills、
-   并发限制与 active / archived 状态。配置控件由 Mohist 返回的 Runtime 能力与 Readiness
-   驱动，缺口直接链接到对应字段或凭据设置。Needs setup 禁用启动；Unknown 仍允许提交并
-   显示“等待 Runner 验证”；Ready 但没有空闲 Runner 时显示排队，不改成配置错误。
-2. **Start session**：输入一个真实任务和可选 Issue / Epic / Repository 上下文，直接创建
-   AgentJob、AgentSession、首条 SessionInput 与首个 AgentTurn。这是接入 Slack 前的规范测试
-   入口。
-3. **Work and conversations**：分别展示 AgentJob 结果和 AgentSession activity，不能用
-   “Session 失败”代替失败的 Job。
-4. **Slack**：把 Agent Readiness、Slack 安装进度、连接健康和身份同步分开
-   展示。Add Slack 是可中断的步骤流，每次只突出一个下一步；Allowlist 通过姓名与头像搜索
-   工作区成员。页面同时支持 Owner 转移、凭据轮换、重新验证、Enable、Disable 和 Delete，
-   不让用户从一个笼统的 Connected / Failed 状态猜问题。
+1. **Definition:** Avatar, name, description, Instructions, Runtime, Model,
+   Variant, Skills, concurrency limit, and active or archived state. Mohist
+   Runtime capabilities and Readiness drive the controls. A gap links directly
+   to the corresponding field or credential setting. Needs setup disables
+   launch. Unknown still accepts work and reports "Waiting for Runner
+   validation." Ready without Runner capacity queues work instead of showing a
+   configuration error.
+2. **Start session:** Submit a real task and optional Issue, Epic, or Repository
+   context. This creates AgentJob, AgentSession, the first SessionInput, and the
+   first AgentTurn. It is the normative test entry point before a Slack
+   Connection is added.
+3. **Work and conversations:** Show AgentJob result separately from AgentSession
+   Activity. Do not present a failed Job as a failed Session.
+4. **Slack:** Show Agent Readiness, Slack installation progress, Connection
+   health, and identity synchronization separately. Add Slack is an
+   interruptible step flow with one emphasized next step. The allowlist searches
+   workspace members by name and avatar. The page supports owner transfer,
+   credential rotation, revalidation, Enable, Disable, and Delete. It does not
+   compress these states into one Connected or Failed label.
 
-Agent archived 后，Start session 与 Add Slack 不可用；历史 Jobs、Sessions 和
-Slack 接入仍可读。active Agent 的 Add Slack 不受 Readiness 阻塞，因为连接健康与执行
-准备度是两件事。Agent 编辑只影响之后的新 Job，页面在保存前明确这个生效时机。
+After an Agent is archived, Start session and Add Slack are unavailable.
+Historical Jobs, Sessions, and Slack Connections remain readable. Readiness
+does not block Add Slack for an active Agent because Connection health and
+execution readiness are separate. An Agent edit affects only new Jobs, and the
+page states this timing before save.
 
-### 实装差距
+### Implementation Gaps
 
-当前 Agent 列表、编辑、直接启动和 Session 读取已经存在。AgentJob、SessionInput、AgentTurn
-与并发/排队信息尚未完整汇总到 Agent 页；头像、Readiness、Slack 接入与 setup 尚未
-实装。
+The Agent list, edit, direct launch, and Session read surfaces exist. AgentJob,
+SessionInput, AgentTurn, concurrency, and queue information are not yet fully
+summarized on the Agent page. Avatar, Readiness, Slack Connection, and setup are
+not implemented.
 
-## AgentSession 页
+## AgentSession
 
-从 Issue 的 Workflow Session 列表或 Mohist Agent 的 Session 列表进入。
+Open an AgentSession from the Workflow Session list on an Issue or the Session
+list for a Mohist Agent.
 
-这里展示 Workflow 或 Mohist Agent 的执行会话。Workflow 来源的 Session 主要是证据与
-诊断视图；Agent launch 来源的 Session 同时是备用的直接对话入口，可以完整提交 follow-up。
-它不需要成为用户的日常工作站，但不能是只读或残缺的调试页。
+The page shows an execution conversation from a Workflow or Mohist Agent. A
+Workflow-origin Session is primarily an evidence and diagnostic view. An Agent
+launch Session is also a fallback direct conversation entry and accepts a
+complete Follow-up. It need not become the daily workspace, but it must not be
+a read-only or incomplete debug page.
 
-页面必须先解释这段会话，再展示会话内容。首屏应当回答：
+The first viewport explains the Session before showing its content:
 
-- 为什么创建，以及它服务于哪个 Issue、Workflow task 或 Mohist Agent 工作
-- 当前是排队、执行中、空闲还是状态未知，当前 AgentTurn 包含哪些输入、最近一次执行产生了
-  什么结果
-- 是否需要人工处理，以及当前有哪些安全操作
+- Why it was created and which Issue, Workflow task, or Mohist Agent work it
+  serves.
+- Whether it is queued, executing, idle, or unknown; which inputs belong to the
+  current AgentTurn; and the most recent result.
+- Whether a person must act and which operations are safe now.
 
-### 会话时间线
+### Session Timeline
 
-会话内容按发生顺序呈现为一条时间线。读它应当像扫视一个能干同事的进展：例行进展一眼
-带过，需要介入的地方一眼看到。时间线遵守以下纪律：
+The timeline presents content in occurrence order. Routine progress should be
+easy to scan, while required intervention must be immediately visible.
 
-- **每个条目读作一句话**：做了什么、对什么、结果如何——「编辑了 `runtime.rs`
-  （+12/−3）」「运行测试 → 通过」。参数、完整输出和 diff 默认折叠，需要时才展开。
-- **Agent 对 Mohist 的操作呈现为领域行为**：评论 Issue、作出审批、推进 Workflow 等
-  动作呈现为对应的领域行为，可点击跳转到目标（如对应 Issue），不淹没在命令输出里。
-- **失败醒目、读取安静**：失败的执行和需要人工判断的动作始终突出；读取、检索等例行
-  操作低调呈现，连续出现时折叠成一条汇总。失败与关键动作从不进入折叠，也不被折叠
-  挡住。
-- **每条输入有状态**：每条用户消息显示 SessionInput 的受理/投递状态，多条输入可以
-  归在同一个 AgentTurn 下；Turn 的排队、执行和结束在时间线中可见。
-- **沉默也是状态**：排队中、等待执行后端响应、空闲、状态未知都明确呈现，时间线不会
-  留下「不知道会话是否还活着」的空白。
-- **上下文边界可见**：Compact 与 Reset 在时间线中以分界条目标注（「上下文已重置」），
-  之前的内容保留，之后从空上下文开始。
+- **Each entry reads as one sentence:** What happened, to which target, and
+  with what result. Examples: "Edited `runtime.rs` (+12/-3)" and "Ran tests:
+  passed." Arguments, complete output, and diff are collapsed by default.
+- **Mohist operations appear as domain actions:** Commenting on an Issue,
+  deciding an Approval, and advancing a Workflow appear as domain actions with
+  links to their targets instead of being hidden in command output.
+- **Failure is prominent; reads are quiet:** Failed execution and actions that
+  need judgment remain prominent. Routine reads and searches are subdued and
+  consecutive entries collapse into a summary. Failure and critical actions
+  never collapse or become hidden behind collapsed entries.
+- **Every input has state:** Each user message shows SessionInput acceptance and
+  delivery. Several inputs can belong to one AgentTurn. Queued, executing, and
+  terminal Turn phases appear in the timeline.
+- **Silence is a state:** Queued work, waiting for a backend, idle, and unknown
+  state are explicit. The timeline never leaves uncertainty about whether the
+  Session is active.
+- **Context boundaries are visible:** Compact and Reset create divider entries
+  such as "Context reset." Earlier content remains visible; later work begins
+  with empty context.
 
-调试时可以切换到原始事件视图：同一时间线数据未经加工的按序呈现，用于核对一次执行
-为什么产生当前结果。
+A raw event view shows the same underlying timeline data without presentation
+processing. Use it to diagnose why an execution produced its result.
 
-在此基础上，可以：
+The page also supports:
 
-- 看模型、用量、压缩记录和当前活动状态
-- 提交 follow-up：执行中加入当前执行，空闲时开始新的执行
-- 取消 queued Turn，或请求停止 active Turn；停止结果未知时保留明确的 Unknown 状态
-- Compact：使用当前执行后端的原生能力压缩上下文
-- Reset：让后续输入从空 Runtime 上下文继续，同时保留已记录的会话内容
+- Model, usage, compaction records, and current Activity.
+- Follow-up that joins the current execution while active or starts a new
+  execution while idle.
+- Cancellation of a queued Turn or requested stop of an active Turn. An
+  uncertain stop remains explicitly Unknown.
+- Compact through the current backend's native capability.
+- Reset so later input continues from empty Runtime context while recorded
+  conversation content remains.
 
-Compact / Reset 与缺失自动恢复的语义见
-[Action 契约 · 共享语义](actions/README.md#agent-执行类-action-的共享语义)；两者都继续
-显示在同一个 AgentSession 下，页面以「上下文已重置」标注，不展示底层 Session 历史。
-Session 来源与身份见 [Agent 与 AgentSession](agent-sessions.md)。
+See [Action Contracts](actions/README.md#shared-semantics-for-agent-execution-actions)
+for Compact, Reset, and missing-Session recovery. Both remain under the same
+AgentSession. The page marks reset context and does not show physical Session
+history. See [Agents and AgentSessions](agent-sessions.md) for Session origins
+and identity.
 
-### 实装差距
+### Implementation Gaps
 
-当前页面是对话式消息视图：工具调用有分类渲染，但条目尚未句式化，也没有显著性与折叠
-纪律；Agent 对 Mohist 的领域操作尚未识别呈现；SessionInput 受理与 AgentTurn 状态已有
-独立证据展示，但尚未编入时间线；原始事件视图不存在。缺失恢复尚未落地，页面仍不能
-展示“后续从空上下文开始”这一状态。对应实施 issue 待从时间线 spec 创建。
+The current page is a conversational message view. Tool calls have categorized
+rendering, but entries do not yet use sentence phrasing, salience, or collapse
+rules. Mohist domain actions are not recognized for separate presentation.
+SessionInput acceptance and AgentTurn state have independent evidence but are
+not part of the timeline. There is no raw event view. Missing-Session recovery
+is not implemented, so the page cannot show that later work starts from empty
+context. Create the implementation Issue from the timeline spec.
 
-## Epics 页
+## Epics
 
-URL: `/epics` 和 `/epics/<id>`
+URLs: `/epics` and `/epics/<id>`
 
-### 列表页
+### List
 
-所有 Epic 按当前工作情况分组：正在推进的、等待启动的、等待/受阻的、空闲的排在前面，Paused / Done / Closed 各自单独分区（Done / Closed 默认折叠）。每张卡片显示编号、状态、优先级、进度条（已完成 / 总数）、以及当前活动或下一步信息。点卡片进详情页。
+Epics are grouped by current work. Advancing, waiting to start, waiting or
+blocked, and idle groups appear first. Paused, Done, and Closed each have their
+own section; Done and Closed are collapsed by default. Each card shows number,
+state, priority, completed and total count, and current activity or next action.
+Select a card to open details.
 
-### 详情页
+### Details
 
-- 顶部按钮区按 Epic 当前状态提供生命周期操作（Start Epic / Pause / Resume / Mark Done / Close Epic）
-- 三个统计卡片：**进度**（已交付 / 总数，并提示是否已可标记完成）、**下一个 Issue**（下一个待推进 issue 和推进状态说明）、**当前活动**（正在进行的 linked issues，按 health 分组）
-- 下方为 Linked Issues 列表，支持添加/移除 issue、单个 issue 的 Start 按钮、以及依赖图视图（Graph tab）
+- Header actions reflect the current lifecycle state: Start Epic, Pause,
+  Resume, Mark Done, and Close Epic.
+- Three summaries show **Progress**, with delivered and total count plus done
+  readiness; **Next Issue**, with advancement state; and **Current Activity**,
+  with linked Issues grouped by health.
+- Linked Issues below can be added or removed. Each has a Start action. A Graph
+  tab shows dependencies.
 
-各操作在什么状态下可用、状态之间怎样转换，见 [用 Epic 规划](epics.md)。
+See [Planning with Epics](epics.md) for action availability and transitions.
 
-## Activity 页
+## Activity
 
 URL: `/activity`
 
-实时活动流，看板消息级别的细粒度事件：
+The live Activity feed shows fine-grained events:
 
-- Issue 状态变化
-- Workflow stage 推进
-- AgentSession 开始/结束
-- Runner 连接/断开
+- Issue state changes.
+- Workflow stage progress.
+- AgentSession start and end activity.
+- Runner connection and disconnection.
 
-调试"刚才发生了什么"时看。
+Use it to answer what happened recently.
 
-## Logs 页
+## Logs
 
 URL: `/logs`
 
-系统日志（Server + Runner）。报错排查时看。
+This page shows Server and Runner system logs for failure diagnosis.
 
-## Settings 页
+## Settings
 
 URL: `/settings/<section>`
 
-6 个 section：
+Settings has six sections:
 
-| Section | 用途 |
+| Section | Purpose |
 |---|---|
-| **OpenCode** | 查看 OpenCode 模型与配置 |
-| **Runtime** | Runner 状态、并发容量 |
-| **Repositories** | 项目关联的 git 仓库 |
-| **Workflows** | Project 的 Workflow Profile collection 与默认 Profile |
-| **Prompts** | Project Prompt 编辑 |
-| **System** | 系统级配置 |
+| **OpenCode** | OpenCode models and configuration |
+| **Runtime** | Runner state and concurrent capacity |
+| **Repositories** | Git Repositories associated with the Project |
+| **Workflows** | Project Workflow Profile collection and default Profile |
+| **Prompts** | Project Prompt editing |
+| **System** | System configuration |
 
-详见 [Workflow Profile](workflow-profiles.md) 和 [Runner 指南](runner.md)。
+See [Workflow Profiles](workflow-profiles.md) and [Runner Guide](runner.md).
 
-## Archived 页
+## Archived
 
 URL: `/archived`
 
-归档的 issue 列表。可以 unarchive。
+This page lists archived Issues and can unarchive them.
 
-## 移动端
+## Mobile
 
-Web UI 在移动端有基本适配（看板有移动布局），但当前不是核心场景。完整的移动端体验在 roadmap 中。
+The Web UI has basic mobile adaptation, including a mobile board layout, but it
+is not currently a core scenario.
 
-现在移动端能用的：
+Current mobile support:
 
-- 看板（切换 stage tab 查看不同列）
-- Issue 详情（基本可读）
+- Board columns through stage tabs.
+- Readable basic Issue details.
 
-不够好的：
+Current limitations:
 
-- 审批按钮较小，容易误触
-- 长 body 在小屏阅读体验差
-- Settings 在移动端不友好
+- Approval buttons are small and easy to activate accidentally.
+- Long Issue bodies are difficult to read on a small screen.
+- Settings are not mobile-friendly.
 
-需要严肃的移动端工作流，见 [移动端 PWA 与推送](mobile-pwa.md)（方案，未实装）。
+See [Mobile PWA and Push Notifications](mobile-pwa.md) for the unimplemented
+proposal for a complete mobile Workflow.
 
 ---
 
-对应源码：`packages/web/`。
+Implementation source: `packages/web/`.
