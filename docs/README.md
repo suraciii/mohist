@@ -1,72 +1,136 @@
-# Mohist 文档
+# Mohist Documentation
 
-这份文档面向**使用者**，按功能板块组织成一条阅读路径。架构与领域分析在 [`../design/`](../design/) 下。
+This documentation is for **users**. It provides a reading path organized by
+product area. Architecture and domain analysis are under
+[`../design/`](../design/).
 
-刚接触 Mohist，先看[仓库 README](../README.md) 了解它是什么。
+If you are new to Mohist, read the [repository README](../README.md) first.
 
-## 板块 1：入门
+## Part 1: Start
 
-- [产品愿景](vision.md) —— Mohist 要去哪里、独立 Agent 与外部交互场所如何配合
-- [快速上手](getting-started.md) —— 从零启动，通过 Mohist Agent、外部 Agent 或 `mo` 看一个 Issue 走完全流程
-- [核心概念](concepts.md) —— 理解 Mohist 的生产线模型
-- [Agent 与 AgentSession](agent-sessions.md) —— 配置并直接使用 Mohist Agent，理解工作与会话关系
+- [Product Vision](vision.md): Where Mohist is going and how independent Agents
+  work with external interaction locations
+- [Getting Started](getting-started.md): Start from zero and move one Issue
+  through the complete Workflow with a Mohist Agent, External Agent, or `mo`
+- [Core Concepts](concepts.md): Understand the Mohist production-line model
+- [Agents and AgentSessions](agent-sessions.md): Configure and use a Mohist
+  Agent directly, and understand the work and session relationship
 
-## 板块 2：工作流
+## Part 2: Workflows
 
-- [工作流详解](the-workflow.md) —— Draft → Plan → Build → Check → Integrate 每个阶段做什么
-- [Workflow Profile](workflow-profiles.md) —— 自定义阶段、任务、检查、审批策略
-- [Workflow Definition 参考](workflow-definition.md) —— 编写 definition 的完整语法：stage、task、expect、recovery、模板表达式
+- [The Workflow](the-workflow.md): What happens in Draft, Plan, Build, Check,
+  and Integrate
+- [Workflow Profile](workflow-profiles.md): Configure stages, tasks, checks, and
+  Approval policy
+- [Workflow Definition Reference](workflow-definition.md): The complete syntax
+  for stages, tasks, expectations, recovery, and template expressions
 
-## 板块 3：工作管理
+## Part 3: Work Management
 
-- [仓库](repositories.md) —— Project 声明多个仓库作为执行资源，issue 按目标仓库分流
-- [Workspace](workspaces.md) —— 跨会话、跨 Agent 的持久执行环境：issue 工作流干净初始化，Slack channel 持久复用
-- [Issue 管理](issues.md) —— 创建、启动、审批、恢复、关闭
-- [复合 Issue 与子 Issue](sub-issues.md) —— 一个 issue 追踪跨仓库需求，拆成子 issue 各自走 workflow
-- [用 Epic 规划](epics.md) —— 把零散 issue 组织成可自动推进的产品目标
+- [Repositories](repositories.md): Declare multiple repositories as Project
+  execution resources and route each Issue to its target repository
+- [Workspace](workspaces.md): Use persistent execution environments across
+  sessions and Agents, with clean Issue initialization and persistent reuse for
+  a Slack channel
+- [Issue Management](issues.md): Create, start, approve, recover, and close
+  Issues
+- [Composite Issues and Sub-issues](sub-issues.md): Track a cross-repository
+  requirement in one Issue and move its sub-issues through separate Workflows
+- [Planning with Epics](epics.md): Organize separate Issues into a product goal
+  that can advance automatically
 
-## 板块 4：观察与操作
+## Part 4: Observation and Operations
 
-- [Web UI 指南](web-ui.md) —— 备用操作和可视化平面的看板、详情、证据与设置
-- [CLI 参考](cli-reference.md) —— 外部 Agent 与人共用的 `mo` 命令语言、命令地图与交互契约
+- [Web UI Guide](web-ui.md): The board, details, evidence, and settings in the
+  fallback operations and visualization plane
+- [CLI Reference](cli-reference.md): The `mo` command language, command map, and
+  interaction contract shared by External Agents and people
 
-## 板块 5：执行后端与扩展
+## Part 5: Execution Backends and Extensions
 
-- [Action 契约](actions/README.md) —— Workflow Action 的输入、输出与行为；当前包括 `mohist/opencode` 与 `mohist/pi`
-- [Runner 指南](runner.md) —— 执行平面怎么跑、怎么调并发
-- [Skill 机制](skills.md) —— Mohist Agent 与外部 Agent 如何获得可复用能力
-- [Slack](slack.md) —— Mohist App 对话式管理接入，Agent App 作为独立 Bot 在私聊和频道里工作
-- [GitHub](github.md) —— GitHub 作为需求入口、进度公告板与审批来源：打标签供料、review 即审批、进度回写
-- [Agent 事件路由](event-routing.md) —— 项目级路由表：一条表达式订阅任何实体的事件，按序触发 Mohist Agent 响应
-- [Agent 监管](agent-supervision.md) —— 一条命令安装监管 Agent：替你审批、替你修复失败，只有它停手时才轮到你
-- [Subagent 与会话树](subagents.md) —— Agent 在自己的会话里分解任务：spawn 子会话、终态回报、级联停止、定时输入
+- [Action Contracts](actions/README.md): Workflow Action inputs, outputs, and
+  behavior, including `mohist/opencode` and `mohist/pi`
+- [Runner Guide](runner.md): Run the execution plane and configure concurrency
+- [Skills](skills.md): Give reusable capabilities to Mohist Agents and External
+  Agents
+- [Slack](slack.md): Use the Mohist App to manage connections conversationally,
+  and use each Agent App as an independent bot in direct messages and channels
+- [GitHub](github.md): Use GitHub as a requirement entry point, progress board,
+  and Approval source through labels, reviews, and progress updates
+- [Agent Event Routing](event-routing.md): Subscribe to events from any entity
+  with a Project routing expression, then trigger Mohist Agent responses in
+  order
+- [Agent Supervision](agent-supervision.md): Install a supervision Agent with
+  one command. It approves work and repairs failures for you until it stops and
+  asks you to act.
+- [Subagents and Session Trees](subagents.md): Let an Agent decompose work in its
+  session through child-session spawn, terminal reports, cascading stop, and
+  scheduled input
 
-## 板块 6：部署与运维
+## Part 6: Deployment and Operations
 
-- [Self-host 部署](self-host.md) —— NAS / 家用服务器 / 笔记本长跑
-- [认证与访问](auth.md) —— 一个管理员加机器主体：本机零登录、CLI 设备授权登录、脚本令牌、Runner 注册与 Agent 归因
-- [Hermes 通知](hermes-notifications.md) —— 审批点、失败、完成推送到你的聊天工具
-- [故障恢复](troubleshooting.md) —— 失败、blocked、drift 怎么办
+- [Self-hosting](self-host.md): Run Mohist continuously on a NAS, home server,
+  or laptop
+- [Authentication and Access](auth.md): One Administrator plus machine
+  Principals, with local zero-login access, CLI device authorization, script
+  tokens, Runner registration, and Agent attribution
+- [Hermes Notifications](hermes-notifications.md): Push approval points,
+  failures, and completion to your chat tool
+- [Troubleshooting](troubleshooting.md): Handle failures, blocked state, and
+  drift
 
-## 板块 7：产品方案（WIP）
+## Part 7: Product Proposals (WIP)
 
-> 尚未实装、需求已对齐的方案。**这些功能当前不存在**；落地后搬到上面的板块。
+> These proposals have aligned requirements but are not implemented. **These
+> features do not currently exist.** Move them to the appropriate part above
+> after implementation.
 
-- [移动端 PWA 与推送](mobile-pwa.md) —— 手机上看进度、收推送的方案记录（暂缓）
-- [可观测性](observability.md) —— 安全地发现运行异常，并保留足够的诊断线索
+- [Mobile PWA and Push](mobile-pwa.md): A deferred proposal for viewing progress
+  and receiving notifications on a phone
+- [Observability](observability.md): Detect runtime anomalies safely and retain
+  enough information for diagnosis
 
-## 写作约束
+## Writing Contract
 
-- **面向 agent 的文档写作规则**：[_agents.md](_agents.md) —— 在 docs/ 写文档必须遵守；先读它再动笔。
-- **每节一个目的**：节名即它回答的问题。动机说教、铺垫导言、常识直接删；能列表不段落，能表格不列表。
-- **规则单点定义**：一个规则只在一篇里定义，其他篇链接它，不复制。
-- **spec 先于实现**：文档记录目标形态——产品该满足什么。实装由 issue 追赶 spec，而非 spec 跟着实装走。文档里出现尚未实装的能力是正常的，由对应 issue 推进落地；落地后无需改动文档（它本就描述目标）。
-- **实装差距单列**：当某文档描述的能力与当前代码有显著差距时，在文内单列「实装差距」之类的小节说明现状与对应 issue，而非把正文降级成"当前实装清单"。正文是 spec，差距是脚注。
-- **命令自包含**：文档会被 agent 读取并直接执行，所有 shell / CLI 示例必须能独立复制运行，不依赖"把上面那个替换一下"。
-- **改前先核对差距**：动手修改任何事实陈述前，先看文内「实装差距」小节是否已标注该处未对齐——避免把 spec 改回现状。
-- **WIP 产品方案**：尚未对齐需求、还在探索方向的产品方案收录在「板块 7」，用 frontmatter `status: wip-not-implemented` 标注，用「将支持 / 计划 / （开放）」等表述。需求对齐、spec 定稿后搬到对应板块，移除 WIP 标记。
-- **语言统一**：正文使用中文；产品规范术语、配置字段、命令和代码符号保留原名。
-- **不用技术语言**：正文不出现 API 端点、字段名、组件类名、源码路径——这些属于 `design/`。唯一例外：文末可以有一行「对应源码：」页脚，指向实现入口。
-- **术语一致**：Project / Issue / Workflow / Epic / Inline Agent / Mohist Agent / Agent Connection / AgentSession / Skill 等术语在各篇保持一致。
+- **Agent-facing writing rules**: Read and follow
+  [_agents.md](_agents.md) before you edit `docs/`.
+- **One purpose per section**: A heading states the question that its section
+  answers. Remove motivational lectures, introductory padding, and common
+  knowledge. Prefer a list to a paragraph and a table to a list.
+- **One authority for each rule**: Define a rule in one document. Other
+  documents must link to it and must not copy it.
+- **Spec before implementation**: Product documents define the target product.
+  Issues bring the implementation to the spec; the spec does not follow the
+  implementation. A document can describe a capability before implementation.
+  Its Issue delivers the capability, and the body does not need to change when
+  delivery finishes.
+- **Separate implementation gaps**: If the implementation differs materially
+  from a document, add an Implementation Gaps section that states the current
+  state and corresponding Issue. Do not reduce the body to a current-feature
+  list. The body is the spec; the gap is a footnote.
+- **Self-contained commands**: Agents read and run these documents. Every shell
+  and CLI example must run independently as written. It must not depend on an
+  instruction to replace a value shown earlier.
+- **Check gaps before changing facts**: Before you change a factual statement,
+  check whether the document's Implementation Gaps section already records the
+  difference. Do not change a target spec back to current behavior.
+- **WIP product proposals**: Put product ideas with unresolved requirements in
+  Part 7. Add `status: wip-not-implemented` frontmatter and use future-state
+  language. After the requirements and spec are final, move the document to its
+  product area and remove the WIP marker.
+- **Language**: Write active prose in English. Preserve the exact spelling of
+  product terms, configuration fields, commands, identifiers, and code symbols.
+  Use short sentences, active voice, and American spelling. Treat ASD-STE100 as
+  a writing target, not a compliance claim.
+- **Diagrams**: Use fenced `text` blocks and ASCII characters. Add a diagram
+  only when it clarifies a boundary, ownership relation, dependency, sequence,
+  hierarchy, or state transition. Define the normative rule in prose. Use a
+  table for exact mappings and numbered steps for a linear procedure.
+- **No technical language**: Do not put API endpoints, field names, component
+  class names, or source paths in the body. They belong in `design/`. A single
+  `Implementation source:` footer that points to implementation entry points is
+  the only exception.
+- **Consistent terms**: Use Project, Issue, Workflow, Epic, Inline Agent, Mohist
+  Agent, Agent Connection, AgentSession, and Skill consistently.
 
-发现过时描述欢迎提 issue。
+Open an Issue when you find an outdated statement.
