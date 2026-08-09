@@ -55,7 +55,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_AgentLaunchSession_ReturnsSummaryWithAgentFieldsOnly()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, querier, CancellationToken.None);
@@ -72,7 +72,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_WorkflowSession_ReturnsSummaryWithWorkflowFieldsOnly()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, WorkflowSession, querier, CancellationToken.None);
@@ -89,7 +89,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_UnknownSessionId_Returns404()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, "never-existed", querier, CancellationToken.None);
@@ -100,7 +100,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_CrossProjectSession_Returns404()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectBInfo, AgentLaunchSession, querier, CancellationToken.None);
@@ -111,7 +111,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_AgentLaunchSourceContract_WorkflowFieldsAbsentOnWire()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, AgentLaunchSession, querier, CancellationToken.None);
@@ -126,7 +126,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Show_WorkflowSourceContract_AgentFieldsAbsentOnWire()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleShowAsync(ProjectAInfo, WorkflowSession, querier, CancellationToken.None);
@@ -143,7 +143,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Transcript_AgentLaunchSession_ReturnsTranscript()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleTranscriptAsync(
@@ -156,7 +156,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Transcript_WorkflowSession_ReturnsTranscript()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleTranscriptAsync(
@@ -169,7 +169,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Transcript_WithoutRuntimeQuery_UsesTheSessionCurrentBinding()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         await using (var context = db.Factory.CreateDbContext())
         {
             var current = await context.AgentSessionTranscriptTurns
@@ -226,7 +226,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Transcript_UnknownSessionId_Returns404()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleTranscriptAsync(
@@ -238,7 +238,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task Transcript_CrossProjectSession_Returns404()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
 
         var result = await UnifiedSessionRoutes.HandleTranscriptAsync(
@@ -252,7 +252,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_ByAgent_ReturnsAgentLaunchSessionsWithAgentFields()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -272,7 +272,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_ByAgent_UnknownAgent_Returns404()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -285,7 +285,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_ByIssue_ReturnsWorkflowSessions()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -306,7 +306,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_ByRun_ReturnsWorkflowSessionsForProject()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -323,7 +323,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_ByRun_CrossProjectRun_YieldsEmpty_NoLeak()
     {
-        var db = await BuildDbAsync(seedCrossProjectRun: true);
+        using var db = await BuildDbAsync(seedCrossProjectRun: true);
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -337,7 +337,7 @@ public class UnifiedSessionRoutesSpecs
     [Fact]
     public async Task List_NoFilter_Returns400()
     {
-        var db = await BuildDbAsync();
+        using var db = await BuildDbAsync();
         var querier = CreateQuerier(db);
         var agentQuerier = new AgentQuerier(db.Factory);
 
@@ -357,23 +357,52 @@ public class UnifiedSessionRoutesSpecs
         return new AgentSessionQuerier(db.Factory, sessionQuery);
     }
 
-    private static async Task<UnifiedTestDb> BuildDbAsync(bool seedCrossProjectRun = false)
+    private static Task<UnifiedTestDb> BuildDbAsync(bool seedCrossProjectRun = false) =>
+        BuildDbAsync(
+            seedCrossProjectRun,
+            TestSqliteDatabase.CreateMigrated,
+            seedOverride: null);
+
+    internal static Task<UnifiedTestDb> BuildDbAsyncForTest(
+        Func<TestSqliteDatabase> createDatabase,
+        Func<IDbContextFactory<MohistDbContext>, Task> seed)
+        => BuildDbAsync(false, createDatabase, seed);
+
+    private static async Task<UnifiedTestDb> BuildDbAsync(
+        bool seedCrossProjectRun,
+        Func<TestSqliteDatabase> createDatabase,
+        Func<IDbContextFactory<MohistDbContext>, Task>? seedOverride)
     {
-        var database = TestSqliteDatabase.CreateMigrated();
-        var factory = new TestDbContextFactory(database.Options);
-
-        await SeedAgentAsync(factory);
-        await SeedAgentLaunchSessionAsync(factory);
-        await SeedWorkflowSessionAsync(factory, WorkflowSession, ProjectA, WorkflowRunId, WorkflowSessionName, WorkflowIssueNumber);
-        await SeedTranscriptAsync(factory, AgentLaunchSession, "rt-agent");
-        await SeedTranscriptAsync(factory, WorkflowSession, "rt-" + WorkflowSession);
-
-        if (seedCrossProjectRun)
+        var database = createDatabase();
+        try
         {
-            await SeedWorkflowSessionAsync(factory, "s_other_project", ProjectB, "wr-other-project", "coder", 300);
-        }
+            var factory = new TestDbContextFactory(database.Options);
 
-        return new UnifiedTestDb(database, factory);
+            if (seedOverride is not null)
+            {
+                await seedOverride(factory);
+            }
+            else
+            {
+                await SeedAgentAsync(factory);
+                await SeedAgentLaunchSessionAsync(factory);
+                await SeedWorkflowSessionAsync(factory, WorkflowSession, ProjectA, WorkflowRunId, WorkflowSessionName, WorkflowIssueNumber);
+                await SeedTranscriptAsync(factory, AgentLaunchSession, "rt-agent");
+                await SeedTranscriptAsync(factory, WorkflowSession, "rt-" + WorkflowSession);
+
+                if (seedCrossProjectRun)
+                {
+                    await SeedWorkflowSessionAsync(factory, "s_other_project", ProjectB, "wr-other-project", "coder", 300);
+                }
+            }
+
+            return new UnifiedTestDb(database, factory);
+        }
+        catch
+        {
+            database.Dispose();
+            throw;
+        }
     }
 
     private static async Task SeedAgentAsync(IDbContextFactory<MohistDbContext> factory)
@@ -543,7 +572,7 @@ public class UnifiedSessionRoutesSpecs
         return (element, context.Response.StatusCode);
     }
 
-    private sealed record UnifiedTestDb(TestSqliteDatabase Database, IDbContextFactory<MohistDbContext> Factory) : IDisposable
+    internal sealed record UnifiedTestDb(TestSqliteDatabase Database, IDbContextFactory<MohistDbContext> Factory) : IDisposable
     {
         public void Dispose() => Database.Dispose();
     }
