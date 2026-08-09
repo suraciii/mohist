@@ -565,8 +565,8 @@ unknown, not terminal blocked.
 
 A scheduled Input is a one-time Follow-up delivered only when it is due. At that time, the Server appends an
 ordinary `SessionInput` to the target Session through the same admission path. It does not create a new Input
-kind, scheduler, or Session terminal state. See the "Scheduled input" section in
-[`subagents.md`](subagents.md) for the complete contract.
+kind, Session terminal state, or tree-specific delivery path. See
+[`scheduled-input.md`](scheduled-input.md) for the complete contract.
 
 A Follow-up command needs only three synchronous results. The canonical Input/operation projection returns
 the steer effect state separately:

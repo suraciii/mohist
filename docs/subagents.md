@@ -247,18 +247,15 @@ cron, relative times such as "in 30 minutes," attachments, automatic launch of
 a new session at the due time, or schedule display in `mo session view` or
 `mo session tree`.
 
-## Implementation Gaps
+## Status
 
 Capability declaration, startup awareness, `mo agent spawn`, terminal reports,
-`mo session tree`, cascade stop, detach, and scheduled input are implemented as
-specified here in delivery increments 1-3 and 5. Increment 4, managed isolated
-workspaces, was implemented and then intentionally **retired**. A git worktree
-is a git tool, not a platform concept. A child session can get its directory
-only by inheriting the parent Workspace or binding another Workspace. The Agent
-uses git itself for isolation. See the "Persistent Workspace Execution
-Environment" milestone for implementation removal.
+`mo session tree`, cascade stop, detach, and scheduled input are implemented.
+A child inherits the parent Workspace unless the caller selects another named
+Workspace. Git isolation remains an Agent and Git concern rather than a second
+Session Tree workspace lifecycle.
 
-**Temporary anonymous child sessions** are intentionally excluded. A child
+Temporary anonymous child sessions are intentionally excluded. A child
 session identity must come from a defined Agent so that configuration has one
 owner and remains visible, adjustable, and reusable in the control plane. The
 spawn task brief provides runtime flexibility without a temporary role. A

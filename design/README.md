@@ -135,7 +135,8 @@ Put API, Writes, Merge, and similar topics in `Semantics` subsections. Split the
 
 - [agent-execution.md](agent-execution.md) — Action, Inline Agent, Mohist Agent, AgentJob, SessionInput, AgentTurn, AgentSession, Runtime Session: layering, lifecycle ownership, activity and transcript DSL.
 - [agent-api.md](agent-api.md) — Agent call boundary shared by Web, CLI, and external integrations: unified capabilities, state, identity, reliability decisions.
-- [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, timed input.
+- [subagents.md](subagents.md) — Subagents and session trees: child launch under flat Agent, capability snapshot, parent-child link, terminal callback, cascade stop, and detach.
+- [scheduled-input.md](scheduled-input.md) — Scheduled input: why durable intent is separate from replaceable wake-up infrastructure, and how delivery reuses ordinary AgentSession follow-up.
 - [slack.md](slack.md) — Slack integration component boundary: why the adapter is standalone and stateless, Session boundary trade-offs, reliability contract, implementation order; product behavior in `docs/slack.md`.
 - [event-routing.md](event-routing.md) — Agent event routing: project-scoped ordered routing table, expression matching + first-match/continue agent launch, replacing subscription priority arbitration.
 - [agent-supervision.md](agent-supervision.md) — Agent supervision presets: one command installs a supervisor agent and approval/failure routing rules; escalation via all-notifications-on + `[supervisor]` comment discipline, no escalate command or system-level rate limiting.
