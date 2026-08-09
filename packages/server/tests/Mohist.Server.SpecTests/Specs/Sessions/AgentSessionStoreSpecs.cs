@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -135,6 +136,50 @@ public class AgentSessionStoreSpecs : IAsyncLifetime
         var partRows = await db.AgentSessionTranscriptParts.ToListAsync();
         var part = Assert.Single(partRows);
         Assert.Equal("hello world", part.Text);
+    }
+
+    [Fact]
+    public async Task SavePartsAsync_ToolUpdatePreservesEarlierRawPayloadFields()
+    {
+        var sessionId = $"transcript-{Guid.NewGuid():N}";
+        var now = TestTime.UtcDateTime;
+        var turn = new AgentSessionTranscriptTurnUpsert(sessionId, 1, "prompt", "task", now, now);
+
+        await _transcriptStore.SaveAsync(new AgentSessionTranscriptFlush(
+            true,
+            turn,
+            [new AgentSessionTranscriptPartDelta(
+                "tool",
+                "tool-1",
+                "tool-1",
+                null,
+                "{\"toolCallId\":\"tool-1\",\"status\":\"in_progress\",\"rawInput\":{\"filePath\":\"README.md\"}}",
+                now,
+                now,
+                1)]));
+
+        await _transcriptStore.SaveAsync(new AgentSessionTranscriptFlush(
+            false,
+            turn,
+            [new AgentSessionTranscriptPartDelta(
+                "tool",
+                "tool-1",
+                "tool-1",
+                null,
+                "{\"toolCallId\":\"tool-1\",\"status\":\"completed\",\"rawOutput\":{\"content\":\"# Project\"}}",
+                now,
+                now,
+                1)]));
+
+        await using var db = new MohistDbContext(_database.Options);
+        var payload = await db.AgentSessionTranscriptParts
+            .Where(part => part.CorrelationKey == "tool-1")
+            .Select(part => part.PayloadJson)
+            .SingleAsync();
+        using var document = JsonDocument.Parse(payload);
+        Assert.Equal("completed", document.RootElement.GetProperty("status").GetString());
+        Assert.Equal("README.md", document.RootElement.GetProperty("rawInput").GetProperty("filePath").GetString());
+        Assert.Equal("# Project", document.RootElement.GetProperty("rawOutput").GetProperty("content").GetString());
     }
 
     [Fact]

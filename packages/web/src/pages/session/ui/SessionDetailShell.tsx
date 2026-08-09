@@ -203,13 +203,16 @@ export function SessionDetailShell({
     launchObservation,
     projectId,
     supportsInputAttachments = false,
+    transcriptView,
+    setTranscriptView,
   } = data
 
   // ── All hooks must be before any early return ──
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLDivElement>(null)
   const isNearBottomRef = useRef(true)
-  const [timelineView, setTimelineView] = useState<'summary' | 'raw'>('summary')
+  const [localTimelineView, setLocalTimelineView] = useState<'summary' | 'raw'>('summary')
+  const timelineView: 'summary' | 'raw' = transcriptView === 'raw' ? 'raw' : localTimelineView
   const pendingTimelineAnchorRef = useRef<string | null>(null)
   const isUserScrollingRef = useRef(false)
   const isSelectingTextRef = useRef(false)
@@ -246,8 +249,9 @@ export function SessionDetailShell({
   const changeTimelineView = useCallback((nextView: 'summary' | 'raw') => {
     if (nextView === timelineView) return
     pendingTimelineAnchorRef.current = findVisibleTimelineSourceId()
-    setTimelineView(nextView)
-  }, [findVisibleTimelineSourceId, timelineView])
+    if (setTranscriptView) setTranscriptView(nextView === 'raw' ? 'raw' : 'public')
+    else setLocalTimelineView(nextView)
+  }, [findVisibleTimelineSourceId, setTranscriptView, timelineView])
 
   useLayoutEffect(() => {
     const sourceId = pendingTimelineAnchorRef.current

@@ -28,8 +28,8 @@ describe('unified session reads', () => {
     ])
   })
 
-  it('does not enable the transcript query before the current runtime binding is known', () => {
-    expect(unifiedSessionTranscriptQueryOptions('proj-1', 'session-1').enabled).toBe(false)
+  it('enables the transcript query by stable session id before a runtime binding exists', () => {
+    expect(unifiedSessionTranscriptQueryOptions('proj-1', 'session-1').enabled).toBe(true)
     expect(unifiedSessionTranscriptQueryOptions('proj-1', 'session-1', 'runtime-1').enabled).toBe(true)
   })
 })

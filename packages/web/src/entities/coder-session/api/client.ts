@@ -21,10 +21,12 @@ export function getUnifiedSessionTranscript(
   projectId: string,
   sessionId: string,
   runtimeSessionId?: string | null,
+  view: 'public' | 'raw' = 'public',
 ) {
-  const search = runtimeSessionId
-    ? `?${new URLSearchParams({ runtimeSessionId }).toString()}`
-    : ''
+  const params = new URLSearchParams()
+  if (runtimeSessionId) params.set('runtimeSessionId', runtimeSessionId)
+  if (view === 'raw') params.set('view', 'raw')
+  const search = params.toString() ? `?${params.toString()}` : ''
   return request<AgentSessionTranscriptResponse>(
     projectApiPath(projectId, `/sessions/${encodeURIComponent(sessionId)}/transcript${search}`),
   )
@@ -46,11 +48,12 @@ export function unifiedSessionTranscriptQueryOptions(
   projectId: string | null | undefined,
   sessionId: string,
   runtimeSessionId?: string | null,
+  view: 'public' | 'raw' = 'public',
 ) {
   return {
-    queryKey: ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId ?? null] as const,
-    queryFn: () => getUnifiedSessionTranscript(projectId!, sessionId, runtimeSessionId),
-    enabled: !!projectId && !!sessionId && !!runtimeSessionId,
+    queryKey: ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId ?? null, view] as const,
+    queryFn: () => getUnifiedSessionTranscript(projectId!, sessionId, runtimeSessionId, view),
+    enabled: !!projectId && !!sessionId,
     refetchInterval: (query: { state: { data: AgentSessionTranscriptResponse | undefined } }) => {
       const turns = query.state.data?.turns
       return turns?.some((turn) => turn.incomplete) ? 5000 : false
@@ -63,9 +66,13 @@ export function useUnifiedSessionSummary(sessionId: string) {
   return useQuery<UnifiedSessionSummaryDto>(unifiedSessionSummaryQueryOptions(projectId, sessionId))
 }
 
-export function useUnifiedSessionTranscript(sessionId: string, runtimeSessionId?: string | null) {
+export function useUnifiedSessionTranscript(
+  sessionId: string,
+  runtimeSessionId?: string | null,
+  view: 'public' | 'raw' = 'public',
+) {
   const { projectId } = useProject()
-  return useQuery<AgentSessionTranscriptResponse>(unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId))
+  return useQuery<AgentSessionTranscriptResponse>(unifiedSessionTranscriptQueryOptions(projectId, sessionId, runtimeSessionId, view))
 }
 
 export function getCoderSessions(number: number, projectId?: string | null, signal?: AbortSignal) {

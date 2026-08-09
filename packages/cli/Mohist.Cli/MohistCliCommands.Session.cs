@@ -418,15 +418,21 @@ internal static class SessionCommands
         var sessionIdArg = new Argument<string>("session-id") { Description = "Stable AgentSession id returned by launch or the workflow session list" };
         var projectOpt = MohistCliCommands.ProjectRefOption();
         var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.SessionTranscript)));
+        var rawOpt = new Option<bool>("--raw")
+        {
+            Description = "Use the explicit diagnostic transcript view, including raw runtime prompt and tool payloads.",
+        };
 
         cmd.Arguments.Add(sessionIdArg);
         cmd.Options.Add(projectOpt);
         cmd.Options.Add(outputOpt);
+        cmd.Options.Add(rawOpt);
         cmd.SetAction(ctx =>
         {
             var sessionId = ctx.GetValue(sessionIdArg);
             var project = ctx.GetValue(projectOpt);
             var output = ctx.GetValue(outputOpt);
+            var raw = ctx.GetValue(rawOpt);
             return TranscriptAsync();
 
             async Task<int> TranscriptAsync()
@@ -437,8 +443,9 @@ internal static class SessionCommands
                 var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
                 if (resolveExit != 0) return resolveExit;
 
+                var suffix = raw ? "?view=raw" : string.Empty;
                 return await api.PrintWithOutputAsync(
-                    ProjectSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/transcript"),
+                    ProjectSessionsPath(resolvedProjectId, $"/{MohistCliCommands.Escape(sessionId!)}/transcript{suffix}"),
                     mode,
                     nameof(MohistCliApi.TableShape.SessionTranscript));
             }

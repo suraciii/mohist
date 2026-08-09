@@ -40,10 +40,11 @@ public static partial class IssueRoutes
             int number,
             string name,
             string? runtimeSessionId,
+            string? view,
             AgentSessionQuerier sessions) =>
         {
             var project = GetRequiredProject(ctx);
-            var transcript = await sessions.GetSessionTranscriptAsync(project.Id, number, name, runtimeSessionId);
+            var transcript = await sessions.GetSessionTranscriptAsync(project.Id, number, name, runtimeSessionId, view: view);
             return transcript is null ? ApiResults.NotFound($"Session {name} not found") : ApiResults.Ok(transcript);
         });
 
