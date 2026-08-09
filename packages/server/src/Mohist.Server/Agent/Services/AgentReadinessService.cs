@@ -118,11 +118,17 @@ public sealed class AgentReadinessService : IScopedService
     private static bool IsConfigurationFailure(string? category)
     {
         if (string.IsNullOrWhiteSpace(category)) return false;
-        var value = category.ToLowerInvariant();
-        return value.Contains("api_key") || value.Contains("credential") || value.Contains("unauthorized")
-            || value.Contains("model not found") || value.Contains("model-not-found") || value.Contains("model_rejected")
-            || value.Contains("model-rejected") || value.Contains("preflight-rejected") || value.Contains("runtime")
-            || value.Contains("invalid-input");
+        var value = category.Trim().ToLowerInvariant().Replace('_', '-');
+        if (value.Contains("runtime-unavailable")
+            || value.Contains("unavailable-runtime")
+            || value.Contains("runner-unavailable"))
+            return false;
+
+        return value.Contains("api-key") || value.Contains("credential") || value.Contains("unauthorized")
+            || value.Contains("model not found") || value.Contains("model-not-found")
+            || value.Contains("model-rejected") || value.Contains("preflight-rejected") || value.Contains("invalid-input")
+            || value.Contains("runtime-invalid") || value.Contains("invalid-runtime")
+            || value.Contains("incompatible-runtime") || value.Contains("runtime-rejected");
     }
 
     private static string DescribeConfigurationFailure(string? category) =>

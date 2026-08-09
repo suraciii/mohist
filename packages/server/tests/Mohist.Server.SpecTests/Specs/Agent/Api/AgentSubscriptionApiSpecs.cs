@@ -5,7 +5,10 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Agent.Grains;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Infrastructure;
+using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Agent;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
@@ -46,6 +49,23 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
         Assert.Equal("unconfigured", data.GetProperty("state").GetString());
         Assert.Equal(AgentReadinessConclusions.NeedsSetup, data.GetProperty("readiness").GetString());
         Assert.Empty(data.GetProperty("subscriptions").EnumerateArray());
+    }
+
+    [Theory]
+    [InlineData("runtime-unavailable")]
+    [InlineData("unavailable-runtime")]
+    public async Task List_RuntimeUnavailablePreservesUnknownInsteadOfUnconfigured(string failureCategory)
+    {
+        var (projectId, agentId) = await CreateProjectAndAgentAsync($"subscription-{failureCategory}");
+        await SeedFailedExecutionAsync(projectId, agentId, failureCategory);
+
+        using var response = await Client.GetAsync(Path(projectId, agentId));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var data = await ReadDataAsync(response);
+        Assert.Equal(AgentReadinessConclusions.Unknown, data.GetProperty("readiness").GetString());
+        Assert.Equal("no_connection", data.GetProperty("state").GetString());
+        Assert.NotEqual("unconfigured", data.GetProperty("state").GetString());
     }
 
     [Fact]
@@ -318,6 +338,47 @@ public sealed class AgentSubscriptionApiSpecs(MohistIntegrationFixture fixture)
             AccessPolicy = AccessPolicyKind.OwnerOnly,
             CreatedAt = fixture.TimeProvider.GetUtcNow(),
             UpdatedAt = fixture.TimeProvider.GetUtcNow(),
+        });
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SeedFailedExecutionAsync(string projectId, string agentId, string failureCategory)
+    {
+        var terminalAt = fixture.TimeProvider.GetUtcNow();
+        var jobKey = $"subscription-readiness-{Guid.NewGuid():N}";
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var factory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await factory.CreateDbContextAsync();
+        db.AgentJobs.Add(new AgentJobRow
+        {
+            JobKey = jobKey,
+            State = JSON.Serialize(new AgentJobState
+            {
+                Status = AgentJobStatus.Failed,
+                SubmittedAt = terminalAt,
+                TerminalAt = terminalAt,
+                Input = new AgentJobInput(
+                    "previous execution",
+                    Model: "openai/gpt-5.6",
+                    ProjectId: projectId,
+                    Runtime: "pi",
+                    AgentId: agentId,
+                    AgentInstructions: "subscription spec instructions",
+                    Skills: []),
+                PendingSessionClose = new PendingSessionClose(
+                    $"agent-job:{jobKey}:terminal",
+                    AgentJobStatus.Failed.ToString(),
+                    1,
+                    failureCategory,
+                    failureCategory,
+                    terminalAt),
+            }),
+            ProjectId = projectId,
+            AgentId = agentId,
+            Status = AgentJobStatus.Failed.ToString().ToLowerInvariant(),
+            SubmittedAt = terminalAt.ToString("O"),
+            TerminalAt = terminalAt.ToString("O"),
+            LaunchVisibility = "visible",
         });
         await db.SaveChangesAsync();
     }
