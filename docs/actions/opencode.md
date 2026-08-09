@@ -25,7 +25,7 @@ separate Variables:
 vars:
   agent:
     model: anthropic/claude-sonnet-4
-    reasoningEffort: high
+    variant: high
 ```
 
 Then bind `session` and `options` explicitly from the Workflow Profile:
@@ -49,15 +49,13 @@ Run values override Issue values. A Workflow Profile references Variables but
 does not store their values.
 
 `agent` is an existing Workflow Variable name. In this Action, it supplies only
-`model`, `reasoningEffort`, and `variant`. It does not identify a Mohist Agent or
-select an OpenCode agent.
+`model` and `variant`. It does not identify a Mohist Agent or select an OpenCode
+agent.
 
 The expanded Action Input is the only configuration fact for this execution.
-`mohist/opencode` does not read `vars.agent` implicitly. An omitted `options`
-does not take a model or reasoning effort from an existing OpenCode Session. A
-Profile that needs a specific setting binds it explicitly. The saved-Agent
-default rule belongs to the separate `mohist/agent` Action, not to an Inline
-Action.
+`mohist/opencode` does not read `vars.agent` implicitly. Without an explicit
+`options` binding, it uses the selection from the current OpenCode Session, or
+the OpenCode default for the first execution.
 
 ## Action Inputs
 
@@ -65,9 +63,8 @@ Action.
 |---|---:|---|---|
 | `prompt` | Yes | - | Prompt sent to OpenCode for this execution |
 | `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
-| `options` | No | - | Object that selects OpenCode execution settings for this execution |
+| `options` | No | - | Object that selects the OpenCode model for this execution |
 | `options.model` | No | - | OpenCode model in `provider/model` form |
-| `options.reasoningEffort` | No | - | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `options.variant` | No | - | OpenCode `variant` for the model |
 | `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
 
@@ -75,11 +72,6 @@ Tools, plugins, permissions, default execution behavior, and automatic
 compaction remain OpenCode configuration. Mohist does not duplicate them as
 fields. Action Input does not need `agent`, `kind`, or `type`; `uses` already
 selects the execution backend.
-
-Only the three listed `options` fields are accepted. Invalid or unknown settings
-fail before work begins; a supported-looking combination that is absent from the
-versioned OpenCode catalog also fails. Mohist does not ignore options or replace
-them with a live OpenCode selection.
 
 ## Workflow Session
 
@@ -119,14 +111,13 @@ OpenCode controls timeout and retry behavior for individual tools. Mohist
 controls only the deadline for the entire execution and interruption
 confirmation. It does not add a separate timeout policy for each tool.
 
-The versioned OpenCode catalog displayed by Mohist defines supported
-configuration. Mohist does not query OpenCode or a provider for a live model
-list when validating or starting work.
+The model list displayed by Mohist helps with configuration. OpenCode remains
+authoritative for model validity and the default model.
 
 ## Error Codes
 
 See [Action Contracts](README.md#shared-semantics-for-agent-execution-actions)
-for shared business error codes and platform errors.
+for the six shared business error codes and platform errors.
 `mohist/opencode` also defines:
 
 | Error code | Meaning |
@@ -139,12 +130,8 @@ for shared business error codes and platform errors.
 
 `mohist/opencode` is implemented for both Workflow and AgentJob origins.
 OpenCode drives execution directly, and the built-in Profiles use this Action.
-Current Session, command result, and diagnostic behavior remains available.
-
-The closed option grammar, static execution configuration checks, and separate
-Reasoning effort are target behavior until saved Agent execution configuration
-is delivered.[^433] One-job CLI override, preview, and immutable readback then
-build on that saved-default contract.[^434]
+Configuration, Session, command results, and diagnostics for Workflow and Agent
+origins no longer contain historical ACP identity fields.
 
 Stable Session identity, origin resolution, Follow-up, Cancel, and Reset are
 implemented. Reset creates empty OpenCode context and replaces the binding while
@@ -156,6 +143,3 @@ is safely idle. AgentJob launch and idle Follow-up do not yet use that recovery
 boundary. Ambiguous or unsafe absence still blocks instead of replaying input.
 The remaining cross-boundary recovery limits are defined in [Agents and
 AgentSessions](../agent-sessions.md#implementation-gaps).
-
-[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
-[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.

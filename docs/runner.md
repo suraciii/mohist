@@ -167,25 +167,6 @@ task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
 [Action Contracts](actions/README.md).
 
-## Runtime Capability Catalog
-
-Mohist publishes the supported combinations of model, reasoning effort, and
-Runtime-specific variant that a Runner can apply. It uses those published choices
-to validate Agent configuration and does not probe a provider or credential store
-for a live model list.
-
-An accepted AgentJob retains the configuration evidence used for its execution.
-If a Runner cannot apply that exact saved configuration, the Job waits until an
-eligible Runner is available. Mohist does not replace it with a different model,
-reasoning effort, or Variant.
-
-This saved configuration contract is target behavior until #433 is delivered.[^433]
-The one-job override and immutable readback that depend on it are #434 target
-work.[^434]
-
-[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
-[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
-
 ## Self-hosting
 
 For a long-running Runner managed as a service instead of foreground
