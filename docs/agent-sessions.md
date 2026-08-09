@@ -185,13 +185,13 @@ Mohist Agent 还可以在自己的会话里 spawn 其它 Agent 的子会话，�
 
 ## AgentJob 与 AgentSession
 
-AgentJob、SessionInput、AgentTurn 和 AgentSession 在 launch 时同时出现，但职责不同：
+AgentJob、SessionInput、AgentTurn 和 AgentSession 在 launch 收敛成功后可同时出现，但职责不同：
 
 | | AgentJob | SessionInput | AgentTurn | AgentSession |
 |---|---|---|---|---|
 | 回答的问题 | 这次 launch 工作成功了吗 | 这条输入是否已接受、排队或交给 Runtime | 这一轮处理到了哪里、结果是什么 | 这段会话发生了什么、现在能否继续输入 |
 | 拥有 | launch 调度、成功或失败、工作结果 | 输入内容、顺序、来源和投递状态 | Input 集合、执行状态和对应回复 | Input/Turn 顺序、上下文、用量、活动状态和当前 Runtime Session |
-| 生命周期 | 一次 launch 工作，最终完成或失败 | 一条输入，最终被提交或明确拒绝；投递事实也可能暂时 unknown | 一次连续执行，最终完成、失败、取消或暂时 unknown | 持续存在，可以接受多次输入 |
+| 生命周期 | 一次 launch 工作，最终完成、拒绝、失败、取消或 blocked | 一条输入先被接受或明确拒绝；accepted 输入的派发仍可能临时 blocked，之后终态为 dispatch terminal | 一次连续执行，最终完成、失败、取消、blocked 或暂时 unknown | 持续存在，可以接受多次输入 |
 | 所属概念 | Mohist Agent 的工作 | AgentSession 的子记录 | AgentSession 的子记录 | Session 记录 |
 
 Workflow 的对应工作所有者是 TaskRun，而不是 AgentJob。TaskRun 或 AgentJob 负责裁定
@@ -201,8 +201,19 @@ Workflow 的对应工作所有者是 TaskRun，而不是 AgentJob。TaskRun 或 
 表示 launch 工作已由 Runtime 成功处理，不表示整段对话关闭，也不
 保证用户口头描述的宽泛目标已经交付。Agent 可以在回复中提出问题；此时 AgentJob 可以已经
 完成，AgentSession 回到空闲，用户通过 follow-up 继续。每次 follow-up 创建一个有稳定 ID
-的新 SessionInput：空闲时它开始新的 AgentTurn；执行中可由当前 Turn steer 接受，不支持
-steer 时则按顺序等待下一 Turn。两种情况都不创建新的 AgentJob，也不重写首次启动的结果。
+的新 SessionInput：先区分 canonical `turnRelation`。当前 Turn 已知 `running`、当前 Runtime
+binding 明确支持 steer 且没有 operation 时，使用 `steer` 复用现有 Turn；只创建一个
+SessionInput，以及同一事务提交的 `SessionOperationRead(kind=steer)` durable effect；不创建
+第二个 Turn、dispatch attempt 或 queue entry，也不受 `queuedTurnCount` 限制。该 operationId
+就是 follow-up 的 caller-provided `requestId`，负责 fence、重试和 response-loss reconciliation。
+只有 Input、operation 和 replayable effect 一起提交时，follow-up 才返回初始 `accepted`；Runtime
+确认前 effect 是 `pending`，response loss 后仍可用同一 identity replay 才能继续报告 accepted，
+已确认成功的 operation 也稳定报告 accepted。
+若不能确认或不能安全 replay，返回 `unknown`，不创建新 Input；确定拒绝或 bounded failure
+返回 effect `terminal`，但不改写已 accepted Input。Runtime 不支持 steer 或当前 Turn 不是 running 时使用 `new-turn`，只有此路径检查 queue
+limit 并创建 Turn 与 dispatch record。若当前为 `outcome_pending`、`unknown` 或有未决 operation，
+明确拒绝并给出原 Turn 的查询 action；不把未知事实转换成新 Turn。两种接受情况都不创建新的
+AgentJob，也不重写首次启动的结果。
 
 需要被持续追踪到 Done 的业务工作应由 Agent 创建或推进 Issue / Workflow；不要靠一个永不
 结束的聊天 Job 代替执行层。用户要开始另一项需要独立启动记录的工作时，应再次 launch，
@@ -212,6 +223,17 @@ steer 时则按顺序等待下一 Turn。两种情况都不创建新的 AgentJob
 
 AgentSession 的结构和用户心智模型靠近 OpenCode、Pi 等会话：它持续保存消息，同时
 呈现当前是否有尚未完成的 Turn；具体是排队还是执行中由 Turn 状态显示。
+
+SessionInput 和 AgentTurn 都有稳定身份。每条被接受的输入保留一个 Input ID，并恰好关联一个 Turn ID；同一请求的重试不得创建第二组 ID。被 queue full 拒绝的请求没有 live Input/Turn ID，但有持久 request fingerprint、reason 和 nextAction tombstone。普通后续输入使用 `new-turn`，只有 Runtime 明确支持 steer 时，才可使用 `steer` 关联当前 running Turn；steer Input 还公开 `steerOperationId`、`steerStatus`、`steerRetryAllowed` 和 `steerNextAction`；已有 Input 的 Turn ID 不可改写。
+
+Input acceptance 是独立事实，取值为 `accepted`、`rejected` 或 `unknown`。Steer 的 effect 状态另取 `pending`、`accepted`、`unknown` 或 `terminal`：`accepted` 表示 Input 与 durable effect 已确认或仍可 replay；pending effect 不表示 Runtime 已完成；`unknown` 必须阻止 admission，且只有同一 operation 仍可安全 replay 时才允许同一身份重试；`terminal` 不把已 accepted Input 改成 rejected。队列已满时在受理前持久化 definitive rejection tombstone 后拒绝新的输入；同 requestId 同 fingerprint 的 response-loss retry 永远返回同一 rejection，改 payload 返回 `idempotency_key_reused`，只有新 requestId 才能稍后重试。输入一旦 accepted，即使后续派发失败也不会被删除、换 ID 或改成 rejected。Turn 的执行状态取值为 `queued`、`running`、`outcome_pending`、`terminal` 或 `unknown`；Turn 本身没有 `idle` 状态。
+
+Session activity 取值为 `idle`、`active` 或 `unknown`，准入使用唯一的
+`admission=ready|blocked` 字段，并带 canonical `reason`/`nextAction`。只有当前
+ContextGeneration 没有非终结 Turn、没有未决副作用或未完成 operation 时才是 `idle` 和
+`admission=ready`；`queued`、`running` 或 `outcome_pending` 会使当前 activity 为 `active`
+且 admission blocked。Input acceptance、Runtime side effect、binding 或最终结果不能确认时
+为 `unknown`，admission 必须 blocked，不能当作安全空闲，也不能用新输入自动重放。
 
 - **有进行中的 Turn**：当前 Turn 可能正在排队，也可能由 Runtime 执行。Follow-up 按顺序创建
   SessionInput：后端支持时加入当前 Turn，否则等待后续 Turn。等待队列达到边界时新输入不会
@@ -227,6 +249,183 @@ AgentSession 的结构和用户心智模型靠近 OpenCode、Pi 等会话：它�
 AgentSession 的会话内容按发生顺序连续展示。SessionInput 为每条输入提供稳定关联，
 AgentTurn 为实际处理过程提供状态；两者都只能通过所属 Session 查找和操作，不建立顶层
 列表或独立管理入口。
+
+## 会话事实、操作与上下文边界
+
+Server 是 AgentJob、AgentSession、SessionInput 和 AgentTurn 的 canonical read model。Web、CLI 和 Agent 接入只适配这份事实，不能从本地日志、HTTP 状态、Runner 事件或 provider 响应自行推导状态。每份读取结果都带有 Server 的 `revision` 和 `observedAt`。
+
+AgentJob 的读取结果使用 canonical `AgentJobLaunchRead`，至少公开 `jobId`、`launchRequestId`、
+`launchRequestFingerprint`、`launchOperationId`、`status`、`outcome`、`reason`、`nextAction`、
+`workspace`、`workspaceReason`、`target`、`targetReason` 和当前的 Session/Input/Turn mapping。
+`workspace` 的类型是 `{ projectId, workspaceId, path }`，`target` 是现有 `ResourceKey`；接受的
+launch 两者必须非 null 且对应 reason 为 null。尚未解析或尚未建立的值可以是 null，但对应
+reason 必须非空；reservation ID 不能冒充 live mapping。Session 使用 canonical `AgentSessionRead`，明确公开
+`admission=ready|blocked`、`reason`、`nextAction`、activity、binding 和 unresolved targets；
+Input 使用 `SessionInputRead`，Turn 使用 `TurnResultRead`。客户端不能把这些事实合并成一个状态。
+
+### 启动身份与响应丢失
+
+启动调用由调用方提供 `launchRequestId` 和完整 envelope 的 `launchRequestFingerprint`。AgentJob
+事务第一次 prepare 时按 `(projectId, agentId, launchRequestId)` 查找：同 fingerprint 的 response
+loss 返回原 operation/rejection，改 payload 返回 `idempotency_key_reused`，只有新 requestId
+才能新 launch；首次请求才创建唯一的 `launchOperationId`、Job、内部 reservation 和
+accept-session durable command。reservation 不是可访问资源。Session 事务只原子提交自己的
+Session、Input、Turn、request map、dispatch record 和 durable accept/reject event/outbox，不能同时
+更新 AgentJob。Launch coordinator 以 `launchOperationId` 为唯一身份消费 Session 结果，再在单独
+的 AgentJob 事务 materialize 三项 live mapping 或 durable rejection。
+
+响应丢失时，客户端先用 `launchRequestId` 找到原 operation，再查询或重试原 `launchOperationId`；Server 必须返回同一组 ID，不得创建第二个 launch。coordinator 重启会扫描 pending command，claim/takeover 后重复消费同一 command；Session accept 成功但 Job 回写失败时，Job 暂时保持 mapping `null + mapping_pending`，直到同一 operation 回写成功。明确拒绝或不可恢复失败是 durable terminal outcome，返回稳定 reason 和 nextAction；临时不可用或 side effect 无法确认时保持 `unknown`，要求查询或人工核对原 operation。
+
+### 操作查询
+
+Compact、Reset、recovery、force-reset、handoff、rebind 和 stop 都必须使用调用方提供的 `operationId`；steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。这个 ID 同时是 query 和 response-loss retry 的身份；查询可以读取当前或历史 operation，并返回唯一 canonical `SessionOperationRead` 的完整字段，包括显式可空 `reason`、同一 phase、outcome、binding、context mapping 和 nextAction。Operation query 不得再次产生副作用、递增 ContextGeneration、创建 candidate 或生成新的 operation。没有 operationId 时 Server 拒绝调用，不生成客户端不可见的替代 key。
+
+Operation projection 是 canonical read model 的一部分。它必须返回该 operation 类型规定的完整字段和显式 null 值；Job、Session、Input 和 Turn 可以引用同一个 `operationId` 或嵌入同一 projection，但不能发明只含状态或只含 mapping 的裁剪 schema。
+
+### Compact、Reset 与 force-reset
+
+- **Compact** 在安全空闲边界执行，保持 AgentSession、当前 Runtime Session 和 ContextGeneration；成功后持久化 ContextBoundary 与 operation result，后续输入继续沿用该 generation。
+- **Reset** 在安全空闲边界建立没有旧 Runtime 上下文的新物理 Session，保持 AgentSession、transcript、Input 和 Turn 身份；它递增 ContextGeneration，并以同一 operationId 查询或重试。
+- **Force-reset** 只在旧输入、Turn、dispatch attempt、Runtime side effect 或 operation 的结果仍未知且普通操作被阻止时受理。它使用新的 operationId，要求当前 revision、expected ContextGeneration、完整 expected binding 和显式确认旧 Runtime 可能仍有副作用。BeginForceReset 必须先按 `sessionId + operationId` 查已有 operation：已有 kind、完整 request fingerprint、expected revision/generation/binding 匹配时返回原 canonical operation，即使响应丢失；错误 kind、target、fingerprint、revision、generation 或 binding 明确拒绝，不创建第二个 context。唯一 collector 在同一 Session 事务收集这些 target；ActiveOperation（如有）也进入同一个 `supersededTargets` 数组。每个 target 都是 canonical `UnresolvedTargetRead`：`targetKind`、稳定 `targetId`、`requestId`、`contextGeneration`、`originalOperationId`（无已知来源时显式 null）、完整或 null 的 `expectedBinding`、`nextAction` 和 `supersededByOperationId`。没有 ActiveOperation 时仍必须为 unknown facts 建立 target。
+
+  collector、`supersededTargets`、`unresolvedPrevious`、旧 operation 的 supersede 标记、新 operation 的完整 fence 和 `admission=blocked` 先在同一原子事务提交；在新的 candidate binding 与 ContextBoundary 原子提交前不接受新的 Input/Turn。完成提交按同一事务递增 ContextGeneration、写 boundary、将 admission 置 ready，再允许新输入。旧 target 和旧 operation 仍可按 targetId/operationId 查询；响应丢失时重用同一 force-reset operationId，不创建第二个 context。
+
+force-reset 的 candidate `getByKey` 返回 `definitely-rejected` 时，不把它当成候选存在或缺失的
+未知 binding：无论是 create response-loss 后的 lookup，还是 Server 重启/重复请求的 same-key
+reconcile，都保留 `candidateState=none`、`candidateBinding=null`、稳定
+`reason=force_reset_candidate_rejected`。deadline 未到时 outcome 为 `pending`，nextAction
+为 `retry_same_force_reset_candidate`，沿用同一 candidate key；deadline 到达后 outcome 为
+`blocked`，nextAction 为 `inspect_force_reset_operation`。这两个分支都不 cleanup、不读未确认
+binding、不构造 CAS；response loss 或 generic unknown 才进入 `candidateState=unknown` 和
+查询/人工核对。
+
+### ContextGeneration 与未决历史
+
+`ContextGeneration` 从 1 开始，标识当前逻辑上下文，不等同于 operation fence 的 claim generation。普通 Compact 不递增它；Reset、runtime change、missing recovery、force-reset、handoff 和 rebind 开始新的 logical context，并在同一 Session 边界中递增它。每个 Input/Turn 保留创建时的 generation，不能移到新上下文。
+
+当前 activity 只计算当前 generation。较旧 generation 的未决 Input、Turn、side effect 和 operation result 不与当前的 `queued`、`running` 或 `outcome_pending` 混合，而通过 `unresolvedPrevious` 暴露；其中至少包含旧 operationId、旧 ContextGeneration、outcome 和 nextAction，并可提供 unresolved count。只有 force-reset 已确认并 supersede 旧 operation、且新 context/binding 边界已提交后，旧 Unknown 才不再阻止当前 generation 的新 Input/Turn。
+
+### Handoff、rebind 与有界派发失败
+
+- **handoff** 是唯一可以改变 Runner 的显式 operation。Runner 重连、超时或旧事件不能隐式 handoff。
+- **rebind** 只能在同一 Runner 上替换 Runtime binding 或物理 Runtime Session，不能借未知事实跨 Runner 迁移。
+- 两者都需要 operationId、当前 revision、expected binding 和 bounded deadline；只有当前 generation 为 `idle` 且没有未决 side effect 时受理。当前为 `active`、`outcome_pending` 或 `unknown` 时先查询原 operation，仍未知则选择 force-reset。成功后递增 ContextGeneration，旧 binding 的事件不能改变当前会话。
+
+Steer operation 在 Server 重启后按 `operationId=requestId` 扫描；pending 或 response-loss 状态先
+查询同一 effect，再按完整 fence claim/takeover。只有 adapter 能以同一 identity replay 时才重试，
+否则保留 `steerStatus=unknown`、`steerRetryAllowed=false`、`admission=blocked` 和
+`query_same_steer_or_force_reset`。同一 request 的重复 follow-up 只返回原 Input/operation
+projection，不能创建第二个 effect，也不能把没有 replay path 的状态报告为 accepted。
+
+Steer 的 Server-to-Runner effect 使用同一 `operationId=requestId` 和可查询的
+`effectId={sessionId, operationId}`。请求固定携带目标 Session、Input、Turn、完整 runtime
+binding/fence 与已接受的原文；Runner 只通过 `apply`、同 effect 的 `query` 或同 effect 的
+`replay` 处理它。重复 effect identity 不创建第二次 provider effect；Server 重启先 query，
+只有完整 fence、deadline 和 `steerRetryAllowed=true` 仍有效时才 replay。`ProviderAccepted`
+才表示 provider 已接受；response loss、unknown 或 stale fence 不能被产品状态翻译为
+provider accepted。
+
+如果目标 Turn 在 steer 调用前已 terminal，或被 stop/force-reset 变得不可受理，Server 会在
+同一 fence 保护的 Session 事务中把 steer settle 为稳定 terminal `rejected`；如果变化发生在
+adapter/query/replay 已开始后，则 settle 为 terminal `blocked`，因为 provider 结果已不再可
+裁定。两种情况都释放 ActiveOperation，设置 `steerRetryAllowed=false`、稳定 reason 和
+nextAction，保留原 Input/Turn ID 与 Input accepted，不会无限重试，也不会报告 provider
+accepted。重复请求和重启只返回这一 durable 结果。
+
+Input accepted 后的 dispatch retry 必须有 canonical `dispatchOperationId`、
+`dispatchAttemptCount`、固定 `dispatchDeadline`、`dispatchAttemptId`、`dispatchLastResult`、
+`dispatchRetryId`、`retryAllowed` 和完整 `dispatchFence`。`dispatchRetryId` 是 outbox command、
+timer、due signal 和 coordinator claim 的同一 durable identity；`dispatchRetryOwnerId`、
+`dispatchRetryClaimGeneration`、`dispatchRetryLeaseUntil` 以及 `TurnDispatchRead/DispatchRetryWork`
+中的 session/operation/owner/ownerFence/claim/revision/attempt/retry/deadline/expected/candidate
+binding 也必须随状态变化持久化。Server 重启后 coordinator 只在
+`dispatchRetryId != null`、`retryAllowed=true`、due 有效且状态允许时修复 work，claim 或
+takeover 过期 lease；重复 signal 只消费一次。
+
+dispatch 状态和 Turn 状态必须同步：`queued|retrying|blocked -> Turn.status=queued`，
+`dispatched -> queued|running|outcome_pending`，`unknown -> Turn.status=unknown`，
+`terminal -> Turn.status=terminal`。同 attempt 查询得到 accepted-before-start 回到
+`dispatched + queued`，accepted-and-started 回到 `dispatched + running`，确定 terminal 结果
+写入 canonical Turn result；response loss 不创建新 Input/Turn/attempt。
+
+达到次数或 deadline 上限时，只有某次持久 `dispatchAttemptId` 的最后结果为
+`definitely-rejected`，且 attempt/deadline 已到边界，Input 仍为 accepted、Input ID 和 Turn ID
+不变，Server 才能原子写入唯一终态 `dispatchStatus=terminal`、Turn `status=terminal`、
+Turn `outcome=blocked`、稳定 `blockedReason` 和可执行 `nextAction`。无 attempt、outbox 未送达、
+response loss、result unknown 或没有 definitely-rejected 证据时，只保留
+`dispatchStatus=unknown`、Turn `status=unknown`、Turn.reason/nextAction 和
+`query_same_attempt_or_manual_reconcile`，不能写 terminal blocked。临时 `blocked` 只能表示
+definitely-rejected 且有有效 retry due；它不是终态，也不能只靠 `nextAction` 唤醒。
+
+Turn 的 canonical `result` 只有 `outcome=completed` 时保留；`failed`、`cancelled` 和
+`blocked` 即使 Runtime 返回了附带 payload，也必须持久化为 `result=null`，同时保留
+`reason` 与 `nextAction`。
+
+`retainUnknownWithoutRetry` 清除 retry identity 时必须持久化 `retryAllowed=false`、
+`dispatchRetryId=null`、`dispatchRetryDueAt=null`、无 due/lease/owner，并保留 Turn/dispatch
+unknown 与可行动 nextAction。重启和重复 reconcile 只能保留 unknown，不能从 null identity
+自动唤醒。
+
+dispatch claim/takeover、enqueue/query、reschedule、blocked/terminal/unknown 写入都必须携带
+完整 `DispatchFenceToken`（session/operation/owner/ownerFence/claimGeneration/revision、attempt/
+retry IDs、lease/deadline、expected binding、candidate binding 和 bindingAtEffect）；Owner A 的迟到结果在 Owner B 接管或
+完成后只能返回 `stale_operation_fence`。
+
+Coordinator 必须在 `claimDueOrTakeOver` 之前检查 `now >= dispatchDeadline`，不得先生成已经
+过期的 lease 再让 fence 失败。该检查在当前 dispatch record fence 下原子递增 revision 并取消
+retry work：若当前 attempt 的持久 `dispatchLastResult=definitely-rejected`，写唯一终态
+`dispatchStatus=terminal`、`Turn.status=terminal`、`Turn.outcome=blocked`；若没有 attempt、
+outbox 未送达或结果为 `unknown`，则写 `dispatchStatus=unknown`、`Turn.status=unknown`、
+`Turn.reason/nextAction`，保留同一 `dispatchAttemptId` 并要求查询/人工核对。两条分支都清空
+retry lease/fence，写入新的 record/session revision。
+
+**Stop** 使用唯一 `SessionOperationRead.kind=stop`。`mo session cancel` 仍取消 queued 或
+active Turn；调用方必须提供 stable operationId、expected revision/binding 和 bounded deadline。
+BeginStop 的 operation row 持久保存 target Turn、request fingerprint、expected
+revision/generation、完整 FenceToken、owner/claim generation、lease、reason 和 nextAction。
+其幂等顺序必须是：
+
+```text
+BeginStop(sessionId, operationId, turnId, fingerprint, expectedRevision,
+          expectedContextGeneration, expectedBinding):
+  atomically:
+    existing = read operationId
+    if existing != null:
+      require existing.kind == stop
+      require existing.targetTurnId == turnId
+      require existing.requestFingerprint == fingerprint
+      require existing.expectedRevision == expectedRevision
+      require existing.expectedContextGeneration == expectedContextGeneration
+      require existing.expectedBinding == expectedBinding
+      return full canonical operation/result projection
+    require expected revision/binding and expectedContextGeneration match
+    require current Turn == turnId and Turn is not terminal
+    create stop operation
+    if Turn is queued:
+      cancel the same dispatch retry work
+      persist dispatchStatus=terminal, dispatchLastResult=none, retryAllowed=false,
+        dispatchRetryId=null, dispatchRetryKind=none, dispatchRetryDueAt=null,
+        dispatchRetryState=none, dispatchRetryOwnerId=null,
+        dispatchRetryClaimGeneration=null, dispatchRetryLeaseUntil=null,
+        dispatchFence=null
+      persist Turn.status=terminal, outcome=cancelled,
+        reason=stop_requested, nextAction=inspect_turn
+      complete the operation in the same Session transaction
+  if Turn is running:
+    recheck the complete pre-token before Runtime.stop and after the response
+    persist cancelled only when the same fence still matches
+```
+
+The existing-operation lookup precedes the non-terminal Turn check, so response loss after a
+successful queued cancel or running stop returns the original canonical projection even when the
+Turn is already terminal. Wrong operation kind, target, fingerprint, revision, or binding is
+explicitly rejected. A running Turn whose `Runtime.stop` response is lost is updated in the same
+fenced Session transaction to `dispatchStatus=unknown`, `dispatchLastResult=unknown`,
+`Turn.status=unknown`, `Turn.outcome=null`, `Turn.reason=stop_result_unknown`, while retaining the
+original `dispatchAttemptId`; no new attempt is created. Query first uses the same stop operation and
+attempt, and a bounded retry reuses that operation's provider idempotency identity. If still unknown
+at the deadline, operation and Turn remain unknown with query/manual nextAction, never cancelled or
+idle.
 
 ## AgentSession 来源
 
@@ -244,11 +443,15 @@ Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来�
 
 - `mo session view <session-id>` / `mo session transcript <session-id>` 都按稳定 Session ID
   读取，不再按来源分两套命令。
-- `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID。
+- `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID；`cancel` 另需
+  `--turn-id`、`--operation-id`、当前 revision/binding 和 bounded deadline。
 - `mo session list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，来源只是发现条件。
   `--agent` 会列出该 Agent 通过直接启动、Agent Connection 或其他受支持入口创建的会话。
-- `mo session cancel` 取消当前 queued 或 active AgentTurn。若它是 launch 的首个 Turn，AgentJob
-  以失败类别 `cancelled` 结束；后续 Turn 被取消不修改原 AgentJob。
+- `mo session cancel` 取消当前 queued 或 active AgentTurn，使用 canonical stop operation。
+  queued Turn 在 Session 事务内终结为 cancelled 并清除 durable dispatch retry；active Turn
+  先执行 fenced Runtime.stop。若它是 launch 的首个 Turn，AgentJob 以失败类别 `cancelled`
+  结束；后续 Turn 被取消不修改原 AgentJob。停止结果未知时保持 operation/Turn `unknown`
+  并提供 query/manual-check nextAction。
 
 ## 当前 Runtime Session 与缺失恢复
 
@@ -256,10 +459,43 @@ AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是
 当前物理会话。AgentSession 只保存当前关联，不建立物理 Session 历史。
 
 通常所有后续输入都复用当前 Runtime Session：task 变化、retry、模型变化、Compact、
-执行结束或 Runner 重启都不能替换它。只有三种情况建立新的物理 Session——用户
-Reset、执行后端明确确认原 Session 已不存在（自动恢复）、明确切换执行后端。替换
-不改变 AgentSession ID、来源、工作目录或已记录的会话内容；新 Session 从空上下文
-开始，会话中以「上下文已重置」标注，旧消息不重放。
+执行结束或 Runner 重启都不能替换它。新的物理 Session 只能来自用户 Reset、明确的
+执行后端切换，或以下受限的 confirmed-missing recovery：同一 Runner 的 probe 明确返回
+`definitely-missing`，且当前 generation `activity=idle`、没有 unknown Input/Turn/dispatch/
+runtime effect、Session `admission=ready`。此时 recovery 才能创建 candidate、通过完整
+expected-binding CAS 换绑，并用 CAS 返回的 post fence 完成 boundary/result 写入。
+
+disconnect、timeout、Runner restart、unavailable、权限错误、非 404 或其它无法证明 physical
+Session 不存在的结果只进入 `ObservationUnknown`，保留原 binding。即使 probe 明确 missing，
+只要当前 generation 为 `running`、`outcome_pending` 或 `unknown`，或旧 side effect 可能已发生，
+recovery 也只能 observation/query，进入 `RecoveryObservationOnly`，Session
+`admission=blocked`，保持 binding/Turn，并给出 `nextAction=query_runtime_or_force_reset`；
+不得自动换绑或 replay。只有 force-reset 的 collector、candidate、CAS、ContextBoundary
+按同一原子顺序完成后，新的 generation 才能 ready。
+
+任何 binding CAS 都执行唯一 `compareAndSwapBinding(preToken)`：preToken 必须匹配 expected
+binding、revision、owner/lease、operation 和 candidate；CAS 原子换绑并递增 revision/binding
+epoch，返回 `postFence/currentBinding=candidate`。后续 effect/result/complete 只能使用 post
+fence；旧 pre/post owner 都 fail closed。替换不改变 AgentSession ID、来源、工作目录或已记录
+的会话内容；新 Session 从空上下文开始，会话中以「上下文已重置」标注，旧消息不重放。
+
+Candidate identity is the complete pair `(operation.candidateKey, operation.candidateBinding)`;
+there is no separate adopted-candidate field on `BindingTuple`. The create result keeps the
+distinction between `response_lost` and generic `unknown`. On `response_lost`, the same fenced
+operation first calls `getByKey` with `candidateBinding=null`; only a second response loss or
+generic unknown persists `candidateState=unknown`, `candidateBinding=null`, `admission=blocked`,
+and `query_same_candidate_or_manual`. An explicit absent result leaves the same operation pending
+with `retry_same_force_reset_candidate`. A ready candidate must have the exact key, a complete
+binding matching target runner/runtime, and `bindingEpoch=expected+1`; only after that pair is
+persisted as `candidateState=created` and reloaded may CAS use it. A complete mismatched candidate
+goes to an independent cleanup fence without CAS with reason
+`force_reset_candidate_identity_mismatch`; an incomplete candidate remains unknown with
+`operator_reconcile_candidate`. Restart and duplicate requests use the same operation/key lookup
+and never create a second candidate, context, or CAS. Candidate cleanup carries the same pair in
+its operation read and uses an independent cleanup fence. Every attempt, phase, identity or
+`cleanup-pending` write increments revision and is reloaded before `getByKey` or `discardCandidate`;
+a changed current binding creates a new bounded cleanup fence, and an adopted/current candidate or
+an expired/stale cleanup fails closed without discard.
 
 复用不变量、自动恢复边界与并发规则见
 [Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
@@ -269,7 +505,8 @@ Reset、执行后端明确确认原 Session 已不存在（自动恢复）、明
 Workflow 来源和 Agent launch 来源的 AgentSession 使用同一组会话操作：
 
 - **Follow-up**：向当前会话追加用户输入；执行中加入当前执行，空闲时开始新的执行，
-  不创建 Mohist Agent 或 AgentJob。
+  不创建 Mohist Agent 或 AgentJob。执行中的 steer 会创建与 Input 同事务提交的 durable
+  steer operation/effect；OpenCode `promptAsync` 和 Pi `session.steer` 只是 adapter 通道。
 - **Compact**：要求当前执行后端压缩上下文，保持 AgentSession 和当前 Runtime Session。
 - **Reset**：在空闲时建立没有旧 Runtime 上下文的新物理 Session，保持 AgentSession
   身份和已有会话内容。
@@ -289,6 +526,15 @@ AgentJob。Web UI 和 CLI 已能创建、编辑、启动 Mohist Agent，并读�
 
 Runtime Session 缺失时的自动重建与重新绑定尚未完整落地；当前部分执行路径仍会失败并
 要求用户 Reset。对应实施 issue 待从本 spec 创建。
+
+### Implementation gap: caller key is required
+
+产品合同要求 follow-up 的 `requestId` 以及 Compact、Reset、recovery、handoff、rebind、stop
+和 force-reset 的 `operationId` 都由调用方提供；缺失或空 key 必须在受理前拒绝，Server 不
+生成用户不可见的替代 key。当前 routes/Grain 仍有缺失 caller key 时生成隐藏 key 的路径，
+这是后续实现工作，不是产品合同的例外，也不代表当前实现已完成。迁移边界是 Server
+canonical admission/operation 层：所有入口先传递 caller key，再由该层在写入任何 operation、
+Input、Turn 或外部 effect 前执行非空校验；在迁移完成前，这个实现 gap 必须保持可见。
 
 Max concurrent runs 尚未真正限制并发。
 
