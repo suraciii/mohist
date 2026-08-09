@@ -7,7 +7,7 @@ using System.Text.Json.Nodes;
 
 namespace Mohist.Cli;
 
-internal static class AgentCommands
+internal static partial class AgentCommands
 {
     internal static readonly ResourceDescriptor AgentDescriptor =
         ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentShow));
@@ -30,6 +30,7 @@ internal static class AgentCommands
         agent.Subcommands.Add(BuildSpawn(api));
         agent.Subcommands.Add(BuildJob(api));
         agent.Subcommands.Add(BuildInstall(api));
+        agent.Subcommands.Add(BuildSubscriptions(api));
         agent.Subcommands.Add(AgentModelCommands.Build(api));
 
         return agent;

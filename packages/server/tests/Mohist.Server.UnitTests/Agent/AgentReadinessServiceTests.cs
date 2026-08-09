@@ -18,6 +18,16 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void MissingAgentConfiguration_RequiresSetup()
+    {
+        var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null);
+
+        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
+        Assert.NotNull(result.Setup);
+    }
+
+    [Fact]
     public void SuccessfulExecution_IsReady_IndependentOfRuntimeAvailability()
     {
         var result = AgentReadinessService.Evaluate(
@@ -63,6 +73,47 @@ public sealed class AgentReadinessServiceTests
         Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
         Assert.Equal("execution-config-failure", Assert.Single(result.Gaps).Code);
         Assert.NotNull(result.Setup);
+    }
+
+    [Theory]
+    [InlineData("incompatible-runtime")]
+    [InlineData("runtime-invalid")]
+    public void DeterministicRuntimeConfigurationFailure_RequiresSetup(string category)
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(),
+            History(AgentJobStatus.Failed, category));
+
+        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Equal("execution-config-failure", Assert.Single(result.Gaps).Code);
+    }
+
+    [Theory]
+    [InlineData("runtime-unavailable")]
+    [InlineData("unavailable-runtime")]
+    [InlineData("runner-unavailable")]
+    public void RuntimeUnavailable_IsUnknownUntilRunnerCanBeObserved(string category)
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(),
+            History(AgentJobStatus.Failed, category));
+
+        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Empty(result.Gaps);
+        Assert.Null(result.Setup);
+    }
+
+    [Fact]
+    public void GenericInvalidInput_IsUnknownAndDoesNotBlockLaunch()
+    {
+        var result = AgentReadinessService.Evaluate(
+            Agent(),
+            History(AgentJobStatus.Failed, "invalid-input"));
+
+        Assert.Equal(AgentReadinessConclusions.Unknown, result.Conclusion);
+        Assert.Empty(result.Gaps);
+        Assert.Null(result.Setup);
+        Assert.True(AgentConnectionDispatchDecision.For(result.Conclusion).Accepted);
     }
 
     [Fact]

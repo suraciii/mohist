@@ -11,14 +11,25 @@ public sealed class AgentReadinessTests
     public void DerivesNeedsSetupWhenConfigurationIsMissing()
     {
         Assert.Equal(AgentReadinessKind.NeedsSetup, AgentReadinessDeriver.Derive(null));
-        Assert.Equal(AgentReadinessKind.NeedsSetup, Derive("{\"model\":\"gpt\"}"));
         Assert.Equal(AgentReadinessKind.NeedsSetup, Derive("{\"runtime\":\"opencode\"}"));
+    }
+
+    [Fact]
+    public void DerivesReadyWhenRuntimeIsOmittedBecauseOpenCodeIsCanonicalDefault()
+    {
+        Assert.Equal(AgentReadinessKind.Ready, Derive("{\"model\":\"gpt\"}"));
     }
 
     [Fact]
     public void DerivesReadyWhenModelAndRuntimeArePresent()
     {
         Assert.Equal(AgentReadinessKind.Ready, Derive("{\"model\":\"gpt\",\"runtime\":\"opencode\"}"));
+    }
+
+    [Fact]
+    public void DerivesNeedsSetupWhenRuntimeIsInvalid()
+    {
+        Assert.Equal(AgentReadinessKind.NeedsSetup, Derive("{\"model\":\"gpt\",\"runtime\":\"unsupported\"}"));
     }
 
     [Fact]

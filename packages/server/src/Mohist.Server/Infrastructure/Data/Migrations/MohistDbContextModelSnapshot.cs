@@ -187,6 +187,10 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("AgentId")
                         .IsRequired()
                         .HasMaxLength(256)
@@ -234,10 +238,16 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
 
                     b.HasIndex("ProjectId", "Name")
                         .IsUnique()
+                        .HasFilter("\"Status\" <> 'deleted'")
                         .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
 
                     b.HasIndex("ProjectId", "Position")
                         .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
+
+                    b.HasIndex("ProjectId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("\"IdempotencyKey\" IS NOT NULL")
+                        .HasDatabaseName("UX_RoutingRules_ProjectId_IdempotencyKey");
 
                     b.ToTable("RoutingRules", (string)null);
                 });

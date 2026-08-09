@@ -75,6 +75,23 @@ public sealed class AgentReadinessService : IScopedService
             gaps.Add(new("instructions-missing", "Instructions are missing.", "Add instructions in Agent settings."));
 
         var (model, variant) = AgentLauncher.ResolveModelAndVariant(agent.AgentConfig);
+        if (agent.AgentConfig is null
+            || agent.AgentConfig.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            gaps.Add(new(
+                "model-missing",
+                "A model is not configured.",
+                "Set a model in Agent settings."));
+            return gaps;
+        }
+        if (agent.AgentConfig.Value.ValueKind != JsonValueKind.Object)
+            return gaps;
+
+        if (string.IsNullOrWhiteSpace(model))
+            gaps.Add(new(
+                "model-missing",
+                "A model is not configured.",
+                "Set a model in Agent settings."));
         if (agent.AgentConfig is { ValueKind: JsonValueKind.Object } rawConfig
             && rawConfig.TryGetProperty("variant", out var rawVariant)
             && rawVariant.ValueKind == JsonValueKind.String)
@@ -101,11 +118,17 @@ public sealed class AgentReadinessService : IScopedService
     private static bool IsConfigurationFailure(string? category)
     {
         if (string.IsNullOrWhiteSpace(category)) return false;
-        var value = category.ToLowerInvariant();
-        return value.Contains("api_key") || value.Contains("credential") || value.Contains("unauthorized")
-            || value.Contains("model not found") || value.Contains("model-not-found") || value.Contains("model_rejected")
-            || value.Contains("model-rejected") || value.Contains("preflight-rejected") || value.Contains("runtime")
-            || value.Contains("invalid-input");
+        var value = category.Trim().ToLowerInvariant().Replace('_', '-');
+        if (value.Contains("runtime-unavailable")
+            || value.Contains("unavailable-runtime")
+            || value.Contains("runner-unavailable"))
+            return false;
+
+        return value.Contains("api-key") || value.Contains("credential") || value.Contains("unauthorized")
+            || value.Contains("model not found") || value.Contains("model-not-found")
+            || value.Contains("model-rejected") || value.Contains("preflight-rejected")
+            || value.Contains("runtime-invalid") || value.Contains("invalid-runtime")
+            || value.Contains("incompatible-runtime") || value.Contains("runtime-rejected");
     }
 
     private static string DescribeConfigurationFailure(string? category) =>

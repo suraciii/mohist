@@ -118,6 +118,8 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.WorkflowProfile => ["issueNumber", "projectId", "sourceTemplateId", "hasCustomTemplate", "yaml", "workflowRunId", "profileId", "updateMode", "variables", "updatedAt", "templateSource"],
             MohistCliApi.TableShape.WorkflowProfileList => ["projectId", "profileId", "name", "description", "sourceProvenance", "isBuiltIn", "definitionSource"],
             MohistCliApi.TableShape.RoutingRule or MohistCliApi.TableShape.RoutingRuleList => ["id", "projectId", "name", "position", "match", "agentId", "responsePrompt", "continue", "status", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentSubscription => ["id", "projectId", "agentId", "name", "match", "responsePrompt", "continue", "position", "status", "createdAt", "updatedAt"],
+            MohistCliApi.TableShape.AgentSubscriptionList => ["subscriptions", "state", "agentStatus", "readiness", "connection"],
             MohistCliApi.TableShape.WebhookSubscription or MohistCliApi.TableShape.WebhookSubscriptionList =>
                 ["id", "projectId", "name", "match", "targetUrl", "status", "eventSelectionMode", "eventTypes", "authType", "hasSecret", "createdAt", "updatedAt"],
             MohistCliApi.TableShape.WebhookDeliveryFailureList =>
