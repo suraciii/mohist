@@ -45,6 +45,8 @@ If you are new to Mohist, read the [repository README](../README.md) first.
   fallback operations and visualization plane
 - [CLI Reference](cli-reference.md): The `mo` command language, command map, and
   interaction contract shared by External Agents and people
+- [Observability](observability.md): Detect runtime anomalies safely and retain
+  enough information for diagnosis
 
 ## Part 5: Execution Backends and Extensions
 
@@ -87,16 +89,20 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Mobile PWA and Push](mobile-pwa.md): A deferred proposal for viewing progress
   and receiving notifications on a phone
-- [Observability](observability.md): Detect runtime anomalies safely and retain
-  enough information for diagnosis
 
 ## Writing Contract
 
 - **Agent-facing writing rules**: Read and follow
   [_agents.md](_agents.md) before you edit `docs/`.
 - **One purpose per section**: A heading states the question that its section
-  answers. Remove motivational lectures, introductory padding, and common
+  answers. Start a concept with the user problem and the reason for the chosen
+  product behavior. Keep only rationale that explains a constraint or
+  trade-off; remove generic motivation, introductory padding, and common
   knowledge. Prefer a list to a paragraph and a table to a list.
+- **Explain the product, not the code**: Describe the user's mental model,
+  ownership boundary, and visible behavior. Do not narrate classes, methods,
+  handlers, storage steps, or source control flow. Put exact commands and
+  fields in task guides and reference sections only when readers must use them.
 - **One authority for each rule**: Define a rule in one document. Other
   documents must link to it and must not copy it.
 - **Spec before implementation**: Product documents define the target product.

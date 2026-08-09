@@ -6,11 +6,20 @@ satisfy. Write for users and Agents who do not read the source code.
 ## Rules
 
 - Write the spec before implementing.
+- Lead with the user problem and why the product behavior exists. Explain the
+  constraint or trade-off that makes the rule necessary before listing the
+  rule itself.
 - Use only product and domain language. Do not use APIs, fields, components, or
   source paths in the body.
+- Describe the product model and user-visible contract, not the code that
+  happens to implement it. Do not turn classes, methods, handlers, or storage
+  steps into prose.
 - One section, one purpose. Lists over paragraphs, tables over lists.
 - Define a rule once; other docs link it, never copy it.
 - Commands and examples must be runnable as written.
+- Keep exact commands and field-by-field details in task guides and reference
+  sections. Concept sections explain the larger workflow, ownership boundary,
+  and reason for the design.
 - The body is the spec. Put divergence in an Implementation Gaps section, never
   in a status list.
 - Keep terms consistent with [`CONTEXT.md`](../CONTEXT.md).

@@ -45,6 +45,12 @@ style rule.
 5. Use `Approval`, `approval point`, and `approve` / `reject`. An Agent is a
    proxy that can occupy a workflow role that a person can also occupy. Do not
    introduce an Agent-only decision channel.
+6. Lead conceptual sections with the problem, constraint, or trade-off that
+   explains why the behavior or boundary exists. Describe the macro product or
+   system model before exact mechanics.
+7. Do not rewrite classes, methods, call chains, storage operations, or source
+   layout as prose. Keep exact commands, fields, and algorithms only in task,
+   reference, or contract sections where the detail resolves real ambiguity.
 
 ## Diagram Contract
 
@@ -83,7 +89,10 @@ push, or create PRs; the integration owner reviews and commits complete slices.
 4. Convert PlantUML and Unicode line-art diagrams to fenced ASCII text.
 5. Enable the documentation gate only after the corpus satisfies it. Do not
    hide remaining non-English prose behind a permanent allowlist.
-6. Run focused documentation checks, then the complete local gate on the final
+6. Review the migrated corpus for design intent. Remove code narration and
+   ensure high-level documents explain their problem, constraints, boundaries,
+   and material trade-offs.
+7. Run focused documentation checks, then the complete local gate on the final
    commit.
 
 ## Acceptance
@@ -99,6 +108,8 @@ push, or create PRs; the integration owner reviews and commits complete slices.
 - `design/domain-analysis.md` includes a high-level context relationship map.
 - Existing workflow, concept, session-tree, and architecture diagrams retain
   their meaning after conversion.
+- Concept and design documents explain why their major boundaries exist and do
+  not narrate implementation code step by step.
 - Every relative Markdown link resolves, and every local heading fragment
   resolves after English heading migration.
 - The getting-started path installs or invokes `mo` before its first use.
