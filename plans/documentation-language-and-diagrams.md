@@ -16,6 +16,28 @@ notices, and existing implementation plans are outside this migration. They
 remain historical records and must not be rewritten to satisfy a current-doc
 style rule.
 
+## Buzz Reference Review
+
+Buzz is a useful reference for reader order, not a template for Mohist's
+architecture. Its entry documentation first shows what people and Agents can
+accomplish, then explains why one identity and event model matters, and keeps
+working capabilities separate from work in progress. Its protocol documents
+usually establish motivation and non-goals before exact wire rules.
+
+Mohist adopts those patterns where they fit:
+
+- start product entry points with the user's task and the reason the product
+  boundary exists;
+- make current capability, active gap, and future opinion visibly distinct;
+- put motivation, authority, and non-goals before exact protocol mechanics;
+- treat Agent access policy, identity, and durable state as explicit product
+  boundaries rather than adapter details.
+
+Mohist does not copy Buzz's repository structure, event architecture, product
+terminology, or Unicode diagrams. The existing `docs/` product-spec and
+`design/` developer-spec split remains authoritative, and diagrams follow the
+portable ASCII contract below.
+
 ## Authorities
 
 - `CONTEXT.md` is the only glossary for cross-context product terms. It defines
