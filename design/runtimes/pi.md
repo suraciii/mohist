@@ -73,8 +73,11 @@ Pi-specific setting and is never an effort alias or part of the model ID.
 values, and an invalid effort reject with `invalid_execution_configuration`
 before Session or provider work. A well-formed selection absent from the accepted
 static catalog rejects with `unsupported_execution_configuration`. `options` does
-not carry `runtime`; the Workflow path selects its backend through `uses`. No
-input is silently ignored, deferred to Pi, or guessed from provider credentials.
+not carry `runtime`; the Workflow path selects its backend through `uses`. A
+catalog model with an invalid effort/Variant combination rejects with
+`incompatible_execution_configuration`; an unavailable catalog rejects with
+`execution_catalog_unavailable`. No input is silently ignored, deferred to Pi,
+or guessed from provider credentials or a current Session.
 
 ## Capability Boundary
 
@@ -344,12 +347,14 @@ never becomes Action output.
 
 ## Versioned Capability Catalog and Integration Boundary
 
-The Pi integration owns a static catalog published with the Runtime release. Each
-entry names `catalogVersion`, Model, supported and default ReasoningEffort values,
-supported Variant values, and the complete non-secret native mapping for Pi. Server
-accepts the catalog as configuration metadata and validates Agent create/edit,
-readiness, and launch resolution against it. Provider credentials and live
-availability do not alter catalog support.
+The Pi integration owns static catalog content and mapping format published with
+the Runtime release. Server owns registry acceptance and the versioned entry
+used to validate Agent create/edit, readiness, and launch resolution. Each
+accepted entry names `catalogVersion`, Model, supported and default
+ReasoningEffort values, supported Variant values, and the complete non-secret
+native mapping for Pi. Runner only declares which accepted versions and mapping
+formats its adapter can apply. Provider credentials and live availability do not
+alter catalog support.
 
 Runtime selection is frozen into the Agent execution snapshot and current Session
 binding. Server routes launch and Session commands by that value; Runner dispatches

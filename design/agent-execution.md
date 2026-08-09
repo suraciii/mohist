@@ -117,16 +117,41 @@ stored as the Agent default. An edit without an effort retains the stored value;
 clearing effort selects and stores the current catalog default. There is no
 legacy path that treats Variant as effort.
 
-Validation has three stable outcomes before dispatch:
+The absent, clear, and default rules are fixed at the boundary that receives the
+request:
+
+| Boundary | Omitted reasoning effort | Explicit clear | Other rule |
+|---|---|---|---|
+| Agent create | Resolve the selected catalog entry's default and persist it. | Illegal. | Runtime and Model must be present together for a complete definition. |
+| Agent edit | Retain the stored value. | `--clear-reasoning-effort` resolves the current catalog default and persists it. | A set value and clear flag are mutually exclusive. |
+| CLI new AgentJob | Use the saved Agent default. | Illegal. | `--model` and `--reasoning-effort` are the only explicit per-launch overrides. |
+| Workflow Agent-definition execution | Use the saved Agent default. | Illegal. | The `mohist/agent` definition reference does not obtain an implicit Runtime or Session default. |
+| Existing AgentSession Follow-up | Keep the immutable Job/Session snapshot. | Illegal. | A later Agent edit or catalog change never silently re-resolves the Session. |
+
+An empty string, `null`, an unknown property, or a value outside the closed
+ReasoningEffort vocabulary is illegal wherever the field is accepted. The only
+clear operation is the dedicated Agent-edit clear flag. A Runtime or Model edit
+revalidates the saved Reasoning effort and Variant against the selected static
+catalog. It fails rather than probing or falling back. Variant remains a
+separate runtime-specific field in every row.
+
+A Workflow Agent-definition execution is a TaskRun attempt rather than an
+AgentJob, but it follows the same saved-default rule. Inline Runtime Actions are
+separate contracts; they do not silently turn a current physical Session into an
+Agent default.
+
+Validation has five stable outcomes before dispatch:
 
 | Condition | Result | Action |
 |---|---|---|
 | An option is unknown, empty, not a string, or has an effort outside the closed vocabulary | `invalid_execution_configuration` | `correct_execution_configuration` |
-| A well-formed Runtime/Model/Effort/Variant combination is absent from the accepted catalog | `unsupported_execution_configuration` | `select_supported_execution_configuration` |
+| A well-formed Runtime or Model is absent from the accepted catalog | `unsupported_execution_configuration` | `select_supported_execution_configuration` |
+| A catalog Runtime/Model cannot use the selected ReasoningEffort or Variant combination | `incompatible_execution_configuration` | `select_compatible_execution_configuration` |
+| The required static catalog cannot be read | `execution_catalog_unavailable` | `wait_for_catalog` |
 | A valid configuration cannot be executed by an available adapter for its persisted catalog version and native mapping | Job remains waiting with `exact_execution_unavailable` | `wait_for_exact_execution` |
 
-The first two outcomes reject before a Workspace, attachment, dispatch, or
-provider side effect. The third retries the same immutable configuration when
+The first four outcomes reject before a Workspace, attachment, dispatch, or
+provider side effect. The fifth retries the same immutable configuration when
 that exact adapter becomes available. It never changes Runtime, Model,
 ReasoningEffort, Variant, catalog version, or native mapping as a fallback.
 
@@ -140,6 +165,37 @@ recompute it. Runner dispatch applies that saved mapping rather than resolving a
 new one. Trusted Job launch responses and Job views return the snapshot; the
 #387 direct API retains its smaller public projection. Session shows only a
 read-only association summary.
+
+The canonical read shapes, gap messages/actions, nullability, and catalog
+ownership are in [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
+
+### Resolve and commit boundary
+
+`ResolveAgentLaunch` is a pure resolve-and-validate phase. It reads the Agent,
+the accepted static catalog, existing Workspace and attachment references, and
+the caller's local attachment metadata. It normalizes valid caller intent,
+chooses the saved defaults and allowed overrides, selects one catalog entry, and
+returns `ResolvedExecutionRead` plus `LaunchMaterializationPlanRead`. It may
+derive a missing Project Workspace name or identify a local attachment that
+would upload, but it does not allocate an ID or write any resource.
+
+`CommitAgentLaunch` runs only after a successful resolve for a new real launch.
+It materializes every `wouldCreate` Workspace and `wouldUpload` attachment,
+persists the caller-intent idempotency record and immutable Job execution
+snapshot, creates the Job/Session/Input/Turn, and requests dispatch. The real
+launch path shares exactly the same resolve phase as dry-run; commit is the
+only phase allowed to cause those effects.
+
+Dry-run accepts only the parse, authorization, caller-intent validation, and
+pure resolve phase. It returns `AgentLaunchPreviewRead`; it creates no
+Workspace, attachment, idempotency record, Job, Session, Input, Turn, reserved
+identity, dispatch, Runner work directory, or provider effect. Existing
+references are read-only resolved. A missing-but-derivable Workspace or local
+attachment is returned only as `wouldCreate` or `wouldUpload`; a missing,
+unreadable, ambiguous, or invalid input rejects with the structured
+`LaunchResolutionProblemRead` or execution error. `--dry-run` and an
+idempotency key are mutually exclusive, because preview does not create or read
+an idempotency record.
 
 ### Launch convergence
 

@@ -49,9 +49,10 @@ to either backend Action. For `mohist/pi`, the valid keys are `model`,
 begins; they are not ignored or recorded as a successful diagnostic.
 
 When `${{ vars.agent }}` occupies the entire `options` value, its expansion is
-still an object. Without an explicit `options` binding, the Action uses the
-current Pi Session's model selection, or the Pi default for the first
-execution.
+still an object. An omitted `options` does not take a model or reasoning effort
+from an existing Pi Session. A Profile that needs a specific setting binds it
+explicitly. The saved-Agent default rule belongs to the separate `mohist/agent`
+Action, not to an Inline Action.
 
 ## Action Inputs
 
@@ -139,10 +140,16 @@ has no Pi-specific business error codes.
 Both Workflow and AgentJob paths are implemented. A Workflow can use
 `mohist/pi`, and a Mohist Agent configured for Pi can execute input. Both reuse
 AgentSession and show transcripts, tools, state, compaction, model, usage, and
-cost on the existing Session page. Execution-backend selection for Agent and
-Issue, Runtime-specific model catalogs, and Web model selectors are also
-implemented. Pi Compact and Reset are available through the shared Session
-operations.
+cost on the existing Session page. Pi Compact and Reset are available through
+the shared Session operations.
+
+The closed option grammar, static execution configuration checks, and separate
+Reasoning effort are target behavior until saved Agent execution configuration
+is delivered.[^433] One-job CLI override, preview, and immutable readback then
+build on that saved-default contract.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
 
 Before a new Workflow input is submitted, Mohist automatically creates empty Pi
 context and replaces a binding that the owning Runner confirms is missing while

@@ -87,27 +87,35 @@ This page lists every file changed by one Issue and includes a diff view.
 
 ## Agents
 
-The Agent list discovers and manages Mohist Agents in the Project. Before the
-user opens a Session, it shows avatar, name, description, active or archived
-state, Ready, Needs setup, or Unknown Readiness, Runtime and model, active and
-queued work counts, and external Connection health. Runner availability and
-capacity are shown separately and cannot appear as Needs setup.
+The Agent list discovers and manages Mohist Agents in the Project. The saved
+execution configuration below is target behavior until #433 is delivered.[^433]
+Readback then follows in #434.[^434] Before the user opens a Session, the
+target list shows avatar, name, description, active or archived state, Ready,
+Needs setup, or Unknown Readiness, Runtime, model, Reasoning effort, Variant,
+active and queued work counts, and external Connection health. Runner
+availability and capacity are shown separately and cannot appear as Needs
+setup.
 
 Agent details contain four continuous areas:
 
 1. **Definition:** Avatar, name, description, Instructions, Runtime, Model,
-   Variant, Skills, concurrency limit, and active or archived state. Mohist
-   Runtime capabilities and Readiness drive the controls. A gap links directly
-   to the corresponding field or credential setting. Needs setup disables
-   launch. Unknown still accepts work and reports "Waiting for Runner
+   Reasoning effort, Variant, Skills, concurrency limit, and active or archived
+   state. Supported choices and Readiness drive the controls. A gap identifies
+   the setting to repair and its next action. Needs setup disables launch.
+   Unknown also blocks a new launch and reports "Waiting for configuration
    validation." Ready without Runner capacity queues work instead of showing a
-   configuration error.
+   configuration error. Creating without Reasoning effort saves the supported
+   default; editing without it retains the saved value; its explicit clear
+   control saves the current supported default.
 2. **Start session:** Submit a real task and optional Issue, Epic, or Repository
    context. This creates AgentJob, AgentSession, the first SessionInput, and the
-   first AgentTurn. It is the normative test entry point before a Slack
-   Connection is added.
+   first AgentTurn. The Web page uses the saved Agent configuration and does not
+   add a second one-job override control. It is the normative test entry point
+   before a Slack Connection is added.
 3. **Work and conversations:** Show AgentJob result separately from AgentSession
-   Activity. Do not present a failed Job as a failed Session.
+   Activity. A Job shows the configuration used for that work and whether it
+   came from the Agent default or its launch. A Session shows only the linked
+   configuration summary. Do not present a failed Job as a failed Session.
 4. **Slack:** Show Agent Readiness, Slack installation progress, Connection
    health, and identity synchronization separately. Add Slack is an
    interruptible step flow with one emphasized next step. The allowlist searches
@@ -123,15 +131,19 @@ page states this timing before save.
 
 ### Implementation Gaps
 
-The Agent list and detail pages show Readiness, Availability, active and queued
-work, configuration, direct launch, and Session history. Slack Connections have
-guided setup, diagnostics, access policy management, identity facts, and
-uncertain-delivery recovery.
+The existing Agent list and detail pages do not yet expose the saved Reasoning
+effort default, supported-choice readiness gaps, or immutable launch
+configuration readback described above. They remain #433/#434 target work.
+Existing Slack Connections have guided setup, diagnostics, access policy
+management, identity facts, and uncertain-delivery recovery.
 
 Agent definitions still have no avatar setting or avatar display. AgentJob has
 no result view separate from its continuing AgentSession. The Web UI does not
 yet expose Slack Connection owner transfer, credential rotation or revalidation,
 Enable, Disable, or Delete.
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
 
 ## AgentSession
 

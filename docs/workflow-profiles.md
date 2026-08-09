@@ -128,6 +128,14 @@ Workflow-wide Variables for the current Run so that later Tasks can use them.
 A Variable affects execution only when the Profile binds it to Action Input,
 `expect`, a Check, or another field that supports expressions.
 
+For an OpenCode or Pi Action, the `agent` value used as `options` can contain
+only `model`, `reasoningEffort`, and the Runtime-specific `variant`.
+Reasoning effort is one of `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+or `max`; Variant is not another way to choose effort. Mohist rejects an
+unknown, empty, or invalid option before work starts. A configuration that is
+well-formed but unavailable is also rejected with the next action to select a
+supported configuration. The target behavior is described in the Action pages.
+
 ### Prompt References
 
 A Profile references a Project Prompt by key, such as
@@ -201,7 +209,7 @@ A fixed value used by only one Task can be written directly in its Action Input:
     prompt: ${{ prompts.proposal }}
     options:
       model: anthropic/claude-sonnet-4
-      variant: high
+      reasoningEffort: high
 ```
 
 When the Project or Issue must control the value, use
@@ -249,3 +257,10 @@ their purpose and remains stable.
   [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
+- Closed Runtime Action options and static Reasoning effort validation are
+  target behavior until saved Agent execution configuration is delivered.[^433]
+  One-job launch overrides and recorded execution readback then build on that
+  saved default.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.

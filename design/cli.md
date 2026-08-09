@@ -320,8 +320,89 @@ Project resolution order and interaction. Implementation adds only three constra
 `mo agent launch --dry-run` is the one execution preview. It calls the same
 Server `ResolveAgentLaunch` path as a real launch to validate and resolve the
 saved defaults plus any `--model` and `--reasoning-effort` override. Dry-run
-persists nothing and has no dispatch, Workspace materialization, attachment, or
-provider side effect. There is no separate `mo agent resolve` command.
+stops before `CommitAgentLaunch`: it persists nothing and has no Workspace
+materialization, attachment upload, idempotency record, Job, Session, Input,
+Turn, dispatch, Runner work-directory, or provider side effect. There is no
+separate `mo agent resolve` command. `--dry-run` and `--idempotency-key` are
+mutually exclusive.
+
+For dry-run, `--json execution` selects the complete execution preview rather
+than a partial Job field. On success it renders exactly an
+`AgentLaunchPreviewRead` object in this shape; all identity keys are present and
+`null`, rather than omitted or replaced with provisional IDs:
+
+```json
+{
+  "execution": {
+    "catalogVersion": "2026-08-09",
+    "runtime": "opencode",
+    "model": "openai/gpt-5.6",
+    "reasoningEffort": "max",
+    "variant": null,
+    "nativeMapping": {
+      "format": "opencode-v1",
+      "values": {
+        "model": "openai/gpt-5.6",
+        "reasoningEffort": "max",
+        "variant": null
+      }
+    },
+    "source": {
+      "runtime": "agent-default",
+      "model": "launch-override",
+      "reasoningEffort": "launch-override",
+      "variant": "agent-default"
+    }
+  },
+  "materializationPlan": {
+    "workspace": {
+      "disposition": "wouldCreate",
+      "workspace": null,
+      "derivedName": "cli-current"
+    },
+    "attachments": [
+      {
+        "disposition": "wouldUpload",
+        "attachmentId": null,
+        "name": "brief.md"
+      }
+    ]
+  },
+  "launchOperationId": null,
+  "jobId": null,
+  "sessionId": null,
+  "inputId": null,
+  "turnId": null
+}
+```
+
+With an existing Workspace, `materializationPlan.workspace.workspace` is the
+read-only resolved `LaunchWorkspaceRead` and `derivedName` is `null`; with an
+existing attachment its `attachmentId` is non-null. An empty attachment input
+renders `attachments: []`. A missing, unreadable, ambiguous, or invalid input
+returns the structured resolution error and no preview object. The preview
+shape is owned by
+[`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections),
+not by a CLI-only DTO.
+
+This saved-default and preview design is target-only until #433 delivers the
+static saved configuration contract.[^433] #434 then delivers the CLI override,
+dry-run, and immutable readback on that base.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
+
+### Execution read mapping
+
+The CLI projects canonical execution reads without deriving a second view:
+
+| Command result | Canonical field | CLI rule |
+|---|---|---|
+| `mo agent list` and `mo agent view` | `AgentExecutionConfigurationRead` as `execution` | Show saved Runtime, Model, ReasoningEffort, Variant, and readiness gaps. Preserve nulls; do not replace them with a Runtime default. |
+| `mo agent model list --runtime <runtime>` | `RuntimeCapabilityCatalogEntryRead` | Return catalog version, model, supported/default reasoning efforts, and supported Variants from Server metadata only. |
+| Real `mo agent launch` response and `mo agent job view` | `AgentJobLaunchRead.execution` | Return the immutable `ResolvedExecutionRead`, including source, catalogVersion, and nativeMapping. Same-key replay returns this stored object. |
+| `mo session view` and Session list detail | `AgentSessionRead.execution` | Return `SessionExecutionSummaryRead` when associated with an AgentJob; otherwise return explicit `null`. Never render Job-only source, catalogVersion, or nativeMapping here. |
+| `mo agent launch --dry-run --json execution` | `AgentLaunchPreviewRead` | Return the complete preview object defined above, including `materializationPlan` and explicit-null identity fields. |
 
 ## Output Contract
 

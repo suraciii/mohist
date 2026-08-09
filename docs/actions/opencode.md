@@ -53,9 +53,11 @@ does not store their values.
 select an OpenCode agent.
 
 The expanded Action Input is the only configuration fact for this execution.
-`mohist/opencode` does not read `vars.agent` implicitly. Without an explicit
-`options` binding, it uses the selection from the current OpenCode Session, or
-the OpenCode default for the first execution.
+`mohist/opencode` does not read `vars.agent` implicitly. An omitted `options`
+does not take a model or reasoning effort from an existing OpenCode Session. A
+Profile that needs a specific setting binds it explicitly. The saved-Agent
+default rule belongs to the separate `mohist/agent` Action, not to an Inline
+Action.
 
 ## Action Inputs
 
@@ -137,8 +139,12 @@ for shared business error codes and platform errors.
 
 `mohist/opencode` is implemented for both Workflow and AgentJob origins.
 OpenCode drives execution directly, and the built-in Profiles use this Action.
-Configuration, Session, command results, and diagnostics for Workflow and Agent
-origins no longer contain historical ACP identity fields.
+Current Session, command result, and diagnostic behavior remains available.
+
+The closed option grammar, static execution configuration checks, and separate
+Reasoning effort are target behavior until saved Agent execution configuration
+is delivered.[^433] One-job CLI override, preview, and immutable readback then
+build on that saved-default contract.[^434]
 
 Stable Session identity, origin resolution, Follow-up, Cancel, and Reset are
 implemented. Reset creates empty OpenCode context and replaces the binding while
@@ -150,3 +156,6 @@ is safely idle. AgentJob launch and idle Follow-up do not yet use that recovery
 boundary. Ambiguous or unsafe absence still blocks instead of replaying input.
 The remaining cross-boundary recovery limits are defined in [Agents and
 AgentSessions](../agent-sessions.md#implementation-gaps).
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.

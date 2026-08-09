@@ -77,6 +77,26 @@ authenticated actor and source metadata. Agent fields are edited before launch.
 The composer accepts only Prompt, context references, and attachments. Runtime,
 Model, and Skills overrides do not belong in the composer.
 
+### Execution configuration projection
+
+Web reads one canonical Server projection per ownership boundary; it does not
+reconstruct configuration from Session events, Runner state, or a current
+catalog lookup:
+
+| Web surface | Canonical projection | Presentation rule |
+|---|---|---|
+| Agent list and definition editor | `AgentExecutionConfigurationRead` | Render the saved Runtime, Model, ReasoningEffort, Variant, and `readiness`; preserve explicit nulls for an incomplete configuration or inapplicable Variant. |
+| Model and effort chooser | `RuntimeCapabilityCatalogEntryRead` | Offer only `supportedReasoningEfforts`, mark `defaultReasoningEffort`, and keep Runtime-specific Variant choices separate. The Web client never probes a provider. |
+| Readiness callout | `ExecutionReadinessRead.gaps` | Render the Server's stable `code`, `message`, and `action`; do not invent a local readiness classification. `execution_catalog_unavailable` blocks a new launch. |
+| AgentJob launch response and Job detail | `AgentJobLaunchRead.execution` | Render the immutable `ResolvedExecutionRead`, including per-field `source`, `catalogVersion`, and `nativeMapping`; do not re-resolve it after an Agent or catalog change. |
+| AgentSession header | `AgentSessionRead.execution` | Render only `SessionExecutionSummaryRead`; it has no `source`, `catalogVersion`, or `nativeMapping`, and must not become a second Job configuration view. |
+
+Web has no second launch-override or resolve command surface. It submits the
+saved Agent default through the same launch intent as other trusted adapters.
+CLI alone owns the #434 one-job Model/ReasoningEffort override and dry-run
+preview. A Web launcher may not create a speculative Workspace, attachment, or
+launch identity merely to render its form.
+
 AgentSession renders two modes from the same Session model:
 
 - A Workflow origin emphasizes task ownership, evidence, and recovery.
@@ -94,6 +114,16 @@ The Connection panel shows resumable setup, next action, access policy, identity
 alignment, and health. Allowlist editing uses member names and avatars for the
 human control. Display name is never authorization identity, and Web never
 reads Slack tokens.
+
+### Delivery gap
+
+The saved Agent configuration and canonical read projections above are target
+design pending #433.[^433] #434 then adds the CLI-only override and dry-run plus
+immutable Job readback on that saved-default base; Web consumes the readback but
+does not add a competing launch input.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
 
 ## Frontend Module Boundary
 

@@ -93,9 +93,12 @@ backend-specific setting, never another name for reasoning effort.
 
 Every supplied value is checked against Mohist's versioned runtime catalog before
 work begins. Unknown or malformed options return
-`invalid_execution_configuration`; a well-formed but unsupported combination
-returns `unsupported_execution_configuration`. Mohist does not ignore a setting,
-query a provider, or substitute a different model, effort, or variant.
+`invalid_execution_configuration`; a Runtime or model outside that catalog
+returns `unsupported_execution_configuration`; and an effort or Variant that
+cannot be used with the selected model returns
+`incompatible_execution_configuration`. If Mohist cannot read the required
+catalog, it returns `execution_catalog_unavailable`. Mohist does not ignore a
+setting, query a provider, or substitute a different model, effort, or Variant.
 
 ### Workflow Session
 
@@ -191,7 +194,9 @@ list only additional codes.
 | Error code | Meaning |
 |---|---|
 | `invalid_execution_configuration` | An execution option is unknown, malformed, empty, or uses an invalid reasoning effort |
-| `unsupported_execution_configuration` | A well-formed model, reasoning effort, or variant combination is not in the Runtime catalog |
+| `unsupported_execution_configuration` | A well-formed Runtime or model is not in the Runtime catalog |
+| `incompatible_execution_configuration` | The selected model cannot use the requested reasoning effort or Variant |
+| `execution_catalog_unavailable` | Mohist cannot read the static configuration catalog needed to validate this Action |
 | `runtime-unavailable` | Backend execution capability is not ready or available |
 | `session-workspace-mismatch` | The working directory does not match the Session binding |
 | `session-binding-failed` | Logical Session binding resolution or persistence failed |
@@ -201,8 +206,11 @@ list only additional codes.
 
 ## Implementation Status
 
-- `mohist/opencode`, `mohist/pi`, and `mohist/agent` are implemented. Their own
-  pages describe remaining capability gaps.
-- Runner dispatch validates unknown fields, required fields, and types against
-  the manifest. A custom Profile must bind every required Variable explicitly
-  in `with`.
+The three Actions and their existing Session behavior are implemented. The
+closed execution-option grammar, static catalog checks, and distinct Reasoning
+effort semantics above are target behavior until saved Agent execution
+configuration is delivered.[^433] One-job CLI override, preview, and immutable
+readback build on that saved-default contract.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.

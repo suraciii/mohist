@@ -139,7 +139,8 @@ Concept ownership and origin rules are defined in
 ### Canonical AgentSession, launch, and Turn result projections
 
 `AgentSessionRead` is the only Session admission projection. The durable Session row uses the same
-fields; callers use `admission=ready|blocked` and do not invent another safety field.
+fields except the read-only `execution` association summary; callers use
+`admission=ready|blocked` and do not invent another safety field.
 
 ```text literal
 AgentSessionRead {
@@ -153,26 +154,74 @@ AgentSessionRead {
   currentBinding: BindingTuple | null
   unresolvedPrevious = [UnresolvedTargetRead]
   unresolvedPreviousCount
+  execution: SessionExecutionSummaryRead | null
   revision
   observedAt
+}
+
+ReasoningEffort = none | minimal | low | medium | high | xhigh | max
+
+AgentExecutionConfigurationRead {
+  runtime: string | null
+  model: string | null
+  reasoningEffort: ReasoningEffort | null
+  variant: string | null
+  readiness: ExecutionReadinessRead
+}
+
+RuntimeCapabilityCatalogEntryRead {
+  catalogVersion
+  runtime
+  model
+  supportedReasoningEfforts: [ReasoningEffort]
+  defaultReasoningEffort: ReasoningEffort
+  supportedVariants: [string]
+  nativeMapping: NativeExecutionMappingRead
+}
+
+NativeExecutionMappingRead {
+  format                         # runtime-owned mapping format from catalogVersion
+  values                         # complete non-secret native model/effort/variant mapping
+}
+
+ExecutionReadinessRead {
+  state = ready | needs-setup | unknown
+  gaps: [ExecutionReadinessGapRead]
+}
+
+ExecutionReadinessGapRead {
+  code = missing_execution_configuration
+       | unsupported_execution_configuration
+       | incompatible_execution_configuration
+       | execution_catalog_unavailable
+  message
+  action = configure_execution
+         | select_supported_execution
+         | select_compatible_execution
+         | wait_for_catalog
 }
 
 ResolvedExecutionRead {
   catalogVersion
   runtime
   model
-  reasoningEffort = none | minimal | low | medium | high | xhigh | max
+  reasoningEffort: ReasoningEffort
   variant                         # explicit null when no runtime-specific variant applies
-  nativeMapping {
-    format                         # runtime-owned mapping format from catalogVersion
-    values                         # complete non-secret native model/effort/variant mapping
-  }
+  nativeMapping: NativeExecutionMappingRead
   source {
     runtime = agent-default
     model = agent-default | launch-override
     reasoningEffort = agent-default | launch-override
     variant = agent-default
   }
+}
+
+SessionExecutionSummaryRead {
+  jobId
+  runtime
+  model
+  reasoningEffort: ReasoningEffort
+  variant                         # explicit null when no runtime-specific variant applies
 }
 
 AgentJobLaunchRead {
@@ -202,16 +251,91 @@ LaunchWorkspaceRead {
   path
 }
 
+WorkspaceMaterializationPlanRead {
+  disposition = existing | wouldCreate
+  workspace: LaunchWorkspaceRead | null
+  derivedName: string | null
+}
+
+AttachmentMaterializationPlanRead {
+  disposition = existing | wouldUpload
+  attachmentId: string | null
+  name
+}
+
+LaunchMaterializationPlanRead {
+  workspace: WorkspaceMaterializationPlanRead
+  attachments: [AttachmentMaterializationPlanRead]
+}
+
+AgentLaunchPreviewRead {
+  execution: ResolvedExecutionRead
+  materializationPlan: LaunchMaterializationPlanRead
+  launchOperationId: null
+  jobId: null
+  sessionId: null
+  inputId: null
+  turnId: null
+}
+
+LaunchResolutionProblemRead {
+  code = workspace_not_resolvable
+       | attachment_not_found
+       | attachment_not_readable
+       | attachment_ambiguous
+       | invalid_launch_input
+  message
+  action = correct_workspace | correct_attachment | correct_launch_input
+}
+```
+
+`AgentExecutionConfigurationRead` is the `execution` member of every Agent
+read and list item. Its values are saved Agent defaults, not a pending launch or
+a Runtime Session selection. `runtime`, `model`, and `reasoningEffort` are null
+only while the Agent definition is incomplete; `variant=null` also means that
+the selected Runtime has no applicable Variant. A ready configuration has no
+gaps. `needs-setup` has one or more of the first three gap codes below;
+`unknown` has exactly `execution_catalog_unavailable`.
+
+| Gap code | Stable message | Stable action |
+|---|---|---|
+| `missing_execution_configuration` | `Choose a Runtime and Model before starting this Agent.` | `configure_execution` |
+| `unsupported_execution_configuration` | `The selected execution configuration is not supported.` | `select_supported_execution` |
+| `incompatible_execution_configuration` | `The selected Model, Reasoning effort, and Variant cannot be used together.` | `select_compatible_execution` |
+| `execution_catalog_unavailable` | `Mohist cannot load the required execution catalog.` | `wait_for_catalog` |
+
+`RuntimeCapabilityCatalogEntryRead` is the only versioned capability metadata
+shape. Its two reasoning-effort fields are non-empty, and
+`defaultReasoningEffort` is one of `supportedReasoningEfforts`. Server owns the
+accepted static catalog registry and its versioning. The catalog contains no
+provider credentials, health observation, or live model probe result.
+
 `ResolvedExecutionRead` is the immutable execution snapshot resolved before the
 Job's first durable write. It is present for every `AgentJobLaunchRead`.
 `catalogVersion` and `nativeMapping` are copied from one accepted static catalog
-entry at that write. `nativeMapping.format` identifies the Runtime-owned shape;
-`values` is the complete JSON-safe mapping the adapter must apply. Neither is
-recomputed from a later catalog, and neither contains provider credentials or
-availability observations. `source` is per field, never inferred from
-nullability, and only uses `agent-default` or `launch-override`. A Session view
-may show a read-only association summary derived from it, but `AgentSessionRead`
-does not own, duplicate, or update it.
+entry at that write. Neither is recomputed from a later catalog, and neither
+contains provider credentials or availability observations. `source` is per
+field, never inferred from nullability, and only uses `agent-default` or
+`launch-override`. A `SessionExecutionSummaryRead` is a read-only association
+for an Agent-launched Session: all configuration fields are non-null except an
+inapplicable Variant, and `jobId` is non-null. It deliberately omits source,
+catalog version, and native mapping; it never owns, duplicates, or updates the
+Job snapshot. `AgentSessionRead.execution=null` for a Session without an
+associated AgentJob; clients must not synthesize a summary from current Agent,
+catalog, or Runtime state.
+
+`AgentLaunchPreviewRead` is a successful dry-run result. It has no durable or
+reserved identity: all five identity fields are present and `null`. An existing
+Workspace or attachment is read-only resolved and carries its real identity. A
+derivable missing Workspace has `disposition=wouldCreate`, `workspace=null`,
+and a non-empty `derivedName`; an existing Workspace has a non-null `workspace`
+and `derivedName=null`. A local attachment that would be uploaded has
+`disposition=wouldUpload` and `attachmentId=null`; an existing attachment has a
+non-null `attachmentId`. The plan does not mint placeholder IDs. Missing,
+unreadable, ambiguous, or otherwise invalid Workspace or attachment input fails
+with `LaunchResolutionProblemRead`, rather than returning a partial plan.
+
+```text literal
 
 TurnResultRead {
   sessionId
