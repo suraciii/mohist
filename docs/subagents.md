@@ -1,206 +1,275 @@
-# Subagent 与会话树
+# Subagents and Session Trees
 
-Mohist Agent 可以在自己的会话里把任务分解出去：用另一个 Agent 开一段新的会话来
-做。分解可以层层继续，形成一棵**会话树**——父会话派活，子会话干活，结果回流
-给父。
+A Mohist Agent can decompose a task from its own session by starting a new
+session for another Agent. Decomposition can continue through multiple levels
+to form a **session tree**. A parent session delegates work, a child session
+performs it, and the result returns to the parent.
 
-Agent 资源永远平铺、没有层级：**Subagent 是会话上下文里的角色，不是 Agent 的属性**。
-同一个 Agent 被用户直接启动时是顶层 Agent，被另一个会话 spawn 时是 Subagent。
-父子关系长在 AgentSession 上——就像进程树：程序之间没有父子，进程之间才有。
+Agent resources are always flat and have no hierarchy: **Subagent is a role in
+session context, not an Agent property**. The same Agent is a top-level Agent
+when a user starts it directly and a Subagent when another session spawns it.
+The parent-child relationship belongs to AgentSessions. This is like a process
+tree: programs have no parent-child relation, but processes do.
 
 ```text
-── 管理面 · Agent 资源（平铺，没有父子）───────────────────────
+Control plane: flat Agent resources, with no parent-child relation
 
-  ┌──────┐   ┌───────┐   ┌──────┐   ┌─────┐   ┌──────────┐
-  │ lead │   │ terra │   │ luna │   │ e2e │   │ reviewer │
-  └──┬───┘   └───────┘   └──────┘   └─────┘   └──────────┘
-     │
-     │ mo agent launch（用户启动，成为树根）
-     ▼
-── 运行面 · 会话树（边做边长，记录在案）────────────────────────
+  [lead]   [terra]   [luna]   [e2e]   [reviewer]
+     |
+     | mo agent launch (the user starts the tree root)
+     v
+Execution plane: a recorded session tree that grows during work
 
-  S1 · lead ──┬── spawn ──▶ S2 · terra
-              ├── spawn ──▶ S3 · luna ── spawn ──▶ S5 · e2e
-              └── spawn ──▶ S4 · reviewer
+  S1: lead
+     +-- spawn --> S2: terra
+     +-- spawn --> S3: luna
+     |                 +-- spawn --> S5: e2e
+     +-- spawn --> S4: reviewer
 
-  子会话默认与父共享工作目录；要隔离，绑定另一个 workspace，或在共享目录内自助 git 操作
+  Child sessions share the parent working directory by default.
+  For isolation, bind another Workspace or use git in the shared directory.
 ```
 
-## 和 Workflow 的分工
+## Division of Work with a Workflow
 
-- Workflow 编排**形状已知**的工作：阶段、任务、检查、审批门预先写在 definition 里。
-- 会话树编排**形状在运行时才知道**的工作：lead Agent 读到任务后自己决定拆成几路、
-  给谁、什么时候收。
+- A Workflow orchestrates work with a **known shape**. Its Definition specifies
+  stages, tasks, checks, and approval points in advance.
+- A session tree orchestrates work whose **shape becomes known only at runtime**.
+  After reading a task, the lead Agent decides how many parts to create, who
+  receives each part, and when to collect the results.
 
-能被预先定义的流程归 Workflow；分解依赖运行时发现的信息、需要 Agent 临场判断的归
-会话树。会话树不经过 Workflow，也不替代它。
+A process that can be defined in advance belongs in a Workflow. Decomposition
+that depends on information found at runtime and requires Agent judgment belongs
+in a session tree. A session tree neither passes through nor replaces a
+Workflow.
 
-## 心智模型
+## Mental Model
 
-- **Mohist 提供能力，Agent 规划工作流**。Mohist 给的是 CLI、Skills 和消息；巡逻、
-  等待、验收、纠偏都由 Agent 用这些能力自己组合。Mohist 不内置「fork-join」、
-  「自动重启」这类现成流程，也不自动巡逻——到点唤醒（定时输入）由 Agent 显式安排。
-- **纪律归 Agent**。分单不重叠、交付必回报、结果要复验、git 是最终仲裁——这些是
-  lead Agent 的工作纪律，由 Skill 和 Instructions 承载，不是产品机制。
+- **Mohist provides capabilities; the Agent plans the work**. Mohist provides
+  the CLI, Skills, and messages. An Agent combines them to inspect, wait,
+  accept, and correct work. Mohist does not include built-in fork-join,
+  automatic restart, or automatic inspection processes. An Agent explicitly
+  schedules a timed input when it needs to wake at a specific time.
+- **The Agent owns work discipline**. Nonoverlapping assignments, required
+  delivery reports, result verification, and git as the final arbiter are lead
+  Agent disciplines carried by Skills and Instructions, not product mechanisms.
 
-## 能力声明
+## Capability Declaration
 
-一个 Agent 默认不能使用任何 Subagent。管理 Agent 时用**可用 Agent 列表**声明
-它能 spawn 哪些已定义的 Mohist Agent。
+By default, an Agent cannot use any Subagent. When managing an Agent, use its
+**available Agent list** to declare which defined Mohist Agents it can spawn.
 
-声明是执行定义的一部分：随 AgentJob 启动时固定，编辑只影响之后启动的工作。
-清单中的 Agent 改名不会改变这份许可；被归档的 Agent 不再接受新的委托。越权的
-spawn 会被拒绝，并回告该 Agent 的声明范围。
+The declaration is part of the execution definition. It is fixed when the
+AgentJob starts, and edits affect only work started later. Renaming an Agent in
+the list does not change permission. An archived Agent no longer accepts new
+delegations. An unauthorized spawn is rejected and reports the declaring
+Agent's permitted scope.
 
-打造一个有分解能力的 lead Agent 是管理面的三件事，都在现有 Agent 配置内：
+Creating a lead Agent that can decompose work requires three control-plane
+settings, all in the existing Agent configuration:
 
-1. **Skills** 挂上 subagent 协作纪律；
-2. **声明**可用 Subagent；
-3. **Instructions** 写清分工策略——什么任务给谁、什么时候收手。
+1. Add the Subagent collaboration discipline through **Skills**.
+2. **Declare** the available Subagents.
+3. Define the division-of-work policy in **Instructions**, including which work
+   goes to which Agent and when to stop.
 
-## 启动即知
+## Known at Startup
 
-可用 Subagent 清单随 AgentJob 启动加载进会话，与 Skill 同一机制：Agent 从第一轮
-对话就知道自己的会话身份、能分解任务、能调用谁、怎么调用。清单每个条目是名称加
-描述——描述回答「什么时候应该选它」。
+The available Subagent list loads into the session with the AgentJob through the
+same mechanism as a Skill. From its first Turn, the Agent knows its session
+identity, whether it can decompose work, which Agents it can invoke, and how to
+invoke them. Each list entry contains a name and description. The description
+answers when that Agent should be selected.
 
-Mohist 不做自动推荐、不做自动路由：选谁是 lead 的判断。需要更细的信息时，Agent
-可以用 `mo agent list`、`mo agent view` 按需查询。
+Mohist does not recommend or route automatically. Agent selection is the lead
+Agent's judgment. When it needs more information, the Agent can query
+`mo agent list` and `mo agent view`.
 
-## spawn 与上下文
+## Spawn and Context
 
-`mo agent spawn` 开一段子会话：
+`mo agent spawn` starts a child session:
 
 ```bash
-mo agent spawn reviewer --project <project-id> --parent-session <session-id> --prompt "审查当前工作目录里的改动，重点是 token 存储路径" --idempotency-key <key>
+mo agent spawn reviewer --project <project-id> --parent-session <session-id> --prompt "Review changes in the current working directory, focusing on the token storage path" --idempotency-key <key>
 ```
 
-子会话默认继承父会话的工作目录（与父同一 workspace）。需要让子会话独立干活时，
-先 `mo workspace create` 建立另一个 workspace，spawn 时用 `--workspace <name>` 绑定它；
-或在共享目录内自行建 git worktree——git worktree 是 git 范畴的工具，是否使用由 Agent
-决定，平台不提供“隔离工作空间”原语。
+A child session inherits the parent session's working directory by default and
+uses the same Workspace. For independent work, first use `mo workspace create`
+to create another Workspace and bind it during spawn with
+`--workspace <name>`. An Agent can instead create a git worktree in the shared
+directory. A git worktree is a git tool whose use the Agent decides; the
+platform has no "isolated workspace" primitive.
 
-spawn 照常创建子会话的 AgentJob、AgentSession、首条输入与首个 Turn——和一次
-launch 相同，只是多一条父子关系。`--parent-session` 明确指出是谁在委托，不能从
-工作目录猜测；网络中断后用同一个 `--idempotency-key` 重试，不会多开子会话。
+Spawn creates the child AgentJob, AgentSession, first Input, and first Turn as
+usual. It is the same as a launch with an additional parent-child relation.
+`--parent-session` explicitly identifies the delegating session and cannot be
+inferred from the working directory. After a network interruption, retry with
+the same `--idempotency-key` to avoid starting another child session.
 
-一次 spawn 的 caller 与 `--idempotency-key` 一起表达稳定的委托身份。父子关系尚未建立前，
-检查不通过不会留下子会话。父的执行环境暂时不可用，或父树正在停止时，保留同一个 key
-等待或重试；系统会重新确认条件，并在条件恢复时接纳同一份委托，不会多开子会话。父没有
-可继承的工作目录、目标不在父的已声明范围内、目标需要配置，或目标已 archive 时，才是
-明确的接纳前拒绝；同一个 key 重试仍得到这个结果，新的 key 才表达一次新的委托。
+The caller and `--idempotency-key` together form the stable delegation identity
+for one spawn. A failed check leaves no child session before the parent-child
+relation is established. If the parent's execution environment is temporarily
+unavailable or its tree is stopping, retain the same key while waiting or
+retrying. The system rechecks conditions and accepts the same delegation after
+recovery without opening another child session. A definitive pre-acceptance
+rejection occurs only when the parent has no inheritable working directory, the
+target is outside the parent's declared scope, the target Needs setup, or the
+target is archived. Retrying with the same key returns the same result; only a
+new key represents a new delegation.
 
-一旦系统已经建立这次委托的执行计划，建立过程中的条件变化会让它明确拒绝，子会话不会
-开始执行；同一个 key 重试始终得到该固定结果。关系一旦建立，子会话就是普通的工作，
-之后的停止或取消按其正常生命周期处理，不会因为父会话后来变化而改写成拒绝。
+After the system establishes the execution plan for a delegation, a condition
+change during establishment causes a definitive rejection, and the child
+session does not execute. Retrying with the same key always returns that fixed
+result. After the relation is established, the child session is ordinary work.
+Later stop or cancel operations follow its normal lifecycle; a later parent
+change does not rewrite it as rejected.
 
-上下文规则：
+Context rules:
 
-- **干净上下文 + 显式简报**：子会话从空上下文开始，唯一的输入是 spawn 的 prompt
-  与上下文引用。父想让子知道什么，必须写进简报；子看不到父的对话历史。
-- **工作目录：默认继承父会话**：子会话随父会话当前可用的工作目录开始（与父同一
-  workspace）。调用方不能指定路径：工作目录必须是父会话当前可用的工作目录。父会话没有
-  这种工作目录或可用执行环境时，spawn 会明确拒绝，不会悄悄换地方执行。需要隔离时，绑定
-  另一个 workspace（`mo workspace create` + `--workspace <name>`），或由子会话在共享目录内
-  自助 git worktree——文件冲突仍由父的分单纪律避免，git 是最终仲裁。当前通过 Agent 接入启动
-  的会话没有可供子会话延续的工作目录和执行环境，因此不能作为父会话 spawn；以后由它自己的
-  会话具备这些条件后才会开放。
+- **Clean context and explicit brief**: A child session starts with empty
+  context. Its only input is the spawn prompt and context references. The parent
+  must put all necessary information in the brief; the child cannot read the
+  parent's conversation history.
+- **Working directory inherited from the parent by default**: The child session
+  starts with the parent's currently available working directory and uses the
+  same Workspace. The caller cannot specify a path; the working directory must
+  be the one currently available to the parent. If the parent has no such
+  directory or usable execution environment, spawn is explicitly rejected and
+  does not silently run elsewhere. For isolation, bind another Workspace with
+  `mo workspace create` and `--workspace <name>`, or let the child create a git
+  worktree in the shared directory. The parent's assignment discipline must
+  still prevent file conflicts, and git is the final arbiter. A session started
+  through an Agent Connection currently has no working directory and execution
+  environment that a child can continue, so it cannot spawn as a parent. This
+  will become available only after its own session has those conditions.
 
-## 父子之间的消息
+## Messages Between Parent and Child
 
 ```text
-      终态回报（自动，内容只是指针）
-  子 ──────────────────────────▶ 父
+                 terminal report (automatic pointer)
+  [Child] ----------------------------------------------> [Parent]
 
-  父 ─────── steer ──────────▶ 子     ┐
-  父 ◀────── 求助 ──────────── 子     ┘ 都走 mo session followup
+  [Parent] -- steer ------------------------------------> [Child]
+  [Parent] <-- request help ----------------------------- [Child]
+                    Both use mo session followup.
 
-  mo session stop S1    ⇒  当前子树工作一起停
-  mo session detach S3  ⇒  S3 从树上摘下，豁免级联
+  mo session stop S1    -> stop active work in the current subtree
+  mo session detach S3  -> detach S3 and exempt it from the cascade
 ```
 
-| 消息 | 方向 | 方式 |
+| Message | Direction | Method |
 |---|---|---|
-| 终态回报 | 子 → 父（自动） | 子的首次委托结束时父收到一条输入：哪个子会话、什么结果、结果去哪看 |
-| Steer | 父 → 子（主动） | `mo session followup` |
-| 求助 | 子 → 父（主动） | `mo session followup`；spawn 时子会话会知道自己的父会话是谁 |
+| Terminal report | Child -> Parent, automatic | When the child's first delegation ends, the parent receives an Input that identifies the child session, result, and result location |
+| Steer | Parent -> Child, active | `mo session followup` |
+| Request help | Child -> Parent, active | `mo session followup`; the child learns its parent session during spawn |
 
-终态回报只是指针：细节由父自己拉取——transcript、工作目录、git 状态。空闲的父
-被这条输入唤醒，开始新的一轮处理；忙碌时按序等待。只回报终态，不打扰进度。
+A terminal report is only a pointer. The parent retrieves details from the
+transcript, working directory, and git state. The Input wakes an idle parent and
+starts a new Turn; it waits in order while the parent is busy. Only terminal
+state is reported, so progress does not interrupt the parent.
 
-巡逻与等待是父的事：什么时候主动查、什么时候等回报、要不要复验，由父 Agent 自己
-规划。`mo session tree` 展示整棵会话树和每个节点的状态，是父的巡逻入口：
+Inspection and waiting are parent responsibilities. The parent Agent decides
+when to query, when to wait for reports, and whether to verify results.
+`mo session tree` shows the complete session tree and each node's state and is
+the parent's inspection entry point:
 
 ```bash
 mo session tree <session-id>
 ```
 
-树很大时，查看结果按页返回。一次连续翻页固定观察第一次查看时的树形：不会重复或漏掉
-节点；期间新增、摘下的会话只会在下一次重新查看时出现。
+For a large tree, results are paginated. Continuous pagination fixes the tree
+shape observed by the first request and neither duplicates nor omits nodes.
+Sessions added or detached during pagination appear only in a new read.
 
-## 生命周期
+## Lifecycle
 
-- **级联停止**：停止一段会话时，停止当时仍挂在它下面的整棵子树正在进行的工作。
-  会话本身仍保留，可以之后明确继续；无法确认的停止结果会如实显示并可重试。
+- **Cascade stop**: Stopping a session stops active work throughout the subtree
+  still attached below it at that time. The sessions remain and can be
+  continued explicitly later. An unconfirmed stop result is shown accurately
+  and can be retried.
 
-  停止、挂接新子会话和 detach 同时发生时，以实际先完成的操作确定范围：先摘下的子树
-  不在这次停止内；先被停止范围记录的子树即使随后 detach，也仍在这次停止内；已挂接的
-  子会话被纳入；尚未挂接的委托和停止期间的新委托会明确拒绝，不会在停止之后悄悄开始。
-  停止结束后，父可用新的请求重新委托；它不属于旧的停止范围。重试始终沿用同一范围。
+  When stop, attachment of a new child, and detach occur concurrently, the
+  operation that actually completes first determines scope. A subtree detached
+  first is outside the stop. A subtree recorded in stop scope first remains in
+  that stop even if it detaches later. An attached child is included. A
+  delegation not yet attached, and a new delegation during stop, is explicitly
+  rejected and does not start silently after stop. After stop finishes, the
+  parent can delegate again with a new request outside the old stop scope. A
+  retry always reuses the same scope.
 
 ```bash
 mo session stop <session-id> --idempotency-key <key>
 ```
 
-- **detach 是逃生口**：子会话产出了独立价值、需要留下来时，先把它从树上摘下，
-  之后停止父不再影响它——例如把一段探索会话上交给用户。
+- **Detach is the escape hatch**: When a child session produces independent
+  value and must remain, detach it from the tree first. A later parent stop no
+  longer affects it. For example, detach an exploration session to hand it to
+  the user.
 
 ```bash
 mo session detach <session-id>
 ```
 
-- **没有自动重启**：子失败不会自动重试；父收到失败回报后自己决定重来、换人、
-  或升级给用户。
-- **没有深度、广度上限**：Mohist 不按一棵树有多少层或多少会话来拒绝分解。Agent 自身的
-  并发和队列仍有正常资源边界，树很大时用分页查看；怎么拆分和等待仍是父 Agent 的责任。
+- **No automatic restart**: A child failure does not retry automatically. After
+  a failure report, the parent decides whether to retry, select another Agent,
+  or escalate to the user.
+- **No depth or breadth limit**: Mohist does not reject decomposition based on
+  the number of levels or sessions in a tree. Normal Agent concurrency and
+  queue resource boundaries still apply, and large trees use pagination. The
+  parent Agent remains responsible for decomposition and waiting.
 
-## 定时输入
+## Scheduled Input
 
-调用方可以为一段会话安排一条**到点才投递的输入**：现在写下文本和到期时间，
-Mohist 到点时把它作为一条普通输入追加给该会话——和 follow-up 走同一条接受与
-执行路径。安排者可以是用户，也可以是 Agent 自己：父会话给子会话安排到点询问，
-Agent 给自己安排「到点还没等到就检查一次」。它不是自动巡逻：Mohist 不替任何人
-判断「该提醒了」，只有明确创建的调度才会触发。
+A caller can schedule an **input delivered only at a specified time**. It records
+the text and due time now. At that time, Mohist appends it to the session as an
+ordinary Input through the same acceptance and execution path as a follow-up.
+The scheduler can be a user or the Agent itself. A parent can schedule a later
+question for a child, and an Agent can schedule a check if it is still waiting.
+This is not automatic inspection. Mohist does not decide when to remind anyone;
+only an explicitly created schedule triggers.
 
 ```bash
-mo session schedule create <session-id> --at 2026-08-06T14:00:00+08:00 --text "汇报当前进度" --idempotency-key <key>
+mo session schedule create <session-id> --at 2026-08-06T14:00:00+08:00 --text "Report current progress" --idempotency-key <key>
 mo session schedule list <session-id>
 mo session schedule cancel <session-id> <schedule-id>
 ```
 
-- **时间是一次性绝对时间**：`--at` 只接受带时区偏移的 RFC 3339 写法
-  （`2026-08-06T14:00:00+08:00` 或 `...Z`）；不带偏移或已经过去的时间被拒绝。
-  没有重复调度；需要再次唤醒就再安排一次。
-- **到点时**：会话空闲，醒来开始一轮新的处理；会话忙碌，输入按普通顺序加入；
-  Mohist 无法确认会话状态时，输入保持待投递，恢复确认后继续投递——绝不假装
-  已投递，也不静默丢弃。
-- **取消**：尚未投递的调度可以取消，取消后不再投递；已经投递的调度取消无效，
-  已投递的输入不受影响。调度不会自动过期，取消是唯一的退出方式。
-- **与生命周期互不影响**：停止、级联停止、detach、reset、compact 都不删除调度。
-  投递撞上正在进行的停止时，等停止结束再投递；被 detach 的会话，它的调度照常
-  到点投递。
+- **One-time absolute time**: `--at` accepts only RFC 3339 with a time-zone
+  offset, such as `2026-08-06T14:00:00+08:00` or `...Z`. A time without an
+  offset or in the past is rejected. There is no repeated schedule; create
+  another schedule to wake again.
+- **At the due time**: An idle session wakes and starts a new Turn. A busy
+  session receives the Input in ordinary order. When Mohist cannot confirm
+  session state, the Input remains pending delivery and delivery continues
+  after confirmation recovers. Mohist never pretends that it delivered the
+  Input or silently discards it.
+- **Cancel**: A schedule not yet delivered can be cancelled and will not
+  deliver. Cancelling an already delivered schedule has no effect on its Input.
+  A schedule does not expire automatically; cancellation is its only exit.
+- **Independent from lifecycle**: Stop, cascade stop, detach, Reset, and Compact
+  do not delete schedules. Delivery that meets a stop in progress waits until
+  stop finishes. A detached session still receives its scheduled Input at the
+  due time.
 
-第一版不做：重复/周期调度（cron）、相对时间（「30 分钟后」）、附件、到点自动
-启动新会话、在 `mo session view` / `mo session tree` 里展示调度。
+The first version does not include repeated or periodic scheduling such as
+cron, relative times such as "in 30 minutes," attachments, automatic launch of
+a new session at the due time, or schedule display in `mo session view` or
+`mo session tree`.
 
-## 实装差距
+## Implementation Gaps
 
-能力声明、启动即知、`mo agent spawn`、终态回报、`mo session tree`、级联停止、
-detach 与定时输入已按本篇落地（交付增量 1–3 与 5）。增量 4（受管隔离工作空间）曾落地，
-但已决定**退役**：git worktree 是 git 范畴的工具，不是平台概念；子会话的目录来源只有
-“继承父会话的 workspace”与“绑定另一个 workspace”两种，隔离由 Agent 用 git 自助解决。
-实装移除见 milestone「Workspace 持久执行环境」。
+Capability declaration, startup awareness, `mo agent spawn`, terminal reports,
+`mo session tree`, cascade stop, detach, and scheduled input are implemented as
+specified here in delivery increments 1-3 and 5. Increment 4, managed isolated
+workspaces, was implemented and then intentionally **retired**. A git worktree
+is a git tool, not a platform concept. A child session can get its directory
+only by inheriting the parent Workspace or binding another Workspace. The Agent
+uses git itself for isolation. See the "Persistent Workspace Execution
+Environment" milestone for implementation removal.
 
-**临时（无身份）子会话**有意不做：子会话的身份必须来自已定义的 Agent——配置只有
-一份、管理面可见、可调可复用；动态性由 spawn 时的任务简报承载，不需要临时角色。
-未来确有运行时定制角色的需要时可作为增量能力加入，不影响本篇模型。
+**Temporary anonymous child sessions** are intentionally excluded. A child
+session identity must come from a defined Agent so that configuration has one
+owner and remains visible, adjustable, and reusable in the control plane. The
+spawn task brief provides runtime flexibility without a temporary role. A
+future incremental capability can add runtime-customized roles if a concrete
+need appears without changing this model.

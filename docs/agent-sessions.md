@@ -1,389 +1,609 @@
-# Agent 与 AgentSession
+# Agents and AgentSessions
 
-Mohist Agent 是 Project 内可独立配置和使用的 Agent。用户可以在 Web UI 或 CLI 中直接
-启动它，也可以把同一个 Agent 接入 Slack，或让它响应事件与评论提及。入口可以变化，
-Agent 的身份、Instructions、执行配置、Skills、AgentJob 和 AgentSession 不变。
+A Mohist Agent is independently configurable and usable within a Project. A
+user can start it directly in the Web UI or CLI, connect the same Agent to
+Slack, or let it respond to events and comment mentions. Entry points can
+change, but the Agent identity, Instructions, execution configuration, Skills,
+AgentJobs, and AgentSessions do not.
 
-第三方的外部 Agent 是另一条路径：它通过 Mohist Skill 和 `mo` 查询、委托或操作执行层，
-不是 Mohist 资源。只有当它显式启动一个 Mohist Agent 时，才会产生该 Mohist Agent 的
-AgentJob 与 AgentSession。完整产品边界见[核心概念](concepts.md)。
+A third-party External Agent is a separate path. It uses the Mohist Skill and
+`mo` to query, delegate to, or operate the execution layer and is not a Mohist
+resource. It creates a Mohist Agent's AgentJob and AgentSession only when it
+explicitly starts that Mohist Agent. See [Core Concepts](concepts.md) for the
+complete product boundary.
 
-## 产品承诺
+## Product Commitments
 
-- **Agent 先独立可用**：没有 Slack 等外部接入时，用户也能完整配置、启动、继续对话、
-  读取结果和处理异常。
-- **配置只有一份**：Instructions、执行后端、模型、Variant、Skills 和并发限制由 Mohist
-  Agent 拥有；名称、头像和描述也构成同一个 Agent 身份。Web、CLI 和 Agent 接入不能
-  保存或覆盖另一份定义。
-- **入口不改变语义**：一次新的委托创建 AgentJob、AgentSession、首条 SessionInput 和首个
-  AgentTurn；对已有会话继续输入会创建新的 SessionInput，但不创建第二个 AgentJob。
-- **执行状态可追溯**：AgentJob 回答首次 launch 是否成功，AgentSession 回答发生了什么、
-  每次后续输入的结果以及当前能否继续。Slack 消息或 Web 页面都不是状态裁判。
+- **An Agent works independently first**: Users can fully configure and start
+  an Agent, continue its conversation, read results, and handle exceptions
+  without Slack or another external connection.
+- **Configuration has one owner**: The Mohist Agent owns its Instructions,
+  execution backend, Model, Variant, Skills, and concurrency limit. Its name,
+  avatar, and description form the same Agent identity. The Web UI, CLI, and
+  Agent Connections cannot store or override another definition.
+- **An entry point does not change semantics**: A new delegation creates an
+  AgentJob, AgentSession, first SessionInput, and first AgentTurn. Continuing an
+  existing session creates a new SessionInput but not a second AgentJob.
+- **Execution state is traceable**: An AgentJob answers whether the first launch
+  succeeded. An AgentSession records what happened, the result of each later
+  input, and whether it can currently continue. A Slack message or Web page is
+  not the state arbiter.
 
-## 概念层次
+## Concept Layers
 
-| 概念 | 是什么 | 身份和生命周期 |
+| Concept | Definition | Identity and lifecycle |
 |---|---|---|
-| Inline Agent | Workflow 直接配置并调用 Agent 能力的用法 | 不是资源，没有 Agent ID；配置随 task 输入存在 |
-| Agent 定义引用 | Workflow task 用 `uses: mohist/agent` 引用 Mohist Agent 定义的用法 | 不是资源，没有 Agent ID；定义在 task 开始执行时固定 |
-| Mohist Agent | Project 内预先定义、按名称复用的 Agent 资源 | 有稳定 Agent ID、名称、指令、配置、Skills 和状态 |
-| Agent 接入 | 把一个 Mohist Agent 暴露到 Slack 等外部交互场所 | 有独立连接生命周期；只引用 Agent，不拥有或复制 Agent 配置 |
-| AgentJob | Mohist Agent 的一次 launch 执行 | 独立记录等待、执行、完成或失败，以及首次执行结果 |
-| SessionInput | AgentSession 接受的一条输入 | 有稳定 Input ID；记录内容、附件、来源、顺序和投递状态，一个 Turn 可以处理多条 Input |
-| AgentTurn | Runtime 连续处理一组有序 SessionInput 的过程 | 有稳定 Turn ID 和状态；由 AgentSession 拥有，不是新的顶层工作 |
-| AgentSession | Mohist 记录的一段持续会话 | 有稳定 Session ID；按顺序拥有 Input 与 Turn，并保存上下文、用量、活动状态和当前 Runtime Session |
-| Runtime Session | OpenCode、Pi 等执行后端实际维护的物理会话 | 由执行后端标识；必要时可以被 AgentSession 替换 |
+| Inline Agent | A use of Agent capability configured and invoked directly by a Workflow | Not a resource and has no Agent ID; its configuration exists in task input |
+| Agent Definition Reference | A use in which a Workflow task references a Mohist Agent definition with `uses: mohist/agent` | Not a resource and has no Agent ID; its definition is fixed when task execution starts |
+| Mohist Agent | A predefined Agent resource reused by name within a Project | Has a stable Agent ID, name, Instructions, configuration, Skills, and state |
+| Agent Connection | Exposes one Mohist Agent in an external interaction location such as Slack | Has an independent connection lifecycle; references the Agent but neither owns nor copies its configuration |
+| AgentJob | One launch execution of a Mohist Agent | Independently records waiting, execution, completion or failure, and the first execution result |
+| SessionInput | One input accepted by an AgentSession | Has a stable Input ID; records content, attachments, source, order, and delivery state; one Turn can process multiple Inputs |
+| AgentTurn | Continuous Runtime processing of an ordered set of SessionInputs | Has a stable Turn ID and state; is owned by an AgentSession and is not new top-level work |
+| AgentSession | A continuing session recorded by Mohist | Has a stable Session ID; owns Inputs and Turns in order and retains context, usage, Activity, and the current Runtime Session |
+| Runtime Session | The physical session maintained by an execution backend such as OpenCode or Pi | Identified by the execution backend; can be replaced by the AgentSession when necessary |
 
-Action 不在 Agent 资源层：`mohist/opencode` 描述一次工作如何交给 OpenCode，
-不代表一个有身份的 Agent。
+An Action is not in the Agent resource layer. `mohist/opencode` describes how
+one unit of work is delegated to OpenCode. It does not represent an Agent with
+an identity.
 
-## 两条调用路径
+## Two Invocation Paths
 
-| 使用路径 | 是否有 Agent 身份 | 谁负责本次工作 | 如何执行 | AgentSession 来源 |
+| Path | Agent identity | Work owner | Execution | AgentSession Origin |
 |---|---|---|---|---|
-| Workflow 直接调用 | 否（Inline Agent 或 Agent 定义引用） | TaskRun | 执行后端 Action（`mohist/opencode`、`mohist/pi`）或 `mohist/agent` | Workflow |
-| 启动 Mohist Agent | 是；使用已保存的 Mohist Agent | AgentJob | Mohist Agent 的内部执行入口 | Agent launch |
+| Direct Workflow invocation | No; uses an Inline Agent or Agent Definition Reference | TaskRun | An execution-backend Action (`mohist/opencode`, `mohist/pi`) or `mohist/agent` | Workflow |
+| Mohist Agent launch | Yes; uses a stored Mohist Agent | AgentJob | The Mohist Agent's internal execution entry point | Agent launch |
 
-两条路径可以使用同一种执行后端能力和同一种 AgentSession 模型，但不会共享 Agent
-身份或工作生命周期。Workflow 通过执行后端 Action 调用 OpenCode 或 Pi；Mohist Agent
-由 AgentJob 执行，只在底层复用执行后端能力，并不反过来调用 Workflow Action。
+The paths can use the same execution-backend capability and AgentSession model,
+but they do not share Agent identity or work lifecycle. A Workflow invokes
+OpenCode or Pi through an execution-backend Action. An AgentJob executes a
+Mohist Agent, reusing only the underlying execution-backend capability; it does
+not invoke a Workflow Action in reverse.
 
 ## Inline Agent
 
-Inline Agent 是一种使用方式，不是持久化实体。Workflow task 直接声明：
+An Inline Agent is a use mode, not a persistent entity. A Workflow task directly
+declares:
 
-- 用哪个执行后端 Action，例如 `mohist/opencode`；
-- 这次执行的 prompt；
-- 可选的 Session 名称和模型选项。
+- The execution-backend Action, such as `mohist/opencode`
+- The prompt for this execution
+- An optional Session name and model options
 
-它适合 Workflow 中的规划、实现、审查和修复。它没有名称、Instructions、Skills
-或 Agent ID，不能被事件路由规则引用，也不能被 `mo agent` 命令查找。
+Use an Inline Agent for planning, implementation, review, and repair in a
+Workflow. It has no name, Instructions, Skills, or Agent ID. An event-routing
+rule cannot reference it, and a `mo agent` command cannot find it.
 
-Workflow TaskRun 拥有这次 task 的成功、失败和输出。Action 是执行接口，AgentSession
-只保存会话内容和执行事实。
+The Workflow TaskRun owns task success, failure, and output. The Action is the
+execution interface. The AgentSession stores only session content and execution
+facts.
 
-## Agent 定义引用
+## Agent Definition Reference
 
-task 也可以改用 `uses: mohist/agent` 并给出 `name`，引用一个预定义 Mohist Agent
-的指令与执行配置来完成本次执行。这不是 Inline Agent（指令与配置不随 task 输入
-存在，来自 Agent 资源），也不是启动 Mohist Agent（不创建 AgentJob）：TaskRun
-拥有成败，AgentSession 仍是 Workflow 来源。契约见
-[`mohist/agent` Action](actions/agent.md)。
+A task can instead set `uses: mohist/agent` and provide a `name` to use a
+predefined Mohist Agent's Instructions and execution configuration. This is not
+an Inline Agent because the Instructions and configuration come from the Agent
+resource rather than task input. It is also not a Mohist Agent launch because
+it creates no AgentJob. The TaskRun owns success or failure, and the
+AgentSession still has a Workflow Origin. See the
+[`mohist/agent` Action](actions/agent.md) contract.
 
 ## Mohist Agent
 
-Mohist Agent 是 Project 内的一等资源。它保存：
+A Mohist Agent is a first-class resource in a Project. It stores:
 
-- 稳定 ID，以及名称、头像和描述组成的可识别身份；
-- Instructions 和 Agent 配置；
-- Skills；
-- 并发限制与 active / archived 状态。
+- A stable ID and a recognizable identity consisting of a name, avatar, and
+  description
+- Instructions and Agent configuration
+- Skills
+- A concurrency limit and `active` or `archived` state
 
-## 配置一个 Agent
+## Configure an Agent
 
-| 配置 | 用户需要回答的问题 | 生效规则 |
+| Setting | User question | Effective rule |
 |---|---|---|
-| 名称 | 在 Project 和外部场所中如何识别它 | Project 内唯一；重命名不改变 Agent ID |
-| 头像 | 在 Web、Slack 和执行记录中如何快速识别它 | 立即更新 Mohist 展示，并同步到支持更新的接入 |
-| 描述 | 什么时候应该选择它 | 只用于发现和选择，不进入执行指令 |
-| Instructions | 它扮演什么角色、如何工作、何时停手 | 每次新 AgentJob 启动时固定 |
-| Runtime | 由哪个执行后端运行 | Agent 自己拥有；普通客户端不能临时覆盖 |
-| Model / Variant | 使用哪个模型和推理档位 | Agent 自己拥有；未配置时使用该 Runtime 的默认值 |
-| Skills | 启动时加载哪些能力说明 | 随 AgentJob 固定；入口不能临时增删 |
-| Max concurrent runs | 该 Agent 最多同时运行多少次执行，包括 launch 与 follow-up | 实时用于后续调度；调低时不强停已在运行的执行，超出后排队 |
-| 状态 | 是否允许接受新委托 | archived Agent 拒绝新委托，已有 Session 仍可查看和继续 |
+| Name | How is the Agent identified in the Project and external locations? | Unique within the Project; renaming does not change the Agent ID |
+| Avatar | How is the Agent recognized quickly in the Web UI, Slack, and execution records? | Updates Mohist presentation immediately and synchronizes to connections that support updates |
+| Description | When should this Agent be selected? | Used only for discovery and selection; not included in execution Instructions |
+| Instructions | What role does the Agent have, how does it work, and when does it stop? | Fixed when each new AgentJob starts |
+| Runtime | Which execution backend runs the Agent? | Owned by the Agent; an ordinary client cannot override it for one request |
+| Model / Variant | Which model and reasoning level does the Agent use? | Owned by the Agent; uses the Runtime default when not configured |
+| Skills | Which capability descriptions load at startup? | Fixed with the AgentJob; an entry point cannot add or remove them for one request |
+| Max concurrent runs | How many executions can this Agent run at once, including launches and follow-ups? | Applies to subsequent scheduling immediately; lowering it does not stop running executions, and excess work queues |
+| State | Can the Agent accept new delegations? | An archived Agent rejects new delegations; existing Sessions remain readable and can continue |
 
-模型供应商与 Runtime 凭据在受保护的 Runtime 设置中配置，不写进 Instructions，也不复制到
-Agent 或 Agent 接入。Agent 只引用 Runtime、Model 与 Variant；Readiness 汇总当前引用是否
-真的可执行，并把缺失凭据指向唯一的设置入口。
+Configure model providers and Runtime credentials in protected Runtime settings.
+Do not put them in Instructions or copy them to an Agent or Agent Connection.
+An Agent references only a Runtime, Model, and Variant. Readiness summarizes
+whether those references can currently execute and directs a missing credential
+to the single settings entry point.
 
-本次委托可以附带 Issue、Epic、Repository 等上下文引用，但上下文不是 Agent 配置。普通
-客户端只能提供任务文本和上下文，不能覆盖这些执行定义或并发限制。Agent 的定义在一次
-launch 或 Workflow Agent task attempt 开始时固定；该次执行加载的 Skills 也随之固定。
-这样，从 Web 测试通过的 Agent 接入 Slack 后仍然是同一个 Agent。
+A delegation can include context references such as an Issue, Epic, or
+Repository, but context is not Agent configuration. An ordinary client can
+provide only task text and context. It cannot override the execution definition
+or concurrency limit. The Agent definition is fixed when a launch or Workflow
+Agent task attempt starts, as are the Skills loaded for that execution. An Agent
+tested in the Web UI is therefore still the same Agent after it connects to
+Slack.
 
-名称、头像和描述是展示身份，编辑后立即用于 Mohist 的发现与展示；Agent 接入异步同步
-支持更新的外部身份，并明确显示未同步状态。Instructions、Runtime、Model、Variant 和
-Skills 是执行定义，只影响之后创建的 AgentJob。每个 AgentJob 保存启动时的执行快照；已有
-AgentSession 的后续输入继续使用该会话建立时的配置与上下文，不因 Agent 被编辑而悄悄换
-模型或能力。Max concurrent runs 是 Agent 当前的调度策略，所有 Session 的下一次执行都按
-最新值排队；修改它不改变任何 Session 的执行定义。
+Name, avatar, and description form the presentation identity. Edits apply
+immediately to discovery and presentation in Mohist. Agent Connections
+asynchronously synchronize external identities that support updates and show
+an explicit out-of-sync state. Instructions, Runtime, Model, Variant, and Skills
+form the execution definition and affect only later AgentJobs. Each AgentJob
+stores its execution snapshot at launch. Follow-ups in an existing AgentSession
+continue with the configuration and context established for that session; an
+Agent edit does not silently change its model or capabilities. Max concurrent
+runs is the Agent's current scheduling policy. Every Session queues its next
+execution under the latest value, but changing it does not change any Session's
+execution definition.
 
-Workflow 的 `mohist/agent` task 也会在每次 attempt 开始时固定完整 Agent 定义。编辑 Agent
-不会改变已经 dispatch 的 attempt；retry 会重新读取当时的定义，因此修复 Runtime、Model、
-Variant、Instructions 或 Skills 后，新的 retry 才会采用修改。
+A Workflow `mohist/agent` task also fixes the complete Agent definition when
+each attempt starts. Editing the Agent does not change an already dispatched
+attempt. A retry reads the definition again when it starts, so only a new retry
+uses repaired Runtime, Model, Variant, Instructions, or Skills.
 
-## Readiness 与可用性
+## Readiness and Availability
 
-Agent 的 active / archived 只回答“是否接受新委托”。Readiness 回答 Mohist 当前能否确认
-Agent 的执行配置完整：
+An Agent's `active` or `archived` state answers only whether it accepts new
+delegations. Readiness answers whether Mohist can currently confirm that the
+Agent execution configuration is complete:
 
-| Readiness | 含义 | 用户动作 |
+| Readiness | Meaning | User action |
 |---|---|---|
-| Ready | Mohist 已确认当前定义可以执行 | 可以测试或启动 |
-| Needs setup | Mohist 已确认存在配置缺口 | 阻止启动，并列出缺口和修复入口 |
-| Unknown | Mohist 暂时无法确认是否可执行 | 可以提交并等待验证，但不能宣称已经可用 |
+| Ready | Mohist confirmed that the current definition can execute | Test or launch the Agent |
+| Needs setup | Mohist confirmed a configuration gap | Launch is blocked; inspect each gap and its repair entry point |
+| Unknown | Mohist cannot currently confirm whether the definition can execute | Submit and wait for validation, but do not claim that the Agent is available |
 
-Runner 暂时离线或没有空闲容量属于 Availability，不把 Ready Agent 改成 Needs setup；工作
-可以被接受并排队。Web、CLI 和 Agent 接入只呈现 Mohist 给出的统一结论，不各自维护一套
-Runtime 判断规则。
+A temporarily offline Runner or lack of capacity is Availability, not a reason
+to change a Ready Agent to Needs setup. Work can be accepted and queued. The
+Web UI, CLI, and Agent Connections present the unified Mohist conclusion and do
+not maintain separate Runtime judgment rules.
 
-Availability 说明现在能否开始一项新的执行。已经排队的 AgentJob 在 Runner 或容量恢复后，可能会
-短暂显示为“等待调度”，直到它的下一次调度尝试开始；这不是新的配置缺口，也不表示 Runner 再次离线。
+Availability states whether a new execution can start now. After a Runner or
+capacity recovers, a queued AgentJob can briefly show "waiting for scheduling"
+until its next scheduling attempt starts. This is not a new configuration gap
+and does not mean that the Runner is offline again.
 
-### 在 Web UI 中配置和测试
+### Configure and Test in the Web UI
 
-1. 在 **Agents** 中创建或打开 Agent，填写名称、头像、描述和 Instructions。
-2. 选择 Runtime 后，只展示该 Runtime 真正支持的 Model、Variant 与凭据要求；
-   再选择 Skills 和并发限制。页面必须显示 Readiness 和每个缺口。
-3. Readiness 为 Ready 后，使用 **Start session** 提交一个真实任务；Unknown 时也可以提交，
-   但页面必须说明任务会等待 Runner 验证。创建成功后进入 AgentSession。
-4. 在 Session 中查看回复和执行事实，并用 follow-up 验证连续对话。
-5. 确认 Agent 能独立完成目标后，再配置事件路由或 Agent 接入。
+1. In **Agents**, create or open an Agent and enter its name, avatar,
+   description, and Instructions.
+2. Select a Runtime. Show only the Model, Variant, and credential requirements
+   that Runtime supports. Then select Skills and a concurrency limit. The page
+   must show Readiness and every gap.
+3. When Readiness is Ready, use **Start session** to submit a real task. You can
+   also submit when it is Unknown, but the page must state that the task will
+   wait for Runner validation. Open the AgentSession after successful creation.
+4. In the Session, inspect replies and execution facts. Use a follow-up to
+   verify a continuing conversation.
+5. After the Agent can complete its goal independently, configure event routing
+   or an Agent Connection.
 
-### 在 CLI 中配置和使用
+### Configure and Use in the CLI
 
 ```bash
 mo agent create --name explorer --description "Explore product needs" --instructions "Clarify the request, identify missing decisions, and produce actionable issues." --runtime opencode --skills mohist,mohist-explore --max-concurrent-runs 1
 mo agent view explorer
-mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案"
-# 响应丢失后使用启动前打印的 key 重试，不要生成新的启动
-mo agent launch explorer --prompt "探索一个可以从 Slack 调用 Mohist Agent 的产品方案" --idempotency-key <key>
+mo agent launch explorer --prompt "Explore a product design for invoking a Mohist Agent from Slack"
+# After response loss, retry with the key printed before launch. Do not create a new launch.
+mo agent launch explorer --prompt "Explore a product design for invoking a Mohist Agent from Slack" --idempotency-key <key>
 ```
 
-`agent view` 显示 Readiness、Availability 与配置缺口；Needs setup 时按提示
-补齐再启动。`agent launch` 返回 AgentJob ID、AgentSession ID、首个 Input ID 与 Turn ID。
-首次启动的工作结果和 composite observation 用返回的 observation URL 读取；连续对话用
-`mo session followup` 提交新的 SessionInput，完整记录用 `mo session transcript`。pending、queued
-和 executing 状态继续观察，terminal 状态读取结果或 transcript，Unknown 必须用原 key 重读或重试。
-CLI 与 Web 调用的是同一组产品能力。
+`agent view` shows Readiness, Availability, and configuration gaps. When the
+Agent Needs setup, repair each listed gap before launch. `agent launch` returns
+the AgentJob ID, AgentSession ID, first Input ID, and Turn ID. Read the first
+launch result and composite observation from the returned observation URL. Use
+`mo session followup` to submit a new SessionInput in a continuing conversation,
+and use `mo session transcript` for the complete record. Continue observing
+`pending`, `queued`, and `executing` states. Read the result or transcript in a
+terminal state. For Unknown, read or retry with the original key. The CLI and
+Web UI invoke the same product capabilities.
 
-## 启动入口
+## Launch Entry Points
 
-| 入口 | 新委托是什么 | Mohist 中发生什么 |
+| Entry point | New delegation | Mohist behavior |
 |---|---|---|
-| Web UI | 选择 Agent，输入任务和可选上下文 | 创建 AgentJob、AgentSession、首条 Input 和首个 Turn，并进入会话页 |
-| CLI | `mo agent launch <agent>` | 创建相同的 AgentJob、AgentSession、首条 Input 和首个 Turn，返回对应 ID |
-| Agent 接入 | Slack 私聊中的首项任务、明确的 New task，或一次新的频道根提及 | 接入把消息交给已绑定的 Agent，不改变 Agent 配置 |
-| 事件路由 | 规则命中的事件和响应提示词 | 为该事件创建一次 AgentJob 与 AgentSession |
-| Issue 评论提及 | `@<agent-name>` 后的评论内容 | 以评论为任务，并关联该 Issue 上下文 |
+| Web UI | Select an Agent and enter a task with optional context | Creates an AgentJob, AgentSession, first Input, and first Turn, then opens the session page |
+| CLI | `mo agent launch <agent>` | Creates the same AgentJob, AgentSession, first Input, and first Turn and returns their IDs |
+| Agent Connection | The first task in a Slack direct message, an explicit New task, or a new root mention in a channel | Delivers the message to the connected Agent without changing Agent configuration |
+| Event routing | A matching event and response prompt | Creates an AgentJob and AgentSession for the event |
+| Issue comment mention | Comment content after `@<agent-name>` | Uses the comment as the task and associates its Issue context |
 
-提及把评论正文作为本次输入，并
-自动带上该 issue 的上下文——这是一次性工作，适合「@my-agent 监督并推进这个
-issue」这样的当面包办；如果要求的是持续关注，Agent 会自己用 `mo issue watch add` 把这个 issue 加入关注。
-无论哪种方式，启动时都会创建
-AgentJob，并固定本次使用的 Agent 指令和配置；之后编辑 Agent，不改变已经开始的工作。
+A mention uses the comment body as the input and automatically includes the
+Issue context. It is one-time work, suitable for a request such as "@my-agent,
+supervise and advance this Issue." For continuous attention, the Agent adds the
+Issue to its watch list with `mo issue watch add`. Every launch entry point
+creates an AgentJob and fixes the Agent Instructions and configuration for that
+work. Later Agent edits do not change work that has started.
 
-Mohist Agent 的核心位置是代理人：它进入流水线上原本由 owner 负责的位置，通过
-和人相同的命令与审批通道执行动作。一个 Mohist Agent 可以有多个 AgentJob，也可以
-有多个 AgentSession。
+A Mohist Agent's central role is proxy. It occupies a production-line position
+that the owner could occupy and acts through the same commands and Approval
+channel as a person. One Mohist Agent can have multiple AgentJobs and multiple
+AgentSessions.
 
-Mohist Agent 还可以在自己的会话里 spawn 其它 Agent 的子会话，把运行时才能看清
-形状的任务分解出去，形成会话树。见 [Subagent 与会话树](subagents.md)。
+A Mohist Agent can also spawn child sessions for other Agents from its own
+session. It can decompose work whose shape becomes clear only at runtime and
+form a session tree. See [Subagents and Session Trees](subagents.md).
 
-把 Agent 接入 Slack 的线程与权限规则见 [Slack](slack.md)。
+See [Slack](slack.md) for thread and permission rules when connecting an Agent
+to Slack.
 
-## AgentJob 与 AgentSession
+## AgentJob and AgentSession
 
-AgentJob、SessionInput、AgentTurn 和 AgentSession 在 launch 收敛成功后可同时出现，但职责不同：
+An AgentJob, SessionInput, AgentTurn, and AgentSession can all exist after a
+launch converges successfully, but they have different responsibilities:
 
 | | AgentJob | SessionInput | AgentTurn | AgentSession |
 |---|---|---|---|---|
-| 回答的问题 | 这次 launch 工作成功了吗 | 这条输入是否已接受、排队或交给 Runtime | 这一轮处理到了哪里、结果是什么 | 这段会话发生了什么、现在能否继续输入 |
-| 拥有 | launch 调度、成功或失败、工作结果 | 输入内容、顺序、来源和投递状态 | Input 集合、执行状态和对应回复 | Input/Turn 顺序、上下文、用量、活动状态和当前 Runtime Session |
-| 生命周期 | 一次 launch 工作，最终完成、拒绝、失败、取消或 blocked | 一条输入先被接受或明确拒绝；accepted 输入的派发仍可能临时 blocked，之后终态为 dispatch terminal | 一次连续执行，最终完成、失败、取消、blocked 或暂时 unknown | 持续存在，可以接受多次输入 |
-| 所属概念 | Mohist Agent 的工作 | AgentSession 的子记录 | AgentSession 的子记录 | Session 记录 |
+| Question answered | Did this launch work succeed? | Was this input accepted, queued, or delivered to the Runtime? | How far did this processing period advance, and what was its result? | What happened in this session, and can it accept more input now? |
+| Owns | Launch scheduling, success or failure, and work result | Input content, order, source, and delivery state | Input set, execution state, and corresponding reply | Input and Turn order, context, usage, Activity, and current Runtime Session |
+| Lifecycle | One launch job that eventually completes, is rejected, fails, is cancelled, or becomes blocked | One input is accepted or explicitly rejected; dispatch of an accepted Input can be temporarily blocked and later reaches a terminal dispatch state | One continuous execution that eventually completes, fails, is cancelled, becomes blocked, or is temporarily unknown | Persists and can accept multiple Inputs |
+| Parent concept | Mohist Agent work | Child record of an AgentSession | Child record of an AgentSession | Session record |
 
-Workflow 的对应工作所有者是 TaskRun，而不是 AgentJob。TaskRun 或 AgentJob 负责裁定
-工作结果；AgentSession 只记录执行事实，不推进 Workflow，也不裁定 AgentJob。
+The corresponding Workflow work owner is a TaskRun, not an AgentJob. A TaskRun
+or AgentJob decides the work result. An AgentSession records only execution
+facts and neither advances the Workflow nor decides the AgentJob.
 
-首个 AgentTurn 与 AgentJob 关联；后续 AgentTurn 不修改 AgentJob。AgentJob 的 `completed`
-表示 launch 工作已由 Runtime 成功处理，不表示整段对话关闭，也不
-保证用户口头描述的宽泛目标已经交付。Agent 可以在回复中提出问题；此时 AgentJob 可以已经
-完成，AgentSession 回到空闲，用户通过 follow-up 继续。每次 follow-up 创建一个有稳定 ID
-的新 SessionInput：先区分 canonical `turnRelation`。当前 Turn 已知 `running`、当前 Runtime
-binding 明确支持 steer 且没有 operation 时，使用 `steer` 复用现有 Turn；只创建一个
-SessionInput，以及同一事务提交的 `SessionOperationRead(kind=steer)` durable effect；不创建
-第二个 Turn、dispatch attempt 或 queue entry，也不受 `queuedTurnCount` 限制。该 operationId
-就是 follow-up 的 caller-provided `requestId`，负责 fence、重试和 response-loss reconciliation。
-只有 Input、operation 和 replayable effect 一起提交时，follow-up 才返回初始 `accepted`；Runtime
-确认前 effect 是 `pending`，response loss 后仍可用同一 identity replay 才能继续报告 accepted，
-已确认成功的 operation 也稳定报告 accepted。
-若不能确认或不能安全 replay，返回 `unknown`，不创建新 Input；确定拒绝或 bounded failure
-返回 effect `terminal`，但不改写已 accepted Input。Runtime 不支持 steer 或当前 Turn 不是 running 时使用 `new-turn`，只有此路径检查 queue
-limit 并创建 Turn 与 dispatch record。若当前为 `outcome_pending`、`unknown` 或有未决 operation，
-明确拒绝并给出原 Turn 的查询 action；不把未知事实转换成新 Turn。两种接受情况都不创建新的
-AgentJob，也不重写首次启动的结果。
+The first AgentTurn is associated with the AgentJob. Later AgentTurns do not
+modify the AgentJob. AgentJob `completed` means that the Runtime processed the
+launch work successfully. It does not close the conversation or guarantee
+delivery of a broad goal described informally by the user. An Agent can ask a
+question in its reply after the AgentJob completes and the AgentSession returns
+to idle; the user then continues through a follow-up.
 
-需要被持续追踪到 Done 的业务工作应由 Agent 创建或推进 Issue / Workflow；不要靠一个永不
-结束的聊天 Job 代替执行层。用户要开始另一项需要独立启动记录的工作时，应再次 launch，
-从而得到新的 AgentJob 与 AgentSession。
+Each follow-up creates a new SessionInput with a stable ID after determining the
+canonical `turnRelation`. Use `steer` to reuse the current Turn only when that
+Turn is known to be `running`, the current Runtime Binding explicitly supports
+steer, and no operation is pending. This path creates only one SessionInput and
+a durable `SessionOperationRead(kind=steer)` effect committed in the same
+transaction. It creates no second Turn, dispatch attempt, or queue entry and is
+not limited by `queuedTurnCount`. Its `operationId` is the caller-provided
+follow-up `requestId`, which provides the fence, retry identity, and
+response-loss reconciliation identity.
 
-## Session 活动状态
+A follow-up initially returns `accepted` only after the Input, operation, and
+replayable effect commit together. The effect is `pending` before Runtime
+confirmation. After response loss, it can continue to report accepted only if
+the same identity remains replayable; a confirmed successful operation also
+reports accepted consistently. If the result cannot be confirmed or replay is
+unsafe, return `unknown` and create no new Input. A definite rejection or
+bounded failure returns a `terminal` effect but does not rewrite an accepted
+Input.
 
-AgentSession 的结构和用户心智模型靠近 OpenCode、Pi 等会话：它持续保存消息，同时
-呈现当前是否有尚未完成的 Turn；具体是排队还是执行中由 Turn 状态显示。
+Use `new-turn` when the Runtime does not support steer or the current Turn is
+not running. Only this path checks the queue limit and creates a Turn and
+dispatch record. If the current state is `outcome_pending` or `unknown`, or an
+operation is pending, reject explicitly and provide a query action for the
+original Turn. Do not convert an unknown fact into a new Turn. Neither accepted
+path creates a new AgentJob or rewrites the first launch result.
 
-SessionInput 和 AgentTurn 都有稳定身份。每条被接受的输入保留一个 Input ID，并恰好关联一个 Turn ID；同一请求的重试不得创建第二组 ID。被 queue full 拒绝的请求没有 live Input/Turn ID，但有持久 request fingerprint、reason 和 nextAction tombstone。普通后续输入使用 `new-turn`，只有 Runtime 明确支持 steer 时，才可使用 `steer` 关联当前 running Turn；steer Input 还公开 `steerOperationId`、`steerStatus`、`steerRetryAllowed` 和 `steerNextAction`；已有 Input 的 Turn ID 不可改写。
+An Agent must create or advance an Issue and Workflow for business work that
+needs continuous tracking to Done. Do not use a never-ending chat Job in place
+of the execution layer. To start different work that needs an independent
+launch record, launch again to get a new AgentJob and AgentSession.
 
-Input acceptance 是独立事实，取值为 `accepted`、`rejected` 或 `unknown`。Steer 的 effect 状态另取 `pending`、`accepted`、`unknown` 或 `terminal`：`accepted` 表示 Input 与 durable effect 已确认或仍可 replay；pending effect 不表示 Runtime 已完成；`unknown` 必须阻止 admission，且只有同一 operation 仍可安全 replay 时才允许同一身份重试；`terminal` 不把已 accepted Input 改成 rejected。队列已满时在受理前持久化 definitive rejection tombstone 后拒绝新的输入；同 requestId 同 fingerprint 的 response-loss retry 永远返回同一 rejection，改 payload 返回 `idempotency_key_reused`，只有新 requestId 才能稍后重试。输入一旦 accepted，即使后续派发失败也不会被删除、换 ID 或改成 rejected。Turn 的执行状态取值为 `queued`、`running`、`outcome_pending`、`terminal` 或 `unknown`；Turn 本身没有 `idle` 状态。
+## Session Activity
 
-Session activity 取值为 `idle`、`active` 或 `unknown`，准入使用唯一的
-`admission=ready|blocked` 字段，并带 canonical `reason`/`nextAction`。只有当前
-ContextGeneration 没有非终结 Turn、没有未决副作用或未完成 operation 时才是 `idle` 和
-`admission=ready`；`queued`、`running` 或 `outcome_pending` 会使当前 activity 为 `active`
-且 admission blocked。Input acceptance、Runtime side effect、binding 或最终结果不能确认时
-为 `unknown`，admission 必须 blocked，不能当作安全空闲，也不能用新输入自动重放。
+The AgentSession structure and user mental model are similar to sessions in
+OpenCode and Pi. The AgentSession continuously retains messages and shows
+whether it has a nonterminal Turn. Turn state distinguishes queued work from
+running work.
 
-- **有进行中的 Turn**：当前 Turn 可能正在排队，也可能由 Runtime 执行。Follow-up 按顺序创建
-  SessionInput：后端支持时加入当前 Turn，否则等待后续 Turn。等待队列达到边界时新输入不会
-  被接受，已接受的输入不会被丢弃。排队时可以取消，Runtime 开始后可以请求停止当前 Turn。
-- **空闲**：没有正在处理的 Turn；Follow-up 创建 SessionInput 和新的 Turn，可以 Compact 或 Reset。
-- **未知**：Mohist 暂时无法确认 Runtime 是否已经停止，或无法确认一次输入是否已被
-  接受；核对完成前不会把 Session 当作安全空闲，也不会自动重复投递输入。
+SessionInput and AgentTurn both have stable identities. Each accepted Input
+keeps one Input ID and is associated with exactly one Turn ID; retrying the same
+request must not create a second pair of IDs. A request rejected because the
+queue is full has no live Input or Turn ID, but it has a durable request
+fingerprint, `reason`, and `nextAction` tombstone. An ordinary follow-up uses
+`new-turn`. It can use `steer` to join the current running Turn only when the
+Runtime explicitly supports steer. A steer Input also exposes
+`steerOperationId`, `steerStatus`, `steerRetryAllowed`, and `steerNextAction`.
+The Turn ID of an existing Input cannot change.
 
-一次 Turn 完成、失败或停止后，AgentSession 在没有后续 queued Turn 时回到空闲。执行结果保留在
-对应的 TaskRun、AgentJob 或 AgentTurn 中，不会把 AgentSession 标记为完成、失败或关闭。Session 不需要
-`closed` 生命周期。
+Input acceptance is an independent fact with value `accepted`, `rejected`, or
+`unknown`. A steer effect separately has state `pending`, `accepted`, `unknown`,
+or `terminal`. `accepted` means that the Input and durable effect are confirmed
+or remain replayable. A pending effect does not mean that the Runtime finished.
+`unknown` must block admission, and retry with the same identity is allowed only
+while the same operation can still be replayed safely. `terminal` does not
+change an accepted Input to rejected.
 
-AgentSession 的会话内容按发生顺序连续展示。SessionInput 为每条输入提供稳定关联，
-AgentTurn 为实际处理过程提供状态；两者都只能通过所属 Session 查找和操作，不建立顶层
-列表或独立管理入口。
+When the queue is full, persist a definitive rejection tombstone before
+rejecting new input. A response-loss retry with the same `requestId` and
+fingerprint always returns the same rejection. A changed payload returns
+`idempotency_key_reused`; only a new `requestId` can retry later. After an Input
+is accepted, a later dispatch failure does not delete it, change its ID, or mark
+it rejected. Turn execution state is `queued`, `running`, `outcome_pending`,
+`terminal`, or `unknown`; a Turn has no `idle` state.
 
-## 会话事实、操作与上下文边界
+Session Activity is `idle`, `active`, or `unknown`. Admission uses the single
+`admission=ready|blocked` field with canonical `reason` and `nextAction`. The
+current ContextGeneration is `idle` with `admission=ready` only when it has no
+nonterminal Turn, pending side effect, or incomplete operation. A `queued`,
+`running`, or `outcome_pending` Turn makes Activity `active` and blocks
+admission. Activity is `unknown` when Input acceptance, a Runtime side effect,
+the Runtime Binding, or the final result cannot be confirmed. Admission must
+then remain blocked. Mohist cannot treat the Session as safely idle or use new
+input to replay automatically.
 
-Server 是 AgentJob、AgentSession、SessionInput 和 AgentTurn 的 canonical read model。Web、CLI 和 Agent 接入只适配这份事实，不能从本地日志、HTTP 状态、Runner 事件或 provider 响应自行推导状态。每份读取结果都带有 Server 的 `revision` 和 `observedAt`。
+- **Active Turn**: The current Turn can be queued or executing in the Runtime.
+  A follow-up creates SessionInputs in order. It joins the current Turn when the
+  backend supports that operation; otherwise it waits for a later Turn. New
+  input is not accepted after the waiting queue reaches its boundary, and
+  accepted input is never discarded. A queued Turn can be cancelled. After the
+  Runtime starts, the user can request that the current Turn stop.
+- **Idle**: No Turn is being processed. A follow-up creates a SessionInput and
+  new Turn. Compact and Reset are available.
+- **Unknown**: Mohist cannot currently confirm that the Runtime stopped or that
+  an input was accepted. Until reconciliation finishes, Mohist does not treat
+  the Session as safely idle or automatically redeliver the input.
 
-AgentJob 的读取结果使用 canonical `AgentJobLaunchRead`，至少公开 `jobId`、`launchRequestId`、
-`launchRequestFingerprint`、`launchOperationId`、`status`、`outcome`、`reason`、`nextAction`、
-`workspace`、`workspaceReason`、`target`、`targetReason` 和当前的 Session/Input/Turn mapping。
-`workspace` 的类型是 `{ projectId, workspaceId, path }`，`target` 是现有 `ResourceKey`；接受的
-launch 两者必须非 null 且对应 reason 为 null。尚未解析或尚未建立的值可以是 null，但对应
-reason 必须非空；reservation ID 不能冒充 live mapping。Session 使用 canonical `AgentSessionRead`，明确公开
-`admission=ready|blocked`、`reason`、`nextAction`、activity、binding 和 unresolved targets；
-Input 使用 `SessionInputRead`，Turn 使用 `TurnResultRead`。客户端不能把这些事实合并成一个状态。
+After a Turn completes, fails, or stops, its AgentSession returns to idle when
+no later Turn is queued. The result remains in the corresponding TaskRun,
+AgentJob, or AgentTurn. The AgentSession is not marked completed, failed, or
+closed and needs no `closed` lifecycle.
 
-### 启动身份与响应丢失
+AgentSession content is shown continuously in occurrence order. A SessionInput
+provides a stable association for each input, and an AgentTurn provides state
+for the actual processing. Both are found and operated only through their
+owning Session. Neither has a top-level list or independent management entry
+point.
 
-启动调用由调用方提供 `launchRequestId` 和完整 envelope 的 `launchRequestFingerprint`。AgentJob
-事务第一次 prepare 时按 `(projectId, agentId, launchRequestId)` 查找：同 fingerprint 的 response
-loss 返回原 operation/rejection，改 payload 返回 `idempotency_key_reused`，只有新 requestId
-才能新 launch；首次请求才创建唯一的 `launchOperationId`、Job、内部 reservation 和
-accept-session durable command。reservation 不是可访问资源。Session 事务只原子提交自己的
-Session、Input、Turn、request map、dispatch record 和 durable accept/reject event/outbox，不能同时
-更新 AgentJob。Launch coordinator 以 `launchOperationId` 为唯一身份消费 Session 结果，再在单独
-的 AgentJob 事务 materialize 三项 live mapping 或 durable rejection。
+## Session Facts, Operations, and Context Boundaries
 
-响应丢失时，客户端先用 `launchRequestId` 找到原 operation，再查询或重试原 `launchOperationId`；Server 必须返回同一组 ID，不得创建第二个 launch。coordinator 重启会扫描 pending command，claim/takeover 后重复消费同一 command；Session accept 成功但 Job 回写失败时，Job 暂时保持 mapping `null + mapping_pending`，直到同一 operation 回写成功。明确拒绝或不可恢复失败是 durable terminal outcome，返回稳定 reason 和 nextAction；临时不可用或 side effect 无法确认时保持 `unknown`，要求查询或人工核对原 operation。
+The Server is the canonical read model for AgentJobs, AgentSessions,
+SessionInputs, and AgentTurns. The Web UI, CLI, and Agent Connections adapt
+these facts. They cannot infer state independently from local logs, HTTP status,
+Runner events, or provider responses. Every read result includes the Server
+`revision` and `observedAt`.
 
-### 操作查询
+The canonical AgentJob read result is `AgentJobLaunchRead`. It exposes at least
+`jobId`, `launchRequestId`, `launchRequestFingerprint`, `launchOperationId`,
+`status`, `outcome`, `reason`, `nextAction`, `workspace`, `workspaceReason`,
+`target`, `targetReason`, and the current Session, Input, and Turn mappings.
+`workspace` has type `{ projectId, workspaceId, path }`, and `target` is an
+existing `ResourceKey`. An accepted launch must have non-null values for both
+and null corresponding reasons. A value that is unresolved or not established
+can be null only when its corresponding reason is non-null. A reservation ID
+cannot masquerade as a live mapping.
 
-Compact、Reset、recovery、force-reset、handoff、rebind 和 stop 都必须使用调用方提供的 `operationId`；steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。这个 ID 同时是 query 和 response-loss retry 的身份；查询可以读取当前或历史 operation，并返回唯一 canonical `SessionOperationRead` 的完整字段，包括显式可空 `reason`、同一 phase、outcome、binding、context mapping 和 nextAction。Operation query 不得再次产生副作用、递增 ContextGeneration、创建 candidate 或生成新的 operation。没有 operationId 时 Server 拒绝调用，不生成客户端不可见的替代 key。
+A Session uses canonical `AgentSessionRead` and explicitly exposes
+`admission=ready|blocked`, `reason`, `nextAction`, Activity, the Runtime Binding,
+and unresolved targets. An Input uses `SessionInputRead`, and a Turn uses
+`TurnResultRead`. A client cannot merge these facts into one state.
 
-Operation projection 是 canonical read model 的一部分。它必须返回该 operation 类型规定的完整字段和显式 null 值；Job、Session、Input 和 Turn 可以引用同一个 `operationId` 或嵌入同一 projection，但不能发明只含状态或只含 mapping 的裁剪 schema。
+### Launch Identity and Response Loss
 
-### Compact、Reset 与 force-reset
+The caller supplies `launchRequestId` and a `launchRequestFingerprint` of the
+complete envelope. When the AgentJob transaction first prepares, it looks up
+`(projectId, agentId, launchRequestId)`. Response loss with the same fingerprint
+returns the original operation or rejection. A changed payload returns
+`idempotency_key_reused`, and only a new request ID can create a new launch. The
+first request alone creates the unique `launchOperationId`, Job, internal
+reservation, and durable accept-session command. A reservation is not an
+accessible resource.
 
-- **Compact** 在安全空闲边界执行，保持 AgentSession、当前 Runtime Session 和 ContextGeneration；成功后持久化 ContextBoundary 与 operation result，后续输入继续沿用该 generation。
-- **Reset** 在安全空闲边界建立没有旧 Runtime 上下文的新物理 Session，保持 AgentSession、transcript、Input 和 Turn 身份；它递增 ContextGeneration，并以同一 operationId 查询或重试。
-- **Force-reset** 只在旧输入、Turn、dispatch attempt、Runtime side effect 或 operation 的结果仍未知且普通操作被阻止时受理。它使用新的 operationId，要求当前 revision、expected ContextGeneration、完整 expected binding 和显式确认旧 Runtime 可能仍有副作用。BeginForceReset 必须先按 `sessionId + operationId` 查已有 operation：已有 kind、完整 request fingerprint、expected revision/generation/binding 匹配时返回原 canonical operation，即使响应丢失；错误 kind、target、fingerprint、revision、generation 或 binding 明确拒绝，不创建第二个 context。唯一 collector 在同一 Session 事务收集这些 target；ActiveOperation（如有）也进入同一个 `supersededTargets` 数组。每个 target 都是 canonical `UnresolvedTargetRead`：`targetKind`、稳定 `targetId`、`requestId`、`contextGeneration`、`originalOperationId`（无已知来源时显式 null）、完整或 null 的 `expectedBinding`、`nextAction` 和 `supersededByOperationId`。没有 ActiveOperation 时仍必须为 unknown facts 建立 target。
+The Session transaction atomically commits only its Session, Input, Turn,
+request map, dispatch record, and durable accept or reject event and outbox. It
+cannot update the AgentJob in the same transaction. The launch coordinator uses
+`launchOperationId` as its unique identity to consume the Session result, then
+materializes the three live mappings or durable rejection in a separate
+AgentJob transaction.
 
-  collector、`supersededTargets`、`unresolvedPrevious`、旧 operation 的 supersede 标记、新 operation 的完整 fence 和 `admission=blocked` 先在同一原子事务提交；在新的 candidate binding 与 ContextBoundary 原子提交前不接受新的 Input/Turn。完成提交按同一事务递增 ContextGeneration、写 boundary、将 admission 置 ready，再允许新输入。旧 target 和旧 operation 仍可按 targetId/operationId 查询；响应丢失时重用同一 force-reset operationId，不创建第二个 context。
+After response loss, the client first uses `launchRequestId` to find the
+original operation, then queries or retries the original `launchOperationId`.
+The Server must return the same IDs and must not create a second launch. After a
+coordinator restart, it scans pending commands and consumes the same command
+after claim or takeover. If Session acceptance succeeds but the Job write-back
+fails, the Job temporarily keeps `null + mapping_pending` mappings until the
+same operation writes them successfully. A definite rejection or unrecoverable
+failure is a durable terminal outcome with stable `reason` and `nextAction`.
+Temporary unavailability or an unconfirmed side effect remains `unknown` and
+requires a query or manual reconciliation of the original operation.
 
-force-reset 的 candidate `getByKey` 返回 `definitely-rejected` 时，不把它当成候选存在或缺失的
-未知 binding：无论是 create response-loss 后的 lookup，还是 Server 重启/重复请求的 same-key
-reconcile，都保留 `candidateState=none`、`candidateBinding=null`、稳定
-`reason=force_reset_candidate_rejected`。deadline 未到时 outcome 为 `pending`，nextAction
-为 `retry_same_force_reset_candidate`，沿用同一 candidate key；deadline 到达后 outcome 为
-`blocked`，nextAction 为 `inspect_force_reset_operation`。这两个分支都不 cleanup、不读未确认
-binding、不构造 CAS；response loss 或 generic unknown 才进入 `candidateState=unknown` 和
-查询/人工核对。
+### Operation Query
 
-### ContextGeneration 与未决历史
+Compact, Reset, recovery, force-reset, handoff, rebind, and stop must use a
+caller-provided `operationId`. A steer follow-up uses the caller-provided
+`requestId` as the same operation identity. This ID is also the query and
+response-loss retry identity. A query can read a current or historical
+operation and returns the complete fields of the single canonical
+`SessionOperationRead`, including an explicitly nullable `reason`, and the same
+phase, outcome, Runtime Binding, context mapping, and `nextAction`. An operation
+query must not cause another side effect, increment ContextGeneration, create a
+candidate, or generate a new operation. Without an `operationId`, the Server
+rejects the call and does not generate a replacement key that the client cannot
+see.
 
-`ContextGeneration` 从 1 开始，标识当前逻辑上下文，不等同于 operation fence 的 claim generation。普通 Compact 不递增它；Reset、runtime change、missing recovery、force-reset、handoff 和 rebind 开始新的 logical context，并在同一 Session 边界中递增它。每个 Input/Turn 保留创建时的 generation，不能移到新上下文。
+The operation projection is part of the canonical read model. It must return
+all fields required by that operation type and explicit null values. A Job,
+Session, Input, or Turn can reference the same `operationId` or embed the same
+projection. It cannot invent a reduced schema that contains only state or only
+a mapping.
 
-当前 activity 只计算当前 generation。较旧 generation 的未决 Input、Turn、side effect 和 operation result 不与当前的 `queued`、`running` 或 `outcome_pending` 混合，而通过 `unresolvedPrevious` 暴露；其中至少包含旧 operationId、旧 ContextGeneration、outcome 和 nextAction，并可提供 unresolved count。只有 force-reset 已确认并 supersede 旧 operation、且新 context/binding 边界已提交后，旧 Unknown 才不再阻止当前 generation 的新 Input/Turn。
+### Compact, Reset, and Force-reset
 
-### Handoff、rebind 与有界派发失败
+- **Compact** runs at a safely idle boundary and preserves the AgentSession,
+  current Runtime Session, and ContextGeneration. On success, it persists a
+  ContextBoundary and operation result, and later input continues in that
+  generation.
+- **Reset** creates a new physical Session without the old Runtime context at a
+  safely idle boundary. It preserves the AgentSession, transcript, Input, and
+  Turn identities, increments ContextGeneration, and uses the same `operationId`
+  for query or retry.
+- **Force-reset** is accepted only when an old Input, Turn, dispatch attempt,
+  Runtime side effect, or operation still has an unknown result and blocks
+  ordinary operations. It uses a new `operationId` and requires the current
+  revision, expected ContextGeneration, complete expected Runtime Binding, and
+  explicit confirmation that the old Runtime can still have side effects.
+  `BeginForceReset` first looks up an existing operation by
+  `sessionId + operationId`. When the existing kind, complete request
+  fingerprint, expected revision, generation, and Runtime Binding match, it
+  returns the original canonical operation even after response loss. A wrong
+  kind, target, fingerprint, revision, generation, or Runtime Binding is
+  explicitly rejected and creates no second context. A single collector
+  collects these targets in the same Session transaction and adds any
+  ActiveOperation to the same `supersededTargets` array. Each target is a
+  canonical `UnresolvedTargetRead` with `targetKind`, stable `targetId`,
+  `requestId`, `contextGeneration`, explicitly null `originalOperationId` when
+  no source is known, complete or null `expectedBinding`, `nextAction`, and
+  `supersededByOperationId`. Unknown facts require a target even when no
+  ActiveOperation exists.
 
-- **handoff** 是唯一可以改变 Runner 的显式 operation。Runner 重连、超时或旧事件不能隐式 handoff。
-- **rebind** 只能在同一 Runner 上替换 Runtime binding 或物理 Runtime Session，不能借未知事实跨 Runner 迁移。
-- 两者都需要 operationId、当前 revision、expected binding 和 bounded deadline；只有当前 generation 为 `idle` 且没有未决 side effect 时受理。当前为 `active`、`outcome_pending` 或 `unknown` 时先查询原 operation，仍未知则选择 force-reset。成功后递增 ContextGeneration，旧 binding 的事件不能改变当前会话。
+  The collector, `supersededTargets`, `unresolvedPrevious`, supersede marker on
+  the old operation, complete fence on the new operation, and
+  `admission=blocked` commit in one atomic transaction first. No new Input or
+  Turn is accepted before the new candidate Runtime Binding and ContextBoundary
+  commit atomically. The completion transaction increments ContextGeneration,
+  writes the boundary, changes admission to ready, and then permits new input.
+  Old targets and operations remain queryable by `targetId` or `operationId`.
+  After response loss, reuse the same force-reset `operationId`; do not create a
+  second context.
 
-Steer operation 在 Server 重启后按 `operationId=requestId` 扫描；pending 或 response-loss 状态先
-查询同一 effect，再按完整 fence claim/takeover。只有 adapter 能以同一 identity replay 时才重试，
-否则保留 `steerStatus=unknown`、`steerRetryAllowed=false`、`admission=blocked` 和
-`query_same_steer_or_force_reset`。同一 request 的重复 follow-up 只返回原 Input/operation
-projection，不能创建第二个 effect，也不能把没有 replay path 的状态报告为 accepted。
+When candidate `getByKey` for a force-reset returns `definitely-rejected`, do
+not treat the candidate's existence or absence as an unknown Runtime Binding.
+For both a lookup after create response loss and same-key reconciliation after
+a Server restart or repeated request, retain `candidateState=none`,
+`candidateBinding=null`, and stable
+`reason=force_reset_candidate_rejected`. Before the deadline, the outcome is
+`pending`, `nextAction` is `retry_same_force_reset_candidate`, and the same
+candidate key remains in use. At the deadline, the outcome is `blocked` and
+`nextAction` is `inspect_force_reset_operation`. Neither branch performs
+cleanup, reads an unconfirmed Runtime Binding, or constructs a CAS. Only
+response loss or a generic unknown enters `candidateState=unknown` and requires
+a query or manual reconciliation.
 
-Steer 的 Server-to-Runner effect 使用同一 `operationId=requestId` 和可查询的
-`effectId={sessionId, operationId}`。请求固定携带目标 Session、Input、Turn、完整 runtime
-binding/fence 与已接受的原文；Runner 只通过 `apply`、同 effect 的 `query` 或同 effect 的
-`replay` 处理它。重复 effect identity 不创建第二次 provider effect；Server 重启先 query，
-只有完整 fence、deadline 和 `steerRetryAllowed=true` 仍有效时才 replay。`ProviderAccepted`
-才表示 provider 已接受；response loss、unknown 或 stale fence 不能被产品状态翻译为
-provider accepted。
+### ContextGeneration and Unresolved History
 
-如果目标 Turn 在 steer 调用前已 terminal，或被 stop/force-reset 变得不可受理，Server 会在
-同一 fence 保护的 Session 事务中把 steer settle 为稳定 terminal `rejected`；如果变化发生在
-adapter/query/replay 已开始后，则 settle 为 terminal `blocked`，因为 provider 结果已不再可
-裁定。两种情况都释放 ActiveOperation，设置 `steerRetryAllowed=false`、稳定 reason 和
-nextAction，保留原 Input/Turn ID 与 Input accepted，不会无限重试，也不会报告 provider
-accepted。重复请求和重启只返回这一 durable 结果。
+`ContextGeneration` starts at 1 and identifies the current logical context. It
+is not the claim generation of an operation fence. Ordinary Compact does not
+increment it. Reset, Runtime change, missing recovery, force-reset, handoff, and
+rebind start a new logical context and increment it at the same Session
+boundary. Each Input and Turn retains the generation in which it was created
+and cannot move to a new context.
 
-Input accepted 后的 dispatch retry 必须有 canonical `dispatchOperationId`、
-`dispatchAttemptCount`、固定 `dispatchDeadline`、`dispatchAttemptId`、`dispatchLastResult`、
-`dispatchRetryId`、`retryAllowed` 和完整 `dispatchFence`。`dispatchRetryId` 是 outbox command、
-timer、due signal 和 coordinator claim 的同一 durable identity；`dispatchRetryOwnerId`、
-`dispatchRetryClaimGeneration`、`dispatchRetryLeaseUntil` 以及 `TurnDispatchRead/DispatchRetryWork`
-中的 session/operation/owner/ownerFence/claim/revision/attempt/retry/deadline/expected/candidate
-binding 也必须随状态变化持久化。Server 重启后 coordinator 只在
-`dispatchRetryId != null`、`retryAllowed=true`、due 有效且状态允许时修复 work，claim 或
-takeover 过期 lease；重复 signal 只消费一次。
+Current Activity is calculated only from the current generation. Pending
+Inputs, Turns, side effects, and operation results from an older generation are
+not combined with current `queued`, `running`, or `outcome_pending` state. They
+are exposed through `unresolvedPrevious`, which contains at least the old
+`operationId`, old ContextGeneration, outcome, and `nextAction` and can include
+an unresolved count. An old Unknown stops blocking new Input and Turns in the
+current generation only after force-reset is confirmed, the old operation is
+superseded, and the new context and Runtime Binding boundary commits.
 
-dispatch 状态和 Turn 状态必须同步：`queued|retrying|blocked -> Turn.status=queued`，
-`dispatched -> queued|running|outcome_pending`，`unknown -> Turn.status=unknown`，
-`terminal -> Turn.status=terminal`。同 attempt 查询得到 accepted-before-start 回到
-`dispatched + queued`，accepted-and-started 回到 `dispatched + running`，确定 terminal 结果
-写入 canonical Turn result；response loss 不创建新 Input/Turn/attempt。
+### Handoff, Rebind, and Bounded Dispatch Failure
 
-达到次数或 deadline 上限时，只有某次持久 `dispatchAttemptId` 的最后结果为
-`definitely-rejected`，且 attempt/deadline 已到边界，Input 仍为 accepted、Input ID 和 Turn ID
-不变，Server 才能原子写入唯一终态 `dispatchStatus=terminal`、Turn `status=terminal`、
-Turn `outcome=blocked`、稳定 `blockedReason` 和可执行 `nextAction`。无 attempt、outbox 未送达、
-response loss、result unknown 或没有 definitely-rejected 证据时，只保留
-`dispatchStatus=unknown`、Turn `status=unknown`、Turn.reason/nextAction 和
-`query_same_attempt_or_manual_reconcile`，不能写 terminal blocked。临时 `blocked` 只能表示
-definitely-rejected 且有有效 retry due；它不是终态，也不能只靠 `nextAction` 唤醒。
+- **handoff** is the only explicit operation that can change the Runner. Runner
+  reconnect, timeout, or an old event cannot cause an implicit handoff.
+- **rebind** can replace a Runtime Binding or physical Runtime Session only on
+  the same Runner. It cannot use unknown facts to migrate across Runners.
+- Both operations require an `operationId`, current revision, expected Runtime
+  Binding, and bounded deadline. They are accepted only when the current
+  generation is `idle` with no pending side effect. When the current generation
+  is `active`, `outcome_pending`, or `unknown`, query the original operation
+  first and choose force-reset only if it remains unknown. Success increments
+  ContextGeneration, and events from the old Runtime Binding cannot change the
+  current session.
 
-Turn 的 canonical `result` 只有 `outcome=completed` 时保留；`failed`、`cancelled` 和
-`blocked` 即使 Runtime 返回了附带 payload，也必须持久化为 `result=null`，同时保留
-`reason` 与 `nextAction`。
+After a Server restart, steer operations are scanned by
+`operationId=requestId`. A pending or response-loss state first queries the same
+effect and then claims or takes it over under the complete fence. Retry only
+when the adapter can replay with the same identity. Otherwise retain
+`steerStatus=unknown`, `steerRetryAllowed=false`, `admission=blocked`, and
+`query_same_steer_or_force_reset`. A repeated follow-up with the same request
+returns only the original Input and operation projection. It cannot create a
+second effect or report a state as accepted without a replay path.
 
-`retainUnknownWithoutRetry` 清除 retry identity 时必须持久化 `retryAllowed=false`、
-`dispatchRetryId=null`、`dispatchRetryDueAt=null`、无 due/lease/owner，并保留 Turn/dispatch
-unknown 与可行动 nextAction。重启和重复 reconcile 只能保留 unknown，不能从 null identity
-自动唤醒。
+The Server-to-Runner steer effect uses the same `operationId=requestId` and
+queryable `effectId={sessionId, operationId}`. Its request fixes the target
+Session, Input, Turn, complete Runtime Binding and fence, and accepted original
+text. The Runner handles it only through `apply`, `query` of that effect, or
+`replay` of that effect. Repeating the effect identity does not create a second
+provider effect. After restart, the Server queries first and replays only while
+the complete fence and deadline remain valid and
+`steerRetryAllowed=true`. Only `ProviderAccepted` means that the provider
+accepted the effect. Product state cannot translate response loss, unknown, or
+a stale fence into provider accepted.
 
-dispatch claim/takeover、enqueue/query、reschedule、blocked/terminal/unknown 写入都必须携带
-完整 `DispatchFenceToken`（session/operation/owner/ownerFence/claimGeneration/revision、attempt/
-retry IDs、lease/deadline、expected binding、candidate binding 和 bindingAtEffect）；Owner A 的迟到结果在 Owner B 接管或
-完成后只能返回 `stale_operation_fence`。
+If the target Turn is terminal before the steer call, or stop or force-reset
+makes it inadmissible, the Server settles steer as stable terminal `rejected` in
+the same fenced Session transaction. If the change occurs after adapter, query,
+or replay starts, it settles as terminal `blocked` because the provider result
+can no longer be decided. Both paths release ActiveOperation, set
+`steerRetryAllowed=false` with stable `reason` and `nextAction`, preserve the
+original Input and Turn IDs and accepted Input, stop retries, and never report
+provider accepted. Repeated requests and restarts return only this durable
+result.
 
-Coordinator 必须在 `claimDueOrTakeOver` 之前检查 `now >= dispatchDeadline`，不得先生成已经
-过期的 lease 再让 fence 失败。该检查在当前 dispatch record fence 下原子递增 revision 并取消
-retry work：若当前 attempt 的持久 `dispatchLastResult=definitely-rejected`，写唯一终态
-`dispatchStatus=terminal`、`Turn.status=terminal`、`Turn.outcome=blocked`；若没有 attempt、
-outbox 未送达或结果为 `unknown`，则写 `dispatchStatus=unknown`、`Turn.status=unknown`、
-`Turn.reason/nextAction`，保留同一 `dispatchAttemptId` 并要求查询/人工核对。两条分支都清空
-retry lease/fence，写入新的 record/session revision。
+Dispatch retry after Input acceptance requires canonical
+`dispatchOperationId`, `dispatchAttemptCount`, fixed `dispatchDeadline`,
+`dispatchAttemptId`, `dispatchLastResult`, `dispatchRetryId`, `retryAllowed`, and
+complete `dispatchFence`. `dispatchRetryId` is the durable identity shared by
+the outbox command, timer, due signal, and coordinator claim. State changes must
+also persist `dispatchRetryOwnerId`, `dispatchRetryClaimGeneration`,
+`dispatchRetryLeaseUntil`, and the session, operation, owner, owner fence,
+claim, revision, attempt, retry, deadline, expected Runtime Binding, and
+candidate Runtime Binding in `TurnDispatchRead/DispatchRetryWork`. After a
+Server restart, the coordinator repairs work and claims or takes over an
+expired lease only when `dispatchRetryId != null`, `retryAllowed=true`, the due
+time is valid, and state permits it. A repeated signal is consumed only once.
 
-**Stop** 使用唯一 `SessionOperationRead.kind=stop`。`mo session cancel` 仍取消 queued 或
-active Turn；调用方必须提供 stable operationId、expected revision/binding 和 bounded deadline。
-BeginStop 的 operation row 持久保存 target Turn、request fingerprint、expected
-revision/generation、完整 FenceToken、owner/claim generation、lease、reason 和 nextAction。
-其幂等顺序必须是：
+Dispatch state and Turn state must stay synchronized:
+`queued|retrying|blocked -> Turn.status=queued`,
+`dispatched -> queued|running|outcome_pending`,
+`unknown -> Turn.status=unknown`, and
+`terminal -> Turn.status=terminal`. Querying the same attempt returns
+accepted-before-start to `dispatched + queued` and accepted-and-started to
+`dispatched + running`, while a definite terminal result writes the canonical
+Turn result. Response loss creates no new Input, Turn, or attempt.
+
+At the attempt-count or deadline limit, the Server can atomically write the
+single terminal `dispatchStatus=terminal`, Turn `status=terminal`, Turn
+`outcome=blocked`, stable `blockedReason`, and actionable `nextAction` only when
+the last result of a durable `dispatchAttemptId` is `definitely-rejected`, the
+attempt or deadline is at its boundary, the Input remains accepted, and its
+Input and Turn IDs remain unchanged. With no attempt, an undelivered outbox,
+response loss, an unknown result, or no definitely-rejected evidence, retain
+only `dispatchStatus=unknown`, Turn `status=unknown`, Turn `reason` and
+`nextAction`, and `query_same_attempt_or_manual_reconcile`; do not write
+terminal blocked. Temporary `blocked` means only definitely-rejected with a
+valid retry due. It is not terminal and cannot be awakened through
+`nextAction` alone.
+
+Retain the canonical Turn `result` only for `outcome=completed`. For `failed`,
+`cancelled`, or `blocked`, persist `result=null` even if the Runtime returns an
+attached payload, while retaining `reason` and `nextAction`.
+
+When `retainUnknownWithoutRetry` clears retry identity, it must persist
+`retryAllowed=false`, `dispatchRetryId=null`, `dispatchRetryDueAt=null`, no due
+time, lease, or owner, and the unknown Turn and dispatch with actionable
+`nextAction`. Restart and repeated reconciliation can retain only unknown; they
+cannot wake work automatically from a null identity.
+
+Every dispatch claim or takeover, enqueue, query, reschedule, and blocked,
+terminal, or unknown write must carry the complete `DispatchFenceToken`:
+session, operation, owner, owner fence, claim generation, revision, attempt and
+retry IDs, lease and deadline, expected Runtime Binding, candidate Runtime
+Binding, and `bindingAtEffect`. A late result from Owner A after Owner B takes
+over or completes can return only `stale_operation_fence`.
+
+The coordinator must check `now >= dispatchDeadline` before
+`claimDueOrTakeOver`; it cannot first create an expired lease and then let the
+fence fail. Under the current dispatch-record fence, this check atomically
+increments revision and cancels retry work. If the current attempt has durable
+`dispatchLastResult=definitely-rejected`, it writes the single terminal
+`dispatchStatus=terminal`, `Turn.status=terminal`, and
+`Turn.outcome=blocked`. If there is no attempt, the outbox was not delivered, or
+the result is `unknown`, it writes `dispatchStatus=unknown`,
+`Turn.status=unknown`, and Turn `reason` and `nextAction`, retains the same
+`dispatchAttemptId`, and requires a query or manual reconciliation. Both paths
+clear the retry lease and fence and write new record and Session revisions.
+
+**Stop** uses the single `SessionOperationRead.kind=stop`. `mo session cancel`
+still cancels a queued or active Turn. The caller must provide a stable
+`operationId`, expected revision and Runtime Binding, and bounded deadline. The
+BeginStop operation row durably stores the target Turn, request fingerprint,
+expected revision and generation, complete FenceToken, owner and claim
+generation, lease, `reason`, and `nextAction`. Its idempotency order is:
 
 ```text
 BeginStop(sessionId, operationId, turnId, fingerprint, expectedRevision,
@@ -427,57 +647,81 @@ attempt, and a bounded retry reuses that operation's provider idempotency identi
 at the deadline, operation and Turn remain unknown with query/manual nextAction, never cancelled or
 idle.
 
-## AgentSession 来源
+## AgentSession Origin
 
-每个 AgentSession 只有一个来源：
+Each AgentSession has exactly one Origin:
 
-- **Workflow 来源**：由 `WorkflowRun + session 名称` 寻址；同名 task 可以继续上下文。
-- **Agent launch 来源**：每次启动 Mohist Agent 时创建，并关联该 Agent ID。
-- **Agent 接入来源**：由 Slack 等 Agent Connection 启动，并关联该 Agent ID；它仍是同一个
-  Mohist Agent 的会话，不是接入方自己的会话副本。
+- **Workflow Origin**: Addressed by `WorkflowRun + session name`; a task with
+  the same name can continue the context.
+- **Agent launch Origin**: Created for each Mohist Agent launch and associated
+  with that Agent ID.
+- **Agent Connection Origin**: Started by an Agent Connection such as Slack and
+  associated with that Agent ID. It is still a session of the same Mohist Agent,
+  not the connection's own session copy.
 
-来源在 Session 整个生命周期内不改变。模型、prompt、执行后端配置相同，不会让两段
-Session 合并；当前 Runtime Session 更换也不会改变 AgentSession 来源。
+Origin does not change during the Session lifecycle. Matching Model, prompt,
+and execution-backend configuration does not merge two Sessions. Replacing the
+current Runtime Session does not change AgentSession Origin.
 
-无论来源，CLI 通过顶层 `mo session` 寻址：
+For every Origin, the CLI addresses the top-level `mo session` surface:
 
-- `mo session view <session-id>` / `mo session transcript <session-id>` 都按稳定 Session ID
-  读取，不再按来源分两套命令。
-- `mo session followup` / `compact` / `reset` / `cancel` 同样只接 Session ID；`cancel` 另需
-  `--turn-id`、`--operation-id`、当前 revision/binding 和 bounded deadline。
-- `mo session list` 通过 `--agent <agent>` / `--issue <number>` / `--run <run-id>` 之一筛选，来源只是发现条件。
-  `--agent` 会列出该 Agent 通过直接启动、Agent Connection 或其他受支持入口创建的会话。
-- `mo session cancel` 取消当前 queued 或 active AgentTurn，使用 canonical stop operation。
-  queued Turn 在 Session 事务内终结为 cancelled 并清除 durable dispatch retry；active Turn
-  先执行 fenced Runtime.stop。若它是 launch 的首个 Turn，AgentJob 以失败类别 `cancelled`
-  结束；后续 Turn 被取消不修改原 AgentJob。停止结果未知时保持 operation/Turn `unknown`
-  并提供 query/manual-check nextAction。
+- `mo session view <session-id>` and
+  `mo session transcript <session-id>` read by stable Session ID. There are no
+  separate commands by Origin.
+- `mo session followup`, `compact`, `reset`, and `cancel` also accept only a
+  Session ID. `cancel` additionally requires `--turn-id`, `--operation-id`, the
+  current revision and Runtime Binding, and a bounded deadline.
+- `mo session list` filters by one of `--agent <agent>`, `--issue <number>`, or
+  `--run <run-id>`. Origin is only a discovery condition. `--agent` lists the
+  Agent's sessions created by direct launch, Agent Connection, or another
+  supported entry point.
+- `mo session cancel` cancels the current queued or active AgentTurn through the
+  canonical stop operation. A queued Turn becomes cancelled and clears durable
+  dispatch retry in the Session transaction. An active Turn first performs a
+  fenced `Runtime.stop`. If it is the launch's first Turn, the AgentJob ends
+  with failure category `cancelled`; cancelling a later Turn does not modify the
+  original AgentJob. When the stop result is unknown, the operation and Turn
+  remain `unknown` and provide a query or manual-check `nextAction`.
 
-## 当前 Runtime Session 与缺失恢复
+## Current Runtime Session and Missing Recovery
 
-AgentSession ID 是 Mohist 的稳定身份；OpenCode Session 或 Pi Session 是执行后端的
-当前物理会话。AgentSession 只保存当前关联，不建立物理 Session 历史。
+An AgentSession ID is the stable Mohist identity. An OpenCode Session or Pi
+Session is the current physical session in the execution backend. An
+AgentSession stores only the current association and no physical Session
+history.
 
-通常所有后续输入都复用当前 Runtime Session：task 变化、retry、模型变化、Compact、
-执行结束或 Runner 重启都不能替换它。新的物理 Session 只能来自用户 Reset、明确的
-执行后端切换，或以下受限的 confirmed-missing recovery：同一 Runner 的 probe 明确返回
-`definitely-missing`，且当前 generation `activity=idle`、没有 unknown Input/Turn/dispatch/
-runtime effect、Session `admission=ready`。此时 recovery 才能创建 candidate、通过完整
-expected-binding CAS 换绑，并用 CAS 返回的 post fence 完成 boundary/result 写入。
+Ordinarily, every later input reuses the current Runtime Session. A task change,
+retry, Model change, Compact, execution completion, or Runner restart cannot
+replace it. A new physical Session can come only from user Reset, an explicit
+execution-backend change, or this limited confirmed-missing recovery: a probe
+on the same Runner explicitly returns `definitely-missing`, the current
+generation has `activity=idle`, there is no unknown Input, Turn, dispatch, or
+Runtime effect, and the Session has `admission=ready`. Only then can recovery
+create a candidate, swap the Runtime Binding through the complete
+expected-binding CAS, and use the post fence returned by CAS to complete the
+boundary and result write.
 
-disconnect、timeout、Runner restart、unavailable、权限错误、非 404 或其它无法证明 physical
-Session 不存在的结果只进入 `ObservationUnknown`，保留原 binding。即使 probe 明确 missing，
-只要当前 generation 为 `running`、`outcome_pending` 或 `unknown`，或旧 side effect 可能已发生，
-recovery 也只能 observation/query，进入 `RecoveryObservationOnly`，Session
-`admission=blocked`，保持 binding/Turn，并给出 `nextAction=query_runtime_or_force_reset`；
-不得自动换绑或 replay。只有 force-reset 的 collector、candidate、CAS、ContextBoundary
-按同一原子顺序完成后，新的 generation 才能 ready。
+A disconnect, timeout, Runner restart, unavailable result, permission error,
+non-404 result, or any result that does not prove the physical Session is absent
+enters only `ObservationUnknown` and retains the original Runtime Binding. Even
+after a probe explicitly reports missing, recovery is limited to observation
+and query and enters `RecoveryObservationOnly` when the current generation is
+`running`, `outcome_pending`, or `unknown`, or when an old side effect can have
+occurred. The Session retains its Runtime Binding and Turn, sets
+`admission=blocked`, and provides
+`nextAction=query_runtime_or_force_reset`. It cannot automatically rebind or
+replay. A new generation can become ready only after the force-reset collector,
+candidate, CAS, and ContextBoundary complete in the same atomic order.
 
-任何 binding CAS 都执行唯一 `compareAndSwapBinding(preToken)`：preToken 必须匹配 expected
-binding、revision、owner/lease、operation 和 candidate；CAS 原子换绑并递增 revision/binding
-epoch，返回 `postFence/currentBinding=candidate`。后续 effect/result/complete 只能使用 post
-fence；旧 pre/post owner 都 fail closed。替换不改变 AgentSession ID、来源、工作目录或已记录
-的会话内容；新 Session 从空上下文开始，会话中以「上下文已重置」标注，旧消息不重放。
+Every Runtime Binding CAS uses the single
+`compareAndSwapBinding(preToken)`. The pre-token must match the expected Runtime
+Binding, revision, owner and lease, operation, and candidate. CAS atomically
+swaps the Runtime Binding, increments revision and BindingEpoch, and returns
+`postFence/currentBinding=candidate`. Later effects, results, and completion can
+use only the post fence; old pre-token and post-token owners fail closed. A
+replacement does not change AgentSession ID, Origin, working directory, or
+recorded session content. The new Session starts with empty context, the
+conversation records "Context reset," and old messages are not replayed.
 
 Candidate identity is the complete pair `(operation.candidateKey, operation.candidateBinding)`;
 there is no separate adopted-candidate field on `BindingTuple`. The create result keeps the
@@ -497,57 +741,76 @@ its operation read and uses an independent cleanup fence. Every attempt, phase, 
 a changed current binding creates a new bounded cleanup fence, and an adopted/current candidate or
 an expired/stale cleanup fails closed without discard.
 
-复用不变量、自动恢复边界与并发规则见
-[Action 契约 · Agent 执行类 Action 的共享语义](actions/README.md#agent-执行类-action-的共享语义)。
+See
+[Shared Semantics for Agent Execution Actions](actions/README.md#shared-semantics-for-agent-execution-actions)
+for reuse invariants, automatic recovery boundaries, and concurrency rules.
 
-## AgentSession 操作
+## AgentSession Operations
 
-Workflow 来源和 Agent launch 来源的 AgentSession 使用同一组会话操作：
+AgentSessions with Workflow and Agent launch Origins use the same session
+operations:
 
-- **Follow-up**：向当前会话追加用户输入；执行中加入当前执行，空闲时开始新的执行，
-  不创建 Mohist Agent 或 AgentJob。执行中的 steer 会创建与 Input 同事务提交的 durable
-  steer operation/effect；OpenCode `promptAsync` 和 Pi `session.steer` 只是 adapter 通道。
-- **Compact**：要求当前执行后端压缩上下文，保持 AgentSession 和当前 Runtime Session。
-- **Reset**：在空闲时建立没有旧 Runtime 上下文的新物理 Session，保持 AgentSession
-  身份和已有会话内容。
+- **Follow-up**: Appends user input to the current session. It joins the current
+  execution when one is running and starts a new execution when idle. It creates
+  no Mohist Agent or AgentJob. Steer during execution creates a durable steer
+  operation and effect committed in the same transaction as the Input. OpenCode
+  `promptAsync` and Pi `session.steer` are adapter channels only.
+- **Compact**: Asks the current execution backend to compress context while
+  preserving the AgentSession and current Runtime Session.
+- **Reset**: Creates a new physical Session without the old Runtime context
+  while idle, preserving AgentSession identity and existing conversation
+  content.
 
-这些操作改变会话，不改变工作所有权。Follow-up 不会把 TaskRun 变成 AgentJob；
-Compact 或 Reset 也不会重新启动 Mohist Agent。
+These operations change the session, not work ownership. A follow-up does not
+turn a TaskRun into an AgentJob. Compact and Reset do not launch the Mohist Agent
+again.
 
-## 当前范围
+## Current Scope
 
-`mohist/opencode` 与 `mohist/pi` 的 Workflow Action 均已实装，具体配置见各自
-Action 文档；Mohist Agent 按配置选择 OpenCode 或 Pi，后端随 snapshot 固定到
-AgentJob。Web UI 和 CLI 已能创建、编辑、启动 Mohist Agent，并读取和继续 AgentSession。
-`mohist/agent` 已定义契约，尚未实装。Mohist Agent 事件响应见
-[Agent 事件路由](event-routing.md)。
+The `mohist/opencode` and `mohist/pi` Workflow Actions are implemented; see
+their Action documents for configuration. A Mohist Agent selects OpenCode or Pi
+through its configuration, and the snapshot fixes that backend to the AgentJob.
+The Web UI and CLI can create, edit, and launch a Mohist Agent and read and
+continue an AgentSession. The `mohist/agent` contract is defined but not
+implemented. See [Agent Event Routing](event-routing.md) for Mohist Agent event
+responses.
 
-## 实装差距
+## Implementation Gaps
 
-Runtime Session 缺失时的自动重建与重新绑定尚未完整落地；当前部分执行路径仍会失败并
-要求用户 Reset。对应实施 issue 待从本 spec 创建。
+Automatic reconstruction and rebinding after a missing Runtime Session are not
+fully implemented. Some current execution paths still fail and require user
+Reset. An implementation Issue must be created from this spec.
 
 ### Implementation gap: caller key is required
 
-产品合同要求 follow-up 的 `requestId` 以及 Compact、Reset、recovery、handoff、rebind、stop
-和 force-reset 的 `operationId` 都由调用方提供；缺失或空 key 必须在受理前拒绝，Server 不
-生成用户不可见的替代 key。当前 routes/Grain 仍有缺失 caller key 时生成隐藏 key 的路径，
-这是后续实现工作，不是产品合同的例外，也不代表当前实现已完成。迁移边界是 Server
-canonical admission/operation 层：所有入口先传递 caller key，再由该层在写入任何 operation、
-Input、Turn 或外部 effect 前执行非空校验；在迁移完成前，这个实现 gap 必须保持可见。
+The product contract requires a caller-provided follow-up `requestId` and a
+caller-provided `operationId` for Compact, Reset, recovery, handoff, rebind,
+stop, and force-reset. A missing or empty key must be rejected before
+acceptance, and the Server must not generate a replacement key hidden from the
+client. Current routes and Grains still contain paths that generate a hidden
+key when the caller key is absent. This is future implementation work, not an
+exception to the product contract or evidence that implementation is complete.
+The migration boundary is the canonical Server admission and operation layer.
+Every entry point first passes the caller key, and that layer validates it as
+nonempty before writing any operation, Input, Turn, or external effect. This gap
+must remain visible until migration is complete.
 
-Max concurrent runs 尚未真正限制并发。
+Max concurrent runs does not yet enforce concurrency.
 
-Agent Connection 的 Readiness 已提供最小配置推导：AgentConfig 缺少 Model 或 Runtime
-时显示 Needs setup，同时保持 Connection health 独立；两者齐备时显示 Ready，尚未探测
-的 Agent 默认显示 Unknown。完整的 Runner/runtime 可执行性探测仍是后续工作，当前仍可能
-在真正启动后发现更多缺口。
+Agent Connection Readiness provides minimal configuration derivation. It shows
+Needs setup when AgentConfig lacks a Model or Runtime while keeping Connection
+health independent. It shows Ready when both are present, and an Agent that has
+not been probed defaults to Unknown. Complete Runner and Runtime executability
+probing remains future work, so a real launch can still find additional gaps.
 
-SessionInput 与 AgentTurn 尚未作为稳定的 Session 子记录完整落地；现有 launch/follow-up
-返回值、transcript 与 live update 还不能分别回答“哪条输入已受理”和“哪轮 Runtime 正在
-处理”。
+SessionInput and AgentTurn are not fully implemented as stable child records of
+a Session. Existing launch and follow-up results, transcripts, and live updates
+cannot yet answer separately which input was accepted and which Runtime Turn is
+processing.
 
-Agent 接入、Slack Bot、接入权限与连接状态尚未实装。当前调用接口也缺少供外部客户端
-安全使用所需的身份验证、重复请求保护和可断线续读的执行事件。目标契约见
-[`design/agent-api.md`](../design/agent-api.md) 与
-[`design/slack.md`](../design/slack.md)。
+Agent Connections, Slack Bots, connection permissions, and connection state are
+not implemented. The current invocation interface also lacks the authentication,
+duplicate-request protection, and resumable execution events required for safe
+external clients. See the target contracts in
+[`design/agent-api.md`](../design/agent-api.md) and
+[`design/slack.md`](../design/slack.md).
