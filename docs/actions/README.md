@@ -1,39 +1,49 @@
-# Action 契约
+# Action Contracts
 
-Action 是 Workflow task 通过 `uses` 选择的一次执行接口。每个 Action 定义自己的
-`with` 输入、输出和失败语义,但不拥有 Workflow 的完成判断,也不代表一个有身份的
-Mohist Agent。
+An Action is an execution interface selected by a Workflow task through
+`uses`. Each Action defines its own `with` inputs, outputs, and failure
+semantics. It does not decide whether the Workflow is complete and does not
+represent a Mohist Agent with an identity.
 
-每个 Action 的契约是声明式的,包含三部分:
+Each Action contract is declarative and has three parts:
 
-- **输入**:名称、是否必填、默认值。任务的 `with` 按声明校验——未知字段、缺少
-  必填字段、类型不符都会被拒绝(保存 Profile 时即报错,而不是运行到才失败),
-  不存在声明之外的隐藏输入。
-- **输出**:成功时产出的字段,供 `setVars`、`${{ tasks.<id>.outputs.* }}` 和
-  recovery 匹配读取。
-- **错误码**:该 Action 全部业务失败的稳定标识目录,供 recovery
-  `when: error.code=...` 匹配;错误文案面向人,不用于匹配。
+- **Inputs**: Names, required status, and default values. A task's `with` value
+  is validated against the declaration. Unknown fields, missing required
+  fields, and invalid types are rejected when the Profile is saved instead of
+  failing only at runtime. There are no hidden inputs outside the declaration.
+- **Outputs**: Fields produced on success for `setVars`,
+  `${{ tasks.<id>.outputs.* }}`, and recovery matching.
+- **Error codes**: Stable identifiers for all business failures produced by
+  the Action. Recovery matches them with `when: error.code=...`. Human-readable
+  error messages are not matching contracts.
 
-平台还可能产生 `invalid-input`、`unexpected-error` 和 `timeout`，分别表示输入校验、
-未预期平台故障和期限失败；它们不属于任何 Action 的业务错误。
+The platform can also produce `invalid-input`, `unexpected-error`, and
+`timeout`. These indicate input validation failure, an unexpected platform
+failure, and a missed deadline. They are not business errors owned by an
+Action.
 
-本目录保存需要独立说明的 Action 产品契约。Workflow 的阶段、task、`expect` 和恢复
-配置见 [Workflow Profile](../workflow-profiles.md);Action、Inline Agent 和 Mohist Agent
-的关系见 [Agent 与 AgentSession](../agent-sessions.md)。
+This directory contains product contracts for Actions that need separate
+documentation. See [Workflow Profiles](../workflow-profiles.md) for Workflow
+stages, tasks, `expect`, and recovery configuration. See
+[Agents and AgentSessions](../agent-sessions.md) for the relationship among
+Actions, Inline Agents, and Mohist Agents.
 
-正文统一使用中文;产品中的规范术语、配置字段和命令保留原名。
+Write the active documentation in English. Preserve product terms,
+configuration fields, and commands exactly.
 
-## 当前 Action
+## Current Actions
 
-- [`mohist/opencode`](opencode.md) —— 通过 OpenCode 执行一次输入,定义模型选项、
-  Workflow Session 和 Session 操作语义。
-- [`mohist/pi`](pi.md) —— 通过 Pi 执行一次输入;与 `mohist/opencode` 同层,共享
-  模型选项形状与 Session 语义,但安装与信任边界不同。
-- [`mohist/agent`](agent.md) —— 引用预定义 Mohist Agent 的定义执行 task：指令与
-  配置来自 Agent 快照，工作机制与 Inline Agent 相同，不创建 AgentJob。
+- [`mohist/opencode`](opencode.md): Executes one input through OpenCode and
+  defines model options, Workflow Session behavior, and Session operations.
+- [`mohist/pi`](pi.md): Executes one input through Pi. It is a peer of
+  `mohist/opencode` and shares its model-option shape and Session semantics,
+  but has different installation and trust boundaries.
+- [`mohist/agent`](agent.md): Executes a task from a predefined Mohist Agent
+  snapshot. It uses the same mechanism as an Inline Agent and does not create
+  an AgentJob.
 
-**Git Actions**:工作区准备、rebase、rebase 状态、merge readiness 和 push 的显式 `with`
-输入契约。
+**Git Actions** define explicit `with` input contracts for workspace
+preparation, rebase, rebase status, merge readiness, and push.
 
 - [`mohist/workspace-prepare`](git.md#mohistworkspace-prepare)
 - [`mohist/rebase`](git.md#mohistrebase)
@@ -41,8 +51,8 @@ Mohist Agent。
 - [`mohist/merge-ready`](git.md#mohistmerge-ready)
 - [`mohist/push`](git.md#mohistpush)
 
-**GitHub PR Actions**:PR 创建、ready、checks、状态校验和 squash merge 的显式 `with`
-输入契约。
+**GitHub PR Actions** define explicit `with` input contracts for PR creation,
+ready state, checks, status validation, and squash merge.
 
 - [`mohist/create-github-pr`](github-pr.md#mohistcreate-github-pr)
 - [`mohist/mark-github-pr-ready`](github-pr.md#mohistmark-github-pr-ready)
@@ -50,109 +60,134 @@ Mohist Agent。
 - [`mohist/github-pr-checks`](github-pr.md#mohistgithub-pr-checks)
 - [`mohist/github-pr-status`](github-pr.md#mohistgithub-pr-status)
 
-**Core Actions**:进程、内联脚本、文件存在性检查和标记检查。
+**Core Actions** run processes and inline scripts, and check file existence and
+markers.
 
 - [`core/process`](core.md#coreprocess)
 - [`core/script`](core.md#corescript)
 - [`core/artifact-exists`](core.md#coreartifact-exists)
 - [`core/marker`](core.md#coremarker)
 
-**OpenSpec Actions**:加载 `tasks.json`、核查 OpenSpec change 产物和归档 change。
+**OpenSpec Actions** load `tasks.json`, verify OpenSpec change artifacts, and
+archive a change.
 
 - [`mohist/openspec-tasks`](openspec.md#mohistopenspec-tasks)
 - [`mohist/openspec-artifacts`](openspec.md#mohistopenspec-artifacts)
 - [`mohist/archive-change`](openspec.md#mohistarchive-change)
 
-Pi 是同层的独立 Action,不是 `mohist/opencode` 的输入扩展。
+Pi is an independent peer Action, not an input extension of
+`mohist/opencode`.
 
-## Agent 执行类 Action 的共享语义
+## Shared Semantics for Agent Execution Actions
 
-`mohist/opencode` 与 `mohist/pi` 共享以下语义，各篇只写差异。`mohist/agent` 通过
-Agent 定义引用落到同一类执行，同样遵循。
+`mohist/opencode` and `mohist/pi` share the following semantics. Their own
+pages describe only their differences. `mohist/agent` resolves an Agent
+definition into the same kind of execution and follows these semantics too.
 
 ### Workflow Session
 
-`session` 标识 Workflow 来源的逻辑 AgentSession。同一 WorkflowRun 中同名 task 共享
-对话上下文，不同名称相互隔离；省略 `session` 时使用 Work ID，避免无意间把两个 task
-放进同一段对话。执行后端切换保留逻辑身份，但新物理 Session 从空上下文开始，不迁移
-旧对话，也不建立物理 Session 历史。
+`session` identifies a logical AgentSession whose origin is a Workflow. Tasks
+with the same name in one WorkflowRun share conversation context. Different
+names are isolated. When `session` is omitted, Mohist uses the Work ID so two
+tasks do not accidentally share a conversation. Changing the execution backend
+preserves the logical identity but starts an empty physical Session. Mohist does
+not migrate the old conversation or create physical Session history.
 
-### 物理 Session 复用不变量
+### Physical Session Reuse Invariants
 
-同一 WorkflowRun 中，只要 task 指定同一个 `session` 名称，Mohist 就必须继续使用该
-AgentSession 当前绑定的同一个物理 Session。task 变化、task 重试、`options.model` 或
-`options.variant` 变化都不能替换它；模型选择只影响本次执行，并在原 Session 上生效。
+When tasks in one WorkflowRun specify the same `session` name, Mohist must keep
+using the physical Session currently bound to that AgentSession. A different
+task, task retry, or change to `options.model` or `options.variant` cannot
+replace it. Model selection affects only the current execution and takes effect
+in the existing Session.
 
-| 变化 | 物理 Session |
+| Change | Physical Session |
 |---|---|
-| 后续 task 或重试继续使用同名 `session` | 保持不变 |
-| `options.model` 或 `options.variant` 变化 | 保持不变 |
-| Compact | 保持不变 |
-| Reset | 建立新的空 Session；AgentSession 保留已有会话内容 |
-| 提交新的独立输入前明确确认当前 Session 已不存在 | 自动建立新的空 Session |
-| 工作目录变化 | 拒绝执行；需要新的逻辑 `session` 名称 |
-| 执行后端变化 | 建立新的空物理 Session |
+| A later task or retry uses the same `session` name | Unchanged |
+| `options.model` or `options.variant` changes | Unchanged |
+| Compact | Unchanged |
+| Reset | Creates a new empty Session; the AgentSession keeps its conversation content |
+| The current Session is confirmed missing before a new independent input is submitted | Creates a new empty Session automatically |
+| Working directory changes | Rejects execution; use a new logical `session` name |
+| Execution backend changes | Creates a new empty physical Session |
 
-自动恢复只处理负责当前绑定的 Runner 上、后端明确确认旧 Session 已不存在、且本次
-输入尚未被接受的情况。请求落到其它 Runner、后端暂时不可用、响应无法判断，或
-Prompt 可能已经提交时，Mohist 明确失败，不替换绑定或重放 Prompt。新 Session 没有旧
-上下文；同一 AgentSession 继续显示已有消息，并以「上下文已重置」说明后续从空上下文
-开始。
+Automatic recovery applies only when the responsible Runner still owns the
+current binding, the backend explicitly confirms that the old Session is
+missing, and the current input has not been accepted. Mohist fails explicitly
+when the request reaches another Runner, the backend is temporarily
+unavailable, the response is ambiguous, or the prompt might already have been
+submitted. It does not replace the binding or replay the prompt. The new
+Session has no old context. The same AgentSession continues to show existing
+messages and indicates that later work starts with reset context.
 
-task 已完成工作但还有改动需要提交或还原时，Mohist 在同一个 AgentSession 和物理
-Session 中继续这次收尾执行；收尾不替换会话，也不要求先 Reset。
+When a task has completed its work but still has changes to commit or restore,
+Mohist continues the cleanup execution in the same AgentSession and physical
+Session. Cleanup does not replace the Session and does not require Reset first.
 
-同一 AgentSession 同时只执行一个由 Workflow 发起的输入；不同 AgentSession 可以并行。
-用户在 Session 页面提交的 follow-up 是例外：Session 正在执行时加入当前执行，空闲时
-开始新的执行。
+Only one Workflow-originated input runs in an AgentSession at a time. Different
+AgentSessions can run concurrently. A follow-up submitted from the Session page
+is the exception: it joins the current execution when the Session is running
+and starts a new execution when the Session is idle.
 
-### Session 操作
+### Session Operations
 
-| 操作 | 结果 |
+| Operation | Result |
 |---|---|
-| Follow-up | 把用户文本交给当前物理 Session；确认后端已接收后返回 |
-| Compact | 使用后端的原生压缩；Runtime Session 身份不变 |
-| Reset | 在 Session 空闲时建立一个没有旧上下文的新物理 Session；AgentSession 保留已有会话内容 |
+| Follow-up | Sends user text to the current physical Session and returns after the backend accepts it |
+| Compact | Uses native backend compaction; the Runtime Session identity remains unchanged |
+| Reset | Creates an empty physical Session while idle; the AgentSession keeps its conversation content |
 
-Compact 是用户在 Session 中发起的操作，不是 Workflow Action；Mohist 不生成假摘要
-模拟压缩，压缩失败也不静默降级。Runner 重启后仍按 AgentSession 保存的绑定继续这些
-操作。Compact 和针对执行中操作的命令不做缺失自动恢复；Reset 即使在旧 Session 已不
-存在时仍可建立新的空 Session。
+Compact is a user operation within a Session, not a Workflow Action. Mohist
+does not simulate compaction with a synthetic summary and does not silently
+degrade when compaction fails. After a Runner restart, these operations still
+use the binding stored by the AgentSession. Compact and operations against a
+running execution do not recover a missing Session automatically. Reset can
+create an empty Session even when the old Session is already missing.
 
-### 完成与失败
+### Completion and Failure
 
-执行成功结束后，Workflow 才按 task 的 `expect`、`artifacts`、`failIf` 和 recovery
-规则判断后续流程；执行失败、取消或超时时，原始错误就是 task 结果，不再检查文件或
-marker。Action Output 只在命中 promise marker 时返回 `{ "promise": "..." }`，否则为
-`null`；Session ID、模型、用量、完整文本与校验明细属于 Session 或任务状态，不塞进
-Action Output。
+After execution succeeds, the Workflow uses the task's `expect`, `artifacts`,
+`failIf`, and recovery rules to decide what happens next. When execution fails,
+is cancelled, or times out, that original error is the task result. Mohist does
+not then inspect files or markers. Action Output is `{ "promise": "..." }`
+only when a promise marker matches; otherwise it is `null`. Session ID, model,
+usage, full text, and validation details belong to Session or task state and
+are not placed in Action Output.
 
-执行期限从提交 Prompt 前开始计时，绑定与审计输入准备不占用该预算；收尾 Prompt 是
-新的执行并获得新的期限。期限到达后中断当前执行并明确报告 timeout；中断后端只是
-收尾，不能用缺少 marker 覆盖 timeout，也不替换当前 Session 绑定或自动 Reset。提交
-结果不确定时不自动重放 Prompt，避免同一任务被执行两次。
+The execution deadline starts before Mohist submits the prompt. Preparing the
+binding and audit input does not consume this budget. A cleanup prompt is a new
+execution with a new deadline. When the deadline expires, Mohist interrupts the
+current execution and reports `timeout`. Backend interruption is cleanup and
+cannot replace `timeout` with a missing-marker result. It also cannot replace
+the current Session binding or perform an automatic Reset. Mohist does not
+replay a prompt when submission is uncertain because that could execute one
+task twice.
 
-provider 明确报告额度、余额或计费耗尽时，Mohist 中断当前执行并让本次 task 失败，
-不等待 provider 继续重试；Session 绑定保持不变，回到空闲后可以选择其他模型继续，
-无需 Reset。无法确认当前执行已经停止时，明确报告中断未确认，不把仍可能执行的
-Session 显示为已经安全空闲。
+When the provider explicitly reports exhausted quota, balance, or billing,
+Mohist interrupts the current execution and fails the task without waiting for
+provider retries. The Session binding remains unchanged. After the Session
+becomes idle, work can continue with another model without Reset. If Mohist
+cannot confirm that execution stopped, it reports that interruption is
+unconfirmed instead of presenting a possibly running Session as safely idle.
 
-### 共享错误码
+### Shared Error Codes
 
-两个执行类 Action 共享以下业务错误码，各篇只补充特有错误码：
+The two execution Actions share these business error codes. Their own pages
+list only additional codes.
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `runtime-unavailable` | 后端执行能力尚未就绪或不可用 |
-| `session-workspace-mismatch` | Session 绑定的工作目录与本次执行不一致 |
-| `session-binding-failed` | 逻辑 Session 绑定的解析或持久化失败 |
-| `runtime-session-missing` | 物理 Session 已不存在，但当前操作无法安全地自动重建或重新投递 |
-| `unavailable-runtime` | 后端报告不可用 |
-| `execution-failed` | 执行失败（含 provider 额度、余额或计费耗尽） |
+| `runtime-unavailable` | Backend execution capability is not ready or available |
+| `session-workspace-mismatch` | The working directory does not match the Session binding |
+| `session-binding-failed` | Logical Session binding resolution or persistence failed |
+| `runtime-session-missing` | The physical Session is missing, but this operation cannot rebuild or resubmit safely |
+| `unavailable-runtime` | The backend reports that it is unavailable |
+| `execution-failed` | Execution failed, including exhausted provider quota, balance, or billing |
 
-## 实装差距
+## Implementation Status
 
-- `mohist/pi` 尚未实装,当前只有产品契约(见 [pi.md](pi.md) 的实装差距小节)。
-- `mohist/agent` 尚未实装,当前只有产品契约(见 [agent.md](agent.md) 的实装差距小节)。
-- Runner 派发时会按 manifest 校验未知字段、必填字段和类型;自定义 Profile 应在 `with`
-  中显式绑定需要的 Variable 值。
+- `mohist/opencode`, `mohist/pi`, and `mohist/agent` are implemented. Their own
+  pages describe remaining capability gaps.
+- Runner dispatch validates unknown fields, required fields, and types against
+  the manifest. A custom Profile must bind every required Variable explicitly
+  in `with`.

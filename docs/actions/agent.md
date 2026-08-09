@@ -1,14 +1,17 @@
 # `mohist/agent` Action
 
-`mohist/agent` 让一个 Workflow task 引用 Project 内预定义的 Mohist Agent 来执行：
-task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套机制运行。
-它只支持 task，不支持 workflow check。
+`mohist/agent` lets a Workflow task execute with a predefined Mohist Agent from
+the Project. The task receives a snapshot of that Agent's instructions and
+execution configuration, then runs through the same mechanism as an Inline
+Agent. It supports tasks only, not Workflow checks.
 
-它是**定义引用，不是工作委托**：不启动 AgentJob，工作的成功失败仍由 TaskRun
-裁定，AgentSession 仍是 Workflow 来源。Agent、AgentJob 和 AgentSession 的总体
-关系见 [Agent 与 AgentSession](../agent-sessions.md)。
+This is an **Agent definition reference, not a work delegation**. It does not
+start an AgentJob. TaskRun still decides whether the work succeeds or fails,
+and the AgentSession still has a Workflow origin. See
+[Agents and AgentSessions](../agent-sessions.md) for the overall relationship
+between Agent, AgentJob, and AgentSession.
 
-## 基本用法
+## Basic Usage
 
 ```yaml
 - id: review
@@ -18,46 +21,55 @@ task 获得该 Agent 的指令与执行配置快照，按 Inline Agent 同一套
     prompt: ${{ prompts.review }}
 ```
 
-`name` 指向的 Agent 提供身份指令、执行后端（OpenCode 或 Pi）、模型、Variant 与 Skills；
-`prompt` 是本次任务输入。适合同一个「角色」被多个 task、多个 Profile 复用，
-或要和路由规则、`@` 提及共用同一个 Agent 身份的场景；一次性任务继续用
-[`mohist/opencode`](opencode.md) 或 [`mohist/pi`](pi.md) 内联。
+The Agent selected by `name` provides identity instructions, execution backend
+(OpenCode or Pi), model, variant, and Skills. `prompt` is the input for this
+task. Use this Action when the same role must be reused by multiple tasks or
+Profiles, or when routing rules and `@` mentions must use the same Agent
+identity. Continue to use [`mohist/opencode`](opencode.md) or
+[`mohist/pi`](pi.md) inline for one-time tasks.
 
-## Action 输入
+## Action Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `name` | 是 | — | Mohist Agent 的静态名称或 id；不支持模板表达式 |
-| `prompt` | 是 | — | 本次交给该 Agent 的任务输入，支持模板表达式 |
-| `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
-| `timeout` | 否 | 与后端 Action 相同 | 本次执行的期限 |
+| `name` | Yes | - | Static Mohist Agent name or ID. Template expressions are not supported. |
+| `prompt` | Yes | - | Task input for the Agent. Template expressions are supported. |
+| `session` | No | - | Logical Session name within the WorkflowRun. The current Work ID is used when omitted. |
+| `timeout` | No | Same as the backend Action | Deadline for this execution. |
 
-执行后端、模型、Variant 与 Skills 由 Agent 配置决定，task 不覆盖；`prompt` 只是本次工作的
-目标输入，不能修改 Agent 定义。`expect`、`artifacts`、`setVars`
-与 recovery 等 task 级构造的行为与其它 Action 相同。
+The Agent configuration selects the execution backend, model, variant, and
+Skills. The task cannot override them. `prompt` supplies only the goal for this
+work and cannot modify the Agent definition. Task-level constructs such as
+`expect`, `artifacts`, `setVars`, and recovery behave as they do for other
+Actions.
 
-`name` 的解析顺序与 `mo` 命令面相同：以 `agent_` 开头的引用只按 id
-解析；其它引用先按名称解析，名称未命中时再按 id 解析。
+`name` uses the same resolution order as the `mo` command surface. A reference
+that starts with `agent_` resolves only as an ID. Other references resolve by
+name first and fall back to ID when no name matches.
 
-## 解析与快照
+## Resolution and Snapshot
 
-- `name` 在**每次 dispatch 时**解析为当时定义的 snapshot：指令、执行后端、模型、Variant
-  与有序 Skills 随该 attempt 固定。
-- 编辑 Agent 不影响已 dispatch 的 attempt；retry 重新解析——修复定义后 retry
-  立即生效。
-- 普通客户端可以提供 prompt 和上下文，但不能通过 task input 或上下文选择另一个 Runtime、
-  Model、Variant 或 Skills。
-- Profile 保存与 `mo workflow validate` 只校验输入形状（`name`、`prompt` 必填），
-  不校验 Agent 是否存在——Profile 的生命周期不被 Agent 的增删卡住。
+- Each dispatch resolves `name` to a snapshot of the current definition. The
+  instructions, execution backend, model, variant, and ordered Skills remain
+  fixed for that attempt.
+- Editing the Agent does not affect an attempt that was already dispatched. A
+  retry resolves the definition again, so a repaired definition takes effect
+  immediately on retry.
+- An ordinary client may provide a prompt and context. It cannot use task input
+  or context to select a different Runtime, model, variant, or set of Skills.
+- Profile save and `mo workflow validate` check only the input shape and require
+  `name` and `prompt`. They do not check whether the Agent exists, so Agent
+  creation and removal do not block the Profile lifecycle.
 
-## 失败语义
+## Failure Semantics
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `agent_not_found` | dispatch 时 `name` 不存在或 Agent 已归档 |
+| `agent_not_found` | `name` does not exist at dispatch time, or the Agent is archived. |
 
-执行期错误（后端不可用、超时等）与所选执行后端的 Action 相同，recovery 的
-`when` 匹配同样适用。
+Execution errors such as backend unavailability and timeout are the same as for
+the selected backend Action. Recovery `when` matching applies in the same way.
 
-`mohist/agent` 仅能用于 task；用于 check 时会被拒绝。引用的 Agent 不存在或已归档时，
-dispatch 失败码为 `agent_not_found`。
+`mohist/agent` can be used only for a task and is rejected when used for a
+check. If the referenced Agent does not exist or is archived, dispatch fails
+with `agent_not_found`.
