@@ -12,9 +12,41 @@ import { VFile } from 'vfile'
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const requiredDocuments = ['README.md', 'CONTEXT.md', 'CONTRIBUTING.md']
 const documentationDirectories = ['docs', 'design']
-const forbiddenDiagramLanguages = new Set(['mermaid', 'plantuml', 'puml'])
-const hanCharacter = /\p{Script=Han}/gu
-const nonAsciiDiagramGlyph = /[\u2190-\u21ff\u2500-\u257f\u25b2\u25bC\u25c4\u25ba\u27f0-\u27ff\u2900-\u297f]/gu
+// These fence names identify diagrams without interpreting ordinary source-code examples.
+const forbiddenDiagramLanguages = new Set([
+  'actdiag',
+  'bob',
+  'blockdiag',
+  'c4',
+  'c4plantuml',
+  'd2',
+  'diagram',
+  'ditaa',
+  'dot',
+  'erd',
+  'flowchart',
+  'graph-easy',
+  'graphviz',
+  'gv',
+  'kroki',
+  'mermaid',
+  'nomnoml',
+  'nwdiag',
+  'packetdiag',
+  'pikchr',
+  'plantuml',
+  'puml',
+  'rackdiag',
+  'seqdiag',
+  'structurizr',
+  'svgbob',
+  'tikz',
+  'vega',
+  'vega-lite',
+  'wavedrom',
+])
+const nonLatinLetter = /(?=\p{Letter})[^\p{Script=Latin}]/gu
+const nonAsciiCharacter = /[^\x00-\x7f]/u
 const absoluteUrl = /^[a-z][a-z\d+.-]*:/iu
 const markdownParser = unified()
   .use(remarkParse)
@@ -26,11 +58,15 @@ type MarkdownPosition = {
 
 type MarkdownNode = {
   type: string
+  alt?: string | null
   children?: MarkdownNode[]
   identifier?: string
   lang?: string | null
+  meta?: string | null
   position?: MarkdownPosition
+  title?: string | null
   url?: string
+  value?: string
 }
 
 export type DocumentationViolation = {
@@ -105,21 +141,23 @@ function findDocumentationFiles(root: string): DocumentationCheckResult {
 
 function scanCharacters(
   filePath: string,
-  source: string,
+  node: MarkdownNode,
+  value: string,
   pattern: RegExp,
   rule: string,
   describe: (character: string) => string,
 ): DocumentationViolation[] {
   const violations: DocumentationViolation[] = []
-  const lines = source.split('\n')
+  const start = positionOf(node)
+  const lines = value.split('\n')
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
     pattern.lastIndex = 0
     const match = pattern.exec(lines[lineIndex])
     if (match === null) continue
     violations.push({
       filePath,
-      line: lineIndex + 1,
-      column: match.index + 1,
+      line: start.line + lineIndex,
+      column: lineIndex === 0 ? start.column + match.index : match.index + 1,
       rule,
       description: describe(match[0]),
     })
@@ -127,22 +165,90 @@ function scanCharacters(
   return violations
 }
 
+function proseCharacterViolations(filePath: string, tree: MarkdownNode): DocumentationViolation[] {
+  const violations: DocumentationViolation[] = []
+  walk(tree, (node) => {
+    const proseValues: string[] = []
+    if (node.type === 'text' && node.value !== undefined) proseValues.push(node.value)
+    if ((node.type === 'image' || node.type === 'imageReference') && node.alt) proseValues.push(node.alt)
+    if ((node.type === 'link' || node.type === 'image' || node.type === 'definition') && node.title) {
+      proseValues.push(node.title)
+    }
+
+    for (const value of proseValues) {
+      violations.push(...scanCharacters(
+        filePath,
+        node,
+        value,
+        nonLatinLetter,
+        'latin-script-prose-only',
+        (character) => `non-Latin letter is not allowed in prose: ${character}`,
+      ))
+    }
+  })
+  return violations
+}
+
+function rawHtmlViolations(filePath: string, tree: MarkdownNode): DocumentationViolation[] {
+  const violations: DocumentationViolation[] = []
+  walk(tree, (node) => {
+    if (node.type !== 'html') return
+    violations.push(violation(
+      filePath,
+      node,
+      'raw-html-not-allowed',
+      'raw HTML is not allowed in active documentation',
+    ))
+  })
+  return violations
+}
+
+function normalizeFenceLanguage(language: string): string {
+  let normalized = language.trim().toLowerCase()
+  if (normalized.startsWith('{.')) normalized = normalized.slice(2)
+  else if (normalized.startsWith('.')) normalized = normalized.slice(1)
+  return normalized.split(/[\s}]/u, 1)[0] ?? ''
+}
+
 function diagramFenceViolations(filePath: string, tree: MarkdownNode): DocumentationViolation[] {
   const violations: DocumentationViolation[] = []
   walk(tree, (node) => {
-    if (node.type !== 'code' || node.lang === null || node.lang === undefined) return
-    const language = node.lang.toLowerCase()
-    const normalizedLanguage = language.startsWith('.')
-      ? language.slice(1)
-      : language.startsWith('{.') && language.endsWith('}')
-        ? language.slice(2, -1)
-        : language
-    if (!forbiddenDiagramLanguages.has(normalizedLanguage)) return
+    if (node.type !== 'code') return
+    const normalizedLanguage = node.lang === null || node.lang === undefined
+      ? ''
+      : normalizeFenceLanguage(node.lang)
+
+    if (forbiddenDiagramLanguages.has(normalizedLanguage)) {
+      violations.push(violation(
+        filePath,
+        node,
+        'ascii-diagram-only',
+        `fenced ${node.lang} diagram must be replaced with a fenced \`text diagram\` ASCII diagram`,
+      ))
+      return
+    }
+
+    if (normalizedLanguage !== 'text') return
+
+    const fenceKind = node.meta?.trim()
+    if (fenceKind !== 'diagram' && fenceKind !== 'literal') {
+      violations.push(violation(
+        filePath,
+        node,
+        'text-fence-kind-required',
+        'fenced text block must declare exactly `text diagram` or `text literal`',
+      ))
+      return
+    }
+    if (fenceKind === 'literal') return
+
+    const match = nonAsciiCharacter.exec(node.value ?? '')
+    if (match === null) return
     violations.push(violation(
       filePath,
       node,
       'ascii-diagram-only',
-      `fenced ${node.lang} diagram must be replaced with a fenced text ASCII diagram`,
+      `fenced text diagram contains a non-ASCII character: ${match[0]}`,
     ))
   })
   return violations
@@ -189,7 +295,7 @@ function linkOccurrences(tree: MarkdownNode): Array<{ node: MarkdownNode; url: s
   const definitions = new Map<string, string>()
   walk(tree, (node) => {
     if (node.type === 'definition' && node.identifier !== undefined && node.url !== undefined) {
-      definitions.set(node.identifier, node.url)
+      if (!definitions.has(node.identifier)) definitions.set(node.identifier, node.url)
     }
   })
 
@@ -316,20 +422,8 @@ export function checkDocumentation(rootPath: string): DocumentationCheckResult {
     const headings = headingFragments(tree)
     headingCache.set(filePath, headings)
 
-    violations.push(...scanCharacters(
-      filePath,
-      source,
-      hanCharacter,
-      'english-only',
-      (character) => `Han-script character is not allowed: ${character}`,
-    ))
-    violations.push(...scanCharacters(
-      filePath,
-      source,
-      nonAsciiDiagramGlyph,
-      'ascii-diagram-only',
-      (character) => `Unicode diagram glyph must be replaced with ASCII: ${character}`,
-    ))
+    violations.push(...proseCharacterViolations(filePath, tree))
+    violations.push(...rawHtmlViolations(filePath, tree))
     violations.push(...diagramFenceViolations(filePath, tree))
     violations.push(...undefinedReferenceViolations(filePath, source, tree))
     violations.push(...linkViolations(root, filePath, tree, headingCache))

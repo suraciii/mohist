@@ -39,7 +39,7 @@ test('accepts English Markdown, ASCII text diagrams, and structurally ignored li
     write(root, 'docs/guide.md', [
       '# Guide',
       '',
-      '```text',
+      '```text diagram',
       '+--------+     +--------+',
       '| Server | --> | Runner |',
       '+--------+     +--------+',
@@ -47,7 +47,7 @@ test('accepts English Markdown, ASCII text diagrams, and structurally ignored li
       '',
       '`[not a link](missing.md)`',
       '',
-      '```text',
+      '```text literal',
       '[also not a link](missing.md)',
       '```',
     ].join('\n'))
@@ -57,17 +57,65 @@ test('accepts English Markdown, ASCII text diagrams, and structurally ignored li
   })
 })
 
-test('rejects Han-script characters in every nested active document', () => {
+test('rejects non-Latin writing scripts in every nested active document', () => {
   withFixture((root) => {
-    write(root, 'docs/nested/guide.md', '# Guide\n\n中文\n')
+    write(root, 'docs/nested/guide.md', '# Guide\n\n中文\n\nРусский\n\nかな\n\n한국어\n')
 
     const result = checkDocumentation(root)
-    assert.equal(result.violations.filter((item) => item.rule === 'english-only').length, 1)
+    assert.equal(result.violations.filter((item) => item.rule === 'latin-script-prose-only').length, 4)
     assert.ok(result.files.some((file) => file.endsWith('/docs/nested/guide.md')))
   })
 })
 
-test('rejects PlantUML and Mermaid fence languages case-insensitively', () => {
+test('checks prose scripts but allows Latin accents and exact inline and fenced code literals', () => {
+  withFixture((root) => {
+    write(root, 'docs/literals.md', [
+      '# Literals',
+      '',
+      'This prose contains 中文.',
+      '',
+      'Latin-script prose may name Café.',
+      '',
+      'The exact provider value is `状态`.',
+      '',
+      '```text literal',
+      '状态',
+      '```',
+      '',
+      '```json',
+      '{"status":"状态"}',
+      '```',
+    ].join('\n'))
+
+    assert.equal(rules(root).filter((rule) => rule === 'latin-script-prose-only').length, 1)
+  })
+})
+
+test('checks image alt and link titles as prose and rejects raw HTML', () => {
+  withFixture((root) => {
+    write(root, 'docs/topic.md', '# Topic\n')
+    write(root, 'docs/asset.png', 'asset')
+    write(root, 'docs/prose-fields.md', [
+      '# Prose fields',
+      '',
+      '![中文](asset.png "标题")',
+      '[Inline link](topic.md "链接")',
+      '[Reference link][topic]',
+      '',
+      '[topic]: topic.md "引用"',
+      '',
+      '<div>',
+      '中文',
+      '</div>',
+    ].join('\n'))
+
+    const result = checkDocumentation(root)
+    assert.equal(result.violations.filter((item) => item.rule === 'latin-script-prose-only').length, 4)
+    assert.equal(result.violations.filter((item) => item.rule === 'raw-html-not-allowed').length, 1)
+  })
+})
+
+test('rejects known non-text diagram fence languages case-insensitively', () => {
   withFixture((root) => {
     write(root, 'docs/diagrams.md', [
       '# Diagrams',
@@ -80,17 +128,110 @@ test('rejects PlantUML and Mermaid fence languages case-insensitively', () => {
       '@startuml',
       '@enduml',
       '```',
+      '',
+      '```DOT',
+      'digraph { a -> b }',
+      '```',
+      '',
+      '```{.GraphViz}',
+      'digraph { a -> b }',
+      '```',
+      '',
+      '```pikchr',
+      'box "Client"; arrow; box "Server"',
+      '```',
+      '',
+      '```ditaa',
+      '+--------+   +--------+',
+      '```',
+      '',
+      '```svgbob',
+      'Client --> Server',
+      '```',
     ].join('\n'))
 
-    assert.equal(rules(root).filter((rule) => rule === 'ascii-diagram-only').length, 2)
+    const violations = checkDocumentation(root).violations
+      .filter((item) => item.rule === 'ascii-diagram-only')
+    assert.equal(violations.length, 7)
+    assert.ok(violations.every((item) => item.description.includes('`text diagram`')))
   })
 })
 
-test('rejects Unicode box-drawing and arrow glyphs', () => {
+test('rejects Unicode line art in fenced text diagrams', () => {
   withFixture((root) => {
-    write(root, 'design/diagram.md', '# Diagram\n\n┌┐└┘├┤┬┴┼─│►◄▲▼→←⇒\n')
+    write(root, 'design/diagram.md', [
+      '# Diagram',
+      '',
+      '```text diagram',
+      '┌┐└┘├┤┬┴┼─│►◄▲▼→←⇒',
+      '```',
+    ].join('\n'))
 
     assert.equal(rules(root).filter((rule) => rule === 'ascii-diagram-only').length, 1)
+  })
+})
+
+test('enforces ASCII only for explicit text diagrams and preserves literal and source code', () => {
+  withFixture((root) => {
+    write(root, 'design/diagram.md', [
+      '# Diagram boundaries',
+      '',
+      '```text diagram',
+      'Client -> Café',
+      '```',
+      '',
+      '```text literal',
+      'provider transition: old -> new',
+      'exact value: 状态 → ready',
+      '```',
+      '',
+      '```typescript',
+      "const arrow = '→'",
+      "const state = '状态'",
+      '```',
+    ].join('\n'))
+
+    const result = checkDocumentation(root)
+    assert.equal(result.violations.filter((item) => item.rule === 'ascii-diagram-only').length, 1)
+    assert.equal(result.violations.filter((item) => item.rule === 'latin-script-prose-only').length, 0)
+  })
+})
+
+test('does not infer diagrams from ordinary unlabeled source code', () => {
+  withFixture((root) => {
+    write(root, 'design/diagram.md', [
+      '# Diagram',
+      '',
+      '```',
+      'fn answer() -> i32 {',
+      '  42',
+      '}',
+      '```',
+    ].join('\n'))
+
+    assert.deepEqual(checkDocumentation(root).violations, [])
+  })
+})
+
+test('requires every text fence to declare exactly diagram or literal metadata', () => {
+  withFixture((root) => {
+    write(root, 'design/text-fences.md', [
+      '# Text fences',
+      '',
+      '```text',
+      'unclassified',
+      '```',
+      '',
+      '```text output',
+      'provider output',
+      '```',
+      '',
+      '```text diagram extra',
+      'Client -> Server',
+      '```',
+    ].join('\n'))
+
+    assert.equal(rules(root).filter((rule) => rule === 'text-fence-kind-required').length, 3)
   })
 })
 
@@ -116,6 +257,28 @@ test('resolves duplicate headings, encoded fragments, references, queries, and d
     ].join('\n'))
 
     assert.deepEqual(checkDocumentation(root).violations, [])
+  })
+})
+
+test('resolves duplicate reference definitions using CommonMark first-wins semantics', () => {
+  withFixture((root) => {
+    write(root, 'docs/topic.md', '# Topic\n')
+    write(root, 'docs/README.md', [
+      '# Product documentation',
+      '',
+      '[Broken first][broken]',
+      '[Valid first][valid]',
+      '',
+      '[broken]: missing.md',
+      '[broken]: topic.md',
+      '[valid]: topic.md',
+      '[valid]: missing.md',
+    ].join('\n'))
+
+    const violations = checkDocumentation(root).violations
+      .filter((item) => item.rule === 'relative-link-target-exists')
+    assert.equal(violations.length, 1)
+    assert.match(violations[0].description, /missing\.md/u)
   })
 })
 
