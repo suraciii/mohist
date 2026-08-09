@@ -1,267 +1,302 @@
-# Issue 管理
+# Issue Management
 
-Issue 是 Mohist 执行层的核心工作单元。这篇覆盖创建到关闭的所有**操作**。用户通常让
-外部 Agent 通过 Mohist Skill 和 `mo` 完成这些操作；也可以直接使用同一套 CLI，或在
-Web UI 这个备用平面中人工操作。各 Workflow 阶段内部做什么、产出什么，见
-[工作流详解](the-workflow.md)；把多个 Issue 组织成里程碑，见 [用 Epic 规划](epics.md)。
+An Issue is the main unit of work in the Mohist execution layer. This document
+covers every operation from creation through closure. Users usually ask an
+external Agent to perform these operations through the Mohist Skill and `mo`.
+You can also use the same CLI directly or work manually in the Web UI as a
+fallback surface. See [The Workflow](the-workflow.md) for the work and
+artifacts inside each Workflow Stage. See [Planning with Epics](epics.md) to organize
+multiple Issues into a milestone.
 
-## 创建 Issue
+## Create an Issue
 
 ### CLI
 
 ```bash
-# 最简
+# Minimal form
 mo issue create "Add search feature"
 
-# 带 body
+# Include a body
 mo issue create "Fix login bug" --body "Users can't login on Safari"
 
-# 长 body 推荐用文件
+# Use a file for a long body
 mo issue create "Refactor auth module" --body-file ./issue-body.md
 
-# 从 stdin
+# Read from stdin
 cat ./my-issue.md | mo issue create "My issue" --body-file -
 
-# 指定优先级和标签
+# Set priority and labels
 mo issue create "Critical fix" --priority p0 --label kind=bug
 
-# 指定 workflow profile
+# Select a Workflow Profile
 mo issue create "Implement search" --workflow-profile mohist/local
 
-# 指定模型
+# Select a model
 mo issue create "Complex refactor" --model claude-sonnet-4
 
-# 指定目标仓库（多仓库 project；不指定落 default 仓库）
-mo issue create "server: 加订阅 API" --repo server
+# Select the target repository in a multi-repository Project.
+# Without --repo, Mohist uses the default repository.
+mo issue create "server: add subscription API" --repo server
 
-# 拆为某个 issue 的子 issue
-mo issue create "web: 订阅管理页" --parent 42 --repo web
+# Create a child of another Issue
+mo issue create "web: add subscription management" --parent 42 --repo web
 ```
 
-不指定 `--workflow-profile` 时，Issue 继承 Project 的默认 Profile。可以在启动前或后续
-更新 Issue 的选择；已经开始的 Workflow 继续使用启动时确定的 Profile，新选择从下一次
-运行开始生效。清除显式选择后，Issue 重新继承 Project 默认值。
+Without `--workflow-profile`, the Issue inherits the Project's default Profile.
+You may update the selection before the Workflow starts or later. An active
+Workflow continues to use the Profile selected when it started. A new
+selection applies to the next run. Clearing an explicit selection restores
+inheritance from the Project default.
 
-### Web UI（备用）
+### Web UI Fallback
 
-看板右上角 **New Issue** 按钮。填 title、body、priority、labels。
+Select **New Issue** in the upper-right corner of the board. Enter the title,
+body, priority, and labels.
 
-### 目标仓库与子 issue
+### Target Repository and Child Issues
 
-- 每个 issue 有一个**目标仓库**，workflow 全程（分支、diff、Integrate）都发生在那里；启动后不可更改。详见 [仓库](repositories.md)。
-- 一份需求横跨多个仓库时，拆成子 issue：父 issue 追踪整体，子 issue 各自走 workflow。详见 [复合 Issue 与子 Issue](sub-issues.md)。
+- Each Issue has one **target repository**. Its branch, diff, and Integrate work
+  all occur in that repository. The target must not change after the Workflow
+  starts. See [Repositories](repositories.md).
+- When one requirement spans multiple repositories, split it into child Issues.
+  The parent tracks the complete requirement, and each child runs its own
+  Workflow. See [Composite Issues and Sub-issues](sub-issues.md).
 
-### Issue body 怎么写
+### Write an Effective Issue Body
 
-body 质量**决定 plan 质量**，plan 质量**决定整个 issue 的成败**。花 5 分钟写好 body，省 30 分钟纠正 plan。
+Body quality determines Plan quality, and Plan quality determines the outcome
+of the Issue. Five minutes spent on a clear body can prevent much more time
+spent correcting the Plan.
 
-一个好 body 包含：
+An effective body contains:
 
 ```markdown
 ## Background
-为什么做这个改动？遇到什么问题了？
+Why is this change needed? What problem occurred?
 
 ## Goal
-这个 issue 完成后，世界应该变成什么样？
+What must be true after this Issue is complete?
 
 ## Non-goals
-明确不做什么（避免 Inline Agent 顺手做太多）
+What is explicitly outside the scope?
 
 ## Acceptance criteria
-怎么算完成？（可验证的条件）
+What verifiable conditions define completion?
 ```
 
-**反例**（不要这样写）：
+Do not use a body with too little context:
 
-```
+```text
 Add search
 ```
 
-Inline Agent 不知道你要搜什么、搜哪些字段、要不要高亮、要不要分页。结果 plan 写一堆你不需要的东西。
+The Inline Agent cannot determine what to search, which fields to include,
+whether to highlight matches, or whether to paginate. It can produce a Plan
+that solves the wrong problem.
 
-**正例**：
+Use a specific body instead:
 
 ```markdown
 ## Background
-首页的任务列表已经 100+ 条，用户找不到旧任务。
+The task list on the home page has more than 100 entries. Users cannot find old
+tasks.
 
 ## Goal
-列表顶部加搜索框，按 title 模糊匹配，实时过滤。
+Add a search field above the list. Filter in real time by a partial title match.
 
 ## Non-goals
-- 不搜索 description（暂不需要）
-- 不做高级筛选
-- 不改后端 API
+- Do not search descriptions.
+- Do not add advanced filters.
+- Do not change the backend API.
 
 ## Acceptance criteria
-- 输入 "foo" 时，只显示 title 包含 "foo" 的任务
-- 大小写不敏感
-- 空输入显示全部
-- 渲染 200 条列表时无明显卡顿
+- Entering "foo" shows only tasks whose title contains "foo".
+- Matching is case-insensitive.
+- An empty input shows every task.
+- Rendering a list of 200 tasks has no visible delay.
 ```
 
-## 查看 Issue
+## View an Issue
 
-在外部 Agent 中可以直接询问某个 Issue 的进度、阻塞和待处理事项。直接使用 CLI 时：
+In an external Agent, ask directly for an Issue's progress, blockers, and
+pending actions. To use the CLI directly:
 
 ```bash
-# 当前 project 所有 issue
+# List all Issues in the current Project
 mo issue list
 
-# 只看某个 stage
+# Filter by Stage
 mo issue list --stage plan
 
-# 看已归档
+# List archived Issues
 mo issue list --archived
 
-# 看所有（含归档）
+# List all Issues, including archived Issues
 mo issue list --all
 
-# 详情
+# View details
 mo issue view 42
 ```
 
-需要完整可视化或人工接管时，在 Web UI 点 Issue card 进入详情页，可以看到：
+For a complete visual view or manual takeover, select an Issue card in the Web
+UI. The details page shows:
 
-- 当前 stage、health、审批状态
-- 完整 body 和 comments
-- Workflow timeline
-- Branch bar（当前分支状态）
-- Diff / commits 概览
-- Latest artifacts（plan/check 产物）
-- 操作按钮（Start / Approve / Reject / Stop / Retry / 等）
-- AgentSessions（Workflow 执行时的对话记录）
+- The current Stage, health, and approval state.
+- The complete body and comments.
+- The Workflow timeline.
+- The branch bar with the current branch state.
+- A diff and commit summary.
+- The latest Plan and Check artifacts.
+- Actions such as Start, Approve, Reject, Stop, and Retry.
+- AgentSessions that contain the Workflow execution conversations.
 
-## 启动 Issue
+## Start an Issue
 
 ```bash
 mo issue start 42
 ```
 
-启动后：
+After the Issue starts:
 
-1. Mohist 创建 `mo/issue-42` worktree 分支
-2. 进入 Plan 阶段
-3. Inline Agent 开始执行
+1. Mohist creates a worktree on the `mo/issue-42` branch.
+2. The Workflow enters Plan.
+3. The Inline Agent starts.
 
-**前置条件**：
-- Issue 在 backlog
-- Runner 已连接（`mo server status` 看 runner 状态）
-- 没超过并发上限（默认 8）
+The following conditions must be true:
 
-## 等待审批时
+- The Issue is in `backlog`.
+- A Runner is connected. Use `mo server status` to inspect Runner status.
+- The concurrency limit has not been reached. The default limit is 8.
 
-Plan / Check 完成后，issue 进入 `awaiting approval`。这表示 workflow 停在审批点，等待 approve / reject 决策：
+## Respond to an Approval Point
+
+After Plan or Check, the Issue enters `awaiting approval`. The Workflow is
+stopped at an approval point and waits for an approve or reject decision:
 
 ```bash
-mo run approve --issue 42     # 通过，进下一阶段
-mo run reject --issue 42 --message "Missing error handling in proposal"  # 打回，Inline Agent 重做当前阶段
+mo run approve --issue 42     # Approve and enter the next Stage.
+mo run reject --issue 42 --message "Missing error handling in proposal"  # Reject and repeat the current Stage.
 ```
 
-审批与评论的归属来自认证身份，不需要也不接受自称；`--display-name` 只是可选展示别名，不影响归属。`reject` 必须带理由，用 `--message`（或 `-m`）说明需要重做什么（审批者可以是人也可以是自动化，见 [核心概念 · Approval](concepts.md#approval审批)）。需要更长上下文时，可以先 add comment，再用简短 reject message 指向它：
+Approval and comment ownership comes from the authenticated identity. Mohist
+does not need or accept a self-declared identity. `--display-name` is an
+optional display alias and does not change ownership. The `reject` action must
+include a reason in `--message` or `-m`. The approver can be a person or
+automation. See [Core Concepts: Approval](concepts.md#approval). For longer context, add a
+comment first and make the short rejection message refer to it:
 
 ```bash
 mo issue comment create 42 --display-name "Ada" --body "Reject because: missing error handling in proposal"
 mo run reject --issue 42 -m "See comment: missing error handling"
 ```
 
-## Comment（评论）
+## Comments
 
 ```bash
-# 加评论（作者是认证身份；--display-name 仅作展示别名）
+# Add a comment. The authenticated identity is the author.
+# --display-name is only a display alias.
 mo issue comment create 42 --display-name "Ada" --body "Looks good but check edge cases"
 
-# 删除评论目前不提供 CLI 命令；使用 Web UI 或 API。
+# The CLI does not currently delete comments. Use the Web UI or API.
 ```
 
-Web UI 上 issue 详情页底部有 comment 区。
+The comment area is at the bottom of the Issue details page in the Web UI.
 
-Comment 是你和 Inline Agent 协作的**轻量通道**——Inline Agent 在 plan 阶段会读 comment 作为额外上下文。
+Comments are a lightweight collaboration channel between you and the Inline
+Agent. During Plan, the Inline Agent reads them as additional context.
 
-## Prerequisite（前置依赖）
+## Prerequisites
 
-"等 #10 完成再开始 #11"：
+To require #10 to finish before #11 starts:
 
 ```bash
-mo issue prereq add 11 10    # #11 等 #10
-mo issue prereq remove 11 10 # 移除依赖
+mo issue prereq add 11 10    # Make #11 wait for #10.
+mo issue prereq remove 11 10 # Remove the dependency.
 ```
 
-有 prerequisite 的 issue，启动时会检查依赖是否完成。没完成就拒绝启动。
+When an Issue has a prerequisite, Mohist checks that it is complete before
+starting the Issue. Mohist rejects the start when the prerequisite is not
+complete.
 
-Web UI 上 issue 详情页有 "Add Prerequisite" 区。
+The Issue details page has an **Add Prerequisite** section.
 
-## 手工标记完成
+## Mark an Issue Done Manually
 
-工作已经在 workflow 之外完成时，可以把 Issue 明确标记为 Done：
+When work was completed outside the Workflow, explicitly mark the Issue Done:
 
 ```bash
 mo issue done 42
 ```
 
-这个命令只适用于正在进行、没有子 Issue，并且 workflow 已永久停止或已经完成的
-Issue。失败的 workflow 仍可重试，必须先用 `mo run stop --issue 42 --yes` 明确终止，再标记完成；
-命令不会替你停止 workflow，也不会重置 Session。
+This command applies only to an in-progress Issue without child Issues whose
+Workflow has either stopped permanently or completed. A failed Workflow can
+still be retried. First use `mo run stop --issue 42 --yes` to end it explicitly,
+then mark the Issue Done. The command does not stop the Workflow or reset its
+Session for you.
 
-重复标记已经 Done 的 Issue 会直接成功，不会产生第二次完成记录。手工完成保留原
-workflow 的停止或完成历史，并与 workflow 正常完成一样计入 Epic 的已交付进度。
-父 Issue 的 Done 状态仍由子 Issue 汇总得出，不能手工覆盖。
+Marking an Issue that is already Done succeeds without creating a second
+completion record. Manual completion preserves the original stopped or
+completed Workflow history and counts toward delivered Epic progress in the
+same way as normal Workflow completion. A parent Issue's Done state is still
+derived from its child Issues and must not be overridden manually.
 
-## 中断、停止与关闭
+## Pause, Stop, Complete, or Close
 
 ```bash
-# 可恢复暂停——终止当前执行回合，保留 AgentSession，后续用 resume 接着跑
+# Recoverable pause: end the current turn, preserve the AgentSession, and resume later.
 mo run pause --issue 42
 
-# 永久停止（stop）—— terminal，不能 resume
+# Permanent stop: terminal and cannot be resumed.
 mo run stop --issue 42 --yes
 
-# 手工完成（done）—— workflow 已终止，但工作已通过其它方式交付
+# Manual completion: the Workflow ended, but the work was delivered another way.
 mo issue done 42
 
-# 完全关闭（close）—— issue 进入 cancelled 终态
+# Close completely: move the Issue to the cancelled terminal state.
 mo issue close 42
 
-# 重新打开（reopen）—— 已关闭的 issue 重新激活
+# Reopen: reactivate a closed Issue.
 mo issue reopen 42
 ```
 
-| 操作 | 适用场景 | 后果 |
+| Operation | Use | Result |
 |---|---|---|
-| `pause` | 暂时停止、Inline Agent 卡住、想保留恢复入口 | 终止当前回合，workflow 进入可 `resume` 的 paused 状态 |
-| `stop` | 确定不再继续这次 workflow | 永久停止 workflow run，terminal，不能 resume |
-| `done` | workflow 外已经完成并交付 | Issue 进入 Done；workflow 历史保持原样 |
-| `close` | 这个 issue 不做了 | 进入 cancelled 终态，可 reopen |
-| `reopen` | 误关了，或想再做 | 回到 backlog |
+| `pause` | Stop temporarily, interrupt a stuck Inline Agent, or preserve a recovery path | Ends the current turn and puts the Workflow in a paused state that supports `resume` |
+| `stop` | End this Workflow permanently | Stops the Workflow Run permanently. It is terminal and cannot resume |
+| `done` | Work was completed and delivered outside the Workflow | Moves the Issue to Done and preserves the Workflow history |
+| `close` | The Issue will not be done | Moves the Issue to the `cancelled` terminal state. It can be reopened |
+| `reopen` | Reverse an accidental closure or do the work later | Returns the Issue to `backlog` |
 
-## 恢复（失败后怎么办）
+## Recover from Failure
 
-失败恢复是 Mohist 的强项。看 [故障恢复](troubleshooting.md) 详解。这里给速查：
+Recovery is a core Mohist capability. See [Troubleshooting](troubleshooting.md)
+for details. The following table is a quick reference:
 
-| 场景 | 命令 |
+| Situation | Command |
 |---|---|
-| Issue blocked，想重试当前阶段 | `mo run retry --issue 42` |
-| Issue paused，继续当前 workflow | `mo run resume --issue 42` |
-| Workflow 已停止，但工作已由其它方式交付 | `mo issue done 42` |
-| 想完全重做当前阶段（丢弃产物） | `mo run rerun --issue 42` |
-| 想从指定阶段重做（丢弃该阶段及之后产物） | `mo run rerun --issue 42 --from-stage build` |
-| Base branch drift 了，rebase issue 分支 | `mo issue rebase 42` |
+| The Issue is blocked. Retry the current Stage | `mo run retry --issue 42` |
+| The Issue is paused. Continue the current Workflow | `mo run resume --issue 42` |
+| The Workflow stopped, but the work was delivered another way | `mo issue done 42` |
+| Repeat the current Stage and discard its artifacts | `mo run rerun --issue 42` |
+| Repeat from a selected Stage and discard that Stage's later artifacts | `mo run rerun --issue 42 --from-stage build` |
+| The base branch moved. Rebase the Issue branch | `mo issue rebase 42` |
 
-## 归档
+## Archive an Issue
 
-Done 之后，issue 还会留在看板的 Done 列。归档后从看板移走：
+An Issue remains in the board's Done column after completion. Archive it to
+remove it from the board:
 
 ```bash
 mo issue archive 42
-mo issue restore 42      # 反悔
-mo issue list --archived  # 看归档列表
+mo issue restore 42       # Restore an archived Issue.
+mo issue list --archived  # List archived Issues.
 ```
 
-Web UI 上有 Archive 页。
+The Web UI has an Archive page.
 
-## 修改 Issue
+## Edit an Issue
 
-没启动的 issue 可以随便改：
+You may freely edit an Issue before it starts:
 
 ```bash
 mo issue edit 42 --title "New title"
@@ -270,12 +305,16 @@ mo issue edit 42 --priority p1
 mo issue edit 42 --label kind=bug --label area=web
 ```
 
-启动后的 issue 改 body 要谨慎——Inline Agent 已经基于旧 body 在工作。
+Edit the body of an active Issue with care. The Inline Agent is already working
+from the previous body.
 
-## CLI 完整命令一览
+## Complete CLI Reference
 
-`mo issue` 的完整命令面见 [CLI 参考 · Issue](cli-reference.md#issue工作项)（命令面的唯一 spec，本篇只保留操作场景示例）。完整选项看 `mo issue <command> --help`。
+See the Issue section in [CLI Reference](cli-reference.md) for the authoritative
+`mo issue` command surface. This document contains only scenario-based examples.
+Use `mo issue <command> --help` for all options.
 
 ---
 
-对应源码：`packages/server/src/Mohist.Server/Issue/`、`Api/IssueRoutes.*`；CLI `packages/cli/`。
+Source: `packages/server/src/Mohist.Server/Issue/`, `Api/IssueRoutes.*`, and the
+CLI under `packages/cli/`.

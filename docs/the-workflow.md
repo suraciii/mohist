@@ -1,169 +1,190 @@
-# 工作流详解
+# The Workflow
 
-Mohist 默认的工作流由 5 个阶段组成。理解每个阶段做什么、产出什么、什么时候停，你才知道审批和恢复动作在哪里发生。issue 的完整操作命令（创建、启动、审批、恢复等）见 [Issue 管理](issues.md)；自定义阶段、任务、审批策略见 [Workflow Profile](workflow-profiles.md)。
+The default Mohist workflow has five stages. You need to understand what each
+stage does, what it produces, and when it stops so that you know where approval
+and recovery actions occur. See [Issue Management](issues.md) for all issue
+operations, including create, start, approve, and recover. See
+[Workflow Profile](workflow-profiles.md) for custom stages, tasks, and approval
+policies.
 
-每个阶段的产物都留在 `openspec/changes/<issue-number>-<slug>/` 下，作为后续判断和追溯的证据。完整状态机见文末。
+Each stage stores its artifacts under
+`openspec/changes/<issue-number>-<slug>/`. These artifacts provide evidence for
+later decisions and audits. See the complete state machine near the end of this
+document.
 
-## Draft（草稿）
+## Draft
 
-Issue 创建后的初始状态。这时：
+Draft is the initial state of a new Issue. In this state:
 
-- 没有启动 workflow
-- Inline Agent 还没开始执行
-- 可以编辑 title、body、labels、priority
-- 可以加 prerequisites（"等 #N 完成再开始"）
+- The Workflow has not started.
+- The Inline Agent has not started.
+- You may edit the title, body, labels, and priority.
+- You may add prerequisites, such as "wait for #N to finish before starting."
 
-操作：
+Run:
+
 ```bash
-mo issue start <number>   # 启动 workflow，进入 Plan
+mo issue start <number>   # Start the Workflow and enter Plan.
 ```
 
-## Plan（规划）
+## Plan
 
-Inline Agent 理解需求、规划怎么实现。这是发现方向错误成本最低的阶段——人工审批时
-重点看 `proposal.md` 和 `tasks.json`。
+The Inline Agent interprets the requirements and plans the implementation. This
+is the least expensive stage in which to find a wrong direction. During a
+manual approval, focus on `proposal.md` and `tasks.json`.
 
-按顺序产出 5 个 artifact：
+Plan produces five artifacts in order:
 
-| Artifact | 内容 |
+| Artifact | Contents |
 |---|---|
-| `proposal.md` | 对需求的理解、范围、动机、提议方案 |
-| `specs/` | capability spec 的具体改动（用户故事级别） |
-| `design.md` | 技术设计决策（如果有多种实现方式，写清楚选哪个、为什么） |
-| `tasks.json` | 接下来 Build 阶段要执行的步骤清单（含验收条件） |
-| `self-review.md` | Inline Agent 对 plan 的 self-review（"我考虑了 X、权衡了 Y、担心 Z"） |
+| `proposal.md` | The interpretation, scope, motivation, and proposed solution |
+| `specs/` | Specific capability-spec changes at the user-story level |
+| `design.md` | Technical design decisions, including the selected option and its rationale when alternatives exist |
+| `tasks.json` | The ordered Build steps and their acceptance conditions |
+| `self-review.md` | The Inline Agent's review of its plan, including considerations, tradeoffs, and concerns |
 
-通常 5–20 分钟，取决于 issue body 清晰度、代码库复杂度与模型速度。
+This stage usually takes 5-20 minutes. The duration depends on the clarity of
+the Issue body, repository complexity, and model speed.
 
-### Plan 完成后
+### After Plan
 
-Workflow 进入审批点，等待 approve / reject 决策：
-
-```bash
-mo run approve --issue <number>   # 通过 plan，进入 Build
-mo run reject --issue <number> --message "说明需要修改的内容"  # 打回，重新 plan
-```
-
-审批者不限定是谁，见 [核心概念 · Approval](concepts.md#approval审批)。
-
-## Build（实现）
-
-Inline Agent 按 tasks.json 里的步骤写代码。
-
-### Build 阶段做的事
-
-- 在 issue 专属的 worktree 里工作（`mo/issue-<number>` 分支）
-- 逐个执行 tasks.json 里的任务
-- 每个任务完成后跑测试或 lint
-- 失败的任务会自动重试或调整
-- 每个任务一个 commit
-
-### Build 完成后
-
-**默认自动进入 Check**。如果你希望 Build 后也等待审批，要在 workflow profile 里把 build 的 `requiresApproval` 改为 `true`。
-
-## Check（审查）
-
-Inline Agent 复审 Build 的产出，相当于内部 code review。
-
-### Check 阶段做的事
-
-- 跑完整测试套件
-- Inline Agent review 自己的 diff
-- 产出 `review.md`（review 结论 + 发现的问题 + 建议修复）
-- 如果发现问题，可能触发 re-build 修复
-
-### Check 完成后
-
-Workflow 进入审批点，等待 approve / reject 决策。
+The Workflow stops at an approval point and waits for an approve or reject
+decision:
 
 ```bash
-mo run approve --issue <number>   # 进入 Integrate
-mo run reject --issue <number> --message "说明需要修改的内容"  # 回到 Build 重做
+mo run approve --issue <number>   # Approve the plan and enter Build.
+mo run reject --issue <number> --message "Describe the required changes"  # Reject and run Plan again.
 ```
 
-人工处理时读 `review.md`。
+The approver may be any authorized actor. See
+[Core Concepts: Approval](concepts.md#approval).
 
-## Integrate（合并）
+## Build
 
-把 `mo/issue-<number>` 分支合并回 base branch。
+The Inline Agent implements the steps in `tasks.json`.
 
-### Integrate 阶段做的事
+### What Build Does
 
-- 检查 base branch 是否有 drift（被别人/别的 issue 推进了）
-- 如果有 drift：尝试 rebase（可能产生冲突）
-- 合并到 base branch
-- 推送到远程（如果配置了）
+- Works in the Issue-specific worktree on the `mo/issue-<number>` branch.
+- Executes the tasks in `tasks.json` one at a time.
+- Runs tests or lint checks after each task.
+- Retries or adjusts failed tasks automatically.
+- Creates one commit for each task.
 
-### Integrate 失败
+### After Build
 
-最常见的失败原因：
+By default, the Workflow enters Check automatically. To require approval after
+Build, set Build's `requiresApproval` field to `true` in the Workflow Profile.
 
-- Merge conflict（drift 太大，rebase 失败）
-- 推送失败（权限/网络）
+## Check
 
-失败时 issue 进入 blocked 状态，看你介入。详见 [故障恢复](troubleshooting.md)。
+The Inline Agent reviews the Build output. This stage acts as an internal code
+review.
 
-## Done（完成）
+### What Check Does
 
-Issue 完成的终态。这时：
+- Runs the complete test suite.
+- Reviews the Inline Agent's own diff.
+- Produces `review.md` with the conclusion, findings, and recommended fixes.
+- May start another Build pass when it finds a problem.
 
-- 代码已经在 base branch 上
-- 所有产物已归档在 `openspec/changes/<number>-<slug>/`
-- 你可以归档 issue（从看板移走）
+### After Check
+
+The Workflow stops at an approval point and waits for an approve or reject
+decision:
+
+```bash
+mo run approve --issue <number>   # Enter Integrate.
+mo run reject --issue <number> --message "Describe the required changes"  # Return to Build.
+```
+
+For a manual decision, read `review.md`.
+
+## Integrate
+
+Integrate merges the `mo/issue-<number>` branch into the base branch.
+
+### What Integrate Does
+
+- Checks whether the base branch has moved because another person or Issue
+  advanced it.
+- Attempts a rebase when the base branch has moved. This can cause conflicts.
+- Merges into the base branch.
+- Pushes to the remote when configured.
+
+### Integrate Failure
+
+The most common causes are:
+
+- A merge conflict because the branches have diverged too far for the rebase.
+- A push failure caused by permissions or the network.
+
+The Issue becomes blocked and waits for intervention. See
+[Troubleshooting](troubleshooting.md).
+
+## Done
+
+Done is the terminal state for a completed Issue. In this state:
+
+- The code is on the base branch.
+- All artifacts are archived under
+  `openspec/changes/<number>-<slug>/`.
+- You may archive the Issue to remove it from the board.
 
 ```bash
 mo issue archive <number>
 ```
 
-## 状态机完整图
+## Complete State Machine
 
-```
-                start            approve           auto            approve
-Draft ──────▶ Plan ──────▶ Build ──────▶ Check ──────▶ Integrate ──────▶ Done
-                ▲              |                       |              |
-                |              | reject                | reject       |
-                |              ▼                       ▼              |
-                └────────── Plan ◄─────────────────── Build           │
-                              (redo)                   (redo)         │
-                                                                     │
-                                                                     ▼
-                                                                  Archived
+```text
+Draft --start--> Plan --approve--> Build --automatic--> Check
+                   |                                  |
+                   +--reject--> Plan                  +--reject--> Build
+
+Check --approve--> Integrate --automatic--> Done --archive--> Archived
+
+Any stage --failure--> Blocked
+Blocked --retry/resume/rerun--> Workflow execution
 ```
 
-任意阶段失败 → blocked → `mo run retry` / `mo run resume` / `mo run rerun`。
+After a failure in any stage, use `mo run retry`, `mo run resume`, or
+`mo run rerun` as appropriate.
 
-## 健康度（Health）
+## Health
 
-除了 workflow stage，issue 还有 health 字段，表示运行健康：
+In addition to its Workflow stage, an Issue has a `health` field that describes
+execution health:
 
-| Health | 含义 |
+| Health | Meaning |
 |---|---|
-| `active` | 正在运行，或正在等待系统自动继续 |
-| `paused` | 暂停（手动 stop 或等待审批决策） |
-| `blocked` | 卡住了，需要你介入 |
-| `cancelled` | 你取消了，不会再跑 |
-| `done` | 完成 |
+| `active` | The Workflow is running or waiting for the system to continue automatically |
+| `paused` | Execution was stopped manually or is waiting for an approval decision |
+| `blocked` | The Workflow cannot continue without intervention |
+| `cancelled` | The Issue was cancelled and will not run again |
+| `done` | The Issue is complete |
 
-Web UI 上每个 issue card 会用颜色点显示 health。
+The Web UI shows health as a colored dot on each Issue card.
 
-## 什么时候需要处理？
+## When Is Action Required?
 
-四个时机：
+Action is required in four situations:
 
-1. **Plan 完成** — 审批点需要 approve 或 reject
-2. **Check 完成** — 审批点需要 approve 或 reject
-3. **Issue blocked** — 看原因，retry/rerun/stop
-4. **Runner 不可用且自动恢复失败** — 按页面给出的操作继续
+1. Plan is complete and needs an approve or reject decision.
+2. Check is complete and needs an approve or reject decision.
+3. The Issue is blocked and needs a retry, rerun, or stop decision.
+4. The Runner is unavailable and automatic recovery has failed.
 
-这些动作可以由 owner、脚本或 Mohist Agent 发起。Workflow 只关心审批动作本身和结果。
+The owner, a script, or a Mohist Agent may perform these actions. The Workflow
+only consumes the approval action and its result.
 
-## 自定义 Workflow
+## Customize the Workflow
 
-默认 workflow 不合口味？改它：
+Change the default Workflow when it does not fit the project:
 
-- 想让 Build 也等待审批？改 profile 的 `requiresApproval`
-- 想跳过 Check？自定义 profile 去掉这个 stage
-- 想加新的 stage（如 deploy）？扩展 profile yaml
+- To require approval after Build, change the Profile's `requiresApproval`
+  value.
+- To skip Check, remove that Stage from a custom Profile.
+- To add a Stage such as Deploy, extend the Profile YAML.
 
-详见 [Workflow Profile](workflow-profiles.md)。
+See [Workflow Profile](workflow-profiles.md).

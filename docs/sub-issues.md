@@ -1,100 +1,156 @@
-# 复合 Issue 与子 Issue
+# Composite Issues and Sub-issues
 
-一个需求有时大到没法作为一个 issue 交付——最典型的：改动横跨多个仓库，每个仓库的改动要各自走完整 workflow。复合 issue 让你在**一个 issue 里追踪需求整体**，把执行拆给若干**子 issue**。
+Some requirements are too large for one Issue. A common case spans multiple
+repositories, where each repository change must complete its own Workflow. A
+composite Issue tracks the complete requirement in one Issue while delegating
+execution to several child Issues.
 
-## 心智模型
+## Mental Model
 
-- 从一个 issue 拆出子 issue 后，它就成为**父 issue**（复合 issue）：父 issue 不再自己进 workflow，它的交付 = 全部子 issue 的交付。
-- **子 issue 是完整的普通 issue**：有自己的目标仓库、自己的 workflow、自己的审批点、自己的 prerequisite。子 issue 的执行和单独创建的 issue 没有任何区别。
-- 层级只有一层：子 issue 不能再拆出子 issue。
-- 复合 issue 与 Epic **正交**：Epic 是产品目标的组织与供料层，复合 issue 是**一份工作的内部分工**。子 issue 不属于任何 Epic；父 issue 在 Epic 眼里就是一个普通 issue。
+- After an Issue gains child Issues, it becomes a **parent Issue**, also called
+  a composite Issue. The parent no longer runs its own Workflow. Delivery of
+  the parent equals delivery of all its children.
+- A **child Issue is a complete, normal Issue**. It has its own target
+  repository, Workflow, approval points, and prerequisites. Its execution is
+  identical to that of an independently created Issue.
+- The hierarchy has only one level. A child Issue must not have child Issues.
+- Composite Issues and Epics are independent. An Epic organizes and feeds work
+  for a product goal. A composite Issue divides the internal work of one
+  requirement. A child Issue does not belong to an Epic. An Epic treats the
+  parent as a normal Issue.
 
-**什么时候用复合 issue，什么时候用 Epic**：如果各部分是独立有价值的交付物（每完成一个，产品就前进一步），用 Epic 组织普通 issue；如果各部分只是同一份需求的分工（只完成一半没有产品意义，比如 server 改了 API 而 web 还没接），用复合 issue。
+Use an Epic when each part is independently valuable and each completion moves
+the product forward. Use a composite Issue when the parts are only divisions
+of one requirement and a partial result has no product value. For example, a
+server API without its required Web integration is only part of one delivery.
 
-## 拆分
+## Split an Issue
 
-需求背景、整体目标和验收标准写在父 issue 的 body；每个子 issue 的 body 写清楚自己负责的范围。
+Put the shared background, complete goal, and overall acceptance criteria in
+the parent body. Give each child body a clear statement of its own scope.
 
 ```bash
-# 父 issue 描述需求整体
-mo issue create "订阅通知功能" --body-file ./subscription-feature.md
+# Describe the complete requirement in the parent Issue.
+mo issue create "Subscription notifications" --body-file ./subscription-feature.md
 
-# 拆出子 issue（假设父 issue 编号为 42）
-mo issue create "server: 订阅 API 与事件推送" --parent 42 --repo server
-mo issue create "web: 订阅管理页"             --parent 42 --repo web
+# Create child Issues. Assume the parent number is 42.
+mo issue create "server: subscription API and event delivery" --parent 42 --repo server
+mo issue create "web: subscription management page"             --parent 42 --repo web
 
-# 需要先后顺序时用 prerequisite（web 等 server）
+# Add a prerequisite when order matters. The Web Issue waits for the server Issue.
 mo issue prereq add 44 43
 ```
 
-- 也可以把已有的 backlog issue 挂为子 issue：`mo issue edit 43 --parent 42`；解除用 `mo issue edit 43 --parent none`。
-- 子 issue 创建时不指定 priority 就继承父 issue 的。
-- 拆分是你（或帮你操作的外部 agent）的决策，Mohist 不做自动拆分。
-- 子 issue 进入 Plan 阶段时，父 issue 的标题与描述会作为背景上下文提供给 Inline Agent——共享背景不需要往每个子 issue 复制。
+- To attach an existing backlog Issue, use
+  `mo issue edit 43 --parent 42`. To detach it, use
+  `mo issue edit 43 --parent none`.
+- A child Issue without an explicit priority inherits the parent's priority.
+- You or an external Agent acting for you decide how to split the work. Mohist
+  does not split it automatically.
+- When a child enters Plan, Mohist gives the Inline Agent the parent title and
+  body as background context. You do not need to copy shared context into each
+  child body.
 
-**拆分的约束**：
+The following constraints apply:
 
-- 已进入 workflow 的 issue 不能拆分，也不能被挂为子 issue（先 stop 再拆）。
-- 已到终态的父 issue 不能再加子 issue（先 reopen）。
-- 有子 issue 的 issue 不能被挂为别人的子 issue（只有一层）。
+- An Issue that has entered a Workflow must not be split or attached as a child.
+  Stop it first.
+- A terminal parent must not accept another child. Reopen it first.
+- An Issue that has children must not become another Issue's child. The hierarchy
+  remains one level deep.
 
-## 推进
+## Advance a Composite Issue
 
 ```bash
-mo issue start 42    # 启动父 issue = 复合推进
+mo issue start 42    # Starting the parent starts composite advancement.
 ```
 
-启动父 issue 后：
+After the parent starts:
 
-1. 所有**可启动**的子 issue（在 backlog、prerequisite 已满足）**并行**启动，各自在各自仓库里走 workflow。
-2. 之后每当一个子 issue 到达终态，被解锁的子 issue 自动启动，直到全部终态。
-3. 并发上限约束照常生效，复合推进不会突破它。
+1. Mohist starts all startable child Issues in parallel. Each child must be in
+   `backlog` with all prerequisites satisfied. Each runs its own Workflow in
+   its own repository.
+2. Whenever a child reaches a terminal state, Mohist automatically starts any
+   children that the completion unblocked. This continues until all children
+   are terminal.
+3. The normal concurrency limit still applies. Composite advancement does not
+   bypass it.
 
-复合推进是并行的——这与 Epic 的逐个供料**有意不同**：Epic 控制的是一个目标下的在制品数量；复合 issue 的各子项是同一份工作的分工，越早全部完成越好，顺序约束由 prerequisite 表达。
+Composite advancement is parallel by design. This differs from the sequential
+feeding of an Epic. An Epic controls work in progress for one goal. Child Issues
+divide one delivery, so they should finish as early as possible. Prerequisites
+express any required order.
 
-你也可以不启动父 issue，逐个手动 `mo issue start` 子 issue——复合推进是便捷方式，不是唯一入口。
+You can also start each child manually with `mo issue start` without starting
+the parent. Composite advancement is a convenience, not the only entry point.
 
-审批、retry、rerun、pause/stop 等所有 workflow 操作都发生在**子 issue** 上，父 issue 没有 workflow，也没有审批点。
+Approval, retry, rerun, pause, and stop operations all apply to child Issues.
+The parent has no Workflow and no approval points.
 
-## 状态与进度
+## State and Progress
 
-父 issue 的状态由子 issue 汇总而来，不需要你手动维护：
+The parent state is derived from the child Issues and does not need manual
+maintenance:
 
-| 父 issue 状态 | 何时 |
+| Parent State | Condition |
 |---|---|
-| `backlog` | 尚未启动，且没有子 issue 开始工作 |
-| `in-progress` | 已启动复合推进，或任一子 issue 已开始工作 |
-| `done` | 全部子 issue 到达终态，且至少一个 done（自动） |
-| `cancelled` | 全部子 issue 都被取消（自动） |
+| `backlog` | Composite advancement has not started, and no child has started |
+| `in-progress` | Composite advancement has started, or any child has started |
+| `done` | All children are terminal and at least one is `done`; set automatically |
+| `cancelled` | All children are cancelled; set automatically |
 
-- 父 issue 没有 workflow 阶段；详情页展示子 issue 清单与进度（X/Y done、blocked 计数），看板卡片显示进度徽标与异常提示。
-- 子 issue blocked 时，恢复动作（retry / rerun / resume）在子 issue 上执行。
+- A parent has no Workflow Stage. Its details show the child list, delivered
+  progress such as X/Y Done, and the blocked count. Its board card shows a
+  progress badge and problem indicator.
+- When a child is blocked, run recovery actions such as retry, rerun, or resume
+  on that child.
 
-## 生命周期细则
+## Lifecycle Details
 
-- **close 父 issue**：要求全部子 issue 已到终态，否则拒绝——先逐个处理子 issue。不做隐式级联关闭。
-- **reopen 父 issue**：回到 backlog，可以继续加子 issue、再次启动。
-- **归档**：归档父 issue 时子 issue 一并归档；子 issue 不单独归档。
-- **解除父子关系**：子 issue 变回普通 issue，父 issue 的汇总立即重算；全部子 issue 都解除后，父 issue 回到普通 issue（可以自己进 workflow）。
-- 子 issue 被 reopen 时，已完成的父 issue 自动回到 in-progress。
+- **Close a parent**: All children must be terminal. Mohist rejects the action
+  otherwise, so handle each child first. Close does not cascade implicitly.
+- **Reopen a parent**: The parent returns to `backlog`. You can add more children
+  and start it again.
+- **Archive**: Archiving a parent also archives its children. A child must not be
+  archived separately.
+- **Detach a child**: The child becomes a normal Issue, and Mohist recalculates
+  the parent immediately. After all children are detached, the parent becomes
+  a normal Issue that can run its own Workflow.
+- When a child is reopened, a completed parent automatically returns to
+  `in-progress`.
 
-## 与 Epic 的关系
+## Relationship to Epics
 
-- **子 issue 不能加入 Epic**，尝试 link 会被拒绝。Epic 的自动推进永远不会触碰子 issue。
-- **父 issue 可以加入 Epic**：Epic 把它当普通 issue 对待——轮到它时启动它（即触发复合推进），它 done 时计入 Epic 进度。Epic 不感知复合结构，Epic 的行为不因本能力发生任何变化。
+- A child Issue must not join an Epic. Mohist rejects the link, and Epic automatic
+  advancement never operates on a child.
+- A parent can join an Epic. The Epic treats it as a normal Issue. Starting the
+  parent triggers composite advancement, and parent completion counts toward
+  Epic progress. The Epic does not inspect the composite structure, and this
+  capability does not otherwise change Epic behavior.
 
-## 与 prerequisite 的关系
+## Relationship to Prerequisites
 
-prerequisite 的规则不变，复合结构下的常见用法：
+Prerequisite rules do not change. Common uses with a composite Issue are:
 
-- **子 issue 之间**：表达拆分内部的顺序（先 server 后 web），复合推进会遵守。
-- **外部 issue 依赖父 issue**：等需求整体完成再开始。
-- **父 issue 依赖外部 issue**：复合推进的启动被 gate 住。
+- **Between child Issues**: Express internal order, such as server before Web.
+  Composite advancement honors it.
+- **An external Issue depends on the parent**: Wait for the complete requirement
+  to finish.
+- **The parent depends on an external Issue**: Gate the start of composite
+  advancement.
 
-## 端到端验收
+## End-to-End Acceptance
 
-子 issue 各自 Integrate 后，跨仓库的联调验证不会自动发生。需要时，把"联调验证"本身建成最后一个子 issue，prerequisite 指向其它全部子 issue。多仓库变更的发布协同（同时上线）是 Non-goal，见 [仓库](repositories.md)。
+After each child Integrates, Mohist does not automatically run cross-repository
+integration validation. When needed, create an integration-validation child as
+the final child and make it depend on all other children. Coordinated release
+of multi-repository changes is a Non-goal. See [Repositories](repositories.md).
 
-## 实装差距
+## Implementation Gaps
 
-本篇是产品 spec，所述能力当前均未实装（父子关系、复合推进、状态汇总、Plan 背景上下文注入），由对应 issue 立项推进。历史决策沿革见 [`design/issue-breakdown.md`](../design/issue-breakdown.md)。
+This document is a product specification. None of the described capability is
+implemented yet, including parent-child relationships, composite advancement,
+state aggregation, and parent context injection during Plan. Corresponding
+Issues track the work. See
+[`design/issue-breakdown.md`](../design/issue-breakdown.md) for the decision
+history.
