@@ -39,15 +39,58 @@ context. Failure notifications contain a short reason, not a stack trace.
 
 ## Setup
 
+### Enable the Hermes Webhook Listener
+
+Hermes must expose its webhook platform before Mohist setup can create a
+subscription. Add a top-level `platforms.webhook` block to
+`~/.hermes/config.yaml`; do not place it under `gateway.platforms`:
+
+```yaml
+platforms:
+  webhook:
+    enabled: true
+    extra:
+      host: "127.0.0.1"
+      port: 8644
+      secret: "<platform-level secret>"
+```
+
+Restart Hermes and check the listener:
+
+```bash
+hermes gateway restart
+curl http://127.0.0.1:8644/health
+```
+
+The listener secret above protects the whole Hermes webhook platform. It is
+not the secret Mohist uses. Each subscription has a separate secret so one
+sender does not receive platform-wide trust.
+
+### Connect Mohist
+
 One guided command configures the Mohist side:
 
 ```bash
 mo notification setup --platform telegram
 ```
 
-The guide detects local Hermes, generates a shared secret, writes Mohist
-notification configuration, and prints the subscription command to run in
-Hermes. Run that command to complete the connection. See
+The guide checks the local listener, generates a subscription-level secret,
+writes Mohist notification configuration, and prints the matching Hermes
+subscription command. Run that printed command to complete the connection. It
+has this shape:
+
+```bash
+hermes webhook subscribe mohist \
+  --deliver telegram \
+  --deliver-only \
+  --secret "<subscription-level secret printed by setup>" \
+  --prompt '{body}'
+```
+
+`--deliver-only` is required because Mohist has already rendered the complete
+message. It prevents an Agent or LLM from reinterpreting the notification.
+Mohist signs each request with the subscription-level secret; do not substitute
+the platform-level secret from `config.yaml`. See
 `mo notification setup --help` for all options.
 
 WeChat has no default receiving chat. Specify its chat ID explicitly. Use
@@ -65,6 +108,12 @@ mo update server
 
 For a direct end-to-end check, drive a real Issue to an Approval point or
 completion and verify that the chat platform receives the notification.
+
+If setup cannot reach Hermes, first check `hermes gateway status` and the health
+URL above. If Hermes accepts a request but no message arrives, confirm that the
+subscription uses `--deliver-only`, its `--secret` matches the Mohist-generated
+subscription secret, and platforms without a home channel have an explicit
+`--deliver-chat-id`.
 
 ## Failure Recovery
 
@@ -92,9 +141,5 @@ such as `hi`, reopens the window until it expires again.
   Server configuration manually. A unified command surface remains future
   work.
 
----
-
-Source: `packages/server/src/Mohist.Server/Notifications/`; CLI:
-`packages/cli/Mohist.Cli/MohistCliCommands.Notify.cs`. See
-[`design/hermes-webhook.md`](../design/hermes-webhook.md) for protocol,
-configuration keys, and Hermes integration details.
+See [`design/hermes-webhook.md`](../design/hermes-webhook.md) for the authority,
+wire, signature, and failure-isolation contracts.
