@@ -841,9 +841,9 @@ channel. Status messages update in place and show work in progress. Unknown
 delivery is reconciled, and a failed update produces only one fallback. Every
 Slack Input includes collaboration rules and a reply location. An ordinary
 follow-up does not interrupt current work; only an explicit Stop operation for
-the executing Turn requests interruption. A terminal reply keeps stable Session
-identity and includes a secure Session link when an administrator configures a
-publicly accessible Mohist address.
+the attached Session subtree requests interruption. A terminal reply keeps
+stable Session identity and includes a secure Session link when an administrator
+configures a publicly accessible Mohist address.
 
 The control plane provides resumable local `mo slack setup` and
 `mo slack install-agent` guides plus one-time Owner claim. Both resume
