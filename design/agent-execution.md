@@ -123,15 +123,34 @@ legacy path that treats Variant as effort.
 
 The absent, value, clear, and invalid rules are fixed at the Agent boundary. A
 clear exists only on Agent edit, via the named `--clear-*` flag (or its typed
-internal equivalent). Exactly one execution clear flag may appear in an edit;
-it is mutually exclusive with a supplied value for that field:
+internal equivalent). Each execution field is exactly one of `omitted`, `set`,
+or `clear`; a clear and a supplied value for the same field are mutually
+exclusive. To keep the dependency resolution deterministic, one edit may use
+at most one of the four execution clear flags. Values for other fields may be
+combined with that one clear.
 
 | Field | Agent create: omitted | Agent edit: omitted | Agent edit: explicit clear | Value and invalid input |
 |---|---|---|---|---|
-| Runtime | Use the catalog's `defaultExecution.runtime`. | Retain the saved Runtime. | `--clear-runtime` selects the catalog's complete `defaultExecution` tuple. | A supplied Runtime replaces only Runtime; retained dependent fields must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
-| Model | Use the selected Runtime's catalog default Model. | Retain the saved Model. | `--clear-model` selects that Runtime's default Model, ReasoningEffort, and Variant. | A supplied Model replaces only Model; retained ReasoningEffort and Variant must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
-| ReasoningEffort | Use the selected Model's `defaultReasoningEffort`. | Retain the saved ReasoningEffort. | `--clear-reasoning-effort` selects that Model's current `defaultReasoningEffort`. | A supplied value must be one of the closed enum and be supported by the selected Model. Empty, `null`, unknown, or unsupported is rejected. |
-| Variant | Use the selected Model's `defaultVariant`; it is null only when that Model has no Variant dimension. | Retain the saved Variant. | `--clear-variant` selects that Model's current `defaultVariant`. | A supplied value must be a supported Runtime-specific Variant. Empty, `null`, unknown, or unsupported is rejected; a value is illegal when no Variant dimension applies. |
+| Runtime | Use the catalog's `defaultExecution.runtime`. | Retain the saved Runtime. | `--clear-runtime` seeds the catalog's complete `defaultExecution` tuple before valid values for other fields are applied. | A supplied Runtime replaces only Runtime; retained dependent fields must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
+| Model | Use the selected Runtime's catalog default Model. | Retain the saved Model. | After a supplied Runtime, if any, `--clear-model` selects that Runtime's default Model, ReasoningEffort, and Variant before valid effort/Variant values are applied. | A supplied Model replaces only Model; retained ReasoningEffort and Variant must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
+| ReasoningEffort | Use the selected Model's `defaultReasoningEffort`. | Retain the saved ReasoningEffort. | After Runtime and Model selection, `--clear-reasoning-effort` selects that Model's current `defaultReasoningEffort`. | A supplied value must be one of the closed enum and be supported by the selected Model. Empty, `null`, unknown, or unsupported is rejected. |
+| Variant | Use the selected Model's `defaultVariant`; it is null only when that Model has no Variant dimension. | Retain the saved Variant. | After Runtime and Model selection, `--clear-variant` selects that Model's current `defaultVariant`. | A supplied value must be a supported Runtime-specific Variant. Empty, `null`, unknown, or unsupported is rejected; a value is illegal when no Variant dimension applies. |
+
+The CLI and typed internal edit surface therefore accept this complete
+combination matrix:
+
+| Operation | Omitted fields | Supplied values | Clear flags | Result |
+|---|---|---|---|---|
+| Agent create | Any subset | Any subset of Runtime, Model, ReasoningEffort, and Variant | None allowed | Omitted fields start from catalog defaults; resolve and persist one complete tuple. |
+| Agent edit, no clear | Any subset | Any subset of the four fields | None | Omitted fields retain saved values; validate the final tuple. |
+| Agent edit, one clear | Any subset other than the cleared field | Any subset of the other three fields | Exactly one of the four execution clear flags | Apply Runtime, Model, ReasoningEffort, Variant dependency order as described above, then validate and persist the complete tuple. |
+| Agent edit, field both set and clear | N/A | The cleared field is also supplied | One clear for that field | Reject `invalid_execution_configuration`; there is no precedence rule. |
+| Agent edit, multiple execution clears | N/A | Any | Two or more | Reject `invalid_execution_configuration`; use separate edits. |
+| Agent create or launch, any execution clear | N/A | Any | One or more | Reject `invalid_execution_configuration`; clear is an Agent-edit operation only. |
+
+An explicit clear always recalculates Readiness and final native mapping for the
+whole candidate tuple. It does not mean that the resulting Variant is null: the
+only valid null effective Variant remains a Model with no Variant dimension.
 
 Every create or successful edit resolves, validates, and persists the entire
 effective tuple, including its `catalogVersion` and final native mapping. A
@@ -200,17 +219,30 @@ the caller's attachment descriptors. The CLI may read a local path only at its
 edge to produce a non-path `name`, `byteLength`, and `contentFingerprint`
 descriptor; a local path never enters Server, a persisted resource, or a public
 DTO. Resolve normalizes valid caller intent, chooses the saved defaults and
-allowed overrides, selects one catalog entry, and returns
-`ResolvedExecutionRead` plus `LaunchMaterializationPlanRead`. It may derive a
-missing Project Workspace name or identify a local attachment that would upload,
-but it does not allocate an ID, create a claim, upload bytes, or write any
-resource.
+allowed overrides through `ResolveExecutionConfiguration`, selects one catalog
+entry, and returns `ResolvedExecutionRead`, its
+`ExecutionResolutionFenceRead`, and `LaunchMaterializationPlanRead`. It may
+derive a missing Project Workspace name or identify a local attachment that
+would upload, but it does not allocate an ID, create a claim, upload bytes, or
+write any resource.
 
 `CommitAgentLaunch` runs only after a successful resolve for a new real launch.
-It atomically creates the `pending` durable admission claim containing the
-immutable resolved snapshot, then lets only that claim's `launchOperationId`
-materialize every `wouldCreate` Workspace and `wouldUpload` attachment, create
-the Job/Session/Input/Turn, and request dispatch. The real launch path shares
+Its durable `FenceResolvedAgentLaunch` operation is the admission boundary, not
+the preceding read. In one compare-and-claim operation it first checks the
+`AdmissionScope` for the caller, Project, Agent, and `launchRequestId`. A
+matching caller-intent fingerprint returns the existing claim unchanged; a
+different caller intent returns `idempotency_key_reused` (409). When there is no
+claim, it verifies that the Agent execution revision and catalog entry still
+match the pure resolution fence. A changed fence causes a new pure resolution,
+with no claim or effect. Only a matching fence can atomically persist either the
+`pending` claim with its immutable execution snapshot and full fingerprint, or
+a pure rejection tombstone. The full fingerprint includes caller intent and the
+complete resolved Runtime, Model, ReasoningEffort, Variant, source,
+`catalogVersion`, and native mapping.
+
+Only the resulting claim's `launchOperationId` may materialize every
+`wouldCreate` Workspace and `wouldUpload` attachment, create the
+Job/Session/Input/Turn, and request dispatch. The real launch path shares
 exactly the same resolve phase as dry-run; commit is the only phase allowed to
 create a claim or cause those effects.
 
@@ -228,69 +260,87 @@ or wait on an admission claim or idempotency record.
 
 ### Launch convergence
 
-AgentJob and AgentSession have separate write authorities, so launch is not one cross-aggregate
-transaction. The durable protocol instead makes every partial state queryable:
+AgentJob and AgentSession have separate write authorities, so launch is not one
+cross-aggregate transaction. The durable protocol instead makes every partial
+state queryable:
 
 ```text diagram
-caller launchRequestId
+caller launchRequestId + canonical caller intent
           |
           v
-pure resolve
+pure ResolveAgentLaunch -> resolved execution + resolution fence
           |
           v
-LaunchAdmissionClaim (pending snapshot)
+FenceResolvedAgentLaunch (atomic scope lookup + fence compare + claim)
           |
-          +--> Workspace / attachment --> AgentJob --> AgentSession --> dispatch
+          +--> pre-materialization tombstone
           |
-          +--> committed | rejected | uncertain
+          +--> pending effect rows: Workspace -> attachment[n] -> Job -> Session/Input/Turn -> dispatch
+          |                              |                  |        |
+          |                              +------------------+--------+--> post-materialization rejection
+          |
+          +--> committed | uncertain recovery
 ```
 
-- The caller supplies a stable `launchRequestId`. Server first authenticates and
-  authorizes it, validates the request structure, then normalizes canonical
-  caller intent and derives its fingerprint; a caller-supplied fingerprint is
-  never trusted. The intent contains task, allowed context and Workspace
-  references, attachment identities or non-path attachment descriptors, and the
-  explicit presence and normalized value of each allowed per-launch override.
-  It never contains mutable Agent defaults, resolved values or sources, catalog
-  version, native mapping, or a local path.
-- Server performs a read-only lookup for that `(caller, project, agent,
-  launchRequestId)` before resolving a candidate. This lookup is not admission:
-  every unmatched real launch follows authentication, validation, and pure
-  resolution before it creates a durable claim. A matching fingerprint returns
-  the original claim outcome without consulting current Agent defaults or the
-  current catalog: `committed` returns its original IDs and snapshot, `rejected`
-  returns its tombstone, `pending` waits for and rereads the winner, and
-  `uncertain` reconciles only that operation. A different fingerprint returns
-  `idempotency_key_reused` (409) and creates no work.
-- With no existing claim, Server runs `ResolveAgentLaunch`, then atomically
-  creates the admission claim/fence. A successful resolution creates `pending`
-  with its immutable snapshot. A definite validation or resolution rejection may
-  be recorded as a `rejected` tombstone after the same pure phase, with no Job,
-  Session, Workspace, attachment, Runner, or dispatch effect. Concurrent
-  callers that both resolved race only for this claim; the loser rereads the
+- The caller supplies a stable `launchRequestId`. Server authenticates and
+  authorizes first, validates the keyed envelope, then normalizes canonical
+  caller intent; a caller-supplied fingerprint is never trusted. Intent contains
+  task, allowed context and Workspace references, attachment identities or
+  non-path attachment descriptors, and explicit presence/value of each allowed
+  per-launch override. It never contains a local path.
+- The Server looks up the canonical `AdmissionScope`
+  `(callerId, projectId, agent-launch, agentId, launchRequestId)` before a new
+  admission. An existing scope compares the stored caller-intent fingerprint:
+  a mismatch is `idempotency_key_reused` (409), while a match returns the
+  original claim without resolving current defaults or catalog metadata. Its
+  stored `launchRequestFingerprint` nonetheless contains the first admission's
+  caller intent and complete resolved execution snapshot, including tuple,
+  `catalogVersion`, native mapping, and sources.
+- With no existing claim, Server runs `ResolveAgentLaunch`. Its result is only a
+  draft until `FenceResolvedAgentLaunch` atomically rechecks its Agent execution
+  revision and catalog-entry fingerprint. A stale draft is discarded and
+  re-resolved without a claim. A matching fence atomically writes either a
+  `pending` claim or a pure rejection tombstone. Concurrent callers may both
+  resolve, but only one matching compare-and-claim wins; the other rereads that
   winner and never materializes a second set of effects.
-- Only the owner of a `pending` claim may, in this order, materialize the
-  Workspace plan, upload attachment bytes, create the Job, Session, Input, and
-  Turn, and request dispatch. Every materialized record and dispatch request is
-  tagged with the claim's operation identity. `committed` is published only with
-  the real accepted IDs and the snapshot already captured by the claim.
-- AgentJob and AgentSession are separate write authorities, so this is not a
-  cross-aggregate transaction. A failure that is definitely before or after a
-  materialized effect is deterministically compensated when that ownership makes
-  it safe and ends in `rejected`; an indeterminate result remains `uncertain`
-  for reconciliation under the same operation identity. It never causes a new
-  claim or a second materialization.
+- After a valid keyed envelope has crossed authentication and authorization,
+  every pure validation, readiness, catalog, Workspace, attachment, or Session
+  admission rejection is a durable tombstone. Same-key replay returns that
+  result after later recovery; only malformed envelopes, failed authentication,
+  failed authorization, or invalid/missing keys occur before this guarantee.
+- A `pending` claim first persists a durable effect row for its Workspace, each
+  attachment, and Job. Each row has an operation-owned identity lookup and a
+  recovery fence. The claim owner may transition only its own effect from
+  `planned` to `materializing` to `materialized`; it then creates the
+  Job/Session/Input/Turn and requests dispatch under the same operation identity.
+  `committed` is published only with real accepted IDs and the immutable snapshot.
+- A definite failure before any effect begins is a
+  `pre-materialization-tombstone`. A definite failure after an effect begins is
+  a `post-materialization-rejection`: each started effect records its durable
+  identity and finishes deterministic compensation when safe, otherwise remains
+  terminally rejected with that identity. An indeterminate effect result is
+  `uncertain`; recovery first uses its operation-owned lookup and recovery fence,
+  then finishes or compensates only that effect. It cannot mint a second claim,
+  ID, Workspace, attachment, or Job.
+- Before an attachment is marked materialized, the transfer rechecks the
+  claim's frozen descriptor against the actual bytes. A different length or
+  content fingerprint is `attachment_content_changed`. It becomes the same
+  claim's pre-materialization tombstone when no effect has started, or its
+  post-materialization rejection when another effect already started. Replaying
+  the key returns that result; resubmitting changed bytes under the key conflicts
+  because the descriptor is caller intent, and a new key is required.
 - No Workspace, attachment, Job, Session, Input, Turn, dispatch, Runner, or
-  provider effect occurs before the durable claim. Same-key replay with the
-  same fingerprint returns the original outcome even after a default or catalog
-  change.
+  provider effect occurs before the durable claim. The protocol owns and
+  reconciles each effect independently; it does not claim a cross-aggregate
+  transaction.
 
-The #434 CLI adapter follows this same caller-intent and claim rule for its
-Model and ReasoningEffort flags. The #387 direct API follows the same replay and
-claim invariant, but its current public launch body has no execution overrides,
-attachments, or context references. A direct API override can enter this
-fingerprint only after [`agent-api.md`](agent-api.md) explicitly adds that field
-to the public schema; an adapter must not infer or silently accept one.
+The #434 CLI adapter follows this same caller-intent, full snapshot fingerprint,
+and compare-and-claim rule for its Model and ReasoningEffort flags. The #387
+direct API follows the same scope and replay invariant, but its current public
+launch body has no execution overrides, attachments, or context references. A
+direct API override can enter caller intent only after
+[`agent-api.md`](agent-api.md) explicitly adds that field to the public schema;
+an adapter must not infer or silently accept one.
 
 The launch projection and null rules are authoritative in
 [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
@@ -346,8 +396,8 @@ to that identity before invoking the command.
 
 | Intent | Ingress replay identity | Durable operation identity |
 |---|---|---|
-| Launch | caller `launchRequestId` | Server creates and durably maps one `launchOperationId` |
-| Follow-up with new Turn | caller `requestId` | the same request map identity |
+| Launch | `AdmissionScope(callerId, projectId, agent-launch, agentId, launchRequestId)` | Server creates and durably maps one `launchOperationId` |
+| Follow-up with new Turn | `AdmissionScope(callerId, projectId, session-followup, sessionId, requestId)` | the same request map identity |
 | Steer | caller `requestId` | the same `SessionOperationRead.operationId` |
 | Compact, Reset, recovery, rebind, handoff, force-reset | caller `operationId` | the same operation ID |
 | Direct API Turn stop | caller `Idempotency-Key` | adapter maps one private operation ID for the frozen Turn |
@@ -360,10 +410,11 @@ per-target identities remain authoritative in
 [`subagents.md#cascade-stop`](subagents.md#cascade-stop). A direct Turn stop does not redefine the
 cascade contract.
 
-For caller-owned keys, a missing key is rejected before a durable write or external effect. The
-same key and fingerprint return the original operation; a changed fingerprint conflicts. Internal
-coordinators must persist an identity before sending a command. They cannot leave a caller waiting
-on an unqueryable effect.
+For caller-owned keys, a missing key is rejected before a durable write or external effect. After an
+authenticated, authorized, parseable keyed command reaches its `AdmissionScope`, the same caller
+intent returns the original operation or tombstone and a changed caller intent conflicts. Internal
+coordinators persist the scope and operation identity before sending a command. They cannot leave a
+caller waiting on an unqueryable effect.
 
 One AgentSession has at most one active Session operation. Historical operations remain queryable
 by their original identity after completion, response loss, supersession, or restart. The canonical
@@ -450,10 +501,15 @@ Follow-up has two semantic paths:
 | running, steer unsupported | `new-turn` | queue a later Turn in Session order if capacity permits |
 | `outcome_pending`, `unknown`, or context operation active | none | reject without guessing a target Turn |
 
-The Session request map is unique by `(SessionId, requestId)`. Acceptance, a durable rejection
-tombstone, or an uncertain result is persisted under that identity. Same-key replay reads the
-stored Input/Turn/operation and cannot create another one. A queue-full rejection occurs before an
-Input is accepted; retry after capacity requires a new request ID.
+The Session request map is the `AdmissionScope`
+`(callerId, projectId, session-followup, sessionId, requestId)`. Acceptance, a
+durable pure-rejection tombstone, or an uncertain result is persisted under that
+identity. Same-key replay reads the stored Input/Turn/operation or tombstone and
+cannot create another one. A queue-full or catalog-unavailable rejection occurs
+before an Input is accepted but after the keyed admission scope, so it is also a
+stable tombstone; retry after capacity or catalog recovery requires a new request
+ID. Authentication, authorization, malformed envelope, and missing/invalid key
+fail before that scope and create no tombstone.
 
 An accepted new-turn Input and its dispatch fact commit before asynchronous enqueue. Queue or
 process failure after that point cannot erase acceptance. Dispatch retry uses the original

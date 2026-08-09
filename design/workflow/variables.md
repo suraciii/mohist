@@ -43,13 +43,22 @@ uses the closed Action shape in [`actions.md`](actions.md#mohistopencode-and-moh
 `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. `variant` remains
 a separate Runtime-specific value and never represents an effort level.
 
+The Runtime comes from the Action's `uses`, not from `vars.agent`. The expanded
+object remains a partial selection and is resolved by the shared
+`ResolveExecutionConfiguration` contract: omitted Model, ReasoningEffort, and
+Variant use the selected Runtime/Model catalog defaults; supplied values are
+Workflow Action overrides; a Model override re-defaults omitted effort and
+Variant for that Model. Variables cannot retain an effort or Variant from a
+previously selected Model or Session.
+
 Variables remain generic resources, so a stored `agent` object is not eagerly
 reinterpreted at every write. At Profile validation and before dispatch, the
-expanded Action input is closed and validated. Unknown, empty, `null`, malformed,
-or illegal effort values fail with `invalid_execution_configuration`; a
-well-formed unsupported model fails with `unsupported_execution_configuration`;
-an unsupported effort/variant combination fails with
-`incompatible_execution_configuration`. No value is silently discarded.
+expanded Action input is closed and passed to that same resolver. Unknown, empty,
+`null`, malformed, or illegal effort values fail with
+`invalid_execution_configuration`; a well-formed unsupported model fails with
+`unsupported_execution_configuration`; an unsupported effort/variant combination
+fails with `incompatible_execution_configuration`. No value is silently
+discarded.
 
 ```text diagram
 Workflow merge:

@@ -317,6 +317,29 @@ Project resolution order and interaction. Implementation adds only three constra
   cannot silently overwrite the other.
 - Help, list, view, and local validation never trigger a setup prompt.
 
+### Agent execution flag matrix
+
+`mo agent create` and `mo agent edit` expose typed `--runtime`, `--model`,
+`--reasoning-effort`, and `--variant` fields rather than a configuration blob.
+The command parser and Server share the following matrix; scripts use the stable
+JSON Agent readback, never human confirmation text:
+
+| Command form | Set values | Clear values | Result |
+|---|---|---|---|
+| `mo agent create` | Any subset of all four fields, including none | No execution clear flag | Omitted fields resolve from the current static catalog default and the complete effective tuple is persisted. |
+| `mo agent edit` with no clear | Any subset of all four fields, including none | None | Omitted fields retain the saved tuple; the final tuple must validate. |
+| `mo agent edit` with one clear | Any subset of the other three fields | Exactly one of `--clear-runtime`, `--clear-model`, `--clear-reasoning-effort`, or `--clear-variant` | The clear seeds its current catalog default in Runtime, Model, ReasoningEffort, Variant dependency order; supplied values in other fields are then applied and the entire tuple is revalidated. |
+| Any create/edit form | A value for the same field | That field's clear flag | Reject `invalid_execution_configuration`; no precedence is inferred. |
+| `mo agent edit` | Any | Two or more execution clear flags | Reject `invalid_execution_configuration`; a separate edit is required. |
+| `mo agent create` or `mo agent launch` | Any | Any execution clear flag | Reject `invalid_execution_configuration`; clear exists only on Agent edit. |
+
+Empty values, JSON `null`, unknown options, or an effort outside the closed
+vocabulary are invalid, never aliases for clear. A null effective Variant is
+readback only for a Model without a Variant dimension. Every successful edit
+with a clear recalculates readiness, `catalogVersion`, and native mapping; a
+failed recalculation leaves the saved configuration unchanged. The canonical
+field-by-field algorithm is in [`agent-execution.md`](agent-execution.md#execution-configuration-resolution).
+
 `mo agent launch --dry-run` is the one execution preview. It calls the same
 Server `ResolveAgentLaunch` path as a real launch to validate and resolve the
 saved defaults plus any `--model` and `--reasoning-effort` override. Dry-run
@@ -338,7 +361,15 @@ An empty path is `invalid_launch_input`. A real upload streams content only
 after Server has admitted the operation claim; dry-run reports the planned
 upload without streaming or creating an attachment. The trusted CLI envelope
 therefore contains only the non-path descriptor during resolve and content under
-the accepted operation identity during commit.
+the accepted operation identity during commit. Before that transfer, the CLI
+re-reads the selected file and binds the actual bytes to the frozen descriptor's
+name, byte length, and content fingerprint. It sends the attachment ordinal and
+descriptor with the accepted operation identity, never the path. A changed file
+or stream mismatch is `attachment_content_changed`: the Server records the
+claim's durable rejection and the CLI returns it rather than uploading different
+bytes. Retrying the same key after the descriptor changes conflicts with
+`idempotency_key_reused`; retrying the stored rejection returns it even if the
+file changes back. Supplying changed bytes requires a new idempotency key.
 
 For dry-run, `--json execution` selects the complete execution preview rather
 than a partial Job field. On success it renders exactly an

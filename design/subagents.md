@@ -246,8 +246,11 @@ mo agent spawn <agent-ref> --project <project-id> --parent-session <session-id> 
   --prompt "<brief>" --idempotency-key <key>
 ```
 
-`--parent-session` is the explicit caller identity. The CLI cannot infer the parent from the
-current directory, Runtime Session, process environment, or most recent launch.
+`--parent-session` is the explicit parent target, not caller identity. The
+trusted command envelope derives canonical `callerId` from the authenticated
+principal or adapter identity; the CLI cannot infer either the parent target or
+caller from the current directory, Runtime Session, process environment, or most
+recent launch.
 `--idempotency-key` is the required invocation identity; after network failure the CLI retries
 with the same key. The child always inherits the parent's Workspace and working directory.
 
@@ -260,11 +263,14 @@ Idempotency-Key: {key}
 { "targetAgentRef": "reviewer", "prompt": "..." }
 ```
 
-The path `parentSessionId` and idempotency header together define the caller and replay boundary
-for a spawn. The body accepts no `workDir`, `workspacePath`, Runner, Runtime, Instructions, Model,
-Skills, Workspace override, or arbitrary filesystem path. Within
-`(ProjectId, ParentSessionId)`, one key can express only one canonical request. A replay with a
-different prompt, target, or caller returns an HTTP 409 idempotency conflict.
+The path `parentSessionId` and idempotency header identify the target and caller
+key, while the trusted envelope supplies `callerId`. Together they form
+`AdmissionScope(callerId, projectId, subagent-spawn, parentSessionId,
+idempotencyKey)`. The body accepts no `workDir`, `workspacePath`, Runner,
+Runtime, Instructions, Model, Skills, Workspace override, or arbitrary
+filesystem path. One key can express only one canonical caller intent in that
+scope. A replay with a different prompt, target, descriptor, or caller returns
+an HTTP 409 idempotency conflict.
 
 The child directory comes only from the parent's Workspace binding
 (`workDir = parent authoritative workDir`). The platform provides no Session-level isolation
@@ -337,34 +343,61 @@ scope. It first persists a `SpawnRequestFence` without child identity:
 
 ```text literal
 SpawnRequestFence
+  Scope: AdmissionScope
+    callerId
+    projectId
+    operationKind = subagent-spawn
+    targetId = parentSessionId
+    idempotencyKey
   ProjectId
   ParentSessionId
-  IdempotencyKey
-  RequestFingerprint
+  CallerIntentFingerprint
+  RequestFingerprint                 # caller intent + resolved child execution snapshot
+  ChildExecution: ResolvedExecutionRead | null
+  ResolutionFence: ExecutionResolutionFenceRead | null
   Outcome: validation-pending | preplan-rejected | admitted
   PreplanRejectionReason?
 ```
 
 This fence is the canonical request authority for
-`(ProjectId, ParentSessionId, IdempotencyKey)`. It always freezes caller/key/fingerprint and neither
-creates nor reserves Job, Session, Input, Turn, edge, or reservation identity.
-`validation-pending` is a retryable observation before child acceptance: replay with the same
-fingerprint revalidates current facts and advances the same request to an admitted plan when
-conditions recover. `parent_runner_binding_unavailable` and
+`(callerId, ProjectId, ParentSessionId, IdempotencyKey)`. It always freezes
+caller/key/caller-intent fingerprint and, when resolution succeeds, the final
+child Runtime, Model, ReasoningEffort, Variant, `catalogVersion`, native mapping,
+and source. It neither creates nor reserves Job, Session, Input, Turn, edge, or
+reservation identity until it has an admitted plan. Parent Session identifies
+the fence target; it never substitutes for the caller dimension.
+`validation-pending` is a retryable observation before child acceptance: replay with matching
+caller intent revalidates only the current parent binding or tree-fence facts and advances the same
+request to an admitted plan when those conditions recover. If the fence already contains a child
+execution snapshot, it reuses that snapshot and does not resolve a later Agent default or catalog.
+`parent_runner_binding_unavailable` and
 `parent_tree_stop_in_progress` may retain this outcome; they cannot freeze the
 key as a rejection. Target `AgentReadiness.Unknown` and an unavailable target
 catalog are instead terminal `execution_catalog_unavailable` pre-plan
 rejections, so a new delegation never waits or creates child execution effects
 while its execution semantics are unknown.
 
-Only definite canonical or authorization invalidity advances it to `preplan-rejected`: the caller
-does not belong to the Project or is not a delegating Mohist Agent Session; the parent has no
-authoritative workDir; the target ref cannot resolve to an Agent ID in the parent's immutable
-snapshot; the target is absent from that snapshot or archived; or target AgentReadiness is
-`NeedsSetup`, for example because Instructions, Model, or Runtime is invalid or missing; and
-target `AgentReadiness.Unknown` or an unavailable target catalog. Same-fingerprint replay always
-returns this terminal pre-plan result; a different fingerprint always returns an HTTP 409
-idempotency conflict.
+After authentication, authorization, a parseable keyed envelope, and closed
+request validation, every definite pure target, execution, Workspace, or
+attachment rejection advances it to the `preplan-rejected` tombstone: the
+caller is not a delegating Mohist Agent Session; the parent has no authoritative
+workDir; the target ref cannot resolve to an Agent ID in the parent's immutable
+snapshot; the target is absent from that snapshot or archived; or target
+AgentReadiness is `NeedsSetup`, for example because Instructions, Model, or
+Runtime is invalid or missing; and target `AgentReadiness.Unknown` or an
+unavailable target catalog. Same-key replay with matching caller intent always
+returns this terminal pre-plan result; a different caller intent always returns
+an HTTP 409 idempotency conflict. Missing credentials, failed authorization,
+malformed envelopes, and missing/invalid keys occur before a fence and create no
+tombstone.
+
+Child execution uses the same `ResolveExecutionConfiguration` and durable
+compare-and-fence boundary as Agent launch. Before the coordinator can admit a
+new child plan, it resolves the target's saved tuple, records the resulting
+execution snapshot and resolution fence, and atomically verifies that the target
+Agent execution revision and selected catalog entry still match. A changed fence
+retries pure resolution without child effects. The admitted plan therefore never
+lets a Runner choose a later default, catalog entry, or native mapping.
 
 Only after request-fence validation succeeds does the coordinator advance it to a launch plan
 with child identities. The plan additionally persists:
@@ -379,7 +412,7 @@ capability snapshot. It uses the existing `PrepareJob -> EnsureInitialLaunch -> 
 extended into one launch pipeline with reservation, final check, and abort:
 
 ```text diagram
-persist request fence with target + exact prompt fingerprint
+persist request fence with caller intent + target + exact prompt + resolved child execution fingerprint
   -> pre-plan validation
   -> keep validation-pending with no child artifacts, terminally preplan-reject with no child artifacts,
        or persist launch plan and reserve EdgeId

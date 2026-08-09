@@ -32,9 +32,10 @@ Runtime Session, or client-owned event log. Authority is intentionally split:
 | Product-level root Session cascade stop | [Subagent cascade stop](subagents.md#cascade-stop) |
 
 This contract is deliberately narrower than a general developer platform. It adds only the
-credential-bound private-Project grant needed by direct callers. It does not add encryption at
-rest, cross-user transcript visibility, multi-tenant policy, OAuth clients, or general RBAC. A
-trusted Agent Connection is a separate adapter and cannot substitute for the direct caller's PAT.
+credential-bound private-Project grant needed by direct callers. Encryption at rest, cross-user
+transcript visibility, multi-tenant policy, OAuth clients, and general RBAC are not delivery gates
+for this private-Project milestone. A trusted Agent Connection is a separate adapter and cannot
+substitute for the direct caller's PAT.
 
 ## Boundary decisions
 
@@ -45,7 +46,7 @@ trusted Agent Connection is a separate adapter and cannot substitute for the dir
 | Write authentication | operator is required for launch, follow-up, and stop. |
 | Read authentication | readonly or operator is required for Job, Input, Turn, and event reads. |
 | Canonical ownership | The Server alone creates and updates Job, Session, Input, Turn, queue, operation, and terminal facts. The caller receives only public observations. |
-| Caller retry identity | The caller supplies an Idempotency-Key; the Server normalizes the complete accepted request and computes its fingerprint. The caller never submits a hash to be trusted. |
+| Caller retry identity | The caller supplies an Idempotency-Key; the Server normalizes the complete accepted request into caller intent and computes its fingerprint. The admitted launch/follow-up record additionally freezes the final execution snapshot in its full replay fingerprint. The caller never submits a hash to be trusted. |
 | Public state | Every public read reports exactly one aggregate state: accepted, queued, running, terminal, or unknown, plus the component facts needed to explain it. |
 | Events | A Session event stream is a Server-owned durable public projection. Canonical aggregates and their outboxes are inputs; the journal is not an internal event bus, Runner stream, transcript dump, or client-side TimelineItem sequence. |
 
@@ -133,24 +134,35 @@ presented as a direct caller key or bypass the direct route's PAT requirement.
 ## Normalized fingerprint and idempotency
 
 The Server parses the accepted JSON once and creates a versioned canonical
-representation. It preserves the text value exactly as a JSON string after
-parsing; it does not trim, case-fold, or otherwise make two distinct prompts
-equivalent. Canonical JSON property ordering and the route's canonical IDs make
-the representation deterministic. The Server persists only the resulting
-fingerprint with the durable request mapping; it does not expose the fingerprint
-or raw request as public output.
+caller-intent representation. It preserves the text value exactly as a JSON
+string after parsing; it does not trim, case-fold, or otherwise make two
+distinct prompts equivalent. Canonical JSON property ordering and the route's
+canonical IDs make the representation deterministic. The authenticated PAT
+resolves a private `callerId`; it is part of every internal admission scope but
+is neither accepted nor returned by this API. For this adapter, `callerId` is
+the canonical `ExternalAgentCaller.callerKeyId` from
+[`auth.md`](auth.md); it is an identity value, never the raw PAT.
+
+For a new launch or Follow-up, the Server uses that caller-intent representation
+with the canonical admission protocol in
+[`agent-execution.md`](agent-execution.md#launch-convergence). The stored full
+replay fingerprint includes both caller intent and the immutable execution
+snapshot actually selected for the operation: Runtime, Model,
+ReasoningEffort, Variant, `catalogVersion`, and native mapping (and the
+per-field source for a launch). The public API never exposes that private
+fingerprint or its catalog fields.
 
 The exact scopes are:
 
-| Command | Idempotency scope | Normalized fingerprint input | Same key and fingerprint | Same key and different fingerprint |
+| Command | Idempotency scope | Stored internal fingerprint input | Same key and caller intent | Same key and different caller intent |
 |---|---|---|---|---|
-| Launch | (projectId, agentId, Idempotency-Key) | contract version, launch, canonical projectId, canonical agentId, complete accepted public body; never Agent defaults, resolved execution, catalog version, or native mapping | Return the original canonical Job/Session/Input/Turn mapping and its current public observation | 409 idempotency_key_reused; no new canonical record, event, queue entry, outbox item, or external effect |
-| Follow-up | (sessionId, Idempotency-Key) | contract version, followup, canonical sessionId, complete accepted body | Return the original Input/Turn mapping or durable rejection and its current public observation | 409 idempotency_key_reused; no new Input, Turn, queue entry, outbox item, or external effect |
-| Stop | (turnId, Idempotency-Key) | contract version, stop, canonical turnId, empty body | Return the original target Turn observation | 409 idempotency_key_reused; no new stop operation or external effect |
+| Launch | `(callerId, projectId, agent-launch, agentId, Idempotency-Key)` | contract version and canonical caller intent (project, Agent, text-only body), plus the first fence-validated final execution tuple, catalog version, native mapping, and sources | Return the original canonical Job/Session/Input/Turn mapping and its current public observation without re-resolving defaults or catalog | 409 `idempotency_key_reused`; no new canonical record, event, queue entry, outbox item, or external effect |
+| Follow-up | `(callerId, projectId, session-followup, sessionId, Idempotency-Key)` | contract version and canonical caller intent (Session and accepted body), plus that Session's immutable Job/attempt execution snapshot when dispatch uses one | Return the original Input/Turn mapping or durable rejection and its current public observation without re-resolving execution | 409 `idempotency_key_reused`; no new Input, Turn, queue entry, outbox item, or external effect |
+| Stop | `(callerId, projectId, turn-stop, turnId, Idempotency-Key)` | contract version, canonical caller intent (target Turn and empty body) | Return the original target Turn observation | 409 `idempotency_key_reused`; no new stop operation or external effect |
 
-For stop, `(turnId, Idempotency-Key)` is the caller-visible route scope. Its
-durable mapping additionally binds callerKeyId, canonical projectId, sessionId,
-and turnId so one caller cannot look up or replay another caller's public key.
+For stop, `(turnId, Idempotency-Key)` is only the caller-visible route shape.
+Its durable mapping is scoped by `callerId`, canonical Project, and Turn so one
+caller cannot look up or replay another caller's public key.
 
 For a follow-up, the Server first resolves the Session and derives its Project
 and Agent from the canonical Session. A caller cannot put a Project or Agent in
@@ -159,22 +171,27 @@ fingerprint with a client-declared derived value.
 
 The mapping is durable before a successful command response. The first launch
 creates at most one canonical Job/Session/Input/Turn group; a response-loss
-retry with the same scope and payload returns that same group. A follow-up
-creates at most one canonical Input/Turn pair. A definitive admission rejection
-is also durable under the same key so capacity recovery, reconnects, and retries
-cannot change a rejected request into a newly accepted one.
+retry with the same scope and caller intent returns that same group. A follow-up
+creates at most one canonical Input/Turn pair. After authentication,
+authorization, a parseable keyed envelope, and closed request validation, every
+pure admission rejection is also a durable same-scope tombstone. Capacity,
+catalog, readiness, and reconnect recovery cannot change that rejected request
+into a newly accepted one; a new key represents new intent.
 
 The canonical mapping is stable. Its public status, timestamps, output, error,
 and event sequence can advance as the Server learns more facts, but retrying a
 matching request never mints different IDs or another execution.
 
-Launch resolution is deliberately downstream of this lookup. For an unmatched
-request, Server resolves the saved Agent defaults and static capability catalog
-once, then records that immutable execution snapshot in its internal durable
-admission claim before it materializes the Job or Session. A matching retry
-returns that original Job and snapshot even when an Agent default or catalog
-changes later. The public response remains this document's smaller allowlist; it
-does not expose the private catalog version or native mapping.
+Launch resolution is deliberately downstream of the existing-scope check. For
+an unmatched request, Server resolves saved Agent defaults and the static
+capability catalog, then atomically compares its resolution fence and writes the
+internal durable admission claim before it materializes the Job or Session. The
+full fingerprint persists the resolved execution tuple, catalog version, and
+native mapping beside caller intent. A matching retry compares its caller-intent
+component to the stored claim and returns that original Job and snapshot even
+when an Agent default or catalog changes later. The public response remains this
+document's smaller allowlist; it does not expose the private catalog version or
+native mapping.
 
 The #434 CLI adapter and this #387 direct API share this caller-intent and replay
 invariant. The current direct API body remains text-only. A future direct API
@@ -566,10 +583,11 @@ attempt, or internal operation. This adapter boundary is distinct from the produ
 [subagents.md](subagents.md#cascade-stop); neither route changes Session into a terminal entity.
 
 After PAT scope and Project authorization, the first keyed request durably maps
-`(callerKeyId, projectId, sessionId, turnId, Idempotency-Key)` to one canonical per-target stop
-operation before any Runner effect. The Server, not the caller, freezes the target revision,
-context generation, complete binding or explicit null binding, and deadline. These facts remain
-internal and follow the canonical [operation projection](conventions.md#canonical-sessionoperationread)
+`AdmissionScope(callerId, projectId, turn-stop, turnId, Idempotency-Key)` to one
+canonical per-target stop operation before any Runner effect. The Server, not
+the caller, freezes the target revision, context generation, complete binding or
+explicit null binding, and deadline. These facts remain internal and follow the
+canonical [operation projection](conventions.md#canonical-sessionoperationread)
 and [effect fence](conventions.md#canonical-effect-fence).
 
 ```text diagram
@@ -586,9 +604,9 @@ fenced stop lifecycle; a changed Turn, binding, context, or owner cannot redirec
 replacement work.
 
 A matching retry resolves the same mapping, snapshot, operation, and outcome. It never rereads the
-current binding to create a replacement deadline or effect. Reusing the key with a different
-fingerprint returns `409 idempotency_key_reused`. While the original stop is `unknown`, a different
-key returns `409 stop_outcome_unknown`; it cannot supersede or replay the unresolved effect.
+current binding to create a replacement deadline or effect. Reusing the scoped key with different
+canonical caller intent returns `409 idempotency_key_reused`. While the original stop is `unknown`, a
+different key returns `409 stop_outcome_unknown`; it cannot supersede or replay the unresolved effect.
 Response loss is recovered by repeating the same POST with the same key because this API exposes no
 internal-operation lookup route.
 

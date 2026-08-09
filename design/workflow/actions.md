@@ -305,16 +305,34 @@ type RuntimeAgentActionOptions = {
 ```
 
 `options` is normally expanded as a whole value from `${{ vars.agent }}`. See
-[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. It is a closed object: only
-`model`, `reasoningEffort`, and `variant` are accepted. An unknown key, empty or `null` value,
-non-string model or variant, or an effort outside the listed enum rejects Profile validation and
-task dispatch with `invalid_execution_configuration`; no value is ignored or retained as a
-diagnostic-only success. A well-formed Runtime or model absent from the accepted static catalog
-returns `unsupported_execution_configuration`; a catalog model with an invalid effort/variant
-combination returns `incompatible_execution_configuration`; an unavailable catalog returns
-`execution_catalog_unavailable`. These checks never probe the Runtime or provider. Workflow
-provides `expect` separately as the task completion contract. Legacy `with.expect` and `with.agent`
-are rejected with actionable errors when the Profile loads.
+[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. It is a
+closed object: only `model`, `reasoningEffort`, and `variant` are accepted. The
+Action's `uses` fixes Runtime and is passed to the shared
+`ResolveExecutionConfiguration` resolver as
+`workflow-action-runtime`; an Action cannot supply a second Runtime field.
+
+The optional fields are resolved as one partial tuple. The resolver starts from
+the catalog default Model for the Runtime named by `uses`. An omitted `model`
+uses that Model; an omitted ReasoningEffort or Variant then uses the selected
+Model's catalog default, including a null Variant only when that Model has no
+Variant dimension. A supplied Model, ReasoningEffort, or Variant is marked
+`workflow-action-override`. A Model change therefore re-defaults omitted effort
+and Variant for that Model rather than retaining values from a different Model.
+The resolved attempt snapshot carries the final tuple, catalog version, native
+mapping, and per-field sources; a retry of that dispatched attempt never probes
+or re-resolves it.
+
+An unknown key, empty or `null` value, non-string model or Variant, or an effort
+outside the listed enum rejects Profile validation and task dispatch with
+`invalid_execution_configuration`; no value is ignored or retained as a
+diagnostic-only success. A well-formed Runtime or Model absent from the accepted
+static catalog returns `unsupported_execution_configuration`; a catalog Model
+with an invalid effort/Variant combination returns
+`incompatible_execution_configuration`; an unavailable catalog returns
+`execution_catalog_unavailable`. These checks never probe the Runtime or
+provider. Workflow provides `expect` separately as the task completion contract.
+Legacy `with.expect` and `with.agent` are rejected with actionable errors when
+the Profile loads.
 
 The two Actions share this grammar and error model, while each Runtime catalog owns its supported
 models, effort combinations, variants, and final native mapping. `variant` never carries a
