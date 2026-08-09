@@ -45,6 +45,38 @@ public sealed class AgentConcurrencyReconciliationSpecs
     }
 
     [Fact]
+    public async Task Reconciliation_removes_a_waiter_whose_job_owner_is_missing()
+    {
+        var projectId = $"stale-waiter-project-{Guid.NewGuid():N}";
+        var agentId = $"stale-waiter-agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: 1);
+        var gate = _fixture.Grains.GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId));
+
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(
+                projectId,
+                agentId,
+                "active",
+                "active-job",
+                AgentConcurrencyPermitOwnerKind.Job));
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Waiting,
+            await gate.AcquireAsync(
+                projectId,
+                agentId,
+                "stale",
+                "missing-job",
+                AgentConcurrencyPermitOwnerKind.Job,
+                "job:missing-job"));
+
+        await RemindAsync(gate, _fixture.TimeProvider.GetUtcNow());
+
+        var snapshot = await gate.GetSnapshotAsync();
+        Assert.DoesNotContain(snapshot.Waiters, waiter => waiter.OwnerId == "missing-job");
+    }
+
+    [Fact]
     public async Task Releasing_after_limit_becomes_unbounded_removes_the_permit_and_wakes_waiters()
     {
         var projectId = $"unbounded-project-{Guid.NewGuid():N}";
@@ -60,8 +92,9 @@ public sealed class AgentConcurrencyReconciliationSpecs
         await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: null);
         await gate.ReleaseAsync(projectId, agentId, "running");
 
-        Assert.Equal(0, await gate.GetActiveCountAsync());
-        Assert.Empty(await gate.GetWaitersAsync());
+        var snapshot = await gate.GetSnapshotAsync();
+        Assert.Contains(snapshot.ActivePermits, permit => permit.OwnerId == "job-waiting");
+        Assert.DoesNotContain(snapshot.Waiters, waiter => waiter.OwnerId == "job-waiting");
     }
 
     private static Task RemindAsync(IAgentConcurrencyGrain gate, DateTimeOffset now) =>

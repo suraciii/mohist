@@ -62,7 +62,7 @@ public sealed class AgentAvailabilityServiceTests
 
         Assert.All(waiting, item => Assert.Equal("waiting", item.Status));
         Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, waiting[0].WaitingReason);
-        Assert.Equal(AgentAvailabilityWaitReasons.ConcurrencyLimit, waiting[1].WaitingReason);
+        Assert.Equal(AgentAvailabilityWaitReasons.CapacityFull, waiting[1].WaitingReason);
     }
 
     [Fact]
