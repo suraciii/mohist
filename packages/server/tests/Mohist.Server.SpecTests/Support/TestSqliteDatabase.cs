@@ -39,8 +39,16 @@ public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
     private static TestSqliteDatabase Create(Action<SqliteConnection> copySchema)
     {
         var keeper = new SqliteConnection($"Data Source=test-{Guid.NewGuid():N};Mode=Memory;Cache=Shared");
-        keeper.Open();
-        copySchema(keeper);
-        return new TestSqliteDatabase(keeper);
+        try
+        {
+            keeper.Open();
+            copySchema(keeper);
+            return new TestSqliteDatabase(keeper);
+        }
+        catch
+        {
+            keeper.Dispose();
+            throw;
+        }
     }
 }

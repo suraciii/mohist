@@ -90,24 +90,40 @@ public static class MigratedSqliteTemplate
     private static SqliteConnection CreateTemplate(string? targetMigration)
     {
         var connection = OpenInMemory();
-        using var db = CreateContext(connection);
-        if (targetMigration is null)
+        try
         {
-            GrainTestConfig.MigrateWithSchemaFix(db);
+            using var db = CreateContext(connection);
+            if (targetMigration is null)
+            {
+                GrainTestConfig.MigrateWithSchemaFix(db);
+            }
+            else
+            {
+                db.GetService<IMigrator>().Migrate(targetMigration);
+            }
+            return connection;
         }
-        else
+        catch
         {
-            db.GetService<IMigrator>().Migrate(targetMigration);
+            connection.Dispose();
+            throw;
         }
-        return connection;
     }
 
     private static SqliteConnection CreateModelSchemaTemplate()
     {
         var connection = OpenInMemory();
-        using var db = CreateContext(connection);
-        db.Database.EnsureCreated();
-        return connection;
+        try
+        {
+            using var db = CreateContext(connection);
+            db.Database.EnsureCreated();
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
     }
 
     private static SqliteConnection OpenInMemory()
