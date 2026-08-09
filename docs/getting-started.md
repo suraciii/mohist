@@ -126,11 +126,15 @@ Mohist invokes an LLM through opencode. Confirm that opencode works:
 opencode --help
 ```
 
-Without an explicit model, an Inline Agent uses the OpenCode default model. To
-select a model explicitly, set it directly in the task `options`. You can also
-configure it in Workflow Variables and pass it with
-`options: ${{ vars.agent }}`. See
-[`mohist/opencode` Action](actions/opencode.md) for the complete configuration.
+Set a model directly in the task `options` when the Workflow needs a specific
+selection. You can also configure model, reasoning effort, and Runtime-specific
+variant in Workflow Variables and pass them with `options: ${{ vars.agent }}`.
+An Inline Agent does not take a model or reasoning effort from an existing
+Session. See [`mohist/opencode` Action](actions/opencode.md) for the complete
+configuration. The closed Reasoning effort configuration contract is target
+behavior pending saved Agent execution configuration delivery.[^433]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
 
 ## 7. Create Your First Project
 

@@ -353,16 +353,36 @@ addressable, continuing conversation. It contains messages, context, and usage.
 The CLI must not use Session state as the AgentJob result. It must not interpret
 Job completion as a closed conversation or a delivered user goal.
 
-- `mo agent launch <agent>` creates an AgentJob, AgentSession, first
-  SessionInput, and first AgentTurn. It returns stable Agent, Job, Session,
-  Input, Turn, Workspace, and target identities, plus the canonical Session URL,
-  transcript URL, and composite observation URL. `--workspace <name>` binds the
-  new Session to an existing Workspace. Without it, the command binds the
-  current Project default Workspace. See [Workspace](#workspace). The command
-  accepts `--idempotency-key`. When omitted, it prints a generated key before
-  the request. After a lost response, the caller must retry with that key.
-- `mo agent create/edit` configures an Agent with typed `--runtime`, `--model`,
-  `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
+The saved configuration rules in this section are target behavior and remain
+spec-first until #433 is delivered.[^433] One-job override, preview, and
+execution readback then follow in #434.[^434]
+
+- `mo agent launch <agent>` is the launch command. Its target behavior creates an AgentJob, AgentSession, first
+  SessionInput, and first AgentTurn. It accepts one-job `--model` and
+  `--reasoning-effort` overrides, and `--dry-run` previews their resolved
+  configuration and materialization plan without creating work. A preview has
+  no Job, Session, Input, Turn, or provisional ID. It returns stable Agent, Job,
+  Session, Input, Turn, Workspace, and target identities only after a real
+  launch, plus the immutable execution record, canonical Session URL,
+  transcript URL, and composite observation URL. `--dry-run --json execution`
+  returns the resolved configuration and its read-only materialization plan;
+  `--dry-run` cannot be combined with `--idempotency-key`.
+  `--workspace <name>` binds the new Session to an existing Workspace. Without
+  it, the command uses the current Project's default Workspace or previews
+  the Workspace it would create when that choice is derivable. See
+  [Workspace](#workspace). A real launch accepts `--idempotency-key`. When
+  omitted, it prints a generated key before the request. After a lost response,
+  the caller must retry with that key; matching retry returns the original Job
+  record and the original configuration used to start it, even after later
+  Agent edits or supported-choice changes. `--attachment <path>` may be
+  repeated for local files. Mohist checks each supplied file before starting:
+  missing, unreadable, ambiguous, or over-limit files are rejected and create
+  no work. During a preview, each valid local file appears only as an upload
+  that would happen; no file is uploaded and no attachment ID is invented. A
+  real launch transfers file content only after the launch has been admitted.
+  The local path never becomes part of a shared or public record.
+- `mo agent create/edit` target behavior configures an Agent with typed `--runtime`, `--model`,
+  `--reasoning-effort`, `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
   `--instructions-file` supplies Instructions. `--runtime` accepts only
   `opencode` or `pi`. `--skills` must contain at least one nonempty Skill name.
@@ -371,19 +391,37 @@ Job completion as a closed conversation or a delivered user goal.
   does not need to construct Agent config JSON. The `--agent-config`
   passthrough is retired, and the old entry point returns migration guidance.
   `edit` clears fields with `--clear-runtime`, `--clear-model`,
-  `--clear-variant`, `--clear-avatar`, `--clear-skills`, and
+  `--clear-reasoning-effort`, `--clear-variant`, `--clear-avatar`, `--clear-skills`, and
   `--clear-max-concurrent-runs`. Set and clear options are mutually exclusive.
+  One edit may use only one of the four execution clear options.
+  On create, every omitted execution setting starts from the current supported
+  default combination and the resulting Runtime, Model, Reasoning effort, and
+  Variant are saved together. On edit, an omitted execution setting keeps its
+  saved value. Clearing Runtime restores the complete current default
+  combination; clearing Model also resets the Model's Reasoning effort and
+  Variant; clearing Reasoning effort or Variant selects that Model's current
+  default for the cleared setting. A Variant is empty only when the selected
+  Model has no Variant setting; it is not another spelling of clear. Empty and
+  `null` values are invalid rather than another form of clear. Every clear
+  recalculates setup status and supported settings. If that recalculation fails,
+  the edit is rejected and the saved Agent is unchanged. Changing Runtime or
+  Model rechecks the retained Reasoning effort and Variant, with no probe or
+  fallback.
   `mo agent view` shows unified Readiness, configuration gaps, and current
   execution availability. The concurrency limit constrains launch and
   follow-up immediately but does not stop an execution that is already running.
+  When Mohist cannot determine the supported execution choices, it rejects a
+  new launch or Session follow-up before it creates new work. Existing Session
+  history remains available to read; retry only after the configuration choices
+  can be read again.
 - `mo agent install <name>` installs a built-in Agent preset, such as
   `supervisor`, which contains a supervising Agent and routing rules for
   Approval and failure. The operation is idempotent and does not overwrite
   existing content. It produces a normal Agent and RoutingRule.
 - `mo agent job list <agent>` and `mo agent job view <job-id>` read work state
   and results.
-- `mo agent model list --runtime <runtime>` reads the models available for Agent
-  and Issue configuration. Runtime is a configuration dimension, not an
+- `mo agent model list --runtime <runtime>` reads the published supported choices
+  available for Agent and Issue configuration. Runtime is a configuration dimension, not an
   independent command resource.
 - `mo session list --agent <agent>` lists Sessions started by that Agent.
 - `mo session list --issue <number>` lists Sessions created by that Issue's
@@ -408,6 +446,26 @@ Job completion as a closed conversation or a delivered user goal.
   returns a new Input ID. It also returns a Turn ID when the Input has joined
   the current Turn or a new Turn; otherwise, read the Session later to find the
   assignment.
+
+### Agent execution output
+
+The saved execution and launch-readback behavior in this subsection is target
+behavior: saved configuration is the #433 gap, and one-job override, preview,
+and readback are the dependent #434 gap.[^433] [^434]
+
+`--json` is the stable interface for automation:
+
+| Command | JSON result | Human result |
+|---|---|---|
+| Agent create, edit, list, and view | Saved Runtime, Model, Reasoning effort, Variant, setup status, and actionable setup gaps. | The saved settings and the next setup action. |
+| Model choices | Supported Models, Reasoning efforts, Variants, and the current defaults. | A compact selection table. |
+| Agent Job list, Job view, and real launch | Job state, accepted IDs, result, next action, and the immutable configuration actually used for that Job, including whether an allowed launch setting overrode the saved Agent. | Job state, useful IDs, effective settings, and links. |
+| Session list and view | The associated Job's concise effective-settings summary, or an explicit empty value when the Session did not begin through an Agent Job. | The Session state and, when relevant, its associated Job and effective settings. |
+| Launch preview | The resolved configuration, planned Workspace and attachment work, and explicit empty Job, Session, Input, Turn, and operation identities. | The settings and work that would be created or uploaded, without temporary IDs. |
+
+Human output is intentionally optimized for scanning and may change its labels,
+ordering, or wording. Scripts and agents must select JSON fields and must never
+parse a table or success sentence.
 
 Source is only a filter and convenient lookup condition. It does not create
 duplicate `mo issue session` and `mo agent session` capabilities.
@@ -568,7 +626,8 @@ same argument resolves a Project name or ID.
   it.
 
 There is no universal `--dry-run`. Only a command that can produce a complete,
-truthful preview declares preview support.
+truthful preview declares preview support. `mo agent launch --dry-run` is the
+execution preview; it does not have a separate `mo agent resolve` companion.
 
 ## Output
 
@@ -710,6 +769,14 @@ generated by the current binary instead of a stale copy.
 - Root help currently omits `workspace`, `github`, and `slack` from its grouped
   overview even though those command groups are available. It must expose the
   same navigation map as this reference.
+- #433 independently delivers a saved, statically validated Agent Runtime,
+  Model, Reasoning effort, and Variant combination, with Variant separate from
+  Reasoning effort.[^433]
+- #434 then delivers one-job Model and Reasoning effort override, dry-run
+  resolution, and immutable execution-record readback.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
 
 ### Completed
 
@@ -717,9 +784,11 @@ generated by the current binary instead of a stale copy.
   `prereq`, `epic`, `createdAt`, and `updatedAt`. `issue list` supports the
   `--epic` filter. `issue edit` supports `--risk`, which `create` already had.
   Dependency Issue reads include Epic membership and prerequisites.
-- Agent create and edit use typed Runtime, model, variant, avatar, Skill, and
-  concurrency flags. Readiness reports the resolved configuration, and the old
-  `--agent-config` passthrough is retired.
+- The existing Agent command surface uses typed Runtime, model, variant, avatar,
+  Skill, and concurrency flags, and the old `--agent-config` passthrough is
+  retired. The saved Runtime, Model, Reasoning effort, and Variant combination,
+  static validation, preview, and immutable readback semantics remain the
+  #433/#434 target gaps above.
 - The Epic field catalog reflects real fields and includes `progress`, with
   `nextIssueNumber` and `nextIssueReason`.
 - Input channels are unified. `workflow create/edit --file` replaces

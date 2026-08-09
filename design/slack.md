@@ -54,7 +54,7 @@ Slack member
 Slack App / Bot
     |
     v  Socket Mode, opened outbound by the local service
-mohist-slack -> Server ingress -> Connection boundary -> Agent API -> Agent / Job / Session -> Runner
+mohist-slack -> Server ingress -> Connection boundary -> trusted Agent command -> Agent / Job / Session -> Runner
                                       |
                                       +-> provider inbox / conversation mapping / outbound outbox
 
@@ -72,9 +72,9 @@ SlackWorkspaceEnrollment -> manages -> ManagedSlackAgentApp, one per managed Age
 |---|---|---|
 | Slack | member identity, channels and message interaction, event and reply transport | Agent configuration, execution, or work results |
 | `mohist-slack` | translation between Slack Socket Mode protocol and normalized ingress / delivery intent; short leases granted by Server | persisted state, thread ownership decisions, Agent execution, work-state arbitration, or App creation / installation |
-| Server Connection boundary, data plane | provider identity and access decisions, durable ingress, conversation mapping, pending delivery, and Agent API calls | Slack SDK / wire payloads, Agent execution, or result arbitration |
+| Server Connection boundary, data plane | provider identity and access decisions, durable ingress, conversation mapping, pending delivery, and trusted Agent command calls | Slack SDK / wire payloads, Agent execution, or result arbitration |
 | Server Slack control plane | Workspace enrollment, external lifecycle and authorization for Mohist App and Agent Apps, manifests, credential references, and audit | Agent execution, thread ownership, or wire protocol |
-| Agent API | unified start, continue, observe, and stop operations | Slack mentions, threads, member directory, or provider rate limits |
+| Trusted Agent command | unified trusted start, continue, observe, and stop operations | Slack mentions, threads, member directory, or provider rate limits |
 | Runner | execution from the resolved Mohist Agent definition | Slack identity, access policy, or thread routing |
 
 Each Mohist Server runs one `mohist-slack` process that carries Socket
@@ -746,7 +746,7 @@ authority and failure mode:
   events and acknowledges only a definite Server decision. It does not authorize
   the caller, choose a Session, or invoke an Agent directly.
 - **Admission and execution arbitration** belong to the Server Connection
-  boundary and Agent API. They authorize stable Slack identities, deduplicate
+  boundary and trusted Agent command. They authorize stable Slack identities, deduplicate
   input, choose start or Follow-up semantics, and expose canonical Session/Turn
   state. A provider response cannot alter those facts.
 - **Reply intent and liveness projection** are separate Server capabilities.
