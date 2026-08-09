@@ -32,16 +32,9 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
 
         try
         {
-            var row = await TestWait.ForAsync(
-                async () =>
-                {
-                    await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
-                    return await db.AgentJobs.SingleOrDefaultAsync(r => r.JobKey == jobKey);
-                },
-                candidate => candidate is not null,
-                TimeSpan.FromSeconds(5),
-                TimeSpan.FromMilliseconds(25),
-                $"AgentJob mirror row '{jobKey}' to be written before assignment release");
+            await _fixture.DispatchObserver.AssignmentPrepared;
+            await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
+            var row = await db.AgentJobs.SingleOrDefaultAsync(r => r.JobKey == jobKey);
             Assert.False(submitTask.IsCompleted);
             Assert.Equal(projectId, row!.ProjectId);
             Assert.Equal("agent-mirror", row.AgentId);

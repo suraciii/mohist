@@ -548,6 +548,14 @@ caller can submit again when capacity is available only with a new requestId. Th
 queued admission for one Session. Cross-Session concurrency, capacity claim and release, and capacity views
 belong to the global scheduling policy. This design does not copy that policy.
 
+Cross-Session capacity waiting is canonical Server admission state. A launch, or a Follow-up that starts a
+new Runtime execution, first persists stable Input and Turn identities and then claims capacity from the
+per-Agent capacity authority. When the claim returns `waiting`, the Turn remains observably `queued` and
+retains the same claim token. Capacity release or a policy change wakes that original waiter. It must not be
+projected as Ready or a synchronous failure, and it must not require the client to generate a new request
+identity. One Session still executes at most one Turn at a time; different Sessions may execute concurrently
+within `max-concurrent-runs` and Runner capacity.
+
 The `new-turn` admission transaction first persists the Input, Turn relation, and canonical dispatch record,
 then enqueues asynchronously. The `steer` admission transaction instead first persists the steer
 operation/effect defined above and creates no dispatch record. If the event/outbox write definitely fails,
