@@ -112,7 +112,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                     AgentJobId: polledAgentJobId,
                     ProjectId: projectId,
                     AgentSessionId: polledSessionId,
-                    OwnerKind: ownerKind);
+                    OwnerKind: ownerKind,
+                    Dispatch: data.Clone());
             }
             else
             {
@@ -175,7 +176,8 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string? AgentJobId,
         string? ProjectId,
         string? AgentSessionId,
-        string? OwnerKind);
+        string? OwnerKind,
+        JsonElement Dispatch);
 
     protected async Task<string> CreateProjectAsync(string prefix)
     {

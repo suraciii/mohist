@@ -793,7 +793,7 @@ internal static partial class AgentCommands
     {
         var cmd = new Command(
             "launch",
-            "Launch a generic AgentSession from an Agent profile. Returns both the AgentJob id (the work owner) and the AgentSession id (the conversation owner). Sends POST /api/projects/:projectId/agents/:agentId/sessions.");
+            "Launch a generic AgentSession from an Agent profile. Returns both the AgentJob id (the work owner) and the AgentSession id (the conversation owner).");
         var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
         var promptOpt = new Option<string?>("--prompt") { Description = "Prompt text (mutually exclusive with --prompt-file)" };
         var promptFileOpt = new Option<string?>("--prompt-file") { Description = "Read prompt from a UTF-8 file path, or - for stdin (mutually exclusive with --prompt)" };

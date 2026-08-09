@@ -881,6 +881,28 @@ public class CliAgentCommandSpecs
     }
 
     [Fact]
+    public async Task AgentLaunch_Help_DescribesLaunchIdentitiesWithoutVolatileRoute()
+    {
+        var handler = new RecordingHttpHandler((_, _) => throw new InvalidOperationException("help must not call the API"));
+        var output = new StringWriter();
+        var error = new StringWriter();
+
+        var exitCode = await RunAsync(
+            handler,
+            ["agent", "launch", "--help"],
+            output: output,
+            error: error,
+            fileSystem: FileSystemWithProject());
+
+        Assert.Equal(0, exitCode);
+        var help = output.ToString() + error;
+        Assert.Contains("AgentJob id", help, StringComparison.Ordinal);
+        Assert.Contains("AgentSession id", help, StringComparison.Ordinal);
+        Assert.DoesNotContain("/sessions", help, StringComparison.Ordinal);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task AgentLaunch_ForwardsExplicitIdempotencyKeyAndPrintsReferences()
     {
         var handler = new RecordingHttpHandler((_, _) => Task.FromResult(RecordingHttpHandler.Json(new

@@ -135,6 +135,22 @@ public static class AgentSessionLaunchRoutes
                     ? await provisioner.ResolveCliWorkspaceNameAsync(project.Id)
                     : await provisioner.ResolveWebWorkspaceNameAsync(project.Id, preMintedSessionId);
 
+            // An implicit CLI launch is still scoped to the server-resolved
+            // workspace. Rebuild the validation context from the name returned
+            // by Ensure so repository membership and the dispatch snapshot use
+            // the same canonical workspace state.
+            var contextForValidation = body.Context;
+            if (!hasExplicitWorkspace)
+            {
+                workspaceName = launchOrigin == CliLaunchOrigin
+                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
+                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
+                contextForValidation = (body.Context ?? new AgentSessionLaunchContextRef()) with
+                {
+                    Workspace = workspaceName,
+                };
+            }
+
             // The fingerprint folds the caller-submitted attachment ids
             // (raw, in order) so a replay with a different attachment set
             // is rejected as a conflicting idempotency replay. The
@@ -142,7 +158,7 @@ public static class AgentSessionLaunchRoutes
             // is established later via ValidateAndBindAgentInputAsync.
 
             var contextValidation = await ValidateContextAsync(
-                body.Context,
+                contextForValidation,
                 project.Id,
                 issueQuerier,
                 epicQuerier,
@@ -275,14 +291,6 @@ public static class AgentSessionLaunchRoutes
                             .Select(BuildAttachmentResultDto)
                             .ToArray(),
                     });
-            }
-
-            if (!hasExplicitWorkspace)
-            {
-                workspaceName = launchOrigin == "cli"
-                    ? await provisioner.EnsureCliWorkspaceAsync(project.Id, timeProvider.GetUtcNow())
-                    : await provisioner.EnsureWebWorkspaceAsync(project.Id, preMintedSessionId, timeProvider.GetUtcNow());
-                launchRequest = launchRequest with { WorkspaceName = workspaceName };
             }
 
             var launchContext = new AgentLaunchContext(
