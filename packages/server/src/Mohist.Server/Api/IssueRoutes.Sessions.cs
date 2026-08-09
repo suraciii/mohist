@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -138,6 +139,7 @@ public static partial class IssueRoutes
             AgentSessionCancelRequest? request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -150,6 +152,7 @@ public static partial class IssueRoutes
                 request,
                 sessions,
                 grains,
+                workReconciler,
                 ct);
         });
 
@@ -163,6 +166,7 @@ public static partial class IssueRoutes
             IGrainFactory grains,
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
+            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = GetRequiredProject(ctx);
@@ -177,6 +181,7 @@ public static partial class IssueRoutes
                 grains,
                 runnerHub,
                 connections,
+                workReconciler,
                 ct);
         });
     }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -31,10 +32,11 @@ public static class AgentSessionCancelRoutes
             AgentSessionCancelRequest? request,
             AgentSessionQuerier sessions,
             IGrainFactory grains,
+            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            return await ExecuteCancelAsync(project.Id, sessionId, request, sessions, grains, ct);
+            return await ExecuteCancelAsync(project.Id, sessionId, request, sessions, grains, workReconciler, ct);
         });
 
         return app;
@@ -46,6 +48,7 @@ public static class AgentSessionCancelRoutes
         AgentSessionCancelRequest? request,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
+        WorkflowSessionWorkReconciler workReconciler,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.TurnId))
@@ -56,6 +59,8 @@ public static class AgentSessionCancelRoutes
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
         var result = await AgentSessionTurnControlOperations.CancelAsync(grains, target.SessionId, request.TurnId);
+        if (result.Kind is TurnControlResultKind.Cancelled or TurnControlResultKind.AlreadyEnded)
+            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-cancel", ct);
         return result.Kind switch
         {
             TurnControlResultKind.NotFound => ApiResults.NotFound($"Turn {request.TurnId} not found"),
