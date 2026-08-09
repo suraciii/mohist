@@ -29,6 +29,7 @@ internal static partial class AgentCommands
         agent.Subcommands.Add(BuildLaunch(api));
         agent.Subcommands.Add(BuildSpawn(api));
         agent.Subcommands.Add(BuildJob(api));
+        agent.Subcommands.Add(BuildHistory(api));
         agent.Subcommands.Add(BuildInstall(api));
         agent.Subcommands.Add(BuildSubscriptions(api));
         agent.Subcommands.Add(AgentModelCommands.Build(api));
@@ -1078,6 +1079,51 @@ internal static partial class AgentCommands
         job.Subcommands.Add(BuildJobView(api));
 
         return job;
+    }
+
+    private static Command BuildHistory(MohistCliApi api)
+    {
+        var cmd = new Command(
+            "history",
+            "List canonical Agent turn history for an Agent profile.");
+        var agentRefArg = new Argument<string>("agent") { Description = "Agent name or id (resolves project-scoped)" };
+        var limitOpt = new Option<int>("--limit")
+        {
+            Description = "Maximum number of canonical turn rows (1-200).",
+            DefaultValueFactory = _ => 50,
+        };
+        var projectOpt = MohistCliCommands.ProjectRefOption();
+        var outputOpt = MohistCliCommands.OutputOption(ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentHistoryList)));
+
+        cmd.Arguments.Add(agentRefArg);
+        cmd.Options.Add(limitOpt);
+        cmd.Options.Add(projectOpt);
+        cmd.Options.Add(outputOpt);
+        cmd.SetAction(ctx => ListAsync(
+            ctx.GetValue(agentRefArg),
+            ctx.GetValue(limitOpt),
+            ctx.GetValue(projectOpt),
+            ctx.GetValue(outputOpt)));
+
+        async Task<int> ListAsync(string? agentRef, int limit, string? project, string? output)
+        {
+            var (mode, exit) = api.ResolveOutputMode(output);
+            if (exit != 0) return exit;
+
+            var (resolvedProjectId, resolveExit) = await api.ResolveProject(project);
+            if (resolveExit != 0) return resolveExit;
+
+            var agent = await ResolveAgentAsync(api, resolvedProjectId, agentRef ?? string.Empty);
+            if (agent is null) return 1;
+
+            var query = $"?limit={Math.Clamp(limit, 1, 200)}";
+            return await api.PrintWithOutputAsync(
+                ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agent.Id)}/history") + query,
+                mode,
+                nameof(MohistCliApi.TableShape.AgentHistoryList));
+        }
+
+        return cmd;
     }
 
     private static Command BuildJobList(MohistCliApi api)

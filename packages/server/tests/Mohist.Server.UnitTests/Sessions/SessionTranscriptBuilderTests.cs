@@ -78,7 +78,7 @@ public sealed class SessionTranscriptBuilderTests
     }
 
     [Fact]
-    public void Build_UnknownPartIsOnlyProjectedAsStructuredRawDiagnostic()
+    public void Build_UnknownPartIsPublicWithoutPayloadAndRawIsExplicitDiagnostic()
     {
         var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
         var session = CreateSession(at);
@@ -109,7 +109,11 @@ public sealed class SessionTranscriptBuilderTests
 
         var publicResponse = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], [part]), session);
         Assert.Equal(1, publicResponse.PartCount);
-        Assert.Empty(Assert.Single(publicResponse.Turns).Assistant);
+        var publicPart = Assert.Single(Assert.Single(publicResponse.Turns).Assistant);
+        Assert.Equal("unknown", publicPart.Type);
+        Assert.Equal("unknown", publicPart.Kind);
+        Assert.Equal("Unknown runtime event", publicPart.Text);
+        Assert.Null(publicPart.Raw);
 
         var diagnosticResponse = SessionTranscriptBuilder.Build(
             new AgentSessionTranscriptData([turn], [part]), session, "raw");
@@ -123,6 +127,53 @@ public sealed class SessionTranscriptBuilderTests
         Assert.Equal("preserved", diagnosticPart.Raw.Payload.GetProperty("state").GetString());
         Assert.Equal(part.PayloadJson, diagnosticPart.Raw.PayloadJson);
         Assert.Equal(2, diagnosticPart.Raw.RawEventCount);
+    }
+
+    [Fact]
+    public void Build_CanonicalInputPartStaysInUserProjection()
+    {
+        var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+        var session = CreateSession(at);
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            Id = 1,
+            SessionId = session.Id,
+            Sequence = 1,
+            PromptText = "canonical prompt",
+            StartedAt = at,
+            UpdatedAt = at,
+        };
+        var parts = new[]
+        {
+            new AgentSessionTranscriptPartRow
+            {
+                Id = 1,
+                TurnId = turn.Id,
+                Sequence = 1,
+                Type = TranscriptPartTypes.Input,
+                PayloadJson = "{\"text\":\"canonical prompt\"}",
+                FirstSeenAt = at,
+                LastSeenAt = at,
+            },
+            new AgentSessionTranscriptPartRow
+            {
+                Id = 2,
+                TurnId = turn.Id,
+                Sequence = 2,
+                Type = TranscriptPartTypes.Text,
+                Text = "canonical reply",
+                PayloadJson = "{\"text\":\"canonical reply\"}",
+                FirstSeenAt = at,
+                LastSeenAt = at,
+            },
+        };
+
+        var resultTurn = Assert.Single(SessionTranscriptBuilder.Build(
+            new AgentSessionTranscriptData([turn], parts), session).Turns);
+
+        Assert.Equal("canonical prompt", resultTurn.User.Text);
+        var reply = Assert.Single(resultTurn.Assistant);
+        Assert.Equal("canonical reply", reply.Text);
     }
 
     [Theory]

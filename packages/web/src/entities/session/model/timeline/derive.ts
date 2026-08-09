@@ -25,6 +25,8 @@ function salienceFor(renderClass: TimelineRenderClass): TimelineSalience {
     case 'plan':
     case 'boundary':
       return 'normal'
+    case 'unknown':
+      return 'normal'
     case 'file-edit':
     case 'shell':
       return 'medium'
@@ -216,6 +218,14 @@ function classifyFact(fact: TimelineFact): Omit<TimelineItem, 'id' | 'sourceIds'
         renderClass: 'error',
         summary: fact.error?.message ?? fact.text ?? '执行失败',
         salience: 'critical',
+        detail: makeDetail(fact),
+        isTerminal: true,
+      }
+    case 'unknown':
+      return {
+        renderClass: 'unknown',
+        summary: fact.text ?? '未知运行事件',
+        salience: 'normal',
         detail: makeDetail(fact),
         isTerminal: true,
       }

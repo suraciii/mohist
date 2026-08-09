@@ -18,6 +18,7 @@ const ITEM_STYLES: Record<TimelineRenderClass, string> = {
   status: 'border-border/50 bg-muted/30 text-muted-foreground',
   boundary: 'border-warning-border bg-warning-subtle',
   error: 'border-danger-border bg-danger-subtle text-danger',
+  unknown: 'border-warning-border bg-warning-subtle/60',
   suppressed: 'border-border/50 bg-muted/20 text-muted-foreground',
 }
 
@@ -34,6 +35,7 @@ const MARKER_STYLES: Record<TimelineRenderClass, string> = {
   status: 'bg-muted-foreground/30',
   boundary: 'bg-warning',
   error: 'bg-danger',
+  unknown: 'bg-warning',
   suppressed: 'bg-muted-foreground/30',
 }
 

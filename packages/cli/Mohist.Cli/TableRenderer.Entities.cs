@@ -483,6 +483,30 @@ internal sealed partial class TableRenderer
             _out.WriteLine($"exit code:       {exitCode}");
     }
 
+    private void RenderAgentHistoryList(JsonNode? data)
+    {
+        var rows = AsArray(data);
+        if (rows.Count == 0)
+        {
+            _out.WriteLine("No agent history");
+            return;
+        }
+
+        var headers = new[] { "turn id", "status", "outcome", "started", "model", "bucket" };
+        var widths = new[] { IdSoftCap, 12, 12, 24, TitleSoftCap, 10 };
+        var cells = rows.Select(row => new[]
+        {
+            Truncate(StringOf(row, "turnId"), IdSoftCap),
+            Truncate(StringOf(row, "status"), 12),
+            Truncate(StringOf(row, "outcome"), 12),
+            Truncate(StringOf(row, "startedAt"), 24),
+            Truncate(StringOf(row, "model"), TitleSoftCap),
+            Truncate(StringOf(row, "bucket"), 10),
+        }).ToList();
+
+        WriteTable(headers, widths, cells);
+    }
+
     private void RenderSessionList(JsonNode? data)
     {
         var rows = AsArray(data);

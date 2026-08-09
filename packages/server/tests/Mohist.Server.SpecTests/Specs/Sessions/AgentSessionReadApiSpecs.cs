@@ -154,13 +154,94 @@ public class AgentSessionReadApiSpecs
         Assert.Contains(workflowSession, projectSessionIds);
     }
 
+    [Fact]
+    public async Task History_ReturnsCanonicalTurnSummaryAndPublicContext()
+    {
+        var project = await CreateProjectAsync("history-contract");
+        var agent = await CreateAgentAsync(project, "history-agent");
+        var sessionId = $"sess-{Guid.NewGuid():N}";
+        var started = TestTime.UtcDateTime.AddMinutes(-1);
+        var ended = started.AddSeconds(9);
+
+        await InsertGenericSessionAsync(
+            project,
+            sessionId,
+            agent.Id,
+            agent.Name,
+            issueNumber: 385,
+            createdAt: started,
+            inputs:
+            [
+                new AgentSessionInputRecord(
+                    "input-history",
+                    1,
+                    "Review history contract",
+                    "agent-launch",
+                    AgentSessionInputAcceptance.Accepted,
+                    started,
+                    JobId: "job-history")
+            ],
+            turns:
+            [
+                new AgentTurnRecord(
+                    "turn-history",
+                    1,
+                    ["input-history"],
+                    AgentTurnStatus.Completed,
+                    JobId: "job-history",
+                    Result: new AgentTurnResult(Message: "complete", Output: "result"),
+                    RecordedAt: started,
+                    UpdatedAt: ended)
+            ],
+            usage: new AgentUsageSummary(CostAmount: 1.5, CostCurrency: "USD"),
+            repository: "suraciii/mohist",
+            workspaceName: "history",
+            workspacePath: "/private/history-worktree",
+            targetId: "target-history");
+
+        var history = await _client.GetDataAsync<JsonElement>(
+            $"/api/projects/{project}/agents/{agent.Id}/history?limit=10");
+
+        var row = Assert.Single(history.EnumerateArray());
+        Assert.Equal("turn-history", row.GetProperty("id").GetString());
+        Assert.Equal(sessionId, row.GetProperty("sessionId").GetString());
+        Assert.Equal("input-history", row.GetProperty("inputId").GetString());
+        Assert.Equal("turn-history", row.GetProperty("turnId").GetString());
+        Assert.Equal("job-history", row.GetProperty("jobId").GetString());
+        Assert.Equal("Review history contract", row.GetProperty("task").GetString());
+        Assert.Equal("completed", row.GetProperty("status").GetString());
+        Assert.Equal("success", row.GetProperty("outcome").GetString());
+        Assert.Equal(started.ToString("o"), row.GetProperty("startedAt").GetString());
+        Assert.Equal(9_000, row.GetProperty("durationMs").GetInt64());
+        Assert.Equal("test-model", row.GetProperty("model").GetString());
+        Assert.Equal(1.5, row.GetProperty("cost").GetProperty("amount").GetDouble());
+        Assert.Equal("USD", row.GetProperty("cost").GetProperty("currency").GetString());
+        Assert.Equal("history", row.GetProperty("workspace").GetString());
+        Assert.Equal("target-history", row.GetProperty("target").GetString());
+        Assert.Equal("recent", row.GetProperty("bucket").GetString());
+
+        var context = row.GetProperty("context");
+        Assert.Equal(385, context.GetProperty("issueNumber").GetInt32());
+        Assert.Equal("suraciii/mohist", context.GetProperty("repository").GetString());
+        Assert.Equal("history", context.GetProperty("workspaceName").GetString());
+        Assert.DoesNotContain("private/history-worktree", row.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("workspacePath", row.ToString(), StringComparison.Ordinal);
+    }
+
     private async Task InsertGenericSessionAsync(
         string projectId,
         string sessionId,
         string agentId,
         string agentName,
         int? issueNumber = null,
-        DateTime? createdAt = null)
+        DateTime? createdAt = null,
+        IReadOnlyList<AgentSessionInputRecord>? inputs = null,
+        IReadOnlyList<AgentTurnRecord>? turns = null,
+        AgentUsageSummary? usage = null,
+        string? repository = null,
+        string? workspaceName = null,
+        string? workspacePath = null,
+        string? targetId = null)
     {
         var labels = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -171,6 +252,14 @@ public class AgentSessionReadApiSpecs
         };
         if (issueNumber.HasValue)
             labels[GenericAgentSessionMetadata.IssueNumber] = issueNumber.Value.ToString();
+        if (!string.IsNullOrWhiteSpace(repository))
+            labels[GenericAgentSessionMetadata.Repository] = repository;
+        if (!string.IsNullOrWhiteSpace(workspaceName))
+            labels[GenericAgentSessionMetadata.WorkspaceName] = workspaceName;
+        if (!string.IsNullOrWhiteSpace(workspacePath))
+            labels[GenericAgentSessionMetadata.WorkspacePath] = workspacePath;
+        if (!string.IsNullOrWhiteSpace(targetId))
+            labels[GenericAgentSessionMetadata.TargetId] = targetId;
 
         var created = createdAt ?? TestTime.UtcDateTime;
         var session = new AgentSession
@@ -180,7 +269,10 @@ public class AgentSessionReadApiSpecs
             Settings = new AgentSessionSettings("test-model"),
             Status = new AgentSessionStatusSnapshot(
                 CreatedAt: created,
-                AgentRuntimeSessionId: sessionId),
+                AgentRuntimeSessionId: sessionId,
+                UsageSummary: usage,
+                Inputs: inputs,
+                Turns: turns),
             Metadata = new AgentSessionMetadata(labels),
         };
 

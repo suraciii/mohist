@@ -155,6 +155,51 @@ public class AgentSessionQuerier : IScopedService
     }
 
     /// <summary>
+    /// Projects the canonical Session input/turn records into the public
+    /// Agent history contract. Transcript rows are used only for read-side
+    /// timestamps and resolved model facts; status, identity, result and
+    /// usage remain sourced from the Session read model.
+    /// </summary>
+    public async Task<IReadOnlyList<AgentHistoryItemDto>> ListAgentHistoryAsync(
+        string projectId,
+        string agentId,
+        int limit = 50,
+        CancellationToken ct = default)
+    {
+        var clampedLimit = Math.Clamp(limit, 1, 200);
+        var records = await ListAgentSessionRecordsAsync(
+            projectId,
+            agentId,
+            [AgentLaunchSourceKind],
+            clampedLimit,
+            additionalContextLabels: null,
+            ct);
+        if (records.Count == 0) return [];
+
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var eventSummaries = await TranscriptReductions.LoadEventSummariesAsync(
+            db,
+            records.Select(record => record.Session.Id).ToArray(),
+            ct);
+        var items = new List<AgentHistoryItemDto>();
+
+        foreach (var record in records)
+        {
+            var session = record.Session;
+            var transcript = await LoadTranscriptAsync(
+                db,
+                session.Id,
+                session.Status.AgentRuntimeSessionId,
+                ct);
+            var resolvedModel = eventSummaries.GetValueOrDefault(session.Id)?.ResolvedModel;
+            items.AddRange(AgentHistoryProjector.Project(
+                new AgentHistoryProjectionSource(record, transcript, resolvedModel)));
+        }
+
+        return AgentHistoryBucketReducer.Reduce(items, clampedLimit);
+    }
+
+    /// <summary>
     /// Lists an Agent's sessions for the source-agnostic session list. Agent
     /// Connection sessions share the Agent identity and session read contract
     /// with direct launches, but remain distinct from Workflow sessions.

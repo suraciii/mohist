@@ -154,4 +154,22 @@ describe('buildTimelineFacts', () => {
       input: { text: 'prompt-turn-unmatched', acceptance: 'unknown' },
     }))
   })
+
+  it('keeps a public unknown transcript part visible without requiring raw payload', () => {
+    const unknown: SessionPart = {
+      id: 'part-unknown',
+      type: 'unknown',
+      kind: 'unknown',
+      startedAt: at,
+      completedAt: null,
+    }
+
+    const facts = buildTimelineFacts({ turns: [turn('turn-unknown', [unknown])] })
+
+    expect(facts).toContainEqual(expect.objectContaining({
+      sourceId: 'part:part-unknown',
+      kind: 'unknown',
+      text: '未知运行事件',
+    }))
+  })
 })

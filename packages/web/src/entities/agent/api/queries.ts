@@ -23,8 +23,8 @@ import type {
   AgentStatusDetailResponse,
   AgentUpdateRequest,
 } from './client'
-import { getAgentSessions as getAgentScopedSessions } from './agent-sessions'
-import type { AgentSessionListItemDto } from './agent-sessions'
+import { getAgentHistory, getAgentSessions as getAgentScopedSessions } from './agent-sessions'
+import type { AgentHistoryItemDto, AgentSessionListItemDto } from './agent-sessions'
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
@@ -195,6 +195,19 @@ export function agentSessionsQueryOptions(projectId: string | null | undefined, 
 export function useAgentSessions({ agentRef }: { agentRef: string }) {
   const { projectId } = useProject()
   return useQuery<AgentSessionListItemDto[]>(agentSessionsQueryOptions(projectId, agentRef))
+}
+
+export function agentHistoryQueryOptions(projectId: string | null | undefined, agentRef: string) {
+  return {
+    queryKey: ['agents', projectId, agentRef, 'history'],
+    queryFn: () => getAgentHistory(projectId!, agentRef),
+    enabled: !!projectId && !!agentRef,
+  }
+}
+
+export function useAgentHistory({ agentRef }: { agentRef: string }) {
+  const { projectId } = useProject()
+  return useQuery<AgentHistoryItemDto[]>(agentHistoryQueryOptions(projectId, agentRef))
 }
 
 /* ── Per-agent server-side status (Readiness/Availability/waiting) ── */

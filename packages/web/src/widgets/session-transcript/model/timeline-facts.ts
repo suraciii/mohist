@@ -264,6 +264,12 @@ function partFact(part: SessionPart, turn: SessionTurn, turnSequence: number | u
       correlationId: `${turn.id}:reasoning`,
     })
   }
+  if (source.type === 'unknown') {
+    return fact(sourceId, 'transcript', 'unknown', occurredAt, order, part, {
+      text: stringValue(source.text) ?? '未知运行事件',
+      correlationId: stringValue(source.id),
+    })
+  }
   if (source.type === 'error') {
     const errorKind = stringValue(source.kind)
     if (errorKind === 'context-reset' || errorKind === 'compaction') {

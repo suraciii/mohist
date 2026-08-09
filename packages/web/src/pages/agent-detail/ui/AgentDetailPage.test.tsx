@@ -7,7 +7,7 @@ import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
   AgentInfo,
-  AgentSessionListItemDto,
+  AgentHistoryItemDto,
   AgentStatusDetailResponse,
 } from '../../../entities/agent'
 import {
@@ -24,7 +24,7 @@ import {
 const state: {
   agent: AgentInfo | undefined
   agentState: 'loading' | 'ready' | 'error'
-  sessions: AgentSessionListItemDto[]
+  sessions: AgentHistoryItemDto[]
   archiveCalls: string[]
   unarchiveCalls: string[]
   detailStatus: AgentStatusDetailResponse | undefined
@@ -128,7 +128,7 @@ function mockAgentError() {
   state.agentState = 'error'
 }
 
-function mockSessions(sessions: AgentSessionListItemDto[]) {
+function mockSessions(sessions: AgentHistoryItemDto[]) {
   state.sessions = sessions
 }
 
@@ -202,16 +202,12 @@ function makeAgent(overrides: Partial<AgentInfo> = {}): AgentInfo {
   }
 }
 
-function makeSession(overrides: Partial<AgentSessionListItemDto> = {}): AgentSessionListItemDto {
+function makeSession(overrides: Partial<AgentHistoryItemDto> = {}): AgentHistoryItemDto {
   return {
-    sessionId: 'sess-1',
-    agentId: 'agent-1',
-    agentName: 'Test Agent',
-    activity: 'idle',
-    createdAt: '2026-06-10T00:00:00Z',
-    lastActivityAt: '2026-06-10T01:00:00Z',
-    resolvedModel: 'gpt-4',
-    contextRefs: null,
+    id: 'turn-1', sessionId: 'sess-1', inputId: 'input-1', inputIds: ['input-1'], turnId: 'turn-1', jobId: 'job-1',
+    task: 'Test task', context: null, status: 'completed', outcome: 'success', result: null,
+    startedAt: '2026-06-10T00:00:00Z', endedAt: '2026-06-10T01:00:00Z', durationMs: 3600000,
+    model: 'gpt-4', cost: { amount: null, currency: null, scope: 'session' }, workspace: null, target: null, bucket: 'ended',
     ...overrides,
   }
 }
@@ -337,15 +333,18 @@ describe('AgentDetailPage', () => {
     it('renders sessions in running, failed, and ended sections', async () => {
       mockAgent(makeAgent())
       mockSessions([
-        makeSession({ sessionId: 's1', activity: 'active' }),
-        makeSession({ sessionId: 's2', activity: 'unknown' }),
-        makeSession({ sessionId: 's3', activity: 'idle' }),
+        makeSession({ sessionId: 's1', turnId: 'turn-s1', id: 'turn-s1', bucket: 'running', status: 'executing' }),
+        makeSession({ sessionId: 's2', turnId: 'turn-s2', id: 'turn-s2', bucket: 'failed', status: 'failed', outcome: 'failure' }),
+        makeSession({ sessionId: 's3', turnId: 'turn-s3', id: 'turn-s3', bucket: 'ended' }),
+        makeSession({ sessionId: 's4', turnId: 'turn-s4', id: 'turn-s4', bucket: 'recent' }),
       ])
       renderPage()
       await screen.findByTestId('agent-detail-sessions')
       expect(screen.getByText('Running')).toBeInTheDocument()
       expect(screen.getByText('Failed')).toBeInTheDocument()
       expect(screen.getByText('Ended')).toBeInTheDocument()
+      expect(screen.getByText('Recent')).toBeInTheDocument()
+      expect(screen.getAllByTestId('session-row-s4-turn-s4')).toHaveLength(1)
     })
 
     it('shows empty sessions message when no sessions exist', async () => {

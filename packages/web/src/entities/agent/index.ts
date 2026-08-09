@@ -12,6 +12,7 @@ export {
   useArchiveAgent,
   useUnarchiveAgent,
   useAgentSessions,
+  useAgentHistory,
   useAgentDetailStatus,
 } from './api/queries'
 export {
@@ -74,6 +75,7 @@ export type {
 export {
   cancelGenericSession,
   stopGenericSession,
+  getAgentHistory,
   getAgentSessions as getAgentScopedSessions,
   getGenericSessionSummary,
   getGenericSessionTranscript,
@@ -100,6 +102,9 @@ export type {
   AgentLaunchObservationMeaning,
   AgentSessionListContextRefsDto,
   AgentSessionListItemDto,
+  AgentHistoryContextDto,
+  AgentHistoryCostDto,
+  AgentHistoryItemDto,
   GenericAgentSessionSummaryDto,
   GenericFollowupInput,
   TurnControlResult,

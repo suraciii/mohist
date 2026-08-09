@@ -99,6 +99,7 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.IssueWatchList] = S("watch list is a CLI projection over issue watch state"),
             [MohistCliApi.TableShape.AgentJobList] = D<AgentJobListItemDto>(),
             [MohistCliApi.TableShape.AgentJobView] = D<AgentJobViewDto>(),
+            [MohistCliApi.TableShape.AgentHistoryList] = D<AgentHistoryItemDto>(),
             [MohistCliApi.TableShape.SessionList] = D<UnifiedSessionListItemDto>(),
             [MohistCliApi.TableShape.SessionShow] = D<UnifiedSessionSummaryDto>(),
             [MohistCliApi.TableShape.SessionTree] = D<AgentSessionTreePage>(),

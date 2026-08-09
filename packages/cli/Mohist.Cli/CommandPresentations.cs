@@ -315,6 +315,10 @@ internal static class CommandPresentations
                 CommandPresentationCatalog.Attach(Find(group, "launch"), new CommandPresentation(
                     CommandCapability.Automation, "Launch a generic AgentSession from an Agent profile",
                     Boundary: "Launch returns both the AgentJob id (work owner) and the AgentSession id (conversation owner)."));
+                CommandPresentationCatalog.Attach(Find(group, "history"), new CommandPresentation(
+                    CommandCapability.Automation, "List canonical Agent turn history for an Agent profile",
+                    Boundary: "History is a Server-owned projection of canonical SessionInput and AgentTurn records; it does not arbitrate lifecycle state.",
+                    JsonFields: ResourceOutputCatalog.For(nameof(MohistCliApi.TableShape.AgentHistoryList)).Fields));
                 CommandPresentationCatalog.Attach(Find(group, "job"), new CommandPresentation(
                     CommandCapability.Automation, "Read AgentJobs (the work result owner)"));
                 var job = Find(group, "job");

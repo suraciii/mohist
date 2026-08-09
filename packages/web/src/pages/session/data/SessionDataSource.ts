@@ -38,6 +38,9 @@ export interface SessionDataSourceResult {
   notFound: boolean
 
   sessionKey: string
+  focusedInputId?: string | null
+  focusedTurnId?: string | null
+  contextJobId?: string | null
   runtimeSessionId: string
   runtimeSessionLineage?: unknown
   viewedRuntimeSessionId?: string | null

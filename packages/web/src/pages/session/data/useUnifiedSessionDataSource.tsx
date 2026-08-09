@@ -95,6 +95,8 @@ export function useUnifiedSessionDataSource(
   const [transcriptView, setTranscriptView] = useState<'public' | 'raw'>('public')
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
   const jobId = searchParams.get('jobId')
+  const focusedInputId = searchParams.get('inputId')
+  const focusedTurnId = searchParams.get('turnId')
 
   useDocumentTitle('Session — Mohist')
 
@@ -281,6 +283,9 @@ export function useUnifiedSessionDataSource(
     isError: summaryError,
     notFound: !sessionId || (!summary && !summaryLoading && !summaryError),
     sessionKey: sessionId,
+    focusedInputId,
+    focusedTurnId,
+    contextJobId: jobId,
     runtimeSessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,

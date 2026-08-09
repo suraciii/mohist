@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions;
@@ -33,7 +34,7 @@ internal static class SessionTranscriptBuilder
             var status = ResolveTurnStatus(canonicalTurn, parts, session?.Status.Activity);
             var dto = new AgentSessionTranscriptTurnDto
             {
-                Id = $"turn-{turn.Sequence}",
+                Id = canonicalTurn?.Id ?? turn.Id.ToString(CultureInfo.InvariantCulture),
                 StartedAt = at,
                 CompletedAt = null,
                 Incomplete = status is "queued" or "executing",
@@ -149,15 +150,26 @@ internal static class SessionTranscriptBuilder
                         continue;
                     }
 
-                    if (diagnostic)
+                    // Input is already represented by the turn's user projection;
+                    // known operational facts and retired protocol events remain
+                    // hidden from the public assistant transcript.
+                    if (part.Type is TranscriptPartTypes.Input
+                        or TranscriptPartTypes.Usage
+                        or TranscriptPartTypes.Model
+                        or RuntimeEventTypes.ContextHealthUpdate
+                        or RuntimeEventTypes.ProviderRetry
+                        || TranscriptAccumulator.IsRetiredEventType(part.Type))
+                        continue;
+
+                    dto.Assistant.Add(new AgentSessionTranscriptPartDto
                     {
-                        dto.Assistant.Add(new AgentSessionTranscriptPartDto
-                        {
-                            Id = $"{dto.Id}-p{++partIndex}",
-                            Type = "unknown",
-                            Kind = "unknown",
-                            StartedAt = partAt,
-                            Raw = new AgentSessionTranscriptRawPartDto
+                        Id = $"{dto.Id}-p{++partIndex}",
+                        Type = "unknown",
+                        Text = "Unknown runtime event",
+                        Kind = "unknown",
+                        StartedAt = partAt,
+                        Raw = diagnostic
+                            ? new AgentSessionTranscriptRawPartDto
                             {
                                 Kind = "unknown",
                                 Type = part.Type,
@@ -169,9 +181,9 @@ internal static class SessionTranscriptBuilder
                                 FirstSeenAt = part.FirstSeenAt.ToString("o"),
                                 LastSeenAt = part.LastSeenAt.ToString("o"),
                                 RawEventCount = part.RawEventCount,
-                            },
-                        });
-                    }
+                            }
+                            : null,
+                    });
                 }
             }
 

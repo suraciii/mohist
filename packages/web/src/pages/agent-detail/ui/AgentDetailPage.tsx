@@ -17,7 +17,7 @@ import {
 import {
   useAgent,
   useAgentDetailStatus,
-  useAgentSessions,
+  useAgentHistory,
   useArchiveAgent,
   useUnarchiveAgent,
   readAgentModelAndVariant,
@@ -27,7 +27,7 @@ import type {
   AgentAvailabilityResponse,
   AgentInfo,
   AgentReadinessResult,
-  AgentSessionListItemDto,
+  AgentHistoryItemDto,
   AgentStatusDetailResponse,
   AgentWaitingWorkItem,
 } from '../../../entities/agent'
@@ -50,7 +50,7 @@ export interface AgentDetailPageData {
   agent: AgentInfo | undefined
   isLoading: boolean
   isError: boolean
-  sessions: AgentSessionListItemDto[]
+  sessions: AgentHistoryItemDto[]
   sessionsLoading: boolean
   archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
   unarchiveAgent: Pick<ReturnType<typeof useUnarchiveAgent>, 'mutate' | 'isPending'>
@@ -62,7 +62,7 @@ export type AgentDetailPageDataHook = (agentId: string) => AgentDetailPageData
 
 const useDefaultData: AgentDetailPageDataHook = (agentId) => {
   const { data: agent, isLoading, isError } = useAgent(agentId)
-  const { data: sessions = [], isLoading: sessionsLoading } = useAgentSessions({ agentRef: agentId })
+  const { data: sessions = [], isLoading: sessionsLoading } = useAgentHistory({ agentRef: agentId })
   const { data: detailStatus, isLoading: detailStatusLoading } = useAgentDetailStatus(agentId)
   return {
     agent,
@@ -98,13 +98,16 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleDateString()
 }
 
-function statusIcon(activity: string) {
-  switch (activity) {
-    case 'active':
+function statusIcon(status: string) {
+  switch (status.toLowerCase()) {
+    case 'queued':
+    case 'executing':
+    case 'running':
       return <ClockIcon className="size-3.5 text-blue-500" />
-    case 'unknown':
+    case 'failed':
+    case 'cancelled':
       return <XCircleIcon className="size-3.5 text-red-500" />
-    case 'idle':
+    case 'completed':
       return <CheckCircleIcon className="size-3.5 text-emerald-500" />
     default:
       return <AlertCircleIcon className="size-3.5 text-muted-foreground" />
@@ -287,7 +290,7 @@ function SessionSection({
   toProjectPath,
 }: {
   title: string
-  sessions: AgentSessionListItemDto[]
+  sessions: AgentHistoryItemDto[]
   toProjectPath: (path: string) => string
 }) {
   if (sessions.length === 0) return null
@@ -296,25 +299,32 @@ function SessionSection({
       <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider px-1">{title}</h4>
       {sessions.map((s) => (
         <a
-          key={s.sessionId}
-          href={toProjectPath(`/sessions/${encodeURIComponent(s.sessionId)}`)}
-          data-testid={`session-row-${s.sessionId}`}
+          key={`${s.sessionId}:${s.turnId}`}
+          href={toProjectPath(sessionHistoryPath(s))}
+          data-testid={`session-row-${s.sessionId}-${s.turnId}`}
           className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >
-          {statusIcon(s.activity ?? 'unknown')}
+          {statusIcon(s.status)}
           <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
-            {s.agentName}
+            {s.task}
           </span>
           <span className="text-xs text-muted-foreground shrink-0">
-            {s.resolvedModel ?? 'unknown'}
+            {s.model ?? 'unknown'}
           </span>
           <span className="text-[10px] text-muted-foreground/60 shrink-0">
-            {formatTime(s.lastActivityAt ?? s.createdAt)}
+            {formatTime(s.endedAt ?? s.startedAt)}
           </span>
         </a>
       ))}
     </div>
   )
+}
+
+function sessionHistoryPath(item: AgentHistoryItemDto): string {
+  const params = new URLSearchParams({ turnId: item.turnId })
+  if (item.inputId) params.set('inputId', item.inputId)
+  if (item.jobId) params.set('jobId', item.jobId)
+  return `/sessions/${encodeURIComponent(item.sessionId)}?${params.toString()}`
 }
 
 export function AgentDetailPage({
@@ -352,29 +362,10 @@ export function AgentDetailPage({
   const isUnknownReadiness = readinessConclusion === 'Unknown'
   const launchBlockedByReadiness = isNeedsSetup
 
-  const runningSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'active'),
-    [allSessions],
-  )
-  const failedSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'unknown'),
-    [allSessions],
-  )
-  const endedSessions = useMemo(
-    () => allSessions.filter((s) => s.activity === 'idle'),
-    [allSessions],
-  )
-  const recentSessions = useMemo(
-    () =>
-      [...allSessions]
-        .sort((a, b) => {
-          const aTime = a.lastActivityAt ?? a.createdAt
-          const bTime = b.lastActivityAt ?? b.createdAt
-          return new Date(bTime).getTime() - new Date(aTime).getTime()
-        })
-        .slice(0, 5),
-    [allSessions],
-  )
+  const runningSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'running'), [allSessions])
+  const failedSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'failed'), [allSessions])
+  const endedSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'ended'), [allSessions])
+  const recentSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'recent'), [allSessions])
 
   function handleArchive() {
     if (!agent) return
