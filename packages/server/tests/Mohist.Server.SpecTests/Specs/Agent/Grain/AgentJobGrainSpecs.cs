@@ -271,16 +271,15 @@ public class AgentJobGrainSpecs : AgentJobGrainTestSupport
 
         await secondJob.SubmitAsync(MakeInput("no capacity", projectId, "/tmp/agent-job-capacity-second"));
 
-        await WaitForStatusAsync(secondJob, AgentJobStatus.Failed, TimeSpan.FromSeconds(5));
+        await WaitForStatusAsync(secondJob, AgentJobStatus.Pending, TimeSpan.FromSeconds(5));
 
         var secondSnapshot = await secondJob.GetRuntimeSnapshotAsync();
         Assert.Null(secondSnapshot.RunnerId);
         Assert.Null(secondSnapshot.CurrentWorkId);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondSnapshot.FailureReason);
 
         var secondTerminal = await secondJob.GetTerminalResultAsync();
-        Assert.Equal(AgentJobStatus.Failed, secondTerminal.Status);
-        Assert.Equal(AgentJobFailureReasons.RunnerUnavailable, secondTerminal.FailureReason);
+        Assert.Equal(AgentJobStatus.Pending, secondTerminal.Status);
+        Assert.Null(secondTerminal.FailureReason);
 
         var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
         var activeWorks = (await runner.GetRuntimeStateAsync()).ActiveWorks;

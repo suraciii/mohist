@@ -1,5 +1,6 @@
 using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
 using Orleans.Runtime;
 
@@ -64,8 +65,8 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             var waiters = DrainWaiters();
             if (waiters.Count > 0)
                 await _state.WriteStateAsync();
-            foreach (var jobId in waiters)
-                _ = NotifyWaiterAsync(jobId);
+            foreach (var waiter in waiters)
+                _ = NotifyWaiterAsync(waiter);
             return AgentConcurrencyAcquireResult.Granted;
         }
 
@@ -99,8 +100,8 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             ? DrainWaiters()
             : await GrantWaitersAsync(projectId, agentId);
         await _state.WriteStateAsync();
-        foreach (var jobId in waiters)
-            _ = NotifyWaiterAsync(jobId);
+        foreach (var waiter in waiters)
+            _ = NotifyWaiterAsync(waiter);
     }
 
     public async Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens)
@@ -111,8 +112,8 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             ? DrainWaiters()
             : await GrantWaitersAsync(projectId, agentId, limit.Value);
         await _state.WriteStateAsync();
-        foreach (var jobId in waiters)
-            _ = NotifyWaiterAsync(jobId);
+        foreach (var waiter in waiters)
+            _ = NotifyWaiterAsync(waiter);
     }
 
     public Task<int> GetActiveCountAsync() => Task.FromResult(_state.State.ActivePermits.Count);
@@ -129,7 +130,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             await ReconcileFromAuthoritativeStateAsync();
     }
 
-    private async Task<IReadOnlyList<string>> GrantWaitersAsync(
+    private async Task<IReadOnlyList<AgentConcurrencyWaiter>> GrantWaitersAsync(
         string projectId,
         string agentId,
         int? knownLimit = null)
@@ -138,7 +139,7 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         if (limit is null)
             return DrainWaiters();
 
-        var jobsToNotify = new List<string>();
+        var granted = new List<AgentConcurrencyWaiter>();
         while (_state.State.Waiters.Count > 0
             && _state.State.ActivePermits.Count < limit.Value)
         {
@@ -146,28 +147,34 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             _state.State.Waiters.RemoveAt(0);
             if (_state.State.ActivePermits.Any(permit => string.Equals(permit.Token, waiter.Token, StringComparison.Ordinal)))
                 continue;
-            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(waiter.Token, waiter.OwnerId, waiter.OwnerKind));
-            if (waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
-                jobsToNotify.Add(waiter.OwnerId);
+            _state.State.ActivePermits.Add(new AgentConcurrencyPermit(
+                waiter.Token,
+                waiter.OwnerId,
+                waiter.OwnerKind,
+                _timeProvider.GetUtcNow()));
+            granted.Add(waiter);
         }
-        return jobsToNotify;
+        return granted;
     }
 
-    private IReadOnlyList<string> DrainWaiters()
+    private IReadOnlyList<AgentConcurrencyWaiter> DrainWaiters()
     {
-        var jobsToNotify = _state.State.Waiters
-            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
-            .Select(waiter => waiter.OwnerId)
-            .ToArray();
+        var waiters = _state.State.Waiters.ToArray();
         _state.State.Waiters.Clear();
-        return jobsToNotify;
+        return waiters;
     }
 
-    private async Task NotifyWaiterAsync(string jobId)
+    private async Task NotifyWaiterAsync(AgentConcurrencyWaiter waiter)
     {
         try
         {
-            await _grains.GetGrain<IAgentJobGrain>(jobId).ConcurrencyPermitGrantedAsync();
+            if (waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+            {
+                await _grains.GetGrain<IAgentJobGrain>(waiter.OwnerId).ConcurrencyPermitGrantedAsync();
+                return;
+            }
+
+            await _grains.GetGrain<IAgentSessionGrain>(waiter.OwnerId).ConcurrencyPermitGrantedAsync();
         }
         catch
         {

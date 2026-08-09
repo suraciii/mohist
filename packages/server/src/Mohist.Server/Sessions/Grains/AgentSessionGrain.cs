@@ -650,6 +650,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             now: Now(),
             attachments: command.Attachments,
             provenance: command.Provenance);
+        StampFollowupConcurrencyToken(session, result.OperationId);
         await CommitAsync(session, Array.Empty<AgentSessionEvent>());
         return result with { AttachmentResults = command.AttachmentResults };
     }
@@ -846,10 +847,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (turn is null) return null;
         var index = leases.FindIndex(lease => string.Equals(lease.TurnId, turn.Id, StringComparison.Ordinal));
         if (index < 0 || leases[index].Dispatching) return null;
+
+        var lease = leases[index];
+        if (!await AcquireFollowupDispatchPermitAsync(session, lease))
+            return null;
+
+        lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
+            string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal)) ?? lease;
+
         var inputs = (session.Status.Inputs ?? []).ToDictionary(input => input.Id, StringComparer.Ordinal);
         var texts = turn.InputIds.Select(id => inputs[id].Text).ToArray();
         var attachments = CollectAttachmentsForDispatch(inputs, turn.InputIds);
-        leases[index] = leases[index] with { Dispatching = true, PayloadSealed = true };
+        leases[index] = lease with { Dispatching = true, PayloadSealed = true };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
         var inputId = turn.InputIds.Count == 1 ? turn.InputIds[0] : null;
@@ -857,6 +866,78 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             ? input.Provenance
             : null;
         return new AgentSessionFollowupDispatch(turn.Id, leases[index].OperationId, texts, attachments, inputId, provenance);
+    }
+
+    private async Task<bool> AcquireFollowupDispatchPermitAsync(
+        AgentSession session,
+        AgentSessionFollowupLease lease)
+    {
+        var projectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var agentId = session.Metadata?.Label(GenericAgentSessionMetadata.AgentId);
+        if (string.IsNullOrWhiteSpace(projectId) || string.IsNullOrWhiteSpace(agentId))
+            return true;
+
+        var token = lease.ConcurrencyToken;
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            token = FollowupConcurrencyToken(session.Id, lease.OperationId);
+            var leases = GetPendingFollowups(session).ToList();
+            var index = leases.FindIndex(candidate =>
+                string.Equals(candidate.OperationId, lease.OperationId, StringComparison.Ordinal));
+            if (index < 0)
+                return false;
+            leases[index] = leases[index] with
+            {
+                ConcurrencyToken = token,
+                ConcurrencyAgentId = agentId,
+            };
+            SetPendingFollowups(session, leases);
+            await CommitAsync(session, []);
+        }
+
+        var result = await _grains
+            .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
+            .AcquireAsync(
+                projectId,
+                agentId,
+                token,
+                session.Id,
+                AgentConcurrencyPermitOwnerKind.Followup);
+        return result == AgentConcurrencyAcquireResult.Granted;
+    }
+
+    private void StampFollowupConcurrencyToken(AgentSession session, string? operationId)
+    {
+        var projectId = session.Metadata?.Label(AgentSessionQueryMetadataKeys.ProjectId);
+        var agentId = session.Metadata?.Label(GenericAgentSessionMetadata.AgentId);
+        if (string.IsNullOrWhiteSpace(projectId)
+            || string.IsNullOrWhiteSpace(agentId)
+            || string.IsNullOrWhiteSpace(operationId))
+            return;
+
+        var leases = GetPendingFollowups(session).ToList();
+        var index = leases.FindIndex(candidate =>
+            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
+        if (index < 0 || !string.IsNullOrWhiteSpace(leases[index].ConcurrencyToken))
+            return;
+
+        leases[index] = leases[index] with
+        {
+            ConcurrencyToken = FollowupConcurrencyToken(session.Id, operationId),
+            ConcurrencyAgentId = agentId,
+        };
+        SetPendingFollowups(session, leases);
+    }
+
+    private static string FollowupConcurrencyToken(string sessionId, string operationId) =>
+        $"followup:{sessionId}:{operationId}";
+
+    public async Task ConcurrencyPermitGrantedAsync()
+    {
+        var session = await GetRequiredAsync();
+        _followupDispatchScheduler?.Schedule(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+            session.Id);
     }
 
     private static IReadOnlyList<AgentSessionInputAttachmentDescriptor>? CollectAttachmentsForDispatch(
@@ -886,9 +967,11 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         var leases = GetPendingFollowups(session).ToList();
         var index = leases.FindIndex(lease => string.Equals(lease.OperationId, operationId, StringComparison.Ordinal));
         if (index < 0 || !leases[index].Dispatching) return;
+        var lease = leases[index];
         leases[index] = leases[index] with { Dispatching = false };
         SetPendingFollowups(session, leases);
         await CommitAsync(session, []);
+        await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
     }
 
     public async Task MarkFollowupTurnExecutingAsync(string operationId)
@@ -914,14 +997,26 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (string.IsNullOrWhiteSpace(operationId))
             return;
         var session = await GetRequiredAsync();
+        var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
+            string.Equals(candidate.OperationId, operationId, StringComparison.Ordinal));
         var events = session.MarkFollowupTurnTerminal(operationId, status, result, Now());
         if (events.Count == 0)
         {
             await _stateStore.SaveAsync(SessionId, session);
             _session = session;
+            if (lease is not null)
+                await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
             return;
         }
         await CommitAsync(session, events);
+        if (lease is not null)
+            await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
+        _followupDispatchScheduler?.Schedule(
+            session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+            session.Id);
     }
 
     private static SessionCommandRequest BuildSessionCommandRequest(
@@ -3003,9 +3098,18 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
         if (string.IsNullOrWhiteSpace(turnId))
             return new AgentTurnCancelResult(null, false);
         var session = await GetRequiredAsync();
+        var lease = GetPendingFollowups(session).FirstOrDefault(candidate =>
+            string.Equals(candidate.TurnId, turnId, StringComparison.Ordinal));
         var result = session.CancelQueuedTurn(turnId, Now());
         await _stateStore.SaveAsync(SessionId, session);
         _session = session;
+        if (result.Cancelled && lease is not null)
+        {
+            await ReleaseFollowupConcurrencyPermitAsync(session, lease.ConcurrencyToken, lease.ConcurrencyAgentId);
+            _followupDispatchScheduler?.Schedule(
+                session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId) ?? string.Empty,
+                session.Id);
+        }
         return result;
     }
 

@@ -39,6 +39,7 @@ public interface IAgentSessionGrain : IGrainWithStringKey
     Task<AgentSessionFollowupReservation> BeginFollowupAsync();
     Task ConfirmFollowupAsync(string operationId);
     Task AbandonFollowupAsync(string operationId);
+    Task ConcurrencyPermitGrantedAsync();
 
     Task<AgentSessionFollowupAcceptResult> AcceptFollowupAsync(AcceptFollowupCommand command);
     Task<AgentSessionFollowupDispatch?> BeginNextFollowupDispatchAsync();

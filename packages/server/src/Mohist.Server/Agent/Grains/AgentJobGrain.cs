@@ -1040,16 +1040,9 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 return;
         }
 
-        await EnterTerminalStateAsync(
-            AgentJobStatus.Failed,
-            null,
-            AgentJobFailureReasons.RunnerUnavailable,
-            AgentJobFailureReasons.RunnerUnavailable,
-            AgentJobFailureReasons.RunnerUnavailable,
-            "no eligible runner has admission capacity",
-            null,
-            null,
-            null);
+        State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
+        await ReleaseConcurrencyPermitAsync();
+        await PersistAsync();
     }
 
     private async Task<bool> AcquireConcurrencyPermitAsync()
@@ -1105,7 +1098,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
     private async Task ReleaseConcurrencyPermitAsync()
     {
-        if (!State.ConcurrencyPermitHeld || State.Input is null)
+        if (State.Input is null)
             return;
 
         var projectId = State.Input.ProjectId;
@@ -1115,6 +1108,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             || string.IsNullOrWhiteSpace(agentId)
             || string.IsNullOrWhiteSpace(token))
         {
+            State.ConcurrencyPermitHeld = false;
             return;
         }
 
@@ -1343,35 +1337,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             $"{AgentJobFailureReasons.ReportTimeout}: report timeout after {_options.JobTimeout}");
     }
 
-    private bool ReadinessTimeoutExceeded()
-    {
-        if (State.Status != AgentJobStatus.Pending)
-            return false;
-        if (State.ReadySince is null)
-            return false;
-        var bound = _options.DispatchRetryBound;
-        if (bound <= TimeSpan.Zero)
-            return false;
-        return _timeProvider.GetUtcNow() >= State.ReadySince.Value + bound;
-    }
-
     private async Task EvaluatePendingAsync()
     {
-        if (ReadinessTimeoutExceeded())
-        {
-            await EnterTerminalStateAsync(
-                AgentJobStatus.Failed,
-                null,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                AgentJobFailureReasons.RunnerUnavailable,
-                "readiness timeout exceeded without claim",
-                null,
-                null,
-                null);
-            return;
-        }
-
         if (string.IsNullOrWhiteSpace(State.RunnerId)
             || string.IsNullOrWhiteSpace(_ledger?.DispatchJson))
         {
