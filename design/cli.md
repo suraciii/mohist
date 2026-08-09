@@ -366,6 +366,46 @@ format, stable error codes, and exit status. Implementation adds:
   does not automatically resend a state-changing request and provides a retry hint only when retry
   is confirmed safe.
 
+## Managed Runtime Updates
+
+`mo install server`, `mo install runner`, `mo update server`, and `mo update runner` share one
+local deployment contract. It covers only managed Server and Runner installations; it does not
+change CLI, Slack, authentication, or other components.
+
+Each Server or Runner installation/update follows this fact chain:
+
+```text
+UpdateSource --repo-root -> InstalledArtifact <component>/<source-hash>
+  -> ServiceTarget (absolute, stable) -> RuntimeIdentity <source-hash>
+```
+
+- `--repo-root` is the sole source authority for that invocation. The command resolves one source
+  hash there and carries it through build, installation, and runtime verification. It never infers
+  the source revision from the current directory, an existing unit `WorkingDirectory`, or another
+  checkout.
+- Build outputs are installed at the stable versioned path
+  `~/.local/share/mohist/runtime/<component>/versions/<source-hash>/`. The Server publish output,
+  plus Runner `dist` and required Node dependencies, belong to that installed version and do not
+  read a Git worktree at runtime.
+- Managed unit `WorkingDirectory` and `ExecStart` are absolute paths beneath the installed runtime
+  root and point at the active version. They contain neither relative `packages/...` paths nor a
+  `--repo-root` path. Updates switch installed versions; they never turn an arbitrary worktree into
+  a service runtime directory.
+- A Server installation carries a source-hash manifest; a Runner installation carries and verifies
+  `dist/build-info.json`. Server reads identity from its installed manifest and Runner reports its
+  build hash through its existing connection. Both are compared with the resolved source hash.
+- The candidate version is fully built and installed, then activated, restarted, and verified. It
+  becomes verified and may report success only after its runtime identity equals the expected source
+  hash.
+- Missing or mismatched identity, service startup failure, and readiness failure all fail the
+  operation. When a previously verified version exists, CLI restores and restarts it; the error
+  reports expected hash, actual hash when available, and the recovery action. A first installation
+  with no verified version stops the unverified candidate and explicitly reports that nothing could
+  be restored.
+
+This boundary keeps source build facts, installed versions, service targets, and runtime reports
+separate: a successful build or systemd restart alone does not constitute a successful update.
+
 ## Reliability Checks
 
 CLI spec tests verify the public contract without a real Server, process, Git repository, network,
@@ -395,6 +435,10 @@ or wall clock:
   configure operations.
 - `runner` and `server` commands do not call a local service manager. `service` commands neither
   depend on Project nor represent local process status as Runner resource state.
+- Server and Runner install/update contract tests use one scoped fake source of truth for source
+  hash, filesystem state, service target, and runtime identity. They assert versioned installation
+  paths, absolute unit targets, identity verification, and rollback without real systemd,
+  processes, network, or Git; sleeps, polling, and retries do not mask identity failures.
 - `otel` queries use the Server query capability. CLI neither opens trace storage files directly
   nor resolves a local storage path.
 - Activity list, Event tail, and dead-letter recovery preserve different results for a durable read

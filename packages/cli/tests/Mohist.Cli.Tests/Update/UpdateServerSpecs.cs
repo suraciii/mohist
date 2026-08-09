@@ -7,206 +7,103 @@ namespace Mohist.Cli.Tests.Update;
 public class UpdateServerSpecs
 {
     [Fact]
-    public async Task UpdateServer_BuildsCurrentSourceAndRestarts()
+    public async Task UpdateServer_InstallsSourceHashUnderStableRootAndUsesAbsoluteServiceTarget()
     {
-        var f = new UpdateTestFactory();
-        var updater = f.BuildUpdater(new SequenceHttpHandler(HttpStatusCode.OK));
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal(2, f.Commands.ExecutedCommands.Count);
-        Assert.Equal("dotnet", f.Commands.ExecutedCommands[0].FileName);
-        Assert.Equal(new[] { "build", "Mohist.sln" }, f.Commands.ExecutedCommands[0].Args);
-        Assert.Equal("/repo", f.Commands.ExecutedCommands[0].WorkingDirectory);
-        Assert.Equal("systemctl", f.Commands.ExecutedCommands[1].FileName);
-        Assert.Equal(new[] { "--user", "restart", "mohist.service" }, f.Commands.ExecutedCommands[1].Args);
-    }
-
-    [Fact]
-    public async Task UpdateServer_WaitsForReadinessAfterRestart()
-    {
-        var f = new UpdateTestFactory();
-        var readiness = new SequenceHttpHandler(
-            null,
-            new ResponseSpec(HttpStatusCode.OK),
-            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-            new ResponseSpec(HttpStatusCode.OK));
-        var updater = f.BuildUpdater(readiness, serverReadyTimeout: TimeSpan.FromSeconds(30));
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(0, exitCode);
-        Assert.Equal(4, readiness.Requests);
-        Assert.Equal(["/api/health", "/api/health", "/", "/assets/app.js"], readiness.Paths);
-        Assert.Contains("Server is ready.", f.Stdout.ToString());
-    }
-
-    [Fact]
-    public async Task UpdateServer_AfterSuccess_AnnouncesRunnerNotRefreshed()
-    {
-        var f = new UpdateTestFactory();
-        var readiness = new SequenceHttpHandler(
-            new ResponseSpec(HttpStatusCode.OK),
-            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-            new ResponseSpec(HttpStatusCode.OK));
-        var updater = f.BuildUpdater(readiness, serverReadyTimeout: TimeSpan.FromSeconds(1));
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(0, exitCode);
-        var output = f.Stdout.ToString();
-        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
-        Assert.Contains("Local runner code may now be stale relative to the updated server", output);
-        Assert.DoesNotContain("all local runtime is current", output, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("everything is up to date", output, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public async Task UpdateServer_WhenRunnerInstalled_ProvidesFollowUpRunnerRefreshCommand()
-    {
-        var f = new UpdateTestFactory();
-        f.SeedRunnerUnit();
-        var readiness = new SequenceHttpHandler(
-            new ResponseSpec(HttpStatusCode.OK),
-            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-            new ResponseSpec(HttpStatusCode.OK));
-        var updater = f.BuildUpdater(readiness, serverReadyTimeout: TimeSpan.FromSeconds(1), unitDir: UpdateTestFactory.UnitDir);
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(0, exitCode);
-        var output = f.Stdout.ToString();
-        Assert.Contains("To refresh the runner, run: mo update runner", output);
-        Assert.Contains("mo update", output);
-        Assert.DoesNotContain("No runner service is installed locally", output);
-    }
-
-    [Fact]
-    public async Task UpdateServer_WhenRunnerNotInstalled_OmitsFollowUpRunnerRefreshCommand()
-    {
-        var f = new UpdateTestFactory();
-        var readiness = new SequenceHttpHandler(
-            new ResponseSpec(HttpStatusCode.OK),
-            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-            new ResponseSpec(HttpStatusCode.OK));
-        var updater = f.BuildUpdater(readiness, serverReadyTimeout: TimeSpan.FromSeconds(1));
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(0, exitCode);
-        var output = f.Stdout.ToString();
-        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
-        Assert.Contains("No runner service is installed locally", output);
-        Assert.DoesNotContain("To refresh the runner, run: mo update runner", output);
-    }
-
-    [Fact]
-    public async Task UpdateServer_InDryRunMode_AnnouncesRunnerNotRefreshed()
-    {
-        var f = new UpdateTestFactory();
-        f.SeedRunnerUnit();
-        var updater = f.BuildUpdater(new SequenceHttpHandler(HttpStatusCode.OK), unitDir: UpdateTestFactory.UnitDir);
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: true);
-
-        Assert.Equal(0, exitCode);
-        var output = f.Stdout.ToString();
-        Assert.Empty(f.Commands.ExecutedCommands);
-        Assert.Contains("Dry run: would execute:", output);
-        Assert.Contains("'mo update server' did not refresh the runner build output or runner runtime", output);
-        Assert.Contains("To refresh the runner, run: mo update runner", output);
-    }
-
-    [Fact]
-    public async Task UpdateServer_WhenReadinessDoesNotBecomeReady_ReturnsFailure()
-    {
-        var f = new UpdateTestFactory();
+        var f = new UpdateTestFactory(root: "/home/test");
         var updater = f.BuildUpdater(
             new SequenceHttpHandler(
                 new ResponseSpec(HttpStatusCode.OK),
-                new ResponseSpec(HttpStatusCode.InternalServerError)),
-            serverReadyTimeout: TimeSpan.FromMilliseconds(250));
+                new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+                new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
 
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
-
-        Assert.Equal(1, exitCode);
-        Assert.Contains("Mohist readiness checks did not pass", f.Stderr.ToString());
-        Assert.Contains("Last readiness error: GET / returned 500 InternalServerError", f.Stderr.ToString());
-    }
-
-    [Fact]
-    public async Task UpdateServer_ReadinessChecksAssetHeadersWithoutReadingBundleBody()
-    {
-        var f = new UpdateTestFactory();
-        var readiness = new SequenceHttpHandler(
-            new ResponseSpec(HttpStatusCode.OK),
-            new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
-            new ResponseSpec(HttpStatusCode.OK, Content: new NeverCompletingContent()));
-        var updater = f.BuildUpdater(readiness, serverReadyTimeout: TimeSpan.FromSeconds(1));
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+        var exitCode = await updater.UpdateServerAsync("/clean", dryRun: false);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal(["/api/health", "/", "/assets/app.js"], readiness.Paths);
+        var versionRoot = "/home/test/.local/share/mohist/runtime/server/versions/abcdef0";
+        Assert.True(f.Files.HasFile(Path.Combine(versionRoot, "mohist-build.json")));
+        Assert.Equal(versionRoot, f.Files.ReadDirectorySymbolicLink("/home/test/.local/share/mohist/runtime/server/current"));
+        Assert.Equal(versionRoot, f.Files.ReadDirectorySymbolicLink("/home/test/.local/share/mohist/runtime/server/verified"));
+
+        var unit = f.Files.Read(Path.Combine(UpdateTestFactory.UnitDir, "mohist.service"));
+        Assert.Contains("WorkingDirectory=/home/test/.local/share/mohist/runtime/server", unit);
+        Assert.Contains("/home/test/.local/share/mohist/runtime/server/current/Mohist.Server.dll", unit);
+        Assert.DoesNotContain("/clean", unit);
+        Assert.Contains(f.Commands.ExecutedCommands, command =>
+            command.FileName == "dotnet" && command.Args.Contains("publish"));
+        Assert.Contains("Server runtime verification: current", f.Stdout.ToString());
     }
 
     [Fact]
-    public void SourceCodeUpdater_DefaultsServerReadinessToIpv4Loopback()
+    public async Task UpdateServer_WhenRuntimeIdentityDiffers_RestoresVerifiedVersionBeforeReturningFailure()
     {
-        var f = new UpdateTestFactory();
-        var updater = f.BuildUpdater();
+        var f = new UpdateTestFactory(root: "/home/test");
+        var initial = f.BuildUpdater(
+            new SequenceHttpHandler(
+                new ResponseSpec(HttpStatusCode.OK),
+                new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+                new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
+        Assert.Equal(0, await initial.UpdateServerAsync("/clean", dryRun: false));
+        f.ClearOutput();
 
-        var httpField = typeof(RuntimeConsistencyValidator)
-            .GetField("_http", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var http = Assert.IsType<HttpClient>(httpField!.GetValue(updater.Validator));
-        Assert.Equal(new Uri("http://127.0.0.1:3456"), http.BaseAddress);
-    }
+        const string candidate = "0123456789abcdef0123456789abcdef01234567";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, candidate + "\n", "");
+        var stale = f.BuildUpdater(
+            SequenceHttpHandler.WithSystemInfo(
+                UpdateTestFactory.HealthySystemInfoJson("abcdef0"),
+                new ResponseSpec(HttpStatusCode.OK),
+                new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+                new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
 
-    [Fact]
-    public async Task UpdateServer_WhenBuildFails_AbortsWithError()
-    {
-        var f = new UpdateTestFactory();
-        f.Commands.SetNextExitCode(1);  // build fails
-        var updater = f.BuildUpdater();
-
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+        var exitCode = await stale.UpdateServerAsync("/clean", dryRun: false);
 
         Assert.Equal(1, exitCode);
-        Assert.Single(f.Commands.ExecutedCommands);
-        Assert.Contains("Build failed", f.Stderr.ToString());
+        Assert.Equal(
+            "/home/test/.local/share/mohist/runtime/server/versions/abcdef0",
+            f.Files.ReadDirectorySymbolicLink("/home/test/.local/share/mohist/runtime/server/current"));
+        var error = f.Stderr.ToString();
+        Assert.Contains($"expected {candidate}, actual abcdef0", error);
+        Assert.Contains("Recovery: restored verified version abcdef0", error);
+        Assert.DoesNotContain("Server runtime verification: current", f.Stdout.ToString());
     }
 
     [Fact]
-    public async Task UpdateServer_WhenBuildFails_PrintsCommandOutput()
+    public async Task UpdateServer_WithoutVerifiedVersion_StopsUnverifiedCandidateAndDoesNotReportSuccess()
     {
-        var f = new UpdateTestFactory();
-        f.Commands.SetNextResult(1, "npm error EBADPLATFORM", "MSB3073");
-        var updater = f.BuildUpdater();
+        var f = new UpdateTestFactory(root: "/home/test");
+        const string source = "0123456789abcdef0123456789abcdef01234567";
+        f.Commands.SetResultFor("git", args => args.SequenceEqual(["rev-parse", "HEAD"]), 0, source + "\n", "");
+        var updater = f.BuildUpdater(
+            SequenceHttpHandler.WithSystemInfo(
+                UpdateTestFactory.HealthySystemInfoJson("fedcba9876543210fedcba9876543210fedcba98"),
+                new ResponseSpec(HttpStatusCode.OK),
+                new ResponseSpec(HttpStatusCode.OK, "<html><script src=\"/assets/app.js\"></script></html>", "text/html"),
+                new ResponseSpec(HttpStatusCode.OK)),
+            unitDir: UpdateTestFactory.UnitDir);
 
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: false);
+        var exitCode = await updater.UpdateServerAsync("/clean", dryRun: false);
 
         Assert.Equal(1, exitCode);
-        var output = f.Stderr.ToString();
-        Assert.Contains("npm error EBADPLATFORM", output);
-        Assert.Contains("MSB3073", output);
-        Assert.Contains("Build failed", output);
+        Assert.Null(f.Files.ReadDirectorySymbolicLink("/home/test/.local/share/mohist/runtime/server/current"));
+        Assert.Contains(f.Commands.ExecutedCommands, command =>
+            command.FileName == "systemctl" && command.Args.SequenceEqual(["--user", "stop", "mohist.service"]));
+        Assert.Contains("Recovery: no verified version existed, stopped the candidate service target", f.Stderr.ToString());
+        Assert.DoesNotContain("Server runtime verification: current", f.Stdout.ToString());
     }
 
     [Fact]
-    public async Task UpdateServer_InDryRunMode_PreviewsCommands()
+    public async Task UpdateServer_DryRunDoesNotResolveGitOrChangeServiceTarget()
     {
-        var f = new UpdateTestFactory();
-        var updater = f.BuildUpdater();
+        var f = new UpdateTestFactory(root: "/home/test");
+        var updater = f.BuildUpdater(unitDir: UpdateTestFactory.UnitDir);
 
-        var exitCode = await updater.UpdateServerAsync("/repo", dryRun: true);
+        var exitCode = await updater.UpdateServerAsync("/clean", dryRun: true);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(f.Commands.ExecutedCommands);
-        var output = f.Stdout.ToString();
-        Assert.Contains("Dry run: would execute:", output);
-        Assert.DoesNotContain("git pull", output);
-        Assert.Contains("dotnet build Mohist.sln", output);
-        Assert.Contains("wait for /api/health, /, and referenced /assets/* response headers readiness checks", output);
+        Assert.Empty(f.Files.DirectoryLinks);
+        Assert.Contains("dotnet publish", f.Stdout.ToString());
     }
 }

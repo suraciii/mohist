@@ -119,6 +119,26 @@ public class SystemdInstallDetectorTests
     }
 
     [Fact]
+    public void Detect_ManagedRuntimeUnit_ReturnsManagedRuntimeWithoutSourcePath()
+    {
+        var fs = new FakeFileSystem();
+        var unitDir = "/units";
+        var runtimeRoot = "/home/test/.local/share/mohist/runtime/server";
+        fs.Write(
+            Path.Combine(unitDir, "mohist.service"),
+            $"[Service]\nWorkingDirectory={runtimeRoot}\nExecStart=dotnet {runtimeRoot}/current/Mohist.Server.dll\n");
+        fs.Write(Path.Combine(unitDir, "mohist-runner.service"), "[Service]\nExecStart=node /home/test/.local/share/mohist/runtime/runner/current/dist/cli.js\n");
+
+        var detector = new SystemdInstallDetector(fs, new MockEnvironmentVariableProvider(), unitDir);
+        var result = detector.Detect();
+
+        Assert.Equal("managed-runtime", result.Mode);
+        Assert.Equal("mohist.service", result.ServerUnit);
+        Assert.Equal("mohist-runner.service", result.RunnerUnit);
+        Assert.Null(result.SourcePath);
+    }
+
+    [Fact]
     public void Detect_MissingUnit_ReturnsUnknown()
     {
         var fs = new FakeFileSystem();

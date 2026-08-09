@@ -15,7 +15,7 @@ public class UpdateRecoverySpecs
         f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "active\n");
-        f.Commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
+        f.Commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "publish", 1);
         var updater = f.BuildUpdater(new SequenceHttpHandler(HttpStatusCode.OK), unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);
@@ -39,7 +39,7 @@ public class UpdateRecoverySpecs
         f.SeedRunnerUnit();
 
         f.Commands.SetStdoutFor("systemctl", args => args.Length >= 3 && args[1] == "is-active", "inactive\n");
-        f.Commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "build", 1);
+        f.Commands.SetExitCodeFor("dotnet", args => args.Length > 0 && args[0] == "publish", 1);
         var updater = f.BuildUpdater(new SequenceHttpHandler(HttpStatusCode.OK), unitDir: UpdateTestFactory.UnitDir);
 
         var exitCode = await updater.UpdateAllAsync(tempRoot, dryRun: false, cliPath: "/home/user/.local/bin/mo", continueAfterCliUpdate: true);

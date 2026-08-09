@@ -24,6 +24,12 @@ internal enum RuntimeCheckOutcome
 
 internal sealed record RuntimeCheckResult(string Component, RuntimeCheckOutcome Outcome, string Message);
 
+internal sealed record RuntimeIdentityVerification(
+    string ExpectedHash,
+    string? ActualHash,
+    bool Matches,
+    string Reason);
+
 internal sealed record UpdateStageLogEntry(string Stage, string Message, DateTimeOffset At);
 
 internal enum UpdateOutcome
@@ -87,6 +93,10 @@ internal sealed class UpdateContext
     public UpdateOutcome? Outcome { get; set; }
     public string? UnavailableCapability { get; set; }
     public string? SourceHead { get; set; }
+    public UpdateSource? UpdateSource { get; set; }
+    public PreparedRuntimeUpdate? ServerRuntime { get; set; }
+    public PreparedRuntimeUpdate? RunnerRuntime { get; set; }
+    public bool ServerRuntimeVerified { get; set; }
     public int LastExitCode { get; set; }
 
     public void RecordWarning(string warning)

@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Mohist.Server.SystemInfo;
 
 public interface IRuntimeSourceIdentity
@@ -7,6 +9,8 @@ public interface IRuntimeSourceIdentity
 
 public sealed class RuntimeSourceIdentity : IRuntimeSourceIdentity
 {
+    internal const string InstalledBuildManifestFileName = "mohist-build.json";
+
     public string? GitHead { get; }
 
     public RuntimeSourceIdentity(IFileSystem fileSystem)
@@ -23,6 +27,10 @@ public sealed class RuntimeSourceIdentity : IRuntimeSourceIdentity
     {
         try
         {
+            var installedIdentity = ReadInstalledBuildIdentity(fileSystem, startPath);
+            if (!string.IsNullOrWhiteSpace(installedIdentity))
+                return installedIdentity;
+
             var root = startPath;
             while (!string.IsNullOrWhiteSpace(root))
             {
@@ -38,6 +46,26 @@ public sealed class RuntimeSourceIdentity : IRuntimeSourceIdentity
         }
 
         return null;
+    }
+
+    private static string? ReadInstalledBuildIdentity(IFileSystem fileSystem, string startPath)
+    {
+        var manifestPath = Path.Combine(startPath, InstalledBuildManifestFileName);
+        if (!fileSystem.Exists(manifestPath))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(fileSystem.ReadAllText(manifestPath));
+            if (!document.RootElement.TryGetProperty("gitHash", out var value)
+                || value.ValueKind != JsonValueKind.String)
+                return null;
+            return NullIfWhiteSpace(value.GetString()?.Trim() ?? string.Empty);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? ReadHead(

@@ -115,8 +115,6 @@ internal static class UpdateCommands
 internal partial class SourceCodeUpdater
 {
     private static readonly TimeSpan ServerReadyTimeout = TimeSpan.FromSeconds(180);
-    private static readonly TimeSpan RunnerActivePollInterval = TimeSpan.FromMilliseconds(500);
-    private static readonly TimeSpan RunnerActiveTimeout = TimeSpan.FromSeconds(30);
 
     private readonly TextWriter _out;
     private readonly TextWriter _err;
@@ -265,6 +263,17 @@ internal partial class SourceCodeUpdater
 
     private async Task<int> RunPostCliUpdateStagesAsync(UpdateContext context)
     {
+        if (!context.DryRun)
+        {
+            var source = await _operations.ResolveUpdateSourceAsync(context.RepoRoot, context.CancellationToken);
+            if (source is null)
+                return await FinalizeAsync(context, 1);
+
+            context.UpdateSource = source;
+            context.SourceHead = source.Hash;
+            context.RecordStage("Resolving update source", $"resolved {source.Hash}");
+        }
+
         var outcome = await RunStageMachineAsync(context, async (ctx, token) =>
         {
             return await PrepareRunnerStageAsync(ctx, token);

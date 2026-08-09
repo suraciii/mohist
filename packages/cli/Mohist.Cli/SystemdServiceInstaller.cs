@@ -38,7 +38,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     public async Task<int> InstallServerAsync(ServiceInstallOptions options)
     {
-        var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        var runtimeRoot = NormalizeOptionalPath(options.RuntimeRoot);
+        if (runtimeRoot is null)
+        {
+            _err.WriteLine("Server services require an installed runtime target. Use 'mo install server' or 'mo update server' instead of writing a source-bound unit.");
+            return 1;
+        }
         var environment = BuildServiceEnvironment();
         // 默认不在 unit 里写死监听地址，让 server 读 ~/.mohist/config.jsonc；
         // 仅当用户显式传 --listen-url 时才追加 --urls。
@@ -51,8 +56,8 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         var unit = new SystemdUnit(
             Name: ServerUnit,
             Description: "Mohist Server",
-            WorkingDirectory: repoRoot,
-            ExecStart: DotnetRun(ResolveExecutable("dotnet"), repoRoot, "packages/server/src/Mohist.Server/Mohist.Server.csproj", serverArgs),
+            WorkingDirectory: runtimeRoot,
+            ExecStart: DotnetAssembly(ResolveExecutable("dotnet"), Path.Combine(runtimeRoot, "current", "Mohist.Server.dll"), serverArgs),
             Environment: environment);
 
         return await InstallAsync(unit, options);
@@ -60,7 +65,12 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
 
     public async Task<int> InstallRunnerAsync(ServiceInstallOptions options)
     {
-        var repoRoot = ResolveRepoRoot(options.RepoRoot);
+        var runtimeRoot = NormalizeOptionalPath(options.RuntimeRoot);
+        if (runtimeRoot is null)
+        {
+            _err.WriteLine("Runner services require an installed runtime target. Use 'mo install runner' or 'mo update runner' instead of writing a source-bound unit.");
+            return 1;
+        }
         var environment = BuildServiceEnvironment();
         environment["SERVER_URL"] = options.ServerUrl ?? "http://127.0.0.1:3456";
         if (!string.IsNullOrWhiteSpace(options.RunnerRoot))
@@ -71,8 +81,8 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
         var unit = new SystemdUnit(
             Name: RunnerUnit,
             Description: "Mohist Runner",
-            WorkingDirectory: repoRoot,
-            ExecStart: $"{ResolveExecutable("node")} packages/runner/dist/cli.js",
+            WorkingDirectory: runtimeRoot,
+            ExecStart: $"{ResolveExecutable("node")} {ShellQuote(Path.Combine(runtimeRoot, "current", "dist", "cli.js"))}",
             Environment: environment);
 
         return await InstallAsync(unit, options);
@@ -177,7 +187,7 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             return start;
         }
 
-        _out.WriteLine($"Installed and started {unit.Name}");
+        _out.WriteLine($"Installed candidate service target {unit.Name}; runtime identity verification is pending.");
         await TryEnableLingerAsync();
         return 0;
     }
@@ -317,25 +327,21 @@ internal sealed class SystemdServiceInstaller : IServiceInstaller
             "systemd",
             "user")).Replace('\\', '/');
 
-    private static string DotnetRun(string dotnetPath, string repoRoot, string projectPath, IReadOnlyList<string> args)
+    private static string DotnetAssembly(string dotnetPath, string assemblyPath, IReadOnlyList<string> args)
     {
-        var combinedPath = (repoRoot + "/" + projectPath).Replace('\\', '/');
         var parts = new List<string>
         {
             dotnetPath,
-            "run",
-            "--project",
-            ShellQuote(combinedPath),
+            ShellQuote(assemblyPath.Replace('\\', '/')),
         };
-        if (args.Count > 0)
-        {
-            parts.Add("--");
-            parts.AddRange(args.Select(ShellQuote));
-        }
+        parts.AddRange(args.Select(ShellQuote));
         return string.Join(' ', parts);
     }
 
     private static string NormalizePath(string value) => value.Replace('\\', '/');
+
+    private static string? NormalizeOptionalPath(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : NormalizePath(value);
 
     private Dictionary<string, string> BuildServiceEnvironment(bool includeOperatorToken = false)
     {

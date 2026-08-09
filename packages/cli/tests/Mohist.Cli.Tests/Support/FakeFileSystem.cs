@@ -6,6 +6,7 @@ public sealed class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _directoryLinks = new(StringComparer.OrdinalIgnoreCase);
     private string _currentDirectory = "/";
 
     public string CurrentDirectory
@@ -26,9 +27,22 @@ public sealed class FakeFileSystem : IFileSystem
         _files[Normalize(path)] = content;
     }
 
-    public bool Exists(string path) => _files.ContainsKey(Normalize(path)) || _directories.Contains(Normalize(path));
+    public bool Exists(string path)
+    {
+        var normalized = Normalize(path);
+        return _files.ContainsKey(normalized)
+            || _directories.Contains(normalized)
+            || _directoryLinks.ContainsKey(normalized)
+            || HasDescendant(normalized);
+    }
 
-    public bool DirectoryExists(string path) => _directories.Contains(Normalize(path));
+    public bool DirectoryExists(string path)
+    {
+        var normalized = Normalize(path);
+        return _directories.Contains(normalized)
+            || _directoryLinks.ContainsKey(normalized)
+            || HasDescendant(normalized);
+    }
 
     public void CreateDirectory(string path)
     {
@@ -38,6 +52,7 @@ public sealed class FakeFileSystem : IFileSystem
     public void Delete(string path)
     {
         _files.Remove(Normalize(path));
+        _directoryLinks.Remove(Normalize(path));
     }
 
     public void DeleteDirectory(string path)
@@ -52,6 +67,10 @@ public sealed class FakeFileSystem : IFileSystem
         foreach (var key in _files.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
         {
             _files.Remove(key);
+        }
+        foreach (var link in _directoryLinks.Keys.Where(k => k == normalized || k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToArray())
+        {
+            _directoryLinks.Remove(link);
         }
     }
 
@@ -150,9 +169,30 @@ public sealed class FakeFileSystem : IFileSystem
         return string.Equals(name, pattern, StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool HasDescendant(string path)
+    {
+        var prefix = path.EndsWith(Path.DirectorySeparatorChar) ? path : path + Path.DirectorySeparatorChar;
+        return _files.Keys.Any(entry => entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            || _directories.Any(entry => entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            || _directoryLinks.Keys.Any(entry => entry.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+    }
+
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(ReadAllText(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    public void ReplaceDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        _directoryLinks[Normalize(linkPath)] = Normalize(targetPath);
+    }
+
+    public string? ReadDirectorySymbolicLink(string linkPath) =>
+        _directoryLinks.TryGetValue(Normalize(linkPath), out var target) ? target : null;
+
+    public void DeleteDirectorySymbolicLink(string linkPath)
+    {
+        _directoryLinks.Remove(Normalize(linkPath));
+    }
 
     private static string Normalize(string path) => Path.GetFullPath(path, "/");
 

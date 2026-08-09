@@ -17,7 +17,8 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: "http://127.0.0.1:4567",
             ServerUrl: null,
-            RunnerRoot: null);
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/server");
 
         var exitCode = await f.Installer.InstallServerAsync(options);
 
@@ -25,8 +26,9 @@ public class InstallSpecs
         var unitContent = f.Files.ReadAllText("/units/mohist.service");
         Assert.Contains("Description=Mohist Server", unitContent);
         Assert.Contains("ExecStart=", unitContent);
-        Assert.Contains("dotnet run --project", unitContent);
-        Assert.Contains("Mohist.Server.csproj", unitContent);
+        Assert.Contains("WorkingDirectory=/stable/server", unitContent);
+        Assert.Contains("dotnet /stable/server/current/Mohist.Server.dll", unitContent);
+        Assert.DoesNotContain("/repo", unitContent);
         Assert.Contains("Environment=\"PATH=", unitContent);
         Assert.Contains("http://127.0.0.1:4567", unitContent);
         Assert.Contains("SuccessExitStatus=0 143", unitContent);
@@ -43,7 +45,8 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: null,
             ServerUrl: "http://127.0.0.1:4567",
-            RunnerRoot: "/runner");
+            RunnerRoot: "/runner",
+            RuntimeRoot: "/stable/runner");
 
         var exitCode = await f.Installer.InstallRunnerAsync(options);
 
@@ -51,7 +54,9 @@ public class InstallSpecs
         var unitContent = f.Files.ReadAllText("/units/mohist-runner.service");
         Assert.Contains("Description=Mohist Runner", unitContent);
         Assert.Contains("ExecStart=", unitContent);
-        Assert.Contains("node packages/runner/dist/cli.js", unitContent);
+        Assert.Contains("WorkingDirectory=/stable/runner", unitContent);
+        Assert.Contains("node /stable/runner/current/dist/cli.js", unitContent);
+        Assert.DoesNotContain("/repo", unitContent);
         Assert.Contains("Environment=\"SERVER_URL=http://127.0.0.1:4567\"", unitContent);
         Assert.Contains("Environment=\"PATH=", unitContent);
         Assert.Contains("/.opencode/bin", unitContent);
@@ -99,7 +104,8 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: null,
             ServerUrl: null,
-            RunnerRoot: null));
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/runner"));
 
         Assert.Equal(0, exitCode);
         var unitContent = files.Read("/units/mohist-slack.service");
@@ -122,7 +128,8 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: null,
             ServerUrl: null,
-            RunnerRoot: null));
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/runner"));
 
         Assert.Equal(0, exitCode);
         var unitContent = files.Read("/units/mohist-slack.service");
@@ -150,11 +157,30 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: null,
             ServerUrl: null,
-            RunnerRoot: null));
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/runner"));
 
         var unitContent = files.Read("/units/mohist-runner.service");
         Assert.Contains("Environment=\"DOTNET_ROOT=/home/test/.dotnet\"", unitContent);
         Assert.Contains("Environment=\"DOTNET_ROOT_X64=/home/test/.dotnet\"", unitContent);
+    }
+
+    [Fact]
+    public async Task InstallServer_RejectsSourceBoundUnitWhenRuntimeTargetIsMissing()
+    {
+        var f = new UpdateTestFactory();
+
+        var exitCode = await f.Installer.InstallServerAsync(new ServiceInstallOptions(
+            DryRun: true,
+            UnitDir: "/units",
+            RepoRoot: "/repo",
+            ListenUrl: null,
+            ServerUrl: null,
+            RunnerRoot: null));
+
+        Assert.Equal(1, exitCode);
+        Assert.False(f.Files.HasFile("/units/mohist.service"));
+        Assert.Contains("source-bound unit", f.Stderr.ToString());
     }
 
     [Fact]
@@ -168,12 +194,14 @@ public class InstallSpecs
             RepoRoot: "/custom/path",
             ListenUrl: null,
             ServerUrl: null,
-            RunnerRoot: null);
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/server");
 
         await f.Installer.InstallServerAsync(options);
 
         var unitContent = f.Files.Read("/units/mohist.service");
-        Assert.Contains("WorkingDirectory=/custom/path", unitContent);
+        Assert.Contains("WorkingDirectory=/stable/server", unitContent);
+        Assert.DoesNotContain("/custom/path", unitContent);
     }
 
     [Fact]
@@ -187,13 +215,14 @@ public class InstallSpecs
             RepoRoot: "/repo",
             ListenUrl: null,
             ServerUrl: null,
-            RunnerRoot: null);
+            RunnerRoot: null,
+            RuntimeRoot: "/stable/server");
 
         await f.Installer.InstallServerAsync(options);
 
         var unitContent = f.Files.Read("/units/mohist.service");
         Assert.DoesNotContain("--urls", unitContent);
         Assert.DoesNotContain("http://", unitContent);
-        Assert.Contains("dotnet run --project", unitContent);
+        Assert.Contains("dotnet /stable/server/current/Mohist.Server.dll", unitContent);
     }
 }

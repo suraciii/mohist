@@ -10,6 +10,7 @@ internal sealed class UpdateOperations
     private readonly IEnvironmentVariableProvider _environment;
     private readonly string? _unitDir;
     private readonly Func<string?>? _getUserHome;
+    private readonly InstalledRuntimeArtifacts _artifacts;
 
     public UpdateOperations(
         TextWriter output,
@@ -29,6 +30,7 @@ internal sealed class UpdateOperations
         _environment = environment;
         _unitDir = unitDir;
         _getUserHome = getUserHome;
+        _artifacts = new InstalledRuntimeArtifacts(error, commandExecutor, fileSystem, environment, getUserHome);
     }
 
     public Task<int> UpdateCliAsync(string? repoRoot, bool dryRun, string? cliPath = null, CancellationToken cancellationToken = default)
@@ -42,6 +44,7 @@ internal sealed class UpdateOperations
         bool dryRun,
         TimeSpan serverReadyTimeout,
         ServiceReadinessProbe readinessProbe,
+        Func<string, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
         CancellationToken cancellationToken = default)
     {
         var root = ResolveRepoRoot(repoRoot);
@@ -51,30 +54,40 @@ internal sealed class UpdateOperations
         if (dryRun)
         {
             _out.WriteLine("Dry run: would execute:");
-            _out.WriteLine($"  cd {root} && dotnet build Mohist.sln");
-            _out.WriteLine($"  {RestartCommandLine("server")} (if installed)");
+            _out.WriteLine($"  cd {root} && git rev-parse HEAD");
+            _out.WriteLine($"  cd {root} && dotnet publish packages/server/src/Mohist.Server/Mohist.Server.csproj -c Release -o <stable-server-version>");
+            _out.WriteLine("  point the absolute server service target at the installed current version");
+            _out.WriteLine($"  {RestartCommandLine("server")}");
             _out.WriteLine("  wait for /api/health, /, and referenced /assets/* response headers readiness checks");
+            _out.WriteLine("  compare the running server gitHash with the source hash before reporting success");
             await WriteServerScopeMessageAsync();
             return 0;
         }
 
-        var exitCode = await BuildAndRestartServerAsync(root, cancellationToken);
-        if (exitCode != 0)
-        {
-            return exitCode;
-        }
+        var source = await _artifacts.ResolveSourceAsync(root, cancellationToken);
+        if (source is null)
+            return 1;
+        var prepared = await PrepareServerRuntimeAsync(source, null, cancellationToken);
+        if (prepared is null)
+            return 1;
 
-        _out.WriteLine("Server service restarted.");
+        _out.WriteLine("Server candidate service started; verifying runtime identity.");
         var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
         if (!ready.Ready)
         {
-            _err.WriteLine($"Server service restarted, but Mohist readiness checks did not pass within {(int)serverReadyTimeout.TotalSeconds} seconds.");
+            _err.WriteLine($"Server candidate did not become ready within {(int)serverReadyTimeout.TotalSeconds} seconds.");
             if (!string.IsNullOrWhiteSpace(ready.LastFailure))
                 _err.WriteLine($"Last readiness error: {ready.LastFailure}");
-            return 1;
+            return await RollBackRuntimeAsync(prepared, actualHash: null, "readiness did not pass", cancellationToken);
         }
 
-        _out.WriteLine("Server is ready.");
+        var identity = await verifyRuntimeIdentity(source.Hash, cancellationToken);
+        if (!identity.Matches)
+            return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
+
+        if (!TryMarkRuntimeVerified(prepared))
+            return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
+        _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
         await WriteServerScopeMessageAsync();
         return 0;
     }
@@ -92,8 +105,10 @@ internal sealed class UpdateOperations
         if (dryRun)
         {
             _out.WriteLine("Dry run: would execute:");
+            _out.WriteLine($"  cd {root} && git rev-parse HEAD");
             _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
-            _out.WriteLine($"  {RestartCommandLine("runner")} (if installed)");
+            _out.WriteLine("  install runner dist and dependencies into a stable versioned runtime directory");
+            _out.WriteLine($"  {RestartCommandLine("runner")}");
             _out.WriteLine("  wait for runner to reconnect, then read its buildGitHash from /api/runner/identity");
             return 0;
         }
@@ -107,24 +122,209 @@ internal sealed class UpdateOperations
             return 0;
         }
 
-        var buildExit = await BuildRunnerAsync(root);
-        if (buildExit != 0)
-            return buildExit;
+        var source = await _artifacts.ResolveSourceAsync(root, cancellationToken);
+        if (source is null)
+            return 1;
+        var prepared = await PrepareRunnerRuntimeAsync(source, null, cancellationToken);
+        if (prepared is null)
+            return 1;
 
-        _out.WriteLine("Runner updated successfully.");
+        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(source.Hash);
+        outcome.WriteSummary(_out, _err);
+        if (outcome.ExitCode != 0)
+            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
 
-        var restart = await _systemd.RestartRunnerAsync(new ServiceCommandOptions(false, null, 100, false));
-        if (restart != 0)
+        if (!TryMarkRuntimeVerified(prepared))
+            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
+        _out.WriteLine("Runner update is verified and current.");
+        return 0;
+    }
+
+    public Task<UpdateSource?> ResolveUpdateSourceAsync(string? repoRoot, CancellationToken cancellationToken)
+    {
+        return _artifacts.ResolveSourceAsync(ResolveRepoRoot(repoRoot), cancellationToken);
+    }
+
+    public async Task<PreparedRuntimeUpdate?> PrepareServerRuntimeAsync(
+        UpdateSource source,
+        ServiceInstallOptions? requestedOptions,
+        CancellationToken cancellationToken)
+    {
+        var artifact = await _artifacts.BuildServerAsync(source, cancellationToken);
+        if (artifact is null)
+            return null;
+
+        RuntimeActivation activation;
+        try
         {
-            _err.WriteLine("Warning: Failed to restart runner service. You may need to restart manually.");
-            return restart;
+            activation = _artifacts.Activate(artifact);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Server runtime activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: service target was left unchanged.");
+            return null;
+        }
+        var options = RuntimeServiceOptions(requestedOptions, source, artifact, dryRun: false);
+        int install;
+        try
+        {
+            install = await _systemd.InstallServerAsync(options);
+        }
+        catch (Exception ex)
+        {
+            var recovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Server);
+            _err.WriteLine($"Server service target activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: {recovery}.");
+            return null;
+        }
+        if (install == 0)
+            return new PreparedRuntimeUpdate(source, activation);
+
+        var serverRecovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Server);
+        _err.WriteLine($"Server service target activation failed: expected {source.Hash}, actual <not-started>; installer exited {install}. Recovery: {serverRecovery}.");
+        return null;
+    }
+
+    public async Task<PreparedRuntimeUpdate?> PrepareRunnerRuntimeAsync(
+        UpdateSource source,
+        ServiceInstallOptions? requestedOptions,
+        CancellationToken cancellationToken)
+    {
+        var artifact = await _artifacts.BuildRunnerAsync(source, cancellationToken);
+        if (artifact is null)
+            return null;
+
+        RuntimeActivation activation;
+        try
+        {
+            activation = _artifacts.Activate(artifact);
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Runner runtime activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: service target was left unchanged.");
+            return null;
+        }
+        var options = RuntimeServiceOptions(requestedOptions, source, artifact, dryRun: false);
+        int install;
+        try
+        {
+            install = await _systemd.InstallRunnerAsync(options);
+        }
+        catch (Exception ex)
+        {
+            var recovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Runner);
+            _err.WriteLine($"Runner service target activation failed: expected {source.Hash}, actual <not-started>; {ex.Message}. Recovery: {recovery}.");
+            return null;
+        }
+        if (install == 0)
+            return new PreparedRuntimeUpdate(source, activation);
+
+        var runnerRecovery = await RestoreAfterInstallFailureAsync(activation, ManagedRuntimeComponent.Runner);
+        _err.WriteLine($"Runner service target activation failed: expected {source.Hash}, actual <not-started>; installer exited {install}. Recovery: {runnerRecovery}.");
+        return null;
+    }
+
+    public bool TryMarkRuntimeVerified(PreparedRuntimeUpdate prepared)
+    {
+        try
+        {
+            _artifacts.MarkVerified(prepared.Activation);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _err.WriteLine($"Could not mark {ComponentLabel(prepared.Activation.Candidate.Component)} runtime '{prepared.Source.Hash}' as verified: {ex.Message}");
+            return false;
+        }
+    }
+
+    public async Task<int> RollBackRuntimeAsync(
+        PreparedRuntimeUpdate prepared,
+        string? actualHash,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var component = prepared.Activation.Candidate.Component;
+        var restored = _artifacts.Restore(prepared.Activation);
+        var expected = prepared.Source.Hash;
+        var actual = string.IsNullOrWhiteSpace(actualHash) ? "<unavailable>" : actualHash;
+        if (!restored)
+        {
+            await StopRuntimeAsync(component);
+            _err.WriteLine($"{ComponentLabel(component)} runtime verification failed: expected {expected}, actual {actual}; {reason}. Recovery: no verified version existed, stopped the candidate service target.");
+            return 1;
         }
 
-        _out.WriteLine("Runner service restarted.");
+        var restart = await RestartRuntimeAsync(component);
+        var recovery = restart == 0
+            ? $"restored verified version {prepared.Activation.PreviousVerified!.SourceHash}"
+            : $"restored verified version {prepared.Activation.PreviousVerified!.SourceHash}, but its service restart failed with exit {restart}";
+        _err.WriteLine($"{ComponentLabel(component)} runtime verification failed: expected {expected}, actual {actual}; {reason}. Recovery: {recovery}.");
+        return 1;
+    }
 
-        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(root);
+    public async Task<int> InstallServerRuntimeAsync(
+        ServiceInstallOptions options,
+        TimeSpan serverReadyTimeout,
+        ServiceReadinessProbe readinessProbe,
+        Func<string, CancellationToken, Task<RuntimeIdentityVerification>> verifyRuntimeIdentity,
+        CancellationToken cancellationToken)
+    {
+        if (options.DryRun)
+        {
+            var root = ResolveRepoRoot(options.RepoRoot);
+            _out.WriteLine($"Dry run: would resolve source hash from {root}, publish an immutable server version, and install an absolute current service target.");
+            return 0;
+        }
+
+        var source = await ResolveUpdateSourceAsync(options.RepoRoot, cancellationToken);
+        if (source is null)
+            return 1;
+        var prepared = await PrepareServerRuntimeAsync(source, options, cancellationToken);
+        if (prepared is null)
+            return 1;
+
+        var ready = await readinessProbe.WaitForServerReadyAsync(serverReadyTimeout, cancellationToken);
+        if (!ready.Ready)
+            return await RollBackRuntimeAsync(prepared, null, ready.LastFailure ?? "readiness did not pass", cancellationToken);
+
+        var identity = await verifyRuntimeIdentity(source.Hash, cancellationToken);
+        if (!identity.Matches)
+            return await RollBackRuntimeAsync(prepared, identity.ActualHash, identity.Reason, cancellationToken);
+
+        if (!TryMarkRuntimeVerified(prepared))
+            return await RollBackRuntimeAsync(prepared, identity.ActualHash, "could not record the verified server version", cancellationToken);
+        _out.WriteLine($"Server runtime verification: current (expected {identity.ExpectedHash}, actual {identity.ActualHash}).");
+        return 0;
+    }
+
+    public async Task<int> InstallRunnerRuntimeAsync(
+        ServiceInstallOptions options,
+        RunnerRefreshVerifier runnerRefreshVerifier,
+        CancellationToken cancellationToken)
+    {
+        if (options.DryRun)
+        {
+            var root = ResolveRepoRoot(options.RepoRoot);
+            _out.WriteLine($"Dry run: would resolve source hash from {root}, install an immutable runner version, and install an absolute current service target.");
+            return 0;
+        }
+
+        var source = await ResolveUpdateSourceAsync(options.RepoRoot, cancellationToken);
+        if (source is null)
+            return 1;
+        var prepared = await PrepareRunnerRuntimeAsync(source, options, cancellationToken);
+        if (prepared is null)
+            return 1;
+
+        var outcome = await runnerRefreshVerifier.VerifyRunnerRuntimeAsync(source.Hash);
         outcome.WriteSummary(_out, _err);
-        return outcome.ExitCode;
+        if (outcome.ExitCode != 0)
+            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), RunnerFailureReason(outcome), cancellationToken);
+
+        if (!TryMarkRuntimeVerified(prepared))
+            return await RollBackRuntimeAsync(prepared, RunnerActualHash(outcome), "could not record the verified runner version", cancellationToken);
+        _out.WriteLine("Runner runtime verification: current.");
+        return 0;
     }
 
     public async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
@@ -311,28 +511,6 @@ internal sealed class UpdateOperations
         return await synchronizer.SyncAsync(sourceSkillDataDir, managedSkillData, ManagedAssetKind.Skill);
     }
 
-    public async Task<int> BuildAndRestartServerAsync(string root, CancellationToken cancellationToken)
-    {
-        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("dotnet", ["build", "Mohist.sln"], root);
-        if (build != 0)
-        {
-            WriteCommandFailureOutput(buildOut, buildErr);
-            _err.WriteLine("Build failed. Aborting update.");
-            return build;
-        }
-
-        _out.WriteLine("Server updated successfully.");
-
-        var restart = await _systemd.RestartServerAsync(new ServiceCommandOptions(false, null, 100, false));
-        if (restart != 0)
-        {
-            _err.WriteLine("Warning: Failed to restart server service. You may need to restart manually.");
-            return restart;
-        }
-
-        return 0;
-    }
-
     public async Task<bool> IsRunnerInstalledAsync()
     {
         return await _systemd.IsRunnerInstalledAsync(_unitDir);
@@ -353,17 +531,125 @@ internal sealed class UpdateOperations
         return await _systemd.StartRunnerAsync(new ServiceCommandOptions(dryRun, null, 100, false));
     }
 
-    public async Task<int> BuildRunnerAsync(string root)
+    private ServiceInstallOptions RuntimeServiceOptions(
+        ServiceInstallOptions? requestedOptions,
+        UpdateSource source,
+        InstalledRuntimeArtifact artifact,
+        bool dryRun)
     {
-        var (build, buildOut, buildErr) = await _commandExecutor.ExecuteAsync("npm", ["run", "build", "-w", "packages/runner"], root);
-        if (build != 0)
+        var baseline = requestedOptions ?? ExistingRuntimeServiceOptions(artifact.Component, source.Root, dryRun);
+        return baseline with
         {
-            WriteCommandFailureOutput(buildOut, buildErr);
-            _err.WriteLine("Build failed. Aborting update.");
-            return build;
-        }
-        return 0;
+            DryRun = dryRun,
+            RepoRoot = source.Root,
+            RuntimeRoot = artifact.ComponentRoot,
+        };
     }
+
+    private ServiceInstallOptions ExistingRuntimeServiceOptions(
+        ManagedRuntimeComponent component,
+        string sourceRoot,
+        bool dryRun)
+    {
+        var unitName = component == ManagedRuntimeComponent.Server ? "mohist.service" : "mohist-runner.service";
+        var unitPath = Path.Combine(ResolveUnitDirectory(), unitName);
+        var serverUrl = component == ManagedRuntimeComponent.Runner
+            ? ReadUnitEnvironment(unitPath, "SERVER_URL")
+            : null;
+        var runnerRoot = component == ManagedRuntimeComponent.Runner
+            ? ReadUnitEnvironment(unitPath, "RUNNER_ROOT")
+            : null;
+        return new ServiceInstallOptions(
+            DryRun: dryRun,
+            UnitDir: _unitDir,
+            RepoRoot: sourceRoot,
+            ListenUrl: null,
+            ServerUrl: serverUrl,
+            RunnerRoot: runnerRoot);
+    }
+
+    private string ResolveUnitDirectory()
+    {
+        if (!string.IsNullOrWhiteSpace(_unitDir))
+            return _unitDir!;
+        var home = _getUserHome?.Invoke() ?? _environment.GetEnvironmentVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return Path.Combine(home, ".config", "systemd", "user");
+    }
+
+    private string? ReadUnitEnvironment(string unitPath, string key)
+    {
+        if (!_fileSystem.Exists(unitPath))
+            return null;
+
+        try
+        {
+            var prefix = $"Environment=\"{key}=";
+            foreach (var line in _fileSystem.ReadAllText(unitPath).Split('\n'))
+            {
+                if (!line.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
+                var value = line[prefix.Length..];
+                var closingQuote = value.LastIndexOf('"');
+                return closingQuote >= 0 ? value[..closingQuote] : value;
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private async Task<string> RestoreAfterInstallFailureAsync(RuntimeActivation activation, ManagedRuntimeComponent component)
+    {
+        if (_artifacts.Restore(activation))
+        {
+            var restart = await RestartRuntimeAsync(component);
+            return restart == 0
+                ? $"restored verified version {activation.PreviousVerified!.SourceHash}"
+                : $"restored verified version {activation.PreviousVerified!.SourceHash}, but its service restart failed with exit {restart}";
+        }
+
+        await StopRuntimeAsync(component);
+        return "no verified version existed; stopped candidate service target";
+    }
+
+    private Task<int> RestartRuntimeAsync(ManagedRuntimeComponent component) => component switch
+    {
+        ManagedRuntimeComponent.Server => _systemd.RestartServerAsync(new ServiceCommandOptions(false, null, 100, false)),
+        ManagedRuntimeComponent.Runner => _systemd.RestartRunnerAsync(new ServiceCommandOptions(false, null, 100, false)),
+        _ => throw new ArgumentOutOfRangeException(nameof(component)),
+    };
+
+    private Task<int> StopRuntimeAsync(ManagedRuntimeComponent component) => component switch
+    {
+        ManagedRuntimeComponent.Server => _systemd.StopServerAsync(new ServiceCommandOptions(false, null, 100, false)),
+        ManagedRuntimeComponent.Runner => _systemd.StopRunnerAsync(new ServiceCommandOptions(false, null, 100, false)),
+        _ => throw new ArgumentOutOfRangeException(nameof(component)),
+    };
+
+    private static string ComponentLabel(ManagedRuntimeComponent component) => component switch
+    {
+        ManagedRuntimeComponent.Server => "Server",
+        ManagedRuntimeComponent.Runner => "Runner",
+        _ => throw new ArgumentOutOfRangeException(nameof(component)),
+    };
+
+    private static string? RunnerActualHash(RunnerRefreshOutcome outcome) => outcome switch
+    {
+        RunnerRefreshOutcome.StaleRunnerRuntime stale => stale.ReportedHash,
+        _ => null,
+    };
+
+    private static string RunnerFailureReason(RunnerRefreshOutcome outcome) => outcome switch
+    {
+        RunnerRefreshOutcome.UnknownIdentity unknown => unknown.Reason,
+        RunnerRefreshOutcome.StaleRunnerRuntime stale => stale.Reason,
+        RunnerRefreshOutcome.NotReconnected => "runner did not reconnect with a runtime identity",
+        _ => "runner runtime verification did not pass",
+    };
 
     public Task<(int ExitCode, string Stdout, string Stderr)> ExecuteCommandAsync(
         string fileName,

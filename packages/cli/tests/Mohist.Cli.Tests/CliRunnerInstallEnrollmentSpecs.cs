@@ -27,7 +27,8 @@ public sealed class CliRunnerInstallEnrollmentSpecs
             ListenUrl: null,
             ServerUrl: "http://127.0.0.1:3456",
             RunnerRoot: "/var/lib/runner",
-            EnrollmentToken: "moh_enroll_unit-test"));
+            EnrollmentToken: "moh_enroll_unit-test",
+            RuntimeRoot: "/stable/runner"));
 
         Assert.Equal(0, exitCode);
         var unit = files.ReadAllText("/units/mohist-runner.service");
@@ -48,7 +49,8 @@ public sealed class CliRunnerInstallEnrollmentSpecs
             ListenUrl: null,
             ServerUrl: "http://127.0.0.1:3456",
             RunnerRoot: null,
-            EnrollmentToken: null));
+            EnrollmentToken: null,
+            RuntimeRoot: "/stable/runner"));
 
         Assert.Equal(0, exitCode);
         var unit = files.ReadAllText("/units/mohist-runner.service");

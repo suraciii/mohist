@@ -363,6 +363,30 @@ internal sealed class RuntimeConsistencyValidator
         }
     }
 
+    internal async Task<RuntimeIdentityVerification> VerifyServerRuntimeIdentityAsync(
+        string expectedHash,
+        CancellationToken token)
+    {
+        var info = await TryGetSystemInfoAsync(token);
+        var actual = info?.Running?.GitHash;
+        if (string.IsNullOrWhiteSpace(actual))
+        {
+            return new RuntimeIdentityVerification(
+                expectedHash,
+                null,
+                false,
+                "Server did not report a runtime gitHash");
+        }
+
+        return new RuntimeIdentityVerification(
+            expectedHash,
+            actual,
+            string.Equals(expectedHash, actual, StringComparison.Ordinal),
+            string.Equals(expectedHash, actual, StringComparison.Ordinal)
+                ? "Server runtime identity matches expected source hash"
+                : "Server runtime identity does not match expected source hash");
+    }
+
     private async Task<SystemInfoSnapshot?> TryGetSystemInfoAsync(CancellationToken token)
     {
         try

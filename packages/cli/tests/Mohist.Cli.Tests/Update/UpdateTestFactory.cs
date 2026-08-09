@@ -29,6 +29,12 @@ internal sealed class UpdateTestFactory
     public StringWriter Stderr { get; }
     public SystemdServiceInstaller Installer { get; }
 
+    public void ClearOutput()
+    {
+        Stdout.GetStringBuilder().Clear();
+        Stderr.GetStringBuilder().Clear();
+    }
+
     public void SeedPackagedSkillAssets()
     {
         WritePackagedSkillAssets(Files, Path.Combine(RequireRoot(), ".publish", "cli", "skill-data"));
@@ -174,8 +180,14 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
         if (resultRule.Match is not null)
             return Task.FromResult((resultRule.ExitCode, resultRule.Stdout, resultRule.Stderr));
         var rule = _exitCodeRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
-        var code = rule.Match is not null ? rule.ExitCode : _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
         var stdoutRule = _stdoutRules.FirstOrDefault(rule => rule.FileName == fileName && rule.Match(args));
+        if (fileName == "git" && args.SequenceEqual(["rev-parse", "HEAD"])
+            && rule.Match is null && stdoutRule.Match is null)
+        {
+            return Task.FromResult((0, "abcdef0\n", ""));
+        }
+
+        var code = rule.Match is not null ? rule.ExitCode : _exitCodes.Count > 0 ? _exitCodes.Dequeue() : 0;
         var stdout = stdoutRule.Match is not null ? stdoutRule.Stdout : _stdout.Count > 0 ? _stdout.Dequeue() : "";
         var stderr = _stderr.Count > 0 ? _stderr.Dequeue() : "";
         return Task.FromResult((code, stdout, stderr));
@@ -185,7 +197,7 @@ internal sealed class FakeCommandExecutor : ICommandExecutor
 internal sealed class SequenceHttpHandler : HttpMessageHandler
 {
     private const string DefaultSystemInfoJson =
-        "{\"success\":true,\"data\":{\"running\":{\"gitHash\":\"testsha\"},\"services\":{\"runner\":\"active\"}}}";
+        "{\"success\":true,\"data\":{\"running\":{\"gitHash\":\"abcdef0\"},\"services\":{\"runner\":\"active\"}}}";
 
     private readonly ResponseSpec?[] _responses;
     private string? _systemInfoJson;
@@ -242,7 +254,7 @@ internal sealed class SequenceHttpHandler : HttpMessageHandler
         {
             Requests++;
             var runnerHash = UpdateTestFactory.ExtractRunningGitHash(_systemInfoJson);
-            var identityJson = $"{{\"success\":true,\"data\":{{\"buildGitHash\":\"{runnerHash}\"}}}}";
+            var identityJson = $"{{\"success\":true,\"data\":{{\"buildGitHash\":\"{runnerHash}\",\"status\":\"online\",\"connectionState\":\"connected\"}}}}";
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(identityJson)
@@ -489,6 +501,7 @@ internal sealed class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _directoryLinks = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private string _currentDirectory = "/";
 
@@ -529,6 +542,17 @@ internal sealed class FakeFileSystem : IFileSystem
             lock (_gate)
             {
                 return new HashSet<string>(_directories, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+    public IReadOnlyDictionary<string, string> DirectoryLinks
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return new Dictionary<string, string>(_directoryLinks, StringComparer.OrdinalIgnoreCase);
             }
         }
     }
@@ -593,7 +617,7 @@ internal sealed class FakeFileSystem : IFileSystem
         var normalized = Normalize(path);
         lock (_gate)
         {
-            return _files.ContainsKey(normalized) || _directories.Contains(normalized);
+            return _files.ContainsKey(normalized) || _directories.Contains(normalized) || _directoryLinks.ContainsKey(normalized);
         }
     }
 
@@ -603,6 +627,8 @@ internal sealed class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             if (_directories.Contains(normalized))
+                return true;
+            if (_directoryLinks.ContainsKey(normalized))
                 return true;
             return _files.Keys.Any(key => StartsWithDirectory(key, normalized));
         }
@@ -623,6 +649,7 @@ internal sealed class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             _files.Remove(normalized);
+            _directoryLinks.Remove(normalized);
         }
     }
 
@@ -641,6 +668,10 @@ internal sealed class FakeFileSystem : IFileSystem
             foreach (var key in _files.Keys.Where(k => StartsWithDirectory(k, normalized)).ToArray())
             {
                 _files.Remove(key);
+            }
+            foreach (var link in _directoryLinks.Keys.Where(k => k == normalized || StartsWithDirectory(k, normalized)).ToArray())
+            {
+                _directoryLinks.Remove(link);
             }
         }
     }
@@ -722,6 +753,30 @@ internal sealed class FakeFileSystem : IFileSystem
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    public void ReplaceDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        lock (_gate)
+        {
+            _directoryLinks[Normalize(linkPath)] = Normalize(targetPath);
+        }
+    }
+
+    public string? ReadDirectorySymbolicLink(string linkPath)
+    {
+        lock (_gate)
+        {
+            return _directoryLinks.TryGetValue(Normalize(linkPath), out var target) ? target : null;
+        }
+    }
+
+    public void DeleteDirectorySymbolicLink(string linkPath)
+    {
+        lock (_gate)
+        {
+            _directoryLinks.Remove(Normalize(linkPath));
+        }
+    }
 
     private static string Normalize(string path) =>
         path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);

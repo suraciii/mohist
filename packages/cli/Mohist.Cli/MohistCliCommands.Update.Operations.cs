@@ -9,7 +9,13 @@ internal partial class SourceCodeUpdater
 
     public virtual async Task<int> UpdateServerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
-        return await _operations.UpdateServerAsync(repoRoot, dryRun, _serverReadyTimeout, _readinessProbe, cancellationToken);
+        return await _operations.UpdateServerAsync(
+            repoRoot,
+            dryRun,
+            _serverReadyTimeout,
+            _readinessProbe,
+            _validator.VerifyServerRuntimeIdentityAsync,
+            cancellationToken);
     }
 
     public virtual async Task<int> UpdateRunnerAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
@@ -20,5 +26,20 @@ internal partial class SourceCodeUpdater
     public virtual async Task<int> UpdateSlackAsync(string? repoRoot, bool dryRun, CancellationToken cancellationToken = default)
     {
         return await _operations.UpdateSlackAsync(repoRoot, dryRun, cancellationToken);
+    }
+
+    public virtual Task<int> InstallServerAsync(ServiceInstallOptions options, CancellationToken cancellationToken = default)
+    {
+        return _operations.InstallServerRuntimeAsync(
+            options,
+            _serverReadyTimeout,
+            _readinessProbe,
+            _validator.VerifyServerRuntimeIdentityAsync,
+            cancellationToken);
+    }
+
+    public virtual Task<int> InstallRunnerAsync(ServiceInstallOptions options, CancellationToken cancellationToken = default)
+    {
+        return _operations.InstallRunnerRuntimeAsync(options, _runnerRefreshVerifier, cancellationToken);
     }
 }

@@ -7,6 +7,7 @@ public class FakeFileSystem : IFileSystem
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _directories = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _directoryLinks = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private string _currentDirectory = "/";
 
@@ -111,7 +112,7 @@ public class FakeFileSystem : IFileSystem
         var normalized = Normalize(path);
         lock (_gate)
         {
-            return _files.ContainsKey(normalized) || _directories.Contains(normalized);
+            return _files.ContainsKey(normalized) || _directories.Contains(normalized) || _directoryLinks.ContainsKey(normalized);
         }
     }
 
@@ -121,6 +122,8 @@ public class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             if (_directories.Contains(normalized))
+                return true;
+            if (_directoryLinks.ContainsKey(normalized))
                 return true;
             return _files.Keys.Any(key => StartsWithDirectory(key, normalized));
         }
@@ -141,6 +144,7 @@ public class FakeFileSystem : IFileSystem
         lock (_gate)
         {
             _files.Remove(normalized);
+            _directoryLinks.Remove(normalized);
         }
     }
 
@@ -159,6 +163,10 @@ public class FakeFileSystem : IFileSystem
             foreach (var key in _files.Keys.Where(k => StartsWithDirectory(k, normalized)).ToArray())
             {
                 _files.Remove(key);
+            }
+            foreach (var link in _directoryLinks.Keys.Where(k => k == normalized || StartsWithDirectory(k, normalized)).ToArray())
+            {
+                _directoryLinks.Remove(link);
             }
         }
     }
@@ -240,6 +248,30 @@ public class FakeFileSystem : IFileSystem
     public Stream OpenRead(string path) => new MemoryStream(Encoding.UTF8.GetBytes(Read(path)));
 
     public Stream OpenWrite(string path) => new RecordingStream(this, path);
+
+    public void ReplaceDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        lock (_gate)
+        {
+            _directoryLinks[Normalize(linkPath)] = Normalize(targetPath);
+        }
+    }
+
+    public string? ReadDirectorySymbolicLink(string linkPath)
+    {
+        lock (_gate)
+        {
+            return _directoryLinks.TryGetValue(Normalize(linkPath), out var target) ? target : null;
+        }
+    }
+
+    public void DeleteDirectorySymbolicLink(string linkPath)
+    {
+        lock (_gate)
+        {
+            _directoryLinks.Remove(Normalize(linkPath));
+        }
+    }
 
     private static string Normalize(string path) =>
         path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);

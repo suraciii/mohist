@@ -84,19 +84,19 @@ public class UpdateAllSpecs
             continueAfterCliUpdate: true);
 
         Assert.Equal(0, exitCode);
-        Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
+        Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "is-active", "mohist-runner.service"]));
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
         Assert.Contains(f.Commands.ExecutedCommands, c =>
-            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+            c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist.service"]));
         Assert.Contains(f.Commands.ExecutedCommands, c => c.FileName == "npm");
         Assert.Contains(f.Commands.ExecutedCommands, c =>
-            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "start", "mohist-runner.service"]));
+            c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "restart", "mohist-runner.service"]));
         Assert.Contains(f.Commands.ExecutedCommands, c =>
             c.FileName == "git" && c.Args.SequenceEqual(["rev-parse", "HEAD"]));
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c => c.FileName == "git" && c.Args.SequenceEqual(["pull"]));
@@ -117,7 +117,7 @@ public class UpdateAllSpecs
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c =>
             c.FileName == "systemctl" && c.Args.SequenceEqual(["--user", "stop", "mohist-runner.service"]));
         Assert.Contains(f.Commands.ExecutedCommands, c =>
-            c.FileName == "dotnet" && c.Args.SequenceEqual(["build", "Mohist.sln"]));
+            c.FileName == "dotnet" && c.Args.Length > 0 && c.Args[0] == "publish");
         Assert.DoesNotContain(f.Commands.ExecutedCommands, c => c.FileName == "npm");
         var output = f.Stdout.ToString();
         Assert.Contains("Runner service is not installed; skipping pre-server runner stop.", output);
