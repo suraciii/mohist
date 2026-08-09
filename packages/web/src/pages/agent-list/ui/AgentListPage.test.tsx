@@ -131,6 +131,23 @@ describe('AgentListPage', () => {
       expect(screen.getByText('high')).toBeInTheDocument()
     })
 
+    it('uses the canonical runtime for Pi rows even when the legacy type disagrees', async () => {
+      mockAgents([makeAgent({
+        id: 'pi-agent',
+        agentConfig: {
+          runtime: 'pi',
+          model: 'gpt-4',
+          variant: 'high',
+          type: 'opencode',
+        } as AgentInfo['agentConfig'],
+      })])
+      renderPage()
+
+      const row = await screen.findByTestId('agent-row-pi-agent')
+      expect(within(row).getByTestId('agent-runtime-pi-agent')).toHaveTextContent('Pi')
+      expect(within(row).getByTestId('agent-runtime-pi-agent')).not.toHaveTextContent('OpenCode')
+    })
+
     it('renders purpose and the server Readiness conclusion distinctly', async () => {
       mockAgents([
         makeAgent({ id: 'ready', name: 'Ready Agent', description: 'Reviews pull requests', readiness: { conclusion: 'Ready', gaps: [], setup: null } }),

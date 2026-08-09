@@ -17,14 +17,6 @@ const defaultComponents: AgentListPageComponents = {
   AgentProfileEditor: DefaultAgentProfileEditor,
 }
 
-function getAgentType(agent: AgentInfo): string {
-  const config = agent.agentConfig
-  if (config && typeof config === 'object' && 'type' in config) {
-    return String(config.type)
-  }
-  return 'opencode'
-}
-
 function getLifecycleStatus(agent: AgentInfo): { label: string; dotClass: string } {
   if (agent.status === 'archived') {
     return { label: 'Archived', dotClass: 'bg-gray-400' }
@@ -43,8 +35,8 @@ function AgentRow({
 }) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
-  const agentType = useMemo(() => getAgentType(agent), [agent])
+  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const runtimeLabel = runtime === 'opencode' ? 'OpenCode' : 'Pi'
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
   const readiness = agent.readiness?.conclusion ?? 'Unknown'
@@ -84,7 +76,7 @@ function AgentRow({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-muted-foreground">{agentType}</span>
+              <span data-testid={`agent-runtime-${agent.id}`} className="text-xs text-muted-foreground">{runtimeLabel}</span>
               {model && (
                 <>
                   <span className="text-xs text-muted-foreground/50">·</span>

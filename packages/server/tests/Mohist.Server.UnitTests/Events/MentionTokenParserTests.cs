@@ -160,4 +160,15 @@ public class MentionTokenParserTests
         Assert.Empty(MentionTokenParser.Parse("@. hello"));
         Assert.Empty(MentionTokenParser.Parse("@- hello"));
     }
+
+    [Fact]
+    public void Parse_LongToken_RemainsLinearAndPreservesTrailingDelimiterSemantics()
+    {
+        var longToken = new string('a', 100_000);
+        var body = $"@supervisor @{longToken}-";
+
+        var tokens = MentionTokenParser.Parse(body);
+
+        Assert.Equal(new[] { "supervisor", longToken }, tokens);
+    }
 }

@@ -880,13 +880,12 @@ internal static partial class AgentCommands
 
                 using var response = await api.SendAsync(
                     HttpMethod.Post,
-                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions"),
+                    ProjectAgentsPath(resolvedProjectId, $"/agents/{MohistCliCommands.Escape(agentRef!)}/sessions/cli"),
                     body,
                     printServerUnavailable: false,
                     headers: new Dictionary<string, string>
                     {
                         ["Idempotency-Key"] = idempotencyKey!,
-                        ["X-Mohist-Launch-Origin"] = "cli",
                     },
                     retries: 1);
                 if (response is null)

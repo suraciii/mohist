@@ -41,6 +41,52 @@ public class AgentSessionLaunchRoutesSpecs : AgentSessionLaunchRoutesTestSupport
     }
 
     [Fact]
+    public async Task Launch_WebRoute_RejectsSpoofedCliOriginHeaderWithoutCreatingWorkspace()
+    {
+        var projectId = await CreateProjectAsync("launch-spoofed-cli-origin");
+        var agent = await CreateAgentAsync(projectId, "spoofed-cli-origin-agent");
+        var workspacesBefore = await CountWorkspacesAsync(projectId);
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agents/{agent.Id}/sessions")
+        {
+            Content = JsonContent.Create(new { prompt = "the header is not a trusted caller" }),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("X-Mohist-Launch-Origin", "cli");
+
+        using var launch = await _fixture.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, launch.StatusCode);
+        var payload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("workspace_required", payload.GetProperty("code").GetString());
+        Assert.Equal(workspacesBefore, await CountWorkspacesAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_CliRoute_UsesServerOriginMetadataInsteadOfHeader()
+    {
+        var projectId = await CreateProjectAsync("launch-cli-origin");
+        await CreateWorkspaceAsync(projectId, "cli-origin-workspace");
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agents/unused-agent/sessions/cli")
+        {
+            Content = JsonContent.Create(new { }),
+        };
+        request.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        request.Headers.Add("X-Mohist-Launch-Origin", "web");
+
+        using var launch = await _fixture.Client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, launch.StatusCode);
+        var payload = await launch.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(payload.GetProperty("success").GetBoolean());
+        Assert.Equal("input_required", payload.GetProperty("code").GetString());
+    }
+
+    [Fact]
     public async Task Launch_RejectsRepositoryOutsideWorkspaceBeforeCreatingSession()
     {
         var projectId = await CreateProjectAsync("launch-workspace-repository-mismatch");

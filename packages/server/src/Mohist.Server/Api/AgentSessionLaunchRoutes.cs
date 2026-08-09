@@ -46,6 +46,9 @@ namespace Mohist.Server.Api;
 /// </remarks>
 public static class AgentSessionLaunchRoutes
 {
+    private const string WebLaunchOrigin = "web";
+    private const string CliLaunchOrigin = "cli";
+
     internal static readonly IReadOnlySet<string> AllowedTopLevelFields = new HashSet<string>(StringComparer.Ordinal)
     {
         "prompt",
@@ -58,7 +61,15 @@ public static class AgentSessionLaunchRoutes
         var group = app.MapGroup("/api/projects/{projectRef}/agents/{agentRef}")
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
-        group.MapPost("/sessions", async (
+        group.MapPost("/sessions/cli", HandleLaunchAsync)
+            .WithMetadata(new LaunchOriginMetadata(CliLaunchOrigin));
+        group.MapPost("/sessions", HandleLaunchAsync)
+            .WithMetadata(new LaunchOriginMetadata(WebLaunchOrigin));
+
+        return app;
+    }
+
+    private static async Task<IResult> HandleLaunchAsync(
             HttpContext context,
             string projectRef,
             string agentRef,
@@ -72,8 +83,8 @@ public static class AgentSessionLaunchRoutes
             IGrainFactory grains,
             InteractionWorkspaceProvisioner provisioner,
             TimeProvider timeProvider,
-            CancellationToken ct) =>
-        {
+            CancellationToken ct)
+    {
             if (body is null)
             {
                 return ApiResults.BadRequest(
@@ -107,7 +118,7 @@ public static class AgentSessionLaunchRoutes
             var preMintedSessionId = $"agent-session-{AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\nsession")}";
             var preMintedInputId = AgentLaunchCoordinatorCodec.StableToken($"{ownershipIdentity}\ninput");
             var preMintedTurnId = Guid.NewGuid().ToString("N");
-            var launchOrigin = ReadLaunchOrigin(context.Request);
+            var launchOrigin = ReadLaunchOrigin(context);
             var suppliedWorkspace = body.Context?.Workspace?.Trim();
             var hasExplicitWorkspace = suppliedWorkspace is { Length: > 0 };
             if (launchOrigin == "web" && !hasExplicitWorkspace)
@@ -338,9 +349,6 @@ public static class AgentSessionLaunchRoutes
             }
 
             return AcceptedLaunch(project.Id, project.Name, result, workspaceName, launchOrigin, agent.Id, attachmentBatch.Results);
-        });
-
-        return app;
     }
 
     private static object BuildAttachmentResultDto(AgentInputAttachmentAcceptance acceptance) =>
@@ -409,19 +417,12 @@ public static class AgentSessionLaunchRoutes
                 statusCode: 201);
     }
 
-    private static string ReadLaunchOrigin(HttpRequest request)
-    {
-        if (request.Headers.TryGetValue("X-Mohist-Launch-Origin", out var values)
-            && values.Count > 0
-            && values[0] is { } supplied
-            && (string.Equals(supplied, "cli", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(supplied, "web", StringComparison.OrdinalIgnoreCase)))
-        {
-            return supplied.Trim().ToLowerInvariant();
-        }
+    private static string ReadLaunchOrigin(HttpContext context) =>
+        context.GetEndpoint()?.Metadata.GetMetadata<LaunchOriginMetadata>()?.Origin == CliLaunchOrigin
+            ? CliLaunchOrigin
+            : WebLaunchOrigin;
 
-        return "web";
-    }
+    private sealed record LaunchOriginMetadata(string Origin);
 
     private static IResult LaunchSetupPending(LaunchSetupPendingException exception) =>
         ApiResults.Fail(
