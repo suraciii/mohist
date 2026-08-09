@@ -22,7 +22,7 @@ between Agent, AgentJob, and AgentSession.
 ```
 
 The Agent selected by `name` provides identity instructions, execution backend
-(OpenCode or Pi), model, variant, and Skills. `prompt` is the input for this
+(OpenCode or Pi), model, reasoning effort, variant, and Skills. `prompt` is the input for this
 task. Use this Action when the same role must be reused by multiple tasks or
 Profiles, or when routing rules and `@` mentions must use the same Agent
 identity. Continue to use [`mohist/opencode`](opencode.md) or
@@ -37,11 +37,19 @@ identity. Continue to use [`mohist/opencode`](opencode.md) or
 | `session` | No | - | Logical Session name within the WorkflowRun. The current Work ID is used when omitted. |
 | `timeout` | No | Same as the backend Action | Deadline for this execution. |
 
-The Agent configuration selects the execution backend, model, variant, and
+The Agent configuration selects the execution backend, model, reasoning effort, variant, and
 Skills. The task cannot override them. `prompt` supplies only the goal for this
 work and cannot modify the Agent definition. Task-level constructs such as
 `expect`, `artifacts`, `setVars`, and recovery behave as they do for other
 Actions.
+
+When this Action starts a new execution without an override field in its
+contract, it uses the saved Agent configuration. It never derives a model or
+reasoning effort from a Runtime or an existing Session. Creating an Agent
+without a reasoning effort records the supported default for its selected
+configuration; editing without that field keeps the saved value, while an
+explicit clear selects and saves the current supported default. Variant remains
+a separate Runtime-specific choice.
 
 `name` uses the same resolution order as the `mo` command surface. A reference
 that starts with `agent_` resolves only as an ID. Other references resolve by
@@ -50,13 +58,13 @@ name first and fall back to ID when no name matches.
 ## Resolution and Snapshot
 
 - Each dispatch resolves `name` to a snapshot of the current definition. The
-  instructions, execution backend, model, variant, and ordered Skills remain
+  instructions, execution backend, model, reasoning effort, variant, and ordered Skills remain
   fixed for that attempt.
 - Editing the Agent does not affect an attempt that was already dispatched. A
   retry resolves the definition again, so a repaired definition takes effect
   immediately on retry.
 - An ordinary client may provide a prompt and context. It cannot use task input
-  or context to select a different Runtime, model, variant, or set of Skills.
+  or context to select a different Runtime, model, reasoning effort, variant, or set of Skills.
 - Profile save and `mo workflow validate` check only the input shape and require
   `name` and `prompt`. They do not check whether the Agent exists, so Agent
   creation and removal do not block the Profile lifecycle.
@@ -73,3 +81,13 @@ the selected backend Action. Recovery `when` matching applies in the same way.
 `mohist/agent` can be used only for a task and is rejected when used for a
 check. If the referenced Agent does not exist or is archived, dispatch fails
 with `agent_not_found`.
+
+## Implementation Gap
+
+The saved default, closed Reasoning effort vocabulary, and static configuration
+checks are target behavior until #433 is delivered.[^433] #434 then adds the
+separate CLI-only one-job override, dry-run preview, and immutable launch
+readback; this Action does not gain a duplicate override surface.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.

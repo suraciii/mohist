@@ -58,8 +58,8 @@ is independently addressable or users directly start operations from it.
 | `otel` | OpenTelemetry traces | Local trace storage and queries; an observability tool, not a business-domain resource |
 | `skill` | Mohist Skill | Packaged Skill assets installed into a local Agent directory; not a business-domain resource |
 
-Runtime adapters, Runtime Sessions, and the model catalog do not form top-level areas. Runtime is a
-dimension of Agent configuration, Session binding, or Action selection. The model catalog supports
+Runtime adapters, Runtime Sessions, and the versioned capability catalog do not form top-level areas. Runtime is a
+dimension of Agent configuration, Session binding, or Action selection. The catalog supports
 configuration through `agent model list --runtime`. A root-level `config` is not a product resource
 either. Settings with different owners remain within explicit Project, Agent, Run, or local Service
 boundaries and cannot be reaggregated through arbitrary key/value commands.
@@ -163,12 +163,12 @@ its own repeated use cases appear.
 | Dump complete JSON by default and make the Agent filter it | Implementation is simple but every call pays in irrelevant fields and tokens | Reject. Default to a human view; automation explicitly selects JSON fields |
 | Put both remote resource behavior and local process lifecycle under `runner` or `server` | There are fewer root commands, but one action changes target, permission, and failure semantics by area and machine state | Reject. Remote objects remain under `runner` and `server`; local lifecycle is uniformly `service <action> <target>` |
 | Merge application logs and local service logs as `server logs --source` | The table is shorter, but connection, permission, stream, and failure results differ | Reject. Keep the distinct `server logs` and `service logs server` behaviors |
-| Create `runtime list/view/model list` for execution backends | It looks symmetric but promotes an internal Runner adapter and configuration catalog into a nonexistent product resource | Reject. Runtime remains a configuration dimension; model discovery is `agent model list --runtime` |
+| Create `runtime list/view/model list` for execution backends | It looks symmetric but promotes an internal Runner adapter and configuration catalog into a nonexistent product resource | Reject. Runtime remains a configuration dimension; static catalog readback is `agent model list --runtime` |
 | Keep root-level `config get/set` | Adding settings is easy but hides different Project, Agent, Workflow, and local Service owners | Reject. Add only typed settings under the resource that owns them |
 | Choose the command surface for Slack access | A generic provider subgroup anticipated multiple future providers, but Slack is the only provider and the abstraction hides binding, permission, and lifecycle behind a generic noun | Use root-level `slack`: `setup` and `status` orchestrate workspace installation, while other actions manage Slack access resources. Keep no compatibility command. Reassess when a second provider exists |
 | Name the action that adds an existing Agent to Slack | `setup-agent` conflicts with Agent Readiness setup and gives workspace-level `slack setup` a second subject; `create` incorrectly suggests creating an Agent or Connection | Use `slack install-agent <agent>`. The subject is an existing Agent and the result is a recoverable Slack installation. App creation, authorization, credentials, and binding remain internal steps |
 | Keep `rotate-credentials` for credential rotation | It overlaps the resumable credential step in `install-agent`; once Connection no longer owns credentials, the command has no target | Reject. Rerun `setup` or `install-agent` and explicitly provide credentials again. One installation record has one path |
-| Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--variant`, `--skills`, and `--avatar-file` |
+| Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--reasoning-effort`, `--variant`, `--skills`, and `--avatar-file` |
 | Add storage or database audit commands for table size, freelist, and row counts | They cover internal Server audits, but those are development operations. Architectural prohibitions constrain domain operations and do not justify expanding the command surface for a one-off audit | Reject. `otel` is the telemetry entry point; direct database reads for an internal Server audit are a valid developer path |
 | Let `mo otel query` read local trace storage directly | Queries survive Server outage, but they bypass the API and query safeguards, couple the storage schema, have no query budget or size limit, and silently read local data when CLI points at a remote Server | Reject. `query` uses the Server query capability. Direct database access during Server failure is a developer path |
 | Give `run view` only `--json` | There is one less source view, but callers cannot inspect the Definition that will govern later Stages | Reject. `run view --yaml` resolves the current Definition of the Profile ID bound to the Run and parallels `workflow view --yaml` as a resource-content view; it is not historical evidence |
@@ -317,6 +317,149 @@ Project resolution order and interaction. Implementation adds only three constra
   cannot silently overwrite the other.
 - Help, list, view, and local validation never trigger a setup prompt.
 
+### Agent execution flag matrix
+
+`mo agent create` and `mo agent edit` expose typed `--runtime`, `--model`,
+`--reasoning-effort`, and `--variant` fields rather than a configuration blob.
+The command parser and Server share the following matrix; scripts use the stable
+JSON Agent readback, never human confirmation text:
+
+| Command form | Set values | Clear values | Result |
+|---|---|---|---|
+| `mo agent create` | Any subset of all four fields, including none | No execution clear flag | Omitted fields resolve from the current static catalog default and the complete effective tuple is persisted. |
+| `mo agent edit` with no clear | Any subset of all four fields, including none | None | Omitted fields retain the saved tuple; the final tuple must validate. |
+| `mo agent edit` with one clear | Any subset of the other three fields | Exactly one of `--clear-runtime`, `--clear-model`, `--clear-reasoning-effort`, or `--clear-variant` | The clear seeds its current catalog default in Runtime, Model, ReasoningEffort, Variant dependency order; supplied values in other fields are then applied and the entire tuple is revalidated. |
+| Any create/edit form | A value for the same field | That field's clear flag | Reject `invalid_execution_configuration`; no precedence is inferred. |
+| `mo agent edit` | Any | Two or more execution clear flags | Reject `invalid_execution_configuration`; a separate edit is required. |
+| `mo agent create` or `mo agent launch` | Any | Any execution clear flag | Reject `invalid_execution_configuration`; clear exists only on Agent edit. |
+
+Empty values, JSON `null`, unknown options, or an effort outside the closed
+vocabulary are invalid, never aliases for clear. A null effective Variant is
+readback only for a Model without a Variant dimension. Every successful edit
+with a clear recalculates readiness, `catalogVersion`, and native mapping; a
+failed recalculation leaves the saved configuration unchanged. The canonical
+field-by-field algorithm is in [`agent-execution.md`](agent-execution.md#execution-configuration-resolution).
+
+`mo agent launch --dry-run` is the one execution preview. It calls the same
+Server `ResolveAgentLaunch` path as a real launch to validate and resolve the
+saved defaults plus any `--model` and `--reasoning-effort` override. Dry-run
+stops before `CommitAgentLaunch`: it persists nothing and has no admission
+claim, Workspace materialization, attachment upload, idempotency record, Job,
+Session, Input, Turn, dispatch, Runner work-directory, or provider side effect.
+There is no separate `mo agent resolve` command. `--dry-run` and
+`--idempotency-key` are mutually exclusive.
+
+`mo agent launch <agent> [--attachment <path>]...` accepts a repeatable local
+file input for both real launch and dry-run. The CLI validates each path at its
+local boundary, reads only enough bounded content to produce a non-path name,
+byte length, and content fingerprint for pure resolution, and never serializes
+the path into a Server resource or public API body. Missing paths fail with
+`attachment_not_found`; unreadable files fail with `attachment_not_readable`;
+non-file, duplicate, or ambiguous targets fail with `attachment_ambiguous`; and
+per-file, total-size, or count limits fail with `attachment_limit_exceeded`.
+An empty path is `invalid_launch_input`. A real upload streams content only
+after Server has admitted the operation claim; dry-run reports the planned
+upload without streaming or creating an attachment. The trusted CLI envelope
+therefore contains only the non-path descriptor during resolve and content under
+the accepted operation identity during commit. Before that transfer, the CLI
+re-reads the selected file and binds the actual bytes to the frozen descriptor's
+name, byte length, and content fingerprint. It sends the attachment ordinal and
+descriptor with the accepted operation identity, never the path. A changed file
+or stream mismatch is `attachment_content_changed`: the Server records the
+claim's durable rejection and the CLI returns it rather than uploading different
+bytes. Retrying the same key after the descriptor changes conflicts with
+`idempotency_key_reused`; retrying the stored rejection returns it even if the
+file changes back. Supplying changed bytes requires a new idempotency key.
+
+For dry-run, `--json execution` selects the complete execution preview rather
+than a partial Job field. On success it renders exactly an
+`AgentLaunchPreviewRead` object in this shape; all identity keys are present and
+`null`, rather than omitted or replaced with provisional IDs:
+
+```json
+{
+  "execution": {
+    "catalogVersion": "2026-08-09",
+    "runtime": "opencode",
+    "model": "openai/gpt-5.6",
+    "reasoningEffort": "max",
+    "variant": null,
+    "nativeMapping": {
+      "format": "opencode-v1",
+      "values": {
+        "model": "openai/gpt-5.6",
+        "reasoningEffort": "max",
+        "variant": null
+      }
+    },
+    "source": {
+      "runtime": "agent-default",
+      "model": "launch-override",
+      "reasoningEffort": "launch-override",
+      "variant": "agent-default"
+    }
+  },
+  "materializationPlan": {
+    "workspace": {
+      "disposition": "wouldCreate",
+      "workspace": null,
+      "derivedName": "cli-current"
+    },
+    "attachments": [
+      {
+        "disposition": "wouldUpload",
+        "attachmentId": null,
+        "name": "brief.md",
+        "byteLength": 4812,
+        "contentFingerprint": "sha256:..."
+      }
+    ]
+  },
+  "launchOperationId": null,
+  "jobId": null,
+  "sessionId": null,
+  "inputId": null,
+  "turnId": null
+}
+```
+
+With an existing Workspace, `materializationPlan.workspace.workspace` is the
+read-only resolved `LaunchWorkspaceRead` and `derivedName` is `null`; with an
+existing attachment its `attachmentId` is non-null and its local content
+fingerprint is absent. No supplied filesystem path appears in this JSON. An
+empty attachment input renders `attachments: []`. A missing, unreadable,
+ambiguous, over-limit, or invalid input returns the structured resolution error
+and no preview object. The preview shape is owned by
+[`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections),
+not by a CLI-only DTO.
+
+This saved-default and preview design is target-only until #433 delivers the
+static saved configuration contract.[^433] #434 then delivers the CLI override,
+dry-run, and immutable readback on that base.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
+
+### Execution read mapping
+
+The CLI projects canonical execution reads without deriving a second view. The
+following are stable `--json` members; list commands return an array of the
+same item projection as their corresponding view, and create or edit returns
+the same Agent projection as view:
+
+| Command result | Stable JSON projection | Human projection boundary |
+|---|---|---|
+| `mo agent create`, `edit`, `list`, and `view` | The Agent's `execution: AgentExecutionConfigurationRead` has `runtime`, `model`, `reasoningEffort`, `variant`, `catalogVersion`, `nativeMapping`, and `readiness`; `readiness` has `state` and `gaps[]`, and every gap has `code`, `message`, and `action`. | Show the saved tuple and readiness/gap action. Preserve explicit nulls. Do not make users parse catalog revision or native mapping. |
+| `mo agent model list --runtime <runtime>` | `RuntimeCapabilityCatalogRead`: `catalogVersion`, `defaultExecution`, and `entries[]`; each entry has `runtime`, `model`, `isDefaultModel`, `supportedReasoningEfforts`, `defaultReasoningEffort`, `hasVariantDimension`, `supportedVariants`, `defaultVariant`, and `nativeMapping`. | Show Runtime, Model, supported choices, and the defaults. A null Variant means the Model has no Variant choice, never that a clear request succeeded. |
+| `mo agent job list <agent>` and `mo agent job view <job-id>` | `AgentJobLaunchRead`: `jobId`, `launchRequestId`, `launchRequestFingerprint`, `launchOperationId`, `status`, `outcome`, `reason`, `nextAction`, `sessionId`, `sessionIdReason`, `inputId`, `inputIdReason`, `turnId`, `turnIdReason`, `workspace`, `workspaceReason`, `target`, `targetReason`, `execution`, `revision`, and `observedAt`. `execution` is the complete immutable `ResolvedExecutionRead`, including `catalogVersion`, `nativeMapping`, and per-field `source`. | Show Job state, accepted identities, effective tuple, and next action. Do not make human output a protocol for source, catalog revision, or native mapping. |
+| Real `mo agent launch` | The same `AgentJobLaunchRead` field set as Job view. A matching idempotency retry returns that original object and its stored `execution`. | Print the accepted Job and Session identities, effective tuple, and links; do not require parsing the line for automation. |
+| `mo session list`, `mo session view`, and Session detail | `AgentSessionRead.execution` is `null` for a Session without an AgentJob, otherwise `SessionExecutionSummaryRead` with `jobId`, `runtime`, `model`, `reasoningEffort`, and `variant`. | Show only the associated effective tuple and Job link. Never show or synthesize Job-only `source`, catalog revision, or native mapping. |
+| `mo agent launch --dry-run --json execution` | Complete `AgentLaunchPreviewRead`: `execution`, `materializationPlan`, and present-null `launchOperationId`, `jobId`, `sessionId`, `inputId`, and `turnId`. Each planned attachment has `disposition`, `attachmentId`, `name`, `byteLength`, and `contentFingerprint`. | Show the effective tuple and what Workspace or attachments would be materialized, with no made-up IDs. |
+
+Scripts and Agents use these JSON fields or NDJSON only. Human tables, one-line
+success output, labels, ordering, and wording are deliberately not a parseable
+contract.
+
 ## Output Contract
 
 A command produces a semantic result before selecting a renderer. TTY detection and output format
@@ -371,6 +514,10 @@ format, stable error codes, and exit status. Implementation adds:
 CLI spec tests verify the public contract without a real Server, process, Git repository, network,
 or wall clock:
 
+The saved execution, one-Job override, preview, and readback checks below are
+target checks for #433 and #434, not a statement that the current CLI implements
+them.
+
 - Every capability in the command tree has one canonical path, and a group has no synonymous
   action.
 - `run variable` reads and writes Run Variables. Effective reads remain read-only. Tests prove that
@@ -379,12 +526,14 @@ or wall clock:
   `set <key> <value>` always stores a string. Boolean, number, object, and array values require the
   mutually exclusive `--value-json <json>` input. `--json` remains output field selection and is
   never overloaded as an input value.
-- `agent launch` returns Job, Session, first Input, and Turn IDs. The AgentJob read model and
-  AgentSession commands never claim each other's state or result. `session followup` returns the new
-  Input ID and the Turn ID when known.
-- Agent create and edit use typed flags for Profile, Runtime, Model, Variant, Skills, and concurrency
-  limit. Commands expose no arbitrary Agent configuration JSON and display Readiness gaps provided
-  by Server.
+- `agent launch` returns Job, Session, first Input, and Turn IDs. It accepts one-job `--model` and
+  `--reasoning-effort` overrides, and its launch response and Job view expose the immutable resolved
+  execution snapshot. Same-key replay returns that original snapshot even after defaults or catalog
+  metadata change. The AgentJob read model and AgentSession commands never claim each other's state
+  or result. `session followup` returns the new Input ID and the Turn ID when known.
+- Agent create and edit use typed flags for Profile, Runtime, Model, ReasoningEffort, Variant, Skills,
+  and concurrency limit. Commands expose no arbitrary Agent configuration JSON and display static
+  Readiness gaps provided by Server.
 - `slack setup` and `slack install-agent` each have one canonical path. Both resume idempotently from
   durable progress, complete App creation and configuration automatically, and pause only for Slack
   installation confirmation or local credential input. A rerun revalidates stored credentials and

@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: wip
 ---
 
 # Workflow Variables
@@ -21,7 +21,7 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 {
   "vars": { "agent": { "model": "gpt-5" } },
   "stages": {
-    "check": { "vars": { "agent": { "variant": "high" } } }
+    "check": { "vars": { "agent": { "reasoningEffort": "high" } } }
   }
 }
 ```
@@ -34,6 +34,31 @@ Project, Issue, and WorkflowRun Variables use the same shape:
 
 WorkflowProfile can reference a Variable, but it does not own, declare, or restrict Variable keys. A
 Variable affects execution only when a Profile, task, check, recovery, or Prompt references it.
+
+### Agent execution options
+
+When a Profile expands `vars.agent` into a Runtime Action's `with.options`, it
+uses the closed Action shape in [`actions.md`](actions.md#mohistopencode-and-mohistpi):
+`model`, `reasoningEffort`, and `variant`. `reasoningEffort` is exactly one of
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. `variant` remains
+a separate Runtime-specific value and never represents an effort level.
+
+The Runtime comes from the Action's `uses`, not from `vars.agent`. The expanded
+object remains a partial selection and is resolved by the shared
+`ResolveExecutionConfiguration` contract: omitted Model, ReasoningEffort, and
+Variant use the selected Runtime/Model catalog defaults; supplied values are
+Workflow Action overrides; a Model override re-defaults omitted effort and
+Variant for that Model. Variables cannot retain an effort or Variant from a
+previously selected Model or Session.
+
+Variables remain generic resources, so a stored `agent` object is not eagerly
+reinterpreted at every write. At Profile validation and before dispatch, the
+expanded Action input is closed and passed to that same resolver. Unknown, empty,
+`null`, malformed, or illegal effort values fail with
+`invalid_execution_configuration`; a well-formed unsupported model fails with
+`unsupported_execution_configuration`; an unsupported effort/variant combination
+fails with `incompatible_execution_configuration`. No value is silently
+discarded.
 
 ```text diagram
 Workflow merge:
@@ -183,11 +208,11 @@ stage: check
 
 projectVariables:
   vars:
-    agent: { model: sonnet, variant: medium }
+    agent: { model: sonnet, reasoningEffort: medium }
   stages:
     check:
       vars:
-        agent: { variant: high }
+        agent: { reasoningEffort: high }
 
 issueVariables:
   vars:
@@ -196,26 +221,26 @@ issueVariables:
   stages:
     check:
       vars:
-        agent: { variant: xhigh }
+        agent: { reasoningEffort: xhigh }
 
 runVariables:
   vars:
     change: { prNumber: 42 }
 
 effectiveWorkflowVariables:
-  agent: { model: gpt-5, variant: medium }
+  agent: { model: gpt-5, reasoningEffort: medium }
   review: { strict: true }
   change: { prNumber: 42 }
 
 effectiveStageVariables:
-  agent: { model: gpt-5, variant: xhigh }
+  agent: { model: gpt-5, reasoningEffort: xhigh }
   review: { strict: true }
   change: { prNumber: 42 }
 ```
 
 Merge process:
 
-| Applied source | `agent.model` | `agent.variant` |
+| Applied source | `agent.model` | `agent.reasoningEffort` |
 |---|---|---|
 | Project Workflow Variables | `sonnet` | `medium` |
 | Issue Workflow Variables | `gpt-5` | `medium` |
@@ -248,6 +273,14 @@ The former open question is resolved. The "Dispatch snapshot persistence" sectio
 [`task-dispatch.md`](task-dispatch.md) defines attempt snapshot semantics, including immutability and
 byte-for-byte replay on redelivery, and its storage lifecycle, including discard at terminal state instead
 of full persistence with Run State. Audit needs do not justify retaining complete per-attempt snapshots.
+
+The closed Runtime Action option grammar, static ReasoningEffort validation, and
+Variant separation above are target behavior until saved execution configuration
+is delivered.[^433] One-job CLI overrides and immutable Job readback build on
+that saved-default contract.[^434]
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
 
 ## `WorkflowRunProfile` row/table name: historical misnomer
 
