@@ -24,6 +24,8 @@ public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
 
     public DbContextOptions<MohistDbContext> Options { get; }
 
+    internal int DisposeCount { get; private set; }
+
     public MohistDbContext CreateContext() => new(Options);
 
     public static TestSqliteDatabase CreateMigrated() => Create(MigratedSqliteTemplate.CopyTo);
@@ -32,9 +34,17 @@ public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
 
     public static TestSqliteDatabase CreateEmpty() => Create(static _ => { });
 
-    public void Dispose() => Keeper.Dispose();
+    public void Dispose()
+    {
+        DisposeCount++;
+        Keeper.Dispose();
+    }
 
-    public async ValueTask DisposeAsync() => await Keeper.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        DisposeCount++;
+        await Keeper.DisposeAsync();
+    }
 
     private static TestSqliteDatabase Create(Action<SqliteConnection> copySchema)
         => Create(
@@ -44,13 +54,19 @@ public sealed class TestSqliteDatabase : IDisposable, IAsyncDisposable
     internal static TestSqliteDatabase Create(
         Func<SqliteConnection> createKeeper,
         Action<SqliteConnection> copySchema)
+        => Create(createKeeper, copySchema, static keeper => new TestSqliteDatabase(keeper));
+
+    internal static TestSqliteDatabase Create(
+        Func<SqliteConnection> createKeeper,
+        Action<SqliteConnection> copySchema,
+        Func<SqliteConnection, TestSqliteDatabase> construct)
     {
         var keeper = createKeeper();
         try
         {
             keeper.Open();
             copySchema(keeper);
-            return new TestSqliteDatabase(keeper);
+            return construct(keeper);
         }
         catch
         {

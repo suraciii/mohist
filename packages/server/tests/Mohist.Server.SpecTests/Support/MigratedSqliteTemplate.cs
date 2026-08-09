@@ -93,19 +93,38 @@ public static class MigratedSqliteTemplate
     internal static SqliteConnection CreateTemplate(
         Func<SqliteConnection> openConnection,
         string? targetMigration)
+        => CreateTemplate(
+            openConnection,
+            db =>
+            {
+                if (targetMigration is null)
+                {
+                    GrainTestConfig.MigrateWithSchemaFix(db);
+                }
+                else
+                {
+                    db.GetService<IMigrator>().Migrate(targetMigration);
+                }
+            });
+
+    internal static void WarmForTest(
+        Func<SqliteConnection> openConnection,
+        Action<MohistDbContext> migrate)
+    {
+        _ = new Lazy<SqliteConnection>(
+            () => CreateTemplate(openConnection, migrate),
+            LazyThreadSafetyMode.ExecutionAndPublication).Value;
+    }
+
+    private static SqliteConnection CreateTemplate(
+        Func<SqliteConnection> openConnection,
+        Action<MohistDbContext> migrate)
     {
         var connection = openConnection();
         try
         {
             using var db = CreateContext(connection);
-            if (targetMigration is null)
-            {
-                GrainTestConfig.MigrateWithSchemaFix(db);
-            }
-            else
-            {
-                db.GetService<IMigrator>().Migrate(targetMigration);
-            }
+            migrate(db);
             return connection;
         }
         catch

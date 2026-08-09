@@ -1,6 +1,7 @@
 using System.Data;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Mohist.Server.SpecTests.Specs.Sessions;
 using Mohist.Server.SpecTests.Support;
 using Xunit;
 
@@ -24,7 +25,7 @@ public sealed class SqliteResourceCleanupSpecs
     [Fact]
     public void MigratedSqliteTemplate_WhenMigrationFails_DisposesConnection()
     {
-        using var connection = new TrackingSqliteConnection();
+        var connection = new TrackingSqliteConnection();
         connection.Open();
 
         var error = Assert.Throws<InvalidOperationException>(() =>
@@ -33,28 +34,45 @@ public sealed class SqliteResourceCleanupSpecs
                 "migration-that-does-not-exist"));
 
         Assert.Contains("migration-that-does-not-exist", error.Message);
-        Assert.True(connection.WasDisposed);
+        Assert.Equal(1, connection.DisposeCount);
         Assert.Equal(ConnectionState.Closed, connection.State);
     }
 
     [Fact]
-    public void TestSqliteDatabase_WhenOpenFails_DisposesKeeper()
+    public void MigratedSqliteTemplate_WarmForTest_WhenFullMigrationFails_RethrowsOriginalAndDisposesConnection()
+    {
+        var connection = new TrackingSqliteConnection();
+        connection.Open();
+        var migrationFailure = new InvalidOperationException("full migration failure");
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            MigratedSqliteTemplate.WarmForTest(
+                () => connection,
+                _ => throw migrationFailure));
+
+        Assert.Same(migrationFailure, error);
+        Assert.Equal(1, connection.DisposeCount);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+    }
+
+    [Fact]
+    public void TestSqliteDatabase_WhenOpenFails_DisposesKeeperOnce()
     {
         var openFailure = new InvalidOperationException("open failure");
-        using var connection = new TrackingSqliteConnection(openFailure);
+        var connection = new TrackingSqliteConnection(openFailure);
 
         var error = Assert.Throws<InvalidOperationException>(() =>
             TestSqliteDatabase.Create(() => connection, static _ => { }));
 
         Assert.Same(openFailure, error);
-        Assert.True(connection.WasDisposed);
+        Assert.Equal(1, connection.DisposeCount);
         Assert.Equal(ConnectionState.Closed, connection.State);
     }
 
     [Fact]
-    public void TestSqliteDatabase_WhenCopySchemaFails_DisposesKeeper()
+    public void TestSqliteDatabase_WhenCopySchemaFails_DisposesKeeperOnce()
     {
-        using var connection = new TrackingSqliteConnection();
+        var connection = new TrackingSqliteConnection();
         var copyFailure = new InvalidOperationException("copy failure");
 
         var error = Assert.Throws<InvalidOperationException>(() =>
@@ -63,8 +81,41 @@ public sealed class SqliteResourceCleanupSpecs
                 _ => throw copyFailure));
 
         Assert.Same(copyFailure, error);
-        Assert.True(connection.WasDisposed);
+        Assert.Equal(1, connection.DisposeCount);
         Assert.Equal(ConnectionState.Closed, connection.State);
+    }
+
+    [Fact]
+    public void TestSqliteDatabase_WhenConstructionFails_DisposesKeeperOnce()
+    {
+        var connection = new TrackingSqliteConnection();
+        var constructionFailure = new InvalidOperationException("construction failure");
+
+        var error = Assert.Throws<InvalidOperationException>(() =>
+            TestSqliteDatabase.Create(
+                () => connection,
+                static _ => { },
+                _ => throw constructionFailure));
+
+        Assert.Same(constructionFailure, error);
+        Assert.Equal(1, connection.DisposeCount);
+        Assert.Equal(ConnectionState.Closed, connection.State);
+    }
+
+    [Fact]
+    public async Task UnifiedSessionRoutesSpecs_WhenSeedFails_DisposesDatabaseOnce()
+    {
+        var database = TestSqliteDatabase.CreateMigrated();
+        var seedFailure = new InvalidOperationException("seed failure");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            UnifiedSessionRoutesSpecs.BuildDbAsyncForTest(
+                () => database,
+                _ => Task.FromException(seedFailure)));
+
+        Assert.Same(seedFailure, error);
+        Assert.Equal(1, database.DisposeCount);
+        Assert.Equal(ConnectionState.Closed, database.Keeper.State);
     }
 
     private sealed class TrackingSqliteConnection : SqliteConnection
@@ -77,7 +128,7 @@ public sealed class SqliteResourceCleanupSpecs
             _openFailure = openFailure;
         }
 
-        public bool WasDisposed { get; private set; }
+        public int DisposeCount { get; private set; }
 
         public override void Open()
         {
@@ -89,7 +140,7 @@ public sealed class SqliteResourceCleanupSpecs
 
         protected override void Dispose(bool disposing)
         {
-            WasDisposed = true;
+            DisposeCount++;
             base.Dispose(disposing);
         }
     }

@@ -357,22 +357,43 @@ public class UnifiedSessionRoutesSpecs
         return new AgentSessionQuerier(db.Factory, sessionQuery);
     }
 
-    private static async Task<UnifiedTestDb> BuildDbAsync(bool seedCrossProjectRun = false)
+    private static Task<UnifiedTestDb> BuildDbAsync(bool seedCrossProjectRun = false) =>
+        BuildDbAsync(
+            seedCrossProjectRun,
+            TestSqliteDatabase.CreateMigrated,
+            seedOverride: null);
+
+    internal static Task<UnifiedTestDb> BuildDbAsyncForTest(
+        Func<TestSqliteDatabase> createDatabase,
+        Func<IDbContextFactory<MohistDbContext>, Task> seed)
+        => BuildDbAsync(false, createDatabase, seed);
+
+    private static async Task<UnifiedTestDb> BuildDbAsync(
+        bool seedCrossProjectRun,
+        Func<TestSqliteDatabase> createDatabase,
+        Func<IDbContextFactory<MohistDbContext>, Task>? seedOverride)
     {
-        var database = TestSqliteDatabase.CreateMigrated();
+        var database = createDatabase();
         try
         {
             var factory = new TestDbContextFactory(database.Options);
 
-            await SeedAgentAsync(factory);
-            await SeedAgentLaunchSessionAsync(factory);
-            await SeedWorkflowSessionAsync(factory, WorkflowSession, ProjectA, WorkflowRunId, WorkflowSessionName, WorkflowIssueNumber);
-            await SeedTranscriptAsync(factory, AgentLaunchSession, "rt-agent");
-            await SeedTranscriptAsync(factory, WorkflowSession, "rt-" + WorkflowSession);
-
-            if (seedCrossProjectRun)
+            if (seedOverride is not null)
             {
-                await SeedWorkflowSessionAsync(factory, "s_other_project", ProjectB, "wr-other-project", "coder", 300);
+                await seedOverride(factory);
+            }
+            else
+            {
+                await SeedAgentAsync(factory);
+                await SeedAgentLaunchSessionAsync(factory);
+                await SeedWorkflowSessionAsync(factory, WorkflowSession, ProjectA, WorkflowRunId, WorkflowSessionName, WorkflowIssueNumber);
+                await SeedTranscriptAsync(factory, AgentLaunchSession, "rt-agent");
+                await SeedTranscriptAsync(factory, WorkflowSession, "rt-" + WorkflowSession);
+
+                if (seedCrossProjectRun)
+                {
+                    await SeedWorkflowSessionAsync(factory, "s_other_project", ProjectB, "wr-other-project", "coder", 300);
+                }
             }
 
             return new UnifiedTestDb(database, factory);
@@ -551,7 +572,7 @@ public class UnifiedSessionRoutesSpecs
         return (element, context.Response.StatusCode);
     }
 
-    private sealed record UnifiedTestDb(TestSqliteDatabase Database, IDbContextFactory<MohistDbContext> Factory) : IDisposable
+    internal sealed record UnifiedTestDb(TestSqliteDatabase Database, IDbContextFactory<MohistDbContext> Factory) : IDisposable
     {
         public void Dispose() => Database.Dispose();
     }
