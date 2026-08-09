@@ -52,7 +52,7 @@ public class AgentSessionQuerier : IScopedService
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var transcript = await LoadTranscriptAsync(db, session.Session.Id, session.Session.Status.AgentRuntimeSessionId, ct);
-        return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript));
+        return new WorkflowSessionDetailDto(ToWorkflowDto(session), SessionTranscriptBuilder.Build(transcript, session.Session));
     }
 
     public async Task<IReadOnlyList<WorkflowSessionDto>> ListByIssueAsync(string projectId, int issueNumber, CancellationToken ct = default)
@@ -543,7 +543,8 @@ public class AgentSessionQuerier : IScopedService
         int issueNumber,
         string sessionName,
         string? runtimeSessionId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? view = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var session = await FindReadableSessionAsync(db, projectId, issueNumber, sessionName, ct);
@@ -554,7 +555,7 @@ public class AgentSessionQuerier : IScopedService
             session.Session.Id,
             runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
             ct);
-        return SessionTranscriptBuilder.Build(transcript);
+        return SessionTranscriptBuilder.Build(transcript, session.Session, view);
     }
 
     /// <summary>
@@ -647,7 +648,8 @@ public class AgentSessionQuerier : IScopedService
         string projectId,
         string sessionId,
         string? runtimeSessionId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? view = null)
     {
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var session = await FindGenericSessionAsync(projectId, sessionId, ct);
@@ -658,7 +660,7 @@ public class AgentSessionQuerier : IScopedService
             session.Session.Id,
             runtimeSessionId ?? session.Session.Status.AgentRuntimeSessionId,
             ct);
-        return SessionTranscriptBuilder.Build(transcript);
+        return SessionTranscriptBuilder.Build(transcript, session.Session, view);
     }
 
     /// <summary>
@@ -761,7 +763,8 @@ public class AgentSessionQuerier : IScopedService
         string projectId,
         string sessionId,
         string? runtimeSessionId = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        string? view = null)
     {
         var record = await FindUnifiedSessionAsync(projectId, sessionId, ct);
         if (record is null) return null;
@@ -772,7 +775,7 @@ public class AgentSessionQuerier : IScopedService
             record.Session.Id,
             runtimeSessionId ?? record.Session.Status.AgentRuntimeSessionId,
             ct);
-        return SessionTranscriptBuilder.Build(transcript);
+        return SessionTranscriptBuilder.Build(transcript, record.Session, view);
     }
 
     /// <summary>

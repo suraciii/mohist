@@ -66,6 +66,8 @@ public sealed class AgentSessionTranscriptResponse
     public IReadOnlyList<AgentSessionTranscriptTurnDto> Turns { get; init; } = [];
     public int PartCount { get; init; }
     public string? LastActivityAt { get; init; }
+    public string Activity { get; init; } = "unknown";
+    public string Status { get; init; } = "unknown";
 }
 
 public sealed class AgentSessionTranscriptTurnDto
@@ -74,6 +76,8 @@ public sealed class AgentSessionTranscriptTurnDto
     public string StartedAt { get; init; } = string.Empty;
     public string? CompletedAt { get; set; }
     public bool Incomplete { get; set; }
+    public string Status { get; init; } = "unknown";
+    public AgentTurnResultObservationDto? Result { get; init; }
     public AgentSessionTranscriptUserDto User { get; init; } = new();
     public List<AgentSessionTranscriptPartDto> Assistant { get; init; } = [];
 }

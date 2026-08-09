@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure.Data.Sessions;
+using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Services;
 using Xunit;
 
@@ -6,6 +7,99 @@ namespace Mohist.Server.UnitTests.Sessions;
 
 public sealed class SessionTranscriptBuilderTests
 {
+    private static AgentSession CreateSession(DateTime at, string workDir = "/workspace") => AgentSession.Create(
+        "session-1",
+        "runner-1",
+        workDir,
+        metadata: new AgentSessionMetadata()
+            .WithLabel("mohist.io/project-id", "project-1")
+            .WithLabel("mohist.io/source-kind", "workflow")
+            .WithLabel("mohist.io/source-id", "workflow-1")
+            .WithLabel("mohist.io/session-name", "transcript"),
+        now: at,
+        runtime: "opencode");
+
+    [Fact]
+    public void Build_DefaultUsesCanonicalInputAndHidesRuntimePayloads_RawIsExplicit()
+    {
+        var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+        var session = CreateSession(at);
+        session.Status = session.Status with
+        {
+            Activity = AgentSessionActivity.Active,
+            Inputs = [new AgentSessionInputRecord(
+                "input-1", 1, "review the change", "agent-launch",
+                AgentSessionInputAcceptance.Accepted, at, JobId: "job-1")],
+            Turns = [new AgentTurnRecord(
+                "turn-1", 1, ["input-1"], AgentTurnStatus.Queued, JobId: "job-1")],
+        };
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            Id = 1,
+            SessionId = session.Id,
+            RuntimeSessionId = "runtime-1",
+            Sequence = 1,
+            PromptText = "[mohist-workspace-anchor]\n/workspace\n[/mohist-workspace-anchor]\n\ninternal instructions\n\nreview the change",
+            PromptKind = "task",
+            StartedAt = at,
+            UpdatedAt = at,
+        };
+        var toolPayload = "{\"toolCallId\":\"tool-1\",\"kind\":\"read\",\"status\":\"completed\",\"title\":\"Read file\",\"rawInput\":{\"filePath\":\"/workspace/secret.txt\"},\"rawOutput\":{\"content\":\"ok\"}}";
+        var part = new AgentSessionTranscriptPartRow
+        {
+            Id = 1,
+            TurnId = turn.Id,
+            Sequence = 1,
+            Type = TranscriptPartTypes.Tool,
+            PayloadJson = toolPayload,
+            FirstSeenAt = at,
+            LastSeenAt = at,
+        };
+
+        var response = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], [part]), session);
+        var resultTurn = Assert.Single(response.Turns);
+        var tool = Assert.Single(resultTurn.Assistant).Tool!;
+
+        Assert.Equal("review the change", resultTurn.User.Text);
+        Assert.Equal("queued", resultTurn.Status);
+        Assert.Equal("active", response.Activity);
+        Assert.Equal("queued", response.Status);
+        Assert.Null(tool.Input);
+        Assert.Null(tool.Output);
+        Assert.Null(tool.RawInput);
+        Assert.Null(tool.RawOutput);
+
+        var diagnostic = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], [part]), session, "raw");
+        var diagnosticTurn = Assert.Single(diagnostic.Turns);
+        var diagnosticTool = Assert.Single(diagnosticTurn.Assistant).Tool!;
+        Assert.Contains("mohist-workspace-anchor", diagnosticTurn.User.Text, StringComparison.Ordinal);
+        Assert.Contains("/workspace/secret.txt", diagnosticTool.RawInput, StringComparison.Ordinal);
+        Assert.Contains("/workspace/secret.txt", diagnosticTool.Input, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(AgentSessionActivity.Unknown, "unknown")]
+    [InlineData(AgentSessionActivity.Idle, "completed")]
+    public void Build_ProjectsAuthoritativeActivityAndTurnStatus(AgentSessionActivity activity, string expectedStatus)
+    {
+        var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+        var session = CreateSession(at, workDir: string.Empty);
+        session.Status = session.Status with { Activity = activity };
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            Id = 1,
+            SessionId = session.Id,
+            Sequence = 1,
+            StartedAt = at,
+            UpdatedAt = at,
+        };
+
+        var response = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], []), session);
+
+        Assert.Equal(expectedStatus, response.Status);
+        Assert.Equal(activity == AgentSessionActivity.Unknown ? "unknown" : activity == AgentSessionActivity.Idle ? "idle" : "active", response.Activity);
+    }
+
     [Fact]
     public void Build_RendersResetAndCompactionEvidenceAfterReload()
     {

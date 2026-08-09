@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Mohist.Server.Infrastructure.Data.Db;
 
@@ -129,7 +131,9 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
                 part.CorrelationId = delta.CorrelationId ?? part.CorrelationId;
                 if (!string.IsNullOrEmpty(delta.TextDelta))
                     part.Text += delta.TextDelta;
-                part.PayloadJson = string.IsNullOrWhiteSpace(delta.PayloadJson) ? part.PayloadJson : delta.PayloadJson;
+                part.PayloadJson = string.IsNullOrWhiteSpace(delta.PayloadJson)
+                    ? part.PayloadJson
+                    : MergePayloadJson(part.PayloadJson, delta.PayloadJson);
                 part.LastSeenAt = delta.LastSeenAt;
                 part.RawEventCount += Math.Max(0, delta.RawEventCount);
                 continue;
@@ -150,6 +154,39 @@ public sealed class AgentSessionTranscriptStore : IAgentSessionTranscriptStore
             };
             db.AgentSessionTranscriptParts.Add(part);
             existingByKey[partKey] = part;
+        }
+    }
+
+    private static string MergePayloadJson(string existingJson, string nextJson)
+    {
+        try
+        {
+            var existing = JsonNode.Parse(existingJson) as JsonObject;
+            var next = JsonNode.Parse(nextJson) as JsonObject;
+            if (existing is null || next is null)
+                return nextJson;
+
+            MergeObject(existing, next);
+            return existing.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return nextJson;
+        }
+    }
+
+    private static void MergeObject(JsonObject target, JsonObject overlay)
+    {
+        foreach (var property in overlay)
+        {
+            if (property.Value is JsonObject overlayObject
+                && target[property.Key] is JsonObject targetObject)
+            {
+                MergeObject(targetObject, overlayObject);
+                continue;
+            }
+
+            target[property.Key] = property.Value?.DeepClone();
         }
     }
 

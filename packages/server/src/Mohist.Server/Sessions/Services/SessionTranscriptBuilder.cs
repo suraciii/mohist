@@ -1,13 +1,18 @@
 using System.Text.Json;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions;
+using Mohist.Server.Sessions.Domain;
 
 namespace Mohist.Server.Sessions.Services;
 
 internal static class SessionTranscriptBuilder
 {
-    public static AgentSessionTranscriptResponse Build(AgentSessionTranscriptData transcript)
+    public static AgentSessionTranscriptResponse Build(
+        AgentSessionTranscriptData transcript,
+        AgentSession? session = null,
+        string? view = null)
     {
+        var diagnostic = IsDiagnosticView(view);
         var responseTurns = new List<AgentSessionTranscriptTurnDto>();
         var partsByTurn = transcript.Parts
             .GroupBy(p => p.TurnId)
@@ -19,16 +24,24 @@ internal static class SessionTranscriptBuilder
             var at = turn.StartedAt.ToString("o");
             partsByTurn.TryGetValue(turn.Id, out var parts);
             var recoveryPrompt = parts is null ? null : RecoveryPromptText(parts);
+            var canonicalTurn = session?.Status.Turns?.FirstOrDefault(candidate => candidate.Sequence == turn.Sequence);
+            var status = ResolveTurnStatus(canonicalTurn, parts, session?.Status.Activity);
             var dto = new AgentSessionTranscriptTurnDto
             {
                 Id = $"turn-{turn.Sequence}",
                 StartedAt = at,
                 CompletedAt = null,
-                Incomplete = false,
+                Incomplete = status is "queued" or "executing",
+                Status = status,
+                Result = ToResult(canonicalTurn?.Result),
                 User = new AgentSessionTranscriptUserDto
                 {
-                    Text = string.IsNullOrWhiteSpace(turn.PromptText) ? recoveryPrompt ?? string.Empty : turn.PromptText,
-                    Kind = AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind),
+                    Text = diagnostic
+                        ? (string.IsNullOrWhiteSpace(turn.PromptText) ? recoveryPrompt ?? string.Empty : turn.PromptText)
+                        : PublicPromptText(turn, canonicalTurn, session?.Status.Inputs, recoveryPrompt),
+                    Kind = diagnostic
+                        ? AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind)
+                        : PublicPromptKind(turn, canonicalTurn),
                     SentAt = at,
                     RuntimeSessionId = turn.RuntimeSessionId,
                 },
@@ -58,7 +71,7 @@ internal static class SessionTranscriptBuilder
 
                     if (part.Type == "tool")
                     {
-                        UpsertToolPart(dto, toolPartIndex, part, payload, partAt, ref partIndex);
+                        UpsertToolPart(dto, toolPartIndex, part, payload, partAt, ref partIndex, diagnostic);
                         continue;
                     }
 
@@ -80,15 +93,15 @@ internal static class SessionTranscriptBuilder
 
                     if (part.Type == TranscriptPartTypes.SessionActivity)
                     {
-                        var status = AgentSessionJsonHelper.GetStringProp(payload, "status") ?? "completed";
-                        if (status is "failed" or "cancelled")
+                        var statusValue = AgentSessionJsonHelper.GetStringProp(payload, "status") ?? "completed";
+                        if (statusValue is "failed" or "cancelled")
                         {
                             dto.Assistant.Add(new AgentSessionTranscriptPartDto
                             {
                                 Id = $"{dto.Id}-p{++partIndex}",
                                 Type = "error",
-                                Message = AgentSessionJsonHelper.GetStringProp(payload, "failureReason") ?? $"Session {status}",
-                                Kind = status == "cancelled" ? "cancelled" : "failed",
+                                Message = AgentSessionJsonHelper.GetStringProp(payload, "failureReason") ?? $"Session {statusValue}",
+                                Kind = statusValue == "cancelled" ? "cancelled" : "failed",
                                 At = partAt,
                             });
                         }
@@ -144,7 +157,157 @@ internal static class SessionTranscriptBuilder
             Turns = responseTurns,
             PartCount = transcript.Parts.Count,
             LastActivityAt = lastActivityAt,
+            Activity = ActivityName(session?.Status.Activity, responseTurns),
+            Status = ResolveResponseStatus(session, responseTurns),
         };
+    }
+
+    private static string PublicPromptText(
+        AgentSessionTranscriptTurnRow turn,
+        AgentTurnRecord? canonicalTurn,
+        IReadOnlyList<AgentSessionInputRecord>? inputs,
+        string? recoveryPrompt)
+    {
+        if (canonicalTurn is not null && inputs is not null)
+        {
+            var inputById = inputs.ToDictionary(input => input.Id, StringComparer.Ordinal);
+            var texts = canonicalTurn.InputIds
+                .Where(inputById.ContainsKey)
+                .Select(inputId => inputById[inputId].Text)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .ToArray();
+            if (texts.Length > 0) return string.Join("\n", texts);
+            if (canonicalTurn.InputIds.Count > 0) return "Attachment input";
+        }
+
+        var sanitized = StripInternalPromptSections(turn.PromptText);
+        return string.IsNullOrWhiteSpace(sanitized)
+            ? recoveryPrompt ?? "Task input recorded"
+            : sanitized;
+    }
+
+    private static bool IsDiagnosticView(string? view) =>
+        string.Equals(view, "raw", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(view, "diagnostic", StringComparison.OrdinalIgnoreCase);
+
+    private static string PublicPromptKind(AgentSessionTranscriptTurnRow turn, AgentTurnRecord? canonicalTurn) =>
+        canonicalTurn?.Sequence > 1
+            ? "followup"
+            : AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind);
+
+    private static string ResolveTurnStatus(
+        AgentTurnRecord? canonicalTurn,
+        IReadOnlyList<AgentSessionTranscriptPartRow>? parts,
+        AgentSessionActivity? activity)
+    {
+        if (canonicalTurn is not null) return TurnStatus(canonicalTurn.Status);
+        if (parts?.Any(part => part.Type == TranscriptPartTypes.SessionActivity
+            && AgentSessionJsonHelper.GetStringProp(AgentSessionJsonHelper.ParsePayloadOrEmpty(part.PayloadJson), "status") == "failed") == true)
+            return "failed";
+        if (activity == AgentSessionActivity.Unknown) return "unknown";
+        if (activity == AgentSessionActivity.Active) return "executing";
+        return "completed";
+    }
+
+    private static string ResolveResponseStatus(
+        AgentSession? session,
+        IReadOnlyList<AgentSessionTranscriptTurnDto> turns)
+    {
+        var current = session?.Status.Turns?
+            .OrderByDescending(turn => turn.Sequence)
+            .FirstOrDefault(turn => turn.Status is AgentTurnStatus.Queued
+                or AgentTurnStatus.Executing
+                or AgentTurnStatus.Unknown);
+        if (current is not null) return TurnStatus(current.Status);
+        if (turns.Count > 0) return turns[^1].Status;
+        return session?.Status.Activity switch
+        {
+            AgentSessionActivity.Active => "executing",
+            AgentSessionActivity.Unknown => "unknown",
+            _ => "completed",
+        };
+    }
+
+    private static string ActivityName(AgentSessionActivity? activity, IReadOnlyList<AgentSessionTranscriptTurnDto> turns) =>
+        activity switch
+        {
+            AgentSessionActivity.Active => "active",
+            AgentSessionActivity.Unknown => "unknown",
+            AgentSessionActivity.Idle => "idle",
+            _ => turns.Any(turn => turn.Status is "queued" or "executing") ? "active" : "unknown",
+        };
+
+    private static string TurnStatus(AgentTurnStatus status) => status switch
+    {
+        AgentTurnStatus.Queued => "queued",
+        AgentTurnStatus.Executing => "executing",
+        AgentTurnStatus.Completed => "completed",
+        AgentTurnStatus.Failed => "failed",
+        AgentTurnStatus.Cancelled => "cancelled",
+        AgentTurnStatus.Unknown => "unknown",
+        _ => "unknown",
+    };
+
+    private static AgentTurnResultObservationDto? ToResult(AgentTurnResult? result) => result is null
+        ? null
+        : new AgentTurnResultObservationDto(
+            result.Message,
+            result.Output,
+            result.FailureReason,
+            result.FailureCategory,
+            result.ExitCode);
+
+    private static string StripInternalPromptSections(string? prompt)
+    {
+        if (string.IsNullOrWhiteSpace(prompt)) return string.Empty;
+        var value = prompt;
+        var removedInternalSection = false;
+        foreach (var marker in new[]
+        {
+            "mohist-agent-session-startup",
+            "mohist-workspace-anchor",
+            "mohist-execution-definition",
+            "mohist-system-facts",
+        })
+        {
+            var before = value;
+            value = RemoveMarkedSection(value, marker);
+            removedInternalSection |= !string.Equals(before, value, StringComparison.Ordinal);
+        }
+
+        const string parentPrefix = "Parent issue context (read-only background; JSON):";
+        var parentStart = value.IndexOf(parentPrefix, StringComparison.Ordinal);
+        if (parentStart >= 0)
+        {
+            var taskStart = value.IndexOf("\n\n", parentStart, StringComparison.Ordinal);
+            taskStart = taskStart < 0 ? -1 : value.IndexOf("\n\n", taskStart + 2, StringComparison.Ordinal);
+            value = taskStart < 0 ? string.Empty : value[(taskStart + 2)..];
+        }
+
+        if (removedInternalSection)
+        {
+            var paragraphs = value
+                .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (paragraphs.Length > 1)
+                value = paragraphs[^1];
+        }
+
+        return value.Trim();
+    }
+
+    private static string RemoveMarkedSection(string value, string marker)
+    {
+        var opening = $"[{marker}]";
+        var closing = $"[/{marker}]";
+        while (true)
+        {
+            var start = value.IndexOf(opening, StringComparison.Ordinal);
+            if (start < 0) return value;
+            var end = value.IndexOf(closing, start + opening.Length, StringComparison.Ordinal);
+            value = end < 0
+                ? value[..start]
+                : value.Remove(start, end + closing.Length - start);
+        }
     }
 
     private static string? RecoveryPromptText(IReadOnlyList<AgentSessionTranscriptPartRow> parts)
@@ -184,7 +347,8 @@ internal static class SessionTranscriptBuilder
         AgentSessionTranscriptPartRow partRow,
         JsonElement payload,
         string at,
-        ref int partIndex)
+        ref int partIndex,
+        bool diagnostic)
     {
         var toolCallId = AgentSessionJsonHelper.GetToolStringProp(payload, "toolCallId")
             ?? AgentSessionJsonHelper.GetToolStringProp(payload, "id")
@@ -200,11 +364,16 @@ internal static class SessionTranscriptBuilder
         {
             existing.Tool.Status = status;
             existing.Tool.Title = AgentSessionJsonHelper.GetToolStringProp(payload, "title") ?? existing.Tool.Title;
-            existing.Tool.Input = rawInput ?? existing.Tool.Input;
-            existing.Tool.Output = rawOutput ?? existing.Tool.Output;
-            existing.Tool.RawInput = rawInput ?? existing.Tool.RawInput;
-            existing.Tool.RawOutput = rawOutput ?? existing.Tool.RawOutput;
-            existing.Tool.Error = status == "failed" ? rawOutput : existing.Tool.Error;
+            if (diagnostic)
+            {
+                existing.Tool.Input = rawInput ?? existing.Tool.Input;
+                existing.Tool.Output = rawOutput ?? existing.Tool.Output;
+                existing.Tool.RawInput = rawInput ?? existing.Tool.RawInput;
+                existing.Tool.RawOutput = rawOutput ?? existing.Tool.RawOutput;
+            }
+            existing.Tool.Error = status == "failed"
+                ? PublicToolError(payload, rawOutput, diagnostic)
+                : existing.Tool.Error;
             if (status is "completed" or "failed" or "cancelled")
             {
                 existing.Tool.CompletedAt = at;
@@ -232,17 +401,26 @@ internal static class SessionTranscriptBuilder
                 NormalizedName = NormalizeToolName(toolName, title),
                 Status = status,
                 Title = title,
-                Input = rawInput,
-                Output = rawOutput,
-                RawInput = rawInput,
-                RawOutput = rawOutput,
-                Error = status == "failed" ? rawOutput : null,
+                Input = diagnostic ? rawInput : null,
+                Output = diagnostic ? rawOutput : null,
+                RawInput = diagnostic ? rawInput : null,
+                RawOutput = diagnostic ? rawOutput : null,
+                Error = status == "failed" ? PublicToolError(payload, rawOutput, diagnostic) : null,
                 StartedAt = at,
                 CompletedAt = completedAt,
             },
         };
         toolPartIndex[toolCallId] = part;
         turn.Assistant.Add(part);
+    }
+
+    private static string PublicToolError(JsonElement payload, string? rawOutput, bool diagnostic)
+    {
+        if (diagnostic) return rawOutput ?? "Tool failed";
+        return AgentSessionJsonHelper.GetToolStringProp(payload, "error")
+            ?? AgentSessionJsonHelper.GetToolStringProp(payload, "failureReason")
+            ?? AgentSessionJsonHelper.GetToolStringProp(payload, "message")
+            ?? "Tool failed";
     }
 
     private static string MapToolStatus(string? status) => status switch

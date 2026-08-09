@@ -395,6 +395,8 @@ export interface AgentSessionTranscriptResponse {
   turns: SessionTurn[]
   partCount: number
   lastActivityAt: string | null
+  activity?: AgentSessionActivity | string
+  status?: string
 }
 
 export interface ToolCallEntry {
