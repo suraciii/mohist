@@ -9,6 +9,7 @@ using Mohist.Server.Infrastructure.Data.Events;
 using Mohist.Server.Infrastructure.Data.Workspace;
 using Mohist.Server.Infrastructure.Events;
 using Mohist.Server.SpecTests.Support;
+using Mohist.Server.TestSupport;
 using Mohist.Server.Workspace.Domain;
 using Xunit;
 
@@ -17,6 +18,8 @@ namespace Mohist.Server.SpecTests.Specs.Workspace;
 [Collection("MohistIntegration")]
 public sealed class WebConversationWorkspaceSpecs
 {
+    private const string WebRepositoryName = "server";
+
     private readonly MohistIntegrationFixture _fixture;
 
     public WebConversationWorkspaceSpecs(MohistIntegrationFixture fixture) => _fixture = fixture;
@@ -27,19 +30,21 @@ public sealed class WebConversationWorkspaceSpecs
         var projectId = await CreateProjectAsync();
         var agentId = await CreateAgentAsync(projectId);
 
-        var launch = await LaunchWebSessionAsync(projectId, agentId, "first web task");
+        var key = $"key-{Guid.NewGuid():N}";
+        var launch = await LaunchWebSessionAsync(projectId, agentId, "first web task", key);
         var sessionId = launch.GetProperty("sessionId").GetString()!;
 
-        Assert.Equal($"web-{sessionId}", await SessionWorkspaceNameAsync(sessionId));
-        var ws = await FindWorkspaceAsync(projectId, $"web-{sessionId}");
+        var workspaceName = WorkspaceNameFor(key);
+        Assert.Equal(workspaceName, await SessionWorkspaceNameAsync(sessionId));
+        var ws = await FindWorkspaceAsync(projectId, workspaceName);
         Assert.NotNull(ws);
         Assert.Equal(WorkspaceStatus.Active, ws!.Status);
-        Assert.Equal(new WorkspaceOrigin.Web(sessionId), ws.Origin);
-        Assert.Empty(ws.RepositoryNames);
+        Assert.Equal(new WorkspaceOrigin.Manual(), ws.Origin);
+        Assert.Equal(new[] { WebRepositoryName }, ws.RepositoryNames);
 
-        var created = await SingleWorkspaceEventAsync(projectId, ws.Name);
+        var created = await SingleWorkspaceEventAsync(projectId, workspaceName);
         Assert.Equal(EventCatalog.ReverseDns.WorkspaceCreated, created.Type);
-        Assert.Equal("web", Lineage(created, EventCatalog.Lineage.WorkspaceOriginKind));
+        Assert.Equal("manual", Lineage(created, EventCatalog.Lineage.WorkspaceOriginKind));
     }
 
     [Fact]
@@ -48,7 +53,8 @@ public sealed class WebConversationWorkspaceSpecs
         var projectId = await CreateProjectAsync();
         var agentId = await CreateAgentAsync(projectId);
 
-        var launch = await LaunchWebSessionAsync(projectId, agentId, "first web task");
+        var key = $"key-{Guid.NewGuid():N}";
+        var launch = await LaunchWebSessionAsync(projectId, agentId, "first web task", key);
         var sessionId = launch.GetProperty("sessionId").GetString()!;
         var workspaceName = await SessionWorkspaceNameAsync(sessionId);
 
@@ -62,22 +68,33 @@ public sealed class WebConversationWorkspaceSpecs
     }
 
     [Fact]
-    public async Task WebConversation_NewConversation_GetsNewWorkspace()
+    public async Task WebConversation_NewConversation_ReusesSelectedWorkspace()
     {
         var projectId = await CreateProjectAsync();
         var agentId = await CreateAgentAsync(projectId);
+        var workspaceName = WorkspaceNameFor($"key-{Guid.NewGuid():N}");
 
-        var first = await LaunchWebSessionAsync(projectId, agentId, "conversation one");
-        var second = await LaunchWebSessionAsync(projectId, agentId, "conversation two");
+        var first = await LaunchWebSessionAsync(
+            projectId,
+            agentId,
+            "conversation one",
+            $"key-{Guid.NewGuid():N}",
+            workspaceName);
+        var second = await LaunchWebSessionAsync(
+            projectId,
+            agentId,
+            "conversation two",
+            $"key-{Guid.NewGuid():N}",
+            workspaceName);
         var firstSessionId = first.GetProperty("sessionId").GetString()!;
         var secondSessionId = second.GetProperty("sessionId").GetString()!;
 
         Assert.NotEqual(firstSessionId, secondSessionId);
         var firstWorkspace = await SessionWorkspaceNameAsync(firstSessionId);
         var secondWorkspace = await SessionWorkspaceNameAsync(secondSessionId);
-        Assert.NotEqual(firstWorkspace, secondWorkspace);
+        Assert.Equal(workspaceName, firstWorkspace);
+        Assert.Equal(firstWorkspace, secondWorkspace);
         Assert.Equal(WorkspaceStatus.Active, (await FindWorkspaceAsync(projectId, firstWorkspace!))!.Status);
-        Assert.Equal(WorkspaceStatus.Active, (await FindWorkspaceAsync(projectId, secondWorkspace!))!.Status);
     }
 
     [Fact]
@@ -129,16 +146,38 @@ public sealed class WebConversationWorkspaceSpecs
         return body.GetProperty("data").GetProperty("id").GetString()!;
     }
 
-    private async Task<JsonElement> LaunchWebSessionAsync(string projectId, string agentId, string prompt, string? key = null)
+    private async Task<JsonElement> LaunchWebSessionAsync(
+        string projectId,
+        string agentId,
+        string prompt,
+        string? key = null,
+        string? selectedWorkspaceName = null)
     {
+        var launchKey = key ?? $"key-{Guid.NewGuid():N}";
+        var workspaceName = selectedWorkspaceName ?? WorkspaceNameFor(launchKey);
+        if (await FindWorkspaceAsync(projectId, workspaceName) is null)
+        {
+            await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/workspaces", new
+            {
+                name = workspaceName,
+                repos = new[] { WebRepositoryName },
+            });
+        }
+
         using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions");
-        request.Headers.TryAddWithoutValidation("Idempotency-Key", key ?? $"key-{Guid.NewGuid():N}");
-        request.Content = JsonContent.Create(new { prompt });
+        request.Headers.TryAddWithoutValidation("Idempotency-Key", launchKey);
+        request.Content = JsonContent.Create(new
+        {
+            prompt,
+            context = new { workspace = workspaceName, repository = WebRepositoryName },
+        });
         using var response = await _fixture.Client.SendAsync(request);
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         return doc.RootElement.GetProperty("data").Clone();
     }
+
+    private static string WorkspaceNameFor(string key) => $"web-conversation-{key}";
 
     private async Task<WorkspaceState?> FindWorkspaceAsync(string projectId, string name)
     {

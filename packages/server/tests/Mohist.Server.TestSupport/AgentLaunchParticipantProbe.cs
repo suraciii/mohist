@@ -34,6 +34,10 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
         new();
     private readonly ConcurrentDictionary<LaunchParticipantGate, ConcurrentQueue<string>> _participantIds =
         new();
+    private int _cancelAfterPlanPersist;
+
+    public void CancelAfterPlanPersistOnce() =>
+        Interlocked.Exchange(ref _cancelAfterPlanPersist, 1);
 
     public void FailNext(LaunchParticipantGate gate, int times = 1)
     {
@@ -61,6 +65,17 @@ public sealed class AgentLaunchParticipantProbe : IAgentLaunchParticipantProbe
 
     public IReadOnlyList<string> ParticipantIds(LaunchParticipantGate gate) =>
         _participantIds.TryGetValue(gate, out var participantIds) ? participantIds.ToArray() : [];
+
+    public Task OnPlanPersistedAsync(string idempotencyKey, string inputId)
+    {
+        if (Interlocked.Exchange(ref _cancelAfterPlanPersist, 0) == 1)
+        {
+            throw new OperationCanceledException(
+                $"Simulated response loss after plan persistence for idempotency key '{idempotencyKey}'.");
+        }
+
+        return Task.CompletedTask;
+    }
 
     public Task OnPrepareJobAsync(string jobKey, string commandId) =>
         RecordAndMaybeThrow(LaunchParticipantGate.PrepareJob, jobKey, commandId);

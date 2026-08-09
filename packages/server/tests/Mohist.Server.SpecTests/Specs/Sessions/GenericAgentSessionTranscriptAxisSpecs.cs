@@ -39,7 +39,11 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis launch" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+            {
+                prompt = "transcript-axis launch",
+                context = LaunchContext,
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -75,7 +79,11 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis events" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+            {
+                prompt = "transcript-axis events",
+                context = LaunchContext,
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -212,7 +220,11 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "transcript-axis first turn" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+            {
+                prompt = "transcript-axis first turn",
+                context = LaunchContext,
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -458,7 +470,11 @@ public class GenericAgentSessionTranscriptAxisSpecs : GenericAgentSessionTranscr
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = "session-id only" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new
+            {
+                prompt = "session-id only",
+                context = LaunchContext,
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;

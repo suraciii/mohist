@@ -35,11 +35,16 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var projectId = await CreateProjectAsync("launch-runtime-from-config");
         var runnerId = $"launch-runtime-from-config-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "config-runtime-agent", runtime: "pi");
+        await CreateWorkspaceAsync(projectId, "launch-runtime-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "execute on pi via config" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "execute on pi via config",
+                context = new { workspace = "launch-runtime-workspace" },
+            });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -52,7 +57,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.Equal("pi", sessionInfo!.Runtime);
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var polledDispatch = snapshot.Dispatch;
             Assert.Equal("pi", ReadRuntimeFromDispatch(polledDispatch));
         }
         finally
@@ -67,11 +72,16 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var projectId = await CreateProjectAsync("launch-runtime-default");
         var runnerId = $"launch-runtime-default-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "default-runtime-agent");
+        await CreateWorkspaceAsync(projectId, "launch-runtime-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "default runtime" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "default runtime",
+                context = new { workspace = "launch-runtime-workspace" },
+            });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -84,7 +94,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             Assert.Equal("opencode", sessionInfo!.Runtime);
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var polledDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var polledDispatch = snapshot.Dispatch;
             Assert.Equal("opencode", ReadRuntimeFromDispatch(polledDispatch));
         }
         finally
@@ -99,6 +109,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var projectId = await CreateProjectAsync("launch-issue-runtime-override");
         var agent = await CreateAgentAsync(projectId, "issue-runtime-override-agent", runtime: "opencode");
         var issueNumber = await CreateIssueAsync(projectId, "Issue runtime override");
+        await CreateWorkspaceAsync(projectId, "launch-runtime-workspace");
 
         using var patch = await _fixture.Client.PatchAsJsonAsync(
             $"/api/projects/{projectId}/issues/{issueNumber}/variables",
@@ -108,7 +119,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
             {
                  prompt = "use the agent backend",
-                context = new { issueNumber },
+                context = new { issueNumber, workspace = "launch-runtime-workspace" },
             });
 
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
@@ -127,6 +138,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var projectId = await CreateProjectAsync("launch-project-runtime-not-issue-override");
         var agent = await CreateAgentAsync(projectId, "project-runtime-agent", runtime: "opencode");
         var issueNumber = await CreateIssueAsync(projectId, "No issue runtime override");
+        await CreateWorkspaceAsync(projectId, "launch-runtime-workspace");
 
         using var projectPatch = await _fixture.Client.PatchAsJsonAsync(
             $"/api/projects/{projectId}/variables",
@@ -136,7 +148,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
             {
                 prompt = "keep the agent backend",
-                context = new { issueNumber },
+                context = new { issueNumber, workspace = "launch-runtime-workspace" },
             });
 
         Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
@@ -233,11 +245,16 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         var projectId = await CreateProjectAsync("launch-snapshot-fixed");
         var runnerId = $"launch-snapshot-fixed-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "snapshot-agent", runtime: "pi");
+        await CreateWorkspaceAsync(projectId, "launch-runtime-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "snapshot" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "snapshot",
+                context = new { workspace = "launch-runtime-workspace" },
+            });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -245,7 +262,7 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
             var jobId = payload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var snapshot = await PollDispatchForSessionAsync(jobId, runnerId, sessionId);
-            var firstDispatch = await PollDispatchEnvelopeAsync(runnerId, snapshot.WorkId!);
+            var firstDispatch = snapshot.Dispatch;
             Assert.Equal("pi", ReadRuntimeFromDispatch(firstDispatch));
 
             await PatchAgentRuntimeAsync(projectId, agent.Id, "opencode");
@@ -257,23 +274,6 @@ public class AgentSessionLaunchRuntimeResolutionSpecs : AgentSessionLaunchRoutes
         {
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
-    }
-
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
     }
 
     private static string ReadRuntimeFromDispatch(JsonElement dispatch)

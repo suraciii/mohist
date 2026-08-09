@@ -73,9 +73,14 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var otherProjectId = await CreateProjectAsync("launch-other-epic");
         var agent = await CreateAgentAsync(projectId, "cross-project-agent");
         var otherEpicNumber = await CreateEpicAsync(otherProjectId, "Other project epic");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "cross project context", context = new { epicNumber = otherEpicNumber } });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+        {
+            prompt = "cross project context",
+            context = new { epicNumber = otherEpicNumber, workspace = "launch-validation-workspace" },
+        });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         Assert.Equal(sessionCountBefore, await CountAgentLaunchSessionsAsync(projectId));
@@ -89,10 +94,15 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     {
         var projectId = await CreateProjectAsync("launch-bad-prompt");
         var agent = await CreateAgentAsync(projectId, "bad-prompt-agent");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
 
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+        {
+            prompt,
+            context = new { workspace = "launch-validation-workspace" },
+        });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -138,13 +148,14 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     public async Task Launch_UnknownAgent_Returns404_WithoutCreatingSessionOrJob()
     {
         var projectId = await CreateProjectAsync("launch-unknown");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
 
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
 
         using var response = await _fixture.Client.LaunchAgentSessionAsync(
             projectId,
             $"agent_{Guid.NewGuid():N}",
-            new { prompt = "find me" });
+            new { prompt = "find me", context = new { workspace = "launch-validation-workspace" } });
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -161,10 +172,15 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var agent = await CreateAgentAsync(projectId, "archived-launch-agent");
         using var archive = await _fixture.Client.DeleteAsync($"/api/projects/{projectId}/agents/{agent.Id}");
         archive.EnsureSuccessStatusCode();
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         var sessionCountBefore = await CountAgentLaunchSessionsAsync(projectId);
         var jobCountBefore = await CountAgentJobsAsync(projectId);
 
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "should not launch" });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+        {
+            prompt = "should not launch",
+            context = new { workspace = "launch-validation-workspace" },
+        });
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -181,6 +197,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var projectId = await CreateProjectAsync("launch-name");
         var runnerId = $"launch-name-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "name-fallback");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
@@ -188,7 +205,11 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             using var response = await _fixture.Client.LaunchAgentSessionAsync(
                 projectId,
                 "name-fallback",
-                new { prompt = "by name please" });
+                new
+                {
+                    prompt = "by name please",
+                    context = new { workspace = "launch-validation-workspace" },
+                });
 
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -206,6 +227,7 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
     public async Task Launch_IsDistinctFromValidationOnlyAgentJobsRoute()
     {
         var projectId = await CreateProjectAsync("launch-distinct");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
 
         // The validation-only endpoint has no project/agent scoping,
         // no AgentSession minting, and no source-kind=agent-launch label.
@@ -222,7 +244,11 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         using var launch = await _fixture.Client.LaunchAgentSessionAsync(
             projectId,
             "agent_unknown",
-            new { prompt = "distinctness check" });
+            new
+            {
+                prompt = "distinctness check",
+                context = new { workspace = "launch-validation-workspace" },
+            });
         Assert.Equal(HttpStatusCode.NotFound, launch.StatusCode);
 
         Assert.NotEqual(AgentJobController.ValidatePath,
@@ -235,11 +261,16 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var projectId = await CreateProjectAsync("launch-dispatch-contract");
         var runnerId = $"launch-dispatch-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "dispatch-contract-agent");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "dispatch contract guard" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "dispatch contract guard",
+                context = new { workspace = "launch-validation-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var mintedSessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -262,7 +293,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -273,11 +303,16 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var projectId = await CreateProjectAsync("launch-completed-terminal");
         var runnerId = $"launch-completed-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "completed-terminal-agent");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "complete the generic session" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "complete the generic session",
+                context = new { workspace = "launch-validation-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -335,11 +370,16 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         var projectId = await CreateProjectAsync("launch-timeout");
         var runnerId = $"launch-timeout-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "timeout-agent");
+        await CreateWorkspaceAsync(projectId, "launch-validation-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
 
         try
         {
-            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "this will never finish" });
+            using var response = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "this will never finish",
+                context = new { workspace = "launch-validation-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, response.StatusCode);
             var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = payload.GetProperty("data").GetProperty("sessionId").GetString()!;
@@ -355,7 +395,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             await WaitForJobTerminalAsync(
                 jobGrain!,
                 AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
                 async () =>
                 {
                     _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));

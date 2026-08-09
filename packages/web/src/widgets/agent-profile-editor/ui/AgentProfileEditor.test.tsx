@@ -148,6 +148,28 @@ describe('AgentProfileEditor', () => {
       expect(callArgs.instructions).toBe('Be helpful')
     })
 
+    it('submits purpose, avatar, allowed subagents, and concurrency intent through the existing Agent contract', async () => {
+      renderEditor()
+      fireEvent.change(screen.getByTestId('editor-name'), { target: { value: 'Task Agent' } })
+      fireEvent.change(screen.getByTestId('editor-description'), { target: { value: 'Reviews pull requests' } })
+      fireEvent.change(screen.getByTestId('editor-avatar'), { target: { value: 'review' } })
+      fireEvent.change(screen.getByTestId('editor-instructions'), { target: { value: 'Review changes carefully' } })
+      fireEvent.change(screen.getByTestId('editor-subagents'), { target: { value: 'agent-helper, agent-test' } })
+      fireEvent.change(screen.getByTestId('editor-concurrency'), { target: { value: '2' } })
+      fireEvent.click(screen.getByTestId('editor-save'))
+
+      expect(mocks.createMutation.mutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Task Agent',
+          description: 'Reviews pull requests',
+          avatar: 'review',
+          allowedSubagentAgentIds: ['agent-helper', 'agent-test'],
+          maxConcurrentRuns: 2,
+        }),
+        expect.any(Object),
+      )
+    })
+
     it('renders model variant chips and persists model plus variant on create', async () => {
       renderEditor()
       fillRequiredFields()

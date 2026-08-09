@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { PlusIcon } from 'lucide-react'
 import { useWorkspaces, workspaceOriginLabel, type Workspace, type WorkspaceStatus } from '../../../entities/workspace'
 import { useProjectPath } from '../../../entities/project'
+import { CreateWorkspaceDialog } from '../../../features/create-workspace'
 import { Badge } from '@/shared/ui/components/badge'
 import { Card } from '@/shared/ui/components/card'
 import { Button } from '@/shared/ui/components/button'
@@ -128,30 +130,45 @@ function WorkspaceSection({
 }
 
 export function WorkspacesPage() {
-  const { data: workspaces, isLoading } = useWorkspaces()
+  const { data: workspaces, isLoading, isError, refetch } = useWorkspaces()
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
 
   const active = workspaces?.filter(w => w.status === 'active') ?? []
   const archived = workspaces?.filter(w => w.status === 'archived') ?? []
 
   return (
     <div className="max-w-4xl mx-auto p-6">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-foreground">Workspaces</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Persistent execution environments in this project: who is bound to them, where they are materialized, and whether they can still be entered.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Workspaces</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Persistent execution environments in this project: who is bound to them, where they are materialized, and whether they can still be entered.
+          </p>
+        </div>
+        <Button type="button" onClick={() => setCreateWorkspaceOpen(true)} data-testid="create-workspace-button">
+          <PlusIcon className="mr-2 h-4 w-4" aria-hidden="true" />
+          Create Workspace
+        </Button>
       </div>
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
           <div className="text-muted-foreground">Loading...</div>
         </div>
+      ) : isError ? (
+        <div className="space-y-3 py-12 text-center" role="alert" data-testid="workspaces-error">
+          <div className="text-sm text-destructive">Workspaces could not be loaded.</div>
+          <Button type="button" variant="outline" size="sm" onClick={() => refetch()} data-testid="workspaces-retry">
+            Retry
+          </Button>
+        </div>
       ) : workspaces && workspaces.length === 0 ? (
         <div className="text-center py-12">
           <div className="text-muted-foreground text-lg mb-4">No workspaces yet</div>
-          <div className="text-sm text-muted-foreground">
-            Workspaces are created when an issue workflow starts or when a session is launched into one.
-          </div>
+          <Button type="button" className="mt-4" onClick={() => setCreateWorkspaceOpen(true)} data-testid="empty-create-workspace-button">
+            <PlusIcon className="mr-2 h-4 w-4" aria-hidden="true" />
+            Create Workspace
+          </Button>
         </div>
       ) : (
         <div className="space-y-8">
@@ -173,6 +190,8 @@ export function WorkspacesPage() {
           )}
         </div>
       )}
+
+      {createWorkspaceOpen && <CreateWorkspaceDialog open onClose={() => setCreateWorkspaceOpen(false)} />}
     </div>
   )
 }

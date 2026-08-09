@@ -303,7 +303,8 @@ public class MohistWebApplicationFactory : WebApplicationFactory<Program>
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(_timeProvider);
             services.RemoveAll<IAgentJobDispatchObserver>();
-            services.AddSingleton<AgentJobDispatchProbe>();
+            services.AddSingleton<AgentJobDispatchProbe>(_ =>
+                new AgentJobDispatchProbe(_timeProvider, _timeProvider.Advance));
             services.AddSingleton<IAgentJobDispatchObserver>(provider => provider.GetRequiredService<AgentJobDispatchProbe>());
             services.RemoveAll<IAgentLaunchParticipantProbe>();
             services.AddSingleton<AgentLaunchParticipantProbe>();

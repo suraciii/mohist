@@ -24,17 +24,18 @@ public class AgentJobWriteThroughMirrorSpecs : AgentJobGrainTestSupport
         var job = JobGrain(jobKey);
 
         _fixture.DispatchObserver.BlockAssignmentPrepared();
-        var submitTask = Task.Run(() => job.SubmitAsync(new AgentJobInput(
+        var submitTask = job.SubmitAsync(new AgentJobInput(
             Prompt: "mirror test",
             WorkspacePath: "/tmp/mirror-submit",
             ProjectId: projectId,
-            AgentId: "agent-mirror")));
+            AgentId: "agent-mirror"));
 
         try
         {
             await _fixture.DispatchObserver.AssignmentPrepared;
             await using var db = GrainTestConfig.CreateDbContext(_fixture.ConnectionString);
             var row = await db.AgentJobs.SingleOrDefaultAsync(r => r.JobKey == jobKey);
+            Assert.NotNull(row);
             Assert.False(submitTask.IsCompleted);
             Assert.Equal(projectId, row!.ProjectId);
             Assert.Equal("agent-mirror", row.AgentId);

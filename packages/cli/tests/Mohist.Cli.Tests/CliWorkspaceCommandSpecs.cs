@@ -344,12 +344,13 @@ public class CliWorkspaceCommandSpecs
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
+        Assert.Equal("/api/projects/proj_test/agents/test-agent/sessions/cli", request.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(request.Body!)!;
         var ctx = body["context"];
         Assert.NotNull(ctx);
         Assert.Equal("pay", ctx!["workspace"]?.GetValue<string>());
         Assert.False(ctx.AsObject().ContainsKey("workspacePath"));
-        Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
+        Assert.False(request.Headers.ContainsKey("X-Mohist-Launch-Origin"));
     }
 
     [Fact]
@@ -385,9 +386,10 @@ public class CliWorkspaceCommandSpecs
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
+        Assert.Equal("/api/projects/proj_test/agents/test-agent/sessions/cli", request.RequestUri?.PathAndQuery);
         var body = JsonNode.Parse(request.Body!)!;
         Assert.False(body.AsObject().ContainsKey("context"));
-        Assert.Equal("cli", request.Headers["X-Mohist-Launch-Origin"].Single());
+        Assert.False(request.Headers.ContainsKey("X-Mohist-Launch-Origin"));
         Assert.Contains("cli-current", output.ToString(), StringComparison.Ordinal);
     }
 

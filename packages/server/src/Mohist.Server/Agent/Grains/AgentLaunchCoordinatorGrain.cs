@@ -2,6 +2,7 @@ using System.Text.Json;
 using Mohist.Server.Contracts;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Agent.Services;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -28,6 +29,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
     private readonly IGrainFactory _grains;
     private readonly TimeProvider _timeProvider;
     private readonly IAgentLaunchParticipantProbe _participantProbe;
+    private readonly AttachmentService _attachments;
     private readonly ILogger<AgentLaunchCoordinatorGrain> _log;
 
     public AgentLaunchCoordinatorGrain(
@@ -35,12 +37,14 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
         IGrainFactory grains,
         TimeProvider timeProvider,
         IAgentLaunchParticipantProbe participantProbe,
+        AttachmentService attachments,
         ILogger<AgentLaunchCoordinatorGrain> log)
     {
         _state = state;
         _grains = grains;
         _timeProvider = timeProvider;
         _participantProbe = participantProbe;
+        _attachments = attachments;
         _log = log;
     }
 
@@ -104,6 +108,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
             if (!existing.Completed)
             {
+                await EnsureAttachmentReservationAdoptedAsync(existing);
                 await EnsureRecoveryReminderAsync();
                 await AdvanceAsync();
             }
@@ -157,10 +162,15 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
-                TargetId: command.TargetId ?? command.Request.TargetId);
+                TargetId: command.TargetId ?? command.Request.TargetId,
+                AttachmentResults: command.AttachmentResults,
+                AttachmentReservationId: command.AttachmentReservationId);
+            await PrepareAttachmentReservationAsync(plan);
             _state.State.Plan = plan;
             await SaveStateAsync();
+            await EnsureAttachmentReservationAdoptedAsync(plan);
             await EnsureRecoveryReminderAsync();
+            await _participantProbe.OnPlanPersistedAsync(plan.IdempotencyKey, plan.InputId);
             await AdvanceAsync();
         }
 
@@ -178,7 +188,10 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: existing?.Completed == true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName,
+            AttachmentResults: final.AttachmentResults,
+            AttachmentReservationId: final.AttachmentReservationId);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeAsync(AgentLaunchCoordinatorRequest request)
@@ -195,6 +208,7 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
 
         if (!existing.Completed)
         {
+            await EnsureAttachmentReservationAdoptedAsync(existing);
             await EnsureRecoveryReminderAsync();
             await AdvanceAsync();
         }
@@ -213,7 +227,10 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentId: final.AgentId,
             AgentName: final.AgentName,
             AlreadyPersisted: true,
-            ParentLinkEdgeId: final.ParentLinkEdgeId);
+            ParentLinkEdgeId: final.ParentLinkEdgeId,
+            WorkspaceName: final.WorkspaceName,
+            AttachmentResults: final.AttachmentResults,
+            AttachmentReservationId: final.AttachmentReservationId);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeExistingSpawnAsync(string spawnRequestFingerprint)
@@ -810,6 +827,16 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             await SaveStateAsync();
         }
 
+        if (!string.IsNullOrWhiteSpace(current.AttachmentReservationId))
+        {
+            await _attachments.ReleaseAdoptedAgentInputReservationAsync(
+                current.ProjectId,
+                current.AttachmentReservationId!,
+                current.SessionId,
+                current.InputId,
+                CancellationToken.None);
+        }
+
         _state.State.Plan = current with
         {
             Pending = null,
@@ -864,6 +891,32 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
     private async Task SaveStateAsync()
     {
         await _state.WriteStateAsync();
+    }
+
+    private async Task EnsureAttachmentReservationAdoptedAsync(AgentLaunchCoordinatorPlan plan)
+    {
+        if (string.IsNullOrWhiteSpace(plan.AttachmentReservationId))
+            return;
+
+        await _attachments.AdoptAgentInputReservationAsync(
+            plan.ProjectId,
+            plan.AttachmentReservationId!,
+            plan.SessionId,
+            plan.InputId,
+            CancellationToken.None);
+    }
+
+    private async Task PrepareAttachmentReservationAsync(AgentLaunchCoordinatorPlan plan)
+    {
+        if (string.IsNullOrWhiteSpace(plan.AttachmentReservationId))
+            return;
+
+        await _attachments.MarkAgentInputReservationCoordinatorPendingAsync(
+            plan.ProjectId,
+            plan.AttachmentReservationId!,
+            plan.SessionId,
+            plan.InputId,
+            CancellationToken.None);
     }
 
     private async Task EnsureRecoveryReminderAsync()
@@ -992,4 +1045,16 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(34)] string? WorkspaceName = null,
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
-    [property: Id(37)] string? TargetId = null);
+    [property: Id(37)] string? TargetId = null,
+    /// <summary>
+    /// Immutable accepted/rejected attachment response captured by the
+    /// launch route. It is persisted on the coordinator plan for exact
+    /// idempotent replay. Append-only Orleans field id (next free after
+    /// <see cref="TargetId"/>).
+    /// </summary>
+    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    /// <summary>
+    /// Pending attachment reservation carried into the durable coordinator
+    /// plan. Append-only Orleans field id.
+    /// </summary>
+    [property: Id(39)] string? AttachmentReservationId = null);

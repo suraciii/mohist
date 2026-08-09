@@ -1,5 +1,5 @@
 import { request, projectApiPath } from '../../../shared/api/client'
-import type { Workspace } from '../model/types'
+import type { CreateWorkspaceInput, Workspace } from '../model/types'
 
 export function getWorkspaces(params?: { projectId?: string; status?: string; origin?: string }) {
   const query = new URLSearchParams()
@@ -11,6 +11,13 @@ export function getWorkspaces(params?: { projectId?: string; status?: string; or
 
 export function getWorkspace(name: string, params?: { projectId?: string }) {
   return request<Workspace>(projectApiPath(params?.projectId, `/workspaces/${encodeURIComponent(name)}`))
+}
+
+export function createWorkspace(projectId: string, input: CreateWorkspaceInput) {
+  return request<Workspace>(projectApiPath(projectId, '/workspaces'), {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 }
 
 export function closeWorkspace(name: string, projectId?: string | null) {

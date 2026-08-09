@@ -22,6 +22,9 @@ namespace Mohist.Server.SpecTests.Specs.Sessions;
 
 public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
 {
+    protected const string LaunchWorkspaceName = "generic-followup-workspace";
+    protected const string LaunchRepositoryName = "main";
+
     protected readonly MohistIntegrationFixture _fixture;
     protected readonly HttpClient _client;
     protected readonly string _runnerId = $"generic-followup-{Guid.NewGuid():N}";
@@ -86,7 +89,14 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
         });
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = 2 });
 
-        using var response = await _fixture.Client.LaunchAgentSessionAsync(project.Id, agent.Id, new { prompt = $"hello from {name}" });
+        using var response = await _fixture.Client.LaunchAgentSessionAsync(
+            project.Id,
+            agent.Id,
+            new
+            {
+                prompt = $"hello from {name}",
+                context = new { workspace = LaunchWorkspaceName, repository = LaunchRepositoryName },
+            });
 
         response.EnsureSuccessStatusCode();
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -240,6 +250,11 @@ public abstract class GenericAgentSessionFollowupApiTestSupport : IAsyncLifetime
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
             setDefault = true,
+        });
+        await _client.PostOkAsync($"/api/projects/{project.Id}/workspaces", new
+        {
+            name = LaunchWorkspaceName,
+            repos = new[] { LaunchRepositoryName },
         });
         return new ProjectRef(project.Id);
     }

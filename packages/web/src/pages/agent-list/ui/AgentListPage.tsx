@@ -1,7 +1,7 @@
 import { useMemo, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { PlusIcon, BotIcon, ArchiveIcon, CircleIcon } from 'lucide-react'
-import { getAgentAvailabilityFeedback, useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
+import { PlusIcon, ArchiveIcon, CircleIcon, BotIcon } from 'lucide-react'
+import { AgentAvatar, getAgentAvailabilityFeedback, useAgentListAvailability, useAgents, readAgentModelAndVariant } from '../../../entities/agent'
 import type { AgentAvailabilitySummaryEntry, AgentInfo } from '../../../entities/agent'
 import { useProjectPath } from '../../../entities/project'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
@@ -15,14 +15,6 @@ export interface AgentListPageComponents {
 
 const defaultComponents: AgentListPageComponents = {
   AgentProfileEditor: DefaultAgentProfileEditor,
-}
-
-function getAgentType(agent: AgentInfo): string {
-  const config = agent.agentConfig
-  if (config && typeof config === 'object' && 'type' in config) {
-    return String(config.type)
-  }
-  return 'opencode'
 }
 
 function getLifecycleStatus(agent: AgentInfo): { label: string; dotClass: string } {
@@ -43,11 +35,12 @@ function AgentRow({
 }) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { model, variant } = useMemo(() => readAgentModelAndVariant(agent), [agent])
-  const agentType = useMemo(() => getAgentType(agent), [agent])
+  const { model, variant, runtime } = useMemo(() => readAgentModelAndVariant(agent), [agent])
+  const runtimeLabel = runtime === 'opencode' ? 'OpenCode' : 'Pi'
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
   const readiness = agent.readiness?.conclusion ?? 'Unknown'
+  const isNotExecutable = isArchived || readiness === 'Needs setup'
   const availabilityFeedback = !isArchived && availability && !availability.canStartNow
     ? getAgentAvailabilityFeedback(availability.waitingReason)
     : null
@@ -66,10 +59,14 @@ function AgentRow({
         isArchived ? 'opacity-60' : ''
       }`}
     >
-      <div className="flex items-center gap-4">
-        <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
-          <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
-        </div>
+        <div className="flex items-center gap-4">
+          <AgentAvatar
+            agentName={agent.name}
+            avatar={agent.avatar}
+            className="size-10 shrink-0 rounded-lg bg-muted"
+            iconClassName={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`}
+            testId={`agent-avatar-${agent.id}`}
+          />
 
         <div className="flex min-w-0 flex-1 items-center gap-4">
           <div className="min-w-0 flex-1">
@@ -83,7 +80,7 @@ function AgentRow({
               )}
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-xs text-muted-foreground">{agentType}</span>
+              <span data-testid={`agent-runtime-${agent.id}`} className="text-xs text-muted-foreground">{runtimeLabel}</span>
               {model && (
                 <>
                   <span className="text-xs text-muted-foreground/50">·</span>
@@ -116,6 +113,13 @@ function AgentRow({
           className={readiness === 'Ready' ? 'text-emerald-700' : readiness === 'Needs setup' ? 'text-amber-700' : 'text-muted-foreground'}
         >
           Readiness: {readiness}
+        </span>
+        <span
+          data-testid={`agent-executability-${agent.id}`}
+          data-state={isNotExecutable ? 'not-executable' : readiness === 'Ready' ? 'executable' : 'unknown'}
+          className={isNotExecutable ? 'font-medium text-red-700' : readiness === 'Ready' ? 'text-emerald-700' : 'text-muted-foreground'}
+        >
+          {isNotExecutable ? 'Not executable' : readiness === 'Ready' ? 'Executable' : 'Executable: Unknown'}
         </span>
         <div>
           <span

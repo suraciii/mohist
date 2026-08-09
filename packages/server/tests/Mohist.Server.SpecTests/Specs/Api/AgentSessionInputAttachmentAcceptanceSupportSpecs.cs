@@ -1,6 +1,7 @@
 using Mohist.Server.SpecTests.Support;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
@@ -17,6 +18,9 @@ namespace Mohist.Server.SpecTests.Specs.Api;
 
 public partial class AgentSessionInputAttachmentAcceptanceSpecs
 {
+    private const string LaunchWorkspaceName = "attachment-launch-workspace";
+    private const string LaunchRepositoryName = "main";
+
     private async Task<string> CreateProjectAsync(string prefix)
     {
         var name = $"{prefix}-{Guid.NewGuid():N}".ToLowerInvariant();
@@ -29,6 +33,11 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
             gitUrl = $"file://{Guid.NewGuid():N}",
             baseBranch = "main",
             setDefault = true,
+        });
+        await _fixture.Client.PostOkAsync($"/api/projects/{projectId}/workspaces", new
+        {
+            name = LaunchWorkspaceName,
+            repos = new[] { LaunchRepositoryName },
         });
         return projectId;
     }
@@ -76,9 +85,16 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
         object body,
         string? idempotencyKey = null)
     {
+        var requestBody = JsonSerializer.SerializeToNode(body)?.AsObject()
+            ?? throw new InvalidOperationException("Launch body must serialize as an object");
+        var context = requestBody["context"] as JsonObject ?? new JsonObject();
+        context["workspace"] = LaunchWorkspaceName;
+        context["repository"] = LaunchRepositoryName;
+        requestBody["context"] = context;
+
         var request = new HttpRequestMessage(HttpMethod.Post, $"/api/projects/{projectId}/agents/{agentId}/sessions")
         {
-            Content = JsonContent.Create(body),
+            Content = JsonContent.Create(requestBody),
         };
         request.Headers.Add("Idempotency-Key", idempotencyKey ?? Guid.NewGuid().ToString("N"));
         return _fixture.Client.SendAsync(request);
@@ -156,9 +172,10 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
                 : null;
             if (match is null && polledSessionId == expectedSessionId)
             {
-                match = new PollSnapshot(
+                    match = new PollSnapshot(
                     WorkflowRunId: data.GetProperty("workflowRunId").GetString() ?? string.Empty,
-                    WorkId: data.GetProperty("workId").GetString() ?? string.Empty);
+                    WorkId: data.GetProperty("workId").GetString() ?? string.Empty,
+                    Dispatch: data.Clone());
             }
             else
             {
@@ -202,26 +219,9 @@ public partial class AgentSessionInputAttachmentAcceptanceSpecs
                 ExitCode: 0));
     }
 
-    private async Task<JsonElement> PollDispatchEnvelopeAsync(string runnerId, string workId)
-    {
-        for (var i = 0; i < 50; i++)
-        {
-            using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", content: null);
-            var dispatches = await poll.ReadDispatchElementsAsync();
-            foreach (var data in dispatches)
-            {
-                if (string.Equals(data.GetProperty("workId").GetString(), workId, StringComparison.Ordinal))
-                    return data;
-                await DrainDispatchElementAsync(runnerId, data);
-            }
-        }
-
-        throw new InvalidOperationException($"No polled dispatch for workId '{workId}'");
-    }
-
     private sealed record AgentRef(string Id, string Name);
 
     private sealed record UploadResult(string Id, string FileName);
 
-    private sealed record PollSnapshot(string WorkflowRunId, string WorkId);
+    private sealed record PollSnapshot(string WorkflowRunId, string WorkId, JsonElement Dispatch);
 }

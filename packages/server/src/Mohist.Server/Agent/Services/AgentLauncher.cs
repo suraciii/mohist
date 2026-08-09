@@ -160,7 +160,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        string? attachmentReservationId = null) =>
         LaunchIdempotentCoreAsync(
             agent,
             prompt,
@@ -172,6 +174,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             preMintedInputId,
             preMintedTurnId,
             ct: ct,
+            attachmentResults: attachmentResults,
+            attachmentReservationId: attachmentReservationId,
             definitionOverride: null,
             skipLaunchability: false);
 
@@ -186,6 +190,8 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        string? attachmentReservationId = null,
         string? parentSessionId = null,
         string? parentAgentId = null,
         string? parentExpectedWorkDir = null,
@@ -314,7 +320,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             ParentExpectedBindingEpoch: parentExpectedBindingEpoch,
             ParentLinkEdgeId: parentLinkEdgeId,
             SpawnRequestFingerprint: spawnRequestFingerprint,
-            WorkspaceRepositories: request.WorkspaceRepositories));
+            WorkspaceRepositories: request.WorkspaceRepositories,
+            AttachmentResults: attachmentResults?.ToArray(),
+            AttachmentReservationId: attachmentReservationId));
 
         return new AgentLaunchResult(
             SessionId: outcome.SessionId,
@@ -323,7 +331,9 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             TurnId: outcome.TurnId,
             AgentId: outcome.AgentId,
             AgentName: outcome.AgentName,
-            ParentLinkEdgeId: outcome.ParentLinkEdgeId);
+            ParentLinkEdgeId: outcome.ParentLinkEdgeId,
+            AttachmentResults: outcome.AttachmentResults,
+            AttachmentReservationId: outcome.AttachmentReservationId);
     }
 
     public async Task<AgentLaunchResult> LaunchSubagentAsync(
@@ -468,7 +478,14 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
             Attachments: attachments,
             StartupContext: startupContext));
 
-        return new AgentLaunchResult(outcome.SessionId, outcome.JobKey, outcome.InputId, outcome.TurnId, outcome.AgentId, outcome.AgentName);
+        return new AgentLaunchResult(
+            outcome.SessionId,
+            outcome.JobKey,
+            outcome.InputId,
+            outcome.TurnId,
+            outcome.AgentId,
+            outcome.AgentName,
+            WorkspaceName: outcome.WorkspaceName);
     }
 
     public async Task<AgentLaunchResult?> ResumeIdempotentAsync(
@@ -492,7 +509,10 @@ public sealed class AgentLauncher : IAgentLauncher, IScopedService
                 InputId: outcome.InputId,
                 TurnId: outcome.TurnId,
                 AgentId: outcome.AgentId,
-                AgentName: outcome.AgentName);
+                AgentName: outcome.AgentName,
+                WorkspaceName: outcome.WorkspaceName,
+                AttachmentResults: outcome.AttachmentResults,
+                AttachmentReservationId: outcome.AttachmentReservationId);
     }
 
     private (string SessionId, string JobKey) ResolveSessionAndJobKeys(

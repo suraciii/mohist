@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 namespace Mohist.Server.Agent.Subscriptions;
 
 /// <summary>
@@ -13,10 +11,8 @@ namespace Mohist.Server.Agent.Subscriptions;
 /// order, with the leading <c>@</c> stripped. The handler dedupes again by
 /// resolved Agent id (two tokens that resolve to the same Agent launch once).
 /// </summary>
-internal static partial class MentionTokenParser
+internal static class MentionTokenParser
 {
-    private const string TokenGroupName = "token";
-
     /// <summary>
     /// Returns the distinct <c>@</c>-mention tokens from <paramref name="body"/>,
     /// with the leading <c>@</c> stripped, in first-occurrence order.
@@ -29,30 +25,45 @@ internal static partial class MentionTokenParser
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tokens = new List<string>();
-        foreach (Match match in MentionRegex.Matches(body))
+        // Comment bodies may contain large prompt text; keep token discovery
+        // linear and independent of a wall-clock regex timeout.
+        for (var atIndex = 0; atIndex < body.Length; atIndex++)
         {
-            var token = match.Groups[TokenGroupName].Value;
+            if (body[atIndex] != '@'
+                || (atIndex > 0
+                    && !char.IsWhiteSpace(body[atIndex - 1])
+                    && !char.IsPunctuation(body[atIndex - 1])))
+            {
+                continue;
+            }
+
+            var tokenStart = atIndex + 1;
+            if (tokenStart >= body.Length || !IsNameStart(body[tokenStart]))
+                continue;
+
+            var tokenEnd = tokenStart + 1;
+            while (tokenEnd < body.Length && IsNamePart(body[tokenEnd]))
+                tokenEnd++;
+
+            while (tokenEnd > tokenStart
+                && (body[tokenEnd - 1] == '.' || body[tokenEnd - 1] == '-'))
+            {
+                tokenEnd--;
+            }
+
+            var token = body[tokenStart..tokenEnd];
             if (seen.Add(token))
                 tokens.Add(token);
         }
         return tokens;
     }
 
-    /// <summary>
-    /// Matches <c>@&lt;name&gt;</c> where the leading <c>@</c> is preceded by
-    /// start-of-string OR a single whitespace/punctuation char. The name
-    /// starts and ends with <c>[A-Za-z0-9_]</c> and may contain
-    /// <c>[A-Za-z0-9_.-]</c> in between, so a trailing sentence-period
-    /// (<c>@supervisor.</c>) is treated as a delimiter, not part of the
-    /// name, while a dot in the middle (<c>@supervisor.io</c>) stays in the
-    /// token. The boundary prefix is part of the match (consumed) so
-    /// consecutive mentions separated by one delimiter (<c>@a @b</c>) still
-    /// both match. The match captures only the name token via
-    /// <see cref="TokenGroupName"/>.
-    /// </summary>
-    [GeneratedRegex(
-        @"(?:^|[\s\p{P}])@(?<token>[A-Za-z0-9_](?:[A-Za-z0-9_.\-]*[A-Za-z0-9_])?)",
-        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
-        matchTimeoutMilliseconds: 100)]
-    private static partial Regex MentionRegex { get; }
+    private static bool IsNameStart(char value) =>
+        (value is >= 'A' and <= 'Z')
+        || (value is >= 'a' and <= 'z')
+        || (value is >= '0' and <= '9')
+        || value == '_';
+
+    private static bool IsNamePart(char value) =>
+        IsNameStart(value) || value is '.' or '-';
 }

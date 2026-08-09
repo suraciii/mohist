@@ -1,5 +1,10 @@
 export type WorkspaceStatus = 'active' | 'archived'
 
+export interface CreateWorkspaceInput {
+  name: string
+  repos: string[]
+}
+
 export interface WorkspaceOrigin {
   kind: 'issue' | 'slack' | 'web' | 'cli' | 'manual' | 'unknown'
   issueNumber?: number | null

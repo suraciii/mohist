@@ -69,6 +69,180 @@ public sealed class AttachmentServiceValidateAndBindAgentInputTests
     }
 
     [Fact]
+    public async Task AgentInputReservation_CancelledRequestCannotClearConcurrentPlanReservation()
+    {
+        var (database, _, _, service) = NewStack();
+        const string projectId = "proj-agent-input-reservation";
+        const string sessionId = "session-reservation";
+        const string inputId = "input-reservation";
+        var upload = await service.UploadAsync(
+            projectId,
+            NewFormFile("notes.txt", "text/plain", "reserved"u8.ToArray()));
+
+        var first = await service.ValidateAndBindAgentInputAsync(
+            projectId,
+            sessionId,
+            inputId,
+            [upload.Id],
+            reservationId: "reservation-a");
+        var second = await service.ValidateAndBindAgentInputAsync(
+            projectId,
+            sessionId,
+            inputId,
+            [upload.Id],
+            reservationId: "reservation-b");
+
+        Assert.Equal("reservation-a", first.ReservationId);
+        Assert.Equal("reservation-b", second.ReservationId);
+
+        // B has crossed the durable coordinator handoff before A's request
+        // loses its response. A's cancellation may release only A's pending
+        // reservation and cannot clear B's owner.
+        await service.MarkAgentInputReservationCoordinatorPendingAsync(
+            projectId,
+            second.ReservationId!,
+            sessionId,
+            inputId);
+        // B's durable adoption supersedes A while A is still pending. The
+        // later response-loss cleanup for A must be a no-op and must not
+        // clear B's adopted ownership.
+        await service.AdoptAgentInputReservationAsync(
+            projectId,
+            second.ReservationId!,
+            sessionId,
+            inputId);
+        await service.ReleaseAgentInputReservationAsync(
+            projectId,
+            first.ReservationId!,
+            sessionId,
+            inputId,
+            [upload.Id]);
+        await service.ReleaseAgentInputReservationAsync(
+            projectId,
+            second.ReservationId!,
+            sessionId,
+            inputId,
+            [upload.Id]);
+        Assert.NotNull(await service.OpenAgentInputContentAsync(
+            projectId,
+            sessionId,
+            inputId,
+            upload.Id));
+
+        // Only a durable coordinator rejection may release the adopted
+        // reservation and return the upload to the pending pool.
+        await service.ReleaseAdoptedAgentInputReservationAsync(
+            projectId,
+            second.ReservationId!,
+            sessionId,
+            inputId);
+        await using (var stateDb = database.CreateContext())
+        {
+            var reservations = await stateDb.AgentInputAttachmentReservations
+                .AsNoTracking()
+                .Where(row => row.ProjectId == projectId)
+                .Select(row => new { row.ReservationId, row.AttachmentId, row.Status })
+                .ToListAsync();
+            Assert.Empty(reservations);
+        }
+        Assert.Null(await service.OpenAgentInputContentAsync(
+            projectId,
+            sessionId,
+            inputId,
+            upload.Id));
+
+        await using var db = database.CreateContext();
+        var row = await db.Attachments.AsNoTracking().SingleAsync(a => a.Id == upload.Id);
+        Assert.Null(row.OwnerKind);
+        Assert.Null(row.OwnerId);
+    }
+
+    [Fact]
+    public async Task ValidateAndBindAgentInput_ConcurrentDifferentOwnersHasSingleConditionalWinner()
+    {
+        var (database, storage, time, serviceA) = NewStack();
+        var serviceB = new AttachmentService(
+            database.Factory,
+            storage,
+            new AttachmentStorageOptions(),
+            time);
+        const string projectId = "proj-agent-input-concurrent-winner";
+        var upload = await serviceA.UploadAsync(
+            projectId,
+            NewFormFile("notes.txt", "text/plain", "concurrent"u8.ToArray()));
+
+        var outcomes = await Task.WhenAll(
+            serviceA.ValidateAndBindAgentInputAsync(
+                projectId,
+                "session-a",
+                "input-a",
+                [upload.Id],
+                reservationId: "reservation-a"),
+            serviceB.ValidateAndBindAgentInputAsync(
+                projectId,
+                "session-b",
+                "input-b",
+                [upload.Id],
+                reservationId: "reservation-b"));
+
+        Assert.Equal(1, outcomes.Count(batch => batch.AcceptedCount == 1));
+        Assert.Equal(1, outcomes.Count(batch =>
+            batch.Results is [{ RejectionReason: AgentInputAttachmentRejectionReason.AlreadyBound }]));
+
+        await using var db = database.CreateContext();
+        var row = await db.Attachments.AsNoTracking().SingleAsync(a => a.Id == upload.Id);
+        Assert.Equal(AttachmentService.OwnerKindAgentInput, row.OwnerKind);
+        Assert.Contains(row.OwnerId, new[]
+        {
+            AttachmentService.BuildAgentInputOwnerId("session-a", "input-a"),
+            AttachmentService.BuildAgentInputOwnerId("session-b", "input-b"),
+        });
+        var reservations = await db.AgentInputAttachmentReservations
+            .AsNoTracking()
+            .Where(reservation => reservation.ProjectId == projectId)
+            .ToListAsync();
+        Assert.Single(reservations);
+    }
+
+    [Fact]
+    public async Task CleanupExpiredPending_ReleasesReservationLeftBeforeCoordinatorPlan()
+    {
+        var (database, storage, time, service) = NewStack();
+        const string projectId = "proj-agent-input-preplan-crash";
+        const string sessionId = "session-preplan-crash";
+        const string inputId = "input-preplan-crash";
+        var upload = await service.UploadAsync(
+            projectId,
+            NewFormFile("notes.txt", "text/plain", "orphaned"u8.ToArray()));
+
+        var batch = await service.ValidateAndBindAgentInputAsync(
+            projectId,
+            sessionId,
+            inputId,
+            [upload.Id],
+            reservationId: "reservation-before-plan");
+        Assert.Equal("reservation-before-plan", batch.ReservationId);
+
+        // Simulate process loss after the coordinator handoff committed but
+        // before it could persist its launch plan.
+        await service.MarkAgentInputReservationCoordinatorPendingAsync(
+            projectId,
+            batch.ReservationId!,
+            sessionId,
+            inputId);
+        time.Advance(AttachmentService.PendingTtl + TimeSpan.FromSeconds(1));
+        var removed = await service.CleanupExpiredPendingAsync();
+
+        Assert.Equal(1, removed);
+        Assert.Null(await service.OpenAgentInputContentAsync(projectId, sessionId, inputId, upload.Id));
+        await using var db = database.CreateContext();
+        Assert.False(await db.AgentInputAttachmentReservations
+            .AnyAsync(reservation => reservation.ProjectId == projectId));
+        Assert.False(await db.Attachments.AnyAsync(attachment => attachment.Id == upload.Id));
+        Assert.False(storage.Contains(storage.GenerateStoragePath(projectId, upload.Id)));
+    }
+
+    [Fact]
     public async Task ValidateAndBindAgentInput_CancellationAfterFirstClaimRollsBackWholeBatch()
     {
         using var cancellation = new CancellationTokenSource();

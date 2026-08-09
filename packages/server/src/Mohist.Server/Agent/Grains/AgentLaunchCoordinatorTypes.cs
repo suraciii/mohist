@@ -126,7 +126,20 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(47)] string? WorkspacePath = null,
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
-    [property: Id(50)] string? TargetId = null);
+    [property: Id(50)] string? TargetId = null,
+    /// <summary>
+    /// Immutable accepted/rejected attachment response captured before
+    /// the plan is committed. Replays project this snapshot instead of
+    /// revalidating attachments or losing rejected results. Append-only
+    /// Orleans field id (next free after <see cref="TargetId"/>).
+    /// </summary>
+    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    /// <summary>
+    /// Durable attachment reservation adopted after this plan is written.
+    /// Pending reservations fence concurrent route cleanup until the plan
+    /// either adopts or explicitly rejects them.
+    /// </summary>
+    [property: Id(52)] string? AttachmentReservationId = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -185,7 +198,15 @@ public sealed record AgentLaunchCoordinatorRequest(
     /// </summary>
     [property: Id(12)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(13)] string? Origin = null,
-    [property: Id(14)] string? TargetId = null);
+    [property: Id(14)] string? TargetId = null,
+    /// <summary>
+    /// Distinguishes a caller-selected workspace from the CLI's
+    /// origin-based workspace resolution. The binding mode is part of
+    /// the idempotency identity so an implicit <c>cli-current</c>
+    /// request cannot replay an explicit workspace with the same name.
+    /// Append-only Orleans field id.
+    /// </summary>
+    [property: Id(15)] string? WorkspaceBindingMode = null);
 
 /// <summary>
 /// Result returned by the coordinator on success. Carries the four
@@ -201,7 +222,10 @@ public sealed record AgentLaunchCoordinatorResult(
     [property: Id(4)] string AgentId,
     [property: Id(5)] string AgentName,
     [property: Id(6)] bool AlreadyPersisted,
-    [property: Id(7)] string? ParentLinkEdgeId = null);
+    [property: Id(7)] string? ParentLinkEdgeId = null,
+    [property: Id(8)] string? WorkspaceName = null,
+    [property: Id(9)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    [property: Id(10)] string? AttachmentReservationId = null);
 
 /// <summary>
 /// Raised when the supplied idempotency key has already accepted a
@@ -296,7 +320,8 @@ public static class AgentLaunchCoordinatorCodec
             : string.Join('\u001e', request.AttachmentIds
                 .Where(id => !string.IsNullOrWhiteSpace(id))
                 .Select(id => id.Trim()));
-        var canonical = string.Join('\u001f',
+        var canonicalFields = new List<string>
+        {
             request.ExactPromptFingerprint
                 ? request.Prompt ?? string.Empty
                 : request.Prompt?.Trim() ?? string.Empty,
@@ -311,12 +336,31 @@ public static class AgentLaunchCoordinatorCodec
             request.Origin?.Trim() ?? string.Empty,
             request.TargetId?.Trim() ?? string.Empty,
             attachments,
+        };
+
+        // Keep legacy callers stable while making the route's binding mode
+        // part of the new request identity.
+        var bindingMode = request.WorkspaceBindingMode?.Trim();
+        if (!string.IsNullOrWhiteSpace(bindingMode))
+        {
+            canonicalFields.Add(bindingMode);
+            canonicalFields.Add(
+                string.Equals(bindingMode, "explicit", StringComparison.OrdinalIgnoreCase)
+                    ? request.WorkspaceName?.Trim() ?? string.Empty
+                    : string.Empty);
+        }
+
+        canonicalFields.AddRange(new[]
+        {
             connectionOrigin?.ConnectionId ?? string.Empty,
             connectionOrigin?.WorkspaceTeamId ?? string.Empty,
             connectionOrigin?.SlackUserId ?? string.Empty,
             connectionOrigin?.ConversationId ?? string.Empty,
             connectionOrigin?.MessageTs ?? string.Empty,
-            connectionOrigin?.ThreadTs ?? string.Empty);
+            connectionOrigin?.ThreadTs ?? string.Empty,
+        });
+
+        var canonical = string.Join('\u001f', canonicalFields);
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(hash).ToLowerInvariant();
     }

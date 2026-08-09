@@ -1,7 +1,12 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -22,12 +27,13 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync("launch-replay-renamed-agent");
         var agent = await CreateAgentAsync(projectId, "original-agent-name");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         const string idempotencyKey = "replay-after-agent-rename";
 
         using var first = await LaunchAsync(
             projectId,
             "original-agent-name",
-            new { prompt = "preserve original launch" },
+            new { prompt = "preserve original launch", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
         var original = await LaunchReferencesAsync(first);
@@ -40,7 +46,7 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         using var replay = await LaunchAsync(
             projectId,
             "original-agent-name",
-            new { prompt = "preserve original launch" },
+            new { prompt = "preserve original launch", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         Assert.Equal(original, await LaunchReferencesAsync(replay));
@@ -51,12 +57,13 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync("launch-replay-archived-agent");
         var agent = await CreateAgentAsync(projectId, "replay-archived-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         const string idempotencyKey = "replay-after-agent-archive";
 
         using var first = await LaunchAsync(
             projectId,
             agent.Id,
-            new { prompt = "preserve archived launch" },
+            new { prompt = "preserve archived launch", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
         var original = await LaunchReferencesAsync(first);
@@ -68,10 +75,259 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         using var replay = await LaunchAsync(
             projectId,
             agent.Id,
-            new { prompt = "preserve archived launch" },
+            new { prompt = "preserve archived launch", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
         Assert.Equal(original, await LaunchReferencesAsync(replay));
+    }
+
+    [Fact]
+    public async Task Launch_ReplayAfterWorkspaceArchive_ReturnsOriginalLaunch()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-archived-workspace");
+        var agent = await CreateAgentAsync(projectId, "replay-archived-workspace-agent");
+        const string workspaceName = "launch-idempotency-workspace";
+        await CreateWorkspaceAsync(projectId, workspaceName);
+        const string idempotencyKey = "replay-after-workspace-archive";
+        var runnerId = $"launch-replay-workspace-runner-{Guid.NewGuid():N}";
+        await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+
+        try
+        {
+            using var first = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "preserve archived workspace launch", context = new { workspace = workspaceName } },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+            var original = await LaunchReferencesAsync(first);
+
+            var dispatch = await PollDispatchForSessionAsync(original.JobId, runnerId, original.SessionId);
+            using var variables = JsonDocument.Parse(dispatch.Dispatch.GetProperty("variables").GetString()!);
+            var workspace = variables.RootElement.GetProperty("workspace");
+            Assert.Equal(workspaceName, workspace.GetProperty("name").GetString());
+            var repository = Assert.Single(workspace.GetProperty("repositories").EnumerateArray());
+            Assert.Equal("main", repository.GetProperty("name").GetString());
+
+            using var archive = await _fixture.Client.PostAsync(
+                $"/api/projects/{projectId}/workspaces/{workspaceName}/close",
+                content: null);
+            Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+
+            using var replay = await LaunchAsync(
+                projectId,
+                agent.Id,
+                new { prompt = "preserve archived workspace launch", context = new { workspace = workspaceName } },
+                idempotencyKey);
+            Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+            Assert.Equal(original, await LaunchReferencesAsync(replay));
+        }
+        finally
+        {
+            await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
+        }
+    }
+
+    [Fact]
+    public async Task Launch_ReplayWithDifferentWorkspaceIdentity_Conflicts()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-workspace-identity");
+        var agent = await CreateAgentAsync(projectId, "workspace-identity-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace-a");
+        const string idempotencyKey = "different-workspace-identity";
+
+        using var first = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new { prompt = "same prompt", context = new { workspace = "launch-idempotency-workspace-a" } },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        using var archive = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/workspaces/launch-idempotency-workspace-a/close",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace-b");
+
+        using var replay = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new { prompt = "same prompt", context = new { workspace = "launch-idempotency-workspace-b" } },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+        var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Launch_ImplicitCliWorkspaceAndExplicitArchivedWorkspaceConflictWithoutNewSideEffects()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-cli-binding-mode");
+        var agent = await CreateAgentAsync(projectId, "cli-binding-mode-agent");
+        await CreateWorkspaceAsync(projectId, "cli-current");
+        using var archive = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/workspaces/cli-current/close",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+
+        var attachmentId = await UploadAttachmentAsync(projectId, "cli-binding.txt", "cli binding"u8.ToArray());
+        const string idempotencyKey = "implicit-cli-explicit-archived-workspace";
+        var implicitBody = new
+        {
+            prompt = "keep one canonical launch",
+            attachments = new[] { attachmentId },
+        };
+
+        using var implicitLaunch = await LaunchCliAsync(projectId, agent.Id, implicitBody, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, implicitLaunch.StatusCode);
+        var original = await LaunchReferencesAsync(implicitLaunch);
+        var originalSession = _fixture.Grains.GetGrain<IAgentSessionGrain>(original.SessionId);
+        var originalInput = await originalSession.GetInitialLaunchAsync();
+        Assert.NotNull(originalInput);
+        var originalInputRecord = originalInput!.Input;
+        Assert.NotNull(originalInputRecord);
+        Assert.Equal(original.InputId, originalInputRecord!.Id);
+        Assert.Contains(originalInputRecord.Attachments ?? [], attachment => attachment.Id == attachmentId);
+        var jobsBeforeConflict = await CountAgentJobsAsync(projectId);
+        var sessionsBeforeConflict = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var explicitReplay = await LaunchCliAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "keep one canonical launch",
+                attachments = new[] { attachmentId },
+                context = new { workspace = "cli-current" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Conflict, explicitReplay.StatusCode);
+        var conflict = await explicitReplay.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", conflict.GetProperty("code").GetString());
+
+        var afterConflict = await originalSession.GetInitialLaunchAsync();
+        Assert.NotNull(afterConflict);
+        Assert.Equal(original.InputId, afterConflict!.Input?.Id);
+        Assert.Equal(original.TurnId, afterConflict.Turn?.Id);
+        Assert.Equal(
+            originalInputRecord.Attachments?.Select(attachment => attachment.Id),
+            afterConflict.Input?.Attachments?.Select(attachment => attachment.Id));
+        Assert.Equal(jobsBeforeConflict, await CountAgentJobsAsync(projectId));
+        Assert.Equal(sessionsBeforeConflict, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_ResponseLossAfterPlanPersist_ReconcilesOneDurableAttachmentOwner()
+    {
+        var projectId = await CreateProjectAsync("launch-response-loss-after-plan");
+        var agent = await CreateAgentAsync(projectId, "response-loss-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
+        var attachmentId = await UploadAttachmentAsync(projectId, "response-loss.txt", "response loss"u8.ToArray());
+        const string idempotencyKey = "response-loss-after-plan-persist";
+        _fixture.LaunchFaults.CancelAfterPlanPersistOnce();
+
+        using var response = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "reconcile the saved plan",
+                attachments = new[] { attachmentId },
+                context = new { workspace = "launch-idempotency-workspace" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var refs = await LaunchReferencesAsync(response);
+        var initial = await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(refs.SessionId)
+            .GetInitialLaunchAsync();
+        Assert.NotNull(initial);
+        var initialInput = initial!.Input;
+        Assert.NotNull(initialInput);
+        Assert.Equal(refs.InputId, initialInput!.Id);
+        Assert.Equal(refs.TurnId, initial.Turn?.Id);
+        Assert.Contains(initialInput.Attachments ?? [], attachment => attachment.Id == attachmentId);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var attachment = await db.Attachments.SingleAsync(row => row.Id == attachmentId);
+        Assert.Equal(AttachmentService.OwnerKindAgentInput, attachment.OwnerKind);
+        Assert.Equal(
+            AttachmentService.BuildAgentInputOwnerId(refs.SessionId, refs.InputId),
+            attachment.OwnerId);
+    }
+
+    [Fact]
+    public async Task Launch_ReplayWithDifferentAttachments_Conflicts()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-attachments");
+        var agent = await CreateAgentAsync(projectId, "attachments-idempotency-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
+        var firstAttachment = await UploadAttachmentAsync(projectId, "first.txt", "first"u8.ToArray());
+        var secondAttachment = await UploadAttachmentAsync(projectId, "second.txt", "second"u8.ToArray());
+        const string idempotencyKey = "different-attachments";
+
+        using var first = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "same prompt",
+                attachments = new[] { firstAttachment },
+                context = new { workspace = "launch-idempotency-workspace" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+
+        using var replay = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "same prompt",
+                attachments = new[] { secondAttachment },
+                context = new { workspace = "launch-idempotency-workspace" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
+        var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", payload.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Launch_ReplayPreservesAcceptedAndRejectedAttachmentResponse()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-attachment-response");
+        var agent = await CreateAgentAsync(projectId, "attachment-response-agent");
+        const string workspaceName = "launch-idempotency-workspace";
+        await CreateWorkspaceAsync(projectId, workspaceName);
+        var acceptedAttachment = await UploadAttachmentAsync(projectId, "accepted.txt", "accepted"u8.ToArray());
+        const string rejectedAttachment = "att_does_not_exist_for_replay";
+        const string idempotencyKey = "replay-attachment-response";
+        var request = new
+        {
+            prompt = "preserve attachment response",
+            attachments = new[] { acceptedAttachment, rejectedAttachment },
+            context = new { workspace = workspaceName },
+        };
+
+        using var first = await LaunchAsync(projectId, agent.Id, request, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstPayload = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var firstData = firstPayload.GetProperty("data");
+        var firstAccepted = firstData.GetProperty("attachments").GetRawText();
+        var firstRejected = firstData.GetProperty("rejectedAttachments").GetRawText();
+        Assert.Contains(acceptedAttachment, firstAccepted, StringComparison.Ordinal);
+        Assert.Contains(rejectedAttachment, firstRejected, StringComparison.Ordinal);
+
+        using var replay = await LaunchAsync(projectId, agent.Id, request, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+        var replayPayload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        var replayData = replayPayload.GetProperty("data");
+
+        Assert.Equal(firstAccepted, replayData.GetProperty("attachments").GetRawText());
+        Assert.Equal(firstRejected, replayData.GetProperty("rejectedAttachments").GetRawText());
     }
 
     [Fact]
@@ -79,19 +335,20 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync("launch-replay-agent-reference");
         var agent = await CreateAgentAsync(projectId, "same-agent-different-reference");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         const string idempotencyKey = "different-agent-reference";
 
         using var first = await LaunchAsync(
             projectId,
             agent.Id,
-            new { prompt = "same prompt" },
+            new { prompt = "same prompt", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
         using var replay = await LaunchAsync(
             projectId,
             "same-agent-different-reference",
-            new { prompt = "same prompt" },
+            new { prompt = "same prompt", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
         var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
@@ -103,19 +360,20 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync("launch-replay-whitespace-prompt");
         var agent = await CreateAgentAsync(projectId, "whitespace-prompt-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         const string idempotencyKey = "different-whitespace-prompt";
 
         using var first = await LaunchAsync(
             projectId,
             agent.Id,
-            new { prompt = "accepted prompt" },
+            new { prompt = "accepted prompt", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Created, first.StatusCode);
 
         using var replay = await LaunchAsync(
             projectId,
             agent.Id,
-            new { prompt = "   " },
+            new { prompt = "   ", context = new { workspace = "launch-idempotency-workspace" } },
             idempotencyKey);
         Assert.Equal(HttpStatusCode.Conflict, replay.StatusCode);
         var payload = await replay.Content.ReadFromJsonAsync<JsonElement>();
@@ -138,14 +396,16 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync($"launch-fence-{gate}");
         var agent = await CreateAgentAsync(projectId, "fence-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         var idempotencyKey = $"fence-{gate}-{Guid.NewGuid():N}";
-        var body = new { prompt = "recover across the fence" };
+        var body = new { prompt = "recover across the fence", context = new { workspace = "launch-idempotency-workspace" } };
         var runnerId = gate == LaunchParticipantGate.SubmitJob
             ? $"launch-fence-submit-runner-{Guid.NewGuid():N}"
             : null;
 
         if (runnerId is not null)
             await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? dispatchJobId = null;
 
         try
         {
@@ -160,6 +420,7 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
             using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
             Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
             var original = await LaunchReferencesAsync(recovered);
+            dispatchJobId = original.JobId;
 
             // The fence no longer fails, so a resume with the same key must
             // return the persisted outcome rather than a new launch.
@@ -180,7 +441,8 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         {
             if (runnerId is not null)
             {
-                await DrainDispatchAsync(runnerId);
+                if (dispatchJobId is not null)
+                    await CompletePendingAgentJobAsync(runnerId, dispatchJobId);
                 await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
             }
         }
@@ -197,8 +459,9 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     {
         var projectId = await CreateProjectAsync("launch-fence-session-children");
         var agent = await CreateAgentAsync(projectId, "session-children-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
         var idempotencyKey = $"fence-session-{Guid.NewGuid():N}";
-        var body = new { prompt = "single input and turn after recovery" };
+        var body = new { prompt = "single input and turn after recovery", context = new { workspace = "launch-idempotency-workspace" } };
 
         _fixture.LaunchFaults.FailNext(LaunchParticipantGate.EnsureInitialLaunch, times: 2);
         for (var i = 0; i < 2; i++)
@@ -244,6 +507,19 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
             data.GetProperty("sessionId").GetString() ?? string.Empty,
             data.GetProperty("inputId").GetString() ?? string.Empty,
             data.GetProperty("turnId").GetString() ?? string.Empty);
+    }
+
+    private async Task<string> UploadAttachmentAsync(string projectId, string fileName, byte[] payload)
+    {
+        using var form = new MultipartFormDataContent("----mohist-launch-idempotency-" + Guid.NewGuid().ToString("N"));
+        using var content = new ByteArrayContent(payload);
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+        form.Add(content, "file", fileName);
+
+        using var response = await _fixture.Client.PostAsync($"/api/projects/{projectId}/attachments", form);
+        response.EnsureSuccessStatusCode();
+        var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+        return body.GetProperty("data").GetProperty("id").GetString()!;
     }
 
     private sealed record LaunchReferences(string JobId, string SessionId, string InputId, string TurnId);

@@ -92,6 +92,11 @@ public interface IAgentLauncher
     /// the coordinator adopts it verbatim. Null/empty when no
     /// attachments are supplied.
     /// </param>
+    /// <param name="attachmentResults">
+    /// Complete accepted/rejected attachment snapshot returned by the
+    /// route. Persisted separately from the accepted descriptors so an
+    /// idempotent replay returns the exact original response.
+    /// </param>
     Task<AgentLaunchResult> LaunchIdempotentAsync(
         AgentInfo agent,
         string prompt,
@@ -102,7 +107,9 @@ public interface IAgentLauncher
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        string? attachmentReservationId = null);
 
     Task<AgentLaunchResult> LaunchSubagentAsync(
         string projectId,
@@ -194,7 +201,10 @@ public sealed record AgentLaunchResult(
     string TurnId,
     string AgentId,
     string AgentName,
-    string? ParentLinkEdgeId = null);
+    string? ParentLinkEdgeId = null,
+    string? WorkspaceName = null,
+    IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    string? AttachmentReservationId = null);
 
 /// <summary>
 /// Outcome of a routed launch. Carries the session id the AgentJob

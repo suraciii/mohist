@@ -44,6 +44,15 @@ function mockWorkspaces(...workspaces: Record<string, unknown>[]) {
   )
 }
 
+function mockRepositories() {
+  server.use(
+    http.get('*/api/projects/:projectId/repositories', () => HttpResponse.json({
+      success: true,
+      data: [{ name: 'main', gitUrl: 'https://example.test/main.git', baseBranch: 'main', isDefault: true }],
+    })),
+  )
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -111,5 +120,23 @@ describe('WorkspacesPage', () => {
 
     fireEvent.click(await screen.findByTestId('workspace-card-pay-refactor'))
     expect(await screen.findByTestId('workspace-detail-target')).toBeInTheDocument()
+  })
+
+  it('opens the shared create dialog from the page action and empty state', async () => {
+    mockRepositories()
+    mockWorkspaces()
+    renderPage()
+
+    fireEvent.click(screen.getByTestId('create-workspace-button'))
+    expect(await screen.findByTestId('create-workspace-dialog')).toBeInTheDocument()
+  })
+
+  it('opens the same create dialog from the empty state action', async () => {
+    mockRepositories()
+    mockWorkspaces()
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId('empty-create-workspace-button'))
+    expect(await screen.findByTestId('create-workspace-dialog')).toBeInTheDocument()
   })
 })

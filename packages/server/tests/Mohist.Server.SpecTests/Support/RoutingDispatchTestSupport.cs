@@ -485,7 +485,9 @@ public sealed class RecordingAgentLauncher : IAgentLauncher
         string? preMintedSessionId = null,
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
-        CancellationToken ct = default) =>
+        CancellationToken ct = default,
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        string? attachmentReservationId = null) =>
         throw new NotSupportedException("RecordingAgentLauncher does not exercise the manual launch path.");
 
     public Task<AgentLaunchResult> LaunchSubagentAsync(

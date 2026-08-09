@@ -31,15 +31,21 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-job-id-roundtrip");
         var runnerId = $"launch-job-roundtrip-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "roundtrip-agent");
+        await CreateWorkspaceAsync(projectId, "launch-job-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? jobId = null;
 
         try
         {
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "roundtrip the job id" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "roundtrip the job id",
+                context = new { workspace = "launch-job-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
-            var jobId = data.GetProperty("jobId").GetString()!;
+            jobId = data.GetProperty("jobId").GetString()!;
             var sessionId = data.GetProperty("sessionId").GetString()!;
             Assert.False(string.IsNullOrWhiteSpace(jobId));
             Assert.False(string.IsNullOrWhiteSpace(sessionId));
@@ -61,7 +67,8 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (jobId is not null)
+                await CompletePendingAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -72,17 +79,23 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         var projectId = await CreateProjectAsync("launch-exactly-once");
         var runnerId = $"launch-exactly-once-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "exactly-once-agent");
+        await CreateWorkspaceAsync(projectId, "launch-job-workspace");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? jobId = null;
 
         try
         {
             var sessionsBefore = await CountAgentLaunchSessionsAsync(projectId);
 
-            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new { prompt = "exactly one of each" });
+            using var launch = await _fixture.Client.LaunchAgentSessionAsync(projectId, agent.Id, new
+            {
+                prompt = "exactly one of each",
+                context = new { workspace = "launch-job-workspace" },
+            });
             Assert.Equal(HttpStatusCode.Created, launch.StatusCode);
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var sessionId = launchPayload.GetProperty("data").GetProperty("sessionId").GetString()!;
-            var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
+            jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             // Exactly one AgentSession: the count grows by exactly one.
             var sessionsAfter = await CountAgentLaunchSessionsAsync(projectId);
@@ -98,8 +111,19 @@ public class AgentSessionLaunchJobIdentitySpecs : AgentSessionLaunchRoutesTestSu
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (jobId is not null)
+                await CompletePendingAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
+    }
+
+    [Fact]
+    public async Task DispatchSupport_MissingReadySignal_FailsWithBoundedFakeTimeDiagnostic()
+    {
+        var error = await Assert.ThrowsAsync<TimeoutException>(() =>
+            WaitForDispatchReadinessFromCurrentPointAsync($"missing-ready-{Guid.NewGuid():N}"));
+
+        Assert.Contains("dispatch readiness", error.Message, StringComparison.Ordinal);
+        Assert.Contains("ReadySnapshot=False", error.Message, StringComparison.Ordinal);
     }
 }

@@ -218,13 +218,20 @@ public sealed class SlackReplyAnchorIngressSpecs : IAsyncLifetime
 
     private async Task<JsonElement> PollInitialDispatchAsync(string runnerId, string jobKey)
     {
-        var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(job);
+        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
+            _fixture.AgentJobDispatches,
+            jobKey,
+            AgentJobDispatchProbe.DefaultWaitTimeout,
+            _fixture.TimeProvider.Advance);
         using var poll = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
         var dispatch = Assert.Single(await poll.ReadDispatchElementsAsync());
-        var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(job);
+        var assignment = await AgentJobConvergence.WaitForRunnerAcceptedAsync(
+            _fixture.AgentJobDispatches,
+            jobKey,
+            AgentJobDispatchProbe.DefaultWaitTimeout,
+            _fixture.TimeProvider.Advance);
         Assert.Equal(runnerId, assignment.RunnerId);
-        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.CurrentWorkId);
+        Assert.Equal(dispatch.GetProperty("workId").GetString(), assignment.WorkId);
         return dispatch;
     }
 

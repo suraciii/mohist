@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using Mohist.Server.Agent.Grains;
-using Xunit;
 
 namespace Mohist.Server.TestSupport;
 
@@ -12,14 +11,29 @@ namespace Mohist.Server.TestSupport;
 /// </summary>
 public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 {
+    public static readonly TimeSpan DefaultWaitTimeout = TimeSpan.FromSeconds(30);
     private readonly TimeProvider _timeProvider;
+    private readonly Action<TimeSpan>? _advance;
     private readonly ConcurrentDictionary<string, int> _preparedCounts =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, TaskCompletionSource> _preparedBoundarySignals =
         new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, PreparedSignal> _preparedSignals =
         new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DispatchReadyForPoll> _readySnapshots =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ReadySignal> _readySignals =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, DispatchRunnerAccepted> _acceptedSnapshots =
+        new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, AcceptedSignal> _acceptedSignals =
+        new(StringComparer.Ordinal);
 
-    public AgentJobDispatchProbe(TimeProvider? timeProvider = null) =>
-        _timeProvider = timeProvider ?? new FixedTimeProvider(TestTime.UtcNow);
+    public AgentJobDispatchProbe(TimeProvider timeProvider, Action<TimeSpan>? advance = null)
+    {
+        _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _advance = advance;
+    }
 
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
@@ -29,8 +43,31 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
         return Task.CompletedTask;
     }
 
-    public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId) =>
-        Task.CompletedTask;
+    public Task AssignmentPreparedBoundaryAsync(string agentJobId, string runnerId, string workId)
+    {
+        _preparedBoundarySignals
+            .GetOrAdd(agentJobId, static _ => NewBoundarySignal())
+            .TrySetResult();
+        return Task.CompletedTask;
+    }
+
+    public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)
+    {
+        var snapshot = new DispatchRunnerAccepted(agentJobId, runnerId, workId);
+        _acceptedSnapshots[agentJobId] = snapshot;
+        if (_acceptedSignals.TryGetValue(agentJobId, out var signal))
+            signal.Completion.TrySetResult(snapshot);
+        return Task.CompletedTask;
+    }
+
+    public Task AssignmentReadyForPollAsync(string agentJobId, string runnerId, string workId)
+    {
+        var snapshot = new DispatchReadyForPoll(agentJobId, runnerId, workId);
+        _readySnapshots[agentJobId] = snapshot;
+        if (_readySignals.TryGetValue(agentJobId, out var signal))
+            signal.Completion.TrySetResult(snapshot);
+        return Task.CompletedTask;
+    }
 
     public int PreparedCount(string agentJobId) =>
         _preparedCounts.GetValueOrDefault(agentJobId);
@@ -44,10 +81,233 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
             : throw new InvalidOperationException(
                 $"No assignment-prepared waiter is registered for AgentJob '{agentJobId}'.");
 
-    public async Task WaitForAssignmentPreparedAsync(
+    public int RetainedReadySignalCount(string agentJobId) =>
+        _readySignals.ContainsKey(agentJobId) ? 1 : 0;
+
+    public int RetainedReadySnapshotCount(string agentJobId) =>
+        _readySnapshots.ContainsKey(agentJobId) ? 1 : 0;
+
+    public Task WaitForReadyWaiterRegisteredAsync(string agentJobId) =>
+        _readySignals.TryGetValue(agentJobId, out var signal)
+            ? signal.WaiterRegistered.Task
+            : throw new InvalidOperationException(
+                $"No dispatch-ready waiter is registered for AgentJob '{agentJobId}'.");
+
+    public int RetainedRunnerAcceptedSignalCount(string agentJobId) =>
+        _acceptedSignals.ContainsKey(agentJobId) ? 1 : 0;
+
+    public int RetainedRunnerAcceptedSnapshotCount(string agentJobId) =>
+        _acceptedSnapshots.ContainsKey(agentJobId) ? 1 : 0;
+
+    public Task WaitForRunnerAcceptedWaiterRegisteredAsync(string agentJobId) =>
+        _acceptedSignals.TryGetValue(agentJobId, out var signal)
+            ? signal.WaiterRegistered.Task
+            : throw new InvalidOperationException(
+                $"No runner-accepted waiter is registered for AgentJob '{agentJobId}'.");
+
+    public Task<DispatchRunnerAccepted> WaitForRunnerAcceptedAsync(
+        string agentJobId,
+        CancellationToken cancellationToken = default) =>
+        WaitForRunnerAcceptedCoreAsync(
+            agentJobId,
+            DefaultWaitTimeout,
+            _advance,
+            waitForPreparedBoundary: _advance is not null,
+            cancellationToken);
+
+    public Task<DispatchRunnerAccepted> WaitForRunnerAcceptedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        WaitForRunnerAcceptedCoreAsync(
+            agentJobId,
+            timeout,
+            _advance,
+            waitForPreparedBoundary: _advance is not null,
+            cancellationToken);
+
+    public Task<DispatchRunnerAccepted> WaitForRunnerAcceptedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan> advance,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(advance);
+        return WaitForRunnerAcceptedCoreAsync(
+            agentJobId,
+            timeout,
+            advance,
+            waitForPreparedBoundary: true,
+            cancellationToken);
+    }
+
+    public async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollAsync(
+        string agentJobId,
+        CancellationToken cancellationToken = default)
+        => await WaitForAssignmentReadyForPollAsync(
+            agentJobId,
+            DefaultWaitTimeout,
+            cancellationToken);
+
+    public async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollAsync(
         string agentJobId,
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
+        => await WaitForAssignmentReadyForPollCoreAsync(
+            agentJobId,
+            timeout,
+            advance: null,
+            waitForPreparedBoundary: false,
+            cancellationToken);
+
+    /// <summary>
+    /// Test-only clock-controlled variant. The callback runs exactly once
+    /// after the waiter is registered, so a missing ready event produces a
+    /// deterministic diagnostic timeout under the injected fake clock without
+    /// wall-clock waiting or polling.
+    /// </summary>
+    public async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollWithClockAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan> advance,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(advance);
+        return await WaitForAssignmentReadyForPollCoreAsync(
+            agentJobId,
+            timeout,
+            advance,
+            waitForPreparedBoundary: true,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Test-only clock-controlled variant for a caller that has already
+    /// established the dispatch boundary. The callback runs exactly once
+    /// after the waiter is registered, without waiting for another observer
+    /// signal.
+    /// </summary>
+    public async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollFromCurrentPointWithClockAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan> advance,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(advance);
+        return await WaitForAssignmentReadyForPollCoreAsync(
+            agentJobId,
+            timeout,
+            advance,
+            waitForPreparedBoundary: false,
+            cancellationToken);
+    }
+
+    private async Task<DispatchReadyForPoll> WaitForAssignmentReadyForPollCoreAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan>? advance,
+        bool waitForPreparedBoundary,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+
+        if (_readySnapshots.TryRemove(agentJobId, out var snapshot))
+            return snapshot;
+
+        var signal = AcquireReadySignal(agentJobId);
+        try
+        {
+            if (_readySnapshots.TryRemove(agentJobId, out snapshot))
+                signal.Completion.TrySetResult(snapshot);
+
+            signal.WaiterRegistered.TrySetResult();
+            var wait = signal.Completion.Task.WaitAsync(
+                timeout,
+                _timeProvider,
+                cancellationToken);
+            if (advance is not null && waitForPreparedBoundary)
+                await WaitForPreparedBoundaryAsync(agentJobId, cancellationToken);
+            advance?.Invoke(timeout);
+            var ready = await wait;
+            _readySnapshots.TryRemove(agentJobId, out _);
+            return ready;
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"Timed out waiting for AgentJob '{agentJobId}' dispatch readiness after {timeout}. "
+                + $"ReadySnapshot={_readySnapshots.ContainsKey(agentJobId)}.");
+        }
+        finally
+        {
+            if (signal.ReleaseWaiter())
+                RemoveReadySignal(agentJobId, signal);
+        }
+    }
+
+    public Task WaitForAssignmentPreparedAsync(
+        string agentJobId,
+        CancellationToken cancellationToken = default) =>
+        WaitForAssignmentPreparedCoreAsync(
+            agentJobId,
+            DefaultWaitTimeout,
+            _advance,
+            waitForPreparedBoundary: _advance is not null,
+            cancellationToken);
+
+    public Task WaitForAssignmentPreparedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default) =>
+        WaitForAssignmentPreparedCoreAsync(
+            agentJobId,
+            timeout,
+            _advance,
+            waitForPreparedBoundary: _advance is not null,
+            cancellationToken);
+
+    public Task WaitForAssignmentPreparedAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan> advance,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(advance);
+        return WaitForAssignmentPreparedCoreAsync(
+            agentJobId,
+            timeout,
+            advance,
+            waitForPreparedBoundary: true,
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Test-only clock-controlled variant for a caller that has already
+    /// established the dispatch boundary. The callback runs exactly once
+    /// after the waiter is registered, without waiting for another observer
+    /// signal.
+    /// </summary>
+    public Task WaitForAssignmentPreparedFromCurrentPointWithClockAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan> advance,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(advance);
+        return WaitForAssignmentPreparedCoreAsync(
+            agentJobId,
+            timeout,
+            advance,
+            waitForPreparedBoundary: false,
+            cancellationToken);
+    }
+
+    private async Task WaitForAssignmentPreparedCoreAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan>? advance,
+        bool waitForPreparedBoundary,
+        CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
 
@@ -62,19 +322,23 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 
             var wait = signal.Completion.Task.WaitAsync(timeout, _timeProvider, cancellationToken);
             signal.WaiterRegistered.TrySetResult();
+            if (advance is not null && waitForPreparedBoundary)
+                await WaitForPreparedBoundaryAsync(agentJobId, cancellationToken);
+            advance?.Invoke(timeout);
             await wait;
         }
         catch (TimeoutException)
         {
-            Assert.Fail(
+            throw new TimeoutException(
                 $"Timed out waiting for AgentJob '{agentJobId}' assignment preparation after {timeout}. "
                 + $"PreparedCount={PreparedCount(agentJobId)}.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            Assert.Fail(
+            throw new OperationCanceledException(
                 $"Cancelled while waiting for AgentJob '{agentJobId}' assignment preparation. "
-                + $"PreparedCount={PreparedCount(agentJobId)}.");
+                + $"PreparedCount={PreparedCount(agentJobId)}.",
+                cancellationToken);
         }
         finally
         {
@@ -82,6 +346,59 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
                 RemoveSignal(agentJobId, signal);
         }
     }
+
+    private async Task<DispatchRunnerAccepted> WaitForRunnerAcceptedCoreAsync(
+        string agentJobId,
+        TimeSpan timeout,
+        Action<TimeSpan>? advance,
+        bool waitForPreparedBoundary,
+        CancellationToken cancellationToken)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(timeout, TimeSpan.Zero);
+
+        if (_acceptedSnapshots.TryRemove(agentJobId, out var snapshot))
+            return snapshot;
+
+        var signal = AcquireAcceptedSignal(agentJobId);
+        try
+        {
+            if (_acceptedSnapshots.TryRemove(agentJobId, out snapshot))
+                signal.Completion.TrySetResult(snapshot);
+
+            signal.WaiterRegistered.TrySetResult();
+            var wait = signal.Completion.Task.WaitAsync(timeout, _timeProvider, cancellationToken);
+            if (advance is not null && waitForPreparedBoundary)
+                await WaitForPreparedBoundaryAsync(agentJobId, cancellationToken);
+            advance?.Invoke(timeout);
+            var accepted = await wait;
+            _acceptedSnapshots.TryRemove(agentJobId, out _);
+            return accepted;
+        }
+        catch (TimeoutException)
+        {
+            throw new TimeoutException(
+                $"Timed out waiting for AgentJob '{agentJobId}' runner acceptance after {timeout}. "
+                + $"AcceptedSnapshot={_acceptedSnapshots.ContainsKey(agentJobId)}.");
+        }
+        finally
+        {
+            if (signal.ReleaseWaiter())
+                RemoveAcceptedSignal(agentJobId, signal);
+        }
+    }
+
+    private async Task WaitForPreparedBoundaryAsync(
+        string agentJobId,
+        CancellationToken cancellationToken)
+    {
+        var boundary = _preparedBoundarySignals.GetOrAdd(
+            agentJobId,
+            static _ => NewBoundarySignal());
+        await boundary.Task.WaitAsync(cancellationToken);
+    }
+
+    private static TaskCompletionSource NewBoundarySignal() =>
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private PreparedSignal AcquireSignal(string agentJobId)
     {
@@ -100,6 +417,42 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
     private void RemoveSignal(string agentJobId, PreparedSignal signal) =>
         ((ICollection<KeyValuePair<string, PreparedSignal>>)_preparedSignals)
             .Remove(new KeyValuePair<string, PreparedSignal>(agentJobId, signal));
+
+    private ReadySignal AcquireReadySignal(string agentJobId)
+    {
+        while (true)
+        {
+            var signal = _readySignals.GetOrAdd(
+                agentJobId,
+                static _ => new ReadySignal());
+            if (signal.TryAcquireWaiter())
+                return signal;
+
+            RemoveReadySignal(agentJobId, signal);
+        }
+    }
+
+    private void RemoveReadySignal(string agentJobId, ReadySignal signal) =>
+        ((ICollection<KeyValuePair<string, ReadySignal>>)_readySignals)
+            .Remove(new KeyValuePair<string, ReadySignal>(agentJobId, signal));
+
+    private AcceptedSignal AcquireAcceptedSignal(string agentJobId)
+    {
+        while (true)
+        {
+            var signal = _acceptedSignals.GetOrAdd(
+                agentJobId,
+                static _ => new AcceptedSignal());
+            if (signal.TryAcquireWaiter())
+                return signal;
+
+            RemoveAcceptedSignal(agentJobId, signal);
+        }
+    }
+
+    private void RemoveAcceptedSignal(string agentJobId, AcceptedSignal signal) =>
+        ((ICollection<KeyValuePair<string, AcceptedSignal>>)_acceptedSignals)
+            .Remove(new KeyValuePair<string, AcceptedSignal>(agentJobId, signal));
 
     private sealed class PreparedSignal
     {
@@ -138,4 +491,83 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
             }
         }
     }
+
+    private sealed class ReadySignal
+    {
+        private readonly object _gate = new();
+        private int _waiters;
+        private bool _retired;
+
+        public TaskCompletionSource<DispatchReadyForPoll> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource WaiterRegistered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool TryAcquireWaiter()
+        {
+            lock (_gate)
+            {
+                if (_retired)
+                    return false;
+
+                _waiters++;
+                return true;
+            }
+        }
+
+        public bool ReleaseWaiter()
+        {
+            lock (_gate)
+            {
+                _waiters--;
+                if (_waiters != 0)
+                    return false;
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
+
+    private sealed class AcceptedSignal
+    {
+        private readonly object _gate = new();
+        private int _waiters;
+        private bool _retired;
+
+        public TaskCompletionSource<DispatchRunnerAccepted> Completion { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource WaiterRegistered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public bool TryAcquireWaiter()
+        {
+            lock (_gate)
+            {
+                if (_retired)
+                    return false;
+
+                _waiters++;
+                return true;
+            }
+        }
+
+        public bool ReleaseWaiter()
+        {
+            lock (_gate)
+            {
+                _waiters--;
+                if (_waiters != 0)
+                    return false;
+
+                _retired = true;
+                return true;
+            }
+        }
+    }
 }
+
+public sealed record DispatchReadyForPoll(string AgentJobId, string RunnerId, string WorkId);
+public sealed record DispatchRunnerAccepted(string AgentJobId, string RunnerId, string WorkId);

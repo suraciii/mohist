@@ -25,10 +25,12 @@ export interface AgentInfo {
   id: string
   projectId: string
   name: string
+  avatar?: string | null
   description: string
   instructions: string
   agentConfig: Record<string, unknown> | null
   skills: string[]
+  allowedSubagentAgentIds?: string[]
   maxConcurrentRuns: number | null
   status: string
   createdAt: string
@@ -38,19 +40,23 @@ export interface AgentInfo {
 
 export interface AgentCreateRequest {
   name: string
+  avatar?: string | null
   description?: string | null
   instructions: string
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  allowedSubagentAgentIds?: string[] | null
   maxConcurrentRuns?: number | null
 }
 
 export interface AgentUpdateRequest {
   name?: string | null
+  avatar?: string | null
   description?: string | null
   instructions?: string | null
   agentConfig?: Record<string, unknown> | null
   skills?: string[] | null
+  allowedSubagentAgentIds?: string[] | null
   maxConcurrentRuns?: number | null
 }
 

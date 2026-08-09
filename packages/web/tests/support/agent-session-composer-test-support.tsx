@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import { render } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../src/entities/project'
@@ -8,6 +9,10 @@ import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
 } from '../../src/entities/agent'
+import type { IssueListItem } from '../../src/entities/issue'
+import type { EpicWithProgress } from '../../src/entities/epic'
+import type { Repository } from '../../src/entities/project'
+import type { Workspace } from '../../src/entities/workspace'
 import {
   AgentSessionComposerPage,
   type AgentSessionComposerDataHook,
@@ -21,6 +26,14 @@ export const state = {
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
+  repositoriesData: [] as Repository[],
+  workspacesData: [] as Workspace[],
+  issuesData: [] as IssueListItem[],
+  epicsData: [] as EpicWithProgress[],
+  repositoriesError: false,
+  repositoryRetryCalls: 0,
+  workspacesError: false,
+  workspaceRetryCalls: 0,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -36,6 +49,8 @@ const components: AgentSessionComposerPageComponents = {
 }
 
 const dataHook: AgentSessionComposerDataHook = () => {
+  const [, setRepositoryRetryVersion] = useState(0)
+  const [, setWorkspaceRetryVersion] = useState(0)
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
@@ -63,6 +78,23 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
+    repositories: state.repositoriesData,
+    repositoriesError: state.repositoriesError,
+    retryRepositories: () => {
+      state.repositoryRetryCalls += 1
+      state.repositoriesError = false
+      setRepositoryRetryVersion((version) => version + 1)
+    },
+    workspaces: state.workspacesData,
+    workspacesError: state.workspacesError,
+    retryWorkspaces: () => {
+      state.workspaceRetryCalls += 1
+      state.workspacesError = false
+      setWorkspaceRetryVersion((version) => version + 1)
+    },
+    issues: state.issuesData,
+    epics: state.epicsData,
+    contextLoading: false,
   }
 }
 
@@ -85,6 +117,36 @@ export function makeAgent(id: string, overrides: Partial<AgentInfo> = {}): Agent
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
   }
+}
+
+export function makeWorkspace(name: string, repositories: string[] = ['main']): Workspace {
+  return {
+    projectId: 'proj-1',
+    name,
+    origin: { kind: 'manual' },
+    repositories,
+    status: 'active',
+    home: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    boundSessionCount: 0,
+  }
+}
+
+export function resetState() {
+  state.agentsData = []
+  state.availabilityData = []
+  state.launchCalls.length = 0
+  state.launchError = null
+  state.launchFailuresRemaining = -1
+  state.launchResponse = null
+  state.repositoriesData = []
+  state.repositoriesError = false
+  state.repositoryRetryCalls = 0
+  state.workspacesError = false
+  state.workspaceRetryCalls = 0
+  state.workspacesData = [makeWorkspace('workspace-1')]
+  state.issuesData = []
+  state.epicsData = []
 }
 
 function LocationProbe() {

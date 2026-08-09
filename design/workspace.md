@@ -71,10 +71,14 @@ there is no separate global creation flow:
   `Origin = { issue, n }`, with Name derived as `issue-<n>`. Retry and rerun
   reuse the same Workspace.
 - Interactive path: the first trigger from an ingress context, such as a Slack
-  channel or Web conversation, creates the corresponding Origin. Its Name is
+  channel, creates the corresponding Origin. Its Name is
   derived from the context and made unique within the Project.
 - Manual path: `mo workspace create <name>` creates a Workspace explicitly with
   `Origin = { manual }`.
+- Generic Web Composer does not use `Origin.Web` implicit conversation
+  provisioning. It binds only to an active named Workspace explicitly selected
+  by the user. If none is available, the user must explicitly create an
+  `Origin = { manual }` Workspace and select it in the Composer.
 
 Creation establishes only the entity and Repository references. The Runner
 materializes the directory on first dispatch. A manual Name is supplied by the
@@ -109,6 +113,10 @@ user and must be unique within the Project.
   Session to an existing Workspace. Without `--workspace`, it binds to the
   current Project's default CLI Workspace, provisioning one when necessary;
   the launch response returns its actual Name.
+- Generic Web Composer accepts only an explicitly selected active named
+  Workspace. A launch without that binding is rejected; it never creates a
+  hidden Workspace or binds a Session to an identity returned only in the
+  response.
 
 ### Scheduling Affinity and Rematerialization
 

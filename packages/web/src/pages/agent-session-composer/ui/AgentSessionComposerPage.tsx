@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
 import {
   getAgentAvailabilityFeedback,
   getAgentLaunchErrorFeedback,
@@ -15,7 +15,16 @@ import type {
   AgentSessionLaunchContext,
 } from '../../../entities/agent'
 import { extractAttachmentIds } from '../../../entities/issue'
+import type { IssueListItem } from '../../../entities/issue'
+import { useIssues } from '../../../entities/issue'
+import type { EpicWithProgress } from '../../../entities/epic'
+import { useEpics } from '../../../entities/epic'
 import { useProject, useProjectPath } from '../../../entities/project'
+import type { Repository } from '../../../entities/project'
+import { useRepositories } from '../../../entities/project'
+import type { Workspace } from '../../../entities/workspace'
+import { useWorkspaces } from '../../../entities/workspace'
+import { CreateWorkspaceDialog } from '../../../features/create-workspace'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
 import { AttachmentResults, type AttachmentResultAccepted, type AttachmentResultRejected } from '../../../shared/ui/attachment-results'
@@ -30,6 +39,7 @@ interface ContextRef {
   type: 'issue' | 'epic' | 'repository' | 'workspace'
   label: string
   value: string
+  workspaceField?: 'workspace' | 'workspacePath'
 }
 
 function ContextRefChip({ refItem, onRemove }: { refItem: ContextRef; onRemove: () => void }) {
@@ -49,6 +59,114 @@ function ContextRefChip({ refItem, onRemove }: { refItem: ContextRef; onRemove: 
         <XIcon className="size-3" />
       </button>
     </span>
+  )
+}
+
+function ContextPicker({
+  contextRefs,
+  repositories,
+  workspaces,
+  workspacesError,
+  issues,
+  epics,
+  loading,
+  onChange,
+  onCreateWorkspace,
+}: {
+  contextRefs: ContextRef[]
+  repositories: Repository[]
+  workspaces: Workspace[]
+  issues: IssueListItem[]
+  epics: EpicWithProgress[]
+  loading: boolean
+  workspacesError: boolean
+  onChange: (type: ContextRef['type'], value: string) => void
+  onCreateWorkspace: () => void
+}) {
+  const selectedValue = (type: ContextRef['type']) => contextRefs.find((item) => item.type === type)?.value ?? ''
+  const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2" data-testid="launch-context-picker">
+      <div className="space-y-1.5">
+        <Label htmlFor="launch-repository">Repository</Label>
+        <select
+          id="launch-repository"
+          aria-label="Repository"
+          data-testid="launch-repository"
+          className={selectClass}
+          value={selectedValue('repository')}
+          onChange={(event) => onChange('repository', event.target.value)}
+          disabled={loading}
+        >
+          <option value="">No repository selected</option>
+          {repositories.map((repository) => <option key={repository.name} value={repository.name}>{repository.name}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="launch-workspace">Workspace</Label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCreateWorkspace}
+            disabled={loading}
+            data-testid="create-workspace-from-composer"
+          >
+            <PlusIcon className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+            Create
+          </Button>
+        </div>
+        <select
+          id="launch-workspace"
+          aria-label="Workspace"
+          data-testid="launch-workspace"
+          className={selectClass}
+          value={selectedValue('workspace')}
+          onChange={(event) => onChange('workspace', event.target.value)}
+          disabled={loading}
+        >
+          <option value="">No workspace selected</option>
+          {workspaces.map((workspace) => <option key={workspace.name} value={workspace.name}>{workspace.name}</option>)}
+        </select>
+        {workspaces.length === 0 && !loading && !workspacesError && (
+          <p className="text-xs text-muted-foreground" data-testid="composer-no-workspaces">
+            No active workspaces.
+          </p>
+        )}
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="launch-issue">Issue</Label>
+        <select
+          id="launch-issue"
+          aria-label="Issue"
+          data-testid="launch-issue"
+          className={selectClass}
+          value={selectedValue('issue')}
+          onChange={(event) => onChange('issue', event.target.value)}
+          disabled={loading}
+        >
+          <option value="">No Issue selected</option>
+          {issues.map((issue) => <option key={issue.number} value={String(issue.number)}>#{issue.number} {issue.title}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="launch-epic">Epic</Label>
+        <select
+          id="launch-epic"
+          aria-label="Epic"
+          data-testid="launch-epic"
+          className={selectClass}
+          value={selectedValue('epic')}
+          onChange={(event) => onChange('epic', event.target.value)}
+          disabled={loading}
+        >
+          <option value="">No Epic selected</option>
+          {epics.map((epic) => <option key={epic.number} value={String(epic.number)}>#{epic.number} {epic.title}</option>)}
+        </select>
+      </div>
+    </div>
   )
 }
 
@@ -174,19 +292,52 @@ export interface AgentSessionComposerData {
   availability: AgentAvailabilitySummaryEntry[] | undefined
   availabilityLoading: boolean
   launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
+  repositories?: Repository[]
+  repositoriesError?: boolean
+  retryRepositories?: () => void | Promise<unknown>
+  workspaces?: Workspace[]
+  workspacesError?: boolean
+  retryWorkspaces?: () => void | Promise<unknown>
+  issues?: IssueListItem[]
+  epics?: EpicWithProgress[]
+  contextLoading?: boolean
 }
 
 export type AgentSessionComposerDataHook = () => AgentSessionComposerData
 
 const useDefaultData: AgentSessionComposerDataHook = () => {
+  const { projectId } = useProject()
   const { data: agents, isLoading: agentsLoading } = useAgents()
   const { data: availability, isLoading: availabilityLoading } = useAgentListAvailability()
+  const {
+    data: repositories,
+    isLoading: repositoriesLoading,
+    isError: repositoriesError,
+    refetch: refetchRepositories,
+  } = useRepositories(projectId ?? undefined)
+  const {
+    data: workspaces,
+    isLoading: workspacesLoading,
+    isError: workspacesError,
+    refetch: refetchWorkspaces,
+  } = useWorkspaces('active')
+  const { data: issues, isLoading: issuesLoading } = useIssues({ projectId: projectId ?? undefined, all: false })
+  const { data: epics, isLoading: epicsLoading } = useEpics()
   return {
     agents,
     agentsLoading,
     availability,
     availabilityLoading,
     launchMutation: useLaunchAgentSession(),
+    repositories,
+    repositoriesError,
+    retryRepositories: () => refetchRepositories(),
+    workspaces,
+    workspacesError,
+    retryWorkspaces: () => refetchWorkspaces(),
+    issues,
+    epics,
+    contextLoading: repositoriesLoading || workspacesLoading || issuesLoading || epicsLoading,
   }
 }
 
@@ -208,7 +359,22 @@ export function AgentSessionComposerPage({
   const { projectId } = useProject()
   const [searchParams] = useSearchParams()
 
-  const { agents, agentsLoading, availability, availabilityLoading, launchMutation } = dataHook()
+  const {
+    agents,
+    agentsLoading,
+    availability,
+    availabilityLoading,
+    launchMutation,
+    repositories = [],
+    repositoriesError = false,
+    retryRepositories,
+    workspaces = [],
+    workspacesError = false,
+    retryWorkspaces,
+    issues = [],
+    epics = [],
+    contextLoading = false,
+  } = dataHook()
 
   const launchableAgents = useMemo(
     () => agents?.filter((a) => a.status !== 'archived') ?? [],
@@ -224,13 +390,20 @@ export function AgentSessionComposerPage({
     if (epic) refs.push({ type: 'epic', label: `Epic: ${epic}`, value: epic })
     const repo = searchParams.get('repo')
     if (repo) refs.push({ type: 'repository', label: `Repository: ${repo}`, value: repo })
+    const workspace = searchParams.get('workspace')
     const ws = searchParams.get('ws')
-    if (ws) refs.push({ type: 'workspace', label: `Workspace: ${ws}`, value: ws })
+    if (workspace) {
+      refs.push({ type: 'workspace', label: `Workspace: ${workspace}`, value: workspace, workspaceField: 'workspace' })
+    } else if (ws) {
+      refs.push({ type: 'workspace', label: `Workspace: ${ws}`, value: ws, workspaceField: 'workspacePath' })
+    }
     return refs
   })
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
+  const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | null>(null)
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
     accepted: AttachmentResultAccepted[]
     rejected: AttachmentResultRejected[]
@@ -253,19 +426,85 @@ export function AgentSessionComposerPage({
   const isUnknownReadiness = readinessConclusion === 'Unknown'
   const launchBlockedByReadiness = isNeedsSetup
 
+  const removeRef = useCallback((index: number) => {
+    setContextRefs((prev) => prev.filter((_, i) => i !== index))
+  }, [])
+
+  const updateContextRef = useCallback((type: ContextRef['type'], value: string) => {
+    setContextRefs((previous) => {
+      const withoutType = previous.filter((item) => item.type !== type)
+      if (!value) return withoutType
+      const label = type === 'issue'
+        ? `Issue #${value}`
+        : type === 'epic'
+          ? `Epic: ${value}`
+          : type === 'repository'
+            ? `Repository: ${value}`
+            : `Workspace: ${value}`
+      return [...withoutType, { type, label, value, ...(type === 'workspace' ? { workspaceField: 'workspace' as const } : {}) }]
+    })
+  }, [])
+
+  const contextByType = useMemo(
+    () => new Map(contextRefs.map((ref) => [ref.type, ref] as const)),
+    [contextRefs],
+  )
+  const activeWorkspaces = useMemo(
+    () => {
+      const active = workspaces.filter((workspace) => workspace.status === 'active')
+      if (!createdWorkspace || active.some((workspace) => workspace.name === createdWorkspace.name)) return active
+      return [...active, createdWorkspace]
+    },
+    [createdWorkspace, workspaces],
+  )
+  const selectedRepository = contextByType.get('repository')?.value ?? null
+  const selectedWorkspaceRef = contextByType.get('workspace')
+  const selectedWorkspace = selectedWorkspaceRef?.workspaceField === 'workspace'
+    ? selectedWorkspaceRef.value
+    : null
+  const selectedWorkspaceEntry = activeWorkspaces.find((workspace) => workspace.name === selectedWorkspace)
+  const compatibleRepositories = useMemo(
+    () => selectedWorkspaceEntry
+      ? repositories.filter((repository) => selectedWorkspaceEntry.repositories.some(
+        (name) => name.localeCompare(repository.name, undefined, { sensitivity: 'accent' }) === 0,
+      ))
+      : [],
+    [repositories, selectedWorkspaceEntry],
+  )
+  const repositoryScopeCompatible = !selectedRepository || Boolean(
+    selectedWorkspaceEntry?.repositories.some(
+      (name) => name.localeCompare(selectedRepository, undefined, { sensitivity: 'accent' }) === 0,
+    ),
+  )
+  const initialWorkspaceRepositoryNames = useMemo(
+    () => selectedRepository ? [selectedRepository] : [],
+    [selectedRepository],
+  )
+  const handleWorkspaceCreated = useCallback((workspace: Workspace) => {
+    setCreatedWorkspace(workspace)
+    const keepRepository = selectedRepository !== null && workspace.repositories.some(
+      (name) => name.localeCompare(selectedRepository, undefined, { sensitivity: 'accent' }) === 0,
+    )
+    setContextRefs((previous) => [
+      ...previous.filter((item) => item.type !== 'workspace' && (item.type !== 'repository' || keepRepository)),
+      { type: 'workspace', label: `Workspace: ${workspace.name}`, value: workspace.name, workspaceField: 'workspace' },
+    ])
+  }, [selectedRepository])
+  const selectedIssue = contextByType.get('issue')?.value ?? null
+  const selectedEpic = contextByType.get('epic')?.value ?? null
   const promptEmpty = !prompt.trim()
   const attachmentIds = useMemo(() => extractAttachmentIds(prompt), [prompt])
   const showPromptError = promptTouched && promptEmpty && attachmentIds.length === 0
-
+  const workspaceScopeConfirmed = Boolean(selectedWorkspaceEntry)
   const canLaunch = (!promptEmpty || attachmentIds.length > 0)
     && !!selectedAgentRef
     && !isArchived
     && !launchBlockedByReadiness
+    && workspaceScopeConfirmed
+    && repositoryScopeCompatible
+    && !repositoriesError
+    && !workspacesError
     && !launchMutation.isPending
-
-  const removeRef = useCallback((index: number) => {
-    setContextRefs((prev) => prev.filter((_, i) => i !== index))
-  }, [])
 
   const handleLaunch = useCallback(() => {
     if (!canLaunch || !selectedAgent) return
@@ -278,7 +517,10 @@ export function AgentSessionComposerPage({
         else context.epicNumber = number
       }
       else if (ref.type === 'repository') context.repository = ref.value
-      else if (ref.type === 'workspace') context.workspacePath = ref.value
+      else if (ref.type === 'workspace') {
+        if (ref.workspaceField === 'workspace') context.workspace = ref.value
+        else context.workspacePath = ref.value
+      }
     }
     const hasContext = Object.keys(context).length > 0
 
@@ -451,16 +693,112 @@ export function AgentSessionComposerPage({
           )}
         </div>
 
-        {contextRefs.length > 0 && (
-          <div className="space-y-1.5">
-            <Label>Context References</Label>
-            <div className="flex flex-wrap gap-2" data-testid="context-refs-list">
+        <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+          <div>
+            <h2 className="text-sm font-medium text-foreground">Execution context</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">Choose the facts that should be attached to this Job.</p>
+          </div>
+          <ContextPicker
+            contextRefs={contextRefs}
+            repositories={compatibleRepositories}
+            workspaces={activeWorkspaces}
+            workspacesError={workspacesError}
+            issues={issues}
+            epics={epics}
+            loading={contextLoading}
+            onChange={updateContextRef}
+            onCreateWorkspace={() => setCreateWorkspaceOpen(true)}
+          />
+          {repositoriesError && (
+            <div
+              role="alert"
+              data-testid="composer-repositories-error"
+              className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
+            >
+              <span className="flex items-center gap-1.5">
+                <AlertTriangleIcon className="size-3.5 shrink-0" />
+                Repositories failed to load.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => retryRepositories?.()}
+                data-testid="retry-composer-repositories"
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Retry
+              </Button>
+            </div>
+          )}
+          {workspacesError && (
+            <div
+              role="alert"
+              data-testid="composer-workspaces-error"
+              className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
+            >
+              <span className="flex items-center gap-1.5">
+                <AlertTriangleIcon className="size-3.5 shrink-0" />
+                Workspaces failed to load.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => retryWorkspaces?.()}
+                data-testid="retry-composer-workspaces"
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Retry
+              </Button>
+            </div>
+          )}
+          {selectedAgent && !workspaceScopeConfirmed && (
+            <div
+              data-testid="workspace-scope-blocked"
+              className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>Workspace scope is required. Select an active Workspace before launching this Job.</span>
+            </div>
+          )}
+          {selectedAgent && selectedRepository && !repositoryScopeCompatible && (
+            <div
+              data-testid="repository-scope-blocked"
+              className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+            >
+              <AlertTriangleIcon className="mt-0.5 size-3.5 shrink-0" />
+              <span>{selectedWorkspaceEntry
+                ? 'Repository is not attached to the selected Workspace. Choose a compatible repository before launching.'
+                : 'Select an active Workspace before choosing a Repository.'}</span>
+            </div>
+          )}
+          {contextRefs.length > 0 && (
+            <div className="flex flex-wrap gap-2 border-t border-border pt-3" data-testid="context-refs-list">
               {contextRefs.map((ref, i) => (
                 <ContextRefChip key={`${ref.type}-${ref.value}`} refItem={ref} onRemove={() => removeRef(i)} />
               ))}
             </div>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-4" data-testid="launch-scope-review">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-medium text-blue-950">Start session review</h2>
+            <Badge variant="outline" className="border-blue-300 text-[10px] text-blue-800">New Job only</Badge>
           </div>
-        )}
+          <dl className="mt-3 grid gap-x-4 gap-y-2 text-xs sm:grid-cols-2">
+            <div><dt className="text-blue-800/70">Agent</dt><dd data-testid="scope-agent" className="font-medium text-blue-950">{selectedAgent?.name ?? 'Not selected'}</dd></div>
+            <div><dt className="text-blue-800/70">Repository</dt><dd data-testid="scope-repository" className="font-medium text-blue-950">{selectedRepository ?? 'Not selected'}</dd></div>
+            <div><dt className="text-blue-800/70">Workspace</dt><dd data-testid="scope-workspace" className="font-medium text-blue-950">{selectedWorkspaceEntry?.name ?? (selectedWorkspaceRef ? `${selectedWorkspaceRef.value} (not confirmed)` : 'Not selected; choose an active Workspace')}</dd></div>
+            <div><dt className="text-blue-800/70">Issue</dt><dd data-testid="scope-issue" className="font-medium text-blue-950">{selectedIssue ? `#${selectedIssue}` : 'Not selected'}</dd></div>
+            <div><dt className="text-blue-800/70">Epic</dt><dd data-testid="scope-epic" className="font-medium text-blue-950">{selectedEpic ? `#${selectedEpic}` : 'Not selected'}</dd></div>
+            <div><dt className="text-blue-800/70">Permission impact</dt><dd data-testid="scope-permissions" className="font-medium text-blue-950">{selectedWorkspaceEntry ? `Runtime-managed access in ${selectedWorkspaceEntry.name}` : 'Cannot review access until a Workspace is selected'}</dd></div>
+          </dl>
+          <p className="mt-3 border-t border-blue-200 pt-2 text-[10px] leading-relaxed text-blue-900/80">
+            Saving the Agent changes future Jobs only. This review records launch facts; it does not change the Agent definition or claim a Server permission policy.
+          </p>
+        </div>
 
         <div className="space-y-1.5">
           <Label htmlFor="prompt">
@@ -511,11 +849,25 @@ export function AgentSessionComposerPage({
             data-testid="launch-button"
             onClick={handleLaunch}
             disabled={!canLaunch}
-            title={launchBlockedByReadiness ? 'Readiness is Needs setup — fix the gaps first.' : undefined}
+            title={launchBlockedByReadiness
+              ? 'Readiness is Needs setup — fix the gaps first.'
+              : !workspaceScopeConfirmed
+                ? 'Select an active Workspace before launching.'
+                : !repositoryScopeCompatible
+                  ? 'Select a repository attached to the Workspace.'
+                  : undefined}
           >
             {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
           </Button>
         </div>
+        {createWorkspaceOpen && (
+          <CreateWorkspaceDialog
+            open
+            onClose={() => setCreateWorkspaceOpen(false)}
+            initialRepositoryNames={initialWorkspaceRepositoryNames}
+            onCreated={handleWorkspaceCreated}
+          />
+        )}
       </div>
     </div>
   )
