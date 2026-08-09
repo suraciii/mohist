@@ -350,6 +350,7 @@ export function AgentDetailPage({
   const readinessConclusion = readiness?.conclusion ?? 'Unknown'
   const isNeedsSetup = readinessConclusion === 'Needs setup'
   const isUnknownReadiness = readinessConclusion === 'Unknown'
+  const isNotExecutable = isArchived || isNeedsSetup
   const launchBlockedByReadiness = isNeedsSetup
 
   const runningSessions = useMemo(
@@ -416,7 +417,7 @@ export function AgentDetailPage({
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-4 min-w-0">
             <div className={`flex items-center justify-center size-12 rounded-xl shrink-0 ${isArchived ? 'bg-muted' : 'bg-blue-50'}`}>
-              <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+              {agent.avatar?.trim() || <BotIcon className={`size-6 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -442,6 +443,9 @@ export function AgentDetailPage({
               <p className="text-xs text-muted-foreground mt-0.5">
                 {model ? `Model · ${model}` : 'Model · Default'}
                 {variant && ` · ${variant}`}
+              </p>
+              <p data-testid="agent-detail-executability" className={`text-xs mt-0.5 ${isNotExecutable ? 'text-red-700' : readinessConclusion === 'Ready' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                {isNotExecutable ? 'Not executable' : readinessConclusion === 'Ready' ? 'Ready to execute' : 'Executability unknown'}
               </p>
             </div>
           </div>
@@ -563,8 +567,20 @@ export function AgentDetailPage({
                     {agent.maxConcurrentRuns ?? 'Unlimited'}
                   </span>
                 </div>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="text-xs text-muted-foreground">Allowed subagents</span>
+                  <span data-testid="agent-detail-subagents" className="text-right text-xs font-medium text-foreground">
+                    {agent.allowedSubagentAgentIds?.length ? agent.allowedSubagentAgentIds.join(', ') : 'None configured'}
+                  </span>
+                </div>
+                <div className="border-t border-border pt-2" data-testid="agent-detail-permissions">
+                  <p className="text-xs font-medium text-foreground">Permissions</p>
+                  <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground">
+                    Runtime-managed. The Start session review shows the repository and workspace scope for each new Job.
+                  </p>
+                </div>
                 <p data-testid="agent-detail-edit-timing" className="border-t border-border pt-2 text-[10px] leading-relaxed text-muted-foreground">
-                  Instructions, Runtime, Model, Variant, and Skills edits apply only to Jobs created after saving. Executions already in progress keep the configuration from launch.
+                  Purpose, instructions, Runtime, model, variant, skills, subagents, and concurrency edits apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration captured at launch.
                 </p>
               </div>
             </div>

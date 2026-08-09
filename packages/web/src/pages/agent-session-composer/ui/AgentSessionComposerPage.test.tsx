@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { makeAgent, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
+import { IssueHealth, IssueStatus } from '../../../entities/issue'
+import { EpicStatus } from '../../../entities/epic'
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
@@ -10,6 +12,10 @@ describe('AgentSessionComposerPage', () => {
     state.launchError = null
     state.launchFailuresRemaining = -1
     state.launchResponse = null
+    state.repositoriesData = []
+    state.workspacesData = []
+    state.issuesData = []
+    state.epicsData = []
   })
 
   afterEach(() => {
@@ -145,6 +151,64 @@ describe('AgentSessionComposerPage', () => {
     expect(state.launchCalls[0].body).not.toHaveProperty('variant')
     expect(state.launchCalls[0].body).not.toHaveProperty('skills')
     expect(state.launchCalls[0].body).not.toHaveProperty('maxConcurrentRuns')
+  })
+
+  it('lets the user select canonical task context and reviews its permission impact', async () => {
+    state.agentsData = [makeAgent('agent-1', { name: 'Review Agent' })]
+    state.repositoriesData = [{ name: 'web', gitUrl: 'https://example.test/web.git', baseBranch: 'main', isDefault: true }]
+    state.workspacesData = [{
+      projectId: 'proj-1',
+      name: 'review-workspace',
+      origin: { kind: 'manual' },
+      repositories: ['web'],
+      status: 'active',
+      home: null,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      boundSessionCount: 0,
+    }]
+    state.issuesData = [{
+      number: 42,
+      title: 'Review task',
+      projectId: 'proj-1',
+      status: IssueStatus.Backlog,
+      health: IssueHealth.Active,
+      labels: {},
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      isDraft: false,
+      canStart: true,
+      blocker: null,
+    }]
+    state.epicsData = [{
+      number: 7,
+      title: 'Quality',
+      description: '',
+      projectId: 'proj-1',
+      priority: 'p2',
+      status: EpicStatus.Idle,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+      progress: { deliveredCount: 0, totalIssueCount: 0, blockedIssues: [], activeIssues: [], nextIssue: null, nextIssueReason: null, readyToMarkDone: false },
+    }]
+    renderPage(['/agent-sessions/new?agent=agent-1'])
+
+    fireEvent.change(await screen.findByTestId('launch-repository'), { target: { value: 'web' } })
+    fireEvent.change(screen.getByTestId('launch-workspace'), { target: { value: 'review-workspace' } })
+    fireEvent.change(screen.getByTestId('launch-issue'), { target: { value: '42' } })
+    fireEvent.change(screen.getByTestId('launch-epic'), { target: { value: '7' } })
+
+    expect(screen.getByTestId('scope-repository')).toHaveTextContent('web')
+    expect(screen.getByTestId('scope-workspace')).toHaveTextContent('review-workspace')
+    expect(screen.getByTestId('scope-issue')).toHaveTextContent('#42')
+    expect(screen.getByTestId('scope-epic')).toHaveTextContent('#7')
+    expect(screen.getByTestId('scope-permissions')).toHaveTextContent('review-workspace')
+
+    fireEvent.change(screen.getByTestId('prompt-textarea'), { target: { value: 'Review the task' } })
+    fireEvent.click(screen.getByTestId('launch-button'))
+    await waitFor(() => expect(state.launchCalls).toHaveLength(1))
+    expect(state.launchCalls[0].body).toMatchObject({
+      context: { repository: 'web', workspace: 'review-workspace', issueNumber: 42, epicNumber: 7 },
+    })
   })
 
   it('sends attachment ids explicitly and displays mixed acceptance results', async () => {

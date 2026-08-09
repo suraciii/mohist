@@ -48,6 +48,7 @@ function AgentRow({
   const lifecycle = useMemo(() => getLifecycleStatus(agent), [agent])
   const isArchived = agent.status === 'archived'
   const readiness = agent.readiness?.conclusion ?? 'Unknown'
+  const isNotExecutable = isArchived || readiness === 'Needs setup'
   const availabilityFeedback = !isArchived && availability && !availability.canStartNow
     ? getAgentAvailabilityFeedback(availability.waitingReason)
     : null
@@ -67,8 +68,8 @@ function AgentRow({
       }`}
     >
       <div className="flex items-center gap-4">
-        <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
-          <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />
+            <div className="flex items-center justify-center size-10 rounded-lg bg-muted shrink-0">
+          {agent.avatar?.trim() || <BotIcon className={`size-5 ${isArchived ? 'text-muted-foreground' : 'text-blue-600'}`} />}
         </div>
 
         <div className="flex min-w-0 flex-1 items-center gap-4">
@@ -116,6 +117,13 @@ function AgentRow({
           className={readiness === 'Ready' ? 'text-emerald-700' : readiness === 'Needs setup' ? 'text-amber-700' : 'text-muted-foreground'}
         >
           Readiness: {readiness}
+        </span>
+        <span
+          data-testid={`agent-executability-${agent.id}`}
+          data-state={isNotExecutable ? 'not-executable' : readiness === 'Ready' ? 'executable' : 'unknown'}
+          className={isNotExecutable ? 'font-medium text-red-700' : readiness === 'Ready' ? 'text-emerald-700' : 'text-muted-foreground'}
+        >
+          {isNotExecutable ? 'Not executable' : readiness === 'Ready' ? 'Executable' : 'Executable: Unknown'}
         </span>
         <div>
           <span

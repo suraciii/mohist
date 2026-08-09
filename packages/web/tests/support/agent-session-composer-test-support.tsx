@@ -8,6 +8,10 @@ import type {
   AgentSessionLaunchContext,
   AgentSessionLaunchResponse,
 } from '../../src/entities/agent'
+import type { IssueListItem } from '../../src/entities/issue'
+import type { EpicWithProgress } from '../../src/entities/epic'
+import type { Repository } from '../../src/entities/project'
+import type { Workspace } from '../../src/entities/workspace'
 import {
   AgentSessionComposerPage,
   type AgentSessionComposerDataHook,
@@ -21,6 +25,10 @@ export const state = {
   launchError: null as { error: string; code?: string } | null,
   launchFailuresRemaining: -1,
   launchResponse: null as Partial<AgentSessionLaunchResponse> | null,
+  repositoriesData: [] as Repository[],
+  workspacesData: [] as Workspace[],
+  issuesData: [] as IssueListItem[],
+  epicsData: [] as EpicWithProgress[],
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -63,6 +71,11 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availability: state.availabilityData,
     availabilityLoading: false,
     launchMutation,
+    repositories: state.repositoriesData,
+    workspaces: state.workspacesData,
+    issues: state.issuesData,
+    epics: state.epicsData,
+    contextLoading: false,
   }
 }
 

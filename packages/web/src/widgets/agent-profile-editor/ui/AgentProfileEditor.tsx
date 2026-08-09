@@ -1,14 +1,17 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BotIcon,
   Loader2Icon,
   ArchiveIcon,
+  CheckIcon,
+  ListIcon,
 } from 'lucide-react'
 import {
   useCreateAgent,
   useUpdateAgent,
   useArchiveAgent,
+  useAgents,
   readAgentModelAndVariant,
   writeAgentModelAndVariant,
 } from '../../../entities/agent'
@@ -21,6 +24,7 @@ import { Input } from '@/shared/ui/components/input'
 import { Textarea } from '@/shared/ui/components/textarea'
 import { Label } from '@/shared/ui/components/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/shared/ui/components/dialog'
+import { AGENT_TASK_FOCUSES, recommendModels, type AgentTaskFocus } from '../model/model-recommendations'
 
 interface Props {
   agent?: AgentInfo | null
@@ -34,6 +38,7 @@ export interface AgentProfileEditorOperations {
   createAgent: Pick<ReturnType<typeof useCreateAgent>, 'mutate' | 'isPending'>
   updateAgent: Pick<ReturnType<typeof useUpdateAgent>, 'mutate' | 'isPending'>
   archiveAgent: Pick<ReturnType<typeof useArchiveAgent>, 'mutate' | 'isPending'>
+  availableAgents?: AgentInfo[]
 }
 
 export type AgentProfileEditorOperationsHook = () => AgentProfileEditorOperations
@@ -42,11 +47,13 @@ const useDefaultOperations: AgentProfileEditorOperationsHook = () => ({
   createAgent: useCreateAgent(),
   updateAgent: useUpdateAgent(),
   archiveAgent: useArchiveAgent(),
+  availableAgents: useAgents().data,
 })
 
 interface FormErrors {
   name?: string
   instructions?: string
+  maxConcurrentRuns?: string
   api?: string
 }
 
@@ -59,16 +66,22 @@ export function AgentProfileEditor({
 }: Props) {
   const navigate = useNavigate()
   const toProjectPath = useProjectPath()
-  const { createAgent, updateAgent, archiveAgent } = operationsHook()
+  const { createAgent, updateAgent, archiveAgent, availableAgents = [] } = operationsHook()
   const isEditing = !!agent
   const initialModelVariant = useMemo(() => readAgentModelAndVariant(agent), [agent])
 
   const [name, setName] = useState(agent?.name ?? '')
+  const [description, setDescription] = useState(agent?.description ?? '')
+  const [avatar, setAvatar] = useState(agent?.avatar ?? '')
   const [instructions, setInstructions] = useState(agent?.instructions ?? '')
   const [skillsText, setSkillsText] = useState(agent?.skills?.join(', ') ?? '')
+  const [subagentsText, setSubagentsText] = useState(agent?.allowedSubagentAgentIds?.join(', ') ?? '')
+  const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(agent?.maxConcurrentRuns == null ? '' : String(agent.maxConcurrentRuns))
   const [model, setModel] = useState<string | null>(initialModelVariant.model)
   const [variant, setVariant] = useState<string | null>(initialModelVariant.variant)
   const [runtime, setRuntime] = useState<AgentRuntime>(initialModelVariant.runtime)
+  const [taskFocus, setTaskFocus] = useState<AgentTaskFocus>('general')
+  const [showFullCatalog, setShowFullCatalog] = useState(false)
   const [errors, setErrors] = useState<FormErrors>({})
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false)
 
@@ -78,11 +91,40 @@ export function AgentProfileEditor({
   const modelVariantsMap = useModelVariants(runtime)
 
   const allModels: string[] = useMemo(() => availableModels?.models ?? [], [availableModels])
+  const recommendedModels = useMemo(
+    () => recommendModels(allModels, taskFocus, `${description} ${instructions}`),
+    [allModels, description, instructions, taskFocus],
+  )
+  const visibleModels = showFullCatalog ? allModels : recommendedModels.slice(0, 8)
+  const availableSubagents = useMemo(
+    () => availableAgents.filter((candidate) => candidate.id !== agent?.id && candidate.status !== 'archived'),
+    [agent?.id, availableAgents],
+  )
+
+  useEffect(() => {
+    if (!open) return
+    setName(agent?.name ?? '')
+    setDescription(agent?.description ?? '')
+    setAvatar(agent?.avatar ?? '')
+    setInstructions(agent?.instructions ?? '')
+    setSkillsText(agent?.skills?.join(', ') ?? '')
+    setSubagentsText(agent?.allowedSubagentAgentIds?.join(', ') ?? '')
+    setMaxConcurrentRuns(agent?.maxConcurrentRuns == null ? '' : String(agent.maxConcurrentRuns))
+    setModel(initialModelVariant.model)
+    setVariant(initialModelVariant.variant)
+    setRuntime(initialModelVariant.runtime)
+    setTaskFocus('general')
+    setShowFullCatalog(false)
+    setErrors({})
+  }, [agent, initialModelVariant, open])
 
   function validate(): FormErrors {
     const errs: FormErrors = {}
     if (!name.trim()) errs.name = 'Name is required'
     if (!instructions.trim()) errs.instructions = 'Instructions are required'
+    if (maxConcurrentRuns.trim() && (!Number.isInteger(Number(maxConcurrentRuns)) || Number(maxConcurrentRuns) < 1)) {
+      errs.maxConcurrentRuns = 'Use a positive whole number or leave this blank'
+    }
     return errs
   }
 
@@ -97,12 +139,20 @@ export function AgentProfileEditor({
       variant,
       runtime,
     )
+    const parsedMaxConcurrentRuns = maxConcurrentRuns.trim() ? Number(maxConcurrentRuns) : null
+    const allowedSubagentAgentIds = subagentsText.trim()
+      ? subagentsText.split(',').map((value) => value.trim()).filter(Boolean)
+      : null
 
     if (isEditing && agent) {
       const payload: AgentUpdateRequest = {
         name: name.trim() || null,
+        avatar: avatar.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim() || null,
         skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
+        allowedSubagentAgentIds,
+        maxConcurrentRuns: parsedMaxConcurrentRuns,
         agentConfig,
       }
       updateAgent.mutate(
@@ -120,8 +170,12 @@ export function AgentProfileEditor({
     } else {
       const payload: AgentCreateRequest = {
         name: name.trim(),
+        avatar: avatar.trim() || null,
+        description: description.trim() || null,
         instructions: instructions.trim(),
         skills: skillsText.trim() ? skillsText.split(',').map((s) => s.trim()).filter(Boolean) : null,
+        allowedSubagentAgentIds,
+        maxConcurrentRuns: parsedMaxConcurrentRuns,
         agentConfig,
       }
       createAgent.mutate(payload, {
@@ -157,7 +211,7 @@ export function AgentProfileEditor({
   return (
     <>
       <Dialog open={open} onOpenChange={(open) => { if (!open) handleClose() }}>
-        <DialogContent className="sm:max-w-lg" data-testid="agent-profile-editor">
+        <DialogContent className="sm:max-w-2xl" data-testid="agent-profile-editor">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <BotIcon className="size-4" />
@@ -165,8 +219,8 @@ export function AgentProfileEditor({
             </DialogTitle>
             <DialogDescription>
               {isEditing
-                ? 'Changes to Instructions, Runtime, Model, Variant, and Skills apply only to Jobs created after saving. Executions already in progress and existing Sessions keep the configuration from launch.'
-                : 'Create a new agent profile with instructions, model, and skills.'}
+                ? 'Saved changes are used by Jobs created after saving. Executions already in progress and existing Sessions keep the identity and configuration captured at launch.'
+                : 'Create a reusable Agent identity around a task, with a Runtime and execution scope for future Jobs.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -214,6 +268,30 @@ export function AgentProfileEditor({
               )}
             </div>
 
+            <div className="grid gap-4 sm:grid-cols-[1fr_8rem]">
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-purpose">Purpose / description</Label>
+                <Textarea
+                  id="agent-purpose"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What task is this Agent for?"
+                  rows={2}
+                  data-testid="editor-description"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-avatar">Avatar</Label>
+                <Input
+                  id="agent-avatar"
+                  value={avatar}
+                  onChange={(e) => setAvatar(e.target.value)}
+                  placeholder="Icon or emoji"
+                  data-testid="editor-avatar"
+                />
+              </div>
+            </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="agent-instructions">Instructions *</Label>
               <Textarea
@@ -232,11 +310,30 @@ export function AgentProfileEditor({
 
             <div className="space-y-1.5">
               <Label>Model</Label>
+              <div className="grid gap-2 sm:grid-cols-[minmax(0,12rem)_1fr]">
+                <select
+                  aria-label="Task use"
+                  data-testid="editor-task-focus"
+                  value={taskFocus}
+                  onChange={(event) => {
+                    setTaskFocus(event.target.value as AgentTaskFocus)
+                    setShowFullCatalog(false)
+                  }}
+                  className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
+                >
+                  {AGENT_TASK_FOCUSES.map((focus) => (
+                    <option key={focus.value} value={focus.value}>{focus.label}</option>
+                  ))}
+                </select>
+                <p className="flex items-center text-xs text-muted-foreground">
+                  Recommendations come from the selected Runtime catalog.
+                </p>
+              </div>
               <ModelSelect
                 id="agent-model"
                 value={model}
                 placeholder="Select a model"
-                models={allModels}
+                models={visibleModels}
                 onChange={(m) => setModel(m)}
                 onChangeVariant={setVariant}
                 onClear={() => { setModel(null); setVariant(null) }}
@@ -245,6 +342,22 @@ export function AgentProfileEditor({
                 valueVariant={variant}
                 onChangeModelVariant={(m, v) => { setModel(m); setVariant(v) }}
               />
+              <div className="flex items-center justify-between gap-2">
+                <span data-testid="model-directory-summary" className="text-[10px] text-muted-foreground">
+                  {showFullCatalog ? `Complete catalog · ${allModels.length} models` : `Recommended · ${visibleModels.length} of ${allModels.length}`}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowFullCatalog((current) => !current)}
+                  data-testid="model-directory-toggle"
+                  className="h-7 px-2 text-xs"
+                >
+                  <ListIcon />
+                  {showFullCatalog ? 'Show recommendations' : 'Browse full catalog'}
+                </Button>
+              </div>
             </div>
 
             <div className="space-y-1.5">
@@ -257,6 +370,64 @@ export function AgentProfileEditor({
                 data-testid="editor-skills"
               />
               <p className="text-[10px] text-muted-foreground">Comma-separated list of skills.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="agent-subagents">Allowed subagents</Label>
+              <Input
+                id="agent-subagents"
+                value={subagentsText}
+                onChange={(e) => setSubagentsText(e.target.value)}
+                placeholder="Agent IDs, comma-separated"
+                data-testid="editor-subagents"
+              />
+              {availableSubagents.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-1" data-testid="editor-subagent-options">
+                  {availableSubagents.map((candidate) => {
+                    const selected = subagentsText.split(',').map((value) => value.trim()).includes(candidate.id)
+                    return (
+                      <button
+                        type="button"
+                        key={candidate.id}
+                        aria-pressed={selected}
+                        onClick={() => {
+                          const selectedIds = new Set(subagentsText.split(',').map((value) => value.trim()).filter(Boolean))
+                          if (selected) selectedIds.delete(candidate.id)
+                          else selectedIds.add(candidate.id)
+                          setSubagentsText(Array.from(selectedIds).join(', '))
+                        }}
+                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${selected ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-border text-muted-foreground'}`}
+                      >
+                        {selected && <CheckIcon className="size-3" />}
+                        {candidate.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="agent-max-concurrent-runs">Concurrency intent</Label>
+                <Input
+                  id="agent-max-concurrent-runs"
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={maxConcurrentRuns}
+                  onChange={(e) => setMaxConcurrentRuns(e.target.value)}
+                  placeholder="No limit"
+                  data-testid="editor-concurrency"
+                  className={errors.maxConcurrentRuns ? 'border-red-500' : ''}
+                />
+                {errors.maxConcurrentRuns && <p data-testid="editor-concurrency-error" className="text-xs text-red-500">{errors.maxConcurrentRuns}</p>}
+                <p className="text-[10px] text-muted-foreground">Saved for future scheduling decisions; this form does not claim a Server capacity change.</p>
+              </div>
+              <div className="space-y-1.5 rounded-md border border-border bg-muted/20 p-3" data-testid="editor-permissions">
+                <p className="text-sm font-medium">Permissions</p>
+                <p className="text-xs text-muted-foreground">Runtime-managed permission prompts apply when this Agent runs. The launch review will show the repository, workspace, Issue, and Epic scope selected for each Job.</p>
+              </div>
             </div>
           </div>
 
