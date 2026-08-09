@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using EnvironmentAbstractions.TestHelpers;
@@ -130,6 +131,75 @@ public class IssueModelVariantRoundTripSpecs
         Assert.Equal("low", loaded.StageModelVariants!["plan"]);
         Assert.Equal("anthropic/claude-sonnet-4-20250514", loaded.StageModels!["build"]);
         Assert.Equal("max", loaded.StageModelVariants!["build"]);
+    }
+
+    [Fact]
+    public async Task ReadModel_StageVariantInheritsModelFromEffectiveTopLevel()
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var env = scope.ServiceProvider.GetRequiredService<IEnvironmentVariableProvider>();
+        var mockEnv = (MockEnvironmentVariableProvider)env;
+        var previousAgent = mockEnv["MOHIST__CONFIG__AGENT"];
+        mockEnv["MOHIST__CONFIG__AGENT"] = """
+            { "model": "old-global-model", "variant": "old-global-variant" }
+            """;
+        try
+        {
+            var db = scope.ServiceProvider.GetRequiredService<MohistDbContext>();
+            var project = new ProjectInfo { Id = $"proj-variant-inherit-{Guid.NewGuid():N}", Name = "Variant inheritance" };
+
+            var issue = new IssueEntity
+            {
+                ProjectId = project.Id,
+                Number = 1,
+                Title = "Stage variant inheritance",
+                Labels = new Dictionary<string, string>(StringComparer.Ordinal),
+                Priority = "p2",
+                Status = Mohist.Server.Issue.Domain.IssueStatus.Backlog,
+            };
+
+            db.Issues.Add(new IssueRow
+            {
+                State = IssueStore.Serialize(issue),
+            });
+            db.ProjectWorkflowProfiles.Add(new ProjectWorkflowProfile
+            {
+                ProjectId = project.Id,
+                Variables = new VariableBundle(JsonSerializer.SerializeToElement(new
+                {
+                    agent = new { model = "old-project-model", variant = "old-project-variant" },
+                })).ToJson(),
+            });
+            db.IssueWorkflowProfiles.Add(new IssueWorkflowProfile
+            {
+                ProjectId = issue.ProjectId,
+                IssueNumber = issue.Number,
+                Variables = """
+                {
+                  "vars": { "agent": { "model": "old-issue-model" } },
+                  "stages": {
+                    "plan": { "vars": { "agent": { "variant": "stage-variant" } } }
+                  }
+                }
+                """,
+            });
+            await db.SaveChangesAsync();
+
+            var service = scope.ServiceProvider.GetRequiredService<IssueQuerier>();
+            var loaded = await service.GetAsync(project.Id, issue.Number, project);
+
+            Assert.NotNull(loaded);
+            Assert.Equal("old-issue-model", loaded!.Model);
+            Assert.Equal("old-project-variant", loaded.ModelVariant);
+            Assert.NotNull(loaded.StageModels);
+            Assert.NotNull(loaded.StageModelVariants);
+            Assert.Equal("old-issue-model", loaded.StageModels!["plan"]);
+            Assert.Equal("stage-variant", loaded.StageModelVariants!["plan"]);
+        }
+        finally
+        {
+            mockEnv["MOHIST__CONFIG__AGENT"] = previousAgent;
+        }
     }
 
     [Fact]
