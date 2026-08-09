@@ -99,6 +99,30 @@ public class TaskLifecycleTests
     }
 
     [Fact]
+    public void RequeueTaskAfterPausedStop_ClearsActiveBindingAndUnlocksResumeAndRerun()
+    {
+        var run = BuildRun();
+        run.StartTask("work-1", "worker-1", DateTimeOffset.UnixEpoch);
+        run.Pause();
+
+        Assert.True(run.RequeueTaskAfterPausedStop("work-1", "worker-1"));
+
+        var task = run.CurrentStage().Tasks[0];
+        Assert.Equal(WorkflowRunStatus.Paused, run.Status);
+        Assert.Equal(TaskRunStatus.Pending, task.Status);
+        Assert.Null(task.WorkId);
+        Assert.Null(task.WorkerId);
+        Assert.Null(run.CurrentActiveWorkFor("worker-1"));
+
+        run.Resume(DateTimeOffset.UnixEpoch);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+
+        run.Status = WorkflowRunStatus.Failed;
+        run.RerunFromStage("build", DateTimeOffset.UnixEpoch);
+        Assert.Equal(WorkflowRunStatus.Ready, run.Status);
+    }
+
+    [Fact]
     public void StageCheck_LifecycleTransitionsThroughDispatched()
     {
         var check = new StageCheck

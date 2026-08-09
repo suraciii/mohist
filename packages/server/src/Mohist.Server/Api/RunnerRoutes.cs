@@ -7,6 +7,7 @@ using Mohist.Server.Infrastructure.Config;
 using Mohist.Server.Infrastructure.Orleans;
 using Mohist.Server.Issue.Services;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Grains;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
@@ -345,9 +346,10 @@ public static class RunnerRoutes
         });
 
         group.MapPost("/sessions/{projectId}/{workflowRunId}/{sessionName}/runtime-events", async (
-            string projectId, string workflowRunId, string sessionName,
+            string runnerId, string projectId, string workflowRunId, string sessionName,
             AgentSessionRuntimeEventsRequest req, AgentSessionResolver sessions,
             AgentSessionFollowupDispatcher followups,
+            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var sessionId = await sessions.ResolveByLabelsAsync(WorkflowAgentSessionMetadata.LookupLabels(projectId, workflowRunId, sessionName), ct);
@@ -359,6 +361,8 @@ public static class RunnerRoutes
                 e.Type,
                 e.Payload.ValueKind == System.Text.Json.JsonValueKind.Undefined ? "{}" : e.Payload.GetRawText())).ToArray();
             var events = await sessions.GetGrain(sessionId).AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(runtimeEvents, req.RuntimeSessionId));
+            if (HasConfirmedSessionStop(req.RuntimeEvents))
+                await workReconciler.ReconcileAsync(projectId, sessionId, runnerId, "session-stop", ct);
             await followups.DispatchNextAsync(projectId, sessionId, ct);
             return Results.Ok(events);
         });
@@ -723,6 +727,28 @@ public static class RunnerRoutes
             req.Stage,
             req.Title,
             EpicNumber: req.EpicNumber is > 0 ? req.EpicNumber : null);
+
+    private static bool HasConfirmedSessionStop(IReadOnlyList<AgentSessionRuntimeEventRequest> events) =>
+        events.Any(IsConfirmedSessionStop);
+
+    private static bool IsConfirmedSessionStop(AgentSessionRuntimeEventRequest runtimeEvent)
+    {
+        if (!string.Equals(runtimeEvent.Type, "session.activity", StringComparison.Ordinal)
+            || runtimeEvent.Payload.ValueKind != JsonValueKind.Object)
+        {
+            return false;
+        }
+
+        var payload = runtimeEvent.Payload;
+        return payload.TryGetProperty("activity", out var activity)
+            && activity.ValueKind == JsonValueKind.String
+            && string.Equals(activity.GetString(), "idle", StringComparison.Ordinal)
+            && payload.TryGetProperty("source", out var source)
+            && source.ValueKind == JsonValueKind.String
+            && string.Equals(source.GetString(), "cancel", StringComparison.Ordinal)
+            && payload.TryGetProperty("stopConfirmed", out var confirmed)
+            && confirmed.ValueKind == JsonValueKind.True;
+    }
 
     private static RunnerAgentSessionResponse ToRunnerAgentSession(string projectId, string workflowRunId, string sessionName, AgentSessionInfo session) =>
         new(
