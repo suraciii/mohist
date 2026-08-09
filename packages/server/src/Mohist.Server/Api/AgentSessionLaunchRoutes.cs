@@ -165,7 +165,8 @@ public static class AgentSessionLaunchRoutes
                 Origin: launchOrigin,
                 TargetId: body.Context?.TargetId?.Trim() is { Length: > 0 } targetId
                     ? targetId
-                    : agentRef.Trim());
+                    : agentRef.Trim(),
+                WorkspaceBindingMode: hasExplicitWorkspace ? "explicit" : "implicit");
 
             // Resume before mutable workspace validation. A completed replay
             // must return its persisted Session/Job/Turn even when the named
@@ -269,16 +270,25 @@ public static class AgentSessionLaunchRoutes
             // The coordinator persists and adopts them as its canonical plan,
             // so a scoped content read always names the durable SessionInput.
             AgentInputAttachmentAcceptanceBatch? attachmentBatch = null;
+            var attachmentReservationId = body.Attachments is { Count: > 0 }
+                ? $"launch-{Guid.NewGuid():N}"
+                : null;
             var retainNewlyBoundAttachments = false;
             async Task RollbackNewlyBoundAttachmentsAsync()
             {
-                if (attachmentBatch?.NewlyBoundAttachmentIds is not { Count: > 0 } newlyBound)
+                if (attachmentBatch?.ReservationId is not { Length: > 0 } reservationId)
                     return;
-                await attachments.UnbindAgentInputAsync(
+                var acceptedIds = attachmentBatch.Results
+                    .Where(result => result.IsAccepted)
+                    .Select(result => result.Id)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+                await attachments.ReleaseAgentInputReservationAsync(
                     project.Id,
+                    reservationId,
                     preMintedSessionId,
                     preMintedInputId,
-                    newlyBound,
+                    acceptedIds,
                     CancellationToken.None);
             }
 
@@ -291,7 +301,8 @@ public static class AgentSessionLaunchRoutes
                         agentSessionId: preMintedSessionId,
                         inputId: preMintedInputId,
                         body.Attachments,
-                        ct);
+                        ct,
+                        reservationId: attachmentReservationId);
                 }
                 catch (AttachmentLimitException ex)
                 {
@@ -386,8 +397,12 @@ public static class AgentSessionLaunchRoutes
                         preMintedInputId,
                         preMintedTurnId,
                         ct,
-                        attachmentResults: attachmentBatch.Results.ToArray());
-                    retainNewlyBoundAttachments = true;
+                        attachmentResults: attachmentBatch.Results.ToArray(),
+                        attachmentReservationId: attachmentBatch.ReservationId);
+                    retainNewlyBoundAttachments = string.Equals(
+                        result.AttachmentReservationId,
+                        attachmentBatch.ReservationId,
+                        StringComparison.Ordinal);
                 }
                 catch (ArgumentException ex)
                 {
@@ -402,12 +417,69 @@ public static class AgentSessionLaunchRoutes
                 }
                 catch (LaunchSetupPendingException ex)
                 {
-                    retainNewlyBoundAttachments = true;
                     return LaunchSetupPending(ex);
                 }
                 catch (AgentReadinessException ex)
                 {
                     return ReadinessRejected(ex);
+                }
+                catch (Exception)
+                {
+                    // The coordinator may have durably saved its plan before
+                    // the response was cancelled or lost. Reconcile the same
+                    // key once; a missing plan is the only outcome that
+                    // authorizes releasing the newly bound attachments.
+                    try
+                    {
+                        var resumed = await launcher.ResumeIdempotentAsync(
+                            project.Id,
+                            idempotencyKey,
+                            launchRequest,
+                            CancellationToken.None);
+                        if (resumed is not null)
+                        {
+                            retainNewlyBoundAttachments = string.Equals(
+                                resumed.AttachmentReservationId,
+                                attachmentBatch.ReservationId,
+                                StringComparison.Ordinal);
+                            return AcceptedLaunch(
+                                project.Id,
+                                project.Name,
+                                resumed,
+                                resumed.WorkspaceName ?? workspaceName,
+                                launchOrigin,
+                                resumed.AgentId,
+                                resumed.AttachmentResults);
+                        }
+                    }
+                    catch (LaunchIdempotencyConflictException ex)
+                    {
+                        return ApiResults.Conflict(
+                            ex.Message,
+                            "launch_idempotency_conflict",
+                            new { idempotencyKey = ex.IdempotencyKey });
+                    }
+                    catch (LaunchSetupPendingException ex)
+                    {
+                        return LaunchSetupPending(ex);
+                    }
+                    catch (AgentReadinessException ex)
+                    {
+                        return ReadinessRejected(ex);
+                    }
+                    catch
+                    {
+                        // The coordinator fences a reservation before writing
+                        // its plan. Pending-only rollback therefore releases
+                        // a definite pre-plan failure while leaving any
+                        // coordinator-owned reservation for durable recovery.
+                        throw;
+                    }
+
+                    // A null reconciliation result proves that no plan was
+                    // persisted, so the original failure remains definitive
+                    // and the outer finally may release the new binding.
+                    throw;
                 }
 
                 return AcceptedLaunch(

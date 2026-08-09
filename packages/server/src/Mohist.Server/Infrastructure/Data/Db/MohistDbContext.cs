@@ -60,6 +60,7 @@ public class MohistDbContext : DbContext
     public DbSet<AgentSessionTranscriptPartRow> AgentSessionTranscriptParts { get; set; } = null!;
     public DbSet<IssueCommentRow> IssueComments { get; set; } = null!;
     public DbSet<AttachmentRow> Attachments { get; set; } = null!;
+    public DbSet<AgentInputAttachmentReservationRow> AgentInputAttachmentReservations { get; set; } = null!;
     public DbSet<IssuePrerequisiteRow> IssuePrerequisites { get; set; } = null!;
     public DbSet<EpicRow> Epics { get; set; } = null!;
     public DbSet<IssueRow> Issues { get; set; } = null!;
@@ -520,6 +521,25 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_Attachments_ProjectId_OwnerIssueNumber");
             entity.HasIndex(e => e.ExpiresAt)
                 .HasDatabaseName("IX_Attachments_ExpiresAt");
+        });
+
+        modelBuilder.Entity<AgentInputAttachmentReservationRow>(entity =>
+        {
+            entity.ToTable("AgentInputAttachmentReservations");
+            entity.HasKey(row => new { row.ReservationId, row.AttachmentId });
+            entity.Property(row => row.ReservationId).HasMaxLength(128).IsRequired();
+            entity.Property(row => row.ProjectId).HasMaxLength(256).IsRequired();
+            entity.Property(row => row.AttachmentId).HasMaxLength(64).IsRequired();
+            entity.Property(row => row.OwnerId).HasMaxLength(512).IsRequired();
+            entity.Property(row => row.Status).HasMaxLength(32).IsRequired();
+            entity.Property(row => row.CreatedAt).IsRequired();
+            entity.Property(row => row.ExpiresAt);
+            entity.HasIndex(row => new { row.ProjectId, row.AttachmentId, row.Status })
+                .HasDatabaseName("IX_AgentInputAttachmentReservations_Attachment");
+            entity.HasIndex(row => new { row.ProjectId, row.ReservationId, row.Status })
+                .HasDatabaseName("IX_AgentInputAttachmentReservations_Reservation");
+            entity.HasIndex(row => new { row.ProjectId, row.Status, row.ExpiresAt })
+                .HasDatabaseName("IX_AgentInputAttachmentReservations_Expiry");
         });
 
         modelBuilder.Entity<IssuePrerequisiteRow>(entity =>

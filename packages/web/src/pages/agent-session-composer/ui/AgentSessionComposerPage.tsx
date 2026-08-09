@@ -66,6 +66,7 @@ function ContextPicker({
   contextRefs,
   repositories,
   workspaces,
+  workspacesError,
   issues,
   epics,
   loading,
@@ -78,6 +79,7 @@ function ContextPicker({
   issues: IssueListItem[]
   epics: EpicWithProgress[]
   loading: boolean
+  workspacesError: boolean
   onChange: (type: ContextRef['type'], value: string) => void
   onCreateWorkspace: () => void
 }) {
@@ -128,7 +130,7 @@ function ContextPicker({
           <option value="">No workspace selected</option>
           {workspaces.map((workspace) => <option key={workspace.name} value={workspace.name}>{workspace.name}</option>)}
         </select>
-        {workspaces.length === 0 && !loading && (
+        {workspaces.length === 0 && !loading && !workspacesError && (
           <p className="text-xs text-muted-foreground" data-testid="composer-no-workspaces">
             No active workspaces.
           </p>
@@ -294,6 +296,8 @@ export interface AgentSessionComposerData {
   repositoriesError?: boolean
   retryRepositories?: () => void | Promise<unknown>
   workspaces?: Workspace[]
+  workspacesError?: boolean
+  retryWorkspaces?: () => void | Promise<unknown>
   issues?: IssueListItem[]
   epics?: EpicWithProgress[]
   contextLoading?: boolean
@@ -311,7 +315,12 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     isError: repositoriesError,
     refetch: refetchRepositories,
   } = useRepositories(projectId ?? undefined)
-  const { data: workspaces, isLoading: workspacesLoading } = useWorkspaces('active')
+  const {
+    data: workspaces,
+    isLoading: workspacesLoading,
+    isError: workspacesError,
+    refetch: refetchWorkspaces,
+  } = useWorkspaces('active')
   const { data: issues, isLoading: issuesLoading } = useIssues({ projectId: projectId ?? undefined, all: false })
   const { data: epics, isLoading: epicsLoading } = useEpics()
   return {
@@ -324,6 +333,8 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     repositoriesError,
     retryRepositories: () => refetchRepositories(),
     workspaces,
+    workspacesError,
+    retryWorkspaces: () => refetchWorkspaces(),
     issues,
     epics,
     contextLoading: repositoriesLoading || workspacesLoading || issuesLoading || epicsLoading,
@@ -358,6 +369,8 @@ export function AgentSessionComposerPage({
     repositoriesError = false,
     retryRepositories,
     workspaces = [],
+    workspacesError = false,
+    retryWorkspaces,
     issues = [],
     epics = [],
     contextLoading = false,
@@ -490,6 +503,7 @@ export function AgentSessionComposerPage({
     && workspaceScopeConfirmed
     && repositoryScopeCompatible
     && !repositoriesError
+    && !workspacesError
     && !launchMutation.isPending
 
   const handleLaunch = useCallback(() => {
@@ -688,6 +702,7 @@ export function AgentSessionComposerPage({
             contextRefs={contextRefs}
             repositories={compatibleRepositories}
             workspaces={activeWorkspaces}
+            workspacesError={workspacesError}
             issues={issues}
             epics={epics}
             loading={contextLoading}
@@ -710,6 +725,28 @@ export function AgentSessionComposerPage({
                 size="sm"
                 onClick={() => retryRepositories?.()}
                 data-testid="retry-composer-repositories"
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Retry
+              </Button>
+            </div>
+          )}
+          {workspacesError && (
+            <div
+              role="alert"
+              data-testid="composer-workspaces-error"
+              className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
+            >
+              <span className="flex items-center gap-1.5">
+                <AlertTriangleIcon className="size-3.5 shrink-0" />
+                Workspaces failed to load.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => retryWorkspaces?.()}
+                data-testid="retry-composer-workspaces"
               >
                 <RefreshCwIcon className="size-3.5" />
                 Retry

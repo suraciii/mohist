@@ -283,7 +283,8 @@ public class RunnerConfigFixture : IAsyncLifetime
 
     public CleanupPolicyOptions Policy { get; } = new();
     public HttpClient Client { get; private set; } = null!;
-    public IGrainFactory Grains => _factory.Services.GetRequiredService<IGrainFactory>();
+    public AgentJobDispatchProbe AgentJobDispatches =>
+        _factory.Services.GetRequiredService<AgentJobDispatchProbe>();
     public FakeTimeProvider TimeProvider { get; } = new(new DateTimeOffset(2026, 6, 30, 0, 0, 0, TimeSpan.Zero));
 
     public async ValueTask InitializeAsync()
@@ -333,13 +334,6 @@ public class RunnerConfigFixture : IAsyncLifetime
         {
             await Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots.Value });
         }
-        var runner = Grains.GetGrain<IRunnerGrain>(runnerId);
-        await TestWait.ForAsync(
-            () => runner.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
         _registeredRunnerIds.Add(runnerId);
         return runnerId;
     }
@@ -380,7 +374,10 @@ public class RunnerConfigFixture : IAsyncLifetime
 
     public Task WaitForAgentJobAssignmentPreparedAsync(string agentJobId) =>
         AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            Grains.GetGrain<IAgentJobGrain>(agentJobId));
+            AgentJobDispatches,
+            agentJobId,
+            AgentJobDispatchProbe.DefaultWaitTimeout,
+            TimeProvider.Advance);
 
     /// <summary>
     /// Unregisters every runner created since the last call so leftover

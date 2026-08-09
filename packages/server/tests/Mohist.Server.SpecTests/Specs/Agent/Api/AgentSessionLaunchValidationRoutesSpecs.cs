@@ -293,7 +293,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -396,7 +395,6 @@ public class AgentSessionLaunchValidationRoutesSpecs : AgentSessionLaunchRoutesT
             await WaitForJobTerminalAsync(
                 jobGrain!,
                 AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
                 async () =>
                 {
                     _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));

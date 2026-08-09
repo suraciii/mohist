@@ -1,14 +1,80 @@
 import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { server, useMswServer } from '../../../../tests/support/msw'
+import { ProjectProvider } from '../../project'
 import { toast } from 'sonner'
-import { closeWorkspaceMutationOptions, createWorkspaceMutationOptions } from './queries'
+import { closeWorkspaceMutationOptions, createWorkspaceMutationOptions, useWorkspaces } from './queries'
 
 useMswServer()
 
 function createInvalidationClient() {
   return { invalidateQueries: vi.fn() }
 }
+
+function WorkspaceQueryProbe() {
+  const { data, isError, refetch } = useWorkspaces('active')
+  return (
+    <>
+      {isError && <span data-testid="workspace-query-error">Workspace query failed.</span>}
+      {data && <span data-testid="workspace-query-loaded">{data[0]?.name ?? 'empty'}</span>}
+      <button type="button" onClick={() => refetch()} data-testid="workspace-query-retry">Retry</button>
+    </>
+  )
+}
+
+function renderWorkspaceQuery() {
+  return render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ProjectProvider
+        initialProjectId="proj-1"
+        initialProjects={[{
+          id: 'proj-1',
+          name: 'Test',
+          repositories: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        }]}
+      >
+        <WorkspaceQueryProbe />
+      </ProjectProvider>
+    </QueryClientProvider>,
+  )
+}
+
+describe('useWorkspaces', () => {
+  it('surfaces a 500 as an error and refetches successfully', async () => {
+    let calls = 0
+    server.use(
+      http.get('*/api/projects/:projectId/workspaces', () => {
+        calls += 1
+        return calls === 1
+          ? HttpResponse.json({ success: false, error: 'workspace query failed' }, { status: 500 })
+          : HttpResponse.json({
+            success: true,
+            data: [{
+              projectId: 'proj-1',
+              name: 'workspace-1',
+              origin: { kind: 'manual' },
+              repositories: ['main'],
+              status: 'active',
+              home: null,
+              createdAt: '2026-01-01T00:00:00.000Z',
+              boundSessionCount: 0,
+            }],
+          })
+      }),
+    )
+
+    renderWorkspaceQuery()
+
+    expect(await screen.findByTestId('workspace-query-error')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('workspace-query-retry'))
+    expect(await screen.findByTestId('workspace-query-loaded')).toHaveTextContent('workspace-1')
+    expect(calls).toBe(2)
+  })
+})
 
 describe('closeWorkspaceMutationOptions', () => {
   it('posts to the workspace close route with the project id', async () => {

@@ -3,13 +3,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 
-import { makeAgent, makeWorkspace, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
+import { makeAgent, makeWorkspace, renderPage, resetState, state } from '../../../../tests/support/agent-session-composer-test-support'
 import { server, useMswServer } from '../../../../tests/support/msw'
 
 describe('AgentSessionComposer workspace creation', () => {
   useMswServer()
 
   beforeEach(() => {
+    resetState()
     state.agentsData = []
     state.availabilityData = []
     state.launchCalls.length = 0

@@ -108,7 +108,8 @@ public interface IAgentLauncher
         string? preMintedInputId = null,
         string? preMintedTurnId = null,
         CancellationToken ct = default,
-        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null);
+        IReadOnlyList<AgentInputAttachmentAcceptance>? attachmentResults = null,
+        string? attachmentReservationId = null);
 
     Task<AgentLaunchResult> LaunchSubagentAsync(
         string projectId,
@@ -202,7 +203,8 @@ public sealed record AgentLaunchResult(
     string AgentName,
     string? ParentLinkEdgeId = null,
     string? WorkspaceName = null,
-    IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
+    IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null,
+    string? AttachmentReservationId = null);
 
 /// <summary>
 /// Outcome of a routed launch. Carries the session id the AgentJob

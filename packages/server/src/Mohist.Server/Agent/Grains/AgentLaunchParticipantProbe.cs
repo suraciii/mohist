@@ -13,6 +13,7 @@ namespace Mohist.Server.Agent.Grains;
 /// </summary>
 public interface IAgentLaunchParticipantProbe
 {
+    Task OnPlanPersistedAsync(string idempotencyKey, string inputId);
     Task OnPrepareJobAsync(string jobKey, string commandId);
     Task OnReserveLinkAsync(string edgeId, string commandId);
     Task OnEnsureInitialLaunchAsync(string sessionId, string commandId);
@@ -28,6 +29,7 @@ public sealed class NoopAgentLaunchParticipantProbe : IAgentLaunchParticipantPro
     {
     }
 
+    public Task OnPlanPersistedAsync(string idempotencyKey, string inputId) => Task.CompletedTask;
     public Task OnPrepareJobAsync(string jobKey, string commandId) => Task.CompletedTask;
     public Task OnReserveLinkAsync(string edgeId, string commandId) => Task.CompletedTask;
     public Task OnEnsureInitialLaunchAsync(string sessionId, string commandId) => Task.CompletedTask;

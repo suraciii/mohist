@@ -1265,6 +1265,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
 
         await EnsureRecoveryReminderAsync();
         await SafeAssignmentPreparedAsync(runnerId, workId);
+        await SafeAssignmentPreparedBoundaryAsync(runnerId, workId);
 
         if (State.ConcurrencyPermitHeld
             && State.ConcurrencyPermitId is not null
@@ -1298,6 +1299,20 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         {
             _log.LogWarning(ex,
                 "AgentJob {Id} dispatch observer AssignmentPrepared threw; ledger row remains authoritative",
+                Key);
+        }
+    }
+
+    private async Task SafeAssignmentPreparedBoundaryAsync(string runnerId, string workId)
+    {
+        try
+        {
+            await _dispatchObserver.AssignmentPreparedBoundaryAsync(Key, runnerId, workId);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex,
+                "AgentJob {Id} dispatch observer AssignmentPrepared boundary threw; ledger row remains authoritative",
                 Key);
         }
     }

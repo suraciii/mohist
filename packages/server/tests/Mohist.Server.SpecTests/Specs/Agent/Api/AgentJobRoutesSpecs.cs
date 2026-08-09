@@ -546,12 +546,8 @@ public class AgentJobDispatchRouteSpecs : AgentSessionLaunchRoutesTestSupport
         await _fixture.Client.PatchOkAsync($"/api/runner/{runnerId}", new { slots = maxWorkflowSlots });
 
         var runnerGrain = _fixture.Grains.GetGrain<IRunnerGrain>(runnerId);
-        await TestWait.ForAsync(
-            () => runnerGrain.GetRuntimeStateAsync(),
-            s => s.Status == RunnerStatus.Online,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to reach Online");
+        var state = await runnerGrain.GetRuntimeStateAsync();
+        Assert.Equal(RunnerStatus.Online, state.Status);
     }
 
 }

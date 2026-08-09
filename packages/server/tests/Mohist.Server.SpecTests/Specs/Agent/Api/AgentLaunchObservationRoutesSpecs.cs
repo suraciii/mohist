@@ -40,6 +40,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
         var runnerId = $"obs-201-runner-{Guid.NewGuid():N}";
         var agent = await CreateAgentAsync(projectId, "obs-id-agent");
         await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? jobId = null;
 
         try
         {
@@ -48,7 +49,7 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var launchPayload = await launch.Content.ReadFromJsonAsync<JsonElement>();
             var data = launchPayload.GetProperty("data");
 
-            var jobId = data.GetProperty("jobId").GetString();
+            jobId = data.GetProperty("jobId").GetString();
             var sessionId = data.GetProperty("sessionId").GetString();
             var inputId = data.GetProperty("inputId").GetString();
             var turnId = data.GetProperty("turnId").GetString();
@@ -64,7 +65,8 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
+            if (jobId is not null)
+                await CompletePendingAgentJobAsync(runnerId, jobId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }
@@ -111,7 +113,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var jobId = launchPayload.GetProperty("data").GetProperty("jobId").GetString()!;
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
+            var ready = await _fixture.AgentJobDispatches.WaitForAssignmentReadyForPollWithClockAsync(
+                jobId,
+                AgentJobDispatchProbe.DefaultWaitTimeout,
+                _fixture.TimeProvider.Advance);
+            Assert.Equal(runnerId, ready.RunnerId);
             var claim = await jobGrain.ClaimNextAsync(runnerId);
             Assert.NotNull(claim);
             var persistence = _fixture.Persistence.Checkpoint(sessionId);
@@ -163,7 +169,11 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             var originalTurnId = launchPayload.GetProperty("data").GetProperty("turnId").GetString()!;
 
             var jobGrain = _fixture.Grains.GetGrain<IAgentJobGrain>(jobId);
-            await AgentJobConvergence.WaitForAssignmentPreparedAsync(jobGrain);
+            var ready = await _fixture.AgentJobDispatches.WaitForAssignmentReadyForPollWithClockAsync(
+                jobId,
+                AgentJobDispatchProbe.DefaultWaitTimeout,
+                _fixture.TimeProvider.Advance);
+            Assert.Equal(runnerId, ready.RunnerId);
             var claim = await jobGrain.ClaimNextAsync(runnerId);
             Assert.NotNull(claim);
 
@@ -271,7 +281,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
             await WaitForJobTerminalAsync(
                 jobGrain!,
                 AgentJobStatus.Unknown,
-                TimeSpan.FromSeconds(30),
                 async () =>
                 {
                     _fixture.TimeProvider.Advance(TimeSpan.FromSeconds(9));
@@ -307,7 +316,6 @@ public class AgentLaunchObservationRoutesSpecs : AgentSessionLaunchRoutesTestSup
         }
         finally
         {
-            await DrainDispatchAsync(runnerId);
             await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
         }
     }

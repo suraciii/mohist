@@ -241,6 +241,8 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
             : Task.CompletedTask;
     }
 
+    public Task AssignmentPreparedBoundaryAsync(string agentJobId, string runnerId, string workId) => Task.CompletedTask;
+
     public Task AssignmentReadyForPollAsync(string agentJobId, string runnerId, string workId) => Task.CompletedTask;
 
     public Task RunnerAcceptedAsync(string agentJobId, string runnerId, string workId)

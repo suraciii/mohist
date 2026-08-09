@@ -1425,6 +1425,51 @@ namespace Mohist.Server.Infrastructure.Data.Migrations
                     b.ToTable("Attachments", (string)null);
                 });
 
+            modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.AgentInputAttachmentReservationRow", b =>
+                {
+                    b.Property<string>("AttachmentId")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OwnerId")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ProjectId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ReservationId")
+                        .HasMaxLength(128)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ReservationId", "AttachmentId");
+
+                    b.HasIndex("ProjectId", "AttachmentId", "Status")
+                        .HasDatabaseName("IX_AgentInputAttachmentReservations_Attachment");
+
+                    b.HasIndex("ProjectId", "ReservationId", "Status")
+                        .HasDatabaseName("IX_AgentInputAttachmentReservations_Reservation");
+
+                    b.HasIndex("ProjectId", "Status", "ExpiresAt")
+                        .HasDatabaseName("IX_AgentInputAttachmentReservations_Expiry");
+
+                    b.ToTable("AgentInputAttachmentReservations", (string)null);
+                });
+
             modelBuilder.Entity("Mohist.Server.Infrastructure.Data.Issue.IssueCommentRow", b =>
                 {
                     b.Property<string>("Id")

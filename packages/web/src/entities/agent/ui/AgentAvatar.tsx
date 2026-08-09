@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { BotIcon } from 'lucide-react'
 
 export interface AgentAvatarProps {
@@ -27,13 +27,11 @@ export function AgentAvatar({
   iconClassName,
   testId = 'agent-avatar',
 }: AgentAvatarProps) {
-  const [imageFailed, setImageFailed] = useState(false)
+  const [failedImageKey, setFailedImageKey] = useState<string | null>(null)
   const value = avatar?.trim() ?? ''
   const imageSource = isImageSource(value) ? value : null
-  useEffect(() => {
-    setImageFailed(false)
-  }, [agentName, imageSource])
-  const image = imageSource !== null && !imageFailed
+  const imageKey = imageSource === null ? null : JSON.stringify([agentName, imageSource])
+  const image = imageSource !== null && failedImageKey !== imageKey
 
   return (
     <div
@@ -43,10 +41,11 @@ export function AgentAvatar({
     >
       {image ? (
         <img
+          key={imageKey ?? 'avatar-image'}
           src={imageSource}
           alt={`${agentName} avatar`}
           className="size-full object-cover"
-          onError={() => setImageFailed(true)}
+          onError={() => setFailedImageKey(imageKey)}
           data-testid={`${testId}-image`}
         />
       ) : value && !isImageSource(value) ? (

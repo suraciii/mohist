@@ -2,7 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Mohist.Server.Agent.Grains;
+using Mohist.Server.Infrastructure.Data.Db;
+using Mohist.Server.Issue.Services.Attachments;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.SpecTests.Support;
@@ -156,6 +160,105 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     }
 
     [Fact]
+    public async Task Launch_ImplicitCliWorkspaceAndExplicitArchivedWorkspaceConflictWithoutNewSideEffects()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-cli-binding-mode");
+        var agent = await CreateAgentAsync(projectId, "cli-binding-mode-agent");
+        await CreateWorkspaceAsync(projectId, "cli-current");
+        using var archive = await _fixture.Client.PostAsync(
+            $"/api/projects/{projectId}/workspaces/cli-current/close",
+            content: null);
+        Assert.Equal(HttpStatusCode.OK, archive.StatusCode);
+
+        var attachmentId = await UploadAttachmentAsync(projectId, "cli-binding.txt", "cli binding"u8.ToArray());
+        const string idempotencyKey = "implicit-cli-explicit-archived-workspace";
+        var implicitBody = new
+        {
+            prompt = "keep one canonical launch",
+            attachments = new[] { attachmentId },
+        };
+
+        using var implicitLaunch = await LaunchCliAsync(projectId, agent.Id, implicitBody, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, implicitLaunch.StatusCode);
+        var original = await LaunchReferencesAsync(implicitLaunch);
+        var originalSession = _fixture.Grains.GetGrain<IAgentSessionGrain>(original.SessionId);
+        var originalInput = await originalSession.GetInitialLaunchAsync();
+        Assert.NotNull(originalInput);
+        var originalInputRecord = originalInput!.Input;
+        Assert.NotNull(originalInputRecord);
+        Assert.Equal(original.InputId, originalInputRecord!.Id);
+        Assert.Contains(originalInputRecord.Attachments ?? [], attachment => attachment.Id == attachmentId);
+        var jobsBeforeConflict = await CountAgentJobsAsync(projectId);
+        var sessionsBeforeConflict = await CountAgentLaunchSessionsAsync(projectId);
+
+        using var explicitReplay = await LaunchCliAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "keep one canonical launch",
+                attachments = new[] { attachmentId },
+                context = new { workspace = "cli-current" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Conflict, explicitReplay.StatusCode);
+        var conflict = await explicitReplay.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("launch_idempotency_conflict", conflict.GetProperty("code").GetString());
+
+        var afterConflict = await originalSession.GetInitialLaunchAsync();
+        Assert.NotNull(afterConflict);
+        Assert.Equal(original.InputId, afterConflict!.Input?.Id);
+        Assert.Equal(original.TurnId, afterConflict.Turn?.Id);
+        Assert.Equal(
+            originalInputRecord.Attachments?.Select(attachment => attachment.Id),
+            afterConflict.Input?.Attachments?.Select(attachment => attachment.Id));
+        Assert.Equal(jobsBeforeConflict, await CountAgentJobsAsync(projectId));
+        Assert.Equal(sessionsBeforeConflict, await CountAgentLaunchSessionsAsync(projectId));
+    }
+
+    [Fact]
+    public async Task Launch_ResponseLossAfterPlanPersist_ReconcilesOneDurableAttachmentOwner()
+    {
+        var projectId = await CreateProjectAsync("launch-response-loss-after-plan");
+        var agent = await CreateAgentAsync(projectId, "response-loss-agent");
+        await CreateWorkspaceAsync(projectId, "launch-idempotency-workspace");
+        var attachmentId = await UploadAttachmentAsync(projectId, "response-loss.txt", "response loss"u8.ToArray());
+        const string idempotencyKey = "response-loss-after-plan-persist";
+        _fixture.LaunchFaults.CancelAfterPlanPersistOnce();
+
+        using var response = await LaunchAsync(
+            projectId,
+            agent.Id,
+            new
+            {
+                prompt = "reconcile the saved plan",
+                attachments = new[] { attachmentId },
+                context = new { workspace = "launch-idempotency-workspace" },
+            },
+            idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var refs = await LaunchReferencesAsync(response);
+        var initial = await _fixture.Grains
+            .GetGrain<IAgentSessionGrain>(refs.SessionId)
+            .GetInitialLaunchAsync();
+        Assert.NotNull(initial);
+        var initialInput = initial!.Input;
+        Assert.NotNull(initialInput);
+        Assert.Equal(refs.InputId, initialInput!.Id);
+        Assert.Equal(refs.TurnId, initial.Turn?.Id);
+        Assert.Contains(initialInput.Attachments ?? [], attachment => attachment.Id == attachmentId);
+
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<MohistDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var attachment = await db.Attachments.SingleAsync(row => row.Id == attachmentId);
+        Assert.Equal(AttachmentService.OwnerKindAgentInput, attachment.OwnerKind);
+        Assert.Equal(
+            AttachmentService.BuildAgentInputOwnerId(refs.SessionId, refs.InputId),
+            attachment.OwnerId);
+    }
+
+    [Fact]
     public async Task Launch_ReplayWithDifferentAttachments_Conflicts()
     {
         var projectId = await CreateProjectAsync("launch-replay-attachments");
@@ -302,6 +405,7 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
 
         if (runnerId is not null)
             await RegisterRunnerAndAwaitOnlineAsync(runnerId, projectId);
+        string? dispatchJobId = null;
 
         try
         {
@@ -316,6 +420,7 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
             using var recovered = await LaunchAsync(projectId, agent.Id, body, idempotencyKey);
             Assert.Equal(HttpStatusCode.Created, recovered.StatusCode);
             var original = await LaunchReferencesAsync(recovered);
+            dispatchJobId = original.JobId;
 
             // The fence no longer fails, so a resume with the same key must
             // return the persisted outcome rather than a new launch.
@@ -336,7 +441,8 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
         {
             if (runnerId is not null)
             {
-                await DrainDispatchAsync(runnerId);
+                if (dispatchJobId is not null)
+                    await CompletePendingAgentJobAsync(runnerId, dispatchJobId);
                 await _fixture.Client.PostAsync($"/api/runner/{runnerId}/unregister", null);
             }
         }

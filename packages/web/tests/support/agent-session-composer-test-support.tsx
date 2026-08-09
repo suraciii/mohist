@@ -32,6 +32,8 @@ export const state = {
   epicsData: [] as EpicWithProgress[],
   repositoriesError: false,
   repositoryRetryCalls: 0,
+  workspacesError: false,
+  workspaceRetryCalls: 0,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -48,6 +50,7 @@ const components: AgentSessionComposerPageComponents = {
 
 const dataHook: AgentSessionComposerDataHook = () => {
   const [, setRepositoryRetryVersion] = useState(0)
+  const [, setWorkspaceRetryVersion] = useState(0)
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
@@ -83,6 +86,12 @@ const dataHook: AgentSessionComposerDataHook = () => {
       setRepositoryRetryVersion((version) => version + 1)
     },
     workspaces: state.workspacesData,
+    workspacesError: state.workspacesError,
+    retryWorkspaces: () => {
+      state.workspaceRetryCalls += 1
+      state.workspacesError = false
+      setWorkspaceRetryVersion((version) => version + 1)
+    },
     issues: state.issuesData,
     epics: state.epicsData,
     contextLoading: false,
@@ -133,6 +142,8 @@ export function resetState() {
   state.repositoriesData = []
   state.repositoriesError = false
   state.repositoryRetryCalls = 0
+  state.workspacesError = false
+  state.workspaceRetryCalls = 0
   state.workspacesData = [makeWorkspace('workspace-1')]
   state.issuesData = []
   state.epicsData = []
