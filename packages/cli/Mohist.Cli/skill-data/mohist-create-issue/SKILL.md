@@ -136,12 +136,13 @@ The catalog is descriptive — a manual the agent reads — not a governance con
 
 ## Priority guidance
 
-When assigning priority, use lowercase (`p0`–`p3`):
+When assigning priority, use lowercase (`p0`–`p4`):
 
 - `p0`: actively breaking a core workflow, the user cannot continue, or there is data/merge safety risk.
 - `p1`: a core flow is visibly impaired but has a workaround; or it persistently misleads the user's judgment.
 - `p2`: an important experience improvement, observability gap, or local flow friction.
 - `p3`: low-risk polish, performance, or copy changes.
+- `p4`: optional work with no near-term delivery need.
 
 ## User confirmation flow
 

@@ -159,6 +159,9 @@ describe('RunnerDetailPage', () => {
       expect(within(screen.getByTestId('runner-detail-capability-list')).getByText('workspace-query')).toBeInTheDocument()
       expect(screen.getByTestId('runner-detail-coder-models')).toHaveTextContent('openai/gpt-4.5')
       expect(screen.getByTestId('runner-detail-max-slots')).toContainElement(screen.getByTestId('slots-editor'))
+      expect(screen.getByText('Max execution slots')).toBeInTheDocument()
+      expect(screen.getByText('Limits the combined Workflow work and AgentJobs on this Runner.')).toBeInTheDocument()
+      expect(screen.queryByText('Max workflow slots')).not.toBeInTheDocument()
 
       const statusBadges = screen.getAllByTestId('runner-status-badge')
       expect(statusBadges.length).toBeGreaterThanOrEqual(1)

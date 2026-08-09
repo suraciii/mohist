@@ -33,14 +33,14 @@ look up in the code.
 ### Priority guidance for epics
 
 Epic priority rates the **milestone's** importance, not any single issue's. Use
-`p0`–`p3` (lowercase), same scale semantics as issues but applied to the milestone.
+`p0`–`p4` (lowercase), same scale semantics as issues but applied to the milestone.
 
 ### Creating an epic
 
 ```bash
 mo epic create "<title>" --description-file ./epic.md --priority p2
 # --description-file: the milestone markdown (see epic-templates.md); use - for stdin
-# --priority: p0|p1|p2|p3
+# --priority: p0|p1|p2|p3|p4
 # --project <id>: target project (else active project)
 ```
 
@@ -156,7 +156,7 @@ Never create an epic without confirmation.
 
 - [ ] Every planned child issue passes the Scope gate defined in `mohist-explore` — **regardless of how the requirement content was produced**. The epic advances one issue at a time, so a child with no standalone value stalls the milestone; fix the split before creating.
 - [ ] `description` follows Goal/Background/Non-goals/Scope.
-- [ ] `priority` is `p0`–`p3`.
+- [ ] `priority` is `p0`–`p4`.
 - [ ] No frontmatter/workflow/risk fields invented.
 - [ ] User confirmed title, description summary, priority, and link plan.
 - [ ] Autopilot posture confirmed: `mo epic start` now vs leave `idle`.
