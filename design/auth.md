@@ -81,7 +81,8 @@ ExternalAgentCaller {
 `operator_all` 是显式授予私有 Project owner 的所有当前 Project 的 grant；它不是仅凭
 `operator` scope 隐式推导。`explicit` 只允许列出的 ProjectId，空列表等价于无 grant 并拒绝。
 PAT 签发时必须选择并持久化其中之一；没有 grant 的旧 PAT 不能调用直接外部 Agent API，
-直到明确补齐 grant。这样不需要引入多用户 RBAC，却让 Project authorization 有唯一权威。
+直到明确补齐 grant。这是该私有 API 的 credential-to-Project binding，不是可扩展的多用户
+RBAC、membership 或跨用户 visibility 模型，却让 Project authorization 有唯一权威。
 
 敏感基础设施面不随 GET 放开给 `readonly`：`/api/fs/**`、`/api/logs/tail`、
 `/api/config/**`、`/api/system/**` 与 dead-letter 路由一律声明 `operator`；`readonly`
@@ -126,8 +127,8 @@ Scope 判定：路由声明所需 scope；`readonly` 仅满足 GET；其余按�
 它不是 Web cookie，也不是 Slack 等 Agent Connection 的受信任服务身份；Connection 仍在自己的
 adapter 边界内处理外部平台身份，不能冒充直接 caller。
 
-该边界的 route scope 固定为：launch、follow-up、stop 要 `operator`；Input、Turn 与 Session
-公开事件读取要 `readonly` 或 `operator`。认证后的 PAT 必须先解析为上述
+该边界的 route scope 固定为：launch、follow-up、stop 要 `operator`；Job、Input、Turn 与
+Session 公开事件读取要 `readonly` 或 `operator`。认证后的 PAT 必须先解析为上述
 `ExternalAgentCaller`，再同时验证 route scope 与 route `projectId` 是否匹配其显式 grant 或
 `operator_all` grant。选中的 Project 不在 grant 中一律 `403 forbidden`，即使该 Project
 不存在也不改为 `404`；只有 grant 已通过后，缺失的 Project/resource 才按资源语义返回 `404`。
@@ -184,17 +185,21 @@ CLI 凭据解析顺序：`MOHIST_TOKEN` env > credentials.json（按 server 匹�
 
 ### PAT
 
-`mo auth token create --name <n> --scope operator|readonly [--ttl <hours>]`：签发
-`Credential(kind=pat)`，完整值仅响应一次。PAT 必须有过期：`--ttl` 缺省 90 天、上限
-1 年（GitHub fine-grained PAT 同此纪律），不允许永不过期。`--name` 在同一 Principal 的
-活跃凭据中唯一。`revoke` 置 `RevokedAt`；`list` 只显示名称与前缀（`moh_pat_…`），不
-显示完整值。集成令牌（`kind=integration`）不由本命令签发，其签发入口由对应入站
-集成的 spec 定义。
+`mo auth token create --name <n> --scope operator|readonly [--ttl <hours>]
+[--project <projectId>]... [--all-projects]`：签发 `Credential(kind=pat)`，完整值仅响应一次。
+用于直接外部 Agent API 的 PAT 必须恰选一种 grant 输入：可重复的 `--project <projectId>`
+持久化为 `explicit/AllowedProjectIds`，或 `--scope operator --all-projects` 持久化为显式
+`operator_all`。两者互斥；`--all-projects` 与 `readonly` 或无 `operator` scope 一起使用时
+被拒绝。没有任一 grant 输入的 PAT 仍可用于其原有控制面，但直接外部 Agent 路由一律拒绝；
+不以“当前 Project”或 Principal 的猜测补齐 grant。
 
-要用于直接外部 Agent API 的 PAT，签发时还必须持久化一个 `ExternalAgentCaller`
-`ProjectGrant`：明确的 `operator_all`，或非空的 `AllowedProjectIds`。没有这项选择的
-既有 PAT 仍可用于其原有控制面，但直接外部 Agent 路由一律拒绝；不以“当前 Project”或
-Principal 的猜测补齐 grant。
+签发前 Server 先认证 issuer，再校验每个 `--project` 或 `--all-projects` 的现有私有 Project
+binding；任一 binding 不成立即 `403 forbidden` 且不写 Credential 或 ProjectGrant。只有完整
+binding 已持久化的 PAT 才能到达直接 API；使用时仍按本页的 route 顺序在任何 idempotency
+lookup 或 admission 前再次验证它。PAT 必须有过期：`--ttl` 缺省 90 天、上限 1 年
+（GitHub fine-grained PAT 同此纪律），不允许永不过期。`--name` 在同一 Principal 的活跃
+凭据中唯一。`revoke` 置 `RevokedAt`；`list` 只显示名称与前缀（`moh_pat_…`），不显示
+完整值。集成令牌（`kind=integration`）不由本命令签发，其签发入口由对应入站集成的 spec 定义。
 
 ### Runner 注册与凭据
 

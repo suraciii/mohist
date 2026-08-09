@@ -194,10 +194,15 @@ in [`conventions.md`](conventions.md). In particular, `AgentSession.Admission` i
 `SessionId`、候选创建键和外部调用所需的 target runner/runtime。它不是第二个 read schema。
 `ContextBoundary` 和 operation result 是 AgentSession 已有持久状态中的记录形状，不是新的
 业务实体。历史 operation 按 `operationId` 保留，以便 response loss 后查询原 operation。
-`operationId` 必须由调用方提供并可重用，Server 不生成客户端不可见的 operation key。
+`operationId` 必须由调用方持有的稳定 key 提供或由入口从该 key 持久映射而来；Server 不得
+为 response loss 生成调用方无法重放的 hidden key。直接外部 API 把 `Idempotency-Key` 作为
+caller-visible stop operation key，并按 `(callerKeyId, projectId, sessionId, turnId, key)` 映射到
+一个稳定 canonical `operationId`。该 internal ID 不对外序列化；调用方以原 public key 查询或
+重放 outcome，完整边界以 [`agent-api.md`](agent-api.md) 为准。
 
 Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的 command 都必须带调用方持有的
-`operationId`；steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。
+`operationId`；直接外部 adapter 先解析上述 public key mapping，再把其 canonical identity 交给
+command。steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。
 同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
 coordinator 也必须在发出 command 前持有并持久化这个身份，不能让客户端只能等待一个
 不可见的 Server key。只有 launch 使用不同的两级身份：调用方提供非空
@@ -711,9 +716,11 @@ durable replay record.
 把 transcript 分组。`unknown` 后只能使用同一调用身份核对或重试；创建新身份重新发送可能
 产生重复副作用。
 
-Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的调用方必须显式提供
-`operationId`；steer 使用 follow-up 的 caller-provided `requestId` 作为 operationId。没有 key
-的 command 在受理前拒绝，不由 grain 生成客户端不可见的替代 key。
+Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的一般调用方必须显式提供
+`operationId`；直接外部 stop 使用 caller-held `Idempotency-Key`，由 adapter 先解析其持久
+mapping 再传入 canonical operationId。steer 使用 follow-up 的 caller-provided `requestId`
+作为 operationId。没有 caller-held key 的 command 在受理前拒绝，不由 grain 生成客户端不可见的
+替代 key。
 同一 `operationId` 重放返回同一 operation，异 key 不能 join 或覆盖另一个 active operation；
 已完成 operation 仍可按同一 key 查询，response loss 不会开启第二个 operation。
 
@@ -2884,7 +2891,8 @@ Runtime binding 基础，但尚未让本文的目标契约成为所有入口共�
 ### Implementation gap: caller key is required
 
 本文的目标行为是：follow-up 必须有非空 caller `requestId`，Compact、Reset、recovery、handoff、
-rebind、stop 和 force-reset 必须有 caller `operationId`；缺失 key 在受理前拒绝，不生成隐藏
+rebind、stop 和 force-reset 必须有 caller-held operation key；直接外部 stop 的 key 是
+`Idempotency-Key`，持久映射到 canonical `operationId`。缺失 key 在受理前拒绝，不生成隐藏
 identity，也不写 operation、Input、Turn、candidate 或外部 effect。当前 routes/Grain 仍有
 缺失 caller key 时生成隐藏 key 的路径，这是 follow-on implementation work，不是目标契约的
 替代行为，也不表示当前实现已经完成。迁移边界在 Server canonical admission/operation 层：

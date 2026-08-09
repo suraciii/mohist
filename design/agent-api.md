@@ -20,9 +20,11 @@ by [conventions.md](conventions.md).
 
 The deployment in scope is a private Project. This contract deliberately does
 not add encryption-at-rest, cross-user transcript visibility, multi-tenant
-policy, OAuth clients, or a new permission model. It still requires every
-direct caller to authenticate with a PAT carried as a Bearer caller key; a
-trusted Agent Connection is not a substitute for that authentication boundary.
+policy, OAuth clients, or a general multi-user/RBAC permission model. It adds
+only the credential-bound private-Project grant required for this direct
+boundary. Every direct caller still authenticates with a PAT carried as a
+Bearer caller key; a trusted Agent Connection is not a substitute for that
+authentication boundary.
 
 ## Boundary decisions
 
@@ -31,7 +33,7 @@ trusted Agent Connection is not a substitute for that authentication boundary.
 | Direct caller identity | Every direct API request sends Authorization: Bearer PAT. The PAT identifies the caller and is never replaced by a caller-supplied connection identity. |
 | Project authorization | A PAT resolves to the minimal ExternalAgentCaller grant in [auth.md](auth.md). Its route scope and explicit Project grant, or explicit operator_all grant, must pass before any idempotency or admission work. |
 | Write authentication | operator is required for launch, follow-up, and stop. |
-| Read authentication | readonly or operator is required for Input, Turn, and event reads. |
+| Read authentication | readonly or operator is required for Job, Input, Turn, and event reads. |
 | Canonical ownership | The Server alone creates and updates Job, Session, Input, Turn, queue, operation, and terminal facts. The caller receives only public observations. |
 | Caller retry identity | The caller supplies an Idempotency-Key; the Server normalizes the complete accepted request and computes its fingerprint. The caller never submits a hash to be trusted. |
 | Public state | Every public read reports exactly one aggregate state: accepted, queued, running, terminal, or unknown, plus the component facts needed to explain it. |
@@ -51,15 +53,17 @@ does not mean that execution completed. The body state is authoritative.
 |---|---|---|---|
 | POST /api/v1/projects/{projectId}/agents/{agentId}/launch | operator | Bearer PAT, Idempotency-Key, launch body | PublicExecutionRead for the unique launch mapping |
 | POST /api/v1/projects/{projectId}/agent-sessions/{sessionId}/inputs | operator | Bearer PAT, Idempotency-Key, follow-up body | PublicExecutionRead for the unique Input/Turn mapping or durable rejection |
+| GET /api/v1/projects/{projectId}/agent-jobs/{jobId} | readonly | Bearer PAT | PublicExecutionRead anchored to the public AgentJob projection |
 | GET /api/v1/projects/{projectId}/agent-inputs/{inputId} | readonly | Bearer PAT | PublicExecutionRead anchored to the Input |
 | GET /api/v1/projects/{projectId}/agent-turns/{turnId} | readonly | Bearer PAT | PublicExecutionRead anchored to the Turn |
 | GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events | readonly | Bearer PAT, optional after and limit | PublicEventPage |
 | POST /api/v1/projects/{projectId}/agent-turns/{turnId}/stop | operator | Bearer PAT, Idempotency-Key, empty body | PublicExecutionRead for the target Turn |
 
-There is deliberately no generic Job, Session, Runner, Runtime, transcript,
-operation, or internal-event export route in this API version. Launch and
-follow-up responses give the stable IDs that can be read through Input, Turn,
-and Session event routes.
+There is deliberately no generic Session, Runner, Runtime, transcript,
+operation, or internal-event export route in this API version. The Job route is
+a constrained public projection, not a serialized AgentJobLaunchRead. Launch
+and follow-up responses give stable IDs that can be read through Job, Input,
+Turn, and Session event routes.
 
 ### Write request bodies
 
@@ -81,7 +85,8 @@ or public event.
 
 Idempotency-Key is an opaque caller string of 1 through 128 printable ASCII
 characters. It is required for every write, including stop. It is a header, not
-a JSON field, a trace ID, an Input ID, or a Server-generated operation ID.
+a JSON field, a trace ID, or an Input ID. On stop it is the caller-visible
+operation key; it is never a Server-generated internal operation ID.
 
 ## Authentication and admission order
 
@@ -90,7 +95,7 @@ For every route, the Server applies this order:
 1. Authenticate the Bearer PAT and resolve its Principal plus
    ExternalAgentCaller callerKeyId, scopes, and Project grant.
 2. Authorize the required scope and selected private Project against that grant;
-   for Agent, Session, Input, and Turn routes, authorize the resource's
+   for Agent, Job, Session, Input, and Turn routes, authorize the resource's
    canonical Project membership as well.
 3. Validate the route, header, query, and JSON syntax without creating domain
    state.
@@ -127,6 +132,10 @@ The exact scopes are:
 | Launch | (projectId, agentId, Idempotency-Key) | contract version, launch, canonical projectId, canonical agentId, complete accepted body | Return the original canonical Job/Session/Input/Turn mapping and its current public observation | 409 idempotency_key_reused; no new canonical record, event, queue entry, outbox item, or external effect |
 | Follow-up | (sessionId, Idempotency-Key) | contract version, followup, canonical sessionId, complete accepted body | Return the original Input/Turn mapping or durable rejection and its current public observation | 409 idempotency_key_reused; no new Input, Turn, queue entry, outbox item, or external effect |
 | Stop | (turnId, Idempotency-Key) | contract version, stop, canonical turnId, empty body | Return the original target Turn observation | 409 idempotency_key_reused; no new stop operation or external effect |
+
+For stop, `(turnId, Idempotency-Key)` is the caller-visible route scope. Its
+durable mapping additionally binds callerKeyId, canonical projectId, sessionId,
+and turnId so one caller cannot look up or replay another caller's public key.
 
 For a follow-up, the Server first resolves the Session and derives its Project
 and Agent from the canonical Session. A caller cannot put a Project or Agent in
@@ -180,9 +189,10 @@ SessionOperationRead.
 
 Every listed key is present. IDs and timestamps can be null only where the
 canonical fact does not exist: for example, a launch rejected before Session
-acceptance has a jobId but no live sessionId, inputId, or turnId. sequence is
-null only when no Session public event could exist. No response contains an
-unlisted execution property.
+acceptance has a jobId but no live sessionId, inputId, or turnId. A prepared
+launch can likewise have a jobId with null live IDs while Session acceptance is
+still pending. sequence is null only when no Session public event could exist.
+No response contains an unlisted execution property.
 
 | Field | Values and meaning |
 |---|---|
@@ -208,6 +218,26 @@ and raw provider or Runner errors. A safe public reasonCode or error may state
 queue_full, context_reset, or stop_outcome_unknown; it cannot include the
 private cause detail.
 
+### Public AgentJob read
+
+GET /api/v1/projects/{projectId}/agent-jobs/{jobId} returns the same strict
+PublicExecutionRead, anchored to the canonical Job's durable public projection.
+It never returns AgentJobLaunchRead or another raw Job shape. A prepared Job
+whose Session is not yet accepted returns 200 with its jobId,
+status=accepted, jobStatus=preparing, and null sessionId/inputId/turnId. A
+durable Session rejection returns 200 with that same jobId, status=terminal,
+outcome=rejected, safe error/reasonCode, and null live IDs. After acceptance,
+the same Job read exposes its public Session/Input/Turn references and later
+public status, output, or error as they become projected.
+
+The same authorization order applies: a PAT without the selected Project grant
+receives 403 before Job lookup; an authorized Project whose Job is absent or
+does not belong to it receives 404 job_not_found. If a launch response was lost
+before the caller learned jobId, it repeats the launch with the same
+Idempotency-Key and receives the same Job anchor or projection_lag; it never
+creates a replacement Job. This route is the minimal public status recovery
+path, not a generic Session or operation lookup.
+
 ## Projection consistency and recovery
 
 AgentJob and AgentSession do not share a cross-aggregate transaction. Their
@@ -217,9 +247,11 @@ claim that a PublicExecutionRead or public event is atomically committed with a
 combined Job/Session/Input/Turn write.
 
 Instead, the Server owns one durable public projection per target Session (or a
-launch target before a Session exists). Its inputs are canonical aggregate
-records plus their durable outbox facts. A projector normalizes those inputs and
-persists, in **one projection transaction**, all of the following:
+launch target before a Session exists). A launch target is permanently anchored
+by jobId, so its Job projection remains addressable before and after Session
+acceptance. Its inputs are canonical aggregate records plus their durable outbox
+facts. A projector normalizes those inputs and persists, in **one projection
+transaction**, all of the following:
 
 1. the allowlisted PublicExecutionRead snapshot for every affected public
    target;
@@ -233,14 +265,16 @@ but are intentionally eventually consistent with the independent canonical
 aggregates. They never read a partial Job/Session combination directly or turn
 an internal outbox delivery into an external event payload.
 
-For a launch, the projector waits for the canonical Job result and the matching
-Session acceptance/rejection fact before it publishes a non-unknown joined
-state. For a follow-up it waits for the matching Session Input/Turn fact. If an
-authorized route knows a required source watermark is ahead of the stored
-projection checkpoint, it returns `503 projection_lag` and the caller retries
-the same key or read; it must not return a stale state as current. Projection
-lag is a transport/reconciliation condition, not the public five-state
-`unknown`.
+For a prepared launch, the projector can publish a Job-anchored accepted state
+with null live IDs after the canonical Job prepare fact. It waits for the
+matching Session acceptance/rejection fact before it publishes a joined
+Job/Session/Input/Turn mapping, then updates that same Job anchor with the
+public references. For a follow-up it waits for the matching Session Input/Turn
+fact. If an authorized route knows a required source watermark is ahead of the
+stored projection checkpoint, it returns `503 projection_lag` and the caller
+retries the same key or read; it must not return a stale state as current.
+Projection lag is a transport/reconciliation condition, not the public
+five-state `unknown`.
 
 `unknown` is emitted only when the projector has consumed the required durable
 facts and those facts say that acceptance, dispatch, binding, stop, or outcome
@@ -334,7 +368,7 @@ safe public fields:
 | 400 | cursor_invalid | The opaque cursor is malformed, tampered with, bound to another Project, Session, or stream generation, or cannot be decoded. No fallback or event read is attempted. |
 | 401 | unauthenticated | The Bearer PAT is absent, invalid, expired, or revoked. The response includes WWW-Authenticate: Bearer; no idempotency or admission effect occurs. |
 | 403 | forbidden | The authenticated caller lacks route scope or the ExternalAgentCaller grant for the selected Project. A grant failure precedes resource lookup, idempotency, and admission, and has zero effects. |
-| 404 | project_not_found, agent_not_found, session_not_found, input_not_found, or turn_not_found | Only after the caller's Project grant passes, the requested canonical resource is not available in that Project. 404 is not the public execution state unknown. |
+| 404 | project_not_found, agent_not_found, job_not_found, session_not_found, input_not_found, or turn_not_found | Only after the caller's Project grant passes, the requested canonical resource is not available in that Project. 404 is not the public execution state unknown. |
 | 409 | idempotency_key_reused | The same durable scope/key was supplied with a different normalized payload. The conflict is stable and creates no new effect. |
 | 409 | stop_outcome_unknown | A different stop key attempts to supersede a stop whose fenced outcome is still unknown. The caller must read the Turn; no new stop is issued. |
 | 410 | cursor_expired | The cursor was valid but falls before the retained public event floor. The response also includes safe earliestSequence and latestSequence values. The caller reloads current Input/Turn observations before starting at a new retained position. |
@@ -505,8 +539,8 @@ Runner call. It freezes:
 
 ```text
 ExternalStopOperation {
+  publicKeyScope = (callerKeyId, projectId, sessionId, turnId, Idempotency-Key)
   turnId
-  idempotencyScope = (turnId, Idempotency-Key)
   fingerprint
   expectedRevision
   expectedContextGeneration
@@ -517,6 +551,9 @@ ExternalStopOperation {
 }
 ```
 
+The caller-visible operation key is Idempotency-Key, never internalOperationId.
+The first authorized request persists exactly one publicKeyScope-to-
+internalOperationId mapping before it freezes any snapshot or calls a Runner.
 All snapshot values are Server-read facts. The caller cannot provide or alter
 revision, context generation, binding, deadline, or internalOperationId. For a
 non-terminal Turn, internalOperationId names the existing canonical
@@ -525,12 +562,13 @@ already terminal at first request, it names the durable no-op terminal
 observation; no Runner stop is issued. This is an API idempotency boundary over
 the existing stop lifecycle, not a second stop state machine.
 
-A matching retry reads the same ExternalStopOperation snapshot and its durable
-outcome. It never rereads current binding to create a replacement operation,
-deadline, or effect. A different fingerprint under the same key returns 409
-idempotency_key_reused. If the original stop is unknown, a different key returns
-409 stop_outcome_unknown until canonical reconciliation resolves that original
-record; the new key cannot target a rebinding or produce a second stop.
+A matching retry first resolves that same publicKeyScope, then reads the same
+ExternalStopOperation snapshot and durable outcome. It never rereads current
+binding to create a replacement operation, deadline, or effect. A different
+fingerprint under the same public key returns 409 idempotency_key_reused. If the
+original stop is unknown, a different key returns 409 stop_outcome_unknown until
+canonical reconciliation resolves that original record; the new key cannot
+target a rebinding or produce a second stop.
 
 A queued Turn can become canonically cancelled. A running Turn invokes the
 existing fenced stop lifecycle from [agent-execution.md](agent-execution.md)
@@ -538,8 +576,11 @@ only when the frozen expectedRevision, expectedContextGeneration, and complete
 expectedBinding still match. If a rebind, reset, or stale owner makes that
 snapshot invalid before or after an external call, the original operation stays
 unknown with a safe reasonCode; it never redirects the stop to the new binding.
-Response loss first queries the same internalOperationId and target attempt. No
-new ExternalStopOperation, Turn, dispatch attempt, or Runner call is created
+Response loss first resolves the same publicKeyScope to the same
+internalOperationId, then queries that target attempt. The caller queries or
+replays the outcome by repeating this same POST with the same Idempotency-Key;
+there is no public internal-operation lookup route. No new
+ExternalStopOperation, Turn, dispatch attempt, or Runner call is created
 automatically.
 
 A terminal commit is fenced against the complete canonical target. Once it
@@ -572,7 +613,7 @@ prompt/input content, memory, workspace/workdir/path, raw payload, or runner
 control. Controlled internal diagnostics and the existing product transcript
 remain separate surfaces with their own contracts.
 
-## Prerequisites and implementation slices
+## Prerequisites, consumer, and implementation slices
 
 This specification remains tracked by #387; these slices do not create new
 issues or a parallel milestone.
@@ -585,20 +626,23 @@ API launch path. Direct external launch remains AgentJob-owned. #376 is a
 prerequisite for stable Action result/status/Agent/Session/Input/Turn IDs and
 shared public vocabulary, not for a shared Job lifecycle or dispatch owner.
 
-| Dependency | State on 2026-08-09 | Required relationship |
+| Item | State on 2026-08-09 | Required relationship |
 |---|---|---|
 | [#376](https://github.com/suraciii/mohist/issues/376) reusable mohist/agent Workflow Action | Open | It supplies stable Action result/status/IDs and shared public terms. Workflow stays TaskRun-owned with no AgentJob; direct API launch stays AgentJob-owned. |
 | [#382](https://github.com/suraciii/mohist/issues/382) capacity and queued state | Closed | The API reuses its canonical capacity/admission facts; it must not add a second queue or reinterpret retryable blocking as terminal. |
 | [#384](https://github.com/suraciii/mohist/issues/384) default public result projection | Closed | The API may reuse its public result facts, but must apply this document's smaller external allowlist rather than export a transcript or UI projection. |
-| [#385](https://github.com/suraciii/mohist/issues/385) Agent history and Session timeline | Open | Public event release waits for durable history ordering and retention decisions to be reconciled with this persisted, cursor-based Session projection. |
+| [#385](https://github.com/suraciii/mohist/issues/385) Agent history and Session timeline | Open | Consumer only: its UI/history experience consumes #387's persisted public stream. It neither owns nor blocks #387 slice 3 retention, ordering, checkpoints, or stream generations. |
 
-1. **Bearer admission gate**: deliver PAT ExternalAgentCaller scope and explicit Project grant checks before every idempotency or admission path; it depends on the auth.md credential model and has no new execution lifecycle dependency.
-2. **Keyed AgentJob launch and Session follow-up**: deliver response-loss-safe external submission and Input/Turn reads using Server-computed normalized fingerprints; it depends on the existing AgentJob launch path and #382's admission facts, while #376 aligns public vocabulary without sharing dispatch ownership.
-3. **Durable public projection**: deliver allowlisted result/error snapshots, checkpoints, generation-aware Session continuation, and context-reset events; it depends on #384's public result facts and #385's settled history ordering/retention boundary.
-4. **Fenced public stop and recovery**: deliver frozen ExternalStopOperation snapshots whose terminal/unknown result cannot be overwritten or replayed automatically; it depends on the preceding projection and the existing fenced Turn lifecycle.
+1. **Bearer admission gate**: deliver explicitly project-bound PAT issuance and route authorization so a caller can safely reach only its private Projects before any idempotency or admission work.
+2. **Keyed AgentJob launch and Session follow-up**: deliver response-loss-safe launch/follow-up plus the minimal public Job, Input, and Turn observations using Server-computed normalized fingerprints and #382 admission facts, while #376 contributes vocabulary only.
+3. **Durable public projection**: #387 owns allowlisted result/error snapshots, public-journal retention and ordering, checkpoints, stream generations, and context-reset events, with #384 result facts as input and #385 only as a later UI consumer.
+4. **Fenced public stop and recovery**: deliver public-key-to-canonical-operation mapping and frozen stop snapshots so terminal or unknown outcomes cannot be replaced or replayed automatically.
 
 ## Acceptance criteria
 
+- A direct external API PAT is issued only after issuer authentication and an
+  explicit `--project` binding or `--scope operator --all-projects` binding;
+  a failed binding returns 403 and persists no Credential or ProjectGrant.
 - A missing, invalid, expired, revoked, or out-of-scope Bearer caller receives
   401 or 403, and a PAT whose ExternalAgentCaller grant excludes the selected
   Project always receives 403 before resource lookup, idempotency, admission,
@@ -608,6 +652,11 @@ shared public vocabulary, not for a shared Job lifecycle or dispatch owner.
   canonical Job/Session/Input/Turn mapping. A matching retry returns those same
   IDs; a changed normalized payload always returns idempotency_key_reused and
   has zero new effect.
+- A known Job has a readonly public projection: a pre-acceptance Job returns
+  accepted/preparing with null live IDs, a rejected Job returns its durable
+  terminal public result with null live IDs, and an accepted Job later exposes
+  its public Session/Input/Turn references; wrong grant is 403 and missing or
+  wrong-Project Job is 404 job_not_found.
 - A follow-up with one (sessionId, Idempotency-Key) creates at most one
   Input/Turn mapping or one durable rejection. Project and Agent are derived
   from the canonical Session, not trusted from caller input.
@@ -629,15 +678,18 @@ shared public vocabulary, not for a shared Job lifecycle or dispatch owner.
   context reset emits only the allowlisted session.context_reset payload.
 - A stop race emits at most one terminal public fact for a Turn. Terminal state
   cannot be overwritten by a late stop/execution result; the first keyed stop
-  freezes its revision/context/binding/deadline/internal identity; unresolved
-  stop and execution facts remain unknown and never cause automatic replay.
+  maps the caller/project/session/turn public key to one hidden canonical
+  operation, freezes its revision/context/binding/deadline, and lets only that
+  same key query/replay its outcome; unresolved stop and execution facts remain
+  unknown and never cause automatic replay.
 
 ## Deterministic verification matrix
 
 | Scenario | Controlled seam | Required assertion |
 |---|---|---|
-| Invalid PAT, expired PAT, readonly write, explicit-grant miss, operator_all grant | Fake ExternalAgentCaller resolver plus recording idempotency/admission store | Exact 401 or 403; a grant miss is 403 before resource lookup; zero mapping reads/returns, durable writes, public events, outbox records, and Runner calls. |
+| PAT issuance and route grant | Fake issuer/project binder plus ExternalAgentCaller resolver and recording stores | Repeated --project persists only explicit IDs; --scope operator --all-projects persists operator_all; invalid binding is 403 with no Credential/ProjectGrant, while a route grant miss is 403 before resource lookup, idempotency, durable writes, public events, outbox records, and Runner calls. |
 | First launch, response-loss retry, concurrent same-key launch | Deterministic transaction barrier and fake Job/Session stores | One Job/Session/Input/Turn mapping only; all matching callers receive the same IDs. |
+| Public AgentJob read | Shared durable projection fixture for prepared, rejected, and accepted Jobs | The Job route returns only PublicExecutionRead; pending acceptance has jobId with null live IDs, rejection preserves a terminal public result, later acceptance adds stable references, and response loss returns the same Job through keyed launch replay. |
 | Launch key reused with changed text or unknown JSON property | Canonical JSON normalizer and recording stores | Stable 409 idempotency_key_reused or 400 invalid_request; no new record/effect. |
 | Follow-up key scope | Two Sessions for one Agent and two Agents in one Project | Same key is isolated by Session; the request never accepts caller-provided derived Project/Agent values. |
 | Rejected, retryably blocked, outcome-pending, terminal blocked, completed, and unknown | Fake canonical state rows | The five-state aggregate and all component fields follow the precedence table exactly. |
@@ -650,7 +702,7 @@ shared public vocabulary, not for a shared Job lifecycle or dispatch owner.
 | Ordered continuation and GET retry | Persisted in-memory public event journal with injected sequence allocator | Pages are ascending, after is exclusive, nextCursor resumes after the last event, and duplicate pages deduplicate by (sessionId, sequence). |
 | Concurrent out-of-order pages and gap | Deterministic client reducer plus reordered page delivery | Client applies only ascending contiguous sequence and rereads/resumes rather than inventing a missing transition. |
 | Tampered, cross-session, wrong-generation, and compacted cursors | Cursor codec, current generation, and injected retained floor | 400 cursor_invalid for malformed/scope/generation mismatch; 410 cursor_expired with safe sequence bounds for a valid current-generation stale cursor; neither causes an implicit restart. |
-| Stop versus completion, rebind, and response loss | Fenced fake Runtime with barriers, persisted ExternalStopOperation, and injected TimeProvider | First key fixes revision/context/binding/deadline/internal identity; one terminal event/output/error survives; stale/rebind and response loss remain unknown with no replay, and a new stop key is rejected. |
+| Stop versus completion, rebind, and response loss | Fenced fake Runtime with barriers, persisted publicKeyScope-to-internalOperationId mapping, and injected TimeProvider | First public key fixes one canonical operation plus revision/context/binding/deadline; matching key reads/replays that outcome without exposing the internal ID, changed fingerprint conflicts, one terminal event/output/error survives, and stale/rebind/response loss remain unknown with no replay. |
 
 Every durability scenario uses a shared in-memory SQLite database across newly
 constructed DbContext/projector instances, deterministic fakes, and injected
@@ -661,7 +713,8 @@ clock.
 
 This is target behavior only. The current route surface does not yet provide the
 PAT ExternalAgentCaller Project grant, Server-computed external idempotency
-mapping, durable checkpointed public projection, generation-aware cursor stream,
-or frozen external stop snapshot defined here. Those gaps remain tracked by
+mapping, public AgentJob read, durable checkpointed public projection,
+generation-aware cursor stream, or public-key-to-canonical-operation stop
+mapping/frozen snapshot defined here. Those gaps remain tracked by
 [#387](https://github.com/suraciii/mohist/issues/387) and its four slices above.
 No source implementation is implied by this specification change.
