@@ -62,16 +62,18 @@ public sealed class AgentAvailabilityService : IScopedService
     {
         var runners = await _runnerStatus.GetOnlineRunnersAsync(projectId, ct);
         var capacity = SumCapacity(runners);
-        var activeRuns = await _grains
+        var snapshot = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-            .GetActiveCountAsync();
+            .GetSnapshotAsync();
+        var activeRuns = snapshot.ActivePermits.Count;
 
         var result = Compute(
             capacity,
             activeRuns,
             agent.MaxConcurrentRuns,
             _timeProvider.GetUtcNow(),
-            runners.Count > 0);
+            runners.Count > 0,
+            GateWaitingCount(snapshot));
         return result;
     }
 
@@ -95,11 +97,23 @@ public sealed class AgentAvailabilityService : IScopedService
         var entries = new Dictionary<string, AgentAvailabilityListEntry>(agents.Count, StringComparer.Ordinal);
         foreach (var agent in agents)
         {
-            var activeRuns = await _grains
+            var snapshot = await _grains
                 .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-                .GetActiveCountAsync();
-            var queuedCount = pendingCounts.TryGetValue(agent.Id, out var count) ? count : 0;
-            entries[agent.Id] = BuildListEntry(agent, capacity, activeRuns, queuedCount, hasOnlineRunner, observedAt);
+                .GetSnapshotAsync();
+            var pendingCount = pendingCounts.TryGetValue(agent.Id, out var count) ? count : 0;
+            var followupWaiters = snapshot.Waiters.Count(waiter =>
+                waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
+            var pendingFollowupNotifications = snapshot.PendingNotifications.Count(notification =>
+                notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
+            var queuedCount = pendingCount + followupWaiters + pendingFollowupNotifications;
+            entries[agent.Id] = BuildListEntry(
+                agent,
+                capacity,
+                snapshot.ActivePermits.Count,
+                queuedCount,
+                hasOnlineRunner,
+                observedAt,
+                GateWaitingCount(snapshot));
         }
 
         return entries;
@@ -111,9 +125,16 @@ public sealed class AgentAvailabilityService : IScopedService
         int activeRuns,
         int queuedCount,
         bool hasOnlineRunner,
-        DateTimeOffset observedAt)
+        DateTimeOffset observedAt,
+        int gateWaiterCount = 0)
     {
-        var availability = Compute(capacity, activeRuns, agent.MaxConcurrentRuns, observedAt, hasOnlineRunner);
+        var availability = Compute(
+            capacity,
+            activeRuns,
+            agent.MaxConcurrentRuns,
+            observedAt,
+            hasOnlineRunner,
+            gateWaiterCount);
         return new AgentAvailabilityListEntry(
             agent.Id,
             availability.CanStartNow,
@@ -130,10 +151,10 @@ public sealed class AgentAvailabilityService : IScopedService
         AgentAvailabilityResult availability,
         CancellationToken ct = default)
     {
-        var waiters = await _grains
+        var snapshot = await _grains
             .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agent.Id))
-            .GetWaitersAsync();
-        var concurrencyJobs = waiters
+            .GetSnapshotAsync();
+        var concurrencyJobs = snapshot.Waiters
             .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
             .Select(waiter => waiter.OwnerId)
             .ToHashSet(StringComparer.Ordinal);
@@ -144,7 +165,24 @@ public sealed class AgentAvailabilityService : IScopedService
             [AgentJobStatus.Pending],
             ct: ct);
 
-        return BuildWaitingWork(pending, concurrencyJobs, availability.WaitingReason);
+        var jobs = BuildWaitingWork(pending, concurrencyJobs, availability.WaitingReason);
+        var followups = snapshot.Waiters
+            .Where(waiter => waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup)
+            .Select(waiter => new AgentWaitingWork(
+                waiter.OwnerId,
+                "waiting",
+                waiter.WaitingReason,
+                null))
+            .ToList();
+        var pendingFollowupNotifications = snapshot.PendingNotifications
+            .Where(notification => notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup)
+            .Select(notification => new AgentWaitingWork(
+                notification.OwnerId,
+                "waiting",
+                AgentAvailabilityWaitReasons.DispatchPending,
+                null))
+            .ToList();
+        return jobs.Concat(followups).Concat(pendingFollowupNotifications).ToList();
     }
 
     public static AgentAvailabilityResult Compute(
@@ -160,11 +198,22 @@ public sealed class AgentAvailabilityService : IScopedService
         int? maxConcurrentRuns,
         DateTimeOffset observedAt,
         bool hasOnlineRunner)
+        => Compute(capacity, activeRuns, maxConcurrentRuns, observedAt, hasOnlineRunner, 0);
+
+    public static AgentAvailabilityResult Compute(
+        RunnerCapacityView capacity,
+        int activeRuns,
+        int? maxConcurrentRuns,
+        DateTimeOffset observedAt,
+        bool hasOnlineRunner,
+        int gateWaiterCount)
     {
         string? reason = !hasOnlineRunner
             ? AgentAvailabilityWaitReasons.NoOnlineRunner
             : capacity.UsedSlots >= capacity.TotalSlots
                 ? AgentAvailabilityWaitReasons.CapacityFull
+                : gateWaiterCount > 0
+                    ? AgentAvailabilityWaitReasons.CapacityFull
                 : maxConcurrentRuns is not null && activeRuns >= maxConcurrentRuns.Value
                     ? AgentAvailabilityWaitReasons.ConcurrencyLimit
                     : null;
@@ -187,10 +236,13 @@ public sealed class AgentAvailabilityService : IScopedService
                 job.JobKey,
                 "waiting",
                 concurrencyJobs.Contains(job.JobKey)
-                    ? AgentAvailabilityWaitReasons.ConcurrencyLimit
+                    ? AgentAvailabilityWaitReasons.CapacityFull
                     : availabilityReason ?? AgentAvailabilityWaitReasons.DispatchPending,
                 job.SubmittedAt))
             .ToList();
+
+    private static int GateWaitingCount(AgentConcurrencySnapshot snapshot) =>
+        snapshot.Waiters.Count + snapshot.PendingNotifications.Count;
 
     private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
     {

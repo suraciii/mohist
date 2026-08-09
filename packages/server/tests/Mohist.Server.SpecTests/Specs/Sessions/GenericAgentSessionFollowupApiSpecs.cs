@@ -31,7 +31,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
     }
 
     [Fact]
-    public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsAccepted()
+    public async Task GenericFollowupEndpoint_ActiveGenericSessionOnlineRunner_ReturnsAcceptedAndQueued()
     {
         var (project, agent, sessionId, _) = await LaunchAndOpenGenericSessionAsync("gen-followup-ok");
         var runner = _fixture.Grains.GetGrain<IRunnerGrain>(_runnerId);
@@ -63,16 +63,7 @@ public class GenericAgentSessionFollowupApiSpecs : GenericAgentSessionFollowupAp
             Assert.Equal("accepted", data.GetProperty("inputAcceptance").GetString());
             Assert.Equal("queued", data.GetProperty("turnStatus").GetString());
 
-            var sent = Assert.Single(runnerHub.SentMessages);
-            Assert.Equal("conn-gen-followup-1", sent.ConnectionId);
-            Assert.Equal("ReceiveFollowup", sent.Method);
-
-            var payload = JsonSerializer.SerializeToElement(sent.Arguments.Single());
-            Assert.Equal("add a logout route", payload.GetProperty("text").GetString());
-            var target = payload.GetProperty("target");
-            Assert.Equal("generic", target.GetProperty("kind").GetString());
-            Assert.Equal(project.Id, target.GetProperty("projectId").GetString());
-            Assert.Equal(sessionId, target.GetProperty("sessionId").GetString());
+            Assert.Empty(runnerHub.SentMessages);
             Assert.Equal(activeWorksBefore, await GetActiveWorkSnapshotAsync(runner));
 
             using var summary = await _client.GetAsync($"/api/projects/{project.Id}/agent-sessions/{sessionId}");

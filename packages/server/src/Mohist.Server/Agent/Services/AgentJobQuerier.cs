@@ -101,6 +101,31 @@ public class AgentJobQuerier : IScopedService
             && string.Equals(state.ConcurrencyPermitToken, token, StringComparison.Ordinal);
     }
 
+    public async Task<bool> HoldsConcurrencyWaiterAsync(
+        string jobKey,
+        string token,
+        string? waiterId = null,
+        long generation = 0,
+        CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var stateJson = await db.AgentJobs
+            .AsNoTracking()
+            .Where(row => row.JobKey == jobKey)
+            .Select(row => row.State)
+            .FirstOrDefaultAsync(ct);
+        if (stateJson is null)
+            return false;
+
+        var state = JSON.Deserialize<AgentJobState>(stateJson);
+        return state?.Status == AgentJobStatus.Pending
+            && !state.ConcurrencyPermitHeld
+            && !state.ConcurrencyReleasePending
+            && string.Equals(state.ConcurrencyPermitToken, token, StringComparison.Ordinal)
+            && (waiterId is null || string.Equals(state.ConcurrencyWaiterId, waiterId, StringComparison.Ordinal))
+            && (generation == 0 || state.ConcurrencyGeneration == generation);
+    }
+
     public async Task<AgentExecutionHistory?> GetLatestExecutionAsync(
         string projectId,
         string agentId,

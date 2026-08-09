@@ -453,7 +453,13 @@ public sealed record AgentSessionFollowupLease(
     [property: Id(7)] string? InputId = null,
     [property: Id(8)] string? TurnId = null,
     [property: Id(9)] bool Dispatching = false,
-    [property: Id(10)] bool PayloadSealed = false);
+    [property: Id(10)] bool PayloadSealed = false,
+    [property: Id(11)] string? ConcurrencyPermitId = null,
+    [property: Id(12)] string? ConcurrencyDispatchId = null,
+    [property: Id(13)] long ConcurrencyGeneration = 0,
+    [property: Id(14)] string? ConcurrencyGateStatus = null,
+    [property: Id(15)] string? WaitingReason = null,
+    [property: Id(16)] string? ConcurrencyWaiterId = null);
 
 /// <summary>
 /// Result of a single <see cref="AgentSessionExtensions.AcceptFollowup"/>
@@ -515,7 +521,8 @@ public sealed record AgentSessionFollowupDispatch(
     /// legacy multi-input shape without inventing an owner scope.
     /// </summary>
     [property: Id(4)] string? InputId = null,
-    [property: Id(5)] AgentSessionInputProvenance? Provenance = null);
+    [property: Id(5)] AgentSessionInputProvenance? Provenance = null,
+    [property: Id(6)] string? DispatchId = null);
 
 /// <summary>
 /// Lookup result of <see cref="AgentSessionExtensions.FindFollowupInputByIdempotencyKey"/>.

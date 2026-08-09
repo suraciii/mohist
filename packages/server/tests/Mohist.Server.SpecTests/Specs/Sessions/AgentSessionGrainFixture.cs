@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
+using Mohist.Server.Agent.Services;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Infrastructure.Events;
@@ -14,6 +15,7 @@ using Mohist.Server.Sessions.Services;
 using Mohist.Server.SpecTests.Support;
 using Mohist.Server.TestSupport;
 using Orleans.Configuration;
+using Orleans.Reminders;
 using Orleans.TestingHost;
 using Xunit;
 
@@ -61,6 +63,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
             siloBuilder.UseInMemoryReminderService();
             siloBuilder.AddMemoryGrainStorageAsDefault();
             siloBuilder.Configure<GrainCollectionOptions>(options => options.CollectionAge = TimeSpan.FromMinutes(10));
+            siloBuilder.Configure<ReminderOptions>(options =>
+                options.MinimumReminderPeriod = TimeSpan.FromMilliseconds(100));
             siloBuilder.Services.AddDbContextFactory<MohistDbContext>(options => options.UseSqlite(ConnectionString));
 
             siloBuilder.Services.AddSingleton<IAgentSessionStore>(StateStore);
@@ -75,6 +79,8 @@ public sealed class AgentSessionGrainFixture : IAsyncLifetime
              siloBuilder.Services.AddSingleton<ILogger<AgentSessionGrain>>(Logger);
              siloBuilder.Services.AddSingleton<IEventStore>(new NoopEventStore());
              siloBuilder.Services.AddSingleton<IBackgroundTaskLauncher, BackgroundTaskLauncher>();
+            siloBuilder.Services.AddScoped<AgentQuerier>();
+            siloBuilder.Services.AddScoped<AgentJobQuerier>();
         });
         Cluster = builder.Build();
         return new ValueTask(Cluster.DeployAsync());

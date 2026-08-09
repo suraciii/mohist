@@ -470,6 +470,14 @@ rejection，改 payload 永远返回 `rejected(idempotency_key_reused)`，不能
 负责跨 Session 的 max-concurrent-runs、capacity claim/release 和容量视图，不在本设计复制
 它的调度策略。
 
+因此，跨 Session 的容量等待属于 Server 的 canonical admission 状态：
+launch 与会开始新 Runtime execution 的 follow-up 都先持久化稳定的
+Input/Turn 身份，再由 per-Agent capacity authority claim。claim 返回
+`waiting` 时，Turn 保持可观察的 `queued`，并保留同一 claim token；释放或
+容量策略变更由 Server 唤醒原 waiter，不能把它映射成 Ready、同步失败或让
+客户端重新生成请求身份。Session 内仍只允许一个 Turn 执行，不同 Session
+可以在 `max-concurrent-runs` 与 Runner capacity 允许时并行。
+
 `new-turn` 受理事务先持久化 Input、Turn 关系和 canonical dispatch record，再异步入队；`steer`
 受理事务则先持久化上面定义的 steer operation/effect，不创建 dispatch record。若 event/outbox
 写入明确失败，整个 Session 受理事务失败，Input 不对外报告 accepted；若 Session 事务已

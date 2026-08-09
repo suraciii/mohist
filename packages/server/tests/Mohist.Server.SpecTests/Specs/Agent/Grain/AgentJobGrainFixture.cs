@@ -229,6 +229,8 @@ public sealed class ControllableAgentJobDispatchObserver : IAgentJobDispatchObse
     public bool FailAssignmentPrepared { get; set; }
     public bool FailRunnerAccepted { get; set; }
 
+    public Task AssignmentPrepared => _assignmentPrepared.Task;
+
     public Task AssignmentPreparedAsync(string agentJobId, string runnerId, string workId)
     {
         _assignmentPrepared.TrySetResult();
