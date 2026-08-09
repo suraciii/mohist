@@ -1,39 +1,65 @@
 import { request, projectApiPath } from '../../../shared/api/client'
+import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 
-export interface AgentSubscriptionFilterDto {
-  type: string
-  source: string | null
-  subject: string | null
-}
+export type AgentSubscriptionStatus = 'active' | 'archived'
+export type AgentSubscriptionState =
+  | 'configured'
+  | 'empty'
+  | 'unconfigured'
+  | 'unavailable'
+  | 'no_connection'
 
 export interface AgentSubscriptionDto {
   id: string
   projectId: string
   agentId: string
   name: string
-  filter: AgentSubscriptionFilterDto
+  match: string
   responsePrompt: string
-  priority: number | null
-  status: 'active' | 'archived'
+  continue: boolean
+  position: number
+  status: AgentSubscriptionStatus
   createdAt: string
   updatedAt: string
 }
 
+export interface AgentSubscriptionListDto {
+  subscriptions: AgentSubscriptionDto[]
+  state: AgentSubscriptionState
+  agentStatus: string
+  readiness: 'Ready' | 'Needs setup' | 'Unknown'
+  connection: 'connected' | 'unavailable' | 'no_connection'
+}
+
 export interface AgentSubscriptionCreateRequest {
   name: string
-  filter: {
-    type: string
-    source?: string | null
-    subject?: string | null
-  }
+  match: string
   responsePrompt: string
-  priority?: number | null
+  continue?: boolean
+  idempotencyKey?: string
+}
+
+export type AgentSubscriptionCreateResult = AgentSubscriptionDto & {
+  idempotencyKey: string
+}
+
+export type AgentSubscriptionCreateError = Error & {
+  idempotencyKey: string
+}
+
+export interface AgentSubscriptionUpdateRequest {
+  name?: string
+  match?: string
+  responsePrompt?: string
+  continue?: boolean | null
+}
+
+function subscriptionsPath(projectId: string, agentRef: string) {
+  return projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/subscriptions`)
 }
 
 export function listAgentSubscriptions(projectId: string, agentRef: string) {
-  return request<AgentSubscriptionDto[]>(
-    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/subscriptions`),
-  )
+  return request<AgentSubscriptionListDto>(subscriptionsPath(projectId, agentRef))
 }
 
 export function createAgentSubscription(
@@ -41,45 +67,38 @@ export function createAgentSubscription(
   agentRef: string,
   data: AgentSubscriptionCreateRequest,
 ) {
-  return request<AgentSubscriptionDto>(
-    projectApiPath(projectId, `/agents/${encodeURIComponent(agentRef)}/subscriptions`),
-    { method: 'POST', body: JSON.stringify(data) },
-  )
+  const { idempotencyKey, ...body } = data
+  const key = idempotencyKey ?? createIdempotencyKey()
+  return request<AgentSubscriptionDto>(subscriptionsPath(projectId, agentRef), {
+    method: 'POST',
+    headers: { 'Idempotency-Key': key },
+    body: JSON.stringify(body),
+  })
+    .then((resource): AgentSubscriptionCreateResult => ({ ...resource, idempotencyKey: key }))
+    .catch((error: unknown) => {
+      const retryable = error instanceof Error
+        ? error
+        : new Error('Subscription create response was lost.')
+      Object.assign(retryable, { idempotencyKey: key })
+      throw retryable as AgentSubscriptionCreateError
+    })
 }
 
-export function archiveAgentSubscription(projectId: string, agentRef: string, subscriptionId: string) {
+export function updateAgentSubscription(
+  projectId: string,
+  agentRef: string,
+  subscriptionId: string,
+  data: AgentSubscriptionUpdateRequest,
+) {
   return request<AgentSubscriptionDto>(
-    projectApiPath(
-      projectId,
-      `/agents/${encodeURIComponent(agentRef)}/subscriptions/${encodeURIComponent(subscriptionId)}/archive`,
-    ),
-    { method: 'POST' },
-  )
-}
-
-export function restoreAgentSubscription(projectId: string, agentRef: string, subscriptionId: string) {
-  return request<AgentSubscriptionDto>(
-    projectApiPath(
-      projectId,
-      `/agents/${encodeURIComponent(agentRef)}/subscriptions/${encodeURIComponent(subscriptionId)}/restore`,
-    ),
-    { method: 'POST' },
+    `${subscriptionsPath(projectId, agentRef)}/${encodeURIComponent(subscriptionId)}`,
+    { method: 'PATCH', body: JSON.stringify(data) },
   )
 }
 
 export function deleteAgentSubscription(projectId: string, agentRef: string, subscriptionId: string) {
-  return request<unknown>(
-    projectApiPath(
-      projectId,
-      `/agents/${encodeURIComponent(agentRef)}/subscriptions/${encodeURIComponent(subscriptionId)}`,
-    ),
+  return request<{ id: string; status: 'deleted' }>(
+    `${subscriptionsPath(projectId, agentRef)}/${encodeURIComponent(subscriptionId)}`,
     { method: 'DELETE' },
   )
-}
-
-export function formatAgentSubscriptionFilter(filter: AgentSubscriptionFilterDto): string {
-  const parts: string[] = [filter.type]
-  if (filter.source) parts.push(`source=${filter.source}`)
-  if (filter.subject) parts.push(`subject=${filter.subject}`)
-  return parts.join(', ')
 }

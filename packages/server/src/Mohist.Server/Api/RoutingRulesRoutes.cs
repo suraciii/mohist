@@ -44,7 +44,9 @@ public static class RoutingRulesRoutes
         {
             var project = context.GetResolvedProject();
             var rule = await store.GetAsync(project.Id, ruleId, ct);
-            return rule is null ? ApiResults.NotFound($"Routing rule '{ruleId}' not found") : ApiResults.Ok(ToDto(rule));
+            return rule is null || rule.Status == RoutingRuleStatus.Deleted
+                ? ApiResults.NotFound($"Routing rule '{ruleId}' not found")
+                : ApiResults.Ok(ToDto(rule));
         });
 
         group.MapPatch("/{ruleId}", async (HttpContext context, string ruleId, RoutingRuleUpdateRequest request, RoutingRuleStore store, CancellationToken ct) =>

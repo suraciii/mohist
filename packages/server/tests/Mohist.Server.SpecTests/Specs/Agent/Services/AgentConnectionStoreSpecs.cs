@@ -519,7 +519,10 @@ public sealed partial class AgentConnectionStoreSpecs : IAsyncLifetime
             Id = agentId,
             State = JsonSerializer.Serialize(new Mohist.Server.Agent.Domain.Agent
             {
-                Id = agentId, ProjectId = projectId, Name = agentId, Status = status,
+                Id = agentId,
+                ProjectId = projectId,
+                Name = agentId,
+                Status = status,
             }, JSON.Options),
         });
         await db.SaveChangesAsync();
