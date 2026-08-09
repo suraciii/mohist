@@ -100,29 +100,20 @@ to create another Workspace and bind it during spawn with
 directory. A git worktree is a git tool whose use the Agent decides; the
 platform has no "isolated workspace" primitive.
 
-Spawn creates the child AgentJob, AgentSession, first Input, and first Turn as
-usual. It is the same as a launch with an additional parent-child relation.
-`--parent-session` explicitly identifies the delegating session and cannot be
-inferred from the working directory. After a network interruption, retry with
-the same `--idempotency-key` to avoid starting another child session.
+Spawn is a normal Agent launch plus an explicit parent-child relation.
+`--parent-session` names the delegating session because a working directory does
+not prove delegation. The caller and `--idempotency-key` identify one delegation
+intent, so a retry after interruption returns the same child or the same
+rejection instead of starting duplicate work. Only a new key means new work.
 
-The caller and `--idempotency-key` together form the stable delegation identity
-for one spawn. A failed check leaves no child session before the parent-child
-relation is established. If the parent's execution environment is temporarily
-unavailable or its tree is stopping, retain the same key while waiting or
-retrying. The system rechecks conditions and accepts the same delegation after
-recovery without opening another child session. A definitive pre-acceptance
-rejection occurs only when the parent has no inheritable working directory, the
-target is outside the parent's declared scope, the target Needs setup, or the
-target is archived. Retrying with the same key returns the same result; only a
-new key represents a new delegation.
-
-After the system establishes the execution plan for a delegation, a condition
-change during establishment causes a definitive rejection, and the child
-session does not execute. Retrying with the same key always returns that fixed
-result. After the relation is established, the child session is ordinary work.
-Later stop or cancel operations follow its normal lifecycle; a later parent
-change does not rewrite it as rejected.
+Before Mohist accepts the relation, a failed check leaves no executable child.
+Temporary loss of the parent's execution environment may be retried with the
+same key. Mohist rejects the delegation when the parent has no inheritable
+working directory, the target is outside the declared scope, the target Needs
+setup, or the target is archived. After acceptance, the child is ordinary work:
+later parent changes do not rewrite its history, and stop or cancel follows the
+normal child lifecycle. See [Subagent Design](../design/subagents.md) for the
+concurrency and recovery protocol behind this guarantee.
 
 Context rules:
 

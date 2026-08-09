@@ -238,11 +238,12 @@ their purpose and remains stable.
 - An Issue with an active Workflow cannot currently change its Profile. The
   target behavior allows selecting the Profile for the next run without
   changing the current run.
-- Mohist reloads the Definition when a Stage starts and reads current Variables
-  and Prompts before a normal Task starts. Recovery self-retry and manual retry
-  now reconstruct the original declaration and resolve a fresh attempt snapshot
-  (issue #465). Profile collection migration must preserve those semantics. It
-  must not add a Definition snapshot to WorkflowRun or turn the input used by one
-  Task into the declaration for a later attempt.
+- Profile changes take effect at future Stage and Task boundaries so a
+  configuration fix can help later work without changing an attempt that is
+  already running. A retry rebuilds the declared Task before it reads current
+  Variables and Prompts; it never treats one attempt's resolved input as future
+  configuration (issue #465). Profile collection migration must preserve both
+  live fixes and accepted-attempt stability. See
+  [Workflow Recovery Design](../design/workflow/recovery.md).
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.

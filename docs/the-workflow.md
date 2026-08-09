@@ -1,9 +1,12 @@
 # The Workflow
 
-The default Mohist workflow has five stages. You need to understand what each
-stage does, what it produces, and when it stops so that you know where approval
-and recovery actions occur. See [Issue Management](issues.md) for all issue
-operations, including create, start, approve, and recover. See
+The default Mohist Workflow separates five kinds of decisions that have
+different costs and failure boundaries. Plan tests the direction before code is
+changed. Build creates an isolated increment. Check creates evidence in a
+separate verification pass. Integrate alone changes the shared base branch.
+This separation keeps approval and recovery focused on the smallest uncertain
+boundary. See [Issue Management](issues.md) for all Issue operations, including
+create, start, approve, and recover. See
 [Workflow Profile](workflow-profiles.md) for custom stages, tasks, and approval
 policies.
 
@@ -14,7 +17,9 @@ document.
 
 ## Draft
 
-Draft is the initial state of a new Issue. In this state:
+Draft keeps a mutable requirement separate from execution. This lets people
+clarify intent and resolve prerequisites before Mohist consumes execution
+capacity. In this state:
 
 - The Workflow has not started.
 - The Inline Agent has not started.
@@ -61,15 +66,11 @@ The approver may be any authorized actor. See
 
 ## Build
 
-The Inline Agent implements the steps in `tasks.json`.
-
-### What Build Does
-
-- Works in the Issue-specific worktree on the `mo/issue-<number>` branch.
-- Executes the tasks in `tasks.json` one at a time.
-- Runs tests or lint checks after each task.
-- Retries or adjusts failed tasks automatically.
-- Creates one commit for each task.
+Build turns the approved plan into small, reviewable changes. Keeping Build
+after plan approval avoids spending execution time on a rejected direction.
+Following `tasks.json` one item at a time, checking each increment, and recording
+separate commits localizes failures and makes recovery understandable. Work
+remains isolated on the Issue branch until Integrate.
 
 ### After Build
 
@@ -78,15 +79,10 @@ Build, set Build's `requiresApproval` field to `true` in the Workflow Profile.
 
 ## Check
 
-The Inline Agent reviews the Build output. This stage acts as an internal code
-review.
-
-### What Check Does
-
-- Runs the complete test suite.
-- Reviews the Inline Agent's own diff.
-- Produces `review.md` with the conclusion, findings, and recommended fixes.
-- May start another Build pass when it finds a problem.
+Check prevents Build's claim of completion from being its only evidence. It
+runs the complete test suite, reviews the diff, and records the conclusion and
+findings in `review.md`. A problem returns to Build before the shared base branch
+is involved.
 
 ### After Check
 
@@ -102,15 +98,11 @@ For a manual decision, read `review.md`.
 
 ## Integrate
 
-Integrate merges the `mo/issue-<number>` branch into the base branch.
-
-### What Integrate Does
-
-- Checks whether the base branch has moved because another person or Issue
-  advanced it.
-- Attempts a rebase when the base branch has moved. This can cause conflicts.
-- Merges into the base branch.
-- Pushes to the remote when configured.
+Integrate isolates shared-branch risk from implementation work. Another person
+or Issue may have advanced the base branch while Build and Check ran, so this
+stage checks drift, rebases when needed, merges the Issue branch, and pushes
+when configured. Conflicts remain an Integrate concern instead of leaking into
+earlier stages.
 
 ### Integrate Failure
 
@@ -124,7 +116,9 @@ The Issue becomes blocked and waits for intervention. See
 
 ## Done
 
-Done is the terminal state for a completed Issue. In this state:
+Done records that both implementation and shared-branch integration succeeded.
+It preserves the evidence needed for later audit while removing the Issue from
+active execution. In this state:
 
 - The code is on the base branch.
 - All artifacts are archived under

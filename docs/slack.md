@@ -29,12 +29,14 @@ continue a session, stop the current execution, and receive the result.
 
 ### Current Development Management Plane
 
-The current P0 Manager lifecycle API has no Mohist login, caller
-authentication, or permission isolation. Every request is treated as a
-deployment management operation. A client cannot declare an operator through
-`ManagerExternalId`, `actor`, or a request header, and those fields do not enter
-the audit record. Slack installation authorization confirms only the actual
-workspace and Agent App; it does not establish a Mohist caller identity.
+The current development management plane trusts the deployment boundary rather
+than identifying and authorizing each caller. Expose it only on a trusted local
+or administration network: any caller that can reach it can request deployment
+management operations. Slack installation authorization proves control of the
+Slack workspace and App, but it does not establish a Mohist operator identity
+or grant Mohist management permission. Per-caller authentication, permission
+isolation, and attribution remain an implementation gap. See
+[Authentication and Access](auth.md).
 
 ## Installation Model
 

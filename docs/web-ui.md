@@ -32,90 +32,42 @@ happened, whether a person must act, and which actions are currently safe.
 
 Use the top navigation to change pages.
 
-## Board (Home)
+## From Global Attention to Safe Action
 
-### Board Columns
+The Board answers which work needs attention across the Project. Issue details
+answers why one item needs attention and which action is safe. Separating these
+decision scopes keeps global triage scannable without hiding the evidence needed
+for manual takeover.
 
-The board groups Issues by status:
+The Board groups Issues as Backlog, In Progress, Done, or Cancelled. Cards expose
+identity, priority, current Workflow stage, and health because those facts are
+enough to choose what to inspect next. Priority, label, title search, and sort
+controls narrow that decision; their URL state is shareable so two people can
+review the same view.
 
-- **Backlog:** Not started.
-- **In Progress:** Running in a Workflow.
-- **Done:** Complete.
-- **Cancelled:** Cancelled and hidden by default. Select **Show cancelled** to
-  expand it.
-
-### Card Content
-
-Each card shows:
-
-- Issue number and title.
-- Priority from P0 through P4.
-- Status such as blocked, approval, running, waiting, or drift.
-- Workflow stage such as Plan, Build, Check, or Integrate.
-- Health such as active, paused, or blocked.
-- A pulsing running indicator while an Inline Agent works.
-
-### Filters and Sort
-
-The toolbar above the board provides:
-
-- **Priority:** Select one or more P0 through P4 values.
-- **Labels:** Select from a list.
-- **Search:** Search by title.
-- **Sort:** Sort by Priority, Number, or Updated.
-
-The page URL contains the filters and can be shared directly.
-
-### Needs Attention Banner
-
-An amber **Needs attention** banner appears above the board when an Issue is
-blocked or waiting for an Approval. Select it to open the relevant work.
-
-### Runner Unavailable Banner
-
-A warning appears above the board when Runner is disconnected and Workflow
-progress is affected. An Issue can still start and wait for an available Runner.
+**Needs attention** elevates blocked work and pending Approvals above ordinary
+progress. Runner unavailability remains a separate warning because it is a
+system constraint that can affect many Issues, not a new state inferred for
+each Issue. An Issue may still start and wait for Runner capacity.
 
 ## Issue Details
 
-This page shows one Issue and its manual operations. Desktop uses two columns;
-mobile uses one.
+This page supports manual takeover of one Issue. It keeps five kinds of context
+together so a person does not act from a status label alone:
 
-### Header
+- **Intent and ownership:** Issue description, Project, Repository, Epic,
+  labels, priority, and prerequisites.
+- **Execution position:** Workflow stage, Task progress, selected Workflow
+  Profile, health, and current activity.
+- **Change evidence:** Definition, artifacts, commits, diff summary, and branch
+  drift.
+- **Diagnosis:** Blocked cause, convergence information, and the recommended
+  recovery action.
+- **Collaboration and control:** Comments and only the actions valid for the
+  authoritative current state.
 
-- Number and title.
-- Priority, Workflow Stage, Health, and Running indicators.
-- Labels.
-- Primary Epic, with a link when present.
-- Creation and update time.
-
-### Main Area
-
-From top to bottom:
-
-1. **Workflow progress:** Current Workflow stage and task progress.
-2. **Workflow Profile selector:** Select a Project Profile for this Issue.
-3. **Diff summary:** Base and head branches, ahead and behind counts, and
-   changed-file count.
-4. **Branch state:** Branch status and rebase availability.
-5. **Description:** Rendered Markdown from the Issue body.
-6. **Workflow Definition:** Definition used by the current run.
-7. **Commits:** Commits for this Issue.
-8. **Comments:** Comment history and new-comment input.
-
-### Sidebar
-
-From top to bottom:
-
-1. **Details:** Issue Stage, Workflow Stage, Project, and Repository.
-2. **Latest artifacts:** Plan or Check artifacts such as `proposal.md` and
-   `review.md`.
-3. **Base Drift Detected:** Base-branch drift, when present.
-4. **Workflow Blocked:** Cause and recommended recovery, when present.
-5. **Convergence:** Convergence information, when present.
-6. **Actions:** Current operations such as Start, Approve, Retry, and Stop.
-7. **Model selector:** Model for the complete Workflow or individual stages.
-8. **Prerequisites:** Dependency list and Add Prerequisite input, when present.
+Desktop may place these groups across a main area and sidebar; mobile may stack
+them. Layout does not change their meaning or the available operations.
 
 ### Available Buttons
 

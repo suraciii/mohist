@@ -66,20 +66,19 @@ Do not increase capacity without accounting for resource use:
   Git lock conflicts.
 - A capacity of 4 to 8 is appropriate for a personal development machine.
 
-## What Runner Does
+## Execution Ownership
 
-For each task, Runner:
+Runner owns host-specific side effects because they are replaceable execution
+state. Server owns durable work decisions because a Runner can disappear at any
+time. This boundary explains why an interrupted Runner can be replaced without
+changing Workflow truth, and why unreported or uncommitted files cannot be
+treated as a durable result.
 
-1. **Prepares a workspace:** Creates an isolated branch and directory for the
-   WorkflowRun.
-2. **Renders the prompt:** Combines the Issue body, artifacts, and template.
-3. **Executes the Action:** For example, `mohist/opencode` sends this input to
-   the installed OpenCode backend.
-4. **Streams facts:** Reports Action execution facts to Server so the UI can
-   update in real time.
-5. **Validates output:** Checks whether `expect.files` exist.
-6. **Reclaims the workspace:** Removes it after the WorkflowRun, or retains it
-   temporarily for debugging.
+For one task, Runner prepares an isolated workspace, resolves the declared
+Action input, invokes the execution backend, and reports facts and outputs to
+Server. It validates declared output expectations before reporting success and
+reclaims the workspace when the Workflow no longer needs it. The complete
+Action contract is in [Action Contracts](actions/README.md).
 
 ## Workspace Location
 
