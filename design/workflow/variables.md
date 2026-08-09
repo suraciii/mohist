@@ -4,16 +4,18 @@ status: implemented
 
 # Workflow Variables
 
-Workflow Variables 是独立于 WorkflowProfile 的资源。Project、Issue 和 WorkflowRun 都
-可以保存 Variables；系统按确定顺序合并它们，并为当前 Stage 产生 Effective Variables。
+Workflow Variables are resources that are independent of WorkflowProfile. Project, Issue, and
+WorkflowRun can each store Variables. The system merges them in a deterministic order and produces
+Effective Variables for the current Stage.
 
-本文只定义变量的资源形状、合并与生效语义。Profile 的选择和结构见
-[`profile.md`](profile.md)，模板命名空间见 [`task-dispatch.md`](task-dispatch.md)，Action
-output 到 Run Variables 的投影见 [`actions.md`](actions.md#setvars)。
+This document defines only the Variable resource shape, merge rules, and effect timing. See
+[`profile.md`](profile.md) for Profile selection and structure,
+[`task-dispatch.md`](task-dispatch.md) for template namespaces, and
+[`actions.md`](actions.md#setvars) for projection from Action output to Run Variables.
 
 ## Model
 
-Project、Issue 和 WorkflowRun 的 Variables 使用相同形状：
+Project, Issue, and WorkflowRun Variables use the same shape:
 
 ```json
 {
@@ -24,51 +26,40 @@ Project、Issue 和 WorkflowRun 的 Variables 使用相同形状：
 }
 ```
 
-- `vars` 是对所有 Stage 生效的 Workflow Variables。
-- `stages.<stage>.vars` 只对指定 Stage 生效。
-- Project Variables 为 Project 中的 Workflow 提供公共值。
-- Issue Variables 对单个 Issue 覆盖或补充 Project Variables。
-- Run Variables 保存单次 WorkflowRun 的动态值；task `setVars` 写入这里。
+- `vars` contains Workflow Variables that apply to all Stages.
+- `stages.<stage>.vars` applies only to the specified Stage.
+- Project Variables provide shared values for Workflows in the Project.
+- Issue Variables override or add to Project Variables for one Issue.
+- Run Variables store dynamic values for one WorkflowRun. A task `setVars` writes here.
 
-WorkflowProfile 可以引用变量，但不拥有、声明或限制变量 key。变量只有被 Profile、task、
-check、recovery 或 Prompt 引用时才会影响执行。
+WorkflowProfile can reference a Variable, but it does not own, declare, or restrict Variable keys. A
+Variable affects execution only when a Profile, task, check, recovery, or Prompt references it.
 
-```plantuml
-@startuml
-left to right direction
-skinparam shadowing false
+```text
+Workflow merge:
+  Project.vars -> Issue.vars -> Run.vars -> Effective Workflow Variables
 
-rectangle "Project Variables\nvars\nstages[current].vars" as Project
-rectangle "Issue Variables\nvars\nstages[current].vars" as Issue
-rectangle "Run Variables\nvars\nstages[current].vars" as Run
-rectangle "Effective Workflow\nVariables" as EffectiveWorkflow
-rectangle "Effective Stage\nVariables" as EffectiveStage
+Stage merge:
+  Effective Workflow Variables
+    -> Project.stages[current].vars
+    -> Issue.stages[current].vars
+    -> Run.stages[current].vars
+    -> Effective Stage Variables
 
-Project -right-> Issue : then merge
-Issue -right-> Run : then merge
-Run -right-> EffectiveWorkflow : resolve vars
-EffectiveWorkflow -right-> EffectiveStage : merge stages[current].vars
-
-note bottom of Issue
-  Later sources override earlier sources.
-end note
-
-note bottom of EffectiveStage
-  Read-only, derived, not stored.
-end note
-@enduml
+Later sources override earlier sources.
+Both Effective Variable results are read-only, derived, and not stored.
 ```
 
-- **Effective Workflow Variables**：按 Project → Issue → Run 合并 `vars` 后得到的、与
-  Stage 无关的结果。
-- **Effective Stage Variables**：从 Effective Workflow Variables 开始，再按 Project →
-  Issue → Run 合并当前 Stage 的 `stages.<stage>.vars` 后得到的结果。
+- **Effective Workflow Variables:** The Stage-independent result after merging `vars` in Project,
+  Issue, and Run order.
+- **Effective Stage Variables:** The result after starting with Effective Workflow Variables and then
+  merging the current Stage's `stages.<stage>.vars` in Project, Issue, and Run order.
 
-两种 Effective Variables 都是只读派生值，不单独持久化。
+Both kinds of Effective Variables are read-only derived values. They are not persisted separately.
 
 ## Semantics
 
-解析先合并 Workflow Variables，再合并当前 Stage Variables：
+Resolution merges Workflow Variables first and then the current Stage Variables:
 
 ```text
 resolve(currentStage, project, issue, run):
@@ -89,7 +80,7 @@ resolve(currentStage, project, issue, run):
   return effectiveStageVariables
 ```
 
-完整优先级从低到高是：
+The complete priority order, from lowest to highest, is:
 
 ```text
 project.vars
@@ -102,25 +93,26 @@ project.vars
 -> Effective Stage Variables
 ```
 
-当前 Stage 的 Variables 比任意 scope 的 Workflow Variables 更具体，因此总是在
-Effective Workflow Variables 之后应用；同为 Stage Variables 时，Run 覆盖 Issue，Issue
-覆盖 Project。
+Variables for the current Stage are more specific than Workflow Variables from any scope. Therefore, they
+always apply after Effective Workflow Variables. Among Stage Variables, Run overrides Issue, and Issue
+overrides Project.
 
 ### Merge
 
 | Later value | Result |
 |---|---|
-| 字段不存在 | 继承已有值 |
-| object | 按字段递归合并 |
-| scalar | 替换已有值 |
-| array | 整体替换，不按元素合并 |
+| Field is absent | Inherit the existing value |
+| object | Merge recursively by field |
+| scalar | Replace the existing value |
+| array | Replace the complete array; do not merge by element |
 
-`vars` 和每个 `stages.<stage>.vars` 的根必须是 object。merge 不修改任何来源资源；
-持久化的 Variables document 不接受 `null` 值。
+The root of `vars` and each `stages.<stage>.vars` must be an object. Merge does not modify a source
+resource. A persisted Variables document does not accept a `null` value.
 
 ### Writes
 
-三个 Variables resource 使用相同方法和 body 语义，地址只决定修改哪个 scope：
+The three Variables resources use the same methods and body semantics. The address determines only which
+scope is modified:
 
 | Scope | Variables resource |
 |---|---|
@@ -128,12 +120,13 @@ Effective Workflow Variables 之后应用；同为 Stage Variables 时，Run 覆
 | Issue | `/api/projects/{projectRef}/issues/{number}/variables` |
 | Run | `/api/workflow-runs/{workflowRunId}/variables` |
 
-- `GET` 读取该 scope 保存的 Variables，不做跨 scope 解析。
-- `PUT` 用完整 Variables document 替换该 scope 的值。
-- `PATCH` 把部分 Variables document deep merge 到该 scope；`null` 只作为删除指令，清除
-  目标 scope 的字段，使其重新继承前一个 scope。`null` 不会被持久化。
+- `GET` reads the Variables stored in that scope. It does not resolve across scopes.
+- `PUT` replaces the scope value with a complete Variables document.
+- `PATCH` deep-merges a partial Variables document into the scope. `null` is only a deletion instruction.
+  It removes the field from the target scope, so the field inherits from the preceding scope again. `null`
+  is not persisted.
 
-Effective Variables 是 Run 下的独立只读资源：
+Effective Variables are a separate read-only resource under Run:
 
 ```text
 GET /api/workflow-runs/{workflowRunId}/variables/effective
@@ -141,42 +134,45 @@ GET /api/workflow-runs/{workflowRunId}/variables/effective?stage={stage}
 GET /api/workflow-runs/{workflowRunId}/variables/effective/{keyPath}
 ```
 
-不传 `stage` 时返回 Effective Workflow Variables；传入 `stage` 时返回 Effective Stage
-Variables。
+Without `stage`, the resource returns Effective Workflow Variables. With `stage`, it returns Effective
+Stage Variables.
 
-Project 和 Issue 的设置入口可以同时修改 `vars` 与 `stages`。task `setVars` 不是另一套
-API：Runner 把 Action output 投影成只包含 `vars` 的 PATCH body，再调用 Run Variables
-resource：
+The Project and Issue settings surfaces can modify both `vars` and `stages`. Task `setVars` is not a
+separate API. The Runner projects Action output into a PATCH body that contains only `vars`, then calls the
+Run Variables resource:
 
 ```json
 { "vars": { "change": { "prNumber": 42 } } }
 ```
 
-task `setVars` 不生成 `stages` 参数，因此只修改 Run 的 Workflow Variables；Run
-Variables resource 本身仍支持其他调用方显式修改 `stages`。
+Task `setVars` does not generate a `stages` parameter, so it modifies only the Run's Workflow Variables.
+The Run Variables resource still lets other callers modify `stages` explicitly.
 
 ### Changes
 
-- 每次派发 task 时由 Server 按当前 Stage 解析 Effective Stage Variables，并把结果作为
-  该 attempt 不可变快照的一部分随 dispatch 一起发送。attempt 快照的语义与求值时机见
-  [`task-dispatch.md`](task-dispatch.md)。
-- attempt 一经 dispatch，其快照在该 attempt 生命周期内保持不变；后续对 Variables 的
-  修改只影响尚未 dispatch 的 task 与后续 attempt（retry、recovery continuation、
-  rerun-from-stage），已派发 attempt 不再读取最新变量。
-- 尚未派发的 task 使用最新变量；retry 是新派发，dispatch 携带的也是 retry 时刻的
-  Effective Stage Variables。
-- task `setVars` 在 Action 成功返回后、task 报告完成前执行。任一 output 投影失败时，
-  Run Variables 不变，task 失败。
+- Each time the Server dispatches a task, it resolves Effective Stage Variables for the current Stage and
+  sends the result with dispatch as part of the immutable attempt snapshot. See
+  [`task-dispatch.md`](task-dispatch.md) for attempt snapshot semantics and evaluation timing.
+- After an attempt is dispatched, its snapshot remains unchanged for the lifetime of that attempt. A later
+  Variables change affects only tasks that are not yet dispatched and later attempts, including retry,
+  recovery continuation, and rerun-from-stage. A dispatched attempt does not read the latest Variables.
+- A task that is not yet dispatched uses the latest Variables. A retry is a new dispatch, so it carries the
+  Effective Stage Variables from the retry time.
+- Task `setVars` runs after the Action returns successfully and before the task reports completion. If any
+  output projection fails, Run Variables remain unchanged and the task fails.
 
-Effective Variables 只通过 `${{ vars.* }}` 显式进入 task `with`、task-level `expect` 或
-其他支持模板的声明；模板求值发生在 Runner 调用 Action 前的执行入口，不发生在 dispatch
-阶段。Action 只能看到 Runner 渲染并校验后的输入，不能再次读取 Variables resource。
+Effective Variables enter task `with`, task-level `expect`, or another template-enabled declaration only
+through an explicit `${{ vars.* }}` reference. Template evaluation occurs at the Runner execution entry
+point before it calls the Action. It does not occur during dispatch. The Action sees only input that the
+Runner has rendered and validated. It cannot read the Variables resource again.
 
-`workflow.*`、`stage.*`、`issue.*`、`repository.*` 等 runtime context，
-`tasks.<id>.outputs.*` 和 `prompts.*` 都是独立命名空间，不参与 Variables merge。
+Runtime context such as `workflow.*`, `stage.*`, `issue.*`, and `repository.*`, plus
+`tasks.<id>.outputs.*` and `prompts.*`, are separate namespaces. They do not participate in the Variables
+merge.
 
-非法 Variables、无法完成的 `setVars` 和其他语义错误必须在写入边界被拒绝，返回领域级
-错误并保持原值不变，而不是静默忽略或只暴露 parser stack trace。
+Invalid Variables, an impossible `setVars`, and other semantic errors must be rejected at the write
+boundary. The operation must return a domain error and keep the original value unchanged. It must not
+silently ignore the error or expose only a parser stack trace.
 
 ## Examples
 
@@ -217,7 +213,7 @@ effectiveStageVariables:
   change: { prNumber: 42 }
 ```
 
-合并过程：
+Merge process:
 
 | Applied source | `agent.model` | `agent.variant` |
 |---|---|---|
@@ -228,28 +224,30 @@ effectiveStageVariables:
 | Issue `check` Stage Variables | `gpt-5` | `xhigh` |
 | Effective Stage Variables | `gpt-5` | `xhigh` |
 
-Run 没有覆盖 `agent`。Project 的 `check` Stage Variables 先覆盖 Effective Workflow
-Variables 的 `medium`，随后 Issue 的同名值再将其覆盖为 `xhigh`。
+Run does not override `agent`. The Project's `check` Stage Variables first override the `medium` value in
+Effective Workflow Variables. The Issue value for the same field then overrides it with `xhigh`.
 
 ### Live adjustment
 
-| 时刻 | 行为 | task 使用的 model |
+| Time | Action | Model used by task |
 |---|---|---|
-| 1 | Project Variables 中的 model 是 `model-a`，派发 task-1 | `model-a` |
-| 2 | Project Variables 中的 model 改为 `model-b` | task-1 不变 |
-| 3 | 派发 task-2 | `model-b` |
+| 1 | The model in Project Variables is `model-a`; dispatch task-1 | `model-a` |
+| 2 | Change the model in Project Variables to `model-b` | task-1 is unchanged |
+| 3 | Dispatch task-2 | `model-b` |
 | 4 | retry task-1 | `model-b` |
 
 ## Status
 
-已实装：Project / Issue / Run 三个 Variables resource 与统一 PUT / PATCH 语义（`null`
-只作删除指令、不持久化）、写入边界 shape 校验（非 object 根拒绝）、dispatch 仅携带
-原始声明与 attempt 不可变快照、Runner 执行入口统一渲染、task `setVars` 经 Run
-Variables PATCH 投影。
+Implemented: Project, Issue, and Run Variables resources with common PUT and PATCH semantics; `null` only
+as a deletion instruction and never persisted; shape validation at the write boundary, including rejection
+of a non-object root; dispatch carrying only the original declarations and an immutable attempt snapshot;
+common rendering at the Runner execution entry point; and task `setVars` projection through a Run Variables
+PATCH.
 
-开放问题已定论：attempt 快照的语义（不可变、重投递逐字重放）与存储生命周期（终态即
-弃、不随 run State 全量持久化）由 [`task-dispatch.md`](task-dispatch.md) 的
-「Dispatch 快照的持久化」一节定义；审计诉求不构成按 attempt 全量保留快照的理由。
+The former open question is resolved. The "Dispatch snapshot persistence" section in
+[`task-dispatch.md`](task-dispatch.md) defines attempt snapshot semantics, including immutability and
+byte-for-byte replay on redelivery, and its storage lifecycle, including discard at terminal state instead
+of full persistence with Run State. Audit needs do not justify retaining complete per-attempt snapshots.
 
 ## `WorkflowRunProfile` row/table name: historical misnomer
 

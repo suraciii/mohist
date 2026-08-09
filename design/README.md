@@ -1,8 +1,13 @@
 # Design
 
-`design/` targets developers and agents. It records architecture boundaries, domain decomposition, workflow mechanics, and cross-module design conventions. User-facing documents live in [`../docs/`](../docs/).
+`design/` targets developers and agents. It records architecture boundaries, domain decomposition,
+workflow mechanics, and cross-module design conventions. User-facing documents live in
+[`../docs/`](../docs/).
 
-Write new or rewritten design prose in English; keep domain identifiers, field names, API names, and code symbols as-is. Existing Chinese documents converge to English as they are revised, so language migration never mixes with unrelated design changes.
+Write all active design prose in English. Use short sentences, active voice, American spelling, and stable
+terms. Use ASD-STE100 writing rules as a target. Do not claim compliance. Keep domain identifiers, field
+names, API names, commands, serialized values, and code symbols as-is when their exact spelling is part of
+the contract. Use `must`, `may`, and `must not` for requirements, options, and prohibitions.
 
 ## Writing a design spec
 
@@ -42,7 +47,9 @@ Do not let agents guess rules. Do not let the current code decide for the target
 - Prefer short sentences. One sentence states one rule.
 - Prefer domain nouns and product nouns. Use technical nouns only in implementation design.
 - Use canonical names. Keep casing, singular/plural, and field paths consistent.
-- Use PlantUML when prose cannot express a relationship or flow clearly. Do not draw when prose is already clear.
+- Use a fenced `text` ASCII diagram only when it makes a boundary, ownership relation, dependency,
+  sequence, hierarchy, or state transition easier to understand. Do not draw when prose is already clear.
+- Use only ASCII characters in diagrams. Do not add PlantUML, Mermaid, Unicode line art, or Unicode arrows.
 - Draw only real concepts. Give every arrow a meaning.
 - Write key rules in prose. Do not make a diagram the only source of truth.
 - Use pseudocode for definite computations.

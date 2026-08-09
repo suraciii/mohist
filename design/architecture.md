@@ -2,25 +2,25 @@
 
 ## Boundary
 
-```
-User in Slack ── Slack Bot / mohist-slack ── Connection boundary ──┐
-User ── Web UI (backup operation + view) ── API ───────────────────┤
-User ── direct CLI ──────────────────────── API ───────────────────┤
-                                                                  │
-User in IDE / chat                                                │
-       │                                                          │
-       v                                                          │
-External Agent ── Mohist Skill ── mo CLI ── API ──────────────────┘
-                                                                  │
-                                                                  v
+```text
+User in Slack -> Slack Bot / mohist-slack -> Connection boundary --+
+User -> Web UI (backup operation + view) -> API -------------------+
+User -> direct CLI -> API -----------------------------------------+
+                                                                   |
+User in IDE / chat                                                 |
+       |                                                           |
+       v                                                           |
+External Agent -> Mohist Skill -> mo CLI -> API -------------------+
+                                                                   |
+                                                                   v
 Agent API
-       │
+       |
        v
 Control Plane        owns state, makes decisions
-       │
+       |
        v
 Execution Plane      runs commands, reports facts
-       │
+       |
        v
 User Project
 ```
@@ -61,7 +61,7 @@ User Project
 
 ## Facts and decisions
 
-```
+```text
 Task executes.
 Check verifies.
 Runner reports.
@@ -75,20 +75,20 @@ Runner may report a failure classification, including `retry-safe`, as an execut
 
 ## Report pipeline
 
-```
+```text
 Side effect
-  │
+  |
   v
-Report              ← fact, not command
-  │
+Report              <- fact, not command
+  |
   v
-Ownership check     ← reject without proof
-  │
+Ownership check     <- reject without proof
+  |
   v
-Decision            ← interpret in workflow context
-  │
+Decision            <- interpret in workflow context
+  |
   v
-State change        ← advance or wait
+State change        <- advance or wait
 ```
 
 Runner may say: completed / failed / verification passed / output produced / failure classification reported.
@@ -103,88 +103,109 @@ Every in-flight work has an owner. Stale reports get rejected, never merged.
 | Domain reaction | durable at-least-once | advance cross-aggregate state |
 | UI push | best-effort | update screen |
 
-UI disconnect → self-reconcile. Never depend on UI for workflow progress.
+The UI self-reconciles after a disconnect. Workflow progress must never depend on the UI.
 
 Events append in same transaction as state save. Dispatcher is the sole notifier.
 
-## 运行保障
+## Runtime guarantees
 
-- 日志、指标、Trace、通知和状态页面都不是业务权威。它们失败时，核心工作继续运行。
-- 后台任务、队列和诊断数据都有资源上限。达到上限时先降级辅助能力，不挤占业务资源。
-- 轮询和状态查询的成本只随当前相关数据增长，不能随无关历史数据增长。
-- 健康检查不只判断进程是否存活，还要暴露延迟、资源压力和辅助能力降级。
+- Logs, metrics, traces, notifications, and status pages are not business authorities. Core work
+  continues if they fail.
+- Background tasks, queues, and diagnostic data have resource limits. When a limit is reached, the
+  system degrades supporting capabilities before it consumes resources needed for business work.
+- The cost of polling and status queries grows only with the current relevant data. It must not grow
+  with unrelated historical data.
+- Health checks expose latency, resource pressure, and degraded supporting capabilities. They do more
+  than report whether a process is alive.
 
-具体规则见[可观测性](observability.md)。
+See [Observability](observability.md) for the detailed rules.
 
-## 聚合与事务
+## Aggregates and transactions
 
-聚合是强一致性边界，也是数据库事务边界。
+An aggregate is both a strong-consistency boundary and a database transaction boundary.
 
-- 一个事务只能保存一个聚合的状态，以及由这次状态变化产生的该聚合领域事件。
-- 不允许用同一个事务修改两个聚合，也不允许用 join table、repository 或 handler 绕过
-  聚合边界完成跨聚合写入。
-- 同一限界上下文内的聚合可以相互引用、查询和发送命令；是否允许依赖不由事务边界
-  决定。每条同步调用链必须有明确方向，调用过程中不得同步回调形成环。
-- 跨聚合流程由「本聚合提交状态与事件 → durable handler → 目标聚合幂等命令」推进。
-  任一步失败都靠事件重投或命令重试继续，不回滚已经提交的另一个聚合。
-- 一个业务事实只有一个写入权威。其他聚合需要该事实时，只保存完成自身决策所需的
-  最小上下文或读模型；这些副本是最终一致的，不参与原事实的校验和写入。
-- 跨聚合查询可以用于选择候选或组装命令，但目标聚合必须再次校验自身不变量。查询
-  结果过期只能导致拒绝、重试或重新选择，不能破坏目标聚合状态。
+- One transaction can save only one aggregate's state and the domain events caused by that state change.
+- A transaction must not modify two aggregates. A join table, repository, or handler must not bypass an
+  aggregate boundary to perform a cross-aggregate write.
+- Aggregates in the same bounded context may reference, query, and send commands to each other. A
+  transaction boundary does not decide whether a dependency is allowed. Each synchronous call chain must
+  have one explicit direction. It must not form a cycle through a synchronous callback.
+- A cross-aggregate process advances as follows: the source aggregate commits state and events, a durable
+  handler receives an event, and the target aggregate receives an idempotent command. If a step fails,
+  event redelivery or command retry continues the process. It does not roll back another aggregate that
+  already committed.
+- Each business fact has one write authority. When another aggregate needs that fact, it stores only the
+  minimum context or read model required for its own decision. These copies are eventually consistent.
+  They do not validate or write the original fact.
+- A cross-aggregate query may select a candidate or assemble a command. The target aggregate must validate
+  its own invariants again. A stale query result may cause rejection, retry, or reselection. It must not
+  corrupt the target aggregate state.
 
-因此「状态与事件同事务」只指同一聚合的状态和自己的事件，不意味着一次业务操作里
-涉及的全部聚合共享事务。
+Therefore, "state and events in one transaction" means the state and events of one aggregate. It does not
+mean that all aggregates involved in one business operation share a transaction.
 
-### 持久化应用协调者（durable application process manager）
+### Durable application process manager
 
-当一条跨聚合命令需要在多个参与者之间串行化、且其结果在重试、激活丢失或网络中断下
-仍要可恢复时，可以引入一个持久的应用层 process manager（即协调者 grain）。它**不**
-是新的业务权威，而是对「本聚合提交 → durable handler → 目标聚合幂等命令」这一既定
-模式的窄化特例。它存在是为了把一组容易竞态的命令一次性收敛，并让每一步骤都具备
-重投安全。
+A durable application-layer process manager, also called a coordinator grain, may be introduced when a
+cross-aggregate command must be serialized across participants and its result must remain recoverable after
+a retry, lost activation, or network interruption. It is **not** a new business authority. It is a narrow
+special case of the established source-aggregate commit, durable-handler delivery, and idempotent
+target-aggregate command pattern. It sends a group of race-prone commands through one coordination point
+and makes every step safe for redelivery.
 
-约束（缺一不可）：
+All of these constraints apply:
 
-- **只持久化不确定的命令投递状态**。协调者 grain 内部只保存当前正在执行的命令 fence
-  （如 `Pending { commandId, kind, payload, expectedRevision }`）。命令得到明确 applied
-  或 rejected 结果后 fence 立即清空，不缓存任何业务结果。
-- **每条命令最多写入一个参与者聚合**。协调者一次同步调用链只进入一个参与者事务；它
-  不得跨聚合写、不得用 join table 或 repository 绕过聚合边界。若一次业务操作要影响
-  两个聚合，由各聚合自己的事务 + 持久事件接力，协调者只负责串行化与幂等。
-- **位于参与者接口的下游**。协调者只单向调用参与者的窄接口命令；参与者**不得**在
-  该同步调用栈中回调协调者，也不得持有协调者引用。`Issue`、`Project` 等参与者聚合
-  不感知协调者存在，事件路由、handler、其它上下文命令继续直接走它们自己的接口。
-- **不存储重复的业务事实**。协调者持久层不含 Issue / Project / 仓库 / WorkflowRun 的
-  业务状态——这些事实在对应聚合内才是唯一权威。协调者最多持有 `commandId`、命令种类、
-  canonical 化的命令参数快照与 expected revision 这些技术性 fence 字段。
-- **不得引入同步回调环**。协调者调用参与者 → 参与者提交 → 持久事件 → 协调者从
-  handler 重新进入；这一步必须经过 durable dispatch，不得由参与者在命令内部再
-  同步调回协调者。
+- **Persist only uncertain command-delivery state.** The coordinator grain stores only the fence for the
+  command that is in progress, such as `Pending { commandId, kind, payload, expectedRevision }`. It clears
+  the fence as soon as the command has a definite `applied` or `rejected` result. It does not cache a
+  business result.
+- **Write at most one participant aggregate per command.** One synchronous coordinator call chain enters
+  only one participant transaction. The coordinator must not write across aggregates or use a join table
+  or repository to bypass aggregate boundaries. If one business operation affects two aggregates, each
+  aggregate uses its own transaction and durable events carry the process forward. The coordinator only
+  provides serialization and idempotency.
+- **Remain downstream of participant interfaces.** The coordinator sends commands in one direction through
+  narrow participant interfaces. A participant must not call the coordinator back in the same synchronous
+  call stack or hold a coordinator reference. Participant aggregates such as `Issue` and `Project` do not
+  know that the coordinator exists. Event routing, handlers, and commands from other contexts continue to
+  use the participant's own interface directly.
+- **Do not store duplicate business facts.** Coordinator persistence contains no Issue, Project,
+  Repository, or WorkflowRun business state. Those facts remain authoritative only in their aggregates.
+  The coordinator may store technical fence fields such as `commandId`, command kind, a canonical command
+  parameter snapshot, and expected revision.
+- **Do not create a synchronous callback cycle.** The coordinator calls a participant, the participant
+  commits, a durable event is published, and a handler reenters the coordinator. Reentry must use durable
+  dispatch. The participant must not call the coordinator synchronously from inside the command.
 
-适用范围：
+The following uses are in scope:
 
-- `IssueRepositoryCoordinatorGrain` 串行化 Project 内的 Issue 创建 / 仓库重新指派 /
-  cancelled Issue reopen / 仓库删除这一组会建立或破坏非终态绑定的命令。Issue 显式
-  WorkflowProfile 选择（含 create / edit / `--inherit-workflow-profile` 清除）作为 Issue
-  聚合字段，随 Issue 创建在同一 `IIssueBindingParticipant` 事务内提交；该参与者在提交前
-  重新验证 Profile 存在性，与它验证仓库存在性的方式一致。
-- `WorkflowProfileReferenceCoordinator` 串行化 Project 内 Profile 删除、Project 默认
-  Profile 写入、WorkflowRun 启动 binding 写入这一组会建立或破坏 Profile 引用的命令。
-  每个 custom Profile 引用的持久行带 nullable custom-Profile backing key 与指向
-  `(ProjectId, ProfileId)` 的 restrictive foreign key（builtin 引用保持 null，因不可删除）；
-  该外键是并发删除正确性的主依赖。`WorkflowProfileDeletionBlockerQuery` 汇总 Project
-  default、该 Project 的**所有** Issue 显式选择（含终态 Issue）与活动 Run binding，作为
-  可操作的删除诊断与错误来源。Issue 选择由 `IssueRepositoryCoordinatorGrain` 串行，
-  不经过 Profile 协调者；跨协调者的删除/选择并发由外键裁决为先提交的引用阻塞删除，或
-  Issue 端收到可重试的 `workflow-profile-not-found` conflict，绝不留 dangling reference。
+- `IssueRepositoryCoordinatorGrain` serializes Issue creation, Repository reassignment, reopening a
+  cancelled Issue, and Repository deletion within a Project. These commands establish or break a binding
+  for a non-terminal Issue. An Issue's explicit WorkflowProfile selection, including creation, edit, and
+  clearing with `--inherit-workflow-profile`, is an Issue aggregate field. Issue creation commits that field
+  in the same `IIssueBindingParticipant` transaction. Before it commits, the participant validates that the
+  Profile exists in the same way that it validates that the Repository exists.
+- `WorkflowProfileReferenceCoordinator` serializes Profile deletion, writes to a Project's default Profile,
+  and WorkflowRun start-binding writes within a Project. These commands establish or break Profile
+  references. Each persisted custom Profile reference has a nullable custom-Profile backing key and a
+  restrictive foreign key to `(ProjectId, ProfileId)`. Builtin references keep a null backing key because
+  they cannot be deleted. This foreign key is the primary mechanism that makes concurrent deletion correct.
+  `WorkflowProfileDeletionBlockerQuery` combines the Project default, **all** explicit Issue selections in
+  that Project, including terminal Issues, and active Run bindings. It is the source of actionable deletion
+  diagnostics and errors. `IssueRepositoryCoordinatorGrain` serializes Issue selection; selection does not
+  pass through the Profile coordinator. For a deletion and selection race across coordinators, the foreign
+  key either makes an already-committed reference block deletion or makes the Issue receive a retryable
+  `workflow-profile-not-found` conflict. It never leaves a dangling reference.
 
-两个协调者各自按 Project key 串行，对参与者使用窄接口（`IIssueBindingParticipant` /
-`IProjectBindingParticipant` / `IWorkflowRunBindingParticipant`），并通过 `ArchTest`
-防止生产代码绕过协调者。它们**不**互相调用、不共享事务：每个协调者一次同步调用链只进入
-一个参与者聚合，Issue 选择与 Project default / Run binding 分属两个 coordinator 责任面。
+Each coordinator serializes by Project key. They use narrow participant interfaces:
+`IIssueBindingParticipant`, `IProjectBindingParticipant`, and `IWorkflowRunBindingParticipant`. An
+`ArchTest` prevents production code from bypassing the coordinators. The coordinators **do not** call each
+other or share a transaction. Each synchronous coordinator call chain enters only one participant aggregate.
+Issue selection belongs to the Issue coordinator. Project default and Run binding belong to the Profile
+coordinator.
 
-不适用范围：参与者内部的不变量校验、跨聚合的最终一致性推进、UI 推送、session 与
-runtime 绑定——这些不走协调者。
+The coordinators do not handle invariant validation inside a participant, eventually consistent progress
+across aggregates, UI pushes, or Session and Runtime binding.
 
 ## Persistence
 

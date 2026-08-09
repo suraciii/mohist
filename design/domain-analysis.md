@@ -23,9 +23,9 @@ contracts. Direct use of a runtime-specific Action is an Inline Agent execution,
 | Slack integration | Server-side workspace Mohist App enrollment and managed Agent App external lifecycle (App create/install approval, manifest, Socket readiness, operation fence, unknown outcome) | Slack workspace, Mohist App, Agent App, enrollment, App lifecycle, authorization, manifest drift, Socket readiness |
 
 Epic is Issue granularity (organizing facet), not a separate subdomain.
-Issue 与 Epic 是同一限界上下文中的两个聚合。Issue 持有自己的当前 `EpicNumber?`；Epic
-持有目标与推进策略，但不持有第二份权威成员集合。Epic 的成员、进度和候选 Issue 是
-对 Issue 当前状态的查询结果。
+Issue and Epic are two aggregates in the same bounded context. Issue holds its current `EpicNumber?`.
+Epic holds the goal and advancement policy, but it does not hold a second authoritative membership set.
+Epic membership, progress, and candidate Issues are query results from the current Issue state.
 Sub-issue/parent is also Issue-internal organization (work decomposition axis, orthogonal to Epic's goal/feeding axis); Workflow never sees it. See [`issue-breakdown.md`](issue-breakdown.md).
 Prompt belongs to Project Space (Project is the only configurable scope). Builtin `.prompt` is
 loader fallback, not another Prompt resource.
@@ -42,9 +42,10 @@ to a Workspace through its Origin, and Runner materializes it as a directory. Se
 
 ### Agent and Session terms
 
-Action、Inline Agent、Mohist Agent、AgentJob、AgentSession 与 Runtime Session 的
-统一定义见 [`../CONTEXT.md`](../CONTEXT.md)；生命周期所有权、调用路径和完整不变量见
-[`agent-execution.md`](agent-execution.md)。
+See [`../CONTEXT.md`](../CONTEXT.md) for the shared definitions of Action, Inline Agent, Mohist
+Agent, AgentJob, AgentSession, and Runtime Session. See
+[`agent-execution.md`](agent-execution.md) for lifecycle ownership, call paths, and the complete
+invariants.
 
 ### Read-side: AgentOps
 
@@ -66,6 +67,29 @@ Cross-domain read-only reports (activity feed, delivery cost, cross-aggregate bo
 ## Bounded contexts and relationships
 
 DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Language (PL), Shared Kernel (SK).
+
+The following ASCII diagram is an orientation map. Its arrows show selected DDD upstream-to-downstream
+relationships. They do not show static source-code dependencies. The table after the diagram is the
+normative and complete relationship map.
+
+```text
+DDD upstream ---> downstream (selected overview)
+
+Project Space ---> Workflow ---> Runner
+       |               |
+       +---------------+-------> Issue
+
+Agent -----------> runner process <----------- Runner
+Runner / Agent --> Session ---> Issue / Workflow / API / AgentOps
+Session / Issue / Workflow / Runner ----------> AgentOps
+Agent / Session ------------------------------> Web / CLI / provider adapters
+Server ---------------------------------------> Web / CLI
+Generic --------------------------------------> Issue and other contexts
+Issue / Project Space ---> IssueRepositoryCoordinator
+```
+
+In particular, row 1 makes Workflow the DDD upstream of Issue. This does not conflict with the static
+`Issue -> Workflow` code dependency defined in [Dependency invariants](#dependency-invariants).
 
 | # | Upstream | Downstream | Pattern | What flows |
 |---|---|---|---|---|
@@ -89,27 +113,31 @@ DDD patterns: Customer/Supplier (C/S), Conformist (C), ACL, OHS, Published Langu
 Runner process (TS) is infrastructure, not a context. It follows Workflow Action contracts
 and AgentJob dispatch contracts.
 
-`IssueRepositoryCoordinator` is a single-grain, Project-scoped 应用层 process manager
-（见 [`architecture.md`](architecture.md) 的「持久化应用协调者」节）。它不是独立的业务
-限界上下文——不持有 Issue、Project、仓库的事实，也不参与读取投影——只为 issue 417
-引入的「建立或破坏非终态绑定」一类命令提供 Project 级串行化与失败重投安全。它的
-两条关系行（14、15）表示协调者单向调用 Issue 与 Project 的窄 participant 接口；
-参与者不在该同步调用栈中回调协调者。
+`IssueRepositoryCoordinator` is a single-grain, Project-scoped application process manager. See
+[Durable application process manager](architecture.md#durable-application-process-manager). It is not
+an independent business bounded context. It holds no Issue, Project, or Repository facts and does not
+participate in read projections. It provides Project-level serialization and failure-redelivery safety
+only for the issue 417 command class that establishes or breaks a non-terminal binding. Its two relationship
+rows, 14 and 15, mean that the coordinator calls narrow Issue and Project participant interfaces in one
+direction. A participant does not call the coordinator back in that synchronous call stack.
 
 ## Dependency invariants
 
-- 同一限界上下文允许聚合相互依赖；聚合边界限制事务，不禁止协作。Issue 与 Epic 可以
-  相互发送命令，但任一命令只提交接收方聚合，且同步调用过程中不回调形成环。
-- Issue 是当前 Epic 归属的唯一写入权威。Epic 不保存可被独立修改的 membership；它
-  通过查询 Issue 状态选择候选，并让 Issue 在自己的事务中接受或拒绝推进命令。
-- 不引入通用 `OwnerRef`、controller aggregate 或关系聚合。`EpicNumber?` 已完整表达
-  Issue 所需的单一可选归属，泛化只会隐藏业务语言和写入权威。
-- Workflow 代码依赖零个业务上下文。这不是风格要求，而是为了保持自治；它不引用 Issue
-  聚合、repository 或领域类型。
-- Issue → Workflow 是静态依赖方向。Issue 向 WorkflowRun 提供只含
-  `ProjectId`、`IssueNumber`、`EpicNumber?` 的运行上下文；这些标量是 Published
-  Language 中的关联信息，不让 Workflow 获得 Issue 行为依赖。Workflow 的结果事件由
-  Issue 侧 handler 消费。
+- Aggregates in the same bounded context may depend on each other. An aggregate boundary limits a
+  transaction; it does not prohibit collaboration. Issue and Epic may send commands to each other, but
+  each command commits only the receiving aggregate. A synchronous call must not call back and form a cycle.
+- Issue is the only write authority for its current Epic membership. Epic does not store independently
+  mutable membership. It queries Issue state to select candidates and lets Issue accept or reject an
+  advancement command in the Issue transaction.
+- Do not introduce a generic `OwnerRef`, controller aggregate, or relationship aggregate. `EpicNumber?`
+  completely expresses the one optional membership that Issue needs. Generalization would hide the business
+  language and write authority.
+- Workflow code depends on no business context. This is not a style preference. It preserves Workflow
+  autonomy. Workflow does not reference Issue aggregates, repositories, or domain types.
+- `Issue -> Workflow` is the static dependency direction. Issue gives WorkflowRun only a run context that
+  contains `ProjectId`, `IssueNumber`, and `EpicNumber?`. These scalars are association information in the
+  Published Language. They do not give Workflow a behavioral dependency on Issue. An Issue-side handler
+  consumes Workflow result events.
 - Agent/Session ownership invariants (work owner is TaskRun xor AgentJob, session origin,
   Inline Agent identity, shared runtime not coupling Workflow to Agent) are listed once in
   [`agent-execution.md`](agent-execution.md).
@@ -123,7 +151,7 @@ and AgentJob dispatch contracts.
 - The Slack integration supporting context owns two independent aggregates: `SlackWorkspaceEnrollment`
   (workspace-level Mohist App identity/capability/lifecycle and credential refs; key without Project by
   default) and `ManagedSlackAgentApp` (an Agent App's external lifecycle/install/manifest/Socket/fence/unknown/audit,
-  referencing an `AgentConnectionId`). They are not Agent-domain and not process managers; AgentApp → Connection
+  referencing an `AgentConnectionId`). They are not Agent-domain and not process managers; AgentApp -> Connection
   converges via durable fact + idempotent bind, not a cross-aggregate transaction.
 - Agent Connection supports staged binding for the `install-agent` path: `AgentId + WorkspaceTeamId` are fixed at
   creation, while `AppId + BotUserId` go from both-empty to both-set exactly once and atomically; half-binding,
@@ -136,12 +164,15 @@ and AgentJob dispatch contracts.
 - runner process is infrastructure: conforms to Workflow + Agent contracts, registers with Runner and proves presence by polling.
 - ProjectId is shared identity, not a Workflow model dependency.
 - Artifact belongs to Workflow, not independent.
-- `IssueRepositoryCoordinator` 是窄化特例 process manager：仅当下游是一条需要
-  Project 级串行化、重投安全、且结果会破坏「非终态 Issue 必须有声明中的仓库」不变量的
-  命令（Issue 创建、目标仓库重新指派、cancelled Issue reopen、仓库删除）时才进入。它
-  只持久化不确定命令的 fence，**不得**写多聚合、不得同步回调、不得保存重复业务
-  事实；完整规则见 [`architecture.md`](architecture.md)。Issue 与 Project 参与者不
-  在自己的命令中反向引用协调者，事件路由与其它上下文继续走原本的接口。
+- `IssueRepositoryCoordinator` is a narrow special-case process manager. It is used only when the
+  downstream command needs Project-level serialization and redelivery safety, and its result can break
+  the invariant that a non-terminal Issue must have a declared Repository. This applies to Issue creation,
+  target Repository reassignment, reopening a cancelled Issue, and Repository deletion. The coordinator
+  persists only the fence for an uncertain command. It **must not** write multiple aggregates, make a
+  synchronous callback, or store duplicate business facts. See
+  [`architecture.md`](architecture.md#durable-application-process-manager) for the complete rules. Issue
+  and Project participants do not reference the coordinator from their commands. Event routing and other
+  contexts continue to use the existing interfaces.
 
 ## Judgment rules
 
