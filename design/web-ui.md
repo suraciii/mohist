@@ -29,7 +29,7 @@ a global view or manual takeover.
 | Render state | Web UI |
 | User actions | Web UI -> API |
 | Authoritative state | Server |
-| Workflow decisions | WorkflowGrain |
+| Workflow decisions | Workflow context on Server |
 | Shell, Agent, and Git execution | Runner |
 | Real-time push | Server -> Web UI |
 | Agent definition and AgentJob result | Agent context through Agent API |
@@ -44,7 +44,7 @@ Push is observation, not a driver. SignalR uses `/hubs/events`. After reconnect,
 the UI reconciles its queries.
 
 ```text
-WorkflowGrain commit -> Server persist and publish -> SignalR -> query refresh
+Workflow decision -> Server commit and publish -> SignalR -> query refresh
 ```
 
 ## Routes

@@ -5,13 +5,29 @@ persisted WorkflowRun state in `WorkflowRuns.State`. See
 [`task-dispatch.md`](task-dispatch.md) for dispatch-snapshot semantics and
 storage lifecycle.
 
+## Design Drivers
+
+WorkflowRun state is read and rewritten as one authoritative decision record. That gives one owner
+an unambiguous view of scheduling and recovery, but it also makes every unnecessary byte part of
+the cost of every state transition. Three boundaries follow:
+
+- Current decision facts belong in State; traceable history belongs in events.
+- Redeliverable execution input belongs in a short-lived attempt snapshot; copying it into State
+  makes old attempts increase the cost of unrelated current decisions.
+- Format compatibility belongs at startup migration; carrying several historical shapes through
+  the live read path makes every request pay for an upgrade that should happen once.
+
+The size budget below is therefore a correctness boundary, not only a storage optimization. An
+unbounded State record can make observation and progress compete for the same memory and write
+capacity.
+
 ## Definition
 
 State is the persisted authority for one WorkflowRun. It contains the minimal
 runtime facts required for current decisions: status, assignment, state-machine
 fields for each Stage and TaskRun, Workspace and Repository references, and
-task output. Orleans grain memory maps one-to-one to State, loads it on
-activation, and rewrites it after each state change.
+task output. The WorkflowRun state owner loads this record when it becomes
+active and rewrites it after each state change.
 
 State is not:
 
@@ -108,13 +124,12 @@ Measured during the Check stage of Issue #521:
   `mo run watch` polling and frequent Runner reports, this causes Server LOH
   allocation pressure. More than 95 percent of measured LOH allocation came
   from STJ string transcoding on this path, and RSS peaked at 2 GiB.
-- `WorkflowRunStore.MigrateLegacyWorkflowRunJson` parses complete State with
-  `JsonDocument.Parse` on every read, violating write-time migration. Issue #536
-  found that 254 of 364 rows still need conversion: 221 completed, 26 failed,
-  and 7 stopped. Compatibility calls exist in seven production files. `failed`
-  is nonterminal in the WorkflowRun lifecycle.
-- `WorkflowQuerier.GetStatusAsync` has no cache. The row ETag can support a
-  versioned cache or conditional response.
+- Legacy format detection still parses complete State on every read, violating
+  the write-time migration boundary. A measured database had 254 of 364 rows
+  still needing conversion: 221 completed, 26 failed, and 7 stopped. `failed`
+  is nonterminal in the WorkflowRun lifecycle, so migration cannot omit it.
+- Status observation has no versioned cache or conditional response even though
+  the row ETag can support one.
 - Write amplification also affects SQLite. `mohist.db` reached 9.2 GiB, without
   a retention policy for events, transcripts, or telemetry. Existing
   `CleanupPolicyOptions` covers only Workspace.

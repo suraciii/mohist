@@ -141,24 +141,23 @@ this section defines its **storage lifecycle**:
   from run State and loaded separately when redelivery needs it. Run State contains only the facts
   required for arbitration and does not copy dispatch payloads. Historical attempt snapshots do
   not exist.
-- A check dispatch does not persist a snapshot; redelivery rebuilds it through
-  `TranslateToDispatchAsync`.
+- A check dispatch does not persist a snapshot; redelivery reconstructs the
+  dispatch through the ordinary translation boundary.
 - Content deduplication within a snapshot, such as referencing Prompts by key or pruning `tasks`
   output on demand, is a rendering-content optimization and does not alter these lifecycle rules.
   See [`variables.md`](variables.md).
 
 ### Current Gap
 
-The current implementation stores every attempt's complete `WorkDispatch` snapshot in
-`TaskRun.DispatchSnapshot` and persists it with the whole run State through `WorkflowRunStore`. It
-does not clear snapshots after terminal state. In a measured active run at the check Stage, State
+The current implementation retains every attempt's complete dispatch snapshot inside the whole run
+State and does not clear it after terminal state. In a measured active run at the check Stage, State
 reached 3.5 MB, and 81% was repeated snapshots from superseded attempts. The complete 27 KB Prompt
-set was copied 65 times, and aggregated `tasks` output was copied as many as 34 times. Every read,
-including `WorkflowRunQuerier.LoadAsync` and `WorkflowQuerier.GetStatusAsync`, and every state write,
-including `WorkflowRunStore.SaveAsync`, serializes or deserializes the complete JSON. This is the
-main source of the observed Server LOH allocation storm, accounting for more than 95% of measured
-LOH allocations. The migration path is to clear snapshots at terminal state first, then move
-snapshot storage outside run State.
+set was copied 65 times, and aggregated `tasks` output was copied as many as 34 times. Every read and
+state change therefore serializes or deserializes payloads that no current decision needs. This was
+the main source of the observed Server large-object allocation storm, accounting for more than 95%
+of measured large-object allocations. The migration must first stop terminal attempts from retaining
+snapshots, then place each active snapshot outside run State so arbitration cost does not grow with
+execution history.
 
 ## Validation Timing
 

@@ -13,6 +13,22 @@ See [`event-protocol.md`](event-protocol.md) for event protocol and stamping.
 See [`agent-execution.md`](agent-execution.md) and
 [`event-routing.md`](event-routing.md) for launch, AgentJob, and AgentSession.
 
+## Design Drivers
+
+A comment mention is intentionally a direct trigger rather than another RoutingRule:
+
+- The author has already selected the Agent by name, so a second configurable routing decision
+  would add ambiguity without adding control.
+- The comment and its durable event provide a stable intent boundary. Delivery can be retried
+  without turning one comment into several AgentJobs.
+- Agent output can itself contain mentions. Attribution must therefore stop Agent-authored
+  comments at the trigger boundary or an ordinary response could recursively create work.
+- A mention is one bounded request, not a subscription. Continued responsibility must be explicit
+  through Issue watch so the owner can see and revoke it.
+
+These forces keep mention handling small: recognize durable user intent, admit one ordinary Agent
+launch, and leave execution ownership to the existing Agent path.
+
 ## Model
 
 A mention adds no domain resource. It uses existing concepts:
@@ -36,18 +52,16 @@ does not trigger.
 ### Detection and Launch
 
 ```text
-AddCommentAsync persists comment -> emit issue.comment-added
-MentionDispatchHandler subscribes:
-  if comment.author matches an active Agent name in the Project:
-    stop                                           # loop prevention
-
-  names = parse and deduplicate @tokens from body
-  for each name:
-    Agent = resolve active Project Agent by name
-    if resolution fails:
-      write structured log and continue           # resolution failure
-    launch(Agent, prompt = body, context = Issue,
-           key = hash(projectId, commentId, agentId))
+Issue comment commit
+        |
+        v
+durable comment-added event
+        |
+        +-- Agent-authored --> stop
+        |
+        +-- owner-authored --> resolve distinct @names
+                                  |
+                                  +--> ordinary Agent launch
 ```
 
 - Launch uses the shared launcher's manual, Workspace-optional path instead of
@@ -99,12 +113,11 @@ Explicit feedback through system comment or inbox remains an open question.
 
 ## Status
 
-Issue #490 delivered the complete behavior: comment creation and its
-lineage-stamped event commit together; mention parsing and Agent name resolution
-are case-insensitive; comment identity makes launch idempotent; Agent-authored
-comments cannot recurse; and a muted watch does not suppress an explicit
-mention. Mention launch reuses the ordinary Agent launch path rather than
-creating a second execution contract.
+The capability is implemented. Comment creation and its lineage-stamped event
+commit together; mention parsing and Agent name resolution are case-insensitive;
+comment identity makes launch idempotent; Agent-authored comments cannot recurse;
+and a muted watch does not suppress an explicit mention. Mention launch reuses
+the ordinary Agent launch path rather than creating a second execution contract.
 
 ### Open Question
 
