@@ -7,7 +7,8 @@ Scope 决定能做什么，认证主体落到审批与活动的 actor 上。
 本模型的第一性是每个请求归属一个 Principal；scope 判定是叠加其上的第二阶段能力（见
 Status 的落地顺序）。GitHub 等外部平台
 的身份与凭据签发见 [`github-integration.md`](github-integration.md)；Slack 成员侧的访问
-策略仍归 [`slack.md`](slack.md) 与 [`agent-api.md`](agent-api.md) 的 Connection 边界。
+策略仍归 [`slack.md`](slack.md)；直接外部 Agent caller 的认证、公开 projection 与恢复边界归
+[`agent-api.md`](agent-api.md)。
 不建多用户、角色、权限组、第三方应用注册与企业身份联邦。
 
 ## Model
@@ -94,6 +95,22 @@ GitHub ingress（自有 HMAC 验签，见 [`github-integration.md`](github-integ
 OTLP listener 上的 `/otel/v1/*`（端口隔离已有边界）。
 
 Scope 判定：路由声明所需 scope；`readonly` 仅满足 GET；其余按上表。scope 不足返回 403。
+
+### 直接外部 Agent 调用
+
+[`agent-api.md`](agent-api.md) 的 `/api/v1` 直接调用者必须使用 `Authorization: Bearer <PAT>`。
+它不是 Web cookie，也不是 Slack 等 Agent Connection 的受信任服务身份；Connection 仍在自己的
+adapter 边界内处理外部平台身份，不能冒充直接 caller。
+
+该边界的 route scope 固定为：launch、follow-up、stop 要 `operator`；Input、Turn 与 Session
+公开事件读取要 `readonly` 或 `operator`。私有 Project 的现有 Principal/Project 归属判断就是
+授权依据，不在这里新增跨用户 visibility、角色或加密策略。
+
+执行顺序固定为认证 Bearer PAT、授权 scope 和 Project/resource、校验请求、再做 idempotency
+lookup/fingerprint/admission。`401` 或 `403` 时不得读取或返回已有 request mapping，也不得写
+rejection、Job、Session、Input、Turn、outbox 或公开事件，亦不得调用 Runner。完整的外部
+字段、错误和 cursor 语义只在 [`agent-api.md`](agent-api.md) 定义，不能从本认证文档或
+Connection 边界推导另一套 API。
 
 ### Bootstrap
 
@@ -210,6 +227,9 @@ Runner 顶替防护：
    （RunnerId、ProjectId）照常记录，路由 gate 同样留给 P2。
 3. P2 权限检查：scope 判定与 403、敏感基础设施面归属、runner 顶替防护、审计事件。
 4. P3（候选，另立设计）：外部 OIDC 与多用户。
+
+`#387` 的直接外部 Agent API 不能在只完成 P0 的阶段发布；它要求上述 PAT 认证和 P2 的
+scope/Project 授权一起生效，才能满足认证、授权先于 idempotency 与 admission 的边界。
 
 开放问题：
 

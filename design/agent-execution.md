@@ -200,9 +200,11 @@ Compact、Reset、recovery、handoff、rebind、stop 和 force-reset 的 command
 `operationId`；steer follow-up 使用 caller-provided `requestId` 作为同一 operation identity。
 同一 `operationId` 是 response loss 后的重试和查询身份。内部 recovery
 coordinator 也必须在发出 command 前持有并持久化这个身份，不能让客户端只能等待一个
-不可见的 Server key。只有 launch 使用不同的两级身份：客户端提供 `launchRequestId`，Server
-在第一次 prepare 中创建 `launchOperationId`；两者的映射必须出现在 canonical launch read
-model 中，不能混用。
+不可见的 Server key。只有 launch 使用不同的两级身份：调用方提供非空
+`launchRequestId`，Server 在认证和授权后从完整 normalized envelope 导出
+`launchRequestFingerprint`，并在第一次 prepare 中创建 `launchOperationId`；三者的映射
+必须出现在 canonical launch read model 中，不能混用。直接外部 API 把
+`Idempotency-Key` 映射为 `launchRequestId`，但不接受调用方声明的 fingerprint。
 
 以下是不变量：
 
@@ -2112,10 +2114,10 @@ canonical 返回值。CLI 省略 Workspace 时，入口先解析当前 Project �
 
 ### 稳定身份与 canonical 投影
 
-客户端必须先提供 `launchRequestId` 和 canonical `launchRequestFingerprint`（本次 launch 的
-idempotency key 与完整请求 envelope hash）。Server 在受理事务中按
-`(projectId, agentId, launchRequestId)` 查找既有请求；同 key 同 fingerprint 的 response loss
-必须返回原 launch rejection/operation，改 payload 必须返回
+调用方必须先提供非空 `launchRequestId`。Server 在认证/授权之后对完整 launch envelope
+canonical normalize，导出并持久化 `launchRequestFingerprint`；fingerprint 不是调用方可声明或
+覆盖的字段。Server 在受理事务中按 `(projectId, agentId, launchRequestId)` 查找既有请求；同 key
+同 fingerprint 的 response loss 必须返回原 launch rejection/operation，改 payload 必须返回
 `rejected(idempotency_key_reused)`；只有新 requestId 才能创建新 launch。第一次 prepare 才生成并持久化
 `launchOperationId`、`AgentJobId`、`AgentSessionId`、`InputId` 和 `TurnId` reservation；只有 Session
 accept 成功后，Session/Input/Turn ID 才成为可寻址的 live mapping。已 materialize 的 ID
@@ -2128,8 +2130,9 @@ RuntimeSessionId 只标识当前物理 binding；它可以替换，不能作为�
 Server 是 canonical read model 与 command result 的权威来源。CLI、Web 和其它入口都是适配器，
 不存在“先固化 CLI JSON、再由 Web 复用”的权威方向。每个返回的事实至少带 Server 产生的
 `revision` 和 `observedAt`；revision 在对应 Job/Session 权威状态变化时单调递增，observedAt
-是 Server 观察该事实的时间。外部续读 cursor 和认证/传输语义仍属于 #387，不在本 issue 新造
-endpoint。
+是 Server 观察该事实的时间。外部认证、cursor、公开 projection 与传输语义由
+[`agent-api.md`](agent-api.md) 定义；它只能投影这些 canonical 事实，不能把本段的内部
+read model 或 lifecycle 直接序列化为新的 endpoint。
 
 | canonical 事实 | 必须回答的问题 | 必须存在的字段 |
 |---|---|---|
@@ -2203,10 +2206,11 @@ Unknown 不是 queued，也必须带查询原 operation、人工核对或 force-
 request -> prepare-job -> accept-session -> queue -> execute -> result
 ```
 
-1. `request` 校验 Agent execution-definition snapshot、Workspace、现有 target/context、
-   输入身份和当前 Session。这一步不承诺 Runtime 已可用；launch 必须带调用方生成的
-   `launchRequestId` 和 `launchRequestFingerprint`。它们是客户端在首次请求和所有 retry 中
-   保存的唯一 idempotency key/envelope hash。
+1. `request` 在认证/授权之后校验 Agent execution-definition snapshot、Workspace、现有
+   target/context、输入身份和当前 Session。这一步不承诺 Runtime 已可用；launch 必须带调用方
+   生成的 `launchRequestId`，Server 从完整 normalized envelope 导出
+   `launchRequestFingerprint`。客户端保存 key 以供首次请求和所有 retry 重用，但不生成或信任
+   自己的 envelope hash。
 2. `prepare-job` 在 AgentJob 自己的事务中按 `(projectId, agentId, launchRequestId)` 查找：同
    fingerprint 返回原 Job/operation 或原 rejection tombstone，改 payload 返回
    `idempotency_key_reused`，不创建任何新 reservation；只有新 requestId 才进入 prepare。
@@ -2726,7 +2730,7 @@ operation fence。
 
 | AC | 可观察验收标准 | 场景映射 | 实施批次 |
 |---|---|---|---|
-| AC1 稳定受理身份 | launch/follow-up 都有 caller `requestId`；launch 还持久化 `launchRequestFingerprint`，同 launch key 同 fingerprint response loss 返回原 rejection/operation，改 payload 返回 `idempotency_key_reused`；`(SessionId, requestId)` 唯一映射稳定返回同一 Input/Turn；steer 只有随 Input 一起持久化 replayable effect 才能报告 accepted | harness、正常 launch、相同 key 重试/response loss、launch key 重用改 payload、不同 key、accept rejection、steer effect response loss | Batch 1 |
+| AC1 稳定受理身份 | launch/follow-up 都有 caller `requestId`；Server 在认证/授权后从完整 normalized envelope 导出并持久化 launch `launchRequestFingerprint`，同 launch key 同 fingerprint response loss 返回原 rejection/operation，改 payload 返回 `idempotency_key_reused`；`(SessionId, requestId)` 唯一映射稳定返回同一 Input/Turn；steer 只有随 Input 一起持久化 replayable effect 才能报告 accepted | harness、正常 launch、相同 key 重试/response loss、launch key 重用改 payload、不同 key、accept rejection、steer effect response loss | Batch 1 |
 | AC2 Turn 与输入语义 | queued/retrying/blocked/dispatched/terminal/unknown 与 Turn status 自洽；blocked 可重试、terminal blocked 不再 retry；steer 关联 existing Turn，并以 durable steer operation/fence/reportable `pending|accepted|unknown|terminal` effect 收敛；queue full 在受理前拒绝 | 正常 follow-up、steer、steer response loss/restart/duplicate、follow-up 排队、queue full、accepted 后入队失败、permanent dispatch failure | Batch 2 |
 | AC3 Server canonical 事实 | Job status、Session activity/admission、Input acceptance、Turn result 分开返回；Turn result 唯一使用 outcome/reason/nextAction/nullable result；Input/dispatch 使用 conventions 唯一 schema；Job 映射缺失时 null+reason；attempt/deadline/fence/reason/nextAction/revision/observedAt 可追踪 | canonical read、stale event、Job/Session 结果分离、dispatch unknown、force-reset 后 current activity | Batch 3 |
 | AC4 Launch 跨聚合收敛 | AgentJob/Session 不共享事务；durable coordinator/outbox 用幂等命令把部分失败收敛到唯一 Job/首 Input/Turn 映射 | launch partial failure、Server restart、Runner submit response loss | Batch 4 |
@@ -2891,3 +2895,8 @@ key；迁移完成前必须保留这一实现 gap。
 #382 负责跨 Session max-concurrent-runs、capacity claim/release 和容量视图；#384 负责默认
 transcript 公共投影；#385 负责历史/Session timeline 展示；#387 负责外部 API 的认证、幂等
 和断线续读。#378 只提供这些边界可复用的生命周期与 canonical 状态合同。
+
+`#387` 的直接 API 还要求 PAT caller 在任何 idempotency lookup 或 admission 前完成认证与
+Project/scope 授权，并把 external response/event 限制为 [`agent-api.md`](agent-api.md) 的公开
+allowlist。RuntimeSessionId、binding、operation、workspace/path、prompt/memory 与 Runner 控制
+仍只属于本 canonical/internal boundary；它们不是外部 API 的替代 read model。
