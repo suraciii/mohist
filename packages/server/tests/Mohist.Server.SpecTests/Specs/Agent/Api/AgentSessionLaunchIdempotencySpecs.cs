@@ -193,6 +193,41 @@ public class AgentSessionLaunchIdempotencySpecs : AgentSessionLaunchRoutesTestSu
     }
 
     [Fact]
+    public async Task Launch_ReplayPreservesAcceptedAndRejectedAttachmentResponse()
+    {
+        var projectId = await CreateProjectAsync("launch-replay-attachment-response");
+        var agent = await CreateAgentAsync(projectId, "attachment-response-agent");
+        const string workspaceName = "launch-idempotency-workspace";
+        await CreateWorkspaceAsync(projectId, workspaceName);
+        var acceptedAttachment = await UploadAttachmentAsync(projectId, "accepted.txt", "accepted"u8.ToArray());
+        const string rejectedAttachment = "att_does_not_exist_for_replay";
+        const string idempotencyKey = "replay-attachment-response";
+        var request = new
+        {
+            prompt = "preserve attachment response",
+            attachments = new[] { acceptedAttachment, rejectedAttachment },
+            context = new { workspace = workspaceName },
+        };
+
+        using var first = await LaunchAsync(projectId, agent.Id, request, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, first.StatusCode);
+        var firstPayload = await first.Content.ReadFromJsonAsync<JsonElement>();
+        var firstData = firstPayload.GetProperty("data");
+        var firstAccepted = firstData.GetProperty("attachments").GetRawText();
+        var firstRejected = firstData.GetProperty("rejectedAttachments").GetRawText();
+        Assert.Contains(acceptedAttachment, firstAccepted, StringComparison.Ordinal);
+        Assert.Contains(rejectedAttachment, firstRejected, StringComparison.Ordinal);
+
+        using var replay = await LaunchAsync(projectId, agent.Id, request, idempotencyKey);
+        Assert.Equal(HttpStatusCode.Created, replay.StatusCode);
+        var replayPayload = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        var replayData = replayPayload.GetProperty("data");
+
+        Assert.Equal(firstAccepted, replayData.GetProperty("attachments").GetRawText());
+        Assert.Equal(firstRejected, replayData.GetProperty("rejectedAttachments").GetRawText());
+    }
+
+    [Fact]
     public async Task Launch_ReplayWithDifferentSuppliedAgentReference_Conflicts()
     {
         var projectId = await CreateProjectAsync("launch-replay-agent-reference");

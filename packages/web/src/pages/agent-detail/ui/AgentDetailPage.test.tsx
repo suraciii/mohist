@@ -9,7 +9,7 @@ import {
   renderJourneyPage,
   renderPage,
   resetState,
-} from './AgentDetailPage.test-support'
+} from './AgentDetailPageTestSupport'
 import type { AgentInfo } from '../../../entities/agent'
 
 describe('AgentDetailPage', () => {

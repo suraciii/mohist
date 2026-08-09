@@ -6,7 +6,7 @@ import {
   renderPage,
   resetState,
   state,
-} from './AgentDetailPage.test-support'
+} from './AgentDetailPageTestSupport'
 
 describe('AgentDetailPage Actions card', () => {
   beforeEach(resetState)

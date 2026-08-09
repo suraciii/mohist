@@ -1,21 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, screen, waitFor } from '@testing-library/react'
-import { makeAgent, makeWorkspace, renderPage, state } from '../../../../tests/support/agent-session-composer-test-support'
+import { makeAgent, makeWorkspace, renderPage, resetState, state } from '../../../../tests/support/agent-session-composer-test-support'
 import { IssueHealth, IssueStatus } from '../../../entities/issue'
 import { EpicStatus } from '../../../entities/epic'
 
 describe('AgentSessionComposerPage', () => {
   beforeEach(() => {
-    state.agentsData = []
-    state.availabilityData = []
-    state.launchCalls.length = 0
-    state.launchError = null
-    state.launchFailuresRemaining = -1
-    state.launchResponse = null
-    state.repositoriesData = []
-    state.workspacesData = [makeWorkspace('workspace-1')]
-    state.issuesData = []
-    state.epicsData = []
+    resetState()
   })
 
   afterEach(() => {

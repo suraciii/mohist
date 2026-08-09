@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BotIcon } from 'lucide-react'
 
 export interface AgentAvatarProps {
@@ -29,17 +29,21 @@ export function AgentAvatar({
 }: AgentAvatarProps) {
   const [imageFailed, setImageFailed] = useState(false)
   const value = avatar?.trim() ?? ''
-  const image = !imageFailed && isImageSource(value)
+  const imageSource = isImageSource(value) ? value : null
+  useEffect(() => {
+    setImageFailed(false)
+  }, [agentName, imageSource])
+  const image = imageSource !== null && !imageFailed
 
   return (
     <div
       className={`flex aspect-square items-center justify-center overflow-hidden ${className}`}
       data-testid={testId}
-      data-avatar-state={image ? 'image' : value && !isImageSource(value) ? 'text' : 'fallback'}
+      data-avatar-state={image ? 'image' : imageSource ? 'fallback' : value ? 'text' : 'fallback'}
     >
       {image ? (
         <img
-          src={value}
+          src={imageSource}
           alt={`${agentName} avatar`}
           className="size-full object-cover"
           onError={() => setImageFailed(true)}

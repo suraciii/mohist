@@ -126,7 +126,14 @@ public sealed record AgentLaunchCoordinatorPlan(
     [property: Id(47)] string? WorkspacePath = null,
     [property: Id(48)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(49)] string? Origin = null,
-    [property: Id(50)] string? TargetId = null);
+    [property: Id(50)] string? TargetId = null,
+    /// <summary>
+    /// Immutable accepted/rejected attachment response captured before
+    /// the plan is committed. Replays project this snapshot instead of
+    /// revalidating attachments or losing rejected results. Append-only
+    /// Orleans field id (next free after <see cref="TargetId"/>).
+    /// </summary>
+    [property: Id(51)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
 
 /// <summary>
 /// Canonical request payload captured from the launch route. The
@@ -202,7 +209,8 @@ public sealed record AgentLaunchCoordinatorResult(
     [property: Id(5)] string AgentName,
     [property: Id(6)] bool AlreadyPersisted,
     [property: Id(7)] string? ParentLinkEdgeId = null,
-    [property: Id(8)] string? WorkspaceName = null);
+    [property: Id(8)] string? WorkspaceName = null,
+    [property: Id(9)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);
 
 /// <summary>
 /// Raised when the supplied idempotency key has already accepted a

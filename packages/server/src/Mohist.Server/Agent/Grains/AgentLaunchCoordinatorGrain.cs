@@ -157,7 +157,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
                 ParentExpectedBindingEpoch: command.ParentExpectedBindingEpoch,
                 WorkspaceRepositories: command.WorkspaceRepositories,
                 Origin: command.Origin ?? command.Request.Origin,
-                TargetId: command.TargetId ?? command.Request.TargetId);
+                TargetId: command.TargetId ?? command.Request.TargetId,
+                AttachmentResults: command.AttachmentResults);
             _state.State.Plan = plan;
             await SaveStateAsync();
             await EnsureRecoveryReminderAsync();
@@ -179,7 +180,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentName: final.AgentName,
             AlreadyPersisted: existing?.Completed == true,
             ParentLinkEdgeId: final.ParentLinkEdgeId,
-            WorkspaceName: final.WorkspaceName);
+            WorkspaceName: final.WorkspaceName,
+            AttachmentResults: final.AttachmentResults);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeAsync(AgentLaunchCoordinatorRequest request)
@@ -215,7 +217,8 @@ public sealed class AgentLaunchCoordinatorGrain : Grain, IAgentLaunchCoordinator
             AgentName: final.AgentName,
             AlreadyPersisted: true,
             ParentLinkEdgeId: final.ParentLinkEdgeId,
-            WorkspaceName: final.WorkspaceName);
+            WorkspaceName: final.WorkspaceName,
+            AttachmentResults: final.AttachmentResults);
     }
 
     public async Task<AgentLaunchCoordinatorResult?> ResumeExistingSpawnAsync(string spawnRequestFingerprint)
@@ -994,4 +997,11 @@ public sealed record AgentLaunchCoordinatorCommandEnvelope(
     [property: Id(34)] string? WorkspaceName = null,
     [property: Id(35)] IReadOnlyList<WorkspaceRepositorySnapshot>? WorkspaceRepositories = null,
     [property: Id(36)] string? Origin = null,
-    [property: Id(37)] string? TargetId = null);
+    [property: Id(37)] string? TargetId = null,
+    /// <summary>
+    /// Immutable accepted/rejected attachment response captured by the
+    /// launch route. It is persisted on the coordinator plan for exact
+    /// idempotent replay. Append-only Orleans field id (next free after
+    /// <see cref="TargetId"/>).
+    /// </summary>
+    [property: Id(38)] IReadOnlyList<AgentInputAttachmentAcceptance>? AttachmentResults = null);

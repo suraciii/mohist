@@ -185,7 +185,7 @@ public static class AgentSessionLaunchRoutes
                         resumed.WorkspaceName ?? workspaceName,
                         launchOrigin,
                         resumed.AgentId,
-                        attachmentResults: null);
+                        attachmentResults: resumed.AttachmentResults);
             }
             catch (LaunchIdempotencyConflictException ex)
             {
@@ -385,7 +385,8 @@ public static class AgentSessionLaunchRoutes
                         preMintedSessionId,
                         preMintedInputId,
                         preMintedTurnId,
-                        ct);
+                        ct,
+                        attachmentResults: attachmentBatch.Results.ToArray());
                     retainNewlyBoundAttachments = true;
                 }
                 catch (ArgumentException ex)
@@ -409,7 +410,14 @@ public static class AgentSessionLaunchRoutes
                     return ReadinessRejected(ex);
                 }
 
-                return AcceptedLaunch(project.Id, project.Name, result, workspaceName, launchOrigin, agent.Id, attachmentBatch.Results);
+                return AcceptedLaunch(
+                    project.Id,
+                    project.Name,
+                    result,
+                    workspaceName,
+                    launchOrigin,
+                    agent.Id,
+                    result.AttachmentResults ?? attachmentBatch.Results);
             }
             finally
             {

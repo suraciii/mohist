@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider, useMutation } from '@tanstack/react-query'
+import { useState } from 'react'
 import { render } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { ProjectProvider } from '../../src/entities/project'
@@ -29,6 +30,8 @@ export const state = {
   workspacesData: [] as Workspace[],
   issuesData: [] as IssueListItem[],
   epicsData: [] as EpicWithProgress[],
+  repositoriesError: false,
+  repositoryRetryCalls: 0,
 }
 
 const components: AgentSessionComposerPageComponents = {
@@ -44,6 +47,7 @@ const components: AgentSessionComposerPageComponents = {
 }
 
 const dataHook: AgentSessionComposerDataHook = () => {
+  const [, setRepositoryRetryVersion] = useState(0)
   const launchMutation = useMutation<
     AgentSessionLaunchResponse,
     Error,
@@ -72,6 +76,12 @@ const dataHook: AgentSessionComposerDataHook = () => {
     availabilityLoading: false,
     launchMutation,
     repositories: state.repositoriesData,
+    repositoriesError: state.repositoriesError,
+    retryRepositories: () => {
+      state.repositoryRetryCalls += 1
+      state.repositoriesError = false
+      setRepositoryRetryVersion((version) => version + 1)
+    },
     workspaces: state.workspacesData,
     issues: state.issuesData,
     epics: state.epicsData,
@@ -111,6 +121,21 @@ export function makeWorkspace(name: string, repositories: string[] = ['main']): 
     createdAt: '2026-01-01T00:00:00.000Z',
     boundSessionCount: 0,
   }
+}
+
+export function resetState() {
+  state.agentsData = []
+  state.availabilityData = []
+  state.launchCalls.length = 0
+  state.launchError = null
+  state.launchFailuresRemaining = -1
+  state.launchResponse = null
+  state.repositoriesData = []
+  state.repositoriesError = false
+  state.repositoryRetryCalls = 0
+  state.workspacesData = [makeWorkspace('workspace-1')]
+  state.issuesData = []
+  state.epicsData = []
 }
 
 function LocationProbe() {

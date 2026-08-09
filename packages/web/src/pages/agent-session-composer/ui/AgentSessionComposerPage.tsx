@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon, PlusIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
 import {
   getAgentAvailabilityFeedback,
   getAgentLaunchErrorFeedback,
@@ -291,6 +291,8 @@ export interface AgentSessionComposerData {
   availabilityLoading: boolean
   launchMutation: Pick<ReturnType<typeof useLaunchAgentSession>, 'mutate' | 'isPending' | 'error'>
   repositories?: Repository[]
+  repositoriesError?: boolean
+  retryRepositories?: () => void | Promise<unknown>
   workspaces?: Workspace[]
   issues?: IssueListItem[]
   epics?: EpicWithProgress[]
@@ -303,7 +305,12 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
   const { projectId } = useProject()
   const { data: agents, isLoading: agentsLoading } = useAgents()
   const { data: availability, isLoading: availabilityLoading } = useAgentListAvailability()
-  const { data: repositories, isLoading: repositoriesLoading } = useRepositories(projectId ?? undefined)
+  const {
+    data: repositories,
+    isLoading: repositoriesLoading,
+    isError: repositoriesError,
+    refetch: refetchRepositories,
+  } = useRepositories(projectId ?? undefined)
   const { data: workspaces, isLoading: workspacesLoading } = useWorkspaces('active')
   const { data: issues, isLoading: issuesLoading } = useIssues({ projectId: projectId ?? undefined, all: false })
   const { data: epics, isLoading: epicsLoading } = useEpics()
@@ -314,6 +321,8 @@ const useDefaultData: AgentSessionComposerDataHook = () => {
     availabilityLoading,
     launchMutation: useLaunchAgentSession(),
     repositories,
+    repositoriesError,
+    retryRepositories: () => refetchRepositories(),
     workspaces,
     issues,
     epics,
@@ -346,6 +355,8 @@ export function AgentSessionComposerPage({
     availabilityLoading,
     launchMutation,
     repositories = [],
+    repositoriesError = false,
+    retryRepositories,
     workspaces = [],
     issues = [],
     epics = [],
@@ -478,6 +489,7 @@ export function AgentSessionComposerPage({
     && !launchBlockedByReadiness
     && workspaceScopeConfirmed
     && repositoryScopeCompatible
+    && !repositoriesError
     && !launchMutation.isPending
 
   const handleLaunch = useCallback(() => {
@@ -682,6 +694,28 @@ export function AgentSessionComposerPage({
             onChange={updateContextRef}
             onCreateWorkspace={() => setCreateWorkspaceOpen(true)}
           />
+          {repositoriesError && (
+            <div
+              role="alert"
+              data-testid="composer-repositories-error"
+              className="flex items-center justify-between gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-900"
+            >
+              <span className="flex items-center gap-1.5">
+                <AlertTriangleIcon className="size-3.5 shrink-0" />
+                Repositories failed to load.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => retryRepositories?.()}
+                data-testid="retry-composer-repositories"
+              >
+                <RefreshCwIcon className="size-3.5" />
+                Retry
+              </Button>
+            </div>
+          )}
           {selectedAgent && !workspaceScopeConfirmed && (
             <div
               data-testid="workspace-scope-blocked"
