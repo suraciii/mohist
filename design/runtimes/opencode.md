@@ -480,9 +480,11 @@ The OpenCode integration owns the static catalog content and mapping format
 published with its Runtime release. Server owns registry acceptance and the
 versioned entry used for Agent create/edit, readiness, and launch validation.
 Each accepted entry names `catalogVersion`, Model, supported and default
-ReasoningEffort values, supported Variant values, and the final non-secret native
-mapping for the OpenCode SDK. Runner only declares which accepted versions and
-mapping formats its adapter can apply.
+ReasoningEffort values, whether the Model has a Variant dimension, supported
+Variant values, its nullable `defaultVariant`, and the final non-secret native
+mapping for the OpenCode SDK. `defaultVariant` is null only when the Model has
+no Variant dimension; otherwise it is one supported non-empty Variant. Runner
+only declares which accepted versions and mapping formats its adapter can apply.
 
 Neither Runner nor Server asks the OpenCode CLI, its providers, or credentials
 for a live model list. A catalog release changes only later resolutions. A Job

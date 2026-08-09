@@ -351,10 +351,12 @@ The Pi integration owns static catalog content and mapping format published with
 the Runtime release. Server owns registry acceptance and the versioned entry
 used to validate Agent create/edit, readiness, and launch resolution. Each
 accepted entry names `catalogVersion`, Model, supported and default
-ReasoningEffort values, supported Variant values, and the complete non-secret
-native mapping for Pi. Runner only declares which accepted versions and mapping
-formats its adapter can apply. Provider credentials and live availability do not
-alter catalog support.
+ReasoningEffort values, whether the Model has a Variant dimension, supported
+Variant values, its nullable `defaultVariant`, and the complete non-secret
+native mapping for Pi. `defaultVariant` is null only when the Model has no
+Variant dimension; otherwise it is one supported non-empty Variant. Runner only
+declares which accepted versions and mapping formats its adapter can apply.
+Provider credentials and live availability do not alter catalog support.
 
 Runtime selection is frozen into the Agent execution snapshot and current Session
 binding. Server routes launch and Session commands by that value; Runner dispatches

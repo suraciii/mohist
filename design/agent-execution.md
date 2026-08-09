@@ -103,37 +103,54 @@ materialization are authoritative in [`workspace.md`](workspace.md#binding-and-r
 `reasoningEffort` is a cross-Runtime user setting with exactly these values:
 `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `variant` is a
 separate Runtime-specific setting and is never an alias for effort. A saved Agent
-has default Runtime, Model, ReasoningEffort, and Variant. The only per-launch
-overrides are Model and ReasoningEffort; they apply to that Job only.
+has one persisted effective Runtime, Model, ReasoningEffort, and Variant tuple.
+The only per-launch overrides are Model and ReasoningEffort; they apply to that
+Job only.
 
 Each Runtime integration owns a static, versioned capability catalog. A catalog
 entry identifies its `catalogVersion`, Runtime, Model, supported and default
-ReasoningEffort values, supported Variant values, and the complete non-secret
-native mapping needed by that Runtime. Server owns the accepted catalog registry
-and validates Agent create/edit, readiness, and launch resolution against it. It
-does not probe a provider, list live models, or infer support from credentials.
-On Agent create, an omitted effort is filled from that catalog's default and
-stored as the Agent default. An edit without an effort retains the stored value;
-clearing effort selects and stores the current catalog default. There is no
+ReasoningEffort values, whether a Variant dimension applies, supported Variant
+values, nullable `defaultVariant`, and the complete non-secret native mapping
+needed by that Runtime. `defaultVariant` is null only when the Model has no
+Variant dimension. Server owns the accepted catalog registry and validates Agent
+create/edit, readiness, and launch resolution against it. It does not probe a
+provider, list live models, or infer support from credentials.
+`RuntimeCapabilityCatalogRead.defaultExecution` supplies the complete persisted
+tuple when Agent creation omits configuration. It also defines the nullable
+Variant rule: an effective Variant is `null` only if that Model has no Variant
+dimension; clearing Variant is an operation, never a null value. There is no
 legacy path that treats Variant as effort.
 
-The absent, clear, and default rules are fixed at the boundary that receives the
-request:
+The absent, value, clear, and invalid rules are fixed at the Agent boundary. A
+clear exists only on Agent edit, via the named `--clear-*` flag (or its typed
+internal equivalent). Exactly one execution clear flag may appear in an edit;
+it is mutually exclusive with a supplied value for that field:
 
-| Boundary | Omitted reasoning effort | Explicit clear | Other rule |
+| Field | Agent create: omitted | Agent edit: omitted | Agent edit: explicit clear | Value and invalid input |
+|---|---|---|---|---|
+| Runtime | Use the catalog's `defaultExecution.runtime`. | Retain the saved Runtime. | `--clear-runtime` selects the catalog's complete `defaultExecution` tuple. | A supplied Runtime replaces only Runtime; retained dependent fields must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
+| Model | Use the selected Runtime's catalog default Model. | Retain the saved Model. | `--clear-model` selects that Runtime's default Model, ReasoningEffort, and Variant. | A supplied Model replaces only Model; retained ReasoningEffort and Variant must validate or the edit is rejected. Empty, `null`, or an unknown option is `invalid_execution_configuration`. |
+| ReasoningEffort | Use the selected Model's `defaultReasoningEffort`. | Retain the saved ReasoningEffort. | `--clear-reasoning-effort` selects that Model's current `defaultReasoningEffort`. | A supplied value must be one of the closed enum and be supported by the selected Model. Empty, `null`, unknown, or unsupported is rejected. |
+| Variant | Use the selected Model's `defaultVariant`; it is null only when that Model has no Variant dimension. | Retain the saved Variant. | `--clear-variant` selects that Model's current `defaultVariant`. | A supplied value must be a supported Runtime-specific Variant. Empty, `null`, unknown, or unsupported is rejected; a value is illegal when no Variant dimension applies. |
+
+Every create or successful edit resolves, validates, and persists the entire
+effective tuple, including its `catalogVersion` and final native mapping. A
+clear recomputes Readiness and that complete native mapping. A failed
+recalculation is atomically rejected and leaves the previously saved tuple
+unchanged. Runtime and Model changes never probe or fall back to a compatible
+effort or Variant.
+
+For new work, the following boundary rules use that saved tuple:
+
+| Boundary | Omitted launch configuration | Explicit clear | Other rule |
 |---|---|---|---|
-| Agent create | Resolve the selected catalog entry's default and persist it. | Illegal. | Runtime and Model must be present together for a complete definition. |
-| Agent edit | Retain the stored value. | `--clear-reasoning-effort` resolves the current catalog default and persists it. | A set value and clear flag are mutually exclusive. |
-| CLI new AgentJob | Use the saved Agent default. | Illegal. | `--model` and `--reasoning-effort` are the only explicit per-launch overrides. |
-| Workflow Agent-definition execution | Use the saved Agent default. | Illegal. | The `mohist/agent` definition reference does not obtain an implicit Runtime or Session default. |
+| CLI new AgentJob | Use the saved Agent tuple. | Illegal. | `--model` and `--reasoning-effort` are the only explicit one-Job overrides. |
+| Workflow Agent-definition execution | Use the saved Agent tuple. | Illegal. | The `mohist/agent` definition reference never obtains an implicit Runtime or Session default. |
 | Existing AgentSession Follow-up | Keep the immutable Job/Session snapshot. | Illegal. | A later Agent edit or catalog change never silently re-resolves the Session. |
 
 An empty string, `null`, an unknown property, or a value outside the closed
-ReasoningEffort vocabulary is illegal wherever the field is accepted. The only
-clear operation is the dedicated Agent-edit clear flag. A Runtime or Model edit
-revalidates the saved Reasoning effort and Variant against the selected static
-catalog. It fails rather than probing or falling back. Variant remains a
-separate runtime-specific field in every row.
+ReasoningEffort vocabulary is illegal wherever the field is accepted. Variant
+remains a separate Runtime-specific field in every row.
 
 A Workflow Agent-definition execution is a TaskRun attempt rather than an
 AgentJob, but it follows the same saved-default rule. Inline Runtime Actions are
@@ -147,24 +164,30 @@ Validation has five stable outcomes before dispatch:
 | An option is unknown, empty, not a string, or has an effort outside the closed vocabulary | `invalid_execution_configuration` | `correct_execution_configuration` |
 | A well-formed Runtime or Model is absent from the accepted catalog | `unsupported_execution_configuration` | `select_supported_execution_configuration` |
 | A catalog Runtime/Model cannot use the selected ReasoningEffort or Variant combination | `incompatible_execution_configuration` | `select_compatible_execution_configuration` |
-| The required static catalog cannot be read | `execution_catalog_unavailable` | `wait_for_catalog` |
+| The required static catalog cannot be read, or Readiness is `unknown` | `execution_catalog_unavailable` | `wait_for_catalog` |
 | A valid configuration cannot be executed by an available adapter for its persisted catalog version and native mapping | Job remains waiting with `exact_execution_unavailable` | `wait_for_exact_execution` |
 
-The first four outcomes reject before a Workspace, attachment, dispatch, or
-provider side effect. The fifth retries the same immutable configuration when
-that exact adapter becomes available. It never changes Runtime, Model,
-ReasoningEffort, Variant, catalog version, or native mapping as a fallback.
+The first four outcomes reject every new launch or delegation before a Job,
+Session, Workspace, attachment, Runner, dispatch, or provider side effect.
+Existing Session history remains readable. A Follow-up may retain its immutable
+snapshot, but when its admission sees an unavailable catalog or Unknown
+Readiness it rejects before creating a new Input, Turn, or dispatch effect; it
+does not re-resolve to a different tuple. The fifth retries the same immutable
+configuration when that exact adapter becomes available. It never changes
+Runtime, Model, ReasoningEffort, Variant, catalog version, or native mapping as
+a fallback.
 
-Resolution starts only for a new launch after input validation and idempotency
-lookup. It selects the saved Agent value unless the allowed launch field is
-explicitly present, records the source for each field, selects one catalog entry,
-and persists the resulting `ResolvedExecutionRead` with the Job's first durable
-write. That snapshot includes `catalogVersion` and the final Runtime-owned
-`nativeMapping`; a later Agent edit or catalog release cannot rewrite, erase, or
-recompute it. Runner dispatch applies that saved mapping rather than resolving a
-new one. Trusted Job launch responses and Job views return the snapshot; the
-#387 direct API retains its smaller public projection. Session shows only a
-read-only association summary.
+Resolution starts only for a new launch after structural input validation and
+the read-only replay lookup described below. It selects the saved Agent value
+unless an allowed launch field is explicitly present, records the source for
+each field, selects one catalog entry, and stores the resulting
+`ResolvedExecutionRead` in the durable admission claim before any materialized
+effect. That immutable snapshot includes `catalogVersion` and the final
+Runtime-owned `nativeMapping`; a later Agent edit or catalog release cannot
+rewrite, erase, or recompute it. Runner dispatch applies that saved mapping
+rather than resolving a new one. Trusted Job launch responses and Job views
+return the snapshot; the #387 direct API retains its smaller public projection.
+Session shows only a read-only association summary.
 
 The canonical read shapes, gap messages/actions, nullability, and catalog
 ownership are in [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
@@ -173,29 +196,35 @@ ownership are in [`conventions.md`](conventions.md#canonical-agentsession-launch
 
 `ResolveAgentLaunch` is a pure resolve-and-validate phase. It reads the Agent,
 the accepted static catalog, existing Workspace and attachment references, and
-the caller's local attachment metadata. It normalizes valid caller intent,
-chooses the saved defaults and allowed overrides, selects one catalog entry, and
-returns `ResolvedExecutionRead` plus `LaunchMaterializationPlanRead`. It may
-derive a missing Project Workspace name or identify a local attachment that
-would upload, but it does not allocate an ID or write any resource.
+the caller's attachment descriptors. The CLI may read a local path only at its
+edge to produce a non-path `name`, `byteLength`, and `contentFingerprint`
+descriptor; a local path never enters Server, a persisted resource, or a public
+DTO. Resolve normalizes valid caller intent, chooses the saved defaults and
+allowed overrides, selects one catalog entry, and returns
+`ResolvedExecutionRead` plus `LaunchMaterializationPlanRead`. It may derive a
+missing Project Workspace name or identify a local attachment that would upload,
+but it does not allocate an ID, create a claim, upload bytes, or write any
+resource.
 
 `CommitAgentLaunch` runs only after a successful resolve for a new real launch.
-It materializes every `wouldCreate` Workspace and `wouldUpload` attachment,
-persists the caller-intent idempotency record and immutable Job execution
-snapshot, creates the Job/Session/Input/Turn, and requests dispatch. The real
-launch path shares exactly the same resolve phase as dry-run; commit is the
-only phase allowed to cause those effects.
+It atomically creates the `pending` durable admission claim containing the
+immutable resolved snapshot, then lets only that claim's `launchOperationId`
+materialize every `wouldCreate` Workspace and `wouldUpload` attachment, create
+the Job/Session/Input/Turn, and request dispatch. The real launch path shares
+exactly the same resolve phase as dry-run; commit is the only phase allowed to
+create a claim or cause those effects.
 
 Dry-run accepts only the parse, authorization, caller-intent validation, and
 pure resolve phase. It returns `AgentLaunchPreviewRead`; it creates no
-Workspace, attachment, idempotency record, Job, Session, Input, Turn, reserved
-identity, dispatch, Runner work directory, or provider effect. Existing
-references are read-only resolved. A missing-but-derivable Workspace or local
-attachment is returned only as `wouldCreate` or `wouldUpload`; a missing,
-unreadable, ambiguous, or invalid input rejects with the structured
+Workspace, attachment, admission claim, idempotency record, Job, Session,
+Input, Turn, reserved identity, dispatch, Runner work directory, or provider
+effect. Existing references are read-only resolved. A missing-but-derivable
+Workspace or local attachment is returned only as `wouldCreate` or
+`wouldUpload`; a missing, unreadable, ambiguous, over-limit, or invalid input
+rejects with the structured
 `LaunchResolutionProblemRead` or execution error. `--dry-run` and an
-idempotency key are mutually exclusive, because preview does not create or read
-an idempotency record.
+idempotency key are mutually exclusive, because preview does not create, read,
+or wait on an admission claim or idempotency record.
 
 ### Launch convergence
 
@@ -206,35 +235,62 @@ transaction. The durable protocol instead makes every partial state queryable:
 caller launchRequestId
           |
           v
-AgentJob prepare -- durable accept request --> AgentSession
-       ^                                        |
-       +-------- durable accept result ---------+
+pure resolve
+          |
+          v
+LaunchAdmissionClaim (pending snapshot)
+          |
+          +--> Workspace / attachment --> AgentJob --> AgentSession --> dispatch
+          |
+          +--> committed | rejected | uncertain
 ```
 
-- The caller supplies a stable `launchRequestId`. After authentication and authorization, Server
-  normalizes canonical caller intent and derives its fingerprint; a caller-supplied fingerprint is
-  never trusted. The intent contains task, allowed context and Workspace references, attachment
-  references, and the explicit presence and normalized value of each per-launch override. It never
-  contains mutable Agent defaults, resolved values or sources, catalog version, or native mapping.
-- The durable idempotency map is read after that normalization and before Agent defaults or catalog
-  resolution. A matching map returns the original Job and its persisted execution snapshot even if
-  the Agent defaults or catalog have since changed. A new key alone reaches resolution and first
-  durable acceptance.
-- The first accepted `(launchRequestId, fingerprint)` maps once to a Server-owned
-  `launchOperationId` and reserved Job, Session, Input, and Turn identities.
-- AgentSession either materializes its Session, first Input, first Turn, dispatch fact, and durable
-  accept result together, or records a durable rejection tombstone without a live mapping.
-- AgentJob publishes live identities only after it receives the durable accept result. Reservation
-  identities are never presented as accepted resources.
-- Same-key replay with the same fingerprint returns the original outcome. Reusing the key for a
-  changed request returns `idempotency_key_reused` and creates no second work item.
+- The caller supplies a stable `launchRequestId`. Server first authenticates and
+  authorizes it, validates the request structure, then normalizes canonical
+  caller intent and derives its fingerprint; a caller-supplied fingerprint is
+  never trusted. The intent contains task, allowed context and Workspace
+  references, attachment identities or non-path attachment descriptors, and the
+  explicit presence and normalized value of each allowed per-launch override.
+  It never contains mutable Agent defaults, resolved values or sources, catalog
+  version, native mapping, or a local path.
+- Server performs a read-only lookup for that `(caller, project, agent,
+  launchRequestId)` before resolving a candidate. This lookup is not admission:
+  every unmatched real launch follows authentication, validation, and pure
+  resolution before it creates a durable claim. A matching fingerprint returns
+  the original claim outcome without consulting current Agent defaults or the
+  current catalog: `committed` returns its original IDs and snapshot, `rejected`
+  returns its tombstone, `pending` waits for and rereads the winner, and
+  `uncertain` reconciles only that operation. A different fingerprint returns
+  `idempotency_key_reused` (409) and creates no work.
+- With no existing claim, Server runs `ResolveAgentLaunch`, then atomically
+  creates the admission claim/fence. A successful resolution creates `pending`
+  with its immutable snapshot. A definite validation or resolution rejection may
+  be recorded as a `rejected` tombstone after the same pure phase, with no Job,
+  Session, Workspace, attachment, Runner, or dispatch effect. Concurrent
+  callers that both resolved race only for this claim; the loser rereads the
+  winner and never materializes a second set of effects.
+- Only the owner of a `pending` claim may, in this order, materialize the
+  Workspace plan, upload attachment bytes, create the Job, Session, Input, and
+  Turn, and request dispatch. Every materialized record and dispatch request is
+  tagged with the claim's operation identity. `committed` is published only with
+  the real accepted IDs and the snapshot already captured by the claim.
+- AgentJob and AgentSession are separate write authorities, so this is not a
+  cross-aggregate transaction. A failure that is definitely before or after a
+  materialized effect is deterministically compensated when that ownership makes
+  it safe and ends in `rejected`; an indeterminate result remains `uncertain`
+  for reconciliation under the same operation identity. It never causes a new
+  claim or a second materialization.
+- No Workspace, attachment, Job, Session, Input, Turn, dispatch, Runner, or
+  provider effect occurs before the durable claim. Same-key replay with the
+  same fingerprint returns the original outcome even after a default or catalog
+  change.
 
-The #434 CLI adapter follows this same caller-intent rule for its Model and
-ReasoningEffort flags. The #387 direct API follows the same replay invariant, but
-its current public launch body has no execution overrides. A direct API override
-can enter this fingerprint only after [`agent-api.md`](agent-api.md) explicitly
-adds that field to the public schema; an adapter must not infer or silently accept
-one.
+The #434 CLI adapter follows this same caller-intent and claim rule for its
+Model and ReasoningEffort flags. The #387 direct API follows the same replay and
+claim invariant, but its current public launch body has no execution overrides,
+attachments, or context references. A direct API override can enter this
+fingerprint only after [`agent-api.md`](agent-api.md) explicitly adds that field
+to the public schema; an adapter must not infer or silently accept one.
 
 The launch projection and null rules are authoritative in
 [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
@@ -647,7 +703,7 @@ filesystem Session, or wall clock:
 
 | Target | Independent value | Dependency | Gap |
 |---|---|---|---|
-| Saved execution configuration | A saved Agent has a clear, statically validated ReasoningEffort default that remains independent from Variant. | None. | [^433] |
+| Saved execution configuration | A saved Agent persists one statically validated Runtime, Model, ReasoningEffort, and Variant tuple with catalog defaults, while Variant remains independent from effort. | None. | [^433] |
 | One-job execution tuning | A launch can override Model and ReasoningEffort for one Job, preview the resolved result, and read back its immutable versioned execution snapshot. | Saved execution configuration. | [^434] |
 
 [^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract.
@@ -660,6 +716,9 @@ Follow-up paths, and current Runtime Binding are implemented. The remaining gap 
 not every ingress, aggregate boundary, and client consumes the same canonical operation and read
 model yet.
 
+- The saved Runtime, Model, ReasoningEffort, and Variant contract, its static catalog readiness,
+  and its effective-tuple readback remain spec-first #433 work. The one-Job override, dry-run,
+  and immutable readback that depend on it remain spec-first #434 work.
 - Launch acceptance does not yet converge through one durable path from caller identity to every
   accepted or rejected Job/Session/Input/Turn result.
 - Canonical internal projections are not yet the only state consumed by trusted clients. The

@@ -321,6 +321,7 @@ When these facts cannot be confirmed, reject rather than fall back:
 | Target is absent from the snapshot | Terminal pre-plan result `subagent_not_allowed`; create no child. |
 | Target is archived | Terminal pre-plan result `target_agent_archived`; create no child. |
 | Target AgentReadiness is `NeedsSetup` | Terminal pre-plan result `agent_needs_setup`; create no child. |
+| Target AgentReadiness is `Unknown`, or its required catalog cannot be read | Terminal pre-plan result `execution_catalog_unavailable`; create no child, Workspace, attachment, Job, Session, Input, Turn, or Runner effect. |
 | Parent belongs to cascade-stop membership without a terminal outcome | `parent_tree_stop_in_progress`; keep the request fence `validation-pending`, create no child, and revalidate on same-key retry. |
 
 An offline Runner does not authorize switching Runner while the binding remains current. The
@@ -349,17 +350,21 @@ This fence is the canonical request authority for
 creates nor reserves Job, Session, Input, Turn, edge, or reservation identity.
 `validation-pending` is a retryable observation before child acceptance: replay with the same
 fingerprint revalidates current facts and advances the same request to an admitted plan when
-conditions recover. `parent_runner_binding_unavailable`, `AgentReadiness.Unknown`, other ordinary
-launch readiness that is temporarily unconfirmed, and `parent_tree_stop_in_progress` may only
-retain this outcome; they cannot freeze the key as a rejection.
+conditions recover. `parent_runner_binding_unavailable` and
+`parent_tree_stop_in_progress` may retain this outcome; they cannot freeze the
+key as a rejection. Target `AgentReadiness.Unknown` and an unavailable target
+catalog are instead terminal `execution_catalog_unavailable` pre-plan
+rejections, so a new delegation never waits or creates child execution effects
+while its execution semantics are unknown.
 
 Only definite canonical or authorization invalidity advances it to `preplan-rejected`: the caller
 does not belong to the Project or is not a delegating Mohist Agent Session; the parent has no
 authoritative workDir; the target ref cannot resolve to an Agent ID in the parent's immutable
 snapshot; the target is absent from that snapshot or archived; or target AgentReadiness is
-`NeedsSetup`, for example because Instructions, Model, or Runtime is invalid or missing. Same-
-fingerprint replay always returns this terminal pre-plan result; a different fingerprint always
-returns an HTTP 409 idempotency conflict.
+`NeedsSetup`, for example because Instructions, Model, or Runtime is invalid or missing; and
+target `AgentReadiness.Unknown` or an unavailable target catalog. Same-fingerprint replay always
+returns this terminal pre-plan result; a different fingerprint always returns an HTTP 409
+idempotency conflict.
 
 Only after request-fence validation succeeds does the coordinator advance it to a launch plan
 with child identities. The plan additionally persists:
@@ -675,10 +680,11 @@ stores:
 - a controlled reset-versus-acquire race for parent `BindingEpoch`/`BindingUseReceipt`: when reset
   linearizes first, reject/abort the plan; when acquire linearizes first, reset cannot replace the
   binding. Attach receipt must match the complete tuple field by field before publish or release;
-- terminal pre-plan workDir/authorization/archive/NeedsSetup rejection (`agent_needs_setup`)
-  persists only the request fence, supports stable same-key replay and mismatched-payload conflict,
-  while `AgentReadiness.Unknown` and every temporary pre-plan observation revalidate under the same
-  key without a child artifact. Post-plan reservation/final-check rejection produces cancelled Job,
+- terminal pre-plan workDir/authorization/archive/NeedsSetup/Unknown-catalog rejection
+  (`agent_needs_setup` or `execution_catalog_unavailable`) persists only the request fence,
+  supports stable same-key replay and mismatched-payload conflict, while actual temporary parent
+  binding observations revalidate under the same key without a child artifact. Post-plan
+  reservation/final-check rejection produces cancelled Job,
   cancelled initial Turn, idle Session, no visible link/input/callback, and replay must-not-submit;
 - activation loss/retry at every durable coordinator fence produces exactly one Job, Session,
   Input, Turn, edge, and dispatch, or the same durable rejection;

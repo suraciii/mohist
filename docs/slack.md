@@ -206,9 +206,11 @@ Before inviting other users, run a real test from the Web UI or with
 reach Connected while the Agent Needs setup, but new Slack delegations are then
 explicitly rejected. A channel shows only a safe summary, while the Owner and
 Web UI or CLI operators see specific configuration gaps. When Readiness is
-Unknown, the delegation is accepted and waits for Runner validation. A
+Unknown or Mohist cannot read the supported execution choices, a new root
+delegation and a thread or DM follow-up are rejected before Mohist creates work
+or sends it to a Runner. Existing Session history remains readable. A
 temporarily offline Runner or lack of capacity does not block Connection
-creation; work is explicitly queued.
+creation; work with a known valid configuration is explicitly queued.
 
 Slack is not a second source of Agent configuration. An Agent that fails when
 used directly cannot become available through a hidden Slack prompt. The
@@ -781,7 +783,7 @@ confirmation and cannot be hidden behind one ambiguous delete operation:
 | Agent concurrency limit edited | The next launch or follow-up uses the latest limit; running input is not stopped |
 | Agent archived | Rejects new root delegations; existing Sessions remain readable and continuable |
 | Agent becomes Needs setup | Connection health stays independent; a new root delegation shows only a safe summary in the channel, while the Owner and Web or CLI operators can inspect configuration gaps; existing Sessions continue with their snapshots |
-| Agent Readiness is Unknown | Accepts a new root delegation and shows "waiting for Runner validation"; an AgentJob or Turn returns an explicit failure if execution is later known to be impossible |
+| Agent Readiness is Unknown | Rejects a new root delegation and any new follow-up before creating work; the channel receives only a safe configuration-unavailable summary, while existing Session history remains readable |
 | Connection Disabled | Stops Slack input and replies immediately; accepted execution continues. Messages received while disabled are acknowledged and discarded instead of becoming later tasks. Enable fills only missing current or final results and does not replay stale progress |
 | Binding removed | Clears runtime records and the Connection binding, preserves Agent App management facts, and does not uninstall the Slack App |
 | Slack App permanently deleted | Requires second confirmation, no active binding, and audit; an unknown delete result requires reconciliation or human arbitration |

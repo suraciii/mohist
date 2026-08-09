@@ -374,7 +374,13 @@ execution readback then follow in #434.[^434]
   omitted, it prints a generated key before the request. After a lost response,
   the caller must retry with that key; matching retry returns the original Job
   record and the original configuration used to start it, even after later
-  Agent edits or supported-choice changes.
+  Agent edits or supported-choice changes. `--attachment <path>` may be
+  repeated for local files. Mohist checks each supplied file before starting:
+  missing, unreadable, ambiguous, or over-limit files are rejected and create
+  no work. During a preview, each valid local file appears only as an upload
+  that would happen; no file is uploaded and no attachment ID is invented. A
+  real launch transfers file content only after the launch has been admitted.
+  The local path never becomes part of a shared or public record.
 - `mo agent create/edit` target behavior configures an Agent with typed `--runtime`, `--model`,
   `--reasoning-effort`, `--variant`, `--skills`, and `--max-concurrent-runs` flags. `--avatar-file`
   supplies the avatar. Mutually exclusive `--instructions` or
@@ -387,14 +393,27 @@ execution readback then follow in #434.[^434]
   `edit` clears fields with `--clear-runtime`, `--clear-model`,
   `--clear-reasoning-effort`, `--clear-variant`, `--clear-avatar`, `--clear-skills`, and
   `--clear-max-concurrent-runs`. Set and clear options are mutually exclusive.
-  Creating without Reasoning effort saves the selected configuration's supported
-  default; an edit without it retains the saved value; clearing it saves the
-  then-current supported default. Empty and `null` values are invalid rather
-  than another form of clear. Changing Runtime or Model rechecks the saved
-  Reasoning effort and Variant, with no probe or fallback.
+  One edit may use only one of the four execution clear options.
+  On create, every omitted execution setting starts from the current supported
+  default combination and the resulting Runtime, Model, Reasoning effort, and
+  Variant are saved together. On edit, an omitted execution setting keeps its
+  saved value. Clearing Runtime restores the complete current default
+  combination; clearing Model also resets the Model's Reasoning effort and
+  Variant; clearing Reasoning effort or Variant selects that Model's current
+  default for the cleared setting. A Variant is empty only when the selected
+  Model has no Variant setting; it is not another spelling of clear. Empty and
+  `null` values are invalid rather than another form of clear. Every clear
+  recalculates setup status and supported settings. If that recalculation fails,
+  the edit is rejected and the saved Agent is unchanged. Changing Runtime or
+  Model rechecks the retained Reasoning effort and Variant, with no probe or
+  fallback.
   `mo agent view` shows unified Readiness, configuration gaps, and current
   execution availability. The concurrency limit constrains launch and
   follow-up immediately but does not stop an execution that is already running.
+  When Mohist cannot determine the supported execution choices, it rejects a
+  new launch or Session follow-up before it creates new work. Existing Session
+  history remains available to read; retry only after the configuration choices
+  can be read again.
 - `mo agent install <name>` installs a built-in Agent preset, such as
   `supervisor`, which contains a supervising Agent and routing rules for
   Approval and failure. The operation is idempotent and does not overwrite
@@ -427,6 +446,26 @@ execution readback then follow in #434.[^434]
   returns a new Input ID. It also returns a Turn ID when the Input has joined
   the current Turn or a new Turn; otherwise, read the Session later to find the
   assignment.
+
+### Agent execution output
+
+The saved execution and launch-readback behavior in this subsection is target
+behavior: saved configuration is the #433 gap, and one-job override, preview,
+and readback are the dependent #434 gap.[^433] [^434]
+
+`--json` is the stable interface for automation:
+
+| Command | JSON result | Human result |
+|---|---|---|
+| Agent create, edit, list, and view | Saved Runtime, Model, Reasoning effort, Variant, setup status, and actionable setup gaps. | The saved settings and the next setup action. |
+| Model choices | Supported Models, Reasoning efforts, Variants, and the current defaults. | A compact selection table. |
+| Agent Job list, Job view, and real launch | Job state, accepted IDs, result, next action, and the immutable configuration actually used for that Job, including whether an allowed launch setting overrode the saved Agent. | Job state, useful IDs, effective settings, and links. |
+| Session list and view | The associated Job's concise effective-settings summary, or an explicit empty value when the Session did not begin through an Agent Job. | The Session state and, when relevant, its associated Job and effective settings. |
+| Launch preview | The resolved configuration, planned Workspace and attachment work, and explicit empty Job, Session, Input, Turn, and operation identities. | The settings and work that would be created or uploaded, without temporary IDs. |
+
+Human output is intentionally optimized for scanning and may change its labels,
+ordering, or wording. Scripts and agents must select JSON fields and must never
+parse a table or success sentence.
 
 Source is only a filter and convenient lookup condition. It does not create
 duplicate `mo issue session` and `mo agent session` capabilities.
@@ -730,8 +769,9 @@ generated by the current binary instead of a stale copy.
 - Root help currently omits `workspace`, `github`, and `slack` from its grouped
   overview even though those command groups are available. It must expose the
   same navigation map as this reference.
-- #433 independently delivers a saved Agent Reasoning effort default that is
-  statically validated and remains separate from Variant.[^433]
+- #433 independently delivers a saved, statically validated Agent Runtime,
+  Model, Reasoning effort, and Variant combination, with Variant separate from
+  Reasoning effort.[^433]
 - #434 then delivers one-job Model and Reasoning effort override, dry-run
   resolution, and immutable execution-record readback.[^434]
 
@@ -746,8 +786,9 @@ generated by the current binary instead of a stale copy.
   Dependency Issue reads include Epic membership and prerequisites.
 - The existing Agent command surface uses typed Runtime, model, variant, avatar,
   Skill, and concurrency flags, and the old `--agent-config` passthrough is
-  retired. The saved Reasoning effort, static validation, preview, and immutable
-  readback semantics remain the #433/#434 target gaps above.
+  retired. The saved Runtime, Model, Reasoning effort, and Variant combination,
+  static validation, preview, and immutable readback semantics remain the
+  #433/#434 target gaps above.
 - The Epic field catalog reflects real fields and includes `progress`, with
   `nextIssueNumber` and `nextIssueReason`.
 - Input channels are unified. `workflow create/edit --file` replaces

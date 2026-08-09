@@ -168,12 +168,13 @@ The canonical mapping is stable. Its public status, timestamps, output, error,
 and event sequence can advance as the Server learns more facts, but retrying a
 matching request never mints different IDs or another execution.
 
-Launch resolution is deliberately downstream of this lookup. On first
-acceptance, Server resolves the saved Agent defaults and static capability catalog
-once, then persists the immutable Job execution snapshot. A matching retry
-returns that original Job even when an Agent default or catalog changes later.
-The public response remains this document's smaller allowlist; it does not expose
-the private catalog version or native mapping.
+Launch resolution is deliberately downstream of this lookup. For an unmatched
+request, Server resolves the saved Agent defaults and static capability catalog
+once, then records that immutable execution snapshot in its internal durable
+admission claim before it materializes the Job or Session. A matching retry
+returns that original Job and snapshot even when an Agent default or catalog
+changes later. The public response remains this document's smaller allowlist; it
+does not expose the private catalog version or native mapping.
 
 The #434 CLI adapter and this #387 direct API share this caller-intent and replay
 invariant. The current direct API body remains text-only. A future direct API

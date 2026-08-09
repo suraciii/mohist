@@ -102,11 +102,17 @@ Agent details contain four continuous areas:
    Reasoning effort, Variant, Skills, concurrency limit, and active or archived
    state. Supported choices and Readiness drive the controls. A gap identifies
    the setting to repair and its next action. Needs setup disables launch.
-   Unknown also blocks a new launch and reports "Waiting for configuration
-   validation." Ready without Runner capacity queues work instead of showing a
-   configuration error. Creating without Reasoning effort saves the supported
-   default; editing without it retains the saved value; its explicit clear
-   control saves the current supported default.
+   Unknown also rejects a new launch before it creates work and explains that
+   the supported choices must become available first. Ready without Runner
+   capacity queues work instead of showing a configuration error. On create,
+   omitted Runtime, Model, Reasoning effort, and Variant use the supported
+   default combination and are saved together. On edit, an omitted setting is
+   retained. A clear control restores the appropriate current default: clearing
+   Runtime restores the complete default combination, clearing Model also resets
+   its effort and Variant, and clearing effort or Variant resets that one
+   setting. A Variant shown as unavailable means the Model has no Variant
+   setting; it is not an empty clear value. A failed recalculation leaves the
+   saved definition unchanged.
 2. **Start session:** Submit a real task and optional Issue, Epic, or Repository
    context. This creates AgentJob, AgentSession, the first SessionInput, and the
    first AgentTurn. The Web page uses the saved Agent configuration and does not
@@ -131,9 +137,10 @@ page states this timing before save.
 
 ### Implementation Gaps
 
-The existing Agent list and detail pages do not yet expose the saved Reasoning
-effort default, supported-choice readiness gaps, or immutable launch
-configuration readback described above. They remain #433/#434 target work.
+The existing Agent list and detail pages do not yet expose the saved Runtime,
+Model, Reasoning effort, and Variant combination, supported-choice readiness
+gaps, or immutable launch configuration readback described above. They remain
+#433/#434 target work.
 Existing Slack Connections have guided setup, diagnostics, access policy
 management, identity facts, and uncertain-delivery recovery.
 
@@ -196,7 +203,9 @@ The page also supports:
 
 - Model, usage, compaction records, and current Activity.
 - Follow-up that joins the current execution while active or starts a new
-  execution while idle.
+  execution while idle. When execution choices are Unknown, historical content
+  remains readable but Follow-up is rejected before it creates a new input or
+  starts dispatch.
 - Cancellation of a queued Turn or requested stop of an active Turn. An
   uncertain stop remains explicitly Unknown.
 - Compact through the current backend's native capability.

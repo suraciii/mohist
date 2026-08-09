@@ -166,16 +166,32 @@ AgentExecutionConfigurationRead {
   model: string | null
   reasoningEffort: ReasoningEffort | null
   variant: string | null
+  catalogVersion: string | null
+  nativeMapping: NativeExecutionMappingRead | null
   readiness: ExecutionReadinessRead
+}
+
+RuntimeCapabilityCatalogRead {
+  catalogVersion
+  defaultExecution {
+    runtime
+    model
+    reasoningEffort: ReasoningEffort
+    variant: string | null
+  }
+  entries: [RuntimeCapabilityCatalogEntryRead]
 }
 
 RuntimeCapabilityCatalogEntryRead {
   catalogVersion
   runtime
   model
+  isDefaultModel: boolean
   supportedReasoningEfforts: [ReasoningEffort]
   defaultReasoningEffort: ReasoningEffort
+  hasVariantDimension: boolean
   supportedVariants: [string]
+  defaultVariant: string | null
   nativeMapping: NativeExecutionMappingRead
 }
 
@@ -261,6 +277,8 @@ AttachmentMaterializationPlanRead {
   disposition = existing | wouldUpload
   attachmentId: string | null
   name
+  byteLength
+  contentFingerprint: string | null
 }
 
 LaunchMaterializationPlanRead {
@@ -283,19 +301,66 @@ LaunchResolutionProblemRead {
        | attachment_not_found
        | attachment_not_readable
        | attachment_ambiguous
+       | attachment_limit_exceeded
        | invalid_launch_input
   message
-  action = correct_workspace | correct_attachment | correct_launch_input
+  action = correct_workspace
+         | correct_attachment
+         | reduce_attachment
+         | correct_launch_input
+}
+
+LaunchAdmissionRejectionRead {
+  code = invalid_execution_configuration
+       | unsupported_execution_configuration
+       | incompatible_execution_configuration
+       | execution_catalog_unavailable
+       | workspace_not_resolvable
+       | attachment_not_found
+       | attachment_not_readable
+       | attachment_ambiguous
+       | attachment_limit_exceeded
+       | invalid_launch_input
+  message
+  action = correct_execution_configuration
+         | select_supported_execution_configuration
+         | select_compatible_execution_configuration
+         | wait_for_catalog
+         | correct_workspace
+         | correct_attachment
+         | reduce_attachment
+         | correct_launch_input
+}
+
+LaunchAdmissionClaim {
+  callerId
+  projectId
+  agentId
+  launchRequestId
+  launchRequestFingerprint
+  launchOperationId
+  state = pending | committed | rejected | uncertain
+  execution: ResolvedExecutionRead | null
+  jobId: string | null
+  sessionId: string | null
+  inputId: string | null
+  turnId: string | null
+  rejection: LaunchAdmissionRejectionRead | null
+  reconciliationAction: string | null
 }
 ```
 
 `AgentExecutionConfigurationRead` is the `execution` member of every Agent
 read and list item. Its values are saved Agent defaults, not a pending launch or
 a Runtime Session selection. `runtime`, `model`, and `reasoningEffort` are null
-only while the Agent definition is incomplete; `variant=null` also means that
-the selected Runtime has no applicable Variant. A ready configuration has no
-gaps. `needs-setup` has one or more of the first three gap codes below;
-`unknown` has exactly `execution_catalog_unavailable`.
+only while the Agent definition is incomplete. `variant=null` means only that
+the selected Model has no Variant dimension; it never represents a request to
+clear Variant. `catalogVersion` and `nativeMapping` are non-null exactly for a
+saved tuple and are null only while the configuration is incomplete. They retain
+the last accepted saved mapping even when current Readiness is unknown; Unknown
+prevents new dispatch but does not erase saved configuration facts. A ready
+configuration has no gaps. `needs-setup` has one or more of the first three gap
+codes below; `unknown` has exactly `execution_catalog_unavailable`.
 
 | Gap code | Stable message | Stable action |
 |---|---|---|
@@ -304,19 +369,45 @@ gaps. `needs-setup` has one or more of the first three gap codes below;
 | `incompatible_execution_configuration` | `The selected Model, Reasoning effort, and Variant cannot be used together.` | `select_compatible_execution` |
 | `execution_catalog_unavailable` | `Mohist cannot load the required execution catalog.` | `wait_for_catalog` |
 
-`RuntimeCapabilityCatalogEntryRead` is the only versioned capability metadata
-shape. Its two reasoning-effort fields are non-empty, and
-`defaultReasoningEffort` is one of `supportedReasoningEfforts`. Server owns the
-accepted static catalog registry and its versioning. The catalog contains no
-provider credentials, health observation, or live model probe result.
+`RuntimeCapabilityCatalogRead` is the only versioned capability metadata
+shape. `defaultExecution` is one complete valid tuple and is used when Agent
+creation omits all four configuration fields. Each Runtime has exactly one
+entry with `isDefaultModel=true`, used when a retained or explicitly supplied
+Runtime needs its Model reset. Its reasoning-effort set is non-empty and its
+`defaultReasoningEffort` belongs to that set. For an entry with
+`hasVariantDimension=false`, `supportedVariants` is empty and
+`defaultVariant=null`; only then may the effective Variant be null. For an
+entry with `hasVariantDimension=true`, `supportedVariants` is non-empty and
+`defaultVariant` is a non-empty member of it. Server owns the accepted static
+catalog registry and its versioning. The catalog contains no provider
+credentials, health observation, or live model probe result.
+
+Agent create and edit use this dependency order: Runtime, Model, then the
+independent ReasoningEffort and Variant choices for that Model. On create,
+every omitted field starts from `defaultExecution`; supplied values replace
+their field and the resulting complete tuple is statically validated and
+persisted. On edit, every omitted field retains its saved value. An explicit
+clear is represented only by that field's dedicated clear flag; exactly one
+execution clear flag may appear in an edit, it is mutually exclusive with a
+value for that field, and it resets that field and its dependent tuple to the
+current catalog default: clearing Runtime selects `defaultExecution`; clearing
+Model selects that Runtime's default Model, effort, and Variant; clearing
+ReasoningEffort selects that Model's default effort; clearing Variant selects
+that Model's `defaultVariant`. A supplied Runtime or Model does not silently
+replace retained dependent values: an incompatible resulting tuple is rejected.
+Empty strings, JSON `null`, unknown properties, and invalid enum values are not
+clear operations and are rejected. Every successful clear recomputes
+Readiness, `catalogVersion`, and `nativeMapping`; any failed recalculation
+rejects atomically and preserves the prior saved configuration.
 
 `ResolvedExecutionRead` is the immutable execution snapshot resolved before the
-Job's first durable write. It is present for every `AgentJobLaunchRead`.
-`catalogVersion` and `nativeMapping` are copied from one accepted static catalog
-entry at that write. Neither is recomputed from a later catalog, and neither
-contains provider credentials or availability observations. `source` is per
-field, never inferred from nullability, and only uses `agent-default` or
-`launch-override`. A `SessionExecutionSummaryRead` is a read-only association
+durable admission claim and therefore before the Job's first durable write. It
+is present for every `AgentJobLaunchRead`. `catalogVersion` and `nativeMapping`
+are copied from one accepted static catalog entry into that claim and then the
+Job. Neither is recomputed from a later catalog, and neither contains provider
+credentials or availability observations. `source` is per field, never inferred
+from nullability, and only uses `agent-default` or `launch-override`. A
+`SessionExecutionSummaryRead` is a read-only association
 for an Agent-launched Session: all configuration fields are non-null except an
 inapplicable Variant, and `jobId` is non-null. It deliberately omits source,
 catalog version, and native mapping; it never owns, duplicates, or updates the
@@ -330,10 +421,27 @@ Workspace or attachment is read-only resolved and carries its real identity. A
 derivable missing Workspace has `disposition=wouldCreate`, `workspace=null`,
 and a non-empty `derivedName`; an existing Workspace has a non-null `workspace`
 and `derivedName=null`. A local attachment that would be uploaded has
-`disposition=wouldUpload` and `attachmentId=null`; an existing attachment has a
-non-null `attachmentId`. The plan does not mint placeholder IDs. Missing,
-unreadable, ambiguous, or otherwise invalid Workspace or attachment input fails
-with `LaunchResolutionProblemRead`, rather than returning a partial plan.
+`disposition=wouldUpload`, `attachmentId=null`, a non-empty `name`, a positive
+`byteLength`, and a non-empty `contentFingerprint`; an existing attachment has
+a non-null `attachmentId` and `contentFingerprint=null` unless the existing
+resource owns a comparable fingerprint. The plan never contains the local path
+and does not mint placeholder IDs. Missing, unreadable, ambiguous, over-limit,
+or otherwise invalid Workspace or attachment input fails with
+`LaunchResolutionProblemRead`, rather than returning a partial plan.
+
+`LaunchAdmissionClaim` is Server-internal durable admission state, not a public
+or CLI resource. Its idempotency scope is `(callerId, projectId, agentId,
+launchRequestId)`. `pending` has exactly one operation identity, a non-null
+resolved snapshot, and no accepted resource IDs. `committed` has that snapshot,
+all four accepted IDs, and no rejection. `rejected` is a definite rejection or
+tombstone and has no accepted IDs; its snapshot is null when no execution was
+resolved and non-null when a later definite failure must preserve the resolved
+semantics. `uncertain` retains the resolved snapshot and marks an outcome that
+must be reconciled using the same operation identity; it does not authorize a
+second materialization.
+`reconciliationAction` is non-null only for `uncertain`. Claim records are the
+sole owner of materialized Workspace, attachment, Job, Session, Input, Turn,
+and dispatch effects for their operation.
 
 ```text literal
 

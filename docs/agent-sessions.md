@@ -120,13 +120,14 @@ checks those saved choices against Mohist's known supported choices. Runtime
 credential setup is a separate connection concern and does not rewrite the
 Agent's saved execution configuration.
 
-A delegation can include context references such as an Issue, Epic, or
-Repository, but context is not Agent configuration. An ordinary client can
-provide only task text and context. CLI launch may choose Model and Reasoning
-effort for that one Job; it cannot override Runtime, Variant, Skills, or the
-concurrency limit. The Agent definition is fixed when a launch or Workflow Agent
-task attempt starts, as are the Skills loaded for that execution. An Agent tested
-in the Web UI is therefore still the same Agent after it connects to Slack.
+A trusted Web, CLI, or Slack delegation can include context references such as
+an Issue, Epic, or Repository, but context is not Agent configuration. The
+separate External Agent API accepts text only. CLI launch may choose Model and
+Reasoning effort for that one Job; it cannot override Runtime, Variant, Skills,
+or the concurrency limit. The Agent definition is fixed when a launch or
+Workflow Agent task attempt starts, as are the Skills loaded for that execution.
+An Agent tested in the Web UI is therefore still the same Agent after it
+connects to Slack.
 
 Name, avatar, and description form the presentation identity. Edits apply
 immediately to discovery and presentation in Mohist. Agent Connections
@@ -154,10 +155,15 @@ then follow in #434.[^434]
 Agent create and edit check the saved Runtime, Model, Reasoning effort, and
 Variant against Mohist's known supported choices. This is not a live check of
 provider credentials or model availability. A missing, unsupported, or
-incompatible choice explains what needs to be selected or repaired. Creating an
-Agent without a Reasoning effort, or clearing it later, saves the supported
-default effort. An edit that omits the field keeps the saved value. Empty values
-are not a way to clear configuration; edit uses the explicit clear control.
+incompatible choice explains what needs to be selected or repaired. On create,
+an omitted execution setting comes from the current supported default
+combination and the complete result is saved. On edit, an omitted setting keeps
+its saved value. A clear restores the current default for that setting and its
+dependencies: Runtime restores the complete default combination, Model also
+restores its effort and Variant, and clearing effort or Variant restores just
+that setting. Variant is empty only when the chosen Model has no Variant setting.
+Empty values are not a way to clear configuration; edit uses one explicit clear
+control, and a failed recalculation leaves the saved configuration unchanged.
 
 `mo agent launch` can add `--model` and `--reasoning-effort` for one Job. It does
 not modify the Agent. Runtime and Variant always come from the saved Agent
@@ -166,9 +172,10 @@ not a Runtime or Session default. `mo agent launch --dry-run` shows the same
 configuration together with a read-only plan: existing Workspace and attachment
 references are inspected, and a missing Workspace or local attachment that can
 be prepared is marked as something Mohist would create or upload. The preview
-does not create a Job, Workspace, attachment, conversation, or work. Invalid or
-ambiguous input stops with an explanation and repair action. Mohist has no
-separate `mo agent resolve` command.
+does not create a Job, Workspace, attachment, conversation, claim, or work; it
+does not invent an attachment ID or expose a local path. Invalid, unreadable,
+ambiguous, or over-limit input stops with an explanation and repair action.
+Mohist has no separate `mo agent resolve` command.
 
 When Mohist accepts a launch, the AgentJob keeps an immutable execution record:
 Runtime, Model, Reasoning effort, Variant, the source of each selection, the
@@ -191,7 +198,7 @@ Agent execution configuration is complete:
 |---|---|---|
 | Ready | The current definition uses supported choices | Test or launch the Agent |
 | Needs setup | A setting is missing, unsupported, or incompatible | Launch is blocked; inspect the named setting and repair action |
-| Unknown | Mohist cannot currently check the required choices | Wait for validation; do not claim that the Agent is available |
+| Unknown | Mohist cannot currently check the required choices | New launch and Follow-up are rejected before work is created; wait until the choices can be checked |
 
 A temporarily offline Runner or lack of capacity is Availability, not a reason
 to change a Ready Agent to Needs setup. Work can be accepted and queued. The
@@ -211,8 +218,9 @@ and does not mean that the Runner is offline again.
    credential requirements that Runtime supports. Then select Skills and a
    concurrency limit. The page must show Readiness and every gap.
 3. When Readiness is Ready, use **Start session** to submit a real task. When it
-   is Unknown, wait for configuration validation before starting work. Open the
-   AgentSession after successful creation.
+   is Unknown, Mohist rejects Start session and Follow-up before creating work;
+   wait until configuration choices can be read. Open the AgentSession after
+   successful creation.
 4. In the Session, inspect replies and execution facts. Use a follow-up to
    verify a continuing conversation.
 5. After the Agent can complete its goal independently, configure event routing
@@ -236,8 +244,9 @@ record. Read the first launch result and composite observation from the returned
 observation URL. Use `mo session followup` to submit a new SessionInput in a
 continuing conversation, and use `mo session transcript` for the complete record.
 Continue observing `pending`, `queued`, and `executing` states. Read the result or
-transcript in a terminal state. For Unknown, read or retry with the original key.
-The CLI and Web UI invoke the same product capabilities.
+transcript in a terminal state. For an unknown operation result, read or retry
+with the original key; an Unknown configuration instead requires waiting for its
+supported choices. The CLI and Web UI invoke the same product capabilities.
 
 ## Launch Entry Points
 
@@ -465,15 +474,17 @@ selects OpenCode or Pi through its configuration, and a Workflow task can
 resolve a named Agent definition at dispatch. The existing Web UI and CLI can
 create, edit, launch, read, and continue an AgentSession. The execution-tuning
 rules in this document are target behavior, not a claim that those current
-surfaces already expose saved Reasoning effort, preview, or execution readback.
+surfaces already expose the saved Runtime, Model, Reasoning effort, and Variant
+combination, preview, or execution readback.
 See [Agent Event Routing](event-routing.md) for Mohist Agent event responses.
 
 ### Planned execution tuning
 
-A saved Agent will keep a statically validated Reasoning effort default that is
-independent from Variant.[^433] A launch will then be able to choose Model and
-Reasoning effort for one Job, preview the resulting configuration, and read back
-the recorded configuration used for that Job.[^434]
+A saved Agent will keep a statically validated Runtime, Model, Reasoning effort,
+and Variant combination, with Variant independent from Reasoning effort.[^433]
+A launch will then be able to choose Model and Reasoning effort for one Job,
+preview the resulting configuration, and read back the recorded configuration
+used for that Job.[^434]
 
 [^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract. It has no dependency on #434.
 [^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract. It depends on #433.
@@ -511,10 +522,10 @@ generate a hidden key. Clients cannot reliably retry those operations after a
 lost response. Cascade Stop already requires a caller-visible idempotency key;
 Server derives the tree operation identity from the root Session and that key.
 
-Agent Connection Readiness currently checks only whether the Agent has a Model
-and Runtime while keeping Connection health independent. An Agent that has not
-been probed defaults to Unknown. Complete Runner and Runtime executability
-probing remains future work, so a real launch can still find additional gaps.
+Agent Connection Readiness uses the same saved execution configuration and
+static supported choices while keeping Connection health independent. It never
+probes a provider, Runtime, credentials, or live model list. Unknown means the
+required static choices cannot be read, not that a live probe has not run.
 
 SessionInput and AgentTurn are durable child records, and launch and follow-up
 return their stable IDs. The remaining gap is a uniform canonical read model:

@@ -320,11 +320,25 @@ Project resolution order and interaction. Implementation adds only three constra
 `mo agent launch --dry-run` is the one execution preview. It calls the same
 Server `ResolveAgentLaunch` path as a real launch to validate and resolve the
 saved defaults plus any `--model` and `--reasoning-effort` override. Dry-run
-stops before `CommitAgentLaunch`: it persists nothing and has no Workspace
-materialization, attachment upload, idempotency record, Job, Session, Input,
-Turn, dispatch, Runner work-directory, or provider side effect. There is no
-separate `mo agent resolve` command. `--dry-run` and `--idempotency-key` are
-mutually exclusive.
+stops before `CommitAgentLaunch`: it persists nothing and has no admission
+claim, Workspace materialization, attachment upload, idempotency record, Job,
+Session, Input, Turn, dispatch, Runner work-directory, or provider side effect.
+There is no separate `mo agent resolve` command. `--dry-run` and
+`--idempotency-key` are mutually exclusive.
+
+`mo agent launch <agent> [--attachment <path>]...` accepts a repeatable local
+file input for both real launch and dry-run. The CLI validates each path at its
+local boundary, reads only enough bounded content to produce a non-path name,
+byte length, and content fingerprint for pure resolution, and never serializes
+the path into a Server resource or public API body. Missing paths fail with
+`attachment_not_found`; unreadable files fail with `attachment_not_readable`;
+non-file, duplicate, or ambiguous targets fail with `attachment_ambiguous`; and
+per-file, total-size, or count limits fail with `attachment_limit_exceeded`.
+An empty path is `invalid_launch_input`. A real upload streams content only
+after Server has admitted the operation claim; dry-run reports the planned
+upload without streaming or creating an attachment. The trusted CLI envelope
+therefore contains only the non-path descriptor during resolve and content under
+the accepted operation identity during commit.
 
 For dry-run, `--json execution` selects the complete execution preview rather
 than a partial Job field. On success it renders exactly an
@@ -364,7 +378,9 @@ than a partial Job field. On success it renders exactly an
       {
         "disposition": "wouldUpload",
         "attachmentId": null,
-        "name": "brief.md"
+        "name": "brief.md",
+        "byteLength": 4812,
+        "contentFingerprint": "sha256:..."
       }
     ]
   },
@@ -378,10 +394,11 @@ than a partial Job field. On success it renders exactly an
 
 With an existing Workspace, `materializationPlan.workspace.workspace` is the
 read-only resolved `LaunchWorkspaceRead` and `derivedName` is `null`; with an
-existing attachment its `attachmentId` is non-null. An empty attachment input
-renders `attachments: []`. A missing, unreadable, ambiguous, or invalid input
-returns the structured resolution error and no preview object. The preview
-shape is owned by
+existing attachment its `attachmentId` is non-null and its local content
+fingerprint is absent. No supplied filesystem path appears in this JSON. An
+empty attachment input renders `attachments: []`. A missing, unreadable,
+ambiguous, over-limit, or invalid input returns the structured resolution error
+and no preview object. The preview shape is owned by
 [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections),
 not by a CLI-only DTO.
 
@@ -394,15 +411,23 @@ dry-run, and immutable readback on that base.[^434]
 
 ### Execution read mapping
 
-The CLI projects canonical execution reads without deriving a second view:
+The CLI projects canonical execution reads without deriving a second view. The
+following are stable `--json` members; list commands return an array of the
+same item projection as their corresponding view, and create or edit returns
+the same Agent projection as view:
 
-| Command result | Canonical field | CLI rule |
+| Command result | Stable JSON projection | Human projection boundary |
 |---|---|---|
-| `mo agent list` and `mo agent view` | `AgentExecutionConfigurationRead` as `execution` | Show saved Runtime, Model, ReasoningEffort, Variant, and readiness gaps. Preserve nulls; do not replace them with a Runtime default. |
-| `mo agent model list --runtime <runtime>` | `RuntimeCapabilityCatalogEntryRead` | Return catalog version, model, supported/default reasoning efforts, and supported Variants from Server metadata only. |
-| Real `mo agent launch` response and `mo agent job view` | `AgentJobLaunchRead.execution` | Return the immutable `ResolvedExecutionRead`, including source, catalogVersion, and nativeMapping. Same-key replay returns this stored object. |
-| `mo session view` and Session list detail | `AgentSessionRead.execution` | Return `SessionExecutionSummaryRead` when associated with an AgentJob; otherwise return explicit `null`. Never render Job-only source, catalogVersion, or nativeMapping here. |
-| `mo agent launch --dry-run --json execution` | `AgentLaunchPreviewRead` | Return the complete preview object defined above, including `materializationPlan` and explicit-null identity fields. |
+| `mo agent create`, `edit`, `list`, and `view` | The Agent's `execution: AgentExecutionConfigurationRead` has `runtime`, `model`, `reasoningEffort`, `variant`, `catalogVersion`, `nativeMapping`, and `readiness`; `readiness` has `state` and `gaps[]`, and every gap has `code`, `message`, and `action`. | Show the saved tuple and readiness/gap action. Preserve explicit nulls. Do not make users parse catalog revision or native mapping. |
+| `mo agent model list --runtime <runtime>` | `RuntimeCapabilityCatalogRead`: `catalogVersion`, `defaultExecution`, and `entries[]`; each entry has `runtime`, `model`, `isDefaultModel`, `supportedReasoningEfforts`, `defaultReasoningEffort`, `hasVariantDimension`, `supportedVariants`, `defaultVariant`, and `nativeMapping`. | Show Runtime, Model, supported choices, and the defaults. A null Variant means the Model has no Variant choice, never that a clear request succeeded. |
+| `mo agent job list <agent>` and `mo agent job view <job-id>` | `AgentJobLaunchRead`: `jobId`, `launchRequestId`, `launchRequestFingerprint`, `launchOperationId`, `status`, `outcome`, `reason`, `nextAction`, `sessionId`, `sessionIdReason`, `inputId`, `inputIdReason`, `turnId`, `turnIdReason`, `workspace`, `workspaceReason`, `target`, `targetReason`, `execution`, `revision`, and `observedAt`. `execution` is the complete immutable `ResolvedExecutionRead`, including `catalogVersion`, `nativeMapping`, and per-field `source`. | Show Job state, accepted identities, effective tuple, and next action. Do not make human output a protocol for source, catalog revision, or native mapping. |
+| Real `mo agent launch` | The same `AgentJobLaunchRead` field set as Job view. A matching idempotency retry returns that original object and its stored `execution`. | Print the accepted Job and Session identities, effective tuple, and links; do not require parsing the line for automation. |
+| `mo session list`, `mo session view`, and Session detail | `AgentSessionRead.execution` is `null` for a Session without an AgentJob, otherwise `SessionExecutionSummaryRead` with `jobId`, `runtime`, `model`, `reasoningEffort`, and `variant`. | Show only the associated effective tuple and Job link. Never show or synthesize Job-only `source`, catalog revision, or native mapping. |
+| `mo agent launch --dry-run --json execution` | Complete `AgentLaunchPreviewRead`: `execution`, `materializationPlan`, and present-null `launchOperationId`, `jobId`, `sessionId`, `inputId`, and `turnId`. Each planned attachment has `disposition`, `attachmentId`, `name`, `byteLength`, and `contentFingerprint`. | Show the effective tuple and what Workspace or attachments would be materialized, with no made-up IDs. |
+
+Scripts and Agents use these JSON fields or NDJSON only. Human tables, one-line
+success output, labels, ordering, and wording are deliberately not a parseable
+contract.
 
 ## Output Contract
 
@@ -457,6 +482,10 @@ format, stable error codes, and exit status. Implementation adds:
 
 CLI spec tests verify the public contract without a real Server, process, Git repository, network,
 or wall clock:
+
+The saved execution, one-Job override, preview, and readback checks below are
+target checks for #433 and #434, not a statement that the current CLI implements
+them.
 
 - Every capability in the command tree has one canonical path, and a group has no synonymous
   action.
