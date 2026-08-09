@@ -2,112 +2,128 @@
 status: converged
 ---
 
-# 评论提及（Comment Mention）
+# Comment Mentions
 
-在 issue comment 里 `@<agent 名>` 直接启动一个 Mohist Agent：提及是 Agent 的
-第三条触发路径（手动 launch、路由规则之外的第三种），零配置——正文里的点名
-就是路由决策，不需要路由表。
+Writing `@<agent-name>` in an Issue comment starts that Mohist Agent directly.
+A mention is the third Agent trigger after manual launch and routing rules. It
+requires no configuration because the name in the comment is the routing
+decision.
 
-事件协议与 stamping 见 [`event-protocol.md`](event-protocol.md)；启动管线、
-AgentJob 与 AgentSession 见 [`agent-execution.md`](agent-execution.md) 与
-[`event-routing.md`](event-routing.md)。
+See [`event-protocol.md`](event-protocol.md) for event protocol and stamping.
+See [`agent-execution.md`](agent-execution.md) and
+[`event-routing.md`](event-routing.md) for launch, AgentJob, and AgentSession.
 
 ## Model
 
-提及不引入新的领域资源。涉及的概念都是已有的：
+A mention adds no domain resource. It uses existing concepts:
 
-- **评论**：Issue 的普通 comment，新增一个事件族 `com.mohist.issue.comment-added`，
-  按 `issue.*` 族 stamping（`projectid`、`issue`、`epic` 如有）。payload 携带
-  `commentId`、`author`、`body`。
-- **提及 token**：评论正文中 `@` 后跟 Agent 名，按空白与标点取词，大小写不敏感。
-  只按名字解析，不解析 id。
-- **触发**：一次提及 = 一次普通 Agent 启动（AgentJob + Agent launch 来源的
-  AgentSession），prompt 为评论正文全文（`@` token 原样保留，不作剔除）。
+- **Comment:** An ordinary Issue comment emits a new
+  `com.mohist.issue.comment-added` event family. It uses `issue.*` stamping with
+  `projectid`, `issue`, and optional `epic`. Payload contains `commentId`,
+  `author`, and `body`.
+- **Mention token:** An Agent name after `@` in the body, delimited by
+  whitespace or punctuation and matched without case sensitivity. Resolve only
+  by name, not ID.
+- **Trigger:** One mention performs one ordinary Agent launch, producing an
+  AgentJob and Agent-launch-origin AgentSession. Prompt is the complete comment
+  body and retains the `@` token.
 
-只有 issue comment 触发提及。Issue 正文里的 `@` 是引用不是点名，不触发。
+Only Issue comments trigger mentions. `@` in an Issue body is a reference and
+does not trigger.
 
 ## Semantics
 
-### 检测与启动
+### Detection and Launch
 
 ```text
-AddCommentAsync 持久化评论 -> 发射 issue.comment-added
-MentionDispatchHandler（系统 handler，订阅该事件）:
-  if comment.author 与项目内某 active Agent 同名: 结束        # 见「防循环」
-  names = 解析 body 中的 @token，去重
+AddCommentAsync persists comment -> emit issue.comment-added
+MentionDispatchHandler subscribes:
+  if comment.author matches an active Agent name in the Project:
+    stop                                           # loop prevention
+
+  names = parse and deduplicate @tokens from body
   for each name:
-    agent = 按名字解析项目内 active Agent
-    if 解析失败: 记结构化日志，继续下一个                      # 见「解析失败」
-    launch(agent, prompt = body, context = issue, key = hash(projectId, commentId, agentId))
+    Agent = resolve active Project Agent by name
+    if resolution fails:
+      write structured log and continue           # resolution failure
+    launch(Agent, prompt = body, context = Issue,
+           key = hash(projectId, commentId, agentId))
 ```
 
-- 启动走共享 launcher 的 manual（workspace-optional）路径，不复用路由启动
-  管线：issue 上下文作为 session metadata 记录，但不做 workspace 解析、不做
-  preflight。理由是提及的典型用例是在 backlog issue 上 `@supervisor` 推进它，
-  backlog issue 没有 workflow run 也没有 workspace —— 路由路径会 preflight
-  失败并把这条最该触发的提及变成失败 AgentJob。触发标签记 `comment-id` 与
-  `comment-added` 事件 id，从 comment 与 AgentJob 双向可查，且可区分于路由 /
-  watch 启动。
-- 幂等键含 commentId：同一评论的重复分发不会重复启动；一条评论 @ 同一个 Agent
-  多次只启动一次；@ 多个不同 Agent 各启动各的。
-- 提及启动是一次性 AgentJob。owner 要求的是持续关注时（例如「监督并推进这个
-  issue」），由 Agent 用自己的命令面兑现——`mo issue watch add` 把该 issue
-  加入关注（见 [`issue-watch.md`](issue-watch.md)）——系统不把提及展开成
-  持久订阅。
+- Launch uses the shared launcher's manual, Workspace-optional path instead of
+  routing launch. Issue context is Session metadata, but launch does not resolve
+  Workspace or run preflight. A common mention asks `@supervisor` to advance a
+  Backlog Issue that has no WorkflowRun or Workspace. Routing preflight would
+  create a failed AgentJob for the mention that most needs to work. Trigger
+  labels record comment ID and comment-added event ID for navigation in both
+  directions and distinguish mention from routing or watch.
+- The idempotency key includes commentId. Redelivery of one comment does not
+  launch again. Repeated mention of one Agent in one comment launches once.
+  Different Agents each launch.
+- Mention is a one-time AgentJob. When an owner requests continuing supervision,
+  the Agent makes it explicit with `mo issue watch add`; see
+  [`issue-watch.md`](issue-watch.md). The system does not turn a mention into a
+  durable subscription.
 
-### 防循环
+### Loop Prevention
 
-约定：Agent 写评论时 `--author` 声明自己的名字（预设文本已写入该约定）。
-凡 author 与项目内 active Agent 同名的评论，不做提及检测。由此 Agent 的评论
-既不会触发别人，也不会触发自己，提及链只能在人的评论处开始。
+By convention, an Agent comment declares its name through `--author`; preset
+text includes this rule. A comment whose author matches an active Project Agent
+name is not scanned for mentions. An Agent comment therefore triggers neither
+another Agent nor itself. A mention chain can begin only with a person's
+comment.
 
-author 是声明而非认证：人故意用 Agent 的名字署名，其评论同样不触发。本地单
-用户场景下这是可接受的约定成本。
+Author is a declaration, not authentication. A person who deliberately uses an
+Agent name also suppresses mention detection. This convention cost is
+acceptable for local single-user use.
 
-### 解析失败
+### Resolution Failure
 
-`@` 了不存在的名字 = 普通评论，不启动任何东西，记结构化日志。人可以从
-`mo agent job list <agent>` 确认 Agent 是否被启动；名字拼错时唯一信号是
-「没有动静」。显式的 typo 反馈（系统回复评论或 inbox 条目）留作开放问题，
-见 Status。
+A mention of an unknown name remains an ordinary comment and starts nothing. A
+structured log records it. A person can use `mo agent job list <agent>` to
+confirm launch. A misspelled name currently produces only the absence of work.
+Explicit feedback through system comment or inbox remains an open question.
 
-## Examples
+## Example
 
 ```text
-# owner 在 issue #42 的评论区写道（Web 或 mo issue comment create 均可）：
-@supervisor 监督并推进这个issue
+# The owner comments on Issue #42 through Web or mo issue comment create:
+@supervisor supervise and advance this Issue
 
-# 系统：supervisor 启动一次 AgentJob，prompt 为该评论全文，上下文为 issue #42。
-# Agent 读到「监督并推进」后，典型动作：
+# Mohist starts one supervisor AgentJob with the complete comment as Prompt
+# and Issue #42 as context. Typical Agent actions are:
 #   mo issue start 42
 #   mo issue watch add 42 --agent supervisor
-# 并在 comment 里以 [supervisor] 记录自己的安排。
+# The Agent records its plan in a comment marked [supervisor].
 ```
 
 ## Status
 
-issue-490 已落地本文描述的全部行为：
+Issue #490 implemented the complete behavior:
 
-- `AddCommentAsync` 持久化评论后，在同一事务里发出 lineage-stamped
-  `com.mohist.issue.comment-added` CloudEvent（payload：`commentId` /
-  `author` / `body`；lineage：`projectid` + `issue`，`epic` 如有）。
-- `MentionDispatchHandler` 订阅该事件，按本文规则做防循环、token 解析、
-  名字解析（大小写不敏感，含 `AgentQuerier.GetByNameAsync` 已改为大小写
-  不敏感）、解析失败 no-op、comment-anchored 幂等启动。
-- `IAgentLauncher.LaunchMentionAsync` 是 manual 路径的 mention 入口，session
-  id / AgentJob key 由 `AgentSessionResolver.CommentSessionId` /
-  `CommentJobKey` 按 `hash(projectId, commentId, agentId)` 派生；trigger 标签
-  记 `mohist.io/trigger/event-id` + `mohist.io/trigger/comment-id`。
-- `muted` watch 不抑制提及启动（见上文「检测与启动」与 issue-490 design
-  Decision 7）：handler 不读 `WatchEntryStore`。
+- `AddCommentAsync` persists the comment and emits a lineage-stamped
+  `com.mohist.issue.comment-added` CloudEvent in the same transaction. Payload
+  contains `commentId`, `author`, and `body`. Lineage contains `projectid`,
+  `issue`, and optional `epic`.
+- `MentionDispatchHandler` subscribes and implements loop prevention, token
+  parsing, case-insensitive name resolution, resolution-failure no-op, and
+  comment-anchored idempotent launch. `AgentQuerier.GetByNameAsync` is
+  case-insensitive.
+- `IAgentLauncher.LaunchMentionAsync` is the mention entry to the manual path.
+  `AgentSessionResolver.CommentSessionId` and `CommentJobKey` derive Session ID
+  and AgentJob key from `hash(projectId, commentId, agentId)`. Trigger labels
+  record `mohist.io/trigger/event-id` and `mohist.io/trigger/comment-id`.
+- A muted watch does not suppress mention launch. The handler does not read
+  `WatchEntryStore`.
 
-### 开放问题
+### Open Question
 
-未被解析的提及是否需要显式反馈（系统评论 / inbox 条目），先以结构化日志与
-「没有动静」为现状，待真实使用数据决定。
+Should an unresolved mention produce an explicit system comment or inbox item?
+Keep structured logging and no visible action until real usage data answers.
 
-### 已实装、本文依赖的底座
+### Implemented Dependencies
 
-`IAgentLauncher` 双路径启动与幂等键、`AgentSessionResolver` 的 comment-anchored
-stable key、评论的 `author` 字段（`AddCommentAsync(author, body)`）、
-`design/event-response.md` 的 comment author 归属约定。
+This design depends on dual-path `IAgentLauncher` with idempotency keys,
+comment-anchored stable keys from `AgentSessionResolver`, comment `author` in
+`AddCommentAsync(author, body)`, and the comment-author attribution convention
+in [`event-response.md`](event-response.md).
