@@ -76,6 +76,8 @@ public sealed class CliFieldContractTests
             [MohistCliApi.TableShape.AgentSessionList] = D<AgentSessionListItemDto>(),
             [MohistCliApi.TableShape.AgentSessionShow] = D<GenericAgentSessionSummaryDto>(),
             [MohistCliApi.TableShape.AgentSessionTranscript] = D<AgentSessionTranscriptResponse>(),
+            [MohistCliApi.TableShape.AgentSubscriptionList] = D<AgentSubscriptionListDto>(),
+            [MohistCliApi.TableShape.AgentSubscription] = D<AgentSubscriptionDto>(),
             [MohistCliApi.TableShape.RoutingRuleList] = D<RoutingRuleDto>(),
             [MohistCliApi.TableShape.RoutingRule] = D<RoutingRuleDto>(),
             [MohistCliApi.TableShape.WebhookSubscriptionList] = D<WebhookSubscriptionDto>(),

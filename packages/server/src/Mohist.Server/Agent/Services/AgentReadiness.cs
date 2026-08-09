@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Mohist.Server.Agent.Domain;
+using Mohist.Server.Infrastructure;
 
 namespace Mohist.Server.Agent.Services;
 
@@ -17,11 +18,12 @@ public static class AgentReadinessDeriver
             return AgentReadinessKind.Unknown;
 
         var modelState = ReadStringState(config, "model");
-        var runtimeState = ReadStringState(config, "runtime");
-        if (modelState == PropertyState.Missing || runtimeState == PropertyState.Missing)
+        if (modelState == PropertyState.Missing)
             return AgentReadinessKind.NeedsSetup;
-        if (modelState == PropertyState.Invalid || runtimeState == PropertyState.Invalid)
+        if (modelState == PropertyState.Invalid)
             return AgentReadinessKind.Unknown;
+        if (AgentConfigSchema.ValidateRuntime(config) is not null)
+            return AgentReadinessKind.NeedsSetup;
         return AgentReadinessKind.Ready;
     }
 
@@ -49,7 +51,7 @@ public sealed record AgentConnectionDispatchDecision(bool Accepted, string Kind,
         AgentReadinessKind.NeedsSetup => new(
             false,
             "rejected",
-            "Agent setup is incomplete: configure both a model and runtime before dispatching a task."),
+            "Agent setup is incomplete: configure a model before dispatching a task (runtime defaults to opencode)."),
         AgentReadinessKind.Unknown => new(
             true,
             "accepted",

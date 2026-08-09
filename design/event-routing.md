@@ -9,8 +9,10 @@ Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代
 [`agent-execution.md`](agent-execution.md)）；信封协议与匹配表达式语法见
 [`event-protocol.md`](event-protocol.md)。
 
-本设计已取代早期「订阅 + 优先级仲裁」模型（AgentSubscription + Arbitrate）；
-旧模型迁移见文末。
+本设计已取代早期「订阅 + 优先级仲裁」模型（独立的 AgentSubscription aggregate
+和 Arbitrate）；旧模型迁移见文末。当前的 Agent subscription 是同一张
+RoutingRule 表的 Agent 作用域配置视图，供 API、CLI 和 Web 共同寻址；它不重新
+引入独立持久化对象、匹配器或仲裁器。
 
 ## 边界
 
@@ -27,12 +29,12 @@ RoutingRule（项目级，有序表）
   AgentId                   响应 Agent
   ResponsePrompt            模板，{{event.<attr>}} 占位符
   Continue                  bool；命中后是否继续向下求值（默认 false）
-  Status                    active | archived
+  Status                    active | archived | deleted
 ```
 
-一个项目一张表；规则引用 Agent，Agent 不拥有规则（早期「1 Agent : N 订阅」的
-归属关系取消——规则的排序语义是表级的，挂在 Agent 下无法表达跨 Agent 的
-兜底/接管次序）。
+一个项目一张表；规则引用 Agent，执行所有权仍在项目级规则表。Agent subscription
+视图按 `AgentId` 显示和修改属于该 Agent 的规则，因此可以表达「一个 Agent 有多条
+subscription」的用户关系，同时不把排序和兜底/接管次序移到 Agent 下。
 
 ## 求值语义
 
@@ -85,6 +87,11 @@ RoutingRule（项目级，有序表）
 - AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
   审计证据。
 
+`deleted` 仅是 RoutingRule 的存储 tombstone 状态，不是可读或可路由的资源：它不会
+出现在规则或 Agent subscription 的 list/read 结果中，也不会参与事件匹配。已知规则
+重复删除仍返回同一个 `deleted` 确认；未知 id 返回 `404`。删除后名称可由非 deleted
+规则重新使用，正是因为名称唯一性只约束可读状态。
+
 ## 与系统 handler 的关系
 
 路由表是用户态消费面；`[Subscription]` handler 是系统态消费面。两者消费同一
@@ -100,15 +107,21 @@ mo routing rule list | view <n> | edit <n> | archive <n>
 mo routing rule move <n> --before <rule> | --after <rule>
 mo routing test [--limit <N>]    # 用最近 N 个事件干跑整张表，逐条显示命中
 mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
+mo agent subscription list <agent> [--project <project>]
+mo agent subscription create <agent> --name <n> --match <expr> \
+    --response-prompt <p> [--continue] [--idempotency-key <key>]
+mo agent subscription edit <agent> <subscription-id> [fields]
+mo agent subscription delete <agent> <subscription-id>
 ```
 
 命名遵循 [`cli.md`](cli.md)：资源在前、项目作用域走 active project / `--project`。
 
 ## 迁移
 
-迁移不做数据自动转换：旧模型（`AgentSubscription` + `Arbitrate`）与
-`mo agent subscription` 命令面已直接删除，不留兼容层（项目积极开发期，无
-版本兼容义务）。旧订阅由操作者按规则手工重配（Filter 三字段可机械对应
+迁移不做数据自动转换：旧模型（独立 `AgentSubscription` + `Arbitrate`）已直接
+删除，不留旧 aggregate 兼容层。当前 `mo agent subscription` 命令面不是旧模型的
+恢复，而是 RoutingRule 的 Agent 作用域视图；它与 `/routing/rules` 和 Agent detail
+页使用同一份规则事实。旧订阅由操作者按规则手工重配（Filter 三字段可机械对应
 表达式：`event.type == "..." && event.source == "..."`，Priority 降序对应
 表内顺序）。
 
@@ -126,8 +139,9 @@ mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
 
 已实装：项目级有序路由表（`Position` / `Continue`）、CEL 子集表达式匹配与
 写入时编译、`{{event.*}}` 渲染、envelope-only 自响应防护、`mo routing rule`
-命令面与 `mo routing test` 干跑、`mo event tail --match`；旧订阅模型及其
-命令面已删除（`DropAgentSubscriptions` 迁移）。
+命令面与 `mo routing test` 干跑、`mo event tail --match`，以及基于同一
+RoutingRule 事实的 `mo agent subscription` / API / Web 视图。旧独立订阅模型及其
+仲裁命令面已删除（`DropAgentSubscriptions` 迁移）。
 
 实装差距：启动管线耐久键仍按 `(projectId, eventId, ruleId)`，(event, agent)
 合并只在单次分发内生效；归一到 agentId 键由 issue #532 收敛。
