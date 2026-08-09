@@ -58,8 +58,8 @@ is independently addressable or users directly start operations from it.
 | `otel` | OpenTelemetry traces | Local trace storage and queries; an observability tool, not a business-domain resource |
 | `skill` | Mohist Skill | Packaged Skill assets installed into a local Agent directory; not a business-domain resource |
 
-Runtime adapters, Runtime Sessions, and the model catalog do not form top-level areas. Runtime is a
-dimension of Agent configuration, Session binding, or Action selection. The model catalog supports
+Runtime adapters, Runtime Sessions, and the versioned capability catalog do not form top-level areas. Runtime is a
+dimension of Agent configuration, Session binding, or Action selection. The catalog supports
 configuration through `agent model list --runtime`. A root-level `config` is not a product resource
 either. Settings with different owners remain within explicit Project, Agent, Run, or local Service
 boundaries and cannot be reaggregated through arbitrary key/value commands.
@@ -163,12 +163,12 @@ its own repeated use cases appear.
 | Dump complete JSON by default and make the Agent filter it | Implementation is simple but every call pays in irrelevant fields and tokens | Reject. Default to a human view; automation explicitly selects JSON fields |
 | Put both remote resource behavior and local process lifecycle under `runner` or `server` | There are fewer root commands, but one action changes target, permission, and failure semantics by area and machine state | Reject. Remote objects remain under `runner` and `server`; local lifecycle is uniformly `service <action> <target>` |
 | Merge application logs and local service logs as `server logs --source` | The table is shorter, but connection, permission, stream, and failure results differ | Reject. Keep the distinct `server logs` and `service logs server` behaviors |
-| Create `runtime list/view/model list` for execution backends | It looks symmetric but promotes an internal Runner adapter and configuration catalog into a nonexistent product resource | Reject. Runtime remains a configuration dimension; model discovery is `agent model list --runtime` |
+| Create `runtime list/view/model list` for execution backends | It looks symmetric but promotes an internal Runner adapter and configuration catalog into a nonexistent product resource | Reject. Runtime remains a configuration dimension; static catalog readback is `agent model list --runtime` |
 | Keep root-level `config get/set` | Adding settings is easy but hides different Project, Agent, Workflow, and local Service owners | Reject. Add only typed settings under the resource that owns them |
 | Choose the command surface for Slack access | A generic provider subgroup anticipated multiple future providers, but Slack is the only provider and the abstraction hides binding, permission, and lifecycle behind a generic noun | Use root-level `slack`: `setup` and `status` orchestrate workspace installation, while other actions manage Slack access resources. Keep no compatibility command. Reassess when a second provider exists |
 | Name the action that adds an existing Agent to Slack | `setup-agent` conflicts with Agent Readiness setup and gives workspace-level `slack setup` a second subject; `create` incorrectly suggests creating an Agent or Connection | Use `slack install-agent <agent>`. The subject is an existing Agent and the result is a recoverable Slack installation. App creation, authorization, credentials, and binding remain internal steps |
 | Keep `rotate-credentials` for credential rotation | It overlaps the resumable credential step in `install-agent`; once Connection no longer owns credentials, the command has no target | Reject. Rerun `setup` or `install-agent` and explicitly provide credentials again. One installation record has one path |
-| Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--variant`, `--skills`, and `--avatar-file` |
+| Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--reasoning-effort`, `--variant`, `--skills`, and `--avatar-file` |
 | Add storage or database audit commands for table size, freelist, and row counts | They cover internal Server audits, but those are development operations. Architectural prohibitions constrain domain operations and do not justify expanding the command surface for a one-off audit | Reject. `otel` is the telemetry entry point; direct database reads for an internal Server audit are a valid developer path |
 | Let `mo otel query` read local trace storage directly | Queries survive Server outage, but they bypass the API and query safeguards, couple the storage schema, have no query budget or size limit, and silently read local data when CLI points at a remote Server | Reject. `query` uses the Server query capability. Direct database access during Server failure is a developer path |
 | Give `run view` only `--json` | There is one less source view, but callers cannot inspect the Definition that will govern later Stages | Reject. `run view --yaml` resolves the current Definition of the Profile ID bound to the Run and parallels `workflow view --yaml` as a resource-content view; it is not historical evidence |
@@ -317,6 +317,12 @@ Project resolution order and interaction. Implementation adds only three constra
   cannot silently overwrite the other.
 - Help, list, view, and local validation never trigger a setup prompt.
 
+`mo agent launch --dry-run` is the one execution preview. It calls the same
+Server `ResolveAgentLaunch` path as a real launch to validate and resolve the
+saved defaults plus any `--model` and `--reasoning-effort` override. Dry-run
+persists nothing and has no dispatch, Workspace materialization, attachment, or
+provider side effect. There is no separate `mo agent resolve` command.
+
 ## Output Contract
 
 A command produces a semantic result before selecting a renderer. TTY detection and output format
@@ -379,12 +385,14 @@ or wall clock:
   `set <key> <value>` always stores a string. Boolean, number, object, and array values require the
   mutually exclusive `--value-json <json>` input. `--json` remains output field selection and is
   never overloaded as an input value.
-- `agent launch` returns Job, Session, first Input, and Turn IDs. The AgentJob read model and
-  AgentSession commands never claim each other's state or result. `session followup` returns the new
-  Input ID and the Turn ID when known.
-- Agent create and edit use typed flags for Profile, Runtime, Model, Variant, Skills, and concurrency
-  limit. Commands expose no arbitrary Agent configuration JSON and display Readiness gaps provided
-  by Server.
+- `agent launch` returns Job, Session, first Input, and Turn IDs. It accepts one-job `--model` and
+  `--reasoning-effort` overrides, and its launch response and Job view expose the immutable resolved
+  execution snapshot. Same-key replay returns that original snapshot even after defaults or catalog
+  metadata change. The AgentJob read model and AgentSession commands never claim each other's state
+  or result. `session followup` returns the new Input ID and the Turn ID when known.
+- Agent create and edit use typed flags for Profile, Runtime, Model, ReasoningEffort, Variant, Skills,
+  and concurrency limit. Commands expose no arbitrary Agent configuration JSON and display static
+  Readiness gaps provided by Server.
 - `slack setup` and `slack install-agent` each have one canonical path. Both resume idempotently from
   durable progress, complete App creation and configuration automatically, and pause only for Slack
   installation confirmation or local credential input. A rerun revalidates stored credentials and

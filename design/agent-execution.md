@@ -90,13 +90,56 @@ launch work returned successfully. It does not mean the AgentSession is closed o
 natural-language task is semantically complete. Later Follow-ups never reopen or rewrite the
 original AgentJob. Business lifecycle belongs in Issue and Workflow.
 
-Agent launch fixes Instructions, Runtime, Model, Variant, Skills, and Workspace identity for that
+Agent launch fixes Instructions, Runtime, Model, ReasoningEffort, Variant, Skills, and Workspace identity for that
 Session. Later input uses the same execution snapshot. Policy changes do not rewrite an execution
 that has already started. The entry point resolves a named Workspace from its Origin and persists
 that identity before acceptance; CLI, Web, and Slack have different Origin rules. The Runner may
 materialize the work directory later. A caller can select a Workspace by Name where the entry point
 allows an override, but cannot substitute a raw path or Runner default. Workspace resolution and
 materialization are authoritative in [`workspace.md`](workspace.md#binding-and-resolution).
+
+### Execution configuration resolution
+
+`reasoningEffort` is a cross-Runtime user setting with exactly these values:
+`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. `variant` is a
+separate Runtime-specific setting and is never an alias for effort. A saved Agent
+has default Runtime, Model, ReasoningEffort, and Variant. The only per-launch
+overrides are Model and ReasoningEffort; they apply to that Job only.
+
+Each Runtime integration owns a static, versioned capability catalog. A catalog
+entry identifies its `catalogVersion`, Runtime, Model, supported and default
+ReasoningEffort values, supported Variant values, and the complete non-secret
+native mapping needed by that Runtime. Server owns the accepted catalog registry
+and validates Agent create/edit, readiness, and launch resolution against it. It
+does not probe a provider, list live models, or infer support from credentials.
+On Agent create, an omitted effort is filled from that catalog's default and
+stored as the Agent default. An edit without an effort retains the stored value;
+clearing effort selects and stores the current catalog default. There is no
+legacy path that treats Variant as effort.
+
+Validation has three stable outcomes before dispatch:
+
+| Condition | Result | Action |
+|---|---|---|
+| An option is unknown, empty, not a string, or has an effort outside the closed vocabulary | `invalid_execution_configuration` | `correct_execution_configuration` |
+| A well-formed Runtime/Model/Effort/Variant combination is absent from the accepted catalog | `unsupported_execution_configuration` | `select_supported_execution_configuration` |
+| A valid configuration cannot be executed by an available adapter for its persisted catalog version and native mapping | Job remains waiting with `exact_execution_unavailable` | `wait_for_exact_execution` |
+
+The first two outcomes reject before a Workspace, attachment, dispatch, or
+provider side effect. The third retries the same immutable configuration when
+that exact adapter becomes available. It never changes Runtime, Model,
+ReasoningEffort, Variant, catalog version, or native mapping as a fallback.
+
+Resolution starts only for a new launch after input validation and idempotency
+lookup. It selects the saved Agent value unless the allowed launch field is
+explicitly present, records the source for each field, selects one catalog entry,
+and persists the resulting `ResolvedExecutionRead` with the Job's first durable
+write. That snapshot includes `catalogVersion` and the final Runtime-owned
+`nativeMapping`; a later Agent edit or catalog release cannot rewrite, erase, or
+recompute it. Runner dispatch applies that saved mapping rather than resolving a
+new one. Trusted Job launch responses and Job views return the snapshot; the
+#387 direct API retains its smaller public projection. Session shows only a
+read-only association summary.
 
 ### Launch convergence
 
@@ -113,8 +156,14 @@ AgentJob prepare -- durable accept request --> AgentSession
 ```
 
 - The caller supplies a stable `launchRequestId`. After authentication and authorization, Server
-  normalizes the complete accepted envelope and derives its fingerprint; a caller-supplied
-  fingerprint is never trusted.
+  normalizes canonical caller intent and derives its fingerprint; a caller-supplied fingerprint is
+  never trusted. The intent contains task, allowed context and Workspace references, attachment
+  references, and the explicit presence and normalized value of each per-launch override. It never
+  contains mutable Agent defaults, resolved values or sources, catalog version, or native mapping.
+- The durable idempotency map is read after that normalization and before Agent defaults or catalog
+  resolution. A matching map returns the original Job and its persisted execution snapshot even if
+  the Agent defaults or catalog have since changed. A new key alone reaches resolution and first
+  durable acceptance.
 - The first accepted `(launchRequestId, fingerprint)` maps once to a Server-owned
   `launchOperationId` and reserved Job, Session, Input, and Turn identities.
 - AgentSession either materializes its Session, first Input, first Turn, dispatch fact, and durable
@@ -123,6 +172,13 @@ AgentJob prepare -- durable accept request --> AgentSession
   identities are never presented as accepted resources.
 - Same-key replay with the same fingerprint returns the original outcome. Reusing the key for a
   changed request returns `idempotency_key_reused` and creates no second work item.
+
+The #434 CLI adapter follows this same caller-intent rule for its Model and
+ReasoningEffort flags. The #387 direct API follows the same replay invariant, but
+its current public launch body has no execution overrides. A direct API override
+can enter this fingerprint only after [`agent-api.md`](agent-api.md) explicitly
+adds that field to the public schema; an adapter must not infer or silently accept
+one.
 
 The launch projection and null rules are authoritative in
 [`conventions.md`](conventions.md#canonical-agentsession-launch-and-turn-result-projections).
@@ -526,6 +582,20 @@ filesystem Session, or wall clock:
 - cleanup cannot discard an adopted/current candidate;
 - cascade stop acts only on frozen targets and never follows later Turns or Bindings;
 - force-reset preserves old unknown facts and exposes the supersession mapping.
+- malformed or unsupported execution configuration rejects before dispatch, while an unavailable
+  exact persisted configuration remains waiting without a fallback;
+- same-key replay after Agent-default or catalog change returns the original Job execution snapshot,
+  including its catalog version and native mapping.
+
+## Delivery sequence
+
+| Target | Independent value | Dependency | Gap |
+|---|---|---|---|
+| Saved execution configuration | A saved Agent has a clear, statically validated ReasoningEffort default that remains independent from Variant. | None. | [^433] |
+| One-job execution tuning | A launch can override Model and ReasoningEffort for one Job, preview the resolved result, and read back its immutable versioned execution snapshot. | Saved execution configuration. | [^434] |
+
+[^433]: Delivery gap [#433](https://github.com/suraciii/mohist/issues/433): saved execution configuration contract.
+[^434]: Delivery gap [#434](https://github.com/suraciii/mohist/issues/434): one-job override and readback contract; depends on #433.
 
 ## Status
 

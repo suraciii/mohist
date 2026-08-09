@@ -167,6 +167,18 @@ task's `uses` value selects an execution-backend Action such as
 `mohist/opencode` or `mohist/pi`. Action Input supplies model options. See
 [Action Contracts](actions/README.md).
 
+## Runtime Capability Catalog
+
+Mohist distributes a versioned catalog of the model, reasoning effort, and
+Runtime-specific variant combinations each Runner can apply. It uses that catalog
+to validate Agent configuration and does not probe a provider or credential store
+for a live model list.
+
+An accepted AgentJob retains the catalog version and native Runtime mapping used
+for its execution. If a Runner cannot apply that exact saved configuration, the
+Job waits until an eligible Runner is available. Mohist does not replace it with
+a different model, reasoning effort, variant, or catalog version.
+
 ## Self-hosting
 
 For a long-running Runner managed as a service instead of foreground

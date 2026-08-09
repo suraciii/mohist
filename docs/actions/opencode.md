@@ -25,7 +25,7 @@ separate Variables:
 vars:
   agent:
     model: anthropic/claude-sonnet-4
-    variant: high
+    reasoningEffort: high
 ```
 
 Then bind `session` and `options` explicitly from the Workflow Profile:
@@ -49,8 +49,8 @@ Run values override Issue values. A Workflow Profile references Variables but
 does not store their values.
 
 `agent` is an existing Workflow Variable name. In this Action, it supplies only
-`model` and `variant`. It does not identify a Mohist Agent or select an OpenCode
-agent.
+`model`, `reasoningEffort`, and `variant`. It does not identify a Mohist Agent or
+select an OpenCode agent.
 
 The expanded Action Input is the only configuration fact for this execution.
 `mohist/opencode` does not read `vars.agent` implicitly. Without an explicit
@@ -63,8 +63,9 @@ the OpenCode default for the first execution.
 |---|---:|---|---|
 | `prompt` | Yes | - | Prompt sent to OpenCode for this execution |
 | `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
-| `options` | No | - | Object that selects the OpenCode model for this execution |
+| `options` | No | - | Object that selects OpenCode execution settings for this execution |
 | `options.model` | No | - | OpenCode model in `provider/model` form |
+| `options.reasoningEffort` | No | - | Reasoning effort: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `options.variant` | No | - | OpenCode `variant` for the model |
 | `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
 
@@ -72,6 +73,11 @@ Tools, plugins, permissions, default execution behavior, and automatic
 compaction remain OpenCode configuration. Mohist does not duplicate them as
 fields. Action Input does not need `agent`, `kind`, or `type`; `uses` already
 selects the execution backend.
+
+Only the three listed `options` fields are accepted. Invalid or unknown settings
+fail before work begins; a supported-looking combination that is absent from the
+versioned OpenCode catalog also fails. Mohist does not ignore options or replace
+them with a live OpenCode selection.
 
 ## Workflow Session
 
@@ -111,13 +117,14 @@ OpenCode controls timeout and retry behavior for individual tools. Mohist
 controls only the deadline for the entire execution and interruption
 confirmation. It does not add a separate timeout policy for each tool.
 
-The model list displayed by Mohist helps with configuration. OpenCode remains
-authoritative for model validity and the default model.
+The versioned OpenCode catalog displayed by Mohist defines supported
+configuration. Mohist does not query OpenCode or a provider for a live model
+list when validating or starting work.
 
 ## Error Codes
 
 See [Action Contracts](README.md#shared-semantics-for-agent-execution-actions)
-for the six shared business error codes and platform errors.
+for shared business error codes and platform errors.
 `mohist/opencode` also defines:
 
 | Error code | Meaning |

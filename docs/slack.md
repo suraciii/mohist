@@ -388,11 +388,11 @@ the primary interaction.
 | Status | Setup required / Ready / Degraded / Disabled; Degraded must include one actionable reason |
 | Identity sync | Whether the Bot name and avatar still match the current Agent |
 
-Agent Instructions, Runtime, Model, Variant, Skills, and concurrency limit are
-not Agent Connection configuration. Edit the Mohist Agent to change its
-execution definition, which applies by snapshot to the next new work. Edit the
-Agent concurrency limit as well, but it acts as a live scheduling policy for
-later launches and follow-ups.
+Agent Instructions, Runtime, Model, Reasoning effort, Variant, Skills, and
+concurrency limit are not Agent Connection configuration. Edit the Mohist Agent
+to change its execution definition, which applies by snapshot to the next new
+work. Edit the Agent concurrency limit as well, but it acts as a live scheduling
+policy for later launches and follow-ups.
 
 Bot identity is not a second Agent configuration. After an Agent name or avatar
 changes, Mohist shows the Agent Connection identity as out of sync and provides

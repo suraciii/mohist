@@ -47,6 +47,7 @@ type OpenCodeActionInput = {
   session?: string
   options?: {
     model?: string
+    reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     variant?: string
   }
 }
@@ -61,17 +62,22 @@ type OpenCodeActionOutput = null | {
 not read Workflow variables or expand templates independently.
 
 `model` uses OpenCode's `providerID/modelID` form and splits only at the first
-`/`, because the model ID may contain additional slashes. `variant` remains a
-separate execution parameter and may be supplied with or without `model`.
-Changing either selection does not rotate a physical Session; omission preserves
-the Session selection or OpenCode default.
+`/`, because the model ID may contain additional slashes. `reasoningEffort` is the
+cross-Runtime value `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`.
+`variant` remains a separate OpenCode-specific execution parameter and may be
+supplied with or without `model`; it is never an effort alias. Changing any of
+these selections does not rotate a physical Session; omission preserves the
+Session selection or OpenCode default.
 
 Selecting `uses: mohist/opencode` already selects the Runtime, so the input has no
-`agent`, `kind`, or `type`. OpenCode remains authoritative for native Agent, tool,
-plugin, permission, and automatic-compaction configuration. Unknown `options`
-keys are ignored with a diagnostic so persisted Agent options can converge without
-turning unrelated legacy keys into execution failure. Present `model` and
-`variant` values must be strings.
+`agent`, `kind`, or `type`. `options` is a closed object: its only accepted keys
+are `model`, `reasoningEffort`, and `variant`. Unknown keys, empty or non-string
+Model/Variant values, and an invalid effort reject with
+`invalid_execution_configuration` before Session or provider work. A well-formed
+selection absent from the accepted static catalog rejects with
+`unsupported_execution_configuration`. It is never ignored, guessed by OpenCode,
+or deferred to a provider probe. OpenCode remains authoritative for native Agent,
+tool, plugin, permission, and automatic-compaction configuration.
 
 Action output deliberately excludes Runtime identity, transcript, model, usage,
 diagnostics, and expectation detail. The work owner evaluates `expect` against
@@ -133,18 +139,14 @@ Before the Runner registers or claims work, it must:
 After the OpenCode Server exits, the Runner stops claiming new work and rebuilds
 the Server, Client, and global event subscription. Affected execution fails
 directly and is never replayed automatically. Once the replacement Server is
-healthy and the event subscription exists, the Runner is ready again without
-waiting for model discovery.
+healthy and the event subscription exists, the Runner is ready again.
 
 Mohist locks the SDK package version; the operator supplies the OpenCode CLI.
 Mohist does not install or upgrade the CLI or require it to match the SDK
 exactly. Server/SDK incompatibility must produce an actionable readiness error.
-CLI model-discovery incompatibility records diagnostics under best-effort
-semantics. Native Workspace configuration and plugins load normally; do not use
-`--pure` or remove the `.opencode` lockfile. If plugin-held resources keep the
-CLI alive past its deadline but stdout already contains a parseable, non-empty
-catalog, mark the snapshot incomplete with a diagnostic. Do not present it as a
-normal completed discovery.
+Native Workspace configuration and plugins load normally; do not use `--pure` or
+remove the `.opencode` lockfile. Runner readiness never probes a provider for
+capability metadata.
 
 ## Directory Instance Reclamation
 
@@ -228,15 +230,16 @@ the expected ID are not missing. An absent ID is evidence of SDK/Server
 incompatibility and must fail rather than create a replacement.
 
 After `definitely-missing`, call `client.session.create()` in the same
-directory. Creation uses the model resolved for this input. Without an explicit
-model, use the OpenCode default; variant is still applied to the Prompt. If the
-new Session is immediately missing, creation fails, or a concurrent operation
-changes the binding, fail this execution and do not attempt a second create.
+directory. Creation uses the execution selection resolved for this input. Without
+an explicit model, use the OpenCode default; effort and variant are still applied
+to the Prompt. If the new Session is immediately missing, creation fails, or a
+concurrent operation changes the binding, fail this execution and do not attempt
+a second create.
 
-Model and variant are execution parameters. They do not enter the Session cache
-key, gate `resumeSession`, or trigger binding replacement. Reuse applies the
-current model / variant on the existing physical Session before executing the
-Prompt.
+Model, reasoning effort, and variant are execution parameters. They do not enter
+the Session cache key, gate `resumeSession`, or trigger binding replacement. Reuse
+applies the current selection on the existing physical Session before executing
+the Prompt.
 
 A worktree-cleanup Follow-up is subsequent execution of the original task. The
 executor invokes the original resolved Action again and preserves WorkflowRun,
@@ -467,24 +470,26 @@ Map known local transport codes, such as header/body timeout, to stable,
 actionable failure text. Retain complete SDK/provider payloads only in
 diagnostics to keep unreviewed external content out of TaskRun.
 
-## Model Catalog Boundary
+## Versioned Capability Catalog
 
-The model catalog assists configuration; it is not execution or readiness
-authority. `RunnerHost`, not `OpenCodeRuntime`, discovers it from the
-operator-provided CLI using a bounded, shell-free process. OpenCode still validates
-the selected model and variant when execution starts.
+The OpenCode integration owns a static, versioned catalog published with the
+Runtime release. Each entry names `catalogVersion`, Model, supported and default
+ReasoningEffort values, supported Variant values, and the final non-secret native
+mapping for the OpenCode SDK. Server accepts the catalog as configuration
+metadata and uses it for Agent create/edit, readiness, and launch validation.
 
-A complete non-empty result replaces the snapshot. A parseable non-empty result
-from a timed-out process is marked incomplete and may add models or variants but
-cannot delete previously known values. Empty or failed refreshes retain the last
-non-empty snapshot. Only a changed snapshot prompts an immediate registration
-heartbeat. This best-effort path never makes an otherwise healthy Runtime
-unready.
+Neither Runner nor Server asks the OpenCode CLI, its providers, or credentials
+for a live model list. A catalog release changes only later resolutions. A Job
+persists its selected catalog version and native mapping before dispatch, so a
+later catalog cannot change the actual request. If no available adapter supports
+that exact version and mapping, the Job waits with
+`exact_execution_unavailable`; it does not fall back to another model, effort,
+variant, or catalog.
 
 ## Verification Boundary
 
-Default verification replaces the Server, Client, event stream, model-discovery
-process, Workspace registry, and clock with deterministic fakes. It proves
+Default verification replaces the Server, Client, event stream, static catalog,
+Workspace registry, and clock with deterministic fakes. It proves
 readiness gating, binding-before-effect, missing versus unknown classification,
 no replay after uncertain submission, completion authority, two-phase closeout,
 permission handling, event reconciliation, and directory fencing. A real smoke

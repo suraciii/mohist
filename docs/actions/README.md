@@ -84,6 +84,19 @@ Pi is an independent peer Action, not an input extension of
 pages describe only their differences. `mohist/agent` resolves an Agent
 definition into the same kind of execution and follows these semantics too.
 
+### Execution Options
+
+For `mohist/opencode` and `mohist/pi`, `options` accepts only `model`,
+`reasoningEffort`, and `variant`. `reasoningEffort` is one of `none`, `minimal`,
+`low`, `medium`, `high`, `xhigh`, or `max`. `variant` is a separate
+backend-specific setting, never another name for reasoning effort.
+
+Every supplied value is checked against Mohist's versioned runtime catalog before
+work begins. Unknown or malformed options return
+`invalid_execution_configuration`; a well-formed but unsupported combination
+returns `unsupported_execution_configuration`. Mohist does not ignore a setting,
+query a provider, or substitute a different model, effort, or variant.
+
 ### Workflow Session
 
 `session` identifies a logical AgentSession whose origin is a Workflow. Tasks
@@ -97,14 +110,14 @@ not migrate the old conversation or create physical Session history.
 
 When tasks in one WorkflowRun specify the same `session` name, Mohist must keep
 using the physical Session currently bound to that AgentSession. A different
-task, task retry, or change to `options.model` or `options.variant` cannot
+task, task retry, or change to `options.model`, `options.reasoningEffort`, or `options.variant` cannot
 replace it. Model selection affects only the current execution and takes effect
 in the existing Session.
 
 | Change | Physical Session |
 |---|---|
 | A later task or retry uses the same `session` name | Unchanged |
-| `options.model` or `options.variant` changes | Unchanged |
+| `options.model`, `options.reasoningEffort`, or `options.variant` changes | Unchanged |
 | Compact | Unchanged |
 | Reset | Creates a new empty Session; the AgentSession keeps its conversation content |
 | The current Session is confirmed missing before a new independent input is submitted | Creates a new empty Session automatically |
@@ -177,6 +190,8 @@ list only additional codes.
 
 | Error code | Meaning |
 |---|---|
+| `invalid_execution_configuration` | An execution option is unknown, malformed, empty, or uses an invalid reasoning effort |
+| `unsupported_execution_configuration` | A well-formed model, reasoning effort, or variant combination is not in the Runtime catalog |
 | `runtime-unavailable` | Backend execution capability is not ready or available |
 | `session-workspace-mismatch` | The working directory does not match the Session binding |
 | `session-binding-failed` | Logical Session binding resolution or persistence failed |

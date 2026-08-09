@@ -144,7 +144,7 @@ The exact scopes are:
 
 | Command | Idempotency scope | Normalized fingerprint input | Same key and fingerprint | Same key and different fingerprint |
 |---|---|---|---|---|
-| Launch | (projectId, agentId, Idempotency-Key) | contract version, launch, canonical projectId, canonical agentId, complete accepted body | Return the original canonical Job/Session/Input/Turn mapping and its current public observation | 409 idempotency_key_reused; no new canonical record, event, queue entry, outbox item, or external effect |
+| Launch | (projectId, agentId, Idempotency-Key) | contract version, launch, canonical projectId, canonical agentId, complete accepted public body; never Agent defaults, resolved execution, catalog version, or native mapping | Return the original canonical Job/Session/Input/Turn mapping and its current public observation | 409 idempotency_key_reused; no new canonical record, event, queue entry, outbox item, or external effect |
 | Follow-up | (sessionId, Idempotency-Key) | contract version, followup, canonical sessionId, complete accepted body | Return the original Input/Turn mapping or durable rejection and its current public observation | 409 idempotency_key_reused; no new Input, Turn, queue entry, outbox item, or external effect |
 | Stop | (turnId, Idempotency-Key) | contract version, stop, canonical turnId, empty body | Return the original target Turn observation | 409 idempotency_key_reused; no new stop operation or external effect |
 
@@ -167,6 +167,20 @@ cannot change a rejected request into a newly accepted one.
 The canonical mapping is stable. Its public status, timestamps, output, error,
 and event sequence can advance as the Server learns more facts, but retrying a
 matching request never mints different IDs or another execution.
+
+Launch resolution is deliberately downstream of this lookup. On first
+acceptance, Server resolves the saved Agent defaults and static capability catalog
+once, then persists the immutable Job execution snapshot. A matching retry
+returns that original Job even when an Agent default or catalog changes later.
+The public response remains this document's smaller allowlist; it does not expose
+the private catalog version or native mapping.
+
+The #434 CLI adapter and this #387 direct API share this caller-intent and replay
+invariant. The current direct API body remains text-only. A future direct API
+override must first be explicitly added to the public schema above; only then do
+its explicit presence and normalized value become part of the launch fingerprint.
+No transport adapter may silently broaden this body or infer an override from a
+current Agent default.
 
 ## Public execution projection
 

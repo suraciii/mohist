@@ -157,6 +157,24 @@ AgentSessionRead {
   observedAt
 }
 
+ResolvedExecutionRead {
+  catalogVersion
+  runtime
+  model
+  reasoningEffort = none | minimal | low | medium | high | xhigh | max
+  variant                         # explicit null when no runtime-specific variant applies
+  nativeMapping {
+    format                         # runtime-owned mapping format from catalogVersion
+    values                         # complete non-secret native model/effort/variant mapping
+  }
+  source {
+    runtime = agent-default
+    model = agent-default | launch-override
+    reasoningEffort = agent-default | launch-override
+    variant = agent-default
+  }
+}
+
 AgentJobLaunchRead {
   jobId
   launchRequestId
@@ -173,6 +191,7 @@ AgentJobLaunchRead {
   workspaceReason
   target: ResourceKey | null
   targetReason
+  execution: ResolvedExecutionRead
   revision
   observedAt
 }
@@ -182,6 +201,17 @@ LaunchWorkspaceRead {
   workspaceId
   path
 }
+
+`ResolvedExecutionRead` is the immutable execution snapshot resolved before the
+Job's first durable write. It is present for every `AgentJobLaunchRead`.
+`catalogVersion` and `nativeMapping` are copied from one accepted static catalog
+entry at that write. `nativeMapping.format` identifies the Runtime-owned shape;
+`values` is the complete JSON-safe mapping the adapter must apply. Neither is
+recomputed from a later catalog, and neither contains provider credentials or
+availability observations. `source` is per field, never inferred from
+nullability, and only uses `agent-default` or `launch-override`. A Session view
+may show a read-only association summary derived from it, but `AgentSessionRead`
+does not own, duplicate, or update it.
 
 TurnResultRead {
   sessionId

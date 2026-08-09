@@ -50,6 +50,7 @@ type PiActionInput = {
   session?: string
   options?: {
     model?: string
+    reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
     variant?: string
   }
 }
@@ -61,20 +62,19 @@ type PiActionOutput = null | {
 
 The input shape, expansion timing, and output projection are identical to
 `mohist/opencode`; see the Action input and output contract in
-[`opencode.md`](opencode.md). There are only two differences:
+[`opencode.md`](opencode.md). `model` uses Pi's `provider/model` form and is
+likewise split only at the first `/`. `reasoningEffort` is the cross-Runtime
+value `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`; Pi's native
+mapping may apply it as a thinking level. `variant` remains a separate
+Pi-specific setting and is never an effort alias or part of the model ID.
 
-- `model` uses Pi's `provider/model` form and is likewise split only at the
-  first `/`. Pi remains the final authority on whether the model is valid.
-- `variant` maps to a Pi thinking level: `off`, `minimal`, `low`, `medium`,
-  `high`, `xhigh`, or `max`. It remains a separate field and must not be joined
-  to the model ID. Pi rejects invalid values, which Mohist normalizes as an
-  execution failure; Mohist does not prevalidate the set.
-
-Keys in `options` other than `model` and `variant` are ignored with a diagnostic
-and do not fail execution. This allows persisted `vars.agent` values containing
-a `runtime` key, used by the Mohist Agent path, or legacy keys to remain
-bindable to this Action. `options` does not carry `runtime`; the Workflow path
-selects its backend through `uses`.
+`options` is a closed object: its only accepted keys are `model`,
+`reasoningEffort`, and `variant`. Unknown keys, empty or non-string Model/Variant
+values, and an invalid effort reject with `invalid_execution_configuration`
+before Session or provider work. A well-formed selection absent from the accepted
+static catalog rejects with `unsupported_execution_configuration`. `options` does
+not carry `runtime`; the Workflow path selects its backend through `uses`. No
+input is silently ignored, deferred to Pi, or guessed from provider credentials.
 
 ## Capability Boundary
 
@@ -85,7 +85,7 @@ Session commands ----+                    |
                                          +--> physical Session files
 ```
 
-`PiRuntime` owns SDK service assembly, readiness, the model catalog, physical
+`PiRuntime` owns SDK service assembly, readiness, the static capability catalog, physical
 Session creation and restoration, in-memory Session caching, Prompt completion,
 Follow-up, interruption, native compaction, event projection, provider-error
 classification, project trust, credential redaction, and compatibility
@@ -121,15 +121,14 @@ not add a separate session-directory setting.
 Before the Runner registers or claims work, it must:
 
 1. assemble SDK services successfully;
-2. load the model catalog successfully.
+2. load its static, versioned capability catalog successfully.
 
-A successful catalog load makes the Runtime ready. An empty catalog, meaning no
-provider with configured credentials, emits a warning diagnostic but does not
-block readiness; Pi remains the final model-validity authority at execution.
-If service assembly or catalog loading fails, `PiRuntime` is not ready and the
-Runner stops claiming new work while it rebuilds. This matches the
+A valid catalog makes the Runtime ready independently of configured provider
+credentials. If service assembly or catalog loading fails, `PiRuntime` is not
+ready and the Runner stops claiming new work while it rebuilds. This matches the
 `OpenCodeRuntime` readiness gate; both Runtime readiness states participate in
-work admission.
+work admission. Mohist never probes Pi or a provider to discover whether a model
+or effort is supported.
 
 Pi's different topology has one important consequence: it runs inside the
 Runner, so terminating the Runner process terminates every running Pi Prompt.
@@ -163,7 +162,9 @@ Physical Session restoration is lazy. Only the PiRuntime on the binding's
 A request reaching another Runner must route back to the bound Runner or fail
 explicitly; a missing local file on that other Runner is not evidence that the
 binding is missing. On a cache miss, the bound Runner uses
-`SessionManager.open()`, which restores messages, model, and thinking level.
+`SessionManager.open()`, which restores messages, model, and Pi's native
+reasoning state. That native state is derived from the saved reasoning-effort
+mapping, not from Variant.
 Only an explicitly absent binding path yields a `definitely-missing` fact and
 permits automatic replacement before a new independent input is submitted. If
 the file exists but cannot be opened, its JSONL is corrupt, permission fails, or
@@ -181,8 +182,8 @@ with already-uncertain submission state is lost, matching the accepted
 redelivery duplicate-execution limitation.
 
 A Runtime change or Reset creates a new physical Session and atomically replaces
-the current binding without migrating context. Compact and changes to model or
-variant keep the same Session file. Model and thinking level are execution
+the current binding without migrating context. Compact and changes to model,
+reasoning effort, or variant keep the same Session file. Those are execution
 parameters applied to the existing physical Session before the Prompt; they do
 not trigger binding replacement.
 
@@ -202,7 +203,7 @@ restore or create physical Session
 persist complete binding and Input identity
                |
                v
-apply model and thinking level
+apply model, reasoning effort, and variant
                |
                v
 submit Prompt
@@ -308,7 +309,7 @@ binding, not by an in-memory Session object.
 
 | Command | Pi-specific contract |
 |---|---|
-| Follow-up | Active execution receives a native steer at an iteration boundary. Idle execution starts a Prompt whose preflight callback is the acceptance authority. Model and thinking level are applied first. Preflight rejection is definitive; active or unknown state never triggers binding replacement. |
+| Follow-up | Active execution receives a native steer at an iteration boundary. Idle execution starts a Prompt whose preflight callback is the acceptance authority. Model, reasoning effort, and variant are applied first. Preflight rejection is definitive; active or unknown state never triggers binding replacement. |
 | Compact | Allowed only while idle. Uses native compaction with the current model, keeps the Session-file binding and AgentSession identity, and never falls back to a Mohist-generated summary. |
 | Reset | Allowed only while idle. Creates an empty Session in the same work directory, then replaces the complete expected binding. A definitely absent old file may skip selection inheritance; corruption, permission failure, and unclassified reads remain explicit failures. |
 | Cancel | Requests interruption. Provider acceptance of the request does not prove execution stopped; events and `isStreaming` provide stop confirmation. |
@@ -341,20 +342,24 @@ The Runtime normalizes failures to `invalid-input`, `unavailable-runtime`,
 `turn-failed`, or `conflict`. Provider detail remains redacted diagnostics and
 never becomes Action output.
 
-## Model Catalog and Integration Boundary
+## Versioned Capability Catalog and Integration Boundary
 
-Pi's catalog contains only models whose providers have configured credentials.
-That makes it useful for configuration assistance, but not final execution
-authority. Thinking levels are the model variants; Pi still validates the selected
-model and level when execution begins.
+The Pi integration owns a static catalog published with the Runtime release. Each
+entry names `catalogVersion`, Model, supported and default ReasoningEffort values,
+supported Variant values, and the complete non-secret native mapping for Pi. Server
+accepts the catalog as configuration metadata and validates Agent create/edit,
+readiness, and launch resolution against it. Provider credentials and live
+availability do not alter catalog support.
 
 Runtime selection is frozen into the Agent execution snapshot and current Session
 binding. Server routes launch and Session commands by that value; Runner dispatches
-to the corresponding independent deep module; clients request the catalog for the
-selected Runtime. Shared Session projections carry normalized transcript, model,
-cost, and usage facts, including cache-read and cache-write tokens, without
-exposing Pi SDK types. This capability boundary replaces component-by-component
-Pi special cases in Server and Web.
+to the corresponding independent deep module using the saved catalog version and
+native mapping. A Job waits with `exact_execution_unavailable` when no available
+adapter can apply that exact configuration; it never falls back to a different
+model, effort, variant, or catalog. Shared Session projections carry normalized
+transcript, model, cost, and usage facts, including cache-read and cache-write
+tokens, without exposing Pi SDK types. This capability boundary replaces
+component-by-component Pi special cases in Server and Web.
 
 ## Verification Boundary
 
@@ -377,7 +382,7 @@ deep module rather than the Workflow Action or AgentSession contracts.
 Every upgrade reads the upstream breaking-change notes and smoke-tests the exact
 locked package against real service assembly, catalog loading, Session create and
 restore, Prompt completion, active and idle Follow-up acceptance, interruption and
-stop confirmation, compaction, model/thinking selection, event payloads, and
+stop confirmation, compaction, model/reasoning-effort/variant selection, event payloads, and
 credential redaction. A method existing in generated types is not evidence that
 its completion or failure semantics still satisfy Mohist.
 
