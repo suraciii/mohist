@@ -1,121 +1,194 @@
-# 认证与访问
+# Authentication and Access
 
-Mohist 是单人自托管的软件产线，认证模型因此只有一个用户假设：**一个管理员（你）**，加上若干机器调用者。所有对 Mohist 的访问都必须归属某个已认证身份——「谁在调用」决定「能做什么」，活动与审批里「谁干的」第一次有了可信来源。
+Mohist is self-hosted for one person, but it is not used by one process. The Web
+UI, remote CLI, Runner, integrations, scripts, and external Agents all need to
+act without sharing the administrator's long-lived secret. Mohist therefore
+keeps one human administrator and gives each machine caller a separate,
+revocable identity.
 
-## 访问总览
+This model preserves zero-login use on the Server host while making remote
+effects attributable. It also limits a leaked credential to the access selected
+when that credential was issued.
 
-| 访问者 | 怎么证明身份 | 能做什么 |
+## Choose the Right Access Method
+
+| Caller | Access method | Why |
 |---|---|---|
-| 本机 `mo`（与 server 同机） | 自动读取管理员凭据文件 | 全部 |
-| 远程 `mo` | 设备授权登录（`mo auth login`） | 全部 |
-| Web UI | 管理员级令牌换取浏览器会话 | 全部 |
-| 脚本、CI、外部 Agent | 个人访问令牌（`MOHIST_TOKEN`） | 全部或只读（签发时定） |
-| Runner | 安装时注册，换取机器凭据 | 仅 Runner 工作面 |
-| 本机服务进程（Slack adapter 等） | 服务凭据文件 | 全部 |
-| 入站集成（外部系统回调） | 端点独立令牌 | 仅该集成端点，按项目收窄 |
-| GitHub | GitHub 原生签名（HMAC） | 仅 GitHub 接入端点 |
+| Local `mo` on the Server host | Administrator credential file, discovered automatically | Access to the host is already the local trust boundary. |
+| Remote `mo` | Device authorization with `mo auth login` | The administrator approves the machine without copying the root credential to it. |
+| Web UI | Administrator-level token exchanged for a browser session | The browser receives a revocable session instead of retaining the root token. |
+| Script or CI | Personal access token in `MOHIST_TOKEN` | Each automation can have its own lifetime and read or write capability. |
+| Direct external Agent caller | Personal access token with an explicit Project grant | A headless caller can reach only the private Projects selected for that token. |
+| Runner | Machine credential issued during registration | A Runner can claim and report work but cannot act as the administrator. |
+| Local service or inbound integration | Dedicated service or integration credential | A compromise remains inside that component's boundary. |
+| GitHub | Native GitHub signature | Mohist can trust the platform event without sharing a general Mohist token. |
 
-每个来访请求都必须出示身份，Mohist 统一查验：查不过拒绝访问（401），权限不够拒绝操作（403）。未认证可达的面是封闭清单：健康检查、登录页与登录接口、GitHub 接入端点。
+Invalid credentials are rejected as unauthenticated. Valid credentials without
+the required capability are rejected as forbidden. Mohist does not reveal
+whether a private resource exists until the caller has access to its Project.
 
-## 身份模型
+## One Administrator, Several Machine Identities
 
-三类调用者：
+Mohist has one administrator. It does not create a second Mohist login, role, or
+permission group for a collaborator. Instead, each machine receives a separate
+credential, and each Mohist Agent receives a stable identity for attribution.
 
-| 调用者 | 是什么 | 身份怎么来 |
-|---|---|---|
-| 管理员 | 系统唯一用户，拥有一切能力 | 安装 server 时自动建立 |
-| 机器 | Runner、本机服务进程（如 Slack adapter）、脚本与外部 Agent、入站集成 | 各持有一枚令牌 |
-| Agent | Mohist Agent 的归因身份 | 定义 Agent 时自动获得 |
+This separation has three consequences:
 
-规则：
+- A token can expire or be revoked without rotating every other credential.
+- Activity and Approval records identify the actual administrator, machine, or
+  Agent that caused an effect.
+- Agent attribution does not make the Agent a login identity. External callers
+  authenticate with their own personal access token.
 
-- 只有一个管理员；没有第二个用户的概念，也没有角色与权限组。
-- 每枚令牌可独立签发、撤销和过期；泄露一枚不波及其它。
-- 签发型令牌只完整出现一次；Mohist 数据库里只存它的指纹，泄露数据库不泄露令牌。
-- Agent 身份用于归因：Agent 的动作在 Mohist 记为 Agent 所为，不记在你的名下。
+Mohist shows an issued token in full only once and stores only its fingerprint.
+A database disclosure therefore does not reveal the token value.
 
-## 协作者：没有第二个人的登录
+## Collaborators Use Platform Identity
 
-Mohist 不给第二个人发凭据。同事参与产线走外部平台身份：在 GitHub 上以平台账号做 PR review（由审批者名单判定，见 [GitHub](github.md)），在 Slack 里以工作区成员身份调用 Agent（由 Connection 访问策略判定，见 [Slack](slack.md)）。平台负责验证他们是谁，Mohist 只核对平台背书的身份与名单。
+Mohist does not issue credentials to another person. A colleague reviews a Pull
+Request through their GitHub account and is checked against the approver list;
+see [GitHub](github.md). A Slack workspace member invokes an Agent through a
+Connection access policy; see [Slack](slack.md).
 
-## 本机使用：零登录
+The platform proves who the person is. Mohist validates the platform-backed
+identity and the configured access policy. That boundary is separate from the
+personal access token required by a direct external Agent caller.
 
-在安装 server 的那台机器上，一切照常，不需要登录：server 首次启动时自动生成管理员凭据文件（权限 600，位于 `~/.mohist/`），本机的 `mo` 凭它自动获得管理员身份。「能读到这个文件」就是本机信任的边界——与「能 SSH 登上这台机器」等价。
+## Local CLI Requires No Login
 
-## 远程 CLI：设备授权登录
+On first start, Server creates an administrator credential under `~/.mohist/`
+with mode 600. Local `mo` reads it automatically. Anyone who can read that file
+already has access equivalent to signing in to the host, so another login prompt
+would not add a useful security boundary.
 
-在另一台机器上用 `mo`（服务器地址沿用 `MOHIST_SERVER_URL`）：
+## Remote CLI Uses Device Authorization
+
+On another machine, configure `MOHIST_SERVER_URL` and run:
 
 ```bash
 mo auth login
 ```
 
-命令打印一个验证码和确认链接（有浏览器时自动打开）。你在 Web UI 里确认后，CLI 自动完成登录并把会话保存在本地（权限 600）。会话过期自动续期；续不上时重新执行 `mo auth login` 即可。
+The command prints a verification code and confirmation link and opens a browser
+when available. After the administrator confirms in the Web UI, CLI stores a
+local session with mode 600. It renews an expiring session automatically. Run
+`mo auth login` again when renewal fails.
 
 ```bash
-mo auth status    # 查看当前身份与服务器
-mo auth logout    # 注销并清除本地会话
+mo auth status
+mo auth logout
 ```
 
-## 脚本与外部 Agent：个人访问令牌
+Device authorization keeps the administrator credential off the remote machine
+and makes every new login an explicit decision in an already trusted browser.
 
-CI、脚本、外部 Agent 这类没有浏览器的调用者，用个人访问令牌：
+## Scripts and CI Use Personal Access Tokens
+
+Create a separate token for each headless caller:
 
 ```bash
-mo auth token create --name ci-bot --scope readonly --ttl 720h --project proj_123
+mo auth token create --name ci-bot --scope readonly --ttl 720h
 ```
 
-令牌只完整显示一次，且必须有过期时间（缺省 90 天，最长 1 年）——泄露的令牌不会永远有效。调用方通过环境变量提供：
+The token is shown in full only once. Its default lifetime is 90 days and its
+maximum lifetime is one year, so a leaked token cannot remain valid forever.
+Supply it through the environment:
 
 ```bash
 export MOHIST_TOKEN=moh_pat_...
 mo issue list
 ```
 
-管理令牌：
+Manage tokens independently:
 
 ```bash
 mo auth token list
 mo auth token revoke ci-bot
 ```
 
-直接调用 Agent 的令牌在签发时必须明确绑定可用的私有 Project：重复 `--project` 可绑定多份
-Project；需要覆盖全部 Project 时，使用具有“全部”范围的令牌并明确选择 `--all-projects`。这只
-限制该令牌的外部 Agent 调用范围，不会创建面向多人或通用资源的项目权限体系。
+Use read-only Scope when automation only observes state. Use operator Scope only
+when it must create or change work.
 
-## Web UI：令牌登录
+## Direct Agent Calls Need a Project Grant
 
-打开 Web UI 需要登录：粘贴一枚管理员级令牌（本机凭据文件的内容，或「全部」范围的个人访问令牌），换取浏览器会话。设备授权登录的确认页面也在 Web UI 里，需要先登录才能批准。
+The [External Agent API](agent-api.md) is intended for headless callers that
+launch or continue Agent work directly. A general PAT Scope is not enough for
+this private-Project boundary. The token must also name the Projects it can use.
 
-## Runner：安装即注册
+The target issuance forms are:
 
-`mo install runner` 时，安装器自动向 server 换取一次性注册令牌；Runner 首次启动用它换到自己的机器凭据，之后所有上报与连接都凭它进行。Runner 凭据只覆盖 Runner 该用的能力，并与其 Runner 身份绑定——任何人无法再顶替一台 Runner。吊销某台 Runner 的凭据后它立即失效；恢复时重新执行一次安装注册流程。
+```bash
+mo auth token create --name release-agent --scope operator --ttl 720h --project proj_123
+mo auth token create --name owner-agent --scope operator --ttl 720h --all-projects
+```
 
-## 入站集成：独立令牌
+Repeat `--project` to grant more than one Project. Use `--all-projects` only with
+operator Scope. These choices are mutually exclusive, and Mohist never infers
+all-Project access from operator Scope alone.
 
-外部系统回调 Mohist（入站 webhook）时，每个集成端点持有自己的令牌，按项目收窄；泄露一个端点不波及其他。GitHub 接入使用 GitHub 原生签名机制，不适用本令牌，见 [GitHub](github.md)。
+Mohist will authenticate the PAT and check its Scope and Project grant before it
+looks for a matching prior request or creates work. This order prevents an
+unauthorized caller from discovering private resources through retries, status
+differences, or request identifiers. A PAT without a Project grant can continue
+to use its existing control-plane access, but it cannot use the direct external
+Agent boundary.
 
-## 令牌范围
+## Web UI Uses a Revocable Session
 
-| 范围 | 能做什么 |
+Paste an administrator-level token into the Web UI to receive a browser session.
+The browser does not retain the root token as its everyday credential. Device
+authorization confirmation also occurs in the Web UI and requires an existing
+login.
+
+## Runner Registration Separates Execution Access
+
+During `mo install runner`, the installer obtains a one-time registration token.
+Runner exchanges it for a credential bound to that Runner identity and uses the
+credential for all later connections and reports. This prevents another machine
+from presenting the same Runner name to gain its access.
+
+Revocation invalidates the Runner credential immediately. Repeat the
+installation registration flow to recover; do not reuse the revoked secret.
+
+## Integrations Keep Independent Boundaries
+
+Each inbound integration receives a Project-constrained credential so a leak in
+one callback does not authorize another. GitHub ingress uses native GitHub
+signatures instead. Local adapters use service credentials and still apply the
+external platform's own member and workspace policies.
+
+## Capability Summary
+
+| Capability | Access |
 |---|---|
-| 全部 | 一切读写与管理 |
-| 只读 | 查看状态与资源，不能改 |
-| Runner | 任务认领、心跳、结果与日志上报 |
-| 集成 | 调用指定项目的入站集成端点 |
+| Operator | Reads, writes, and administration. |
+| Read-only | Product observation without modification. |
+| Runner | Work claim, heartbeat, result, artifact, and log reporting. |
+| Integration | One inbound integration within its Project boundary. |
 
-管理员凭据与个人访问令牌默认「全部」，签发时可收窄到「只读」；机器凭据的范围固定，不可扩大。
+Machine credentials have fixed capabilities and cannot expand themselves.
+Sensitive infrastructure remains operator-only even when an operation only
+reads data.
 
-## Agent 身份与外部交付
+## Non-goals
 
-Mohist Agent 是独立身份：它经手的活动在 Mohist 记为它所为；它到外部系统交付时（GitHub 上发 issue、提 PR、发评论），也以独立的 bot 身份出现，而不是冒用你。GitHub 侧的身份配置见 [GitHub](github.md)。
+- Multiple Mohist users, roles, permission groups, or reusable Project ACLs.
+- A public developer platform or third-party application registration.
+- Single sign-on or enterprise identity federation.
 
-## 非目标
+The explicit Project grant on an external Agent PAT is only a credential safety
+boundary. It does not introduce any of these broader identity models.
 
-- 多用户、角色、权限组和可复用的项目级授权模型；外部 Agent PAT 的显式 Project 绑定只是令牌签发时的最小范围。
-- 公共开发者平台、第三方应用注册。
-- 单点登录（SSO）与企业身份联邦。
+## Implementation Gaps
 
-## 实装差距
+The single-administrator model, local bootstrap, authenticated Web UI, remote
+CLI device authorization and renewal, personal access tokens, Runner and
+integration credentials, capability enforcement, attribution, and audit records
+are implemented.
 
-本篇描述的能力全部未实装。当前除 Slack 与少数运维端点使用部署级共享凭据外，全部接口与 Web UI 无认证——[Self-host 部署](self-host.md) 的安全注意在实装前继续有效。落地由后续 issue 推进。
+Project grants for personal access tokens and the direct External Agent API are
+target behavior only. They remain tracked by
+[#387](https://github.com/suraciii/mohist/issues/387). The `--project` and
+`--all-projects` examples above will become executable with that work; do not use
+them as current installation steps.

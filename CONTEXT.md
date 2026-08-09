@@ -1,109 +1,171 @@
-# Mohist 统一语言
+# Mohist Glossary
 
-本词汇表定义 Mohist 各上下文共享的产品与 Agent 执行语言。生命周期、事件与模块边界的
-规范见 [`design/agent-execution.md`](design/agent-execution.md)。
+This glossary defines the product and Agent execution language shared across
+Mohist contexts. See [`design/agent-execution.md`](design/agent-execution.md) for
+lifecycle, event, and module boundaries.
 
-## 产品界面
+## Product Interfaces
 
-**外部 Agent**：用户在 Mohist 之外直接交互，并代表用户读取或操作 Mohist 的 Agent。
-它不是 Mohist 资源，也不由 Mohist 调度或运行。
+**External Agent**:
+An Agent with which the user interacts outside Mohist and that reads or operates
+Mohist on the user's behalf. It is not a Mohist resource, and Mohist neither
+schedules nor runs it.
 
-避免用法：用“Mohist Agent”或“Inline Agent”指代外部 Agent。
+_Avoid_: Mohist Agent, Inline Agent
 
-**Agent 接入（Agent Connection）**：把一个 Mohist Agent 暴露到某个外部交互场所的
-持久关系。它保存该场所中的 Agent 身份、调用范围和可用状态，但不复制 Mohist Agent
-的 Instructions、执行配置或 Skills，也不拥有 AgentSession。
+**Agent Connection**:
+A persistent relationship that exposes one Mohist Agent in an external
+interaction location and contains its identity, invocation scope, and
+availability there. It contains no copy of the Mohist Agent's Instructions,
+execution configuration, or Skills and owns no AgentSession.
 
-**Mohist App**：一个 Slack 工作区中只安装一次的 Mohist 管理入口。它负责建立工作区
-连接、安装和管理 Agent 接入，但不代表任何一个业务 Agent，也不代替 Agent App 执行工作。
+**Mohist App**:
+The Mohist management entry point installed once in a Slack workspace. It
+establishes the workspace connection and manages Agent Connections but neither
+represents a business Agent nor performs Agent App work.
 
-**Agent App**：一个 Agent 接入在 Slack 平台上的专属 App 与 Bot。它让一个 Mohist Agent
-以独立身份出现在一个 Slack 工作区中，但不复制 Agent 定义；同一个 Mohist Agent 在不同
-工作区中的 Agent App 是彼此独立的外部身份。
+**Agent App**:
+The dedicated Slack App and bot for one Agent Connection, presenting a Mohist
+Agent as an independent identity without copying its definition. Agent Apps for
+the same Mohist Agent in different workspaces are independent external
+identities.
 
-**Slack Bot**：Agent 接入在 Slack 中代表 Mohist Agent 的交互身份。Slack Bot 是客户端，
-不是另一个 Mohist Agent，也不是外部 Agent。
+**Slack Bot**:
+The client identity that represents a Mohist Agent in Slack through an Agent
+Connection. It is neither another Mohist Agent nor an External Agent.
 
-**Web UI**：Mohist 的备用操作和可视化平面。它用于观察、人工操作和接管，不是用户
-日常协作的工作站点，也不是主要交互入口；它仍可直接配置、启动和继续使用 Mohist Agent。
+**Web UI**:
+Mohist's fallback plane for observation, visualization, manual operations, and
+takeover, with direct configuration, launch, and continuation of Mohist Agents.
+It is neither the user's daily collaboration workspace nor the primary
+interaction entry point.
 
-## Agent 执行
+## Agent Execution
 
-**Action**：工作所有者把一次执行交给 Runner 时使用的输入输出契约。Action 没有 Agent
-身份，也不拥有工作生命周期。
+**Action**:
+The input and output contract by which a work owner delegates one execution to
+a Runner. It has no Agent identity and owns no work lifecycle.
 
-**Inline Agent**：Workflow task 直接选择 Runtime Action 并提供输入的使用方式。它不是
-持久化资源，没有 Agent ID。
+**Inline Agent**:
+A use of Agent capability in which a Workflow task selects a Runtime Action
+directly and supplies its input. It is not a persistent resource and has no
+Agent ID.
 
-**Agent 定义引用**：Workflow task 用 `uses: mohist/agent` 引用 Mohist Agent 定义的
-使用方式。定义快照随 dispatch 解析；不创建 AgentJob，没有 Agent 身份。
+**Agent Definition Reference**:
+A use of Agent capability in which a Workflow task references a Mohist Agent
+definition with `uses: mohist/agent`. Its definition snapshot resolves at
+dispatch, and it creates neither an AgentJob nor an Agent identity.
 
-**Mohist Agent**：Project 范围内可复用、具有稳定身份且可独立启动的预定义 Agent 资源。
-Web UI、CLI、Agent 接入、事件路由和评论提及都只是它的不同入口。
+**Mohist Agent**:
+A predefined, reusable Agent resource within a Project that has a stable
+identity and can start independently. The Web UI, CLI, Agent Connections, event
+routing, and comment mentions are entry points to the same Agent.
 
-**Agent Readiness**：Mohist 对 Agent 执行配置是否完整的统一诊断，取值为 `ready`、
-`needs-setup` 或 `unknown`。它不是 active / archived 生命周期；`needs-setup` 必须带有可行动
-的缺口，`unknown` 不能被入口猜成 Ready 或 Failed。
+**Agent Readiness**:
+Mohist's unified diagnosis of whether an Agent execution configuration is
+complete, with value `ready`, `needs-setup`, or `unknown`; it is not the
+`active` or `archived` lifecycle. `needs-setup` includes an actionable gap, and
+an entry point cannot infer Ready or Failed from `unknown`.
 
-**Agent Availability**：当前是否有与 Agent 执行定义匹配的 Runner 可以立即执行，或工作
-需要等待 Runner、容量或验证。Availability 是瞬时执行条件，不改变 Agent Readiness。
+**Agent Availability**:
+Whether a matching Runner can execute an Agent definition immediately or the
+work must wait for a Runner, capacity, or validation. It is a transient
+execution condition and does not change Agent Readiness.
 
-**AgentJob**：启动 Mohist Agent 时创建的一次工作。它拥有 launch 的调度状态、结果与恢复，
-并关联 AgentSession 中的首个 AgentTurn；它不等同于持续对话，也不裁定后续 Follow-up。
+**AgentJob**:
+One unit of work created when a Mohist Agent starts, owning launch scheduling
+state, result, and recovery and associated with the first AgentTurn in an
+AgentSession. It is neither the continuing conversation nor the arbiter of
+subsequent Follow-up work.
 
-**SessionInput**：AgentSession 已接受的一条有序输入。它有稳定身份，一个或多个连续
-SessionInput 可以由同一个 AgentTurn 处理。
+**SessionInput**:
+One ordered input with stable identity that an AgentSession has accepted. One
+AgentTurn can process one or more consecutive SessionInputs.
 
-**AgentTurn**：AgentSession 中一次连续的 Runtime 处理过程。它包含一个或多个有序
-SessionInput，并区分等待、执行和结果；它不是新的顶层工作。
+**AgentTurn**:
+One continuous Runtime processing period in an AgentSession that contains one
+or more ordered SessionInputs and distinguishes waiting, execution, and result
+states. It is not a new top-level unit of work.
 
-**AgentSession**：Mohist 持有的稳定逻辑会话与审计记录。它按顺序拥有 SessionInput 与
-AgentTurn，并持续记录回复和执行事实；一次 Turn 结束不会关闭 AgentSession。
+**AgentSession**:
+The stable logical session and audit record that Mohist owns, with ordered
+SessionInputs, AgentTurns, replies, and execution facts. The end of one
+AgentTurn does not close it.
 
-避免用法：用“Session 完成”“Session 失败”或“Session closed”表达一次执行的结果。
+_Avoid_: "Session completed," "Session failed," or "Session closed" for the
+result of one execution
 
-**Activity**：AgentSession 当前是否有尚未终结的 Turn，取值为 `idle`、`active` 或
-`unknown`。`active` 同时覆盖 Turn 排队和 Runtime 正在执行，具体阶段由 AgentTurn 状态表达；
-Activity 不是一次工作的成功或失败结果。
+**Activity**:
+Whether an AgentSession has a nonterminal AgentTurn, with value `idle`, `active`,
+or `unknown`; `active` covers a queued Turn and a Runtime that is executing,
+while AgentTurn state gives the phase. Activity is not the success or failure
+result of one unit of work.
 
-**Runtime Session**：OpenCode、Pi 或其他执行后端拥有的物理对话。它可以被缓存、恢复、
-替换或回收，不决定 AgentSession 是否还能接受后续输入。
+**Runtime Session**:
+A physical conversation owned by OpenCode, Pi, or another execution backend
+that can be cached, resumed, replaced, or reclaimed. It does not determine
+whether an AgentSession can accept more input.
 
-**Runtime Binding**：AgentSession 当前关联的 Runtime、物理 Session 与 Runner 等路由
-事实。Binding 可以整体替换，但不是 AgentSession 身份，也不是物理 Session 历史。
+**Runtime Binding**:
+The routing facts that associate an AgentSession with its current Runtime,
+physical Session, Runner, and related resources and that can be replaced as one
+unit. It is neither the AgentSession identity nor physical Session history.
 
-## Workflow 决策
+## Workflow Decisions
 
-**Approval**：对 Workflow 阶段产物作出的 approve 或 reject 决策。审批者署名是可选的
-归属信息，不是决策成立的前提；未署名表示这次决策没有记录操作者。
+**Approval**:
+An `approve` or `reject` decision about the output of a Workflow stage. An
+approver signature is optional attribution rather than a validity condition;
+an unsigned Approval records no operator.
 
-## 认证与访问
+**approval point**:
+A Workflow state that waits for an Approval before its output can continue
+through the pipeline.
 
-**管理员（Admin）**：Mohist 的唯一用户，拥有全部能力。系统没有第二个用户的概念。
+_Avoid_: quality gate
 
-**主体（Principal）**：Mohist 认可的调用者身份，分管理员、服务、Agent 三类。所有控制面
-访问都必须归属某个主体；「谁在调用」决定「能做什么」。
+## Authentication and Access
 
-**凭据（Credential）**：主体用来证明自己的令牌，可独立签发、撤销与过期；Mohist 只存
-其哈希。服务凭据是部署级机器身份（如 Slack adapter 持有的），不是用户。
+**Administrator (Admin)**:
+Mohist's only user, with all capabilities. The system has no concept of a second
+user.
 
-**Agent 身份**：Mohist Agent 作为主体的归因身份。Agent 的动作在 Mohist 记为 Agent 所为；
-到外部系统交付时以独立 bot 身份出现，不冒用管理员。
+**Principal**:
+A caller identity that Mohist recognizes as an Administrator, service, or
+Agent. Every control-plane access belongs to a Principal, whose identity
+determines its capabilities.
 
-避免用法：用“用户”指代 service 或 agent 主体；用“登录”指代 Runner 或集成的凭据认证。
+**Credential**:
+A token that proves a Principal's identity and can be issued, revoked, or
+expired independently, with only its hash stored by Mohist. A service
+Credential is a deployment-level machine identity, such as one held by a Slack
+adapter, and is not a user.
+
+**Agent Identity**:
+The attribution identity of a Mohist Agent as a Principal, to which Mohist
+attributes the Agent's actions. Its external delivery identity is an independent
+bot and does not impersonate the Administrator.
+
+_Avoid_: "user" for a service or Agent Principal; "login" for Runner or
+integration Credential authentication
 
 ## Workspace
 
-**Workspace**：Project 范围内持久存在的命名执行环境。它持有来源、仓库引用与
-归档状态，跨 AgentSession 与 WorkflowRun 存在；同一来源的多个会话与多个 Agent
-共享同一个 Workspace。目录内容与 git 组织不属于 Workspace 的定义。
+**Workspace**:
+A named, persistent Project execution environment that holds an Origin,
+repository references, and archive state and exists across AgentSessions and
+WorkflowRuns. Sessions and Agents with the same Origin share one Workspace;
+directory contents and git organization are outside its definition.
 
-**Workspace 来源（Origin）**：Workspace 的创建来源与唯一解析键——一个 Issue、
-一个交互入口上下文（Slack channel、Web 对话）或一次显式创建。同一来源同时
-最多对应一个 active Workspace。
+**Origin**:
+A Workspace creation source and unique resolution key: an Issue, an interaction
+context such as a Slack channel or Web conversation, or an explicit creation.
+At most one active Workspace exists for the same Origin at one time.
 
-**Workspace 物化（Materialization）**：Workspace 在某台 Runner 上的目录实例及其
-路由事实。物化位置决定后续执行的调度去向；目录可以被回收或随 Runner 丢失，
-重新物化从空目录开始，不是 Workspace 身份的变更。
+**Materialization**:
+A Workspace directory instance on one Runner, with routing facts that determine
+where subsequent execution is scheduled. Its directory can be reclaimed or
+lost with the Runner; rematerialization starts empty without changing Workspace
+identity.
 
-避免用法：用“worktree”“runner 目录”指代 Workspace 的身份；它们只是物化结果。
+_Avoid_: worktree or Runner directory as the Workspace identity

@@ -2,65 +2,80 @@
 status: converged
 ---
 
-# Agent 事件响应（Event Response）
+# Agent Event Response
 
-事件路由决定「谁来响应」（[`event-routing.md`](event-routing.md)），本文定义
-「响应本身遵守什么契约」：事件命中之后，从启动、行动到结果可见的全部保证。
+Event routing decides who responds; see
+[`event-routing.md`](event-routing.md). This document defines the response
+contract from launch through action and visible result.
 
 ## Model
 
-响应不是新实体：一次响应 = 路由触发的一次 AgentJob（+ Agent launch 来源的
-AgentSession）。响应的事实分三处，各有权威：
+A response is not a new entity. One response is one routing-triggered AgentJob
+and its Agent-launch-origin AgentSession. Three authorities own its facts:
 
-- AgentJob 裁定响应本身完成或失败；
-- AgentSession 记录 agent 的行动过程；
-- issue comment（若 agent 写了）承载对 owner 的交代。
+- AgentJob decides whether the response completed or failed.
+- AgentSession records Agent actions.
+- An Issue comment, when written by the Agent, explains the handoff to the
+  owner.
 
 ## Semantics
 
-### 响应保证
+### Guarantees
 
-1. **至多一次**：同一事件里同一 Agent 至多启动一次——耐久幂等键按
-   `(projectId, eventId, agentId)` 归一，由启动管线保证，与触发路径（规则、
-   关注、提及）无关。
-2. **基于当前状态，不是事件快照**：事件只说「发生过什么」。agent 行动前必须用
-   命令面核对「现在是什么」（例如 approve 前确认 run 仍在等审批）。领域命令对
-   过期状态明确失败——approve 一个不在等审批的 run 会被拒绝——agent 必须把
-   拒绝当作正常信号处理，而不是当成自己的错误重试。
-3. **无串行化**：同一 issue 的多个响应可以并发（路由触发与 @ 提及、连续事件）。
-   不建 per-issue 锁：冲突由目标聚合的命令校验拒绝，不产生脏状态。真实使用
-   出现冲突困扰时再评估。
-4. **响应失败必须可见**：AgentJob 终态失败（含 preflight 失败）发射
-   `com.mohist.agent.job.failed`，stamping 含 `agentid` 与业务谱系（issue /
-   epic / workflowrunid，如有）。该事件默认进入 inbox 与 hermes（新通知种类
-   「Agent 响应失败」，默认开）——「owner 以为 agent 在处理，其实没有」不能
-   静默。
-5. **失败事件可路由，但防自响应**：`agent.job.failed` 与其它事件同权进入路由
-   协议；规则的 AgentId 与信封 `agentid` 相同时视同不命中（envelope-only 检查，
-   记结构化日志）。两个 Agent 互相响应对方失败（A→B→A）的循环无法由此斩断，
-   属用户配置责任，靠干跑与可见性发现。
+1. **At most once:** One Agent starts at most once for one event. The launch
+   pipeline normalizes a durable idempotency key from
+   `(projectId, eventId, agentId)`, independent of trigger path through routing
+   rule, watch, or mention.
+2. **Use current state, not the event snapshot:** An event says what occurred.
+   Before acting, the Agent must use the command surface to confirm current
+   state. For example, it confirms that a run still waits for an Approval.
+   Domain commands reject stale state explicitly. Approving a run that no
+   longer waits is rejected. The Agent treats rejection as a normal signal, not
+   as an internal error to retry.
+3. **No serialization:** Responses for one Issue can run concurrently, such as
+   routing plus an `@` mention or consecutive events. Do not add a per-Issue
+   lock. Target aggregate command validation rejects conflicts without dirty
+   state. Reevaluate only if real use produces harmful conflict.
+4. **Response failure is visible:** Terminal AgentJob failure, including
+   preflight failure, emits `com.mohist.agent.job.failed`. Stamping includes
+   `agentid` and available business lineage such as Issue, Epic, and
+   WorkflowRun. The event enters inbox and Hermes by default as an
+   Agent-response-failed notification. The owner must not silently believe an
+   Agent is handling work when it is not.
+5. **Failure events are routable without self-response:** `agent.job.failed`
+   uses the normal routing protocol. A rule whose AgentId equals envelope
+   `agentid` does not match, based only on envelope data, and writes a structured
+   log. This cannot stop a two-Agent cycle such as `A -> B -> A`. Such a cycle
+   is user configuration and must be found through dry run and visibility.
 
-### 可归属
+### Attribution
 
-agent 的每个决定必须与人的可区分，这是 owner 回看历史能接手的前提：
+Every Agent decision must be distinguishable from a person's action so an owner
+can take over from history.
 
-- comment：`--author` 声明 agent 自己的名字（约定，已写入监管预设文本）。
-- 审批决议：可附带声明式操作者 `decidedBy`，与 comment author 一样是声明而非
-  认证。`mo run approve` / `mo run reject` 可用 `--author` 署名；审批决议事件与
-  读取模型在有署名时携带该字段。Agent 应主动署名，人操作时可以省略。
-- Web UI 的人工 approve / send back 不要求填写操作者。未署名决议保持
-  `decidedBy` 为空，不以 `web`、`owner` 或其它合成值代替。
+- A comment declares the Agent name through `--author`, by convention in the
+  supervision preset.
+- An Approval decision can declare `decidedBy`. Like comment author, it is a
+  declaration rather than authentication. `mo run approve` and
+  `mo run reject` accept `--author`. Decision events and read models include the
+  field when present. An Agent should provide attribution; direct human action
+  can omit it.
+- Manual Approve and Send Back in the Web UI do not require an actor. An
+  unsigned decision leaves `decidedBy` empty and does not synthesize `web`,
+  `owner`, or another value.
 
-### Not doing
+### Non-goals
 
-- per-issue 响应串行锁。
-- 响应自动重试：job 失败靠 `agent.job.failed` 上浮；重试等于新事件或人工动作。
-- 触发频控 / 冷却期：沿用 [`event-routing.md`](event-routing.md) 的 Not doing。
-- 被监管事件的直达通知抑制：通知语义见
-  [`agent-supervision.md`](agent-supervision.md) 的升级模型。
+- A per-Issue response serialization lock.
+- Automatic response retry. Job failure surfaces through
+  `agent.job.failed`; retry is a new event or manual action.
+- Trigger rate limits or cooldowns. Follow the Non-goals in
+  [`event-routing.md`](event-routing.md).
+- Suppression of direct notification for a supervised event. See the escalation
+  model in [`agent-supervision.md`](agent-supervision.md).
 
 ## Status
 
-`agent.job.failed` 事件与通知种类、可选审批 `decidedBy` 及 Agent 的操作者声明
-均已实装。响应保证 1–3 描述的是启动管线与领域命令的既有行为，本文把它们
-固定为契约。
+The `agent.job.failed` event and notification, optional Approval `decidedBy`,
+and Agent actor declaration are implemented. Guarantees 1 through 3 formalize
+existing launch-pipeline and domain-command behavior.

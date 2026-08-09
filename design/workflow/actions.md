@@ -1,35 +1,38 @@
-# Action 设计
+# Action Design
 
-Action 是 Workflow task 的可插拔执行单元:`uses` 选择 Action,`with` 传入全部输入,
-返回结构化 output 或 error。开发者写一个 Action = 写一份声明式契约(manifest)+
-一个纯函数实现,体验对齐 GitHub Actions。
+An Action is the pluggable execution unit of a Workflow task. `uses` selects the Action, `with`
+provides all inputs, and the Action returns structured output or an error. For a developer,
+authoring an Action means writing a declarative contract, or manifest, plus a pure-function
+implementation. The experience follows GitHub Actions.
 
-Action 不拥有 Workflow 的完成判断(`expect`),不代表有身份的 Mohist Agent,也不是
-独立进程——它是 Runner 进程内注册的受信任模块。
+An Action does not own the Workflow completion decision in `expect`, does not represent an
+identifiable Mohist Agent, and is not a separate process. It is a trusted module registered in the
+Runner process.
 
 ## Model
 
 ### Manifest
 
-每个 Action 由一份 manifest 声明契约。manifest 是纯数据(可序列化为 JSON),与实现
-同文件定义,通过 `defineAction` 获得类型推导:
+Each Action declares its contract in a manifest. The manifest is pure data that can be serialized
+as JSON. It is defined beside the implementation and gains type inference through `defineAction`:
 
 ```ts
 export const rebaseAction = defineAction({
   name: "mohist/rebase",
-  description: "把 workflow branch rebase 到 base branch 上",
+  description: "Rebase the workflow branch onto the base branch",
   inputs: {
     baseBranch: { type: "string", required: true },
     remote: { type: "string", default: "origin" },
   },
   outputs: {
-    headSha: { type: "string", description: "rebase 后的 HEAD" },
+    headSha: { type: "string", description: "HEAD after the rebase" },
   },
   errors: {
-    "rebase-conflict": "rebase 产生冲突,需要人工或恢复任务处理",
+    "rebase-conflict": "The rebase produced conflicts that require manual or recovery work",
   },
   run: async (inputs, host) => {
-    // inputs: { baseBranch: string; remote: string } —— 已校验、已填默认值
+    // inputs is validated and defaults are applied:
+    // { baseBranch: string; remote: string }
     const result = await host.exec("git", ["rebase", `${inputs.remote}/${inputs.baseBranch}`])
     if (!result.ok) return err("rebase-conflict", result.stderr)
     return ok({ headSha: result.stdout.trim() })
@@ -37,64 +40,71 @@ export const rebaseAction = defineAction({
 })
 ```
 
-- `name` 是 `uses` 匹配键,小写,`<namespace>/<action>` 形式,无版本段。
-- `inputs` 每项声明 `type`(`string | number | boolean | object | array`)、
-  `required` 或 `default`(二者互斥)、`description`。
-- `outputs` 声明成功 output 的字段,是文档与投影契约(`setVars`、
-  `tasks.<id>.outputs.*` 的可用路径来源)。
-- `errors` 声明该 Action 全部业务 error code(kebab-case)及含义,供 recovery
-  `when: error.code=...` 匹配与文档生成。
+- `name` is the case-insensitive `uses` match key. It is lowercase, has the form
+  `<namespace>/<action>`, and has no version segment.
+- Every `inputs` entry declares `type` (`string | number | boolean | object | array`), either
+  `required` or `default` but not both, and `description`.
+- `outputs` declares successful output fields. It is both documentation and a projection contract,
+  providing the available paths for `setVars` and `tasks.<id>.outputs.*`.
+- `errors` declares every business error code for the Action in kebab-case and its meaning. Recovery
+  can match these with `when: error.code=...`, and documentation can be generated from them.
 
-平台保留两类不进 manifest 的标识:保留输入 `working-directory`(engine 消费,决定
-`host.workDir`,Action 不可声明同名输入)和平台 error code(`invalid-input`、
-`unexpected-error`、`timeout`,由 engine 产生,Action 不得自造)。
+The platform reserves two categories that do not appear in the manifest: the reserved input
+`working-directory`, which the engine consumes to select `host.workDir` and which an Action cannot
+declare, and the platform error codes `invalid-input`, `unexpected-error`, and `timeout`, which the
+engine produces and an Action cannot invent.
 
-### 实现接口与 host
+### Implementation Interface and Host
 
-`run(inputs, host)` 是 Action 的全部实现面。默认 host 只有:
+`run(inputs, host)` is the entire Action implementation surface. The default host contains only:
 
 ```ts
 interface ActionHost {
-  workDir: string                 // 已解析的执行目录
+  workDir: string                 // Resolved execution directory
   signal: AbortSignal
   log(source: string, line: string): void
   exec(cmd: string, args: string[], options?): Promise<ExecResult>
 }
 ```
 
-Action 不接触 Run Variables、server 连接、runtime 句柄、recovery 声明或 dispatch
-元数据。需要上下文数据的,一律由 profile 通过 `with` 模板显式传入。
+An Action cannot access Run Variables, the Server connection, Runtime handles, recovery
+declarations, or dispatch metadata. A Profile must explicitly pass required context through a
+`with` template.
 
-### 能力(capabilities)
+### Capabilities
 
-超出默认 host 的能力必须在 manifest 声明,engine 按声明注入,不声明则不可见:
+Capabilities beyond the default host must be declared in the manifest. The engine injects only
+declared capabilities:
 
-| 能力 | 注入 | 用途 |
-| --- | --- | --- |
-| `agent-execution` | `host.agent.execute({ prompt, session?, options? })` | 执行一次 Agent 输入。Session 打开/attach、Runtime 生命周期由能力实现层处理,Action 只表达意图 |
-| `add-tasks` | 允许结果携带 `addTasks` | 追加后续 task,由 engine 统一上报,Action 不直连 server |
-| `write-vars` | `host.writeVars(vars)` | 执行中即时持久化 `vars.*`(与完成后投影的 `setVars` 不同,失败不回滚,供重试观察) |
+| Capability | Injection | Purpose |
+|---|---|---|
+| `agent-execution` | `host.agent.execute({ prompt, session?, options? })` | Execute one Agent input. The capability layer owns Session open/attach and the Runtime lifecycle; the Action only expresses intent |
+| `add-tasks` | allows a result to carry `addTasks` | Append later tasks. The engine reports them uniformly; the Action does not connect directly to Server |
+| `write-vars` | `host.writeVars(vars)` | Persist `vars.*` immediately during execution, unlike the post-completion `setVars` projection. Writes are not rolled back on failure and are visible to retries |
 
-声明 `agent-execution` 同时意味着:该 Action 的执行会产生 Runner-private execution fact
-(最终 assistant 文本),由能力实现层记录,供 `expect` 的 `_output` marker 匹配;
-Action 结果本身不携带它。
+Declaring `agent-execution` also means the Action produces a Runner-private execution fact: the
+final assistant text. The capability layer records it so the `_output` marker in `expect` can match
+it. The Action result itself does not carry this fact.
 
-### Registry 与 catalog
+### Registry and Catalog
 
-Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` 大小写不敏感
-匹配 `name`。全部 manifest 汇总为 catalog(纯 JSON),连同退役 Action 的 tombstone
-(name + 指引文案)在 Runner 注册时上报 server。
+Built-in Runner Actions are registered in one list. The registry is built from manifests and
+matches `uses` against `name` case-insensitively. All manifests are collected into a pure-JSON
+catalog and reported to Server when Runner registers, together with tombstones for retired Actions.
+Each tombstone contains a name and guidance.
 
-外部插件加载、`uses` 版本段(`@v1`)、组合 Action(YAML 编排 steps)都是非目标;
-扩展点保留为 registry 接受额外的 `defineAction` 集合。
+Loading external plugins, version segments in `uses` such as `@v1`, and composite Actions that
+orchestrate YAML steps are out of scope. The registry retains an extension point that accepts
+additional `defineAction` collections.
 
 ## Semantics
 
-### 输入
+### Inputs
 
-输入单通道:Action 的全部输入来自渲染并校验后的 `with`,Runner 在调用 Action 前完成
-渲染和 manifest 校验,Action 不接触 raw `with`、Variables resource 或 dispatch context。
-渲染时机与 attempt 快照语义以 [`task-dispatch.md`](task-dispatch.md) 为权威。
+Actions have one input channel: all inputs come from the rendered and validated `with` value. The
+Runner renders and validates against the manifest before calling the Action. The Action cannot see
+raw `with`, a Variables resource, or dispatch context. [`task-dispatch.md`](task-dispatch.md) is
+authoritative for rendering timing and attempt snapshot semantics.
 
 ```yaml
 - id: integrate:rebase
@@ -104,28 +114,31 @@ Runner 内置 Action 在一处列表注册,registry 由 manifest 构建,`uses` �
     remote: origin
 ```
 
-Runner 执行入口的处理顺序与失败行为(每一步失败都使 Action 不被调用):
+The Runner execution entry point applies this order. Failure at any step prevents the Action call:
 
-1. 在 attempt 快照上克隆原始 `with`,识别 manifest 声明 `render: deferred` 的字段并保留
-   原值;其余字段递归展开 `${{ ... }}`(未解析引用按 dispatch 契约失败,见
-   [`task-dispatch.md`](task-dispatch.md))。
-2. `expect` 同样在 attempt 快照上渲染;渲染结果只作为 Workflow 拥有的完成契约,不进入
-   Action 输入通道。
-3. 按 manifest 校验渲染后的 inputs:未知输入键 → `invalid-input` 失败,不静默忽略。
-4. 缺失 `required` 输入 → `invalid-input` 失败。
-5. 类型不匹配 → `invalid-input` 失败。
-6. 应用 `default`,交给 `run` 的是完整、强类型的 inputs。
+1. Clone the original `with` from the attempt snapshot. Preserve fields declared
+   `render: deferred` by the manifest and recursively expand `${{ ... }}` in every other field. An
+   unresolved reference fails under the dispatch contract; see
+   [`task-dispatch.md`](task-dispatch.md).
+2. Render `expect` from the same attempt snapshot. The result remains a Workflow-owned completion
+   contract and does not enter the Action input channel.
+3. Validate rendered inputs against the manifest. An unknown input key fails with `invalid-input`
+   instead of being silently ignored.
+4. A missing `required` input fails with `invalid-input`.
+5. A type mismatch fails with `invalid-input`.
+6. Apply each `default`; `run` receives complete, strongly typed inputs.
 
-manifest 声明 `render: deferred` 的字段不参与第 1 步递归展开,原样进入第 3–6 步校验,
-保留内部 `${{ ... }}` 供确实要生成后续 task 的 Action 传播。其余对象/数组字段按普通规则
-递归展开。
+A field declared `render: deferred` is excluded from recursive expansion in step 1 and passes
+unchanged through steps 3-6. Internal `${{ ... }}` expressions remain available for an Action that
+must propagate them into later tasks. Other object and array fields use the normal recursive rules.
 
-输入之间的一致性约束(例如 merge 前置条件)属于 Action 语义,写在 `run` 开头,
-失败返回 manifest 声明的 error code 或 `invalid-input`。
+Consistency constraints between inputs, such as merge preconditions, belong to the Action's
+semantics and are checked at the beginning of `run`. A failure returns an error code declared by
+the manifest or `invalid-input`.
 
-### 结果
+### Results
 
-Action 的公开结果是二选一:
+An Action has exactly one of two public result shapes:
 
 ```json
 { "output": { "prNumber": 42, "prUrl": "https://github.com/example/repo/pull/42" } }
@@ -135,50 +148,58 @@ Action 的公开结果是二选一:
 { "error": { "code": "pr-checks-failed", "message": "PR #42 checks failed. Fix the failures and retry." } }
 ```
 
-- `output` 是 JSON object 或 `null`,端到端保持结构化:Runner 内部、上报 wire、
-  `TaskRun.Output` 存储、`setVars` 投影、`tasks.<id>.outputs.*` 读取、recovery
-  `when: output.*` 匹配都作用于同一个 object,任何环节不做字符串化再解析。
-- `error.code` 必须是 manifest `errors` 声明的 code 或平台 code。
-- `error.message` 是唯一用户可见的错误文案;error 不携带额外 details,原始命令
-  输出和诊断进入 task log。
-- 原生异常不是协议的一部分;engine 在 Action 边界把它规范化为 `unexpected-error`。
-- 声明 `add-tasks` 能力的 Action 可在成功结果中附带 `addTasks`,由 engine 上报。
-- engine 不对成功 output 做运行期 schema 校验;声明了 `outputs` 但缺字段的问题在
-  `setVars` 投影处以明确错误暴露。
+- `output` is a JSON object or `null` and stays structured end to end. Runner internals, the report
+  wire format, `TaskRun.Output` storage, `setVars` projection, `tasks.<id>.outputs.*` reads, and
+  recovery matching through `when: output.*` all operate on the same object. No layer stringifies
+  and reparses it.
+- `error.code` must be a code declared in the manifest's `errors` or a platform code.
+- `error.message` is the only user-visible error text. An error has no additional details; raw
+  command output and diagnostics belong in the task log.
+- Native exceptions are not part of the protocol. The engine normalizes them to `unexpected-error`
+  at the Action boundary.
+- An Action with the `add-tasks` capability may include `addTasks` in a successful result, which the
+  engine reports.
+- The engine does not validate successful output against a schema at runtime. If a field declared
+  in `outputs` is missing, `setVars` projection exposes an explicit error.
 
-`TaskRun.Output` 只保存 Action 成功 output。Action 成功后被 `expect`、工作区约束
-或其他 Runner 后置检查判定失败时,TaskRun 可以同时保存原 output 与 Runner 产生的
-error。Task status、exit code 和 Runner-private execution fact 属于 Task 执行协议,不属于
-Action 公开结果。
+`TaskRun.Output` stores only successful Action output. If `expect`, a workspace constraint, or
+another Runner postcondition fails after an Action succeeds, TaskRun can store both the original
+output and the Runner-produced error. Task status, exit code, and Runner-private execution facts
+belong to the task execution protocol, not the public Action result.
 
-engine 对结果的通用处理不解释任何 Action 的业务语义。唯一按能力分派的行为:声明
-`agent-execution` 的 Action,其 output 由 task executor 依据 `expect` 投影为
-`null | { promise }`(见下文 expect 节);其余 Action 的 output 原样保留。不存在
-按 `uses` 名单的特判。
+Generic result handling in the engine does not interpret any Action's business semantics. The only
+capability-based branch is for an Action that declares `agent-execution`: the task executor projects
+its output from `expect` as `null | { promise }`, as described below. Every other Action preserves
+its output unchanged. There is no special-case list based on `uses`.
 
-### 校验时机与 catalog 消费
+### Validation Timing and Catalog Consumption
 
-- **Profile 保存/更新时**:server 用最近上报的 catalog 做全量校验——未知 `uses`、
-  未知输入键、缺 `required`、常量输入的类型错,都是可操作错误。含模板表达式的输入
-  只校验键名,类型留到 Runner 执行入口。catalog 尚未上报时跳过此层并记录,不阻塞保存。
-- **Runner 执行入口(权威,fail-closed)**:Runner 在 attempt 快照上渲染原始 `with` 后,
-  按本地 manifest 强制校验,失败即 task 失败(`invalid-input`),不会以未校验输入调用
-  `run`。Server 不再做 dispatch 前展开。
-- **退役 Action**:Runner 渲染时命中 tombstone → 以 tombstone 指引文案失败;profile
-  保存命中 → 拒绝保存。
+- **Profile save or update:** Server performs full validation against the most recently reported
+  catalog. Unknown `uses`, unknown input keys, missing `required` inputs, and constant input type
+  mismatches are actionable errors. Inputs containing template expressions are checked only for
+  key names; type validation waits for the Runner execution entry point. If no catalog has been
+  reported, this layer is skipped and recorded without blocking the save.
+- **Runner execution entry point, authoritative and fail-closed:** Runner renders the original
+  `with` from the attempt snapshot, enforces its local manifest, and fails the task with
+  `invalid-input` instead of invoking `run` with unvalidated input. Server no longer expands
+  templates before dispatch.
+- **Retired Action:** a tombstone encountered during Runner rendering fails with its guidance; a
+  tombstone encountered during Profile save rejects the save.
 
-Profile 保存先由 Workflow Definition 校验器产生语义模型，再使用 catalog 判断 `uses` 与
-`with`。Definition 校验器只递归检查 `with` 值中的模板表达式；catalog 不重复判断
-Definition 字段或模板命名空间。两类诊断合并进同一条校验异常，使用同一 YAML path 规则
-并以来源标签区分。保存成功响应显式携带 `actionValidation: { performed, reason? }`，
-告知调用方 Action-contract 校验是否执行；catalog 不可用时按上文跳过并在响应中说明。
-内置 Profile 加载、运行时加载与 `mo run validate` 只做 Definition 校验，不依赖
-catalog。legacy `with.agent` / `with.kind` / `with.type` / `with.expect` 不作为特例
-存在，一律按未知输入键拒绝。
+Profile save first uses the Workflow Definition validator to produce a semantic model, then uses
+the catalog to evaluate `uses` and `with`. The Definition validator only recursively checks template
+expressions in `with` values. The catalog does not repeat Definition field or template namespace
+validation. Both diagnostic sources are combined into one validation exception, use the same YAML
+path convention, and carry source labels. A successful save response explicitly contains
+`actionValidation: { performed, reason? }`, telling the caller whether Action-contract validation
+ran. If the catalog is unavailable, the response explains the skipped validation. Built-in Profile
+loading, runtime loading, and `mo run validate` only perform Definition validation and do not depend
+on the catalog. Legacy `with.agent`, `with.kind`, `with.type`, and `with.expect` receive no special
+treatment and are rejected as unknown input keys.
 
-### setVars
+### `setVars`
 
-把 Action output 字段投影到 Run Variables:
+`setVars` projects Action output fields into Run Variables:
 
 ```yaml
 setVars:
@@ -186,17 +207,18 @@ setVars:
   change.url: output.changeUrl
 ```
 
-- 左侧是 `vars` 下的 path,右侧是 Action output 中的 JSON path。
-- Runner 在报告 task complete 前执行 `setVars`;投影失败(含 path 不存在)则 task
-  失败,不静默跳过。
-- 只能修改 `vars.*`,不能修改 `workflow`、`stage`、`work`、`issue`、`workspace`。
-- Recovery task 可以覆盖相同的 `vars.*`。
-- Runner 使用与其他调用方相同的 Run Variables PATCH API,但生成的 body 只包含
-  `vars`,不包含 `stages`。完整语义见 [`variables.md`](variables.md)。
+- The left side is a path under `vars`; the right side is a JSON path in Action output.
+- Runner applies `setVars` before reporting task completion. A projection failure, including a
+  missing path, fails the task instead of being silently skipped.
+- Only `vars.*` can change. `workflow`, `stage`, `work`, `issue`, and `workspace` cannot.
+- A recovery task can overwrite the same `vars.*` path.
+- Runner uses the same Run Variables PATCH API as other callers, but its generated body contains
+  only `vars`, not `stages`. See [`variables.md`](variables.md) for complete semantics.
 
-### artifacts
+### `artifacts`
 
-声明需要采集的输出。采集是 best-effort:文件不存在时跳过,不让 task 失败。
+`artifacts` declares output to collect. Collection is best-effort: a missing file is skipped and
+does not fail the task.
 
 ```yaml
 artifacts:
@@ -204,27 +226,31 @@ artifacts:
     - path: docs/proposal.md
 ```
 
-### expect
+### `expect`
 
-`expect` 是由 Workflow 拥有的 task 完成契约,与 Action 输入分离。作者可见语义
-(失败规则、与 `artifacts` 的搭配)见
-[docs 的 expect 节](../../docs/workflow-definition.md#expect--完成要求)。Runner 的
-task executor 在 attempt 快照上渲染 `expect`,只在 Action 成功后应用完成判断;Action
-失败、取消或超时时直接保留原始失败,不读取文件或 marker。Action 与能力实现层都不
-解释它,渲染后的 `expect` 也不进入 Action 输入通道。
+`expect` is a Workflow-owned task completion contract separate from Action input. See the
+[product reference](../../docs/workflow-definition.md#expect-completion-requirements) for
+author-visible failure rules and its relationship with `artifacts`. The Runner task executor
+renders `expect` against the attempt snapshot and applies completion checks only after the Action
+succeeds. If the Action fails, is cancelled, or times out, the original failure is preserved and no
+file or marker is read. Neither the Action nor its capability implementation interprets `expect`,
+and rendered `expect` does not enter the Action input channel.
 
-marker 的 `path` 可以是特殊值 `_output`,表示对本次执行最终 assistant 文本匹配,而不是
-文件内容。task executor 从 `agent-execution` 能力记录的 execution fact 中取得该文本;它不进入
-Action output,也不要求 Action 额外声明。
+A marker `path` may use the special value `_output`, which matches the final assistant text of this
+execution instead of file content. The task executor obtains that text from the execution fact
+recorded by the `agent-execution` capability. It does not enter Action output and requires no extra
+Action declaration.
 
-`_output` 只识别 promise-tag 形式(`<promise>VALUE</promise>`)。多个被接受的值出现
-时,按文本中最后出现的为准(与 file marker 的"声明顺序优先"不同)。若需要按字面
-substring 匹配最终 assistant 文本,请把字面值编码为 `oneOf` 中 promise tag 的内部
-VALUE。`_output` 不读取文件系统,evidence 也不会把它当作可抓取的文件路径。
+`_output` recognizes only the promise-tag form `<promise>VALUE</promise>`. If multiple accepted
+values appear, the last occurrence in the text wins, unlike file markers where declaration order
+wins. To match a literal substring of final assistant text, encode the literal as the `VALUE`
+inside a promise tag in `oneOf`. `_output` does not read the file system, and evidence collection
+does not treat it as a file path.
 
-### Error 与 recovery
+### Errors and Recovery
 
-Runner 为 recovery 构造 `{ output, error }` 上下文。显式 `when` 使用该上下文的 path:
+Runner constructs an `{ output, error }` context for recovery. An explicit `when` uses a path in
+that context:
 
 ```yaml
 handlers:
@@ -232,88 +258,99 @@ handlers:
   - when: output.promise=FAIL
 ```
 
-没有 `when` 的最后一个 handler 是存在 error 的兜底。它可以处理 executor 在 Action
-完成后发现的失败,例如工作区不干净。`error.message` 不是机器协议,禁止用于 `when`。
+The final handler without `when` is a fallback only when an error exists. It can handle a failure
+that the executor finds after Action completion, such as a dirty workspace. `error.message` is not
+a machine protocol and must not be used in `when`.
 
-系统没有全局 Action error enum,engine 也不理解具体错误含义;error code 的权威目录
-是各 Action 的 manifest。Recovery 设计见 [`recovery.md`](recovery.md)。
+There is no global Action error enum, and the engine does not understand error-specific meaning.
+Each Action manifest is the authoritative catalog of its error codes. See
+[`recovery.md`](recovery.md) for recovery design.
 
-### checks
+### Checks
 
-Stage check 项通过相同的 `uses`/`with` 复用同一 Action 契约。成功/失败到
-pass/fail 的映射由 check 宿主完成,Action 不感知自己运行在 task 还是 check 中。
+A Stage check uses the same `uses` and `with` values to reuse the same Action contract. The check
+host maps success or failure to pass or fail. An Action does not know whether it is running as a
+task or a check.
 
-## 内置 Action
+## Built-In Actions
 
 ### `mohist/opencode`
 
-Runtime 特有的 `agent-execution` Action;它与 Agent / Session 的所有权关系(直接使用即
-Inline Agent、不解析 Agent 定义等不变量)见 [`../agent-execution.md`](../agent-execution.md)。
-Runtime 已由 `uses` 选择,输入不需要 `kind` 或 `type` discriminator。
+This Runtime-specific Action declares `agent-execution`. See
+[`../agent-execution.md`](../agent-execution.md) for invariants about its ownership relationship
+with Agent and Session, including that direct use means an Inline Agent and does not resolve an
+Agent definition. Because `uses` already selects the Runtime, inputs need no `kind` or `type`
+discriminator.
 
-输入契约:
+Input contract:
 
 ```ts
 type OpenCodeActionInput = {
-  prompt: string                    // Runner 渲染后的非空字符串
-  session?: string                  // 逻辑 Session 名称
+  prompt: string                    // Non-empty string rendered by Runner
+  session?: string                  // Logical Session name
   options?: {
-    model?: string                  // provider/model;model 自身可包含 '/'
-    variant?: string                // 与 model 同级的独立字段,不拼进 model ID
+    model?: string                  // provider/model; model itself may contain '/'
+    variant?: string                // Separate sibling of model; never joined to the model ID
   }
 }
 ```
 
-`options` 通常由 `${{ vars.agent }}` 整值展开而来,模板求值时机以
-[`task-dispatch.md`](task-dispatch.md) 为权威。`options` 中除 `model` 与 `variant`
-之外的键被忽略并记入诊断,不使执行失败。Workflow 把 `expect` 作为 task 完成契约单独
-提供;旧结构 `with.expect`、`with.agent` 在 profile 加载阶段就被可操作错误拒绝。
+`options` is normally expanded as a whole value from `${{ vars.agent }}`. See
+[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. Keys other than `model` and
+`variant` in `options` are ignored and recorded in diagnostics without failing execution. Workflow
+provides `expect` separately as the task completion contract. Legacy `with.expect` and `with.agent`
+are rejected with actionable errors when the Profile loads.
 
-输出契约:
+Output contract:
 
 ```ts
 type OpenCodeActionOutput = null | { promise: string }
 ```
 
-该 `{ promise }` output 由 task executor 依据 `expect` 对 `agent-execution` Action 合成;
-Action 与能力实现层都不产生它。Runtime Session 身份、model、usage、transcript、
-诊断信息和 expectation 明细保存在各自所属模型中,不复制到 Action output。OpenCode
-实现见 [`../runtimes/opencode.md`](../runtimes/opencode.md)。
+The task executor synthesizes this `{ promise }` output for an `agent-execution` Action based on
+`expect`; neither the Action nor the capability layer produces it. Runtime Session identity, model,
+usage, transcript, diagnostics, and expectation details stay in the models that own them and are
+not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) for the
+OpenCode implementation.
 
-### Git 与 GitHub PR Action
+### Git and GitHub PR Actions
 
-`mohist/push`、`create-github-pr`、`mark-github-pr-ready`、`merge-github-pr`、
-`mohist/rebase` 都是普通 Workflow Action,遵循输入单通道:base branch、workflow
-branch、remote 等由 profile 通过 `${{ repository.* }}` / `${{ workspace.* }}` 显式
-传入,Action 不反查 Run Variables。
+`mohist/push`, `create-github-pr`, `mark-github-pr-ready`, `merge-github-pr`, and `mohist/rebase`
+are ordinary Workflow Actions with one input channel. A Profile explicitly passes the base branch,
+workflow branch, remote, and other context through `${{ repository.* }}` and
+`${{ workspace.* }}`. An Action does not look up Run Variables itself.
 
-- `push`:唯一负责把当前 workspace 的已提交 HEAD 发布到远端 workflow branch。workflow
-  branch 由一个 WorkflowRun 独占,因此 Profile 使用强制更新,不依赖 remote-tracking ref。
-- `create-github-pr`:只创建或更新 draft PR,输出稳定 PR 身份;它不执行 Git 操作,也不
-  决定哪个提交应被发布。
-- `mark-github-pr-ready`:把 draft PR 标记为 ready;已经 ready 时保持幂等。
-- `merge-github-pr`:以 squash 方式合并 PR;执行 merge 前必须等待 PR checks。
+- `push` is solely responsible for publishing the current workspace's committed HEAD to the remote
+  workflow branch. One WorkflowRun exclusively owns the workflow branch, so the Profile uses a
+  force update and does not depend on a remote-tracking ref.
+- `create-github-pr` only creates or updates a draft PR and outputs a stable PR identity. It performs
+  no Git operation and does not decide which commit should be published.
+- `mark-github-pr-ready` marks a draft PR ready and is idempotent if it is already ready.
+- `merge-github-pr` squash-merges a PR and must wait for PR checks before the merge.
 
-发布、PR 元数据和 merge 是三个独立 task,因此失败边界也独立:push 失败只重试 push,
-PR 操作失败只重试 PR,merge 恢复只处理 merge 自己的失败。
+Publishing, PR metadata, and merging are three independent tasks with independent failure
+boundaries. A push failure retries only push; a PR operation failure retries only that PR operation;
+merge recovery handles only its own failure.
 
-等待 PR checks 是 merge Action 的内部前置条件,不是 stage-level check。它轮询
-`gh pr view --json statusCheckRollup`。checks 为空时在 120 秒 grace window 内等待;
-checks 失败时返回 `error.code: pr-checks-failed`。Action 不做隐式自动修复,profile 必须
-声明显式 recovery。
+Waiting for PR checks is an internal precondition of the merge Action, not a Stage-level check. It
+polls `gh pr view --json statusCheckRollup`. If checks are empty, it waits within a 120-second grace
+window. Failed checks return `error.code: pr-checks-failed`. The Action performs no implicit repair;
+the Profile must declare explicit recovery.
 
-`mohist/github-pr-checks` 把同一套轮询/分类逻辑暴露成可在 stage graph 中声明的显式 task
-（典型用法:check 阶段在 `mark-pr-ready` 之后做交付前 CI 门控）。它复用 merge Action 内部
-的轮询纯函数与 `pr-checks-failed` error code,因此 profile 的 recovery handler 与 merge-pr
-完全对称(同样的 `recover:fix-pr-checks` + `recover:push` + `retrySelf`)。它只读校验:
-不改 PR、不 push、不做隐式修复,profile 声明显式 recovery。
+`mohist/github-pr-checks` exposes the same polling and classification logic as an explicit task in
+the Stage graph. A typical Profile places this delivery CI check after `mark-pr-ready` in the check
+Stage. It reuses the merge Action's polling pure function and `pr-checks-failed` error code, so its
+recovery handler is symmetric with merge-pr: the same `recover:fix-pr-checks` + `recover:push` +
+`retrySelf`. It is read-only: it does not modify the PR, push, or perform implicit repair. The
+Profile declares recovery explicitly.
 
-完整 task graph 见 [`builtin-workflows.md`](builtin-workflows.md)。
+See [`builtin-workflows.md`](builtin-workflows.md) for the complete task graph.
 
 ## Status
 
-已实装：manifest 与 `defineAction`、registry 与 catalog（含 tombstone）随 runner 注册
-上报 server、Profile 保存时 catalog 校验（响应携带 `actionValidation` 标记）、声明式
-能力注入（`agent-execution` / `add-tasks` / `write-vars`）、结构化 output 端到端与
-`setVars` 投影。按名特判名单（PROMISE_PROJECTED / REMOVED）已移除，`openspec-tasks`
-等越权访问已收敛为声明式 effects。
+Implemented: manifests and `defineAction`; registry and catalog reporting, including tombstones,
+when Runner registers with Server; catalog validation during Profile save with an
+`actionValidation` response marker; declarative capability injection for `agent-execution`,
+`add-tasks`, and `write-vars`; structured output end to end; and `setVars` projection. Named
+special-case lists, `PROMISE_PROJECTED` and `REMOVED`, have been removed. Privileged access such as
+`openspec-tasks` has been reduced to declarative effects.

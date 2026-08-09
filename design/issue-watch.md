@@ -2,84 +2,99 @@
 status: converged
 ---
 
-# Issue 关注（Watch）
+# Issue Watch
 
-Issue 级的 Agent 关注声明：被关注的 issue 到达审批门或终态失败时，Agent 自动
-响应。这是 issue 的 autopilot 开关——路由表管项目级与任意表达式
-（[`event-routing.md`](event-routing.md)），关注管「这一个 issue」的日常开关；
-响应本身遵守 [`event-response.md`](event-response.md) 的契约。
+An Issue-level Agent watch declaration makes an Agent respond when the Issue
+reaches an Approval point or terminal failure. It is the Issue autopilot switch.
+The routing table owns Project-wide and arbitrary expressions; see
+[`event-routing.md`](event-routing.md). Watch owns the daily switch for one
+Issue. Responses follow [`event-response.md`](event-response.md).
 
 ## Model
 
-```text
+```text literal
 WatchEntry
   ProjectId, IssueNumber, AgentId
   State: watching | muted
 ```
 
-- WatchEntry 由 Agent context 拥有与持久化。Issue 聚合不持有它；issue 详情里的
-  「关注 / 静音」两块是对 WatchEntry 的读取投影。
-- `watching`：该 issue 的审批请求与 run 终态失败事件启动该 Agent。
-- `muted`：压制该 Agent 在该 issue 上的一切启动，包括路由规则命中。
-- 事件集固定为 `stage.approval-requested` 与 `run.failed`——autopilot 的含义
-  就是这两类时刻，不可配置；要花式响应用路由规则。
-- 关注启动使用内置响应提示词（事件事实 + 「按你的身份指令处理」），没有
-  per-rule ResponsePrompt；纪律由 Agent 的身份指令承载。
+- Agent context owns and persists WatchEntry. The Issue aggregate does not own
+  it. Watching and muted sections in Issue details are read projections.
+- `watching` starts that Agent for an Approval request or terminal run failure
+  on the Issue.
+- `muted` suppresses every launch of that Agent for the Issue, including a
+  routing-rule match.
+- The fixed event set is `stage.approval-requested` and `run.failed`. These two
+  moments define autopilot and are not configurable. Use routing rules for other
+  responses.
+- Watch launch uses a built-in response prompt containing event facts and an
+  instruction to act according to Agent Instructions. It has no per-rule
+  ResponsePrompt. Agent Instructions own the discipline.
 
 ## Semantics
 
-### 命令面
+### Command Surface
 
-```text
+```text literal
 mo issue watch add <issue> --agent <name>
-  无声明        -> 建 watching
-  已 muted      -> 转 watching
-  已 watching   -> 幂等，报告现状
+  no declaration  -> create watching
+  muted            -> change to watching
+  watching         -> idempotently report current state
 
 mo issue watch remove <issue> --agent <name>
-  已 watching   -> 删除声明
-  无声明        -> 建 muted（语义：该 Agent 被项目级规则覆盖，这里撤回）
-  已 muted      -> 幂等，报告现状
+  watching         -> delete declaration
+  no declaration  -> create muted; withdraw Project-wide coverage here
+  muted            -> idempotently report current state
 
 mo issue watch list <issue>
-  列出该 issue 的 watching 与 muted；`mo issue view` 展示同样两块。
+  list watching and muted for the Issue; mo issue view shows both groups
 ```
 
-`watch add` / `remove` 校验 Agent 存在且 active；对已 archived 的 Agent 拒绝。
+`watch add` and `watch remove` require an existing active Agent and reject an
+archived Agent.
 
-### 启动
+### Launch
 
-带 `issue` 属性的事件到达后，分发侧在路由表求值之外查 WatchEntry：
+When an event with an `issue` attribute arrives, dispatch examines WatchEntry in
+addition to the routing table:
 
-```text
-for 命中规则的 agent:           # 路由路径，不变
-  if (issue, agent) 是 muted: 视同不命中，记结构化日志
+```text literal
+for each Agent matched by a rule:       # Existing routing path
+  if (Issue, Agent) is muted:
+    treat as no match and write a structured log
 
-if 事件类型 ∈ {approval-requested, run.failed}:
-  for (issue, agent) 是 watching 的声明:
-    launch(agent, prompt = 内置模板, context = issue)
+if event type is approval-requested or run.failed:
+  for each watching (Issue, Agent) declaration:
+    launch(Agent, prompt = builtin template, context = Issue)
 ```
 
-- 幂等键按 `hash(projectId, eventId, agentId)` 归一：同一事件里同一个 Agent
-  无论被规则命中还是被关注命中，只启动一次。
-- muted 的压制先于一切启动发生；同一 issue 上 muted 优先于任何规则与关注
-  （watching 与 muted 不可能同时存在，状态唯一）。
-- workspace 解析、触发标签、preflight 失败进失败 AgentJob 等行为与路由启动
-  一致；触发标签注明来源是 watch。
+- The normalized idempotency key is
+  `hash(projectId, eventId, agentId)`. One Agent starts once for one event even
+  when both a rule and watch match.
+- Muting suppresses launch before any trigger. On one Issue, muted takes
+  precedence over every rule and watch. Watching and muted cannot coexist
+  because WatchEntry has one state.
+- Workspace resolution, trigger labels, and failed AgentJob creation after
+  preflight failure match routing launch behavior. The trigger label records
+  watch as the origin.
 
-### 与路由表的分工
+### Routing Table Boundary
 
-- 项目级监管、任意事件类型、任意匹配表达式 → 路由规则，有排序与 Continue。
-- 单 issue 的日常开关 → 关注；不进入路由表，没有排序语义。
-- `@` 提及要求持续关注时，Agent 用 `mo issue watch add` 兑现，不再手写路由
-  规则（见 [`agent-mentions.md`](agent-mentions.md)）。
+- Use a routing rule for Project supervision, arbitrary event types, or
+  arbitrary expressions. Rules have order and Continue.
+- Use watch as a daily switch for one Issue. It does not enter the routing table
+  and has no ordering semantics.
+- When an `@` mention requests continuing watch, the Agent runs
+  `mo issue watch add` instead of writing a routing rule. See
+  [`agent-mentions.md`](agent-mentions.md).
 
 ## Status
 
-已实装：WatchEntry 持久化（Agent context）、`mo issue watch add/remove/list`
-与 issue 读模型投影、分发侧 muted 压制与 watching 启动（内置提示词，以
-`watch:` 合成规则 id 复用路由启动管线）。
+Implemented: WatchEntry persistence in Agent context; `mo issue watch
+add/remove/list`; Issue read-model projection; dispatch-side muted suppression
+and watching launch with a built-in prompt and a synthetic `watch:` rule ID.
 
-实装差距：启动管线的耐久键当前仍按 `(projectId, eventId, ruleId)`（watch 用
-`watch:` 合成规则 id），(event, agent) 合并只在单次分发内生效；归一到
-agentId 键由 issue #532 收敛。
+Implementation gap: The durable launch key remains
+`(projectId, eventId, ruleId)`, with a synthetic `watch:` rule ID. Event-Agent
+deduplication applies only within one dispatch. Issue #532 will normalize it to
+an AgentId key.

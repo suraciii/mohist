@@ -1,15 +1,17 @@
 # `mohist/pi` Action
 
-`mohist/pi` 是 Pi Action：它把一次工作交给 Pi，并把执行事实报告回来。它与
-[`mohist/opencode`](opencode.md) 处于同一层——Workflow 用 `uses` 选择其中一个执行
-后端，两者不互相包装，也不共享输入。Workflow 直接使用它时形成 Inline Agent，但
-Action 本身不是 Agent，也不会查找或启动 Mohist Agent。
+`mohist/pi` delegates one unit of work to Pi and reports the execution facts.
+It is a peer of [`mohist/opencode`](opencode.md): a Workflow selects one backend
+with `uses`; neither wraps the other or shares its input. When a Workflow uses
+it directly, it forms an Inline Agent. The Action itself is not an Agent and
+does not find or start a Mohist Agent.
 
-Agent、AgentJob 和 AgentSession 的总体关系见 [Agent 与 AgentSession](../agent-sessions.md)。
+See [Agents and AgentSessions](../agent-sessions.md) for the overall
+relationship among Agent, AgentJob, and AgentSession.
 
-## 基本用法
+## Basic Usage
 
-最小配置只有提示词：
+The minimal configuration contains only a prompt:
 
 ```yaml
 - id: proposal
@@ -18,8 +20,9 @@ Agent、AgentJob 和 AgentSession 的总体关系见 [Agent 与 AgentSession](..
     prompt: ${{ prompts.proposal }}
 ```
 
-模型选项的绑定方式与 `mohist/opencode` 相同：在 Project、Issue 或 Run Variables 中
-设置 `agent` 对象，再由 Workflow Profile 显式绑定 `session` 和 `options`：
+Model options use the same binding pattern as `mohist/opencode`. Set an `agent`
+object in Project, Issue, or Run Variables, then bind `session` and `options`
+explicitly from the Workflow Profile:
 
 ```yaml
 vars:
@@ -38,84 +41,111 @@ stages:
           options: ${{ vars.agent }}
 ```
 
-`agent` 变量的合并规则（Issue 覆盖 Project，Run 覆盖 Issue）与其他 Workflow 变量
-一致，见 [`mohist/opencode`](opencode.md) 的基本用法。同一个 `agent` 对象可以绑定给
-任何一个后端 Action：对 `mohist/pi` 有效的键是 `model` 和 `variant`；对象中其余的键
-（例如为 Mohist Agent 准备的 `runtime`）会被忽略并记入诊断，不会导致执行失败。
+The `agent` Variable follows the same merge rules as other Workflow Variables:
+Issue overrides Project, and Run overrides Issue. See the
+[`mohist/opencode`](opencode.md) basic usage. The same `agent` object can bind
+to either backend Action. For `mohist/pi`, the valid keys are `model` and
+`variant`. Other keys, such as `runtime` for a Mohist Agent, are ignored and
+recorded in diagnostics. They do not fail execution.
 
-`${{ vars.agent }}` 占据整个 `options` 值时，展开结果仍是一个对象。没有显式绑定
-`options` 时，使用当前 Pi Session 的模型选择，首次执行则使用 Pi 默认值。
+When `${{ vars.agent }}` occupies the entire `options` value, its expansion is
+still an object. Without an explicit `options` binding, the Action uses the
+current Pi Session's model selection, or the Pi default for the first
+execution.
 
-## Action 输入
+## Action Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `prompt` | 是 | — | 本次交给 Pi 的提示词 |
-| `session` | 否 | — | WorkflowRun 内的逻辑 Session 名称；省略时使用当前 Work ID |
-| `options` | 否 | — | 本次选择 Pi 模型的对象 |
-| `options.model` | 否 | — | Pi 模型，使用 `provider/model` 标识 |
-| `options.variant` | 否 | — | 该模型的推理档位（Pi thinking level），如 `low`、`medium`、`high` |
-| `timeout` | 否 | `3600000` | 本次执行的期限，以毫秒为单位；到达后中断当前执行 |
+| `prompt` | Yes | - | Prompt sent to Pi for this execution |
+| `session` | No | - | Logical Session name within the WorkflowRun; the current Work ID is used when omitted |
+| `options` | No | - | Object that selects the Pi model for this execution |
+| `options.model` | No | - | Pi model in `provider/model` form |
+| `options.variant` | No | - | Pi reasoning level, such as `low`, `medium`, or `high` |
+| `timeout` | No | `3600000` | Execution deadline in milliseconds; reaching it interrupts the current execution |
 
-工具、技能、系统提示词和自动压缩继续使用 Pi 自己的配置，不复制成 Mohist 字段。
-Action Input 不需要 `agent`、`kind` 或 `type`；使用哪个执行后端已经由 `uses` 决定。
+Tools, Skills, system prompts, and automatic compaction remain Pi
+configuration. Mohist does not duplicate them as fields. Action Input does not
+need `agent`, `kind`, or `type`; `uses` already selects the execution backend.
 
-Action Input 展开后的值是本次执行的唯一配置事实。`mohist/pi` 不会在后台额外读取
-`vars.agent`。
+The expanded Action Input is the only configuration fact for this execution.
+`mohist/pi` does not read `vars.agent` implicitly.
 
 ## Workflow Session
 
-逻辑 `session` 名称语义、物理 Session 复用不变量、缺失自动恢复、收尾执行与并发
-规则与 `mohist/opencode` 共享，见
-[Action 契约](README.md#agent-执行类-action-的共享语义)。本 Action 的物理 Session
-是 Pi 的 session 文件；自动恢复以文件明确不存在为准，文件损坏或无法打开不算缺失。
+Logical `session` names, physical Session reuse invariants, missing-Session
+recovery, cleanup execution, and concurrency follow the rules in
+[Action Contracts](README.md#shared-semantics-for-agent-execution-actions).
+The physical Session for this Action is Pi's session file. Automatic recovery
+requires that file to be explicitly missing. A corrupt or unreadable file is
+not considered missing.
 
-Session 用量分别记录 input、output、cache read、cache write 与 thought tokens（Pi 提供时）；
-cache write 不会并入 cache read，也不会因事件重投而重复累加。
+Session usage records input, output, cache read, cache write, and thought tokens
+when Pi provides them. Cache write is not included in cache read and is not
+counted again when an event is redelivered.
 
-## Pi Session 操作
+## Pi Session Operations
 
-Follow-up、Compact、Reset 的行为与恢复规则和 `mohist/opencode` 共享，见
-[Action 契约](README.md#agent-执行类-action-的共享语义)；操作对象是当前绑定的
-Pi Session。
+Follow-up, Compact, and Reset follow the shared behavior and recovery rules in
+[Action Contracts](README.md#shared-semantics-for-agent-execution-actions).
+They operate on the currently bound Pi Session.
 
-## 完成与失败
+## Completion and Failure
 
-完成判断、promise Action Output、执行期限、provider 额度耗尽与中断确认的共享语义
-见 [Action 契约](README.md#agent-执行类-action-的共享语义)。
+See [Action Contracts](README.md#shared-semantics-for-agent-execution-actions)
+for completion, promise Action Output, deadlines, exhausted provider quota, and
+interruption confirmation.
 
-Pi 无人值守执行时不会被工具确认阻塞：Pi 不在单次工具执行前要求批准，已配置允许的
-操作直接执行。
+Unattended Pi execution does not block for tool confirmation. Pi does not ask
+for an Approval before each tool execution, and configured operations run
+directly.
 
-## Pi 责任边界
+## Pi Responsibility Boundary
 
-Pi 随 Mohist Runner 一起发布，版本由 Mohist 锁定；安装者不需要单独安装或升级 Pi。
-这与 `mohist/opencode` 不同——OpenCode CLI 由安装者提供，Pi 则是 Runner 的内置能力。
+Pi ships with Mohist Runner and its version is pinned by Mohist. The installer
+does not install or upgrade Pi separately. This differs from
+`mohist/opencode`, whose OpenCode CLI is supplied by the installer.
 
-安装者负责为 Runner 运行环境配置 provider 凭证（环境变量或 Pi 自己的登录凭证）。
-Mohist 不管理 API key，也不在 UI 中收集凭证。模型是否可用、默认模型是什么，由 Pi
-根据已配置的凭证判断；Mohist 展示的模型列表只用于帮助配置。
+The installer configures provider credentials in the Runner environment,
+through environment variables or Pi's own login credentials. Mohist does not
+manage API keys or collect credentials in its UI. Pi determines model
+availability and the default model from configured credentials. The model list
+displayed by Mohist only helps with configuration.
 
-Pi 执行工具时不逐项征求批准，也不提供沙箱；工具以 Runner 进程的权限直接执行。为
-保证无人值守执行的确定性，Mohist 不加载工作仓库中项目级的 Pi 配置（`.pi/` 目录中的
-设置、扩展、技能等）；仓库无法通过携带 Pi 配置改变 Runner 的执行行为。仓库根部的
-AGENTS.md 和 CLAUDE.md 不属于 Pi 配置，仍作为上下文提供给模型（与 OpenCode 的行为
-一致）。需要自定义 Pi 行为时，在 Runner 用户的全局 Pi 配置中进行。
+Pi does not ask for an Approval for every tool invocation and provides no
+sandbox. Tools run with the permissions of the Runner process. For
+deterministic unattended execution, Mohist does not load project-level Pi
+configuration from the work repository, including settings, extensions, and
+Skills under `.pi/`. A repository therefore cannot change Runner behavior by
+including Pi configuration. Root-level `AGENTS.md` and `CLAUDE.md` files are
+not Pi configuration; they are still provided to the model as context, as they
+are for OpenCode. Customize Pi behavior in the Runner user's global Pi
+configuration.
 
-工具的超时和重试由 Pi 判断。Mohist 只负责整个执行的期限和中断确认，不为单个工具
-建立另一套超时策略。
+Pi controls timeout and retry behavior for individual tools. Mohist controls
+only the deadline for the entire execution and interruption confirmation. It
+does not add a separate timeout policy for each tool.
 
-## 错误码
+## Error Codes
 
-`mohist/pi` 的业务错误码即六个共享业务错误码，见
-[Action 契约](README.md#agent-执行类-action-的共享语义)；无 Pi 特有业务错误码。
+`mohist/pi` uses only the six shared business error codes in
+[Action Contracts](README.md#shared-semantics-for-agent-execution-actions). It
+has no Pi-specific business error codes.
 
-## 实装差距
+## Implementation Gaps
 
-Workflow 与 AgentJob 两条路径都已实装：Workflow 的 `uses: mohist/pi` 和选择 Pi 的 Mohist
-Agent 都可执行输入，复用 AgentSession，并在现有 Session 页面展示 transcript、工具、
-状态、压缩、模型、用量和成本。Agent 和 issue 的执行后端选择、按 Runtime 提供
-模型目录与 Web 选择器也已落地。
+Both Workflow and AgentJob paths are implemented. A Workflow can use
+`mohist/pi`, and a Mohist Agent configured for Pi can execute input. Both reuse
+AgentSession and show transcripts, tools, state, compaction, model, usage, and
+cost on the existing Session page. Execution-backend selection for Agent and
+Issue, Runtime-specific model catalogs, and Web model selectors are also
+implemented. Pi Compact and Reset are available through the shared Session
+operations.
 
-缺失的 Pi Session 文件目前仍会让部分新输入失败，自动重建与重新绑定尚未落地；对应
-实施 issue 待从本 spec 创建。
+Before a new Workflow input is submitted, Mohist automatically creates empty Pi
+context and replaces a binding that the owning Runner confirms is missing while
+the Session is safely idle. AgentJob launch and idle Follow-up do not yet use
+that recovery boundary. Ambiguous or unsafe absence still blocks instead of
+replaying input. The complete ownership lease, fencing, candidate reconciliation,
+and cleanup contract is not yet enforced at every boundary; see [Agents and
+AgentSessions](../agent-sessions.md#implementation-gaps).

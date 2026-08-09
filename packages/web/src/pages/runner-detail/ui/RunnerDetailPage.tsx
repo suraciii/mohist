@@ -213,7 +213,7 @@ function RunnerDetailContent({
               )}
             </div>
             <div className="flex justify-between gap-3">
-              <dt className="text-muted-foreground">Max workflow slots</dt>
+              <dt className="text-muted-foreground">Max execution slots</dt>
               <dd className="text-foreground" data-testid="runner-detail-max-slots">
                 {maxSlots != null ? (
                   <SlotsEditor runnerId={row.id} value={maxSlots} mutationHook={slotsMutationHook} />
@@ -223,7 +223,7 @@ function RunnerDetailContent({
               </dd>
             </div>
             <p className="text-[11px] text-muted-foreground mt-1">
-              Limits concurrent workflow work dispatched from the backlog.
+              Limits the combined Workflow work and AgentJobs on this Runner.
             </p>
           </div>
         </CardSection>

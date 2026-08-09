@@ -43,7 +43,7 @@ internal sealed class AgentInstallPreflight
                     $"warning: could not find the 'mohist' skill stub in the current directory '{localProxyPath}', " +
                     $"which is being used as a local proxy for {repo}'s workspace (the CLI cannot inspect the runner's " +
                     $"actual checkout). If the supervisor runs from a workspace without the stub, it will not discover " +
-                    $"the mo command surface. Repair in the repository checkout: run `mo skills install --path {localProxyPath}`.");
+                    $"the mo command surface. Repair in the repository checkout: run `mo skill install --path {localProxyPath}`.");
             }
         }
 

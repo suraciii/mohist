@@ -1,274 +1,301 @@
-# 认证与身份
+# Authentication and Identity
 
-Mohist 控制面的认证与归因模型：每个访问都归属一个 Principal，凭 Credential 证明身份，
-Scope 决定能做什么，认证主体落到审批与活动的 actor 上。
+Authentication in Mohist must preserve two properties that are easy to lose in
+a self-hosted system: local use stays frictionless, and every remote effect has
+a trusted identity. One administrator owns the deployment, while CLI clients,
+Runners, integrations, and external Agents receive credentials that can be
+revoked independently.
 
-边界：只覆盖 Mohist 自有 API 与 SignalR hub 的认证、scope 判定与归因。身份先于权限——
-本模型的第一性是每个请求归属一个 Principal；scope 判定是叠加其上的第二阶段能力（见
-Status 的落地顺序）。GitHub 等外部平台
-的身份与凭据签发见 [`github-integration.md`](github-integration.md)；Slack 成员侧的访问
-策略仍归 [`slack.md`](slack.md)；直接外部 Agent caller 的认证、公开 projection 与恢复边界归
-[`agent-api.md`](agent-api.md)。
-不建多用户、角色、权限组、第三方应用注册与企业身份联邦。
+This design covers authentication, authorization, and attribution for
+Mohist-owned APIs and SignalR hubs. GitHub verifies its own ingress as described
+in [github-integration.md](github-integration.md). Slack member policy remains
+inside the Agent Connection boundary in [slack.md](slack.md). The direct
+external Agent boundary builds on this model and is defined in
+[agent-api.md](agent-api.md).
 
-## Model
+## Drivers
+
+- Local commands should not require an interactive login. Access to the Server
+  host is already the local trust boundary.
+- Browser, remote CLI, service, Runner, integration, and direct Agent callers
+  must not share one long-lived secret. A leaked credential must have a bounded
+  lifetime and blast radius.
+- Authentication must establish one stable Principal before authorization or
+  domain work begins. This makes Activity and Approval attribution trustworthy.
+- A direct external Agent caller must receive explicit access to private
+  Projects. An operator Scope alone must not silently become access to every
+  Project.
+- Authorization failures must not reveal whether a private resource or a prior
+  idempotent request exists. Authentication and Project authorization therefore
+  precede resource lookup, idempotency, and admission.
+- The model must stay smaller than a multi-user identity system. Project grants
+  for direct Agent PATs are credential boundaries, not roles, memberships, or a
+  general ACL.
+
+```text diagram
+local administrator file -----------+
+browser or remote CLI session ------+--> Principal --> Scope --> product action
+service or Runner credential -------+
+integration credential -------------+
+direct Agent PAT --> Project grant -+
+
+external platform identity --> Connection or ingress policy --> product action
+```
+
+## Identity Model
 
 ### Principal
 
-Server 级资源（不 Project-scoped）。三类：
+A Principal is the stable identity recorded for an action. It is a Server-level
+resource rather than a Project membership.
 
-| Kind | 数量 | 来源 | 能力上限 |
-|---|---|---|---|
-| `admin` | 恒为 1 | bootstrap 建立 | `operator` |
-| `service` | 按内置组件 | bootstrap 建立（本机服务进程，如 Slack adapter） | `operator` |
-| `agent` | 按 Mohist Agent 定义 | Agent 创建时建立 | 不签发凭据，仅作归因锚点 |
+| Kind | Cardinality | Why it exists |
+|---|---|---|
+| `admin` | exactly one | Represents the owner of the self-hosted deployment. |
+| `service` | one per built-in component | Separates trusted local machines and adapters from the administrator. |
+| `agent` | one per Mohist Agent | Preserves Agent attribution without giving the Agent a login credential. |
 
-字段：`Id`、`Kind`、`Name`、`CreatedAt`。
-
-必须一直成立：admin 恰有一个；不存在创建或删除 Principal 的 API；agent Principal 不随
-Agent 归档而删除——历史归因记录永久指向它。
+Mohist does not expose Principal creation or deletion. Archiving an Agent does
+not delete its Principal because historical attribution must remain stable.
 
 ### Credential
 
-Principal 的凭据。库中只存 token 的 SHA-256 哈希（高熵随机值，无需加盐）。
+A Credential proves a Principal's identity. Persisted credentials store only a
+SHA-256 token hash, never the token value. The token uses high-entropy random
+data, so hashing protects the secret without introducing a password-style salt
+or recovery path.
 
-字段：`Id`、`PrincipalId`、`Kind`、`TokenHash`、`Scopes`、`Name`、`ExpiresAt`、
-`RevokedAt`、`CreatedAt`。直接外部 Agent API 使用的 PAT 还持久化一个最小
-`ProjectGrant`：`operator_all` 或 `explicit`，后者带非空的 `AllowedProjectIds`。这不是
-通用角色、membership 或 ACL 模型；它只回答一把 PAT 能否访问一个私有 Project。
-
-| Kind | 用途 | 承载 |
-|---|---|---|
-| `session` | Web 与 CLI 登录会话 | cookie / CLI 本地存储 |
-| `refresh` | CLI 会话续期 | CLI 本地存储 |
-| `pat` | admin 签发的自用令牌（脚本、CI、外部 Agent） | `MOHIST_TOKEN` env |
-| `runner` | Runner 机器凭据，绑定 `RunnerId` | runner 本地文件 |
-| `integration` | 入站集成令牌，带 ProjectId 约束 | 集成方配置 |
-
-token 形态：`moh_<kind>_<base64url(32B)>`。kind 前缀供人眼识别与泄漏扫描。
-
-**文件型凭据**（不入库）：admin bootstrap 与 service 凭据沿用 `OperatorCredential` 的文件
-机制——缺失时自动生成 32 字节随机值，0600、拒符号链接，启动时加载入内存比对。它们是
-部署级根凭据；入库会产生「谁初始化库」的循环依赖。文件即凭据，吊销即换文件内容。
-
-**Scope**（封闭集合）：
-
-| Scope | 满足 |
+| Kind | Trust boundary |
 |---|---|
-| `operator` | 一切路由 |
-| `readonly` | 仅 GET |
-| `runner` | `/api/runner/**`、工件与日志上报、`/hubs/runner` |
-| `webhook` | 入站集成端点，限 Credential 约束的 Project |
+| `session` | Short-lived Web or CLI access. |
+| `refresh` | CLI session renewal with rolling family revocation. |
+| `pat` | Headless callers such as scripts, CI, and external Agents. |
+| `runner` | One Runner identity and the Runner-only surface. |
+| `integration` | One inbound integration constrained to a Project. |
 
-Credential 的 Scopes 不得超过其 Principal 的能力上限；`operator` 满足一切 scope。
+Issued tokens use `moh_<kind>_<base64url(32B)>`. The prefix supports human
+recognition and leak scanning; it is not an authorization input.
+
+Administrator bootstrap and built-in service roots remain file credentials.
+They cannot depend on the database because they authorize the process that
+initializes it. Mohist creates a missing root with 32 random bytes, requires
+mode 0600, rejects symbolic links, and loads the value at startup. Replacing the
+file value revokes that deployment root.
+
+### Scope
+
+Scope limits which class of operation a credential can perform.
+
+| Scope | Capability |
+|---|---|
+| `operator` | All control-plane capabilities. |
+| `readonly` | Observation of business resources only. |
+| `runner` | Runner work, artifact, log, heartbeat, and connection capabilities. |
+| `webhook` | One inbound integration within its constrained Project. |
+
+`operator` satisfies every Scope. A Credential cannot exceed the maximum
+capability of its Principal. `readonly` does not gain access to infrastructure
+or secret-bearing surfaces merely because an operation is a read. Filesystem,
+configuration, system, log-tail, and dead-letter operations remain
+operator-only; dead-letter operations also retain their loopback-only listener
+boundary.
 
 ### ExternalAgentCaller
 
-直接外部 Agent API 的 Bearer PAT 成功认证后，Server 解析出一个只用于该边界的
-`ExternalAgentCaller`：
+A Bearer PAT used at the direct external Agent boundary resolves to an
+`ExternalAgentCaller`. This model gives authorization and idempotency one stable
+caller identity without exposing or persisting the plaintext token.
 
-```text
-ExternalAgentCaller {
-  callerKeyId = CredentialId
-  principalId
-  scopes
-  projectGrant = operator_all | explicit
-  allowedProjectIds = [ProjectId]     # only when projectGrant=explicit
-}
-```
+| Fact | Contract |
+|---|---|
+| `callerKeyId` | The Credential ID. It is stable across retries and never supplied or returned by the caller. |
+| `principalId` | The Principal used for attribution. |
+| `scopes` | The route capabilities granted to the PAT. |
+| `projectGrant` | Either `explicit` or `operator_all`. |
+| `allowedProjectIds` | A non-empty Project set when the grant is `explicit`. |
 
-`callerKeyId` 是 PAT 的稳定内部身份，不是 token 明文，也不是调用方可提交或读取的字段。
-`operator_all` 是显式授予私有 Project owner 的所有当前 Project 的 grant；它不是仅凭
-`operator` scope 隐式推导。`explicit` 只允许列出的 ProjectId，空列表等价于无 grant 并拒绝。
-PAT 签发时必须选择并持久化其中之一；没有 grant 的旧 PAT 不能调用直接外部 Agent API，
-直到明确补齐 grant。这是该私有 API 的 credential-to-Project binding，不是可扩展的多用户
-RBAC、membership 或跨用户 visibility 模型，却让 Project authorization 有唯一权威。
+`operator_all` is an explicit grant to all current private Projects owned by the
+deployment. It is not inferred from `operator` Scope. An `explicit` grant allows
+only the listed Projects. An empty or absent grant denies the direct Agent API,
+including for PATs issued before Project grants exist.
 
-敏感基础设施面不随 GET 放开给 `readonly`：`/api/fs/**`、`/api/logs/tail`、
-`/api/config/**`、`/api/system/**` 与 dead-letter 路由一律声明 `operator`；`readonly`
-只覆盖业务资源的观察面（含 `/hubs/events` 与 `/otel/api/**` 查询）。dead-letter 另保留
-现状约束：仅在 loopback-only listener 时挂载。
+The grant answers one question: may this credential use the direct Agent API for
+this private Project? It does not create reusable Project membership,
+cross-user visibility, or RBAC.
 
 ### EnrollmentToken
 
-一次性注册令牌：`TokenHash`、`ExpiresAt`（签发后 15 分钟）、`ConsumedAt`。不预绑定
-RunnerId——谁消费，谁登记自己的 RunnerId。
+A Runner installation needs a short bridge from administrator authorization to
+a distinct machine credential. An EnrollmentToken is single-use, expires 15
+minutes after issuance, and is not pre-bound to a Runner ID. The first valid
+consumer registers its Runner identity and exchanges the token for a bound
+Runner credential.
 
-## Semantics
+## Authentication Boundary
 
-### 认证解析
+Mohist accepts the first valid carrier in this order:
 
-按以下顺序取第一个命中：
+1. `Authorization: Bearer <token>`.
+2. The `mohist_session` cookie for same-origin Web access.
 
-1. `Authorization: Bearer <token>`；
-2. `mohist_session` cookie（Web 同源，浏览器 WebSocket 自动携带）。
+Tokens are never accepted in a query string because URIs enter browser history,
+access logs, and proxy records. Web SignalR uses the same-origin cookie. Runner
+SignalR uses the authorization header.
 
-不允许 query string 携带 token（RFC 6750 §2.3 与 RFC 9700：URI 会进访问日志、浏览器
-历史与代理记录）。两个 SignalR hub 因此没有例外通道：Web 走同源 cookie，Runner 的
-SignalR client 走 header。
-
-```text
-token 与文件型凭据逐一 FixedTimeEquals          -> admin / service Principal
-否则 SHA-256(token) 查 Credential               -> 校验 RevokedAt、ExpiresAt -> Principal + Scopes
-PAT on direct Agent API                            -> ExternalAgentCaller + ProjectGrant
-均失败 -> 401 + WWW-Authenticate: Bearer error="invalid_token"（RFC 6750 §3）；
-         对外不区分「不存在 / 过期 / 吊销」
+```text diagram
+present credential
+  -> compare deployment root credentials in constant time
+  -> otherwise hash token and resolve a stored Credential
+  -> reject expired or revoked credentials
+  -> resolve Principal and Scope
+  -> for a direct Agent PAT, also resolve ExternalAgentCaller and Project grant
+  -> authorize the requested capability
+  -> begin resource lookup and domain work
 ```
 
-豁免清单（此外全部要求认证 + scope）：`/api/health`；登录与设备授权端点；Web 静态资源；
-GitHub ingress（自有 HMAC 验签，见 [`github-integration.md`](github-integration.md)）；
-OTLP listener 上的 `/otel/v1/*`（端口隔离已有边界）。
+Invalid authentication returns 401 with the Bearer challenge and does not reveal
+whether a token was missing, expired, or revoked. Insufficient Scope returns
+403. Health, authentication entry points, Web static assets, GitHub's
+signature-verified ingress, and the isolated OTLP listener form the closed
+unauthenticated set.
 
-Scope 判定：路由声明所需 scope；`readonly` 仅满足 GET；其余按上表。scope 不足返回 403。
+## Direct External Agent Authorization
 
-### 直接外部 Agent 调用
+Direct external Agent calls accept a Bearer PAT only. A Web cookie and a trusted
+Agent Connection identity belong to different adapters and cannot substitute
+for that caller key.
 
-[`agent-api.md`](agent-api.md) 的 `/api/v1` 直接调用者必须使用 `Authorization: Bearer <PAT>`。
-它不是 Web cookie，也不是 Slack 等 Agent Connection 的受信任服务身份；Connection 仍在自己的
-adapter 边界内处理外部平台身份，不能冒充直接 caller。
+Writes that launch, continue, or stop work require `operator`. Public reads may
+use `readonly` or `operator`. Every request follows one security order:
 
-该边界的 route scope 固定为：launch、follow-up、stop 要 `operator`；Job、Input、Turn 与
-Session 公开事件读取要 `readonly` 或 `operator`。认证后的 PAT 必须先解析为上述
-`ExternalAgentCaller`，再同时验证 route scope 与 route `projectId` 是否匹配其显式 grant 或
-`operator_all` grant。选中的 Project 不在 grant 中一律 `403 forbidden`，即使该 Project
-不存在也不改为 `404`；只有 grant 已通过后，缺失的 Project/resource 才按资源语义返回 `404`。
-这不新增跨用户 visibility、角色或加密策略。
-
-执行顺序固定为认证 Bearer PAT、解析 ExternalAgentCaller、授权 scope 和 Project grant、验证
-Project/resource 归属、校验请求、再做 idempotency lookup/fingerprint/admission。`401` 或 `403`
-时不得读取或返回已有 request mapping，也不得写 rejection、Job、Session、Input、Turn、outbox
-或公开事件，亦不得调用 Runner。完整的外部字段、错误和 cursor 语义只在
-[`agent-api.md`](agent-api.md) 定义，不能从本认证文档或 Connection 边界推导另一套 API。
-
-### Bootstrap
-
-```text
-~/.mohist/admin-token    不存在 -> 生成写入（0600，拒 symlink）   # admin Principal
-~/.mohist/operator-token 不存在 -> 同上                            # service Principal，沿用现机制
-启动时加载两者为文件型凭据
+```text diagram
+Bearer PAT authentication
+  -> ExternalAgentCaller resolution
+  -> Scope authorization
+  -> Project grant authorization
+  -> canonical resource ownership check
+  -> request validation and normalization
+  -> idempotency lookup and fingerprint comparison
+  -> admission and durable effects
 ```
 
-`X-Mohist-Operator-Token` header 退役，全部统一 `Authorization: Bearer`。Slack adapter 改持
-service 凭据走 Bearer；原 operator token 文件内容即 service 凭据，已部署环境无需轮换。
+A Project outside the grant returns 403 even when that Project does not exist.
+Only after the grant passes may a missing Project or resource return 404. This
+ordering prevents a credential from using status codes or idempotency mappings
+as an oracle for private resources.
 
-### Web 登录
+On 401 or 403, Mohist does not read or return a request mapping, create a
+rejection, Job, Session, Input, Turn, outbox record, or public event, or contact
+a Runner. The complete retry, public projection, cursor, and stop contracts are
+owned by [agent-api.md](agent-api.md).
 
-`POST /api/auth/session {token}`：校验为 `operator` 凭据后签发 `Credential(kind=session,
-7 天)`，写 `Set-Cookie: mohist_session=<token>; HttpOnly; SameSite=Lax; Path=/`（https
-请求附加 `Secure`）。SameSite=Lax 加 JSON API 已使跨站表单无法携带会话，不另建 CSRF
-token。登出吊销该 Credential。SPA 遇 401 呈现登录页。不设密码——粘贴令牌即登录。
+## Human Access
 
-### CLI 设备授权（RFC 8628）
+### Local Bootstrap
 
-豁免端点：`POST /api/auth/device/code`、`POST /api/auth/token`。确认页 `/device` 要求已
-登录的 Web 会话。两个端点限流：轮询与猜码超过每来源每分钟数次即 `slow_down` / 429。
+On first Server start, Mohist creates the administrator credential file and the
+built-in service credential file when absent. Local `mo` discovers the
+administrator file automatically. This preserves zero-login local use while
+still requiring every request to resolve to a Principal.
 
-```text
-CLI  POST device/code {name}  -> {device_code, user_code, verification_uri,
-                                   verification_uri_complete, interval=5, expires_in=600}
-用户 打开 verification_uri(_complete) -> 输入 user_code -> approve -> 记录批准（admin Principal）
-CLI  轮询 POST token {grant_type=urn:ietf:params:oauth:grant-type:device_code, device_code}
-     <- authorization_pending / slow_down / expired_token
-     <- 成功 {access_token(kind=session, 1h), refresh_token(kind=refresh, 30d)}
+The retired `X-Mohist-Operator-Token` header is not a parallel credential path.
+All callers use Bearer authentication or the Web session cookie. Existing
+operator file content becomes the service credential, so this unification does
+not require a deployment-wide secret rotation.
+
+### Web Login
+
+The Web UI exchanges an administrator-level token for a seven-day, HttpOnly,
+SameSite=Lax session cookie. HTTPS adds `Secure`. Logout revokes the session.
+Same-site cookies and the JSON-only API prevent cross-site forms from creating
+authenticated effects without adding a separate CSRF token.
+
+### Remote CLI
+
+Remote CLI uses RFC 8628 device authorization because it keeps the administrator
+secret out of the remote machine and lets the already authenticated Web UI
+approve the login. Device codes expire after ten minutes and rate limits protect
+the polling and guessing surfaces.
+
+The resulting access token lasts one hour. A refresh token lasts 30 days and is
+rotated on every use. Reuse of an invalidated refresh token revokes its entire
+session family because reuse indicates likely credential leakage. CLI resolves
+credentials in this order: `MOHIST_TOKEN`, the Server-matched local session, and
+the administrator file on the Server host.
+
+## Personal Access Tokens
+
+PATs support callers that cannot complete a browser flow. The token is shown in
+full once, must expire, defaults to 90 days, and cannot exceed one year. Active
+names are unique per Principal. Revocation is immediate; listing exposes only a
+recognizable prefix.
+
+The target issuance contract is:
+
+```text literal
+mo auth token create --name <name> --scope operator|readonly [--ttl <hours>]
+  [--project <projectId>]... [--all-projects]
 ```
 
-`user_code`：8 字符，字母表 `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`（去 I/O/0/1，同 Slack
-认领码先例）；CLI 以 `XXXX-XXXX` 分组显示，确认页输入忽略连字符与大小写。
+A PAT for the direct Agent API must choose exactly one Project grant form:
 
-续期：`POST token {grant_type=refresh_token}`——旧 refresh 立即作废并保留其哈希至窗口
-结束，签发新 access + refresh（滚动轮换）。再次出示已作废 refresh 视为泄露：吊销该
-设备授权派生的整条会话链（RFC 9700 §4.14.2 的 family 撤销）。CLI 会话存
-`~/.mohist/credentials.json`（0600）。
+- Repeated `--project` options persist an `explicit` grant.
+- `--scope operator --all-projects` persists `operator_all`.
+- `--project` and `--all-projects` are mutually exclusive.
+- `--all-projects` is invalid without `operator` Scope.
+- A PAT without either grant remains usable on its existing control-plane
+  surfaces but cannot call the direct Agent API.
 
-CLI 凭据解析顺序：`MOHIST_TOKEN` env > credentials.json（按 server 匹配）> admin-token
-文件（本机）。401 先尝试续期，失败提示 `mo auth login`。
+Issuance authenticates the issuer and validates the complete private-Project
+grant before it persists the Credential. Any failed binding returns 403 and
+persists neither the Credential nor its grant. Use of the PAT repeats Scope and
+Project authorization before idempotency or admission; issuance-time validation
+is not a permanent substitute for request-time authorization.
 
-### PAT
+## Machine Access
 
-`mo auth token create --name <n> --scope operator|readonly [--ttl <hours>]
-[--project <projectId>]... [--all-projects]`：签发 `Credential(kind=pat)`，完整值仅响应一次。
-用于直接外部 Agent API 的 PAT 必须恰选一种 grant 输入：可重复的 `--project <projectId>`
-持久化为 `explicit/AllowedProjectIds`，或 `--scope operator --all-projects` 持久化为显式
-`operator_all`。两者互斥；`--all-projects` 与 `readonly` 或无 `operator` scope 一起使用时
-被拒绝。没有任一 grant 输入的 PAT 仍可用于其原有控制面，但直接外部 Agent 路由一律拒绝；
-不以“当前 Project”或 Principal 的猜测补齐 grant。
+### Runner Registration
 
-签发前 Server 先认证 issuer，再校验每个 `--project` 或 `--all-projects` 的现有私有 Project
-binding；任一 binding 不成立即 `403 forbidden` 且不写 Credential 或 ProjectGrant。只有完整
-binding 已持久化的 PAT 才能到达直接 API；使用时仍按本页的 route 顺序在任何 idempotency
-lookup 或 admission 前再次验证它。PAT 必须有过期：`--ttl` 缺省 90 天、上限 1 年
-（GitHub fine-grained PAT 同此纪律），不允许永不过期。`--name` 在同一 Principal 的活跃
-凭据中唯一。`revoke` 置 `RevokedAt`；`list` 只显示名称与前缀（`moh_pat_…`），不显示
-完整值。集成令牌（`kind=integration`）不由本命令签发，其签发入口由对应入站集成的 spec 定义。
+`mo install runner` obtains a one-use EnrollmentToken. On first start, Runner
+exchanges it for a credential bound to its Runner ID and stores that credential
+with mode 0600. Every later Runner report and connection uses that credential.
+The asserted Runner ID must match the credential binding; a mismatch returns
+403. Recovery after revocation repeats enrollment rather than reusing the old
+secret.
 
-### Runner 注册与凭据
+### Integrations and Services
 
-```text
-mo install runner（admin 已认证）: POST /api/auth/runner-enrollments -> EnrollmentToken
-安装器把令牌注入 runner 环境
-runner 首启: POST /api/auth/runner/credentials {enrollment_token, runner_id, hostname}
-             校验未消费未过期 -> 消费 -> 签发 Credential(kind=runner, 绑定 runner_id)
-             -> runner 存 $RUNNER_ROOT/credential（0600）
-之后: Bearer 访问 /api/runner/** 与 /hubs/runner
-```
+Each inbound integration uses a distinct Project-constrained credential so one
+leak cannot authorize another integration. GitHub uses its native HMAC signature
+instead. Built-in local adapters use service credentials and retain their own
+external identity and access-policy checks.
 
-路径与 hub query 里的 `runnerId` 必须与凭据绑定的 `RunnerId` 一致，否则 403——顶替防护
-在认证层完成，不再信任自声明。吊销后该 runner 全部请求 401；恢复即重新走注册流程。
+## Attribution and Audit
 
-### 归因
+After authentication, mutating operations record the Principal as their actor.
+Display aliases such as `--author` never become ownership evidence. Agent
+execution continues to attribute work to the Agent Principal.
 
-认证通过后，mutating handler 把 Principal 记入领域动作的 actor：审批 `decidedBy`、评论
-作者、活动记录。`--author` 保留为展示别名，不再充当归属依据。Agent 归因沿用执行协议
-已有的 job/agent 身份上报，agent Principal 是这些记录指向的稳定锚点。
+Audit records contain no plaintext token. They cover credential issuance,
+revocation, and consumption; Runner enrollment issuance and consumption; device
+authorization approval; and session creation.
 
-### 审计事件
+## Non-goals
 
-落持久记录（不含 token 明文）：凭据签发 / 吊销 / 消费、EnrollmentToken 签发与消费、
-设备授权批准、session 建立。
-
-## Examples
-
-本机 CLI：
-
-```text
-server 首启 -> admin-token 生成
-mo issue list -> 命中 admin-token 文件 -> admin Principal，operator
-```
-
-远程 CI：
-
-```text
-mo auth token create --name ci --scope readonly --ttl 720h -> moh_pat_...（显示一次）
-MOHIST_TOKEN=moh_pat_... mo issue list    -> readonly 满足 GET -> 200
-MOHIST_TOKEN=moh_pat_... mo issue create  -> scope 不足 -> 403
-```
-
-Runner 顶替防护：
-
-```text
-凭据绑定 runner-a；携 runner-a 凭据 POST /api/runner/runner-b/heartbeat -> 403
-```
+- Multiple Mohist users, roles, permission groups, or reusable Project ACLs.
+- Third-party application registration or a public developer platform.
+- Single sign-on, external OIDC, or enterprise identity federation.
 
 ## Status
 
-全部未实装。当前仅 Slack adapter / Manager ingress / dead-letter 三面由
-`OperatorCredential` 手工校验，主 API 与两个 SignalR hub 无认证。
+Principal and Credential bootstrap, unified API and SignalR authentication, Web
+login, CLI device authorization and refresh-family protection, personal access
+tokens, Runner enrollment, Project-constrained integration credentials, Scope
+enforcement, actor attribution, and audit records are implemented.
 
-落地顺序（供 `mohist-explore` 切分）——**身份认证先行，权限检查后到**：
-
-1. P0 身份认证：Principal / Credential、认证解析与豁免清单、bootstrap、Web 登录、
-   CLI 设备授权与 PAT、`X-Mohist-Operator-Token` 退役、actor 归因。此阶段不做 scope
-   判定：任何有效凭据可达任何需认证路由。相对现状（全裸奔）已把「陌生人」挡在门外；
-   凭据滥用的收敛留给 P2。PAT 签发时仍记录 Scopes（数据模型就位），P2 起生效。
-2. P1 机器身份：Runner enrollment 与凭据签发、integration 令牌落地；凭据绑定信息
-   （RunnerId、ProjectId）照常记录，路由 gate 同样留给 P2。
-3. P2 权限检查：scope 判定与 403、敏感基础设施面归属、runner 顶替防护、审计事件，以及
-   PAT 的 `ExternalAgentCaller` Project grant 解析与先授权后 idempotency/admission。
-4. P3（候选，另立设计）：外部 OIDC 与多用户。
-
-`#387` 的直接外部 Agent API 不能在只完成 P0 的阶段发布；它要求上述 PAT 认证和 P2 的
-scope/Project grant 授权一起生效，才能满足认证、授权先于 idempotency 与 admission 的边界。
-
-开放问题：
-
-- session 续期策略（7 天绝对过期还是滑动窗口）实装时定，不影响模型。
+The direct external Agent API remains WIP under
+[#387](https://github.com/suraciii/mohist/issues/387). Its PAT ProjectGrant,
+`ExternalAgentCaller` resolution, grant-aware PAT issuance, and authorization
+before idempotency and admission are target behavior only. The direct API must
+not ship until this authentication slice and the public execution boundary in
+[agent-api.md](agent-api.md) are implemented together.

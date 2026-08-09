@@ -307,7 +307,8 @@ public class CliAgentCommandSpecs
         Assert.Contains("warning: could not find the", stdout);
         Assert.Contains("skill stub", stdout);
         Assert.Contains("local proxy", stdout);
-        Assert.Contains("mo skills install --path", stdout);
+        Assert.Contains("mo skill install --path", stdout);
+        Assert.DoesNotContain("mo skills install --path", stdout);
     }
 
     [Fact]
@@ -323,7 +324,7 @@ public class CliAgentCommandSpecs
         Assert.Equal(0, exitCode);
         var stdout = output.ToString();
         Assert.DoesNotContain("could not find the", stdout);
-        Assert.DoesNotContain("mo skills install --path", stdout);
+        Assert.DoesNotContain("mo skill install --path", stdout);
     }
 
     [Fact]

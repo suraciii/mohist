@@ -2,111 +2,131 @@
 status: converged
 ---
 
-# Agent 事件路由（Routing Table）
+# Agent Event Routing
 
-Mohist Agent 通过项目级**事件路由表**自动响应系统事件，取代手动 launch。
-本文的 Agent 均指 Mohist Agent（术语与所有权不变量见
-[`agent-execution.md`](agent-execution.md)）；信封协议与匹配表达式语法见
-[`event-protocol.md`](event-protocol.md)。
+A Mohist Agent responds to system events automatically through a
+Project-scoped **event routing table**, without a manual launch. Agent means a
+Mohist Agent throughout this document; see
+[`agent-execution.md`](agent-execution.md) for terminology and ownership
+invariants. See [`event-protocol.md`](event-protocol.md) for the envelope and
+match-expression syntax.
 
-本设计已取代早期「订阅 + 优先级仲裁」模型（独立的 AgentSubscription aggregate
-和 Arbitrate）；旧模型迁移见文末。当前的 Agent subscription 是同一张
-RoutingRule 表的 Agent 作用域配置视图，供 API、CLI 和 Web 共同寻址；它不重新
-引入独立持久化对象、匹配器或仲裁器。
+This design replaces the earlier subscription plus priority-arbitration model,
+which used a separate AgentSubscription aggregate and Arbitrate operation. See
+Migration for the old model. The current Agent subscription surface is an
+Agent-scoped configuration view over the same RoutingRule table for API, CLI,
+and Web addressing. It does not reintroduce a separate persisted object,
+matcher, or arbitrator.
 
-## 边界
+## Boundary
 
-路由属于 Agent context。消费 CloudEvent PL（infra 层）。禁止 `using
-Workflow.Domain` 或 `Issue.Domain`。匹配与渲染 envelope-only，零跨域反查。
+Routing belongs to the Agent context and consumes the CloudEvent PL from the
+infrastructure layer. It cannot import `Workflow.Domain` or `Issue.Domain`.
+Matching and rendering use only the envelope and perform no cross-domain query.
 
-## 模型
+## Model
 
-```
-RoutingRule（项目级，有序表）
+```text literal
+RoutingRule (one ordered, Project-scoped table)
   Id, ProjectId, Name
-  Position                  表内序号，唯一；求值按此序
-  Match                     匹配表达式（event-protocol.md 定义的 CEL 子集）
-  AgentId                   响应 Agent
-  ResponsePrompt            模板，{{event.<attr>}} 占位符
-  Continue                  bool；命中后是否继续向下求值（默认 false）
+  Position                  Unique position; evaluation uses this order
+  Match                     CEL-subset expression from event-protocol.md
+  AgentId                   Agent that responds
+  ResponsePrompt            Template with {{event.<attr>}} placeholders
+  Continue                  Continue evaluation after a match; default false
   Status                    active | archived | deleted
 ```
 
-一个项目一张表；规则引用 Agent，执行所有权仍在项目级规则表。Agent subscription
-视图按 `AgentId` 显示和修改属于该 Agent 的规则，因此可以表达「一个 Agent 有多条
-subscription」的用户关系，同时不把排序和兜底/接管次序移到 Agent 下。
+Each Project has one table. Rules reference Agents, while execution ownership
+remains in the Project-scoped table. The Agent subscription view shows and
+modifies rules for one `AgentId`. It can express that one Agent has several
+subscriptions without moving ordering, fallback, or takeover order under the
+Agent.
 
-## 求值语义
+## Evaluation Semantics
 
-路由表是项目级的：信封无 `projectid` 的事件不进入任何路由表（与现有分发行为
-一致）。事件到达（带 `projectid`）→ 取该项目 active 规则按 `Position` 升序：
+The routing table is Project-scoped. An event envelope without `projectid`
+enters no routing table, consistent with existing dispatch behavior. When an
+event with `projectid` arrives, Mohist reads that Project's active rules in
+ascending `Position` order:
 
-1. 逐条求值 `Match`；不命中 → 下一条。
-2. 命中 → 渲染 `ResponsePrompt`，经 `IAgentLauncher` 启动 Agent；
-   `Continue == false` → 求值结束；`true` → 继续下一条。
-3. 命中但不可执行（Agent 已 archived、渲染后 prompt 为空）→ 视同不命中，
-   记结构化日志，继续下一条。
-4. 表达式运行期异常 → 视同不命中（见 event-protocol.md）。
-5. 同一事件里同一 Agent 至多启动一次：它已被前序规则或关注声明启动时，
-   后续命中它的规则不再启动，记结构化日志；响应提示词取自首个启动它的
-   规则。
+1. Evaluate `Match`. Continue to the next rule when it does not match.
+2. On a match, render `ResponsePrompt` and launch the Agent through
+   `IAgentLauncher`. Stop when `Continue == false`; otherwise evaluate the next
+   rule.
+3. Treat a match that cannot execute as no match, write a structured log, and
+   continue. This includes an archived Agent or an empty rendered prompt.
+4. Treat a runtime expression error as no match, as defined in
+   `event-protocol.md`.
+5. Launch the same Agent at most once for one event. When an earlier rule or
+   watch declaration launched it, log and skip any later matching rule for that
+   Agent. Use the response prompt from the first rule that launched it.
 
-由此得到：
+This produces:
 
-- **exclusive（默认）**：first-match-wins，排序即优先级，无数字算术；
-- **fanout**：上游规则标 `Continue`；
-- **兜底 + 接管**：针对性规则排在兜底规则上方。
+- **Exclusive by default**: First match wins. Table order is priority, without
+  numeric priority arithmetic.
+- **Fanout**: An earlier rule sets `Continue`.
+- **Fallback and takeover**: Specific rules appear above fallback rules.
 
-无 Arbitrate、无 Priority 字段、无 CoordinationMode。
+There is no Arbitrate operation, Priority field, or CoordinationMode.
 
-## 写入时校验
+## Write-time Validation
 
-创建/更新规则时：
+Creating or updating a rule rejects:
 
-- `Match` 编译失败 → 拒绝；
-- `AgentId` 不存在或非 active → 拒绝；
-- `ResponsePrompt` 空 → 拒绝。
+- A `Match` expression that does not compile.
+- A missing or inactive `AgentId`.
+- An empty `ResponsePrompt`.
 
-运行期只做求值，不做校验兜底（Agent 事后 archived 属运行期跳过情形）。
+Runtime performs evaluation only. It does not repeat validation as a fallback;
+an Agent archived after validation is a runtime skip.
 
-## 渲染
+## Rendering
 
-`{{event.<attr>}}` 直接替换信封属性（与 Match 同一命名空间），envelope-only、
-无模板引擎、未命中占位符原样保留。旧 token（`{{workflow_run_id}}`、`{{stage}}`、
-`{{event_type}}`）保留为别名。`{{event.stage}}` 依赖 stage 提升为信封属性
-（stamping 矩阵 workflow 族），不再从 `data` 解析。
+`{{event.<attr>}}` directly substitutes an envelope property from the same
+namespace used by Match. Rendering is envelope-only and uses no template
+engine. An unresolved placeholder remains unchanged. The old
+`{{workflow_run_id}}`, `{{stage}}`, and `{{event_type}}` tokens remain aliases.
+`{{event.stage}}` depends on `stage` being promoted into a Workflow-family
+envelope and does not parse `data`.
 
-## 幂等与可见性
+## Idempotency and Visibility
 
-- Launcher key = `hash(projectId, eventId, agentId)`：同一事件里同一 Agent
-  至多启动一次，无论命中它的是哪条规则或关注声明；重复分发不会重复起
-  job（沿用 AgentLauncher 幂等启动机制）。命中规则只作触发归因（trigger
-  标签），不进幂等键。
-- 触发的 AgentSession 打标签：`mohist.io/trigger/event-id`、
-  `mohist.io/trigger/rule-id`。事件 → 规则 → AgentJob 双向可查。
-- AgentJob 裁定响应完成；AgentSession 以 SessionInput、AgentTurn 和 transcript 提供对话与
-  审计证据。
+- Launcher key is `hash(projectId, eventId, agentId)`. One event launches one
+  Agent at most once, regardless of which rule or watch declaration matched it.
+  Duplicate delivery does not create another Job because it uses the
+  AgentLauncher idempotent-launch mechanism. The matching rule is trigger
+  attribution only and does not enter the idempotency key.
+- A triggered AgentSession carries `mohist.io/trigger/event-id` and
+  `mohist.io/trigger/rule-id`. Event, rule, and AgentJob are queryable in both
+  directions.
+- AgentJob determines response completion. AgentSession provides conversation
+  and audit evidence through SessionInput, AgentTurn, and transcript.
 
-`deleted` 仅是 RoutingRule 的存储 tombstone 状态，不是可读或可路由的资源：它不会
-出现在规则或 Agent subscription 的 list/read 结果中，也不会参与事件匹配。已知规则
-重复删除仍返回同一个 `deleted` 确认；未知 id 返回 `404`。删除后名称可由非 deleted
-规则重新使用，正是因为名称唯一性只约束可读状态。
+`deleted` is only the RoutingRule storage tombstone, not a readable or routable
+resource. Deleted rules do not appear in rule or Agent-subscription list and
+read results and do not participate in matching. Repeating deletion of a known
+rule returns the same `deleted` confirmation; an unknown ID returns `404`.
+Because name uniqueness applies only to readable states, a non-deleted rule can
+reuse the name after deletion.
 
-## 与系统 handler 的关系
+## System Handler Relationship
 
-路由表是用户态消费面；`[Subscription]` handler 是系统态消费面。两者消费同一
-信封协议，经同一个分发器投递。Agent 无特殊通道：响应动作走
-`mo workflow approve` / `mo issue comment` 等正规命令面。
+The routing table is the user consumer surface. `[Subscription]` handlers are
+the system consumer surface. Both consume the same envelope protocol through
+the same dispatcher. Agents have no special channel; a response uses normal
+commands such as `mo workflow approve` and `mo issue comment`.
 
-## 命令面
+## Command Surface
 
-```
+```text literal
 mo routing rule create --name <n> --match <expr> --agent <agent> \
     --response-prompt <p> [--continue] [--before <rule> | --after <rule>]
 mo routing rule list | view <n> | edit <n> | archive <n>
 mo routing rule move <n> --before <rule> | --after <rule>
-mo routing test [--limit <N>]    # 用最近 N 个事件干跑整张表，逐条显示命中
-mo event tail [--match <expr>]   # 用同一 matcher 过滤事件流
+mo routing test [--limit <N>]    # Dry-run the full table over the latest N events
+mo event tail [--match <expr>]   # Filter the event stream with the same matcher
 mo agent subscription list <agent> [--project <project>]
 mo agent subscription create <agent> --name <n> --match <expr> \
     --response-prompt <p> [--continue] [--idempotency-key <key>]
@@ -114,34 +134,44 @@ mo agent subscription edit <agent> <subscription-id> [fields]
 mo agent subscription delete <agent> <subscription-id>
 ```
 
-命名遵循 [`cli.md`](cli.md)：资源在前、项目作用域走 active project / `--project`。
+Names follow [`cli.md`](cli.md): the resource comes first, and Project scope
+uses the active Project or `--project`.
 
-## 迁移
+## Migration
 
-迁移不做数据自动转换：旧模型（独立 `AgentSubscription` + `Arbitrate`）已直接
-删除，不留旧 aggregate 兼容层。当前 `mo agent subscription` 命令面不是旧模型的
-恢复，而是 RoutingRule 的 Agent 作用域视图；它与 `/routing/rules` 和 Agent detail
-页使用同一份规则事实。旧订阅由操作者按规则手工重配（Filter 三字段可机械对应
-表达式：`event.type == "..." && event.source == "..."`，Priority 降序对应
-表内顺序）。
+Migration performs no automatic data conversion. The old model, a separate
+`AgentSubscription` plus `Arbitrate`, was deleted directly with no aggregate
+compatibility layer. The current `mo agent subscription` surface does not
+restore that model. It is an Agent-scoped RoutingRule view that shares facts
+with `/routing/rules` and the Agent detail page. Operators manually recreate
+old subscriptions as rules. The three Filter fields map mechanically to an
+expression such as `event.type == "..." && event.source == "..."`, and
+descending Priority maps to table order.
 
-## Not doing
+## Non-goals
 
-- Agent 专用审批通道——走正规命令面。
-- 严格冲突检测——干跑 + 可见性替代。
-- 规则级 retry/outbox——复用分发器投递保障 + AgentJob 失败可见性。
-- `event.data.*` 匹配——按 event-protocol.md 准入标准提升属性。
-- 每 Agent 并发闸——先靠规则与可见性控制。
-- 触发频控 / 冷却期——监管型 Agent 的循环风险（失败→rerun→失败→再触发）
-  短期由响应提示词自限（如 comment 计数），系统级频控留待真实需求出现。
+- An Agent-specific approval channel; Agents use the regular command surface.
+- Strict conflict detection; dry-run and visibility replace it.
+- Per-rule retry or outbox; reuse dispatcher delivery guarantees and AgentJob
+  failure visibility.
+- Matching `event.data.*`; promote an attribute under the admission criterion
+  in `event-protocol.md`.
+- A per-Agent concurrency gate; rules and visibility provide initial control.
+- Trigger rate limits or cooldowns. In the short term, response prompts limit a
+  supervising Agent's loop risk, such as failure -> rerun -> failure -> another
+  trigger, by using a comment count. System rate limiting waits for a concrete
+  need.
 
 ## Status
 
-已实装：项目级有序路由表（`Position` / `Continue`）、CEL 子集表达式匹配与
-写入时编译、`{{event.*}}` 渲染、envelope-only 自响应防护、`mo routing rule`
-命令面与 `mo routing test` 干跑、`mo event tail --match`，以及基于同一
-RoutingRule 事实的 `mo agent subscription` / API / Web 视图。旧独立订阅模型及其
-仲裁命令面已删除（`DropAgentSubscriptions` 迁移）。
+Implemented: the Project-scoped ordered routing table with `Position` and
+`Continue`; CEL-subset matching with write-time compilation;
+`{{event.*}}` rendering; envelope-only self-response protection; the
+`mo routing rule` surface and `mo routing test` dry-run; `mo event tail --match`;
+and `mo agent subscription`, API, and Web views over the same RoutingRule
+facts. Migration `DropAgentSubscriptions` removed the old independent
+subscription model and arbitration surface.
 
-实装差距：启动管线耐久键仍按 `(projectId, eventId, ruleId)`，(event, agent)
-合并只在单次分发内生效；归一到 agentId 键由 issue #532 收敛。
+Implementation gap: the durable launch-pipeline key is still
+`(projectId, eventId, ruleId)`, so event-and-Agent coalescing applies only
+within one dispatch. Issue #532 converges it on the Agent ID key.

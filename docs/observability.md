@@ -1,49 +1,62 @@
----
-status: wip-not-implemented
----
+# Observability
 
-# 可观测性
+Mohist should signal problems before they affect work and retain enough
+evidence to explain their cause. Observation itself must not slow or block
+work.
 
-Mohist 应该在问题影响工作前发出信号，并留下足够线索解释原因。
-观测本身不能拖慢或阻断工作。
+## What Users Can Learn
 
-## 用户能知道什么
+A user should be able to answer four questions quickly:
 
-用户可以快速回答四个问题：
+1. Is Mohist working correctly now?
+2. Which operations are slow, failing, or consuming unusual resources?
+3. When did the problem start, and what is its impact?
+4. What should the user inspect or do next?
 
-1. Mohist 现在是否正常工作？
-2. 哪类操作变慢、失败或消耗异常？
-3. 问题从何时开始，影响多大？
-4. 下一步该查看什么或执行什么操作？
+A live process is not necessarily a healthy system. Health must also reflect
+slow responses, resource pressure, and observation data that has stopped or
+been dropped.
 
-“进程还活着”不等于“系统健康”。健康状态还要反映响应变慢、资源吃紧、
-观测数据停止写入或被丢弃等情况。
+## Three Signal Types
 
-## 三类信号
+- **Metrics detect problems:** They show trends in speed, request volume,
+  resource use, and data growth.
+- **Traces explain problems:** They show the steps in one operation and where
+  time and effort were spent.
+- **Logs record events:** They record a specific failure, rejection, drop, or
+  degradation and its cause.
 
-- **指标发现问题**：显示速度、请求量、资源占用和数据增长趋势。
-- **Trace 解释问题**：显示一次操作经过了哪些步骤，时间和工作量花在哪里。
-- **日志记录事件**：记录一次明确的失败、拒绝、丢弃或降级，并给出原因。
+Each signal type has one job. A user should not need to inspect many traces
+manually to discover a problem.
 
-三类信号各做一件事。用户不需要定期手工翻查大量 Trace 才能发现异常。
+## Safety Boundary
 
-## 安全边界
+- Issues, Workflows, and AgentSessions continue to work when observation is
+  disabled or fails.
+- Observation data uses separate, bounded storage and does not compete with
+  product data for disk space.
+- When data grows too quickly, Mohist reduces or drops observation data before
+  sacrificing core work.
+- The status page clearly reports whether observation is off, healthy, or
+  degraded, including storage use and dropped data.
+- Default configuration supports long-running use without regular manual
+  cleanup.
+- Built-in observation is enabled by default with a separate 1 GiB storage
+  budget and 72-hour retention. The OTLP receiver listens only on
+  `localhost:4318` by default and is not exposed externally.
+- Set `Mohist:Otel:Enabled=false` and restart Server to disable collection,
+  receiving, diagnostic sampling, and background maintenance when resource or
+  binding problems occur.
 
-- 观测关闭或故障时，Issue、Workflow 和 AgentSession 继续正常工作。
-- 观测数据使用独立且有上限的空间，不与业务数据争抢磁盘。
-- 数据增长过快时，Mohist 先减少或丢弃观测数据，不牺牲核心工作。
-- 状态页明确显示观测是否关闭、正常或降级，以及存储使用量和丢弃情况。
-- 默认配置适合长期运行，不要求用户定期手工清理。
-- 内置观测默认启用，使用独立的 1 GiB 存储预算和 72 小时保留期；OTLP 接收端默认只监听
-  `localhost:4318`，不会因为默认配置对外开放。
-- 出现资源或绑定问题时，可设置 `Mohist:Otel:Enabled=false` 并重启 Server，完全关闭采集、接收、
-  诊断采样和后台维护。
+## Inspecting Status
 
-## 使用状态
+Run `mo otel status` to see whether observation is `healthy`, `degraded`, or
+`off`, and to inspect current resource protection.
 
-运行 `mo otel status` 查看观测是否 `healthy`、`degraded` 或 `off`，以及当前资源保护状态。
+## Status
 
-## 实装差距
-
-当前内置能力主要收集和查询 Trace，也能显示收集器状态、资源使用和降级信息。指标发现和
-自动异常提示仍未完整提供。本文描述的是目标行为。
+Built-in traces, metrics, bounded route diagnostics, runtime status, and the
+application log contract are implemented. They let a user detect and inspect a
+problem without making observation part of the work path. Automatic anomaly
+notifications are not implemented, so users must still inspect status instead
+of receiving a proactive notice.

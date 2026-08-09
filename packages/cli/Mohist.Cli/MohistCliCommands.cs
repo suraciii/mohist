@@ -131,7 +131,7 @@ internal static class MohistCliCommands
         new("--stage") { Description = "Filter by stage" };
 
     internal static Option<string?> IssuePriorityOption() =>
-        new("--priority", "-p") { Description = "Issue priority (p0|p1|p2|p3)" };
+        new("--priority", "-p") { Description = "Issue priority (p0|p1|p2|p3|p4)" };
 
     internal static (Option<bool> Ready, Option<bool> Draft) IsDraftFlags(string action)
     {

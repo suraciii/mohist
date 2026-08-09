@@ -1,21 +1,24 @@
-# 快速上手
+# Getting Started
 
-目标：30 分钟内从零启动 Mohist，通过 Mohist Agent、第三方外部 Agent 或 `mo` 跑通
-一个真实的 Issue，看到代码被合并。Web UI 作为备用的操作与可视化平面，也可以直接
-配置和使用 Mohist Agent。
+Goal: Start Mohist from zero in 30 minutes. Use a Mohist Agent, a third-party
+External Agent, or `mo` to move one real Issue through the complete Workflow and
+see its code merged. The Web UI is the fallback operations and visualization
+plane. You can also use it to configure and use a Mohist Agent directly.
 
-## 前置条件
+## Prerequisites
 
-| 工具 | 版本 | 检查命令 |
+| Tool | Version | Check command |
 |---|---|---|
 | .NET SDK | 11.0+ | `dotnet --version` |
 | Node.js | 22.19.0+ | `node --version` |
 | npm | 10+ | `npm --version` |
-| opencode CLI | 可正常启动 | `opencode --version` |
+| opencode CLI | Must start successfully | `opencode --version` |
 
-如果 `opencode` 没装，按 [opencode 官方文档](https://opencode.ai) 装。Mohist 不内置 AI 模型，Inline Agent 依赖 OpenCode 执行任务。
+If `opencode` is not installed, follow the
+[official opencode documentation](https://opencode.ai). Mohist does not include
+an AI model. An Inline Agent uses OpenCode to execute tasks.
 
-## 1. 获取代码 + 安装依赖
+## 1. Get the Source and Install Dependencies
 
 ```bash
 git clone <your-fork-or-mohist-url> mohist
@@ -23,193 +26,250 @@ cd mohist
 npm ci
 ```
 
-`npm ci` 会按 lockfile 安装 Web UI 和 Runner 的所有依赖。
+`npm ci` installs all Web UI and Runner dependencies from the lockfile.
 
-## 2. 构建后端
+## 2. Build Mohist
 
 ```bash
 npm run build
 ```
 
-这会编译 ASP.NET Core server 和 CLI。第一次会慢一点（要还原 NuGet 包）。
+This command compiles the ASP.NET Core server and CLI. The first build can take
+longer because it restores NuGet packages.
 
-## 3. 启动核心进程
+## 3. Install the `mo` CLI
 
-Server 和 Runner 是 Mohist 执行所需的核心进程。开两个终端分别跑：
+Install the CLI before its first use:
 
 ```bash
-# 终端 1：控制平面
-npm run dev:server
-
-# 终端 2：执行平面（必须在 server 之后）
-npm run dev:runner
+npm run install:cli
+mo --version
 ```
 
-需要备用操作和可视化平面时，再启动 Web UI：
+The repository command packages the local CLI and installs the global .NET tool
+as `mo`.
+
+## 4. Start the Core Processes
+
+The Server and Runner are the core processes required for Mohist execution.
+Start Server in one terminal:
 
 ```bash
-# 可选终端 3：Web UI（开发服务器）
+npm run dev:server
+```
+
+After Server is ready, install and start an authenticated Runner from a second
+terminal in the same repository:
+
+```bash
+mo install runner --repo-root "$PWD"
+mo runner status
+```
+
+The installer requests a one-time enrollment from Server, starts Runner as a
+managed service, and lets Runner keep its own machine credential. Later starts
+can use `mo service start runner` without enrolling again.
+
+Start the Web UI when you need the fallback operations and visualization plane:
+
+```bash
+# Optional terminal 3: Web UI development server
 npm run dev:web
 ```
 
-打开 `http://localhost:3456` 可以查看看板、配置并直接使用 Mohist Agent；第三方外部
-Agent 和 `mo` 不依赖 Web UI 运行。
+Open `http://localhost:3456` to view the board and configure or use a Mohist
+Agent directly. A third-party External Agent and `mo` do not require the Web UI.
 
-> 生产或长跑场景请参考 [Self-host 部署](self-host.md)，无需分别启动这些开发进程。
+> For production or continuous operation, see
+> [Self-hosting](self-host.md). You do not need to start these development
+> processes separately in that configuration.
 
-## 4. 选择交互路径
+## 5. Select an Interaction Path
 
-Mohist 支持三条互补路径。它们操作同一个 Project、Issue 与 Workflow，不会形成三套
-状态：
+Mohist supports three complementary paths. They operate the same Project,
+Issue, and Workflow. They do not create three separate sets of state.
 
-- **Mohist Agent**：在 Mohist 中保存身份、Instructions、执行配置和 Skills，可以从
-  Web UI 或 CLI 直接使用，之后还能把同一个 Agent 接入 Slack。
-- **第三方外部 Agent**：运行在 Slack、IDE 或其它产品中，通过 Mohist Skill 与 `mo`
-  查询、委托和操作 Mohist；它不是 Mohist Agent。
-- **直接使用 `mo`**：适合确定性的人工操作、脚本和排障。
+- **Mohist Agent**: Stores identity, Instructions, execution configuration, and
+  Skills in Mohist. Use it directly from the Web UI or CLI, then connect the
+  same Agent to Slack when necessary.
+- **Third-party External Agent**: Runs in Slack, an IDE, or another product. It
+  uses the Mohist Skill and `mo` to query, delegate to, and operate Mohist. It
+  is not a Mohist Agent.
+- **Direct `mo` use**: Suitable for deterministic manual operations, scripts,
+  and troubleshooting.
 
-要直接试用 Mohist Agent，先按[Agent 与 AgentSession](agent-sessions.md)创建并启动一个 Agent。
-要让第三方外部 Agent 认识 Mohist，则把 Mohist Skill 安装到本机支持的 Agent：
+To try a Mohist Agent directly, follow
+[Agents and AgentSessions](agent-sessions.md) to create and start one. To let a
+third-party External Agent use Mohist, install the Mohist Skill into a supported
+local Agent:
 
 ```bash
 mo skill install
 ```
 
-之后可以直接在外部 Agent 所在的 Slack、IDE 或其他交互场所提出需求，例如“查看 Mohist
-当前有哪些 Issue 在推进，是否需要我处理”。外部 Agent 会按场景读取 Skill，并通过 `mo`
-查询或操作 Mohist。具体机制见 [Skill 机制](skills.md)。
+You can then make a request in the Slack workspace, IDE, or other interaction
+location where the External Agent runs. For example, ask, "Which Mohist Issues
+are advancing, and do any need my attention?" The External Agent reads the
+appropriate Skill and uses `mo` to query or operate Mohist. See
+[Skills](skills.md) for the complete mechanism.
 
-本快速上手后续以第三方外部 Agent 或 `mo` 为例，不要求先创建 Mohist Agent；不使用
-外部 Agent 时，可以直接执行本文中的 `mo` 命令。
+The rest of this guide uses a third-party External Agent or `mo`. You do not
+need to create a Mohist Agent first. If you do not use an External Agent, run
+the `mo` commands in this guide directly.
 
-## 5. 配置 Inline Agent 模型
+## 6. Configure the Inline Agent Model
 
-Mohist 通过 opencode 调用 LLM。你需要确保 opencode 能正常工作：
+Mohist invokes an LLM through opencode. Confirm that opencode works:
 
 ```bash
-# 测试 opencode 是否能调通
+# Confirm that opencode can start.
 opencode --help
 ```
 
-不指定模型时，Inline Agent 使用 OpenCode 的默认模型。需要显式选择时，可以
-直接写在 task 的 `options`，也可以在 Workflow variables 中配置后通过
-`options: ${{ vars.agent }}` 传入。完整配置见
-[`mohist/opencode` Action](actions/opencode.md)。
+Without an explicit model, an Inline Agent uses the OpenCode default model. To
+select a model explicitly, set it directly in the task `options`. You can also
+configure it in Workflow Variables and pass it with
+`options: ${{ vars.agent }}`. See
+[`mohist/opencode` Action](actions/opencode.md) for the complete configuration.
 
-## 6. 创建你的第一个项目
+## 7. Create Your First Project
 
-用 CLI 创建 Project：
+Create a Project with the CLI:
 
 ```bash
 mo project create my-app --path /path/to/your/repo
 mo project use my-app
 ```
 
-也可以让已经安装 Mohist Skill 的外部 Agent 执行同一操作。需要人工备用入口时，在 Web UI：
+An External Agent with the Mohist Skill can perform the same operation. For the
+manual fallback path, use the Web UI:
 
-1. 点 **Create Project**
-2. 填项目名（如 `my-app`）
-3. 填初始仓库的资源名（如 `server`）和 Git URL
-4. 确认 base branch（默认 `main`）
+1. Select **Create Project**.
+2. Enter the Project name, such as `my-app`.
+3. Enter a resource name for the initial repository, such as `server`, and its
+   Git URL.
+4. Confirm the base branch. The default is `main`.
 
-## 7. 创建第一个 Issue
+## 8. Create Your First Issue
 
-写一个简单、清晰、可验证的 issue 作为试验。比如：
+Use a simple, clear, and verifiable Issue as the trial:
 
 > Title: Add hello world endpoint
 >
 > Body: Add a `GET /hello` endpoint that returns `{ "message": "hello" }`.
 
-在外部 Agent 中可以直接说：
+You can say this directly to an External Agent:
 
-```text
-在 my-app 创建一个 ready Issue：增加 GET /hello，返回 { "message": "hello" }。
+```text literal
+Create a ready Issue in my-app. Add GET /hello and return { "message": "hello" }.
 ```
 
-外部 Agent 会整理需求并使用 `mo` 创建。直接使用 CLI 时：
+The External Agent structures the requirement and creates the Issue with `mo`.
+To use the CLI directly, run:
 
 ```bash
 mo issue create "Add hello world endpoint" \
-  --body "Add a GET /hello endpoint that returns {\"message\":\"hello\"}."
+  --body "Add a GET /hello endpoint that returns {\"message\":\"hello\"}." \
+  --ready
 ```
 
-备用路径是 Web UI 看板右上角 **New Issue**。
+The fallback path is **New Issue** in the upper-right corner of the Web UI board.
 
-## 8. 启动 Issue
+## 9. Start the Issue
 
-可以让外部 Agent“启动刚创建的 Issue”，也可以直接执行：
+Ask the External Agent to start the Issue it created, or run:
 
 ```bash
 mo issue start 1
 ```
 
-备用路径是在 Web UI 看板上点 Issue 进入详情页 → **Start**。
+For the fallback path, select the Issue on the Web UI board to open its details,
+then select **Start**.
 
-这时 Mohist 会：
-1. 创建 worktree（`mo/issue-1` 分支）
-2. 进入 **Plan** 阶段，Inline Agent 开始分析需求、产出 proposal/design/specs/tasks
+Mohist then:
 
-## 9. 等待 Plan 完成
+1. Creates or reuses the named Workspace `issue-1` from the target Repository.
+2. Enters the **Plan** stage, where an Inline Agent analyzes the requirement and
+   produces the proposal, design, specs, and tasks.
 
-Plan 阶段通常 5-20 分钟（取决于 issue 复杂度和模型速度）。你可以在：
+## 10. Wait for Plan to Finish
 
-- 外部 Agent 中询问“#1 推进到哪里，是否有问题”
-- `mo issue logs 1` 看详细日志
-- `mo issue view 1` 看当前状态
-- Web UI Issue 详情页查看完整进度和执行证据
+The Plan stage usually takes 5 to 20 minutes, depending on Issue complexity and
+model speed. You can:
 
-Plan 完成后，issue 会停在 **awaiting approval** 状态，表示 workflow 正在等待审批决策。
+- Ask the External Agent, "How far has #1 advanced, and are there any problems?"
+- Run `mo issue logs 1` to read detailed logs.
+- Run `mo issue view 1` to read current state.
+- Open the Web UI Issue details to see complete progress and execution evidence.
 
-## 10. 审批 Plan
+After Plan finishes, the Issue stops in **awaiting approval**. The Workflow is
+waiting for an Approval decision.
 
-让外部 Agent 汇总 Plan 产物、风险和建议，或者进入 Web UI Issue 详情页查看最新产物：
+## 11. Approve or Reject Plan
 
-- `proposal.md` — Inline Agent 对这个需求的理解
-- `design.md` — 设计决策
-- `specs/` — 规格变更
-- `tasks.json` — 接下来 Build 阶段会执行的步骤
-- `self-review.md` — Inline Agent 自己的 review
+Ask the External Agent to summarize the Plan artifacts, risks, and
+recommendation. You can also open the Web UI Issue details to inspect the latest
+artifacts:
 
-觉得合理就批准，觉得有问题就附带理由打回（Inline Agent 会重新 plan）。这一步处理的是
-Workflow 的审批点；动作可以来自外部 Agent、Web UI、CLI、Mohist Agent 或其它自动化。
-外部 Agent 和自动化执行时应署名；人直接操作时可以不署名。
+- `proposal.md`: The Inline Agent's understanding of the requirement
+- `design.md`: Design decisions
+- `specs/`: Specification changes
+- `tasks.json`: Steps that the Build stage will execute
+- `self-review.md`: The Inline Agent's own review
+
+Approve the output when it is sound. Reject it with a reason when it needs a
+change; the Inline Agent will plan again. This step handles a Workflow approval
+point. The operation can come from an External Agent, the Web UI, CLI, a Mohist
+Agent, or other automation. An External Agent or automation should provide
+attribution. A person who acts directly can omit it.
 
 ```bash
-mo run approve --issue 1                         # 批准
-mo run reject --issue 1 --message "需要修改的内容"  # 打回
+mo run approve --issue 1                              # Approve
+mo run reject --issue 1 --message "Changes required"  # Reject
 ```
 
-## 11. 观察 Build / Check / Integrate
+## 12. Observe Build, Check, and Integrate
 
-审批通过后 workflow 自动推进：
+After Approval, the Workflow advances automatically:
 
-- **Build**：Inline Agent 按 tasks.json 写代码、跑测试
-- **Check**：Inline Agent review 自己的产出，可能再次等待审批
-- **Integrate**：把 `mo/issue-1` 分支合并回 base branch
+- **Build**: An Inline Agent writes code and runs tests according to
+  `tasks.json`.
+- **Check**: An Inline Agent reviews its output and can wait for another
+  Approval.
+- **Integrate**: Mohist merges the Workspace branch into the base branch.
 
-任何阶段失败，issue 会进入 blocked 状态。看 [故障恢复](troubleshooting.md) 怎么处理。
+If any stage fails, the Issue enters blocked state. See
+[Troubleshooting](troubleshooting.md) for recovery.
 
-## 12. 验收 Issue
+## 13. Verify the Issue
 
-Integrate 完成后，issue 进入 Done。这时：
+After Integrate finishes, the Issue enters Done:
 
-- `mo/issue-1` 分支已经合并进你的 base branch
-- 你的仓库里有了实际的代码改动
-- 所有产物留在 `openspec/changes/1-<slug>/` 下作为审计记录
+- The Workspace branch is merged into your base branch.
+- Your repository contains the code changes.
+- All artifacts remain under `openspec/changes/issue-1/` as an audit record.
 
-去你的仓库验证一下 `GET /hello` 真的工作。
+In your repository, verify that `GET /hello` works.
 
-## 下一步
+## Next Steps
 
-- [Skill 机制](skills.md) — 让外部 Agent 查询、委托和操作 Mohist
-- [Agent 与 AgentSession](agent-sessions.md) — 配置并直接使用一个 Mohist Agent
-- [Slack](slack.md) — 把已经测试好的 Agent 带到 Slack，用 Mohist App 对话式管理接入
-- [核心概念](concepts.md) — 理解你刚才用到的所有名词
-- [Issue 管理](issues.md) — 学会 prerequisites、comments、force stop、retry 等
-- [用 Epic 规划](epics.md) — 把零散 issue 组织成可自动推进的产品路线
-- [Workflow Profile](workflow-profiles.md) — 改造 workflow 适配你的工作风格
-- [CLI 参考](cli-reference.md) — `mo` 完整命令、选项、退出码
+- [Skills](skills.md): Let an External Agent query, delegate to, and operate
+  Mohist
+- [Agents and AgentSessions](agent-sessions.md): Configure and use a Mohist
+  Agent directly
+- [Slack](slack.md): Bring a tested Agent to Slack and use the Mohist App to
+  manage its Agent Connection conversationally
+- [Core Concepts](concepts.md): Understand all terms used in this guide
+- [Issue Management](issues.md): Learn prerequisites, comments, force stop, and
+  retry
+- [Planning with Epics](epics.md): Organize separate Issues into a product plan
+  that advances automatically
+- [Workflow Profile](workflow-profiles.md): Adapt the Workflow to your working
+  style
+- [CLI Reference](cli-reference.md): See all `mo` commands, options, and exit
+  codes
 
 ---
 
-对应源码：仓库根 `package.json`、`global.json`、`Directory.Build.props`。
+Implementation source: `package.json`, `global.json`, and
+`Directory.Build.props` in the repository root.

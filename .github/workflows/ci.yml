@@ -191,6 +191,9 @@ jobs:
         run: |
           timeout --signal=TERM --kill-after=30s 180s npm run archtest
 
+      - name: Check active documentation
+        run: timeout --signal=TERM --kill-after=30s 180s npm run docs:check
+
       - name: Build
         run: timeout --signal=TERM --kill-after=30s 300s npm run build --workspaces --if-present
 

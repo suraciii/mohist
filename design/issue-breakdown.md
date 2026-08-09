@@ -2,58 +2,112 @@
 status: accepted 2026-07-15
 ---
 
-# 复合 Issue / 子 Issue
+# Composite Issues and Child Issues
 
-产品 spec：[`docs/sub-issues.md`](../docs/sub-issues.md)、[`docs/repositories.md`](../docs/repositories.md)。本文记录领域设计、决策依据与约束。
+Product specs: [`docs/sub-issues.md`](../docs/sub-issues.md) and
+[`docs/repositories.md`](../docs/repositories.md). This document records the
+domain design, rationale, and constraints.
 
-## 决策沿革
+## Decision History
 
-- 原 #96 提议三段式自动 breakdown（Agent 分析 → `issue-breakdown.json` artifact → 审批 → 批量建子 issue），已否决；#281 将自动 breakdown 与批量子 issue 生成列为 Non-Goal，**该 Non-Goal 维持不变**——拆分永远是 owner（或替 owner 操作的外部 agent）的显式决策。
-- 上一版结论"sub-issue 与 Epic 重叠，deferred"成立于单仓库 project 前提。2026-07-15 拍板复合 issue 成立，前提变化：project 引入多仓库资源后，"一份需求拆到多个仓库执行"成为真实结构需求。分解轴（一份工作的内部分工）与 Epic 轴（产品目标的组织与供料）正交，不再重叠：
-  - Epic 成员是独立有价值的交付物，串行供料控制 WIP。
-  - 子 issue 是同一份工作的分工，完成一半没有产品意义，startable 者并行推进。
+- The original #96 proposed automatic three-stage breakdown: Agent analysis,
+  an `issue-breakdown.json` artifact, Approval, and bulk child-Issue creation.
+  It was rejected. #281 lists automatic breakdown and bulk generation as
+  Non-goals. That decision remains: decomposition is always an explicit choice
+  by the owner or an External Agent acting for the owner.
+- The earlier conclusion that child Issues overlapped with Epic assumed one
+  Repository per Project. On 2026-07-15, multi-Repository resources introduced
+  a real need to execute one requirement across Repositories. The decomposition
+  axis, internal parts of one unit of work, is independent of the Epic axis,
+  product-goal organization and work supply.
+  - Epic members deliver independent value and are supplied serially to control
+    work in progress.
+  - Child Issues divide one unit of work. A partial result has no product value,
+    and startable children advance concurrently.
 
-## 模型
+## Model
 
-- 子 issue 持有指向父 issue 的单向引用（parent）。只有这一种关系，只有一层（子不能再有子）。**不引入通用 IssueLink**——`blocks`/`relates` 仍然拒绝，start-ordering 由 prerequisite 覆盖，origin 由 parent 覆盖。
-- 父 issue 不是新类型："复合"= 拥有 ≥1 个子 issue 这一事实。全部子 issue 解除后回归普通 issue。
-- 仓库：project 持有仓库集合（名字唯一 + base branch），恰好一个 default；issue 持有目标仓库名，缺省解析为 default。父 issue 的目标仓库无执行意义（它不进 workflow）。
-- 状态汇总（由子状态变化触发重算，非手动维护）：
-  - 全部子终态且 ≥1 done → 父 done；全部 cancelled → 父 cancelled。
-  - 任一子被 reopen → 已完成的父回到 in-progress。
-  - 显式 start 或任一子开始工作 → 父 in-progress。
+- A child Issue holds one directional `parent` reference. This is the only
+  relationship and has one level; a child cannot own another child. Do not add
+  a generic `IssueLink`. `blocks` and `relates` remain rejected. Prerequisites
+  express start ordering, and parent expresses origin.
+- A parent is not a new Issue type. An Issue is composite when it has at least
+  one child. Removing every child makes it an ordinary Issue again.
+- Project owns a Repository collection with unique names, base branches, and
+  exactly one default. Issue stores a target Repository name and resolves an
+  omitted value to the default. A parent's target has no execution meaning
+  because a parent does not enter a Workflow.
+- Child state changes derive parent state; parent state is not maintained
+  manually.
+  - When all children are terminal and at least one is Done, the parent becomes
+    Done. When all are Cancelled, the parent becomes Cancelled.
+  - Reopening any child moves a completed parent to In Progress.
+  - Explicit start or the start of any child moves the parent to In Progress.
 
-## 域归属与不变式
+## Ownership and Invariants
 
-- 父子关系、状态汇总、复合推进全部落在 **Issue 子域**（work organization）。
-- **Workflow 零感知**：子 issue 的 WorkflowRun 与普通 issue 无异；父 issue 不创建 WorkflowRun。不变式"Issue → Workflow 单向、Workflow 不知道 issue"保持。
-- 子 issue 的 Plan Inline Agent 背景在派发 HTTP 响应边界按需组装：仅解析父 issue 当前标题与 body，不进入 WorkflowRun、Workflow WorkDispatch 或 task input；runner 的 `mohist/opencode` Action 负责将其标为只读背景，并保持子 issue body 为交付范围权威。完整派发规则见 [`workflow/task-dispatch.md`](workflow/task-dispatch.md)。
-- 仓库集合与 default 解析属于 **Project Space**（repo binding 本就归它）；任务派发时目标仓库解析为 repo path + base branch 注入，替代"从 project 取唯一仓库"。
-- 父子是不同 Issue 聚合，经领域事件协调（子 issue 终态/reopen 事件 → 父重算并推进兄弟），与 `WorkflowRunCompleted → CompleteIssue` 同风格。见 [`workflow/issue-coordination.md`](workflow/issue-coordination.md)。
+- Parent-child relation, state aggregation, and composite advancement belong to
+  the **Issue subdomain** as work organization.
+- **Workflow has no awareness.** A child WorkflowRun behaves like an ordinary
+  Issue run. A parent creates no WorkflowRun. The static `Issue -> Workflow`
+  dependency remains one-way; Workflow does not know Issue.
+- At the HTTP dispatch-response boundary, a child Plan Inline Agent receives
+  the current parent title and body as assembled background. They do not enter
+  WorkflowRun, Workflow WorkDispatch, or task input. Runner's
+  `mohist/opencode` Action marks this background read-only, while the child body
+  remains authoritative for delivery scope. See
+  [`workflow/task-dispatch.md`](workflow/task-dispatch.md).
+- Repository collection and default resolution belong to **Project Space**.
+  Dispatch resolves the target to Repository path and base branch instead of
+  reading one Project Repository.
+- Parent and child are different Issue aggregates. Domain events coordinate
+  them: a child terminal or reopen event causes parent recomputation and sibling
+  advancement. This follows the `WorkflowRunCompleted -> CompleteIssue`
+  pattern. See
+  [`workflow/issue-coordination.md`](workflow/issue-coordination.md).
 
-## 复合推进
+## Composite Advancement
 
-- start 父 = 启动全部 startable 子（backlog 且 prerequisite 满足），并行；子到终态后重评估，启动新解锁者，直到全部终态。
-- 复用现有 start 前置约束（并发上限、runner 在线）；无空位时等待下一次重评估，不引入独立调度器状态。
-- 手动 start 单个子 issue 始终允许，与复合推进不冲突。
+- Starting a parent starts every startable child, meaning Backlog with satisfied
+  prerequisites, concurrently. A child terminal transition reevaluates and
+  starts newly unlocked children until all are terminal.
+- Reuse existing start constraints such as concurrency and Runner presence.
+  When no capacity is available, wait for the next reevaluation. Do not add
+  separate scheduler state.
+- Manual start of one child is always allowed and does not conflict with
+  composite advancement.
 
-## 与 Epic 的隔离（关键约束）
+## Separation from Epic
 
-- **Epic 机制零改动**。Epic 视父 issue 为普通 issue：auto-advance 调用的 start 即触发复合推进；父 done 经由现有进度重算计入。
-- **子 issue 拒绝 link 到 Epic**——校验落在 Issue 侧的 link 入口，不改 Epic 的推进与判定逻辑。
+- **Epic behavior does not change.** Epic treats a parent as an ordinary Issue.
+  Auto-advance starts it, which triggers composite advancement. Existing
+  progress recomputation observes parent Done.
+- A child Issue cannot link to an Epic. Validate this at the Issue-side link
+  entry point without changing Epic advancement or decisions.
 
-## 生命周期约束表
+## Lifecycle Constraints
 
-| 操作 | 约束 |
+| Operation | Constraint |
 |---|---|
-| 挂靠（create `--parent` / update `--parent`） | 子必须 backlog 未启动；父未启动或 in-progress（终态拒绝）；已有子的 issue 不能被挂为子 |
-| 解除（`--parent none`） | 任意时刻允许；父汇总立即重算 |
-| start 父 | 需 ≥1 子 issue（无子则走普通 workflow start） |
-| close 父 | 全部子终态才允许，不级联 |
-| archive 父 | 子随父归档；子不单独 archive |
-| 删除仓库 | default 不可删；有未终态 issue 绑定不可删 |
+| Attach through create or update `--parent` | Child must be unstarted Backlog; parent must be unstarted or In Progress; an Issue that already has children cannot become a child |
+| Detach with `--parent none` | Allowed at any time; recompute parent state immediately |
+| Start parent | Requires at least one child; an Issue without children uses ordinary Workflow start |
+| Close parent | Allowed only when all children are terminal; does not cascade |
+| Archive parent | Children archive with the parent; a child cannot archive independently |
+| Delete Repository | The default cannot be deleted; a Repository bound to a nonterminal Issue cannot be deleted |
 
-## 开放问题（单独立项）
+## Open Questions
 
-1. **multi-checkout**：一个 issue 同时检出多个仓库（联调型工作）明确不做；产品 spec 以"最后一个联调子 issue"覆盖，真实需求出现再评估。
-2. **Web UI**：看板上父卡片按 status 定位（无 stage）、进度徽标与 blocked 提示的具体形态，归 [`web-ui.md`](web-ui.md) 细化。
+1. **Multiple checkouts:** One Issue checking out several Repositories for
+   integration work is explicitly unsupported. The product spec uses a final
+   integration child Issue. Reevaluate only after a real requirement appears.
+2. **Web UI:** [`web-ui.md`](web-ui.md) owns exact parent-card placement by
+   status without stage, progress indicators, and blocked presentation.
+
+## Status
+
+The parent-child model, derived parent state, composite advancement, Epic
+isolation, parent context for child planning, and CLI/Web surfaces are
+implemented. A final integration child remains the explicit product mechanism
+for cross-repository acceptance; coordinated multi-repository release is not
+part of this design.

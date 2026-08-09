@@ -568,6 +568,8 @@ public class RuntimeConsistencyValidatorSpecs
 
         Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
         Assert.Contains("missing", result.Message);
+        Assert.Contains("mo skill install", result.Message);
+        Assert.DoesNotContain("mo skills install", result.Message);
     }
 
     [Fact]
@@ -589,6 +591,8 @@ public class RuntimeConsistencyValidatorSpecs
         Assert.True(result.Outcome == RuntimeCheckOutcome.Warn,
             $"Expected Warn but got {result.Outcome}: {result.Message}");
         Assert.Contains("contain no skill", result.Message);
+        Assert.Contains("mo skill install", result.Message);
+        Assert.DoesNotContain("mo skills install", result.Message);
     }
 
     [Fact]

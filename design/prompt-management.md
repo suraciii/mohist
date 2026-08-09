@@ -4,40 +4,30 @@ status: wip
 
 # Prompt Management
 
-Prompt 是 Project-scoped 资源，属于 Project Space。WorkflowProfile、Issue 和 WorkflowRun
-都不拥有 Prompt，也不保存 Prompt override。
+A Prompt is a Project-scoped resource in Project Space. WorkflowProfile, Issue, and WorkflowRun do not
+own a Prompt or store a Prompt override.
 
-一个 Project 按 key 管理自己的 Prompt。Builtin `.prompt` 文件只在 Project 未配置该 key
-时提供只读 fallback，不是另一个可配置 scope。
+A Project manages its Prompts by key. A builtin `.prompt` file provides a read-only fallback only when the
+Project does not configure that key. It is not another configurable scope.
 
-Workflow 是 Prompt 的一个消费者；Standalone Agent 使用同一个 Project Prompt 集合。
+Workflow is one Prompt consumer. A Standalone Agent uses the same Project Prompt collection.
 
 ## Resolution
 
-WorkflowProfile 只保存 Prompt key 引用，例如 `${{ prompts.proposal }}`，不保存 Prompt
-body。Server 在 dispatch 时按 Project 和 key 把 body 加载进 attempt 不可变快照，Runner
-在调用 Action 前的执行入口对快照中的 body 做模板求值：
+WorkflowProfile stores only a Prompt key reference, such as `${{ prompts.proposal }}`. It does not store
+the Prompt body. At dispatch, the Server loads the body by Project and key into the immutable attempt
+snapshot. At the execution entry point, the Runner evaluates the body template before it calls the Action:
 
-```plantuml
-@startuml
-skinparam shadowing false
+```text diagram
+WorkflowProfile prompts.<key> -- projectId + key --> Prompt Resolver
+Project Prompts, key -> body --- configured body ---> Prompt Resolver
+Builtin Prompts, key -> body --- fallback on miss --> Prompt Resolver
 
-rectangle "WorkflowProfile\nprompts.<key>" as Profile
-rectangle "Prompt Resolver" as Resolver
-rectangle "Project Prompts\nkey -> body" as ProjectPrompts
-rectangle "Builtin Prompts\nkey -> body" as Builtin
-rectangle "Attempt Snapshot\nvars + runtime + failure" as Snapshot
-rectangle "Rendered Prompt" as Rendered
-
-Profile --> Resolver : projectId + key
-ProjectPrompts --> Resolver : configured body
-Builtin --> Resolver : fallback on miss
-Resolver --> Snapshot : dispatch 时按 key 加载 body
-Snapshot --> Rendered : Runner 调用 Action 前求值
-@enduml
+Prompt Resolver -- load body by key at dispatch --> Attempt Snapshot
+Attempt Snapshot -- Runner renders before Action --> Rendered Prompt
 ```
 
-```text
+```text literal
 resolvePrompt(projectId, key):
   if Project configured key:
     return Project Prompt body
@@ -45,60 +35,65 @@ resolvePrompt(projectId, key):
   return Builtin Prompt body for key
 ```
 
-Prompt 不做跨 scope merge，也不产生 `EffectivePrompts` collection。同名 Prompt body 是
-一个完整字符串；Project 配置整体替换 builtin body。
+Prompts do not merge across scopes and do not produce an `EffectivePrompts` collection. A Prompt body is
+one complete string. A Project configuration replaces the entire builtin body for the same key.
 
-Profile 写入时可以校验 Prompt key 的语法。Server 在 dispatch 时按 Project Prompt 或
-builtin fallback 加载 body；都不存在该 key 时本次 dispatch 失败并返回可行动的领域错误。
-同一次 attempt 的 Prompt body 由 dispatch 时刻的快照冻结，后续修改不影响该 attempt。
+A Profile write may validate Prompt key syntax. At dispatch, the Server loads the body from the Project
+Prompt or the builtin fallback. If neither source has the key, dispatch fails with an actionable domain
+error. The dispatch snapshot freezes the Prompt body for that attempt. A later change does not affect it.
 
 ## Rendering
 
-```text
+```text literal
 PromptTemplateEngine.Render(body, attemptSnapshot)
   ${{ path.to.value }} -> attempt snapshot lookup
 ```
 
-渲染使用 attempt 快照里的 Effective Stage Variables 与 runtime context，与 `with` /
-`expect` 共享同一套模板表达式语法：根命名空间封闭；任一表达式解析不出值时本次 task
-失败；嵌入字符串的值必须是 scalar，对象或数组会失败；表达式占据整个值时保留 JSON 类型；
-`\${{` 产生字面 `${{`。递归展开必须有确定的深度上限。渲染时机与 attempt 快照语义以
-[`workflow/task-dispatch.md`](workflow/task-dispatch.md) 为权威。
+Rendering uses the Effective Stage Variables and runtime context in the attempt snapshot. It uses the same
+template expression syntax as `with` and `expect`. The root namespaces are closed. The task fails if any
+expression does not resolve. A value embedded in a string must be a scalar; an object or array fails. When
+an expression occupies the whole value, it preserves its JSON type. `\${{` produces a literal `${{`.
+Recursive expansion must have a deterministic depth limit. [`workflow/task-dispatch.md`](workflow/task-dispatch.md)
+is authoritative for rendering time and attempt snapshot semantics.
 
-Prompt 不保存 revision 或 body snapshot。每次 dispatch 都从当时的 Project Prompt 资源
-读取最新 body 并冻结进 attempt 快照；redelivery、retry、rerun-from-stage 都基于自己的
-快照重新读取并渲染，因此一次 attempt 使用的 Prompt body 与该 attempt 的 dispatch 时刻
-绑定。Action 收到渲染后的 Prompt 后，本次 Action 调用不再读取 Prompt resource。
+The Prompt model has no revision or body-snapshot field. When an attempt snapshot is created at dispatch,
+the Server reads the current body from the Project Prompt resource and freezes it in that snapshot.
+Redelivery uses the attempt's existing snapshot. Retry and rerun-from-stage use their new attempt snapshots.
+Each attempt renders from its own snapshot, so its Prompt body is bound to its dispatch time. After the
+Action receives the rendered Prompt, that Action call does not read the Prompt resource again.
 
-Workflow 只依赖 Prompt key。Action 最终接收渲染后的 Prompt text，不能再次读取 Prompt
-resource 或 Variables resource。
+Workflow depends only on the Prompt key. The Action receives the rendered Prompt text. It cannot read the
+Prompt resource or Variables resource again.
 
-## Builtin Prompt 约定
+## Builtin Prompt conventions
 
-Builtin `.prompt` 是产品化内容，随产品分发、面向任意项目：
+A builtin `.prompt` is product content. It ships with the product and applies to any project:
 
-- 一律使用英文。
-- 保持产品与技术栈通用：不引用 Mohist 仓库自身的命令面、目录结构或开发历史示例。
-- 可以引用 Mohist 产品面（`mo` CLI、文档列出的模板命名空间、workflow 变量），它们在
-  任意受管项目中都成立。OpenSpec 路径约定直接写成
-  `openspec/changes/issue-${{ issue.number }}`，不依赖额外命名空间。
-- 只声明任务、输入输出与机器可校验的契约（产出路径、marker）；不规定过程细节、问题
-  分类或报告模板——执行者是足够聪明的 agent，报告的读者主要是下一个任务的 agent。
-- review 类 prompt 只诊断不修复；修复由独立的 fix 类 prompt 承担，review 报告是两者
-  之间的交接面。
-- 修改文件的 prompt（build、fix 类）常驻一行中断契约：agent 可能随时被中断——边做
-  边提交、进度记录保持最新。review 类 prompt 不加：其唯一产物是报告，收到收尾警告
-  时用当前发现立即写完即可。期限警告的注入与文案由 runtime 统一负责（见
-  [`runtimes/opencode.md`](runtimes/opencode.md)「Prompt 期限与两段式收尾」），prompt
-  不复述警告内容。
+- Use English only.
+- Keep the content independent of a product repository and technology stack. Do not refer to Mohist's own
+  repository commands, directory structure, or examples from its development history.
+- The content may refer to Mohist product surfaces, such as the `mo` CLI, documented template namespaces,
+  and workflow variables. These surfaces are valid in any managed project. Write the OpenSpec path as
+  `openspec/changes/issue-${{ issue.number }}` without an additional namespace dependency.
+- State only the task, inputs, outputs, and machine-verifiable contracts such as output paths and markers.
+  Do not prescribe process details, problem classifications, or report templates. The executing agent is
+  capable, and the primary reader of its report is the agent for the next task.
+- A review Prompt diagnoses but does not fix. A separate fix Prompt performs the repair. The review report
+  is their handoff surface.
+- A Prompt that modifies files, such as a build or fix Prompt, always contains a one-line interruption
+  contract. The agent can be interrupted at any time, so it commits as it works and keeps progress records
+  current. A review Prompt does not contain this contract because its only artifact is the report. On a
+  closeout warning, it immediately finishes the report with the current findings. The Runtime owns the
+  injection and text of deadline warnings. See the "Prompt deadlines and two-stage closeout" section in
+  [`runtimes/opencode.md`](runtimes/opencode.md). The Prompt does not repeat the warning text.
 
-CLI skill-data 中随 nupkg 分发的 SKILL.md 适用同一约定。
+The same conventions apply to the SKILL.md that ships in the nupkg as CLI skill data.
 
 ## API
 
-Prompt collection 直接挂在 Project 下：
+The Prompt collection is a direct child resource of Project:
 
-```text
+```text literal
 GET    /api/projects/{projectRef}/prompts
 GET    /api/projects/{projectRef}/prompts/{key}
 PUT    /api/projects/{projectRef}/prompts/{key}
@@ -106,14 +101,14 @@ DELETE /api/projects/{projectRef}/prompts/{key}
 POST   /api/projects/{projectRef}/prompts/{key}/preview
 ```
 
-删除 Project Prompt 后，该 key 恢复使用 builtin fallback；不存在 builtin 时读取失败。
-Issue 和 WorkflowRun 不提供 Prompt API。
+After a Project Prompt is deleted, its key uses the builtin fallback again. A read fails if no builtin
+exists. Issue and WorkflowRun do not provide a Prompt API.
 
 ## Status
 
-与当前实现的差距：
+Gaps from the current implementation:
 
-- 当前 Project Prompt 同时暴露 `/templates`、`/workflow-profile/prompts` 等重复路径；目标
-  只保留 Project `/prompts` resource。
-- 当前部分 Profile 解析代码会预先组装 Prompt map；目标实现只传 key，并在执行时读取
-  单个 Project Prompt。
+- The current Project Prompt exposes duplicate paths such as `/templates` and
+  `/workflow-profile/prompts`. The target keeps only the Project `/prompts` resource.
+- Some current Profile resolution code assembles a Prompt map in advance. The target passes only the key
+  and reads one Project Prompt at execution time.

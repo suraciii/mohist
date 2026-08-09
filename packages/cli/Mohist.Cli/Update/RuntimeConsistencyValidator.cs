@@ -307,7 +307,7 @@ internal sealed class RuntimeConsistencyValidator
         if (!_fileSystem.DirectoryExists(assetRoot))
         {
             return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
-                $"Managed skill assets are missing at '{assetRoot}'. Run 'mo skills install' to restore.");
+                $"Managed skill assets are missing at '{assetRoot}'. Run 'mo skill install' to restore.");
         }
 
         try
@@ -319,7 +319,7 @@ internal sealed class RuntimeConsistencyValidator
             if (!hasSkill)
             {
                 return new RuntimeCheckResult("Managed skill assets", RuntimeCheckOutcome.Warn,
-                    $"Managed skill assets at '{assetRoot}' contain no skill. Run 'mo skills install' to restore.");
+                    $"Managed skill assets at '{assetRoot}' contain no skill. Run 'mo skill install' to restore.");
             }
         }
         catch (Exception ex)

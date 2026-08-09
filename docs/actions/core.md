@@ -2,29 +2,29 @@
 
 ## `core/process`
 
-运行一个进程并采集标准输出和退出码。
+Runs a process and captures its standard output and exit code.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `command` | 是 | — | 要调用的命令。类型为文本。 |
-| `args` | 否 | `[]` | 传给命令的参数。类型为数组。 |
+| `command` | Yes | - | Command to invoke. The value is text. |
+| `args` | No | `[]` | Arguments to pass to the command. The value is an array. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `stdout` | 去除首尾空白后的命令标准输出。 |
-| `exitCode` | 进程退出码。 |
+| `stdout` | Command standard output with leading and trailing whitespace removed. |
+| `exitCode` | Process exit code. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `process-failed` | 进程以非零状态退出。 |
+| `process-failed` | The process exited with a nonzero status. |
 
-### 示例
+### Example
 
 ```yaml
 - id: check-version
@@ -36,36 +36,39 @@
 
 ## `core/script`
 
-通过当前平台的 Shell 包装器运行一段内联脚本。
+Runs an inline script through the current platform's shell wrapper.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `run` | 是 | — | 要运行的脚本内容。类型为文本。 |
-| `shell` | 否 | — | Shell 可执行文件。类型为文本。 |
-| `timeout` | 否 | — | 脚本执行期限，单位为毫秒。类型为数值。 |
+| `run` | Yes | - | Script content to run. The value is text. |
+| `shell` | No | - | Shell executable. The value is text. |
+| `timeout` | No | - | Script execution deadline in milliseconds. The value is numeric. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `run` | 原样返回的脚本内容。 |
-| `shell` | 实际使用的 Shell 可执行文件。 |
-| `exitCode` | Shell 退出码。 |
-| `stdout` | 截断后的标准输出。 |
-| `stderr` | 截断后的标准错误输出。 |
+| `kind` | Output type identifier. |
+| `run` | Original script content. |
+| `shell` | Shell executable that was used. |
+| `exitCode` | Shell exit code. |
+| `stdout` | Truncated standard output. |
+| `stderr` | Truncated standard error. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `script-failed` | 脚本以非零状态退出。 |
+| `script-failed` | The script exited with a nonzero status. |
 
-脚本失败的诊断会包含 Shell 退出码，以及非空标准输出和标准错误的有界尾部。这样即使某个工具把警告写入标准错误、把实际失败写入标准输出，恢复处理仍能看到可操作的失败原因。
+A script-failure diagnostic includes the shell exit code and bounded tails of
+nonempty standard output and standard error. Recovery therefore receives an
+actionable failure reason even when a tool writes warnings to standard error
+and the actual failure to standard output.
 
-### 示例
+### Example
 
 ```yaml
 - id: verify-diff
@@ -76,29 +79,29 @@
 
 ## `core/artifact-exists`
 
-检查工作区内一个相对路径的文件或目录是否存在。
+Checks whether a file or directory exists at a relative workspace path.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `path` | 是 | — | 要检查的路径。类型为文本。 |
+| `path` | Yes | - | Path to check. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `path` | 解析后的路径。 |
-| `exists` | 路径是否存在。 |
+| `kind` | Output type identifier. |
+| `path` | Resolved path. |
+| `exists` | Whether the path exists. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `artifact-missing` | 必需的文件或目录不存在。 |
+| `artifact-missing` | The required file or directory does not exist. |
 
-### 示例
+### Example
 
 ```yaml
 - id: check-proposal
@@ -109,32 +112,32 @@
 
 ## `core/marker`
 
-检查工作区内文件是否包含指定的标记文本。
+Checks whether a workspace file contains specified marker text.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `path` | 是 | — | 要读取的路径。类型为文本。 |
-| `expect` | 否 | — | 要匹配的标记文本。类型为文本。 |
+| `path` | Yes | - | Path to read. The value is text. |
+| `expect` | No | - | Marker text to match. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `path` | 解析后的路径。 |
-| `marker` | 本次检查所匹配的标记文本。 |
-| `found` | 是否找到标记。 |
+| `kind` | Output type identifier. |
+| `path` | Resolved path. |
+| `marker` | Marker text matched by this check. |
+| `found` | Whether the marker was found. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `artifact-missing` | 标记文件不存在。 |
-| `marker-missing` | 文件中未找到标记文本。 |
+| `artifact-missing` | The marker file does not exist. |
+| `marker-missing` | The marker text was not found in the file. |
 
-### 示例
+### Example
 
 ```yaml
 - id: verify-completion

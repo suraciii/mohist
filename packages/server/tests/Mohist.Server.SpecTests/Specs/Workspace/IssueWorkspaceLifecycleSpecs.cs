@@ -186,7 +186,8 @@ public class IssueWorkspaceLifecycleSpecs
             () => WorkspaceGrain(workspaceName).CloseAsync(_fixture.TimeProvider.GetUtcNow()));
         Assert.Equal("workspace_close_not_allowed_for_issue", ex.Code);
         Assert.Contains("issue done", ex.Hint);
-        Assert.Contains("issue cancel", ex.Hint);
+        Assert.Contains("issue close", ex.Hint);
+        Assert.DoesNotContain("issue cancel", ex.Hint);
     }
 
     [Fact]

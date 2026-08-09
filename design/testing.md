@@ -138,15 +138,20 @@ finish a test run.
 
 The lowest useful layer owns the behavior matrix. API/integration specs assert route, binding, status code, JSON shape, parameter parsing, and one success path per endpoint; state and calculation permutations belong to the querier/grain/domain specs below. Never repeat the lower layer's scenario matrix through HTTP — one behavior change must touch one test file, not two layers.
 
-### 5. 成本只随相关数据增长
+### 5. Cost Grows Only with Relevant Data
 
-轮询、心跳、状态、看板和清理路径读取存储或调用其他组件时，要测试执行成本。
+Test execution cost whenever polling, heartbeat, status, dashboard, or cleanup
+paths read storage or call other components.
 
-- 当前工作相同，分别加入少量和大量无关历史数据。
-- 用测试拦截器或测试替身统计数据库命令、反序列化记录或下游调用。
-- 无关历史数据增加时，只依赖当前状态的工作量不能增加。
-- 断言操作次数或明确上限，不断言墙钟耗时。
-- 正确性测试与成本测试共用准备数据时，放在同一个测试文件。
+- Hold the current work constant and compare fixtures with a small and a large
+  amount of unrelated historical data.
+- Use test interceptors or fakes to count database commands, deserialized
+  records, or downstream calls.
+- Increasing unrelated history must not increase work that depends only on the
+  current state.
+- Assert operation counts or an explicit upper bound, not wall-clock duration.
+- When correctness and cost tests share fixture data, keep them in the same
+  test file.
 
 ## Spec parallelism (server)
 
@@ -224,10 +229,10 @@ packages/cli/tests/Mohist.Cli.Tests/bin/Debug/net11.0/Mohist.Cli.Tests \
 |---|---|---|---|---|
 | time | FakeTimeProvider | vi.useFakeTimers | same as runner | seam missing |
 | HTTP | WebApplicationFactory + TestServer | vi.stubGlobal('fetch') | MSW | RecordingHttpHandler |
-| SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | config alias → tests/support/signalr-fake.ts | — |
-| notification | — | — | config alias → tests/support/sonner-fake.ts | — |
-| process | — | fake OpenCodeRuntime / SDK server factory | — | FakeCommandExecutor |
-| DB | in-memory SQLite, clone from MigratedSqliteTemplate.CopyTo (no Migrate()) | — | — | fake IOtelQueryExecutor |
-| grain | InProcessTestCluster, ControllableReminderTable | — | — | — |
-| render | — | — | customRender (tests/test-utils.tsx) | — |
+| SignalR | RecordingRunnerHubContext | vi.mock('@microsoft/signalr') | config alias -> tests/support/signalr-fake.ts | n/a |
+| notification | n/a | n/a | config alias -> tests/support/sonner-fake.ts | n/a |
+| process | n/a | fake OpenCodeRuntime / SDK server factory | n/a | FakeCommandExecutor |
+| DB | in-memory SQLite, clone from MigratedSqliteTemplate.CopyTo (no Migrate()) | n/a | n/a | fake IOtelQueryExecutor |
+| grain | InProcessTestCluster, ControllableReminderTable | n/a | n/a | n/a |
+| render | n/a | n/a | customRender (tests/test-utils.tsx) | n/a |
 | file/data | Support/TestData/* | tests/support/* | tests/support/* | FakeFileSystem |

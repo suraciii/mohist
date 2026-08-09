@@ -1,100 +1,133 @@
 # Workspace
 
-Workspace 是 Project 下持久存在的执行环境：一组工作目录，加上若干仓库的访问权。
-它跨会话、跨 Agent 存在——多个会话、多个 Agent 可以在同一个 workspace 里接力，
-后加入者看到的是同一个目录：装好的依赖、检索到的资料、未提交的改动都在。
+A Workspace is a persistent execution environment under a Project. It contains
+a set of working directories and access to one or more repositories. It
+persists across Sessions and Agents. Multiple Sessions and Agents can continue
+work in the same Workspace. A later participant sees the same directories,
+installed dependencies, research material, and uncommitted changes.
 
-Workspace 是“工作”发生的地方，仓库只是它的材料：仓库检出位于 workspace 之下，
-而计划、调研、笔记等工作产物直接属于 workspace，不属于任何一个仓库——一件横跨
-多个仓库的工作，其成果在 workspace 层始终有安放之处。
+Work happens in a Workspace; repositories are its inputs. Repository checkouts
+live under the Workspace. Plans, research, notes, and other work products belong
+directly to the Workspace rather than to one repository. Work that spans
+several repositories therefore always has a place at the Workspace level.
 
-## 两种来源
+## Two Sources
 
-### Issue 工作流的 workspace
+### Workspace for an Issue Workflow
 
-Issue 首次启动时自动获得自己的 workspace（命名为 `issue-<编号>`）。它**干净初始化**：
-从目标仓库全新检出，不与其他 issue 共享任何目录——大量 issue 并行推进时互不干扰。
+When an Issue first starts, it automatically receives a Workspace named
+`issue-<number>`. Mohist initializes it from a clean checkout of the target
+repository. It does not share directories with other Issues, so many Issues can
+run in parallel without interfering with each other.
 
-同一个 issue 的所有阶段、重试、会话和被拉进来的 Agent 共享这个 workspace；
-issue 完成或取消时，workspace 随之归档。
+All Stages, retries, Sessions, and invited Agents for the same Issue share this
+Workspace. Mohist archives it when the Issue completes or is cancelled.
 
-### 交互入口的 workspace
+### Workspace for an Interactive Entry Point
 
-从 Slack、Web 或 CLI 直接发起的会话同样落在 workspace 里。默认规则是**一个交互
-场所一个 workspace**：
+A Session started directly from Slack, Web, or CLI also runs in a Workspace.
+By default, each interaction location has one Workspace:
 
-- **Slack**：一个 channel 一个 workspace。channel 里发起的所有会话、被拉进来的
-  所有 Agent，都在同一个 workspace 里工作。
-- **Web**：一个对话一个 workspace。
-- **CLI**：`mo workspace create <name>` 显式创建，启动会话时用 `--workspace <name>`
-  绑定。不带 `--workspace` 的 `mo agent launch` 绑定当前 Project 的默认 Workspace，必要时
-  创建 `cli-current`（来源记录为 `cli`）；CLI 输出会显示实际绑定，避免隐藏默认作用域。
+- **Slack**: Each channel has one Workspace. All Sessions and invited Agents in
+  the channel use that Workspace.
+- **Web**: Each conversation has one Workspace.
+- **CLI**: Create one explicitly with `mo workspace create <name>` and bind a
+  Session with `--workspace <name>`. Without `--workspace`,
+  `mo agent launch` binds the current Project's default Workspace. When needed,
+  Mohist creates `cli-current` with source `cli`. CLI output shows the actual
+  binding so that the default scope is not hidden.
 
-交互入口的 workspace 不做干净初始化：它持久累积。这正是跨会话复用的价值。
+Mohist does not initialize an interactive Workspace from a clean state. It
+accumulates work over time, which enables reuse across Sessions.
 
-## 绑定与共享
+## Binding and Sharing
 
-- 新会话默认绑定所在场所解析出的 workspace；在同一个 channel 里再开新会话，
-  落在同一个 workspace。
-- 把别的 Agent 拉进会话或 channel，它就进入同一个 workspace，看到同样的文件。
-- 会话里委托出的子会话继承同一个 workspace；需要隔离的子会话，委托时绑定另一个
-  workspace，或由 Agent 在目录内自行 git worktree（git 范畴的工具，平台不提供
-  “隔离工作空间”原语）。
-- 任何时候，一个场所只对应一个活跃 workspace——“我在这里说话，Agent 在哪个目录”
-  永远有唯一答案。
+- A new Session uses the Workspace resolved from its interaction location by
+  default. Another Session in the same channel uses the same Workspace.
+- An Agent invited into a Session or channel enters the same Workspace and sees
+  the same files.
+- A delegated child Session inherits the same Workspace. To isolate a child,
+  let the Agent create a Git worktree inside the inherited directory. Spawn
+  cannot select another Workspace. A Git worktree is a Git tool; Mohist does
+  not provide a child-specific Workspace primitive.
+- At any time, one interaction location maps to one active Workspace. There is
+  always one answer to the question, "Which directory is the Agent using here?"
 
-## 命令面
+## Commands
 
 ```bash
-# 建立共享环境，两个 Agent 先后加入
+# Create a shared environment and let two Agents join in sequence.
 mo workspace create payment-refactor --repo server --repo web
 mo agent launch coder --workspace payment-refactor
 mo agent launch reviewer --workspace payment-refactor
 
-# 观察：来源、仓库、当前绑定的会话
+# Inspect the source, repositories, and bound Sessions.
 mo workspace list --status active
 mo workspace view payment-refactor
 mo session list --workspace payment-refactor
 
-# 调整仓库成员；归档（有活跃会话时会被拒绝并提示下一步）
+# Change repository membership, then archive the Workspace.
+# Archive is rejected with a recovery instruction while Sessions are active.
 mo workspace repo add payment-refactor infra
 mo workspace close payment-refactor
 ```
 
-完整命令契约见 [CLI 参考](cli-reference.md#workspace)。
+See [CLI Reference](cli-reference.md#workspace) for the complete command
+contract.
 
-## 仓库
+## Repositories
 
-Workspace 持有一组仓库引用（Project 已声明的仓库资源）。workflow 路径从 issue 的
-目标仓库预填；交互路径按需挂载。挂载表示授予访问权和默认检出目标；真正的 clone、
-分支与 worktree 组织由 Agent 在目录内自行完成，平台不规定目录内部结构。布局约定
-（检出放 `repos/` 下、工作产物放 workspace 根）由 prompt 承载，不是平台强制。
+A Workspace holds references to repositories declared as Project resources. An
+Issue Workflow starts with the Issue's target repository. Runner owns that
+checkout's branch, marker, and layout so every Stage, retry, and integration
+step observes the same Workspace identity. Treat its recorded home as opaque
+and inspect it through `mo workspace view`.
 
-## 生命周期终点
+An interactive Workspace mounts repositories as needed. There, a mount grants
+access and provides a default checkout target, while the Agent controls the
+actual clone, branch, and worktree layout. Conventions such as placing checkouts
+under `repos/` and work products at the Workspace root belong in the Prompt and
+are not enforced by the platform.
 
-- Issue 完成或取消 → 其 workflow workspace 自动归档。
-- `mo workspace close <name>` 归档任意 workspace。
-- Slack channel 归档 → 对应 workspace 归档；channel 里的下一条消息自动开始一个
-  全新的 workspace——"搞乱了重来"就是 close 后继续说话。
-- 归档后 workspace 保留历史可查，不再接受新会话。
+## Lifecycle Endpoints
 
-## 事件
+- Completing or cancelling an Issue archives its Workflow Workspace.
+- `mo workspace close <name>` archives an interactive or manually created
+  Workspace. An Issue Workspace can end only through `mo issue done` or
+  `mo issue close` because the Issue lifecycle owns it.
+- Archiving a Slack channel archives its Workspace. The next message in that
+  channel automatically starts a new Workspace. To discard a disordered
+  environment and continue, close it and send another message.
+- An archived Workspace remains available for history but accepts no new
+  Sessions.
 
-Workspace 的创建与归档是平台事件（`workspace.created` / `workspace.archived`），
-携带 Project、Workspace 名称与来源（issue / manual / slack / web / cli）。订阅方可以按
-来源过滤——例如：渠道 Agent 在收到归档事件后收尾，创建事件触发依赖预装。
-事件路由见 [事件路由](event-routing.md)，订阅语法见[事件协议](event-protocol.md)。
+## Events
 
-## 目录丢失
+Workspace creation and archival produce the `com.mohist.workspace.created` and
+`com.mohist.workspace.archived` platform events. Each event includes the Project,
+Workspace name, and source: `issue`, `manual`, `slack`, `web`, or `cli`.
+Subscribers can filter by source. For example, a channel Agent can perform
+cleanup after an archive event, or a create event can trigger dependency
+installation. See [Event Routing](event-routing.md) and
+[Event Protocol](../design/event-protocol.md).
 
-Workspace 的目录由执行它的 runner 承载。runner 故障或磁盘清理后，workspace 本身
-仍在，但目录内容不保证恢复：再次使用时从空目录开始，未推送的工作随之丢失。
-工作流靠推送到远端的 workflow branch 保留成果；交互 workspace 里重要的东西应该
-提交并推送。
+## Missing Directory
 
-## 实装差距
+The Runner that executes a Workspace hosts its directories. The Workspace still
+exists after Runner failure or disk cleanup, but its directory contents are not
+guaranteed to return. A missing directory can be rematerialized empty on the same
+home Runner. AgentJob scheduling can clear an offline home and select another
+Runner, but a WorkflowRun remains assigned and does not migrate automatically.
+Unpushed work is lost in either case. A Workflow preserves completed work by
+pushing its Workflow branch to the remote. Important work in an interactive
+Workspace must be committed and pushed.
 
-Workspace 实体与生命周期（创建/归档）已实装；交互入口（Slack / Web 来源）的
-动态创建、Slack channel 归档到 workspace 归档的接线尚未落地，当前交互入口只
-覆盖 manual 来源。目录物化仍在 runner 侧按 WorkflowRun 组织，跨会话复用与
-回收守卫的 Workspace 视角切换待推进。
+## Implementation Gaps
+
+Workspace identity, create and archive lifecycle, Issue and interactive source
+resolution, named Runner materialization, and cross-Session reuse are
+implemented. AgentJobs can replace an offline home; WorkflowRuns cannot yet move
+their assignment to another Runner. Slack channel archival also does not yet
+archive its Workspace; until that linkage exists, close the interactive
+Workspace explicitly when the channel should no longer retain an active
+environment.

@@ -2,31 +2,31 @@
 
 ## `mohist/openspec-tasks`
 
-加载 `tasks.json`，把其中的任务加入当前 Workflow 执行。
+Loads `tasks.json` and adds its tasks to the current Workflow execution.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `path` | 是 | — | `tasks.json` 的路径。类型为文本。 |
-| `task` | 否 | — | 应用于每个任务条目的默认任务级字段。类型为对象；该值在任务展开时解析。 |
-| `items` | 否 | `tasks` | JSON 文档中任务列表的顶层路径。类型为文本。 |
-| `buildPrompt` | 否 | — | 构建任务提示词的文本。类型为文本。 |
+| `path` | Yes | - | Path to `tasks.json`. The value is text. |
+| `task` | No | - | Default task-level fields applied to each task entry. The value is an object and is resolved when the task expands. |
+| `items` | No | `tasks` | Top-level path to the task list in the JSON document. The value is text. |
+| `buildPrompt` | No | - | Text used to build each task prompt. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `loaded` | 加入本次运行的任务数量。 |
+| `loaded` | Number of tasks added to this run. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `missing-source` | `tasks.json` 文件不存在。 |
-| `server-unavailable` | 无法连接 Server。 |
+| `missing-source` | The `tasks.json` file does not exist. |
+| `server-unavailable` | The Server cannot be reached. |
 
-### 示例
+### Example
 
 ```yaml
 - id: load-tasks
@@ -37,34 +37,35 @@
     items: tasks
 ```
 
-本示例引用名为 `defaultTask` 的 Variable；如不需要默认任务级字段，可省略 `task`。
+This example references a Variable named `defaultTask`. Omit `task` when no
+default task-level fields are needed.
 
 ## `mohist/openspec-artifacts`
 
-检查指定 OpenSpec change 目录中的必需产物是否齐全。
+Checks whether all required artifacts exist in an OpenSpec change directory.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `changeDir` | 是 | — | OpenSpec change 目录的路径。类型为文本。 |
+| `changeDir` | Yes | - | Path to the OpenSpec change directory. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `changeDir` | 解析后的 change 目录。 |
-| `present` | 所有必需产物是否存在。 |
-| `missing` | 缺失产物路径列表。 |
+| `kind` | Output type identifier. |
+| `changeDir` | Resolved change directory. |
+| `present` | Whether all required artifacts exist. |
+| `missing` | Paths of missing artifacts. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `artifacts-missing` | 必需的 OpenSpec 产物不存在。 |
+| `artifacts-missing` | A required OpenSpec artifact does not exist. |
 
-### 示例
+### Example
 
 ```yaml
 - id: verify-change
@@ -75,38 +76,38 @@
 
 ## `mohist/archive-change`
 
-归档 OpenSpec change 目录，并提交这次移动产生的变更。
+Archives an OpenSpec change directory and commits the resulting move.
 
-### 输入
+### Inputs
 
-| 字段 | 必填 | 默认 | 含义 |
+| Field | Required | Default | Meaning |
 |---|---:|---|---|
-| `changeDir` | 是 | — | OpenSpec change 目录的路径。类型为文本。 |
+| `changeDir` | Yes | - | Path to the OpenSpec change directory. The value is text. |
 
-### 输出
+### Outputs
 
-| 字段 | 含义 |
+| Field | Meaning |
 |---|---|
-| `kind` | 输出类型标识。 |
-| `source` | 源 change 目录。 |
-| `destination` | 归档目标目录。 |
-| `changed` | 归档步骤是否修改了仓库。 |
-| `noChange` | 归档步骤是否没有产生变更。 |
-| `commitMessage` | 归档步骤修改仓库时使用的提交消息。 |
-| `commitSha` | 归档步骤修改仓库时产生的提交 SHA。 |
-| `commitOutput` | 原始 Git 提交输出。 |
-| `changedFiles` | 归档提交修改的文件。 |
+| `kind` | Output type identifier. |
+| `source` | Source change directory. |
+| `destination` | Archive destination directory. |
+| `changed` | Whether the archive step modified the repository. |
+| `noChange` | Whether the archive step produced no change. |
+| `commitMessage` | Commit message used when the archive step modified the repository. |
+| `commitSha` | Commit SHA produced when the archive step modified the repository. |
+| `commitOutput` | Raw Git commit output. |
+| `changedFiles` | Files modified by the archive commit. |
 
-### 业务错误码
+### Business Error Codes
 
-| 错误码 | 含义 |
+| Error code | Meaning |
 |---|---|
-| `retry-safe` | 归档步骤可以安全重试。 |
-| `partial-archive` | 源目录和归档目录都包含文件，因此拒绝覆盖。 |
-| `missing-source` | 源 change 目录不存在。 |
-| `config-error` | 归档配置无效。 |
+| `retry-safe` | The archive step can be retried safely. |
+| `partial-archive` | Both source and archive directories contain files, so overwrite is refused. |
+| `missing-source` | The source change directory does not exist. |
+| `config-error` | The archive configuration is invalid. |
 
-### 示例
+### Example
 
 ```yaml
 - id: archive-change

@@ -1,346 +1,446 @@
 # CLI Design
 
-`mo` 是 Mohist 面向人和 Agent 的操作语言。它把领域意图编码成稳定命令，把执行所需的最小准确上下文放在当前层级。
+`mo` is Mohist's operational language for people and Agents. It encodes domain intent as stable
+commands and places the smallest accurate execution context at the current level.
 
-本文定义命令语言的领域归属、设计依据与实现约束。命令语言的用户可见规则——语法、动词、flag、输入通道、输出与错误契约——唯一权威是 [`docs/cli-reference.md`](../docs/cli-reference.md)；本文不重复这些规则，只保留它们的构造依据、实现机制与验证方式。
+This document defines domain ownership, design rationale, and implementation constraints for the
+command language. [`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for its
+user-visible rules: syntax, verbs, flags, input channels, output, and error contracts. This document
+does not repeat those rules. It retains only their construction rationale, implementation
+mechanisms, and verification approach.
 
 ## Goals
 
-- Agent 只凭 Mohist Skill 与当前版本的 `mo --help` 就能发现并准确执行常见操作。
-- 人和 Agent 使用同一命令面、帮助、输出和错误，不维护平行协议。
-- 命令能从领域对象和动作推导；一项能力只有一个规范路径。
-- 默认输出适合人阅读，结构化输出允许调用方只取决策所需字段。
-- 非交互行为确定；参数、状态和失败都能在一次反馈中给出下一步。
-- 帮助与 Skill 保持短小，每句话都改变选择、输入或恢复动作。
+- An Agent can discover and execute common operations accurately using only the Mohist Skill and
+  `mo --help` from the current version.
+- People and Agents use the same command surface, help, output, and errors. There is no parallel
+  protocol.
+- Commands can be derived from domain objects and actions. Each capability has one canonical path.
+- Default output is readable by people, while structured output lets callers request only the
+  fields needed for a decision.
+- Non-interactive behavior is deterministic. Parameters, state, and failures provide the next step
+  in one response.
+- Help and the Skill stay small. Every sentence changes a choice, input, or recovery action.
 
-`mo` 不承担以下职责：
+`mo` does not:
 
-- 不在 Skill 或帮助中教授通用 shell、JSON、Git 或 Agent 推理方法。
-- 不把完整产品手册、内部接口或实现历史塞进 `--help`。
-- 不为了语法整齐发明没有产品意义的资源。
-- 不成为任意服务接口的通用透传客户端。
-- 不提供一套与人类命令分离的 “Agent mode”。
+- teach general shell, JSON, Git, or Agent reasoning in the Skill or help;
+- put a complete product manual, internal interface, or implementation history in `--help`;
+- invent resources without product meaning for the sake of syntactic regularity;
+- become a generic pass-through client for arbitrary service interfaces;
+- provide an Agent mode separate from commands used by people.
 
 ## Model
 
-CLI 导航以用户意图为主，同时尊重领域所有权。顶层命令不机械映射代码模块或聚合；一个对象可独立寻址或用户会直接以它为操作起点时，才值得成为顶层 area。
+CLI navigation starts with user intent while respecting domain ownership. Top-level commands do
+not mechanically mirror code modules or aggregates. An object merits a top-level area only when it
+is independently addressable or users directly start operations from it.
 
-| Area | 对应产品 / 领域概念 | 作用域与边界 |
+| Area | Product or domain concept | Scope and boundary |
 |---|---|---|
-| `project` | Project | Project Space 根入口；拥有 Prompt 与 Project Variable |
-| `repo` | Repository | Project 范围的命名执行资源；Issue 只引用它 |
-| `workspace` | Workspace | Project 范围的持久执行环境；仓库成员关系是其子资源 |
-| `issue` | Issue | 工作项及其自身生命周期；`start` 负责开始工作 |
-| `epic` | Epic | 与 Issue 同一限界上下文，但有独立身份和生命周期 |
-| `workflow` | WorkflowProfile | Project 范围的 Workflow 定义入口，不表示一次执行 |
-| `run` | WorkflowRun | 一次 Workflow 执行及其审批、恢复和终止动作 |
-| `agent` | Mohist Agent | Project 范围的可复用 Agent；AgentJob 是工作子资源，Agent Connection 是外部接入子资源 |
-| `session` | AgentSession | 稳定的逻辑会话，与来源无关地统一寻址 |
-| `activity` | AgentOps Activity feed | Project 范围的跨领域只读活动记录 |
-| `runner` | Runner | Server 已注册的执行资源、presence 与 capacity |
-| `server` | Mohist Server | 当前连接的控制平面应用及其状态、健康和应用日志 |
-| `service` | Managed Service | 本机受管的 Server、Runner 或可选 `mohist-slack` 进程；不是领域上下文 |
-| `event` | Event delivery operations | 实时信封流与 dead-letter 恢复；不是业务领域资源 |
-| `label` | Label definition | Project 范围的标签词汇定义，供 Issue / Epic 引用 |
-| `routing` | Routing rule | Project 范围的有序事件路由规则及其干跑评估 |
-| `notification` | Notification channel | 本机外发通知渠道配置；不是业务领域资源 |
-| `otel` | OpenTelemetry traces | 本机追踪存储与查询；可观测性工具，不是业务领域资源 |
-| `skill` | Mohist Skill | 打包的 Skill 资产，安装到本机 agent 目录；不是业务领域资源 |
+| `project` | Project | Root entry point for a Project Space; owns Prompts and Project Variables |
+| `repo` | Repository | Named execution resource scoped to a Project; Issue only references it |
+| `workspace` | Workspace | Persistent execution environment scoped to a Project; repository membership is its child resource |
+| `issue` | Issue | Work item and its own lifecycle; `start` begins work |
+| `epic` | Epic | Shares the bounded context with Issue but has an independent identity and lifecycle |
+| `workflow` | WorkflowProfile | Project-scoped Workflow Definition entry point; does not represent one execution |
+| `run` | WorkflowRun | One Workflow execution and its approval, recovery, and termination actions |
+| `agent` | Mohist Agent | Reusable Agent scoped to a Project; AgentJob is a work child resource and Agent Connection is an external access child resource |
+| `session` | AgentSession | Stable logical Session addressed uniformly regardless of origin |
+| `activity` | AgentOps Activity feed | Project-scoped, cross-domain, read-only activity records |
+| `runner` | Runner | Execution resource registered with Server, including presence and capacity |
+| `server` | Mohist Server | Currently connected control-plane application, including status, health, and application logs |
+| `service` | Managed Service | Locally managed Server, Runner, or optional `mohist-slack` process; not a domain context |
+| `event` | Event delivery operations | Live envelope stream and dead-letter recovery; not a business-domain resource |
+| `label` | Label definition | Project-scoped label vocabulary referenced by Issues and Epics |
+| `routing` | Routing rule | Ordered Project-scoped event routing rules and dry-run evaluation |
+| `notification` | Notification channel | Local outbound notification channel configuration; not a business-domain resource |
+| `otel` | OpenTelemetry traces | Local trace storage and queries; an observability tool, not a business-domain resource |
+| `skill` | Mohist Skill | Packaged Skill assets installed into a local Agent directory; not a business-domain resource |
 
-Runtime adapter、Runtime Session 和 model catalog 不形成顶层 area。Runtime 是 Agent 配置、
-Session binding 或 Action 选择中的维度；模型目录通过 `agent model list --runtime` 提供配置
-辅助。根级 `config` 也不是产品资源：所有者不同的设置必须留在 Project、Agent、Run 或本机
-Service 等明确边界，不能用任意 key/value 命令重新聚合。
+Runtime adapters, Runtime Sessions, and the model catalog do not form top-level areas. Runtime is a
+dimension of Agent configuration, Session binding, or Action selection. The model catalog supports
+configuration through `agent model list --runtime`. A root-level `config` is not a product resource
+either. Settings with different owners remain within explicit Project, Agent, Run, or local Service
+boundaries and cannot be reaggregated through arbitrary key/value commands.
 
-`run` 是 WorkflowRun 的命令行短名。`workflow` 是 WorkflowProfile 的导航名；group help 的首句必须写明它管理 Workflow Profile，不能让用户把它理解成 WorkflowRun。CLI 短名不引入新的领域概念，也不改变 [`domain-analysis.md`](domain-analysis.md) 的所有权。
+`run` is the CLI short name for WorkflowRun. `workflow` is the navigation name for
+WorkflowProfile. The first sentence of group help must say that it manages Workflow Profiles so
+users do not interpret it as WorkflowRun. A CLI short name introduces no new domain concept and
+does not change the ownership defined by [`domain-analysis.md`](domain-analysis.md).
 
-`workflow edit` 修改 Profile 资源，而不是只为未来 Run 准备配置。Profile ID 绑定、
-Definition 与 Variables 的生效时机由产品 [Workflow Profile spec](../docs/workflow-profiles.md#选择-profile)
-统一定义；CLI 不复制另一套生命周期规则。`workflow edit --help` 必须明确该操作可能影响
-活动 Run，并链接 `run --help` 以区分 Profile 与执行。
+`workflow edit` modifies a Profile resource rather than configuration only for future Runs. The
+product [Workflow Profile specification](../docs/workflow-profiles.md#select-a-profile) defines
+Profile ID binding and when Definition and Variables changes take effect. CLI does not copy a
+second set of lifecycle rules. `workflow edit --help` must state that the operation can affect an
+active Run and link to `run --help` to distinguish a Profile from an execution.
 
-### Canonical ownership
+### Canonical Ownership
 
-每个领域意图只有一个规范入口。area 选择用户正在表达的主要对象或关系；持久化字段位于哪个
-aggregate 是内部实现，不机械决定命令导航。跨 context 的关系必须在路径中显式给出拥有该
-关系的 scope，不能把引用伪装成被引用资源自身的属性：
+Every domain intent has one canonical entry point. The area represents the main object or
+relationship the user is expressing. The aggregate that persists a field is an implementation
+detail and does not mechanically choose command navigation. A relationship across contexts must
+show the Scope that owns the relationship in its path. It cannot masquerade as a property of the
+referenced resource:
 
-- `issue start` 开始一项工作并取得当前 WorkflowRun；它是 Issue 动作。
-- `run approve/reject/retry/rerun/pause/resume/stop` 改变 WorkflowRun；不在 `issue` 下复制。
-- `project workflow set-default` 修改 Project 的默认 Profile 引用；`workflow` 只管理 Profile
-  collection，Issue 的显式选择由 `issue create/edit --workflow-profile` 修改，并由
-  `issue edit --inherit-workflow-profile` 清除；两个 flag 互斥。默认仓库同理，由
-  `project repo set-default` 修改。
-- `agent launch` 启动 Mohist Agent 并返回 AgentJob、AgentSession、首条 SessionInput 与首个
-  AgentTurn；Job 裁定首次 launch execution，Session 承载持续对话，二者不互相冒充状态或结果。
-- `workspace create/list/view/close` 管理 Workspace 实体，`workspace repo add/remove` 管理其仓库
-  成员关系。Session 与 Workspace 的绑定只有一个显式入口：`agent launch --workspace`；省略时
-  Session 不绑定 Workspace，沿用 Runner 默认工作目录。Issue 与 Slack / Web 入口的绑定是
-  Origin 自动解析，不在 `issue` 或 `session` 下复制 workspace 命令；`session list --workspace`
-  与 `session view` 的 workspace 字段只是读取维度。
+- `issue start` begins one work item and obtains its current WorkflowRun. It is an Issue action.
+- `run approve/reject/retry/rerun/pause/resume/stop` changes WorkflowRun and is not duplicated under
+  `issue`.
+- `project workflow set-default` changes the Project's default Profile reference. `workflow`
+  manages only the Profile collection. `issue create/edit --workflow-profile` changes an Issue's
+  explicit selection and `issue edit --inherit-workflow-profile` clears it; the two flags are
+  mutually exclusive. The default repository follows the same rule and changes through
+  `project repo set-default`.
+- `agent launch` starts a Mohist Agent and returns an AgentJob, AgentSession, first SessionInput, and
+  first AgentTurn. Job arbitrates the initial launch execution and Session carries the ongoing
+  conversation. Neither claims the other's state or result.
+- `workspace create/list/view/close` manages Workspace entities, while
+  `workspace repo add/remove` manages repository membership. Session has one explicit Workspace
+  override entry point: `agent launch --workspace`. Without that override, the entry point resolves
+  the Workspace from its Origin; CLI launch uses the Project's `cli-current` Workspace. This is a
+  binding decision, not permission to pass a Runner directory. Origin resolution and
+  materialization are authoritative in [`workspace.md`](workspace.md). Issue, Slack, and Web do not
+  duplicate Workspace commands under `issue` or `session`. The Workspace field in
+  `session list --workspace` and `session view` is read-only.
 - `slack install-agent/list/view/claim-owner/edit/transfer-owner/enable/disable/remove-binding`
-  管理一个 Agent 的 Slack 接入关系，`permanent-delete` 在无 active binding 时永久删除对应
-  Agent App；这些动作不修改 Agent 定义。`install-agent` 是把已有 Agent 安装到
-  Slack workspace 的领域动作，创建或恢复 Connection 与 Agent App；接入动作直接挂在根级
-  `slack`，不设泛化的 connection 子组。
-- `session transcript/followup/compact/reset/cancel/stop` 改变或读取 AgentSession；`cancel` 确定性取消指定的排队 Turn，`stop` 请求 Runtime 停止指定的执行中 Turn；不按 Issue 来源和 Agent 来源复制两套路径。
-- `epic add/remove` 表达 Epic membership 这一用户意图；Issue 仍是当前 EpicNumber 的唯一
-  写入权威，CLI 不暴露跨 aggregate 协调过程。
-- `--issue`、`--run`、`--agent` 是解析或筛选条件，不转移动作所有权。
+  manages the Slack access relationship of one Agent. `permanent-delete` permanently deletes its
+  Agent App only when no active binding exists. These actions do not modify the Agent definition.
+  `install-agent` is the domain action that installs an existing Agent into a Slack workspace and
+  creates or recovers the Connection and Agent App. Access actions live directly under root-level
+  `slack`; there is no generic connection subgroup.
+- `session transcript/followup/compact/reset/cancel/stop` reads or changes AgentSession. `cancel`
+  deterministically cancels one specified queued Turn. `stop` creates the durable cascade rooted at
+  the selected Session; it is not a public single-Turn Runtime command. Membership and retry are
+  authoritative in [`subagents.md#cascade-stop`](subagents.md#cascade-stop). Paths are not
+  duplicated by Issue origin and Agent origin.
+- `epic add/remove` expresses the user intent of Epic membership. Issue remains the sole write
+  authority for current EpicNumber, and CLI does not expose cross-aggregate coordination.
+- `--issue`, `--run`, and `--agent` are resolution or filtering conditions. They do not transfer
+  ownership of an action.
 
-subarea 用于没有独立操作入口的从属资源（`issue comment`、`project workflow prompt`、`agent job`），
-只服务于一个 area 的窄目录（`issue template`、`routing rule`、`agent model`），或表达拥有者
-scope 下的关系（`project workflow`、`project repo`）。AgentSession 有稳定 ID、独立生命周期且经常直接
-操作，因此必须是顶层 `session`。
+A subarea represents a subordinate resource without an independent operation entry point, such as
+`issue comment`, `project workflow prompt`, or `agent job`; a narrow catalog used by one area, such
+as `issue template`, `routing rule`, or `agent model`; or a relationship under its owner's Scope,
+such as `project workflow` or `project repo`. AgentSession has a stable ID, independent lifecycle,
+and frequent direct operations, so it must remain the top-level `session` area.
 
-## Command language
+## Command Language
 
-命令形状、动词词表、flag 词汇与输入通道的用户可见规则由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。本节只保留构造命令时的设计判定：
+[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for user-visible command
+shape, verb vocabulary, flag vocabulary, and input channels. This section retains only the design
+decisions used to construct a command:
 
-- 设计顺序是：先确定领域意图和唯一入口，再选择最短的惯用命令词。这是一门受约束的命令 DSL，而不是要求所有句子满足同一种语法外观。
-- area 使用短、稳定、通常为单数的英文词：`repo`、`run`、`skill`，不为了对应类型名写成 `repository`、`workflow-run`、`skills`。
-- 同一 action 在所有 area 保持同一动作类别。不同语义不能只因实现复用而使用同一个词。
-- 只有共享同一语义、校验和结果的变体才能合并为 flag。行为不同就保留不同 action。
+- First identify domain intent and its sole entry point, then choose the shortest idiomatic command
+  word. This is a constrained command DSL, not a requirement that every sentence have the same
+  syntactic appearance.
+- Areas use short, stable, usually singular English words such as `repo`, `run`, and `skill`. They
+  do not mirror type names as `repository`, `workflow-run`, or `skills`.
+- The same action belongs to the same action category in every area. Different semantics cannot
+  share a word merely because their implementations are reused.
+- Variants can become flags only when they share semantics, validation, and results. Different
+  behavior remains a different action.
 
-### Reference baseline
+### Reference Baseline
 
-`gh` 是交互设计参考，不是兼容目标。`mo` 借鉴四项已经被验证的形态：分层的 [root / group / leaf help](https://cli.github.com/manual/gh)、[workflow](https://cli.github.com/manual/gh_workflow) 与 [run](https://cli.github.com/manual/gh_run) 分工、[字段选择式 JSON](https://cli.github.com/manual/gh_help_formatting)，以及轻量的 [Skill 入口](https://cli.github.com/manual/gh_skill)。
+`gh` is an interaction-design reference, not a compatibility target. `mo` adopts four proven
+shapes: layered [root, group, and leaf help](https://cli.github.com/manual/gh), separate
+[workflow](https://cli.github.com/manual/gh_workflow) and
+[run](https://cli.github.com/manual/gh_run) ownership,
+[field-selecting JSON](https://cli.github.com/manual/gh_help_formatting), and a lightweight
+[Skill entry point](https://cli.github.com/manual/gh_skill).
 
-`mo` 不照搬 `gh api`、内建 `--jq`、template renderer 或 alias 体系。它们解决的是 GitHub 的范围和兼容需求；Mohist 只有在出现自己的重复用例后才增加对应能力。
+`mo` does not copy `gh api`, built-in `--jq`, a template renderer, or an alias system. Those features
+address GitHub's scope and compatibility requirements. Mohist adds similar capabilities only after
+its own repeated use cases appear.
 
-### Main trade-offs
+### Main Trade-Offs
 
-| 方案 | 结果 | 决定 |
+| Option | Result | Decision |
 |---|---|---|
-| 根层只允许领域名词，并把所有任务包装成资源 | 语法表面整齐，但会产生 `component install`、`system info` 等人为层级 | 不采用；保留清楚的 `install`、`update`、`info` 任务入口 |
-| Skill 维护完整命令表，或增加机器可读 command catalog | 初次读取看似完整，但与运行版本重复、容易过期，并消耗大量上下文 | 不采用；Skill 做决策，运行时 help 做语法发现 |
-| 所有结果使用通用 `{ok,data,error}` envelope | 统一了传输形状，却增加无信息字段并迫使人类输出绕过同一模型 | 不采用；成功输出原始资源，失败使用退出码和 stderr |
-| 默认倾倒完整 JSON，由 Agent 自行过滤 | 实现简单，但把无关字段和 token 成本推给每次调用 | 不采用；默认人类视图，自动化显式选择 JSON 字段 |
-| 在 `runner` / `server` 下同时放远程资源行为和本机进程生命周期 | 根命令较少，但同一个 action 会因 area 和机器状态改变目标、权限与失败语义 | 不采用；远程对象留在 `runner` / `server`，本机生命周期统一到 `service <action> <target>` |
-| 用 `server logs --source` 合并应用日志与本机服务日志 | 命令表更短，但两种日志的连接、权限、流和失败结果不同 | 不采用；保留 `server logs` 与 `service logs server` 两个明确行为 |
-| 为执行后端建立 `runtime list/view/model list` | 看似对称，但把 Runner 内部 adapter 与配置目录提升成不存在的产品资源 | 不采用；Runtime 只作为配置维度，模型目录放在 `agent model list --runtime` |
-| 保留根级 `config get/set` | 容易增加设置，却隐藏 Project、Agent、Workflow 与本机 Service 的不同所有权 | 不采用；只增加由明确资源拥有的类型化设置入口 |
-| Slack 接入的命令面放在哪 | 曾按「未来多 provider」预演为泛化 provider 子组；但 provider 只有 Slack 一个，预置抽象让绑定、权限与生命周期躲进泛化名词后面 | 采用根级 `slack`：`setup`/`status` 编排 workspace 安装，其余动作管理 Slack 接入资源；不留兼容命令。第二个 provider 出现时按当时形态再评估 |
-| 把已有 Agent 加到 Slack 的动作叫什么 | `setup-agent` 会与 Agent Readiness 的 setup 混淆，也和 workspace 级 `slack setup` 形成两个不同对象的 setup；`create` 错称在创建 Agent 或 Connection | 采用 `slack install-agent <agent>`：主语是已有 Agent，结果是一个可恢复的 Slack 安装；App 创建、授权、凭据与绑定都是该动作内部步骤 |
-| 凭据轮换是否保留 `rotate-credentials` | 与 `install-agent` 续跑的凭据步骤职责重叠；Connection 不再拥有凭据后，命令的操作对象落空 | 不采用；重跑 `setup` / `install-agent` 并显式重供凭据即轮换，同一安装记录只有一条路径 |
-| 用 `--agent-config <json>` 作为 Agent 的长期配置面 | 实现短，但把 schema、互斥和错误推给用户及 Agent | 不采用；公开 CLI 使用 `--runtime`、`--model`、`--variant`、`--skills`、`--avatar-file` 等类型化 flags |
-| 增加存储 / DB 审计命令（表体积、freelist、行数统计） | 能覆盖 server 内部审计场景，但那是开发行为不是产品操作；架构禁令约束的是领域操作，不为一次性审计扩大命令面 | 不采用；`otel` 是遥测入口，server 内部审计直接读库是开发者的合理路径 |
-| `mo otel query` 直读本机追踪存储 | Server 不可用时仍可查询，但绕过 API 与查询安全网、耦合存储 schema、没有查询预算与大小上限，且 CLI 指向远程 Server 时静默读到本机数据 | 不采用；`query` 经 Server 查询能力执行，Server 故障时直接读库是开发者路径 |
-| `run view` 只提供 `--json` | 少一个 source view，但「这次 Run 实际用了哪份 Definition」无法回答 | 不采用；`run view --yaml` 读取 Run 绑定的 Definition 快照，与 `workflow view --yaml` 同属资源内容视图 |
-| `set-default` 挂在被默认资源的 area（`repo set-default`、`workflow set-default`） | 路径更短，但默认引用是 Project 的状态，两处惯例不如一处规则可推导 | 不采用；统一为 `project repo set-default`、`project workflow set-default` |
+| Allow only domain nouns at root and wrap every task as a resource | The syntax looks regular but creates artificial levels such as `component install` and `system info` | Reject. Keep direct `install`, `update`, and `info` task entry points |
+| Maintain the full command table in the Skill or add a machine-readable command catalog | The initial read looks complete but duplicates the running version, becomes stale, and consumes substantial context | Reject. The Skill makes decisions and runtime help discovers syntax |
+| Wrap every result in a generic `{ok,data,error}` envelope | The transport shape is uniform but adds fields without information and forces human output around the same model | Reject. Successful output is the resource itself; failures use exit status and stderr |
+| Dump complete JSON by default and make the Agent filter it | Implementation is simple but every call pays in irrelevant fields and tokens | Reject. Default to a human view; automation explicitly selects JSON fields |
+| Put both remote resource behavior and local process lifecycle under `runner` or `server` | There are fewer root commands, but one action changes target, permission, and failure semantics by area and machine state | Reject. Remote objects remain under `runner` and `server`; local lifecycle is uniformly `service <action> <target>` |
+| Merge application logs and local service logs as `server logs --source` | The table is shorter, but connection, permission, stream, and failure results differ | Reject. Keep the distinct `server logs` and `service logs server` behaviors |
+| Create `runtime list/view/model list` for execution backends | It looks symmetric but promotes an internal Runner adapter and configuration catalog into a nonexistent product resource | Reject. Runtime remains a configuration dimension; model discovery is `agent model list --runtime` |
+| Keep root-level `config get/set` | Adding settings is easy but hides different Project, Agent, Workflow, and local Service owners | Reject. Add only typed settings under the resource that owns them |
+| Choose the command surface for Slack access | A generic provider subgroup anticipated multiple future providers, but Slack is the only provider and the abstraction hides binding, permission, and lifecycle behind a generic noun | Use root-level `slack`: `setup` and `status` orchestrate workspace installation, while other actions manage Slack access resources. Keep no compatibility command. Reassess when a second provider exists |
+| Name the action that adds an existing Agent to Slack | `setup-agent` conflicts with Agent Readiness setup and gives workspace-level `slack setup` a second subject; `create` incorrectly suggests creating an Agent or Connection | Use `slack install-agent <agent>`. The subject is an existing Agent and the result is a recoverable Slack installation. App creation, authorization, credentials, and binding remain internal steps |
+| Keep `rotate-credentials` for credential rotation | It overlaps the resumable credential step in `install-agent`; once Connection no longer owns credentials, the command has no target | Reject. Rerun `setup` or `install-agent` and explicitly provide credentials again. One installation record has one path |
+| Use `--agent-config <json>` as the long-term Agent configuration surface | Implementation is short but pushes schema, mutual exclusion, and errors onto users and Agents | Reject. Public CLI uses typed flags such as `--runtime`, `--model`, `--variant`, `--skills`, and `--avatar-file` |
+| Add storage or database audit commands for table size, freelist, and row counts | They cover internal Server audits, but those are development operations. Architectural prohibitions constrain domain operations and do not justify expanding the command surface for a one-off audit | Reject. `otel` is the telemetry entry point; direct database reads for an internal Server audit are a valid developer path |
+| Let `mo otel query` read local trace storage directly | Queries survive Server outage, but they bypass the API and query safeguards, couple the storage schema, have no query budget or size limit, and silently read local data when CLI points at a remote Server | Reject. `query` uses the Server query capability. Direct database access during Server failure is a developer path |
+| Give `run view` only `--json` | There is one less source view, but callers cannot inspect the Definition that will govern later Stages | Reject. `run view --yaml` resolves the current Definition of the Profile ID bound to the Run and parallels `workflow view --yaml` as a resource-content view; it is not historical evidence |
+| Put `set-default` under the resource being made default as `repo set-default` or `workflow set-default` | The path is shorter, but a default reference is Project state and two conventions are less derivable than one | Reject. Use `project repo set-default` and `project workflow set-default` consistently |
 
-## Context architecture
+## Context Architecture
 
-Agent 获得上下文的顺序是：
+An Agent obtains context in this order:
 
-```text
+```text diagram
 Mohist Skill -> root/group help -> leaf help -> result or actionable error
 ```
 
-每层只承担一个决策：
+Each layer makes one decision:
 
-| 来源 | 唯一职责 | 不应包含 |
+| Source | Sole responsibility | Must not contain |
 |---|---|---|
-| Mohist Skill | 判断场景、首次读取、危险动作与相近恢复动作 | 完整命令树、通用 flags、实现启动命令 |
-| Root help | 建立产品能力地图 | 叶子 flags、完整状态语义 |
-| Group help | 解释对象边界并帮助选择 action | 其它 group 的参考手册 |
-| Leaf help | 让一条调用无需猜测即可执行 | 源码、接口路径、历史兼容说明 |
-| Result | 返回本次操作需要的事实 | 无关资源的完整快照 |
-| Error | 说明本次失败及确定的下一步 | 内部调用链、模糊的通用建议 |
+| Mohist Skill | Select a scenario, first read, dangerous action, or nearby recovery action | Complete command tree, common flags, or implementation startup commands |
+| Root help | Establish the product capability map | Leaf flags or complete state semantics |
+| Group help | Explain the object boundary and choose an action | Reference manuals for other groups |
+| Leaf help | Make one invocation executable without guessing | Source code, interface paths, or compatibility history |
+| Result | Return facts needed by this operation | Complete snapshots of unrelated resources |
+| Error | Explain this failure and a deterministic next step | Internal call chains or vague generic advice |
 
-### Context quality
+### Context Quality
 
-所有帮助、Skill 和错误文案按六个维度审查：
+Review all help, Skills, and error text on six dimensions:
 
-| 维度 | 判定标准 |
+| Dimension | Criterion |
 |---|---|
-| Authoritative | 来自当前命令模型、输出字段定义或领域状态，不凭文案副本猜测 |
-| Relevant | 只回答当前层需要做的选择 |
-| Sufficient | 执行所需参数、前提、危险后果和恢复动作没有缺口 |
-| Concise | 删除不改变下一步行为的句子，不重复其它权威层 |
-| Executable | 示例可被当前命令树解析，hint 可以直接运行或补齐 |
-| Current | help 与二进制同版本；Skill 不冻结易变化的 flag 清单 |
+| Authoritative | Derived from the current command model, output field definition, or domain state instead of guessed from a prose copy |
+| Relevant | Answers only the choice required at the current layer |
+| Sufficient | Omits no required parameter, precondition, destructive consequence, or recovery action |
+| Concise | Removes sentences that do not change the next action and avoids repeating another authoritative layer |
+| Executable | Examples parse under the current command tree and hints can be run directly or completed |
+| Current | Help matches the binary version and the Skill does not freeze a volatile flag list |
 
-## Syntax authority
+## Syntax Authority
 
-[`docs/cli-reference.md`](../docs/cli-reference.md) 是目标产品语义和命令面的 spec。实装后，C# 的 `System.CommandLine` 命令树是该版本唯一的可执行语法权威：
+[`docs/cli-reference.md`](../docs/cli-reference.md) specifies the target product semantics and
+command surface. Once implemented, the C# `System.CommandLine` tree is the sole executable syntax
+authority for that version:
 
-- `mo --help`、group help 和 leaf help 都从命令树生成。
-- 参数必填、互斥、默认值和合法值由同一参数定义校验。
-- 每个资源结果的 JSON 字段集合由一份字段定义同时驱动选择、序列化和 leaf help。
-- Skill 中出现的命令示例必须通过同一命令树的解析测试。
-- 不再增加独立的 `mo command list/get` catalog；它会复制命令树并扩大同步面。
+- `mo --help`, group help, and leaf help are generated from the command tree.
+- One argument definition validates required values, mutual exclusion, defaults, and allowed values.
+- One field definition drives selection, serialization, and leaf help for JSON fields in each
+  resource result.
+- Command examples in the Skill must pass parsing by the same command tree.
+- Do not add a separate `mo command list/get` catalog. It would copy the command tree and expand the
+  synchronization surface.
 
-spec 先于实现时，差距只写在产品文档的 Status。迁移完成的同一变更必须同时更新命令树、生成帮助、示例测试和差距说明，不能长期保留两套“权威”。
+When the spec precedes implementation, only the product document Status records the gap. A change
+that completes a migration must update the command tree, generated help, example tests, and gap
+statement together. Two authorities must not persist.
 
-## Help contract
+## Help Contract
 
-所有 `--help` 都是纯本地、快速、无副作用的操作，成功退出且不依赖 Server。
+Every `--help` operation is local, fast, side-effect free, successful, and independent of Server.
 
-### Root help
+### Root Help
 
-固定顺序：
+Use this fixed order:
 
-1. 一句产品说明。
-2. `USAGE`。
-3. 按 Work、Automation、Operations、Tools 分组的命令，每项一句结果说明。
-4. 两到三个覆盖发现、读取和恢复的示例。
-5. `mo help <topic>` 与文档入口。
+1. One product description.
+2. `USAGE`.
+3. Commands grouped under Work, Automation, Operations, and Tools, with a one-sentence result for
+   each command.
+4. Two or three examples covering discovery, reading, and recovery.
+5. `mo help <topic>` and the documentation entry point.
 
-Root help 是索引，不显示所有共享 flag，也不展开子命令。
+Root help is an index. It neither displays every shared flag nor expands subcommands.
 
-### Group help
+### Group Help
 
-固定顺序：
+Use this fixed order:
 
-1. 一句说明该 area 是什么、作用域是什么。
-2. `USAGE`。
-3. action 列表，每项一句结果说明。
-4. 只有确实容易混淆时才增加 `SEE ALSO`。
+1. One sentence identifying the area and its Scope.
+2. `USAGE`.
+3. An action list with a one-sentence result for every action.
+4. `SEE ALSO` only for a genuine common ambiguity.
 
-例如 `workflow --help` 必须指出它管理 Workflow Profile，并链接 `run --help`；`run --help` 必须指出它管理 WorkflowRun，并说明可用 Run ID 或 `--issue` 寻址。
+For example, `workflow --help` must state that it manages Workflow Profiles and link to
+`run --help`. `run --help` must state that it manages WorkflowRun and can resolve one through a Run
+ID or `--issue`.
 
-### Leaf help
+### Leaf Help
 
-固定顺序：
+Use this fixed order:
 
-1. 一句准确结果，使用产品和领域语言。
-2. 一个或多个合法 `USAGE` 形式。
-3. arguments 与 options；说明 required、默认值、互斥关系和合法值。
-4. 仅在影响选择时说明状态前提、不可恢复后果或相近动作区别。
-5. 对资源结果列出 `JSON FIELDS`。
-6. 最多三个可独立执行的 `EXAMPLES`。
-7. 必要的 `SEE ALSO`。
+1. One precise result sentence in product and domain language.
+2. One or more valid `USAGE` forms.
+3. Arguments and options, including required values, defaults, mutual exclusion, and allowed values.
+4. State preconditions, irreversible consequences, or distinctions from nearby actions only when
+   they affect the choice.
+5. `JSON FIELDS` for a resource result.
+6. At most three independently executable `EXAMPLES`.
+7. Necessary `SEE ALSO` entries.
 
-Leaf help 禁止出现：
+Leaf help must not contain:
 
-- API route、HTTP method、DTO、grain、handler、class 或源码路径。
-- issue 编号、迁移阶段、旧命令或“等价于旧路径”。
-- 通用 shell 教程和 Agent 操作常识。
-- 没有行为约束的宣传性描述。
+- an API route, HTTP method, DTO, grain, handler, class, or source path;
+- an Issue number, migration stage, old command, or compatibility statement;
+- generic shell instruction or common Agent-operating knowledge;
+- promotional text without a behavioral constraint.
 
-被三个以上命令组共享且无法由参数定义自解释的内容，移入 `mo help output`、`mo help environment` 或 `mo help exit-codes`。只被一两个命令使用的规则留在 leaf help，避免过早抽象 help topic。
+Content shared by three or more command groups and not self-explanatory from argument definitions
+moves to `mo help output`, `mo help environment`, or `mo help exit-codes`. A rule used by only one
+or two commands remains in leaf help to avoid a premature help topic abstraction.
 
-## Skill contract
+## Skill Contract
 
-Mohist Skill 使用渐进披露：入口 Skill 只保留高价值决策，场景细节按需加载 sibling Skill。
+The Mohist Skill uses progressive disclosure. The entry Skill contains only high-value decisions
+and loads a sibling Skill when a scenario needs detail.
 
-入口 Skill 的正文结构固定为：
+The entry Skill body has a fixed structure:
 
-1. Scope：何时使用 Mohist Skill。
-2. First read：收到已有 Issue / Run 时先取哪些当前事实。
-3. Scenario routing：何时加载 explore、create issue、create epic 等 Skill。
-4. Hard decisions：`retry/rerun`、`pause/stop`、`compact/reset` 等无法从通用 CLI 推导的区别。
-5. CLI handoff：用 leaf help 确认精确 flags，并用 `--json` 只请求需要的字段。
+1. Scope: when to use the Mohist Skill.
+2. First read: which current facts to read first for an existing Issue or Run.
+3. Scenario routing: when to load explore, create-Issue, create-Epic, and other Skills.
+4. Hard decisions: distinctions that generic CLI cannot derive, including `retry/rerun`,
+   `pause/stop`, and `compact/reset`.
+5. CLI handoff: use leaf help to confirm exact flags, then request only required fields through
+   `--json`.
 
-入口 Skill 不复制：
+The entry Skill does not copy:
 
-- 完整 Issue / Epic 生命周期表。
-- 所有 read-only helper 和 common flags。
-- Server、Runner、测试或源码启动方式。
-- 已移除实现与兼容历史。
-- leaf help 已经准确表达的参数说明。
+- a complete Issue or Epic lifecycle table;
+- every read-only helper or common flag;
+- Server, Runner, test, or source startup instructions;
+- removed implementations or compatibility history;
+- parameter details already expressed accurately by leaf help.
 
-Skill frontmatter description 只负责触发判断。正文中的命令示例必须少量、规范且可解析。复杂场景放入 sibling Skill 或 reference；不存在真实分支时不增加文件层级。
+The Skill frontmatter description only determines triggering. Body examples must be few, canonical,
+and parseable. Complex scenarios belong in sibling Skills or references. Do not add another file
+hierarchy level unless scenario routing has a real branch.
 
-## Input and scope
+## Input and Scope
 
-Project 解析顺序与交互行为的产品规则由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧只补充三条：
+[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for product rules around
+Project resolution order and interaction. Implementation adds only three constraints:
 
-- 所有 Project-scoped 命令复用一个 inherited `--project <name-or-id>` option 和同一 resolver。解析结果必须唯一；名称、ID 和当前项目只是同一 ProjectRef 的输入形式，不能形成不同 handler 路径。
-- body 与 body-file、target 与 selector 等互斥输入在本地拒绝，不能静默选一个覆盖另一个。
-- help、list、view 和本地校验绝不触发 setup prompt。
+- Every Project-scoped command reuses one inherited `--project <name-or-id>` option and the same
+  resolver. Resolution must be unique. Name, ID, and current Project are input forms for the same
+  ProjectRef, not distinct handler paths.
+- Mutually exclusive inputs such as body and body-file or target and selector fail locally. One
+  cannot silently overwrite the other.
+- Help, list, view, and local validation never trigger a setup prompt.
 
-## Output contract
+## Output Contract
 
-命令先产生语义结果，再选择 renderer。TTY 判断和输出格式不能改变请求、资源选择或状态变化。输出形状的用户可见规则——人类视图、`--json` 字段选择、裸 `--json` 字段发现、NDJSON 流与 source view——由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧补充：
+A command produces a semantic result before selecting a renderer. TTY detection and output format
+cannot change the request, resource selection, or state transition.
+[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for user-visible output
+rules, including the human view, field selection with `--json`, field discovery with bare `--json`,
+the NDJSON stream, and source views. Implementation adds:
 
-- `--json` 的 field 在执行远程操作前本地校验；未知 field 返回合法字段清单和用法错误，不发起远程请求。
-- 默认 table 只保留扫描和下一步判断需要的列。
-- 颜色遵循终端能力与 `NO_COLOR`；stderr 重定向后不保留控制字符。
-- 新增 renderer 的采纳门槛：三个以上独立、重复出现且外部工具不能清楚解决的用例。
+- Validate each `--json` field locally before a remote operation. An unknown field returns the
+  valid field list and a usage error without making a remote request.
+- A default table retains only columns needed for scanning and choosing the next action.
+- Color follows terminal capability and `NO_COLOR`; redirected stderr contains no control sequence.
+- Adopt a new renderer only after at least three independent, repeated use cases that external
+  tools cannot solve clearly.
 
-## Field contract
+## Field Contract
 
-Server 的 read model（API 响应 DTO）是每个资源字段的唯一权威。CLI 的字段目录
-（`ResourceOutputCatalog`）不是第二份事实，它是 DTO 的投影：目录必须覆盖 DTO 的
-全部 JSON 属性；与 DTO 的偏差只允许显式登记的两种（见下）。
+The Server read model, represented by API response DTOs, is the sole authority for fields of each
+resource. The CLI field catalog, `ResourceOutputCatalog`, is a projection of the DTO rather than a
+second fact. It must cover every JSON property of the DTO. Only two explicitly registered
+differences are allowed:
 
-- **覆盖是双向的**。目录缺少 DTO 已有的属性 = `--json` 把合法字段拒绝为
-  invalid，调用方被迫绕过 CLI 直调 API；目录列出 DTO 没有的属性 = 静默渲染
-  null 列。两者都是契约破损，都必须测试即红。
-- **偏差必须显式**。唯一的声明表按（资源, 字段, 理由）逐条登记两种偏差：
-  Omit——DTO 有而目录刻意不暴露；Local——目录有而 DTO 没有（CLI 本地合成
-  的字段，如 server 不可用时的降级输出）。新 DTO 属性或新目录字段未登记时
-  测试变红——「改 DTO 时同步 CLI」由此从纪律变成机械门，声明是有意识的
-  评审决定，不是遗漏的兜底。
-- **映射显式登记**。契约对照测试持有 TableShape → DTO 类型的映射表；新增资源
-  未登记映射即红，防止新 shape 静默逃出防护。
-- **机制**：测试反射 server 程序集的 DTO 类型，按 JSON 序列化名（命名策略与
-  `[JsonPropertyName]`）取属性集合，与 CLI 字段目录逐资源做集合比对；无运行时
-  端点、无共享程序集、无人工清单。
+- **Coverage is bidirectional.** If the catalog omits a DTO property, `--json` rejects a valid
+  field and forces callers to bypass CLI for the API. If the catalog lists a property absent from
+  the DTO, CLI silently renders a null column. Both are contract failures that must fail tests.
+- **Differences are explicit.** One declaration table registers each difference as resource,
+  field, and reason. Omit means a DTO property intentionally hidden from the catalog. Local means
+  a catalog property absent from the DTO and synthesized locally by CLI, such as degraded output
+  when Server is unavailable. A new DTO property or catalog field fails tests until registered.
+  This converts the discipline to update CLI with a DTO into a mechanical check. Each declaration
+  is a deliberate review decision rather than a fallback for omissions.
+- **Mappings are explicit.** Contract comparison tests contain the `TableShape -> DTO type` map.
+  Adding a resource without a mapping fails, preventing a new shape from silently escaping the
+  contract.
+- **Mechanism.** Tests reflect DTO types from the Server assembly, derive property names from JSON
+  serialization naming policy and `[JsonPropertyName]`, and compare the set with the CLI field
+  catalog for each resource. There is no runtime endpoint, shared assembly, or manual property list.
 
-## Errors and exit status
+## Errors and Exit Status
 
-错误格式、稳定错误码与退出码的用户可见契约由 [`docs/cli-reference.md`](../docs/cli-reference.md) 单点定义。实现侧补充：
+[`docs/cli-reference.md`](../docs/cli-reference.md) is the sole authority for the user-visible error
+format, stable error codes, and exit status. Implementation adds:
 
-- stable code 使用小写 snake_case，表示调用方可据此分类的产品错误，不表示内部异常类型。
-- transport error 区分「确定未提交」与「提交结果未知」。CLI 不自动重发状态修改；只有确认安全时才给出 retry hint。
+- A stable code uses lowercase snake_case and represents a product error on which a caller can
+  branch. It does not represent an internal exception type.
+- A transport error distinguishes definitely not submitted from submission result unknown. CLI
+  does not automatically resend a state-changing request and provides a retry hint only when retry
+  is confirmed safe.
 
-## Reliability checks
+## Reliability Checks
 
-CLI 的 spec 测试验证公开契约，不依赖真实 Server、进程、Git、网络或墙钟：
+CLI spec tests verify the public contract without a real Server, process, Git repository, network,
+or wall clock:
 
-- 命令树中每项能力只有一个规范路径；同一 group 内没有同义 action。
-- `run variable` 能读写 Run Variables；effective read 保持只读，并证明新 attempt 使用更新值、
-  已接受 attempt 保持自己的 context snapshot。
-- Project / Issue / Run 的 `variable` 命令共享 dotted key path 与 `--stage`；位置形式
-  `set <key> <value>` 始终保存 string，boolean、number、object 或 array 必须通过互斥的
-  `--value-json <json>` 输入；`--json` 仍只表示输出字段选择，不能被重载成输入值。
-- `agent launch` 返回 Job、Session、首个 Input 与 Turn ID；AgentJob read model 与
-  AgentSession 命令不会互相声称拥有对方的状态或结果。`session followup` 返回新 Input ID
-  与已知时的 Turn ID。
-- Agent create/edit 的 profile、Runtime、Model、Variant、Skills 与并发限制使用类型化
-  flags；命令不暴露任意 Agent config JSON，并显示 Server 提供的 Readiness 缺口。
-- `slack setup` 与 `slack install-agent` 只有一组规范路径；两者都从持久进度幂等续跑，自动完成
-  App 创建与配置，只在 Slack 安装确认和本机凭据输入时停下。重跑会重新校验已保存凭据，
-  失效即回到凭据步骤；对就绪记录显式重供凭据即轮换，不设独立的 rotate 命令。`view` 始终
-  显示当前事实和下一步，Owner 通过明确认领建立。命令面不复制 Agent 配置，不暴露 token，
-  也不把底层 create/configure 拆给用户编排。
-- `runner` / `server` 命令不得调用本机 service manager，`service` 命令不得依赖 Project 或
-  把本机进程状态表示成 Runner resource 状态。
-- `otel` 查询动作经 Server 查询能力执行；CLI 不直接打开追踪存储文件，不解析本地存储路径。
-- Activity list、Event tail 和 dead-letter recovery 分别锁定持久读模型、实时流和投递恢复
-  的不同结果；不得用 source/mode flag 合并。
-- 目标命令树不存在顶层 `runtime` 或泛化 `config`。
-- root、group、leaf help 满足各自结构，`--help` 不触发远程依赖。
-- 文档、Skill 和 help 中的命令示例都由真实命令树解析。
-- help 声明的 JSON fields 与字段选择器完全一致；选择后的 object 不出现额外字段。
-- stdout 只含结果，stderr 只含诊断；JSON 与 NDJSON 中没有 ANSI 或进度文本。
-- 非 TTY 与 `MOHIST_PROMPT_DISABLED=1` 下没有 prompt 路径。
-- target / selector、body / body-file 等互斥输入在本地失败，且没有远程调用。
-- 每个错误路径非零退出，并包含 stable code；有 hint 时其命令也能被命令树解析。
-- help 文案检查禁止 API route、HTTP method、grain、handler、源码路径、历史 issue 和迁移 alias。
-- 每个资源只有一份字段目录：`list` / `view` / 返回该资源的 mutation 共享字段名与语义；目录覆盖
-  read model 的全部用户可见字段，不存在兜底默认字段集。
-- 字段目录与 server read model DTO 的契约对照测试通过（见 Field contract）：目录 =
-  DTO JSON 属性集 − 显式豁免，反向同样强制。
-- 裸 `--json` 字段发现优先于其它参数校验，且不触发远程请求。
-- 短 flag 全在白名单内、全局字母唯一，且渲染进对应 leaf help。
-- help 的选项描述非空、无拼写错误；`USAGE` 标题与 `--json` 描述在所有叶子一致；互斥关系可见。
+- Every capability in the command tree has one canonical path, and a group has no synonymous
+  action.
+- `run variable` reads and writes Run Variables. Effective reads remain read-only. Tests prove that
+  a later attempt uses an updated value while an accepted attempt keeps its own context snapshot.
+- Project, Issue, and Run `variable` commands share dotted key paths and `--stage`. Positional
+  `set <key> <value>` always stores a string. Boolean, number, object, and array values require the
+  mutually exclusive `--value-json <json>` input. `--json` remains output field selection and is
+  never overloaded as an input value.
+- `agent launch` returns Job, Session, first Input, and Turn IDs. The AgentJob read model and
+  AgentSession commands never claim each other's state or result. `session followup` returns the new
+  Input ID and the Turn ID when known.
+- Agent create and edit use typed flags for Profile, Runtime, Model, Variant, Skills, and concurrency
+  limit. Commands expose no arbitrary Agent configuration JSON and display Readiness gaps provided
+  by Server.
+- `slack setup` and `slack install-agent` each have one canonical path. Both resume idempotently from
+  durable progress, complete App creation and configuration automatically, and pause only for Slack
+  installation confirmation or local credential input. A rerun revalidates stored credentials and
+  returns to the credential step if they are invalid. Explicitly resupplying credentials to a ready
+  record rotates them; there is no separate rotate command. `view` always displays current facts
+  and the next action. An Owner is established through an explicit claim. The command surface does
+  not copy Agent configuration, expose a token, or make users orchestrate underlying create and
+  configure operations.
+- `runner` and `server` commands do not call a local service manager. `service` commands neither
+  depend on Project nor represent local process status as Runner resource state.
+- `otel` queries use the Server query capability. CLI neither opens trace storage files directly
+  nor resolves a local storage path.
+- Activity list, Event tail, and dead-letter recovery preserve different results for a durable read
+  model, live stream, and delivery recovery. A source or mode flag cannot merge them.
+- The target command tree has no top-level `runtime` or generic `config`.
+- Root, group, and leaf help satisfy their structures, and `--help` invokes no remote dependency.
+- Command examples in documentation, Skills, and help parse through the real command tree.
+- JSON fields declared by help exactly match the field selector, and a selected object contains no
+  additional fields.
+- stdout contains only results and stderr only diagnostics. JSON and NDJSON contain no ANSI or
+  progress text.
+- There is no prompt path for non-TTY input or when `MOHIST_PROMPT_DISABLED=1`.
+- Mutually exclusive target and selector or body and body-file inputs fail locally with no remote
+  call.
+- Every error path exits nonzero and contains a stable code. A hint command also parses through the
+  command tree.
+- Help prose checks reject API routes, HTTP methods, grains, handlers, source paths, historical
+  Issues, and migration aliases.
+- Each resource has one field catalog. `list`, `view`, and mutations that return that resource share
+  field names and semantics. The catalog covers every user-visible field in the read model and has
+  no fallback default field set.
+- Contract comparison tests pass between field catalogs and Server read model DTOs as defined under
+  Field Contract: catalog equals DTO JSON property set minus explicit exemptions, with the reverse
+  direction enforced as well.
+- Bare `--json` field discovery occurs before other argument validation and makes no remote request.
+- Short flags all belong to an allowlist, use globally unique letters, and render in the
+  corresponding leaf help.
+- Help option descriptions are non-empty and correctly spelled. `USAGE` headings and `--json`
+  descriptions are consistent across all leaves, and mutual exclusion is visible.
 
-不要用整页 snapshot 作为唯一测试。结构测试锁定必须存在的区块和语义，少量 golden test 只覆盖确实属于公开排版契约的输出。
+Do not use a full-page snapshot as the only test. Structural tests lock required sections and
+semantics. A small number of golden tests cover output that is genuinely part of the public layout
+contract.
 
 ## Status
 
-Project / Issue / Run Variables 命令切片已经交付：三个 scope 都使用
-`variable list/get/set/unset`，位置值始终保存为 string，显式 JSON 类型只通过
-`--value-json <json>` 输入，Run 的 effective read 保持只读。
+The Project, Issue, and Run Variables command slices are delivered. All three Scopes use
+`variable list/get/set/unset`; a positional value always stores a string, explicit JSON types enter
+only through `--value-json <json>`, and effective reads for Run remain read-only.
 
-当前实现与目标设计的主要差距记录在 [`docs/cli-reference.md`](../docs/cli-reference.md#实装差距)。
-落地先建立共享契约（字段选择式 JSON、统一 ProjectRef、stdout/stderr、退出码与非交互），
-各领域切片在其上并行；每个切片同时交付自己的 leaf help 和契约测试，保持当时的命令树、
-帮助和测试内部一致——不先发布一套命令、再靠 Skill 解释另一套语法。
+The main gaps between the current implementation and target design are recorded under
+[`docs/cli-reference.md`](../docs/cli-reference.md#implementation-gaps). Delivery first establishes
+shared contracts for field-selecting JSON, a consistent ProjectRef, stdout and stderr, exit status,
+and non-interactive operation. Domain slices can proceed in parallel on that foundation. Each slice
+delivers its own leaf help and contract tests so the command tree, help, and tests remain internally
+consistent at every point. Do not publish one command surface and use a Skill to explain another.
 
-WorkflowProfile 与 Variables 切片必须建立在既有 Definition / Variables 分离、attempt
-context snapshot 和权威校验链之上。
+The WorkflowProfile and Variables slices must build on the existing separation between Definition
+and Variables, attempt context snapshots, and the authoritative validation chain.

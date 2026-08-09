@@ -150,7 +150,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             await PersistAsync();
             await UpsertRegistryAsync();
             EnsurePresenceTimer();
-            _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted workflow slots", info.RunnerId, info.Hostname, _slots);
+            _log.LogInformation("Runner {Id} registered from {Host} as global resource with {Slots} persisted execution slots", info.RunnerId, info.Hostname, _slots);
         }
         finally
         {

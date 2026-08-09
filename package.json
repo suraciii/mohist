@@ -21,12 +21,13 @@
     "test:fast:arch": "dotnet test packages/server/tests/Mohist.Server.ArchTests/Mohist.Server.ArchTests.csproj -p:SkipWebBuild=true --no-restore",
     "test:fast:wf": "dotnet test packages/server/tests/Mohist.Workflow.Definition.Tests/Mohist.Workflow.Definition.Tests.csproj -p:SkipWebBuild=true --no-restore",
     "test:fast:cli": "dotnet test packages/cli/tests/Mohist.Cli.Tests/Mohist.Cli.Tests.csproj -p:SkipWebBuild=true --no-restore",
-    "verify": "npm run build && npm test",
+    "verify": "npm run docs:check && npm run build && npm test",
     "hooks": "git config --local core.hooksPath \"$(git rev-parse --path-format=absolute --git-common-dir)/../.githooks\"",
     "typecheck:scripts": "tsc -p tsconfig.scripts.json --noEmit",
     "test:archscripts": "tsx --test scripts/*.test.ts scripts/test-duration/*.test.ts",
     "test:budget": "tsx scripts/test-duration/guard.ts",
     "test:budget:all": "tsx scripts/test-duration/guard.ts --all",
+    "docs:check": "tsx scripts/check-docs.ts",
     "ci:agent-job-gate": "tsx scripts/agent-job-ci-gate.ts",
     "archtest": "npm run typecheck:scripts && npm run test:archscripts",
     "build:web": "npm run build -w packages/web",
@@ -38,10 +39,16 @@
     "install:cli": "dotnet pack packages/cli/Mohist.Cli/Mohist.Cli.csproj -c Release -o ./nupkg && dotnet tool install -g Mohist.Cli --add-source ./nupkg"
   },
   "devDependencies": {
-    "@types/node": "^22.15.0",
     "@babel/parser": "^7.29.7",
+    "@types/node": "^22.15.0",
     "concurrently": "^9.2.3",
+    "github-slugger": "^2.0.0",
+    "mdast-util-to-string": "^4.0.0",
+    "remark-lint-no-undefined-references": "^5.0.2",
+    "remark-parse": "^11.0.0",
     "tsx": "^4.20.0",
-    "typescript": "7.0.2"
+    "typescript": "7.0.2",
+    "unified": "^11.0.5",
+    "vfile": "^6.0.3"
   }
 }
