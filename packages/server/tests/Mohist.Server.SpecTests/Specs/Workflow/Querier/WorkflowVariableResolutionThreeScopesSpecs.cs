@@ -58,6 +58,37 @@ public sealed class WorkflowVariableResolutionThreeScopesSpecs : WorkflowDefinit
     }
 
     [Fact]
+    public async Task EffectiveStageAgent_OverridesProjectAndIssueTopLevelValues()
+    {
+        var runId = "wr_three_scopes05";
+        var project = new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "old-project-model", variant = "old-project-variant" },
+            }),
+            Stages: Stage("build", new
+            {
+                agent = new { model = "stage-model", variant = "stage-variant" },
+            }));
+        var issue = new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "old-issue-model", variant = "old-issue-variant" },
+            }));
+        await SeedAllLayersAsync(
+            "proj_three_scopes", 5, runId,
+            project: project,
+            issue: issue,
+            runtime: VariableBundle.Empty);
+
+        var result = await Resolver.ResolveEffectiveVariablesAsync(runId, "build");
+        var agent = result.GetProperty("agent");
+
+        Assert.Equal("stage-model", agent.GetProperty("model").GetString());
+        Assert.Equal("stage-variant", agent.GetProperty("variant").GetString());
+    }
+
+    [Fact]
     public async Task EffectiveVariables_FreshRunHasNoArchiveKey()
     {
         var runId = "wr_three_scopes02";

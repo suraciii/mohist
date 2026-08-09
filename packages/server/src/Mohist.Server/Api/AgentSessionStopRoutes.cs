@@ -6,6 +6,7 @@ using Microsoft.Extensions.Primitives;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure;
 using Mohist.Server.Project.Services;
+using Mohist.Server.Runner.Services;
 using Mohist.Server.Runner.Services.SignalR;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
@@ -29,6 +30,7 @@ public static class AgentSessionStopRoutes
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
             SessionTreeStopOrchestrator cascadeStop,
+            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
@@ -85,6 +87,7 @@ public static class AgentSessionStopRoutes
                 grains,
                 runnerHub,
                 connections,
+                workReconciler,
                 ct);
         });
 
@@ -118,6 +121,7 @@ public static class AgentSessionStopRoutes
         IGrainFactory grains,
         IHubContext<RunnerHub> runnerHub,
         RunnerConnectionTracker connections,
+        WorkflowSessionWorkReconciler workReconciler,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.TurnId))
@@ -129,6 +133,8 @@ public static class AgentSessionStopRoutes
 
         var result = await AgentSessionTurnControlOperations.StopAsync(
             projectId, grains, runnerHub, connections, target, request.TurnId, ct);
+        if (result.Kind is TurnControlResultKind.Stopped or TurnControlResultKind.AlreadyEnded)
+            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-stop", ct);
         return result.Kind switch
         {
             TurnControlResultKind.NotFound => ApiResults.NotFound($"Turn {request.TurnId} not found"),

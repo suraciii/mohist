@@ -5,6 +5,8 @@ using Mohist.Server.Runner.Services;
 using Mohist.Server.Workflow.Domain;
 using Mohist.Workflow.Definition;
 using Mohist.Server.Workflow.Domain.Run;
+using Mohist.Server.Workflow.Services;
+using Mohist.Server.TestSupport;
 using Xunit;
 
 
@@ -75,6 +77,44 @@ public partial class WorkflowItemTranslatorSpecs
         Assert.Equal("${{ vars.marker }}", JsonDocument.Parse(dispatch.Expect!).RootElement.GetProperty("marker").GetString());
         Assert.DoesNotContain("model-a", dispatch.With, StringComparison.Ordinal);
         Assert.True(JsonDocument.Parse(dispatch.Variables!).RootElement.TryGetProperty("vars", out _));
+    }
+
+    [Fact]
+    public async Task TranslateToDispatch_StageAgentValuesOverrideProjectAndIssueTopLevelValues()
+    {
+        var runId = $"wr-{Guid.NewGuid():N}";
+        var projectId = "proj-translate-stage-agent";
+        var run = await SeedRunningWorkflowAsync(runId, projectId);
+        var factory = new TestDbContextFactory(_database.Options);
+        var projectVariables = new ProjectVariableStore(factory);
+        var issueVariables = new IssueVariableStore(factory);
+
+        await projectVariables.SetVariablesAsync(projectId, new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "old-project-model", variant = "old-project-variant" },
+            }),
+            Stages: new Dictionary<string, StageVariables>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["build"] = new(JsonSerializer.SerializeToElement(new
+                {
+                    agent = new { model = "stage-model", variant = "stage-variant" },
+                })),
+            }));
+        await issueVariables.SetVariablesAsync(projectId, 42, new VariableBundle(
+            Vars: JsonSerializer.SerializeToElement(new
+            {
+                agent = new { model = "old-issue-model", variant = "old-issue-variant" },
+            })));
+
+        var item = WorkItem.Task("build", "task-1.1", "Task 1", "spec/task",
+            With(@"{ ""options"": ""${{ vars.agent }}"" }"));
+        var dispatch = await _translator.TranslateToDispatchAsync(item, runId, run, "runner-1");
+
+        using var document = JsonDocument.Parse(dispatch.Variables!);
+        var agent = document.RootElement.GetProperty("vars").GetProperty("agent");
+        Assert.Equal("stage-model", agent.GetProperty("model").GetString());
+        Assert.Equal("stage-variant", agent.GetProperty("variant").GetString());
     }
 
     [Fact]

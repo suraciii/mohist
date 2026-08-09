@@ -36,6 +36,70 @@ public partial class WorkflowGrain
         return ReportAck.Accepted;
     }
 
+    public async Task<ReportAck> AbandonActiveWorkAsync(string workerId, string workId, string reason)
+    {
+        RejectIfRunReloadRequired();
+        if (_run is null || !_run.IsAssignedTo(workerId)) return ReportAck.Stale;
+
+        var activeWork = _run.FindActiveWork(workId, workerId);
+        if (activeWork is null) return ReportAck.Stale;
+
+        await _stageLockCoordinator.ReleaseCurrentStageLocksAsync(reason);
+
+        IReadOnlyList<WorkflowEvent> events;
+        if (_run.Status == WorkflowRunStatus.Paused)
+        {
+            if (activeWork.IsTask)
+            {
+                if (!_run.RequeueTaskAfterPausedStop(workId, workerId))
+                    return ReportAck.Stale;
+            }
+            else if (activeWork.IsChecks)
+            {
+                _workLifecycle.RequeueRunningChecks(_run);
+            }
+            else
+            {
+                return ReportAck.Stale;
+            }
+
+            events = [];
+        }
+        else if (_run.Status == WorkflowRunStatus.Stopped)
+        {
+            if (activeWork.IsTask)
+            {
+                events = _run.FailTaskForStopped(reason, Now());
+            }
+            else if (activeWork.IsChecks)
+            {
+                _workLifecycle.RequeueRunningChecks(_run);
+                events = [];
+            }
+            else
+            {
+                return ReportAck.Stale;
+            }
+        }
+        else if (activeWork.IsTask)
+        {
+            events = _run.FailTask(new TaskResult("failed", reason), Now());
+        }
+        else if (activeWork.IsChecks)
+        {
+            events = _run.FailRunningChecks(reason, Now());
+        }
+        else
+        {
+            return ReportAck.Stale;
+        }
+
+        await CommitAsync(events);
+        if (activeWork.IsTask)
+            await DeleteSnapshotBestEffortAsync(workId);
+        return ReportAck.Accepted;
+    }
+
     public async Task<ReportAck> RejectActiveWorkDispatchAsync(string workerId, string workId, ExecutionError error)
     {
         RejectIfRunReloadRequired();

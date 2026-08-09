@@ -102,6 +102,58 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
+    public async Task PausedWorkflow_ConfirmedSessionStop_RequeuesTaskAndResumeDispatchesIt()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: []));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        await workflow.PauseAsync("user requested");
+
+        var acknowledgement = await workflow.AbandonActiveWorkAsync(
+            runnerId,
+            task.WorkId,
+            "session-stop");
+
+        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal("Paused", await workflow.GetRunStatusAsync());
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
+        Assert.Equal(
+            ReportAck.Stale,
+            await workflow.AbandonActiveWorkAsync(runnerId, task.WorkId, "duplicate-session-stop"));
+
+        await workflow.ResumeAsync();
+
+        var (resumedTask, resumedRunnerId) = await PollWorkAnyAsync();
+        Assert.Equal(task.WorkId, resumedTask.WorkId);
+        await ReportAsync(resumedRunnerId, resumedTask.WorkId, "completed");
+    }
+
+    [Fact]
+    public async Task RunningWorkflow_ConfirmedSessionCancel_FailsTaskAndUnlocksRerun()
+    {
+        var workflow = await StartWorkflowAsync(SingleStage(
+            tasks: [new("task-1", "Task 1", "spec/task")],
+            checks: []));
+
+        var (task, runnerId) = await PollWorkAnyAsync();
+        var acknowledgement = await workflow.AbandonActiveWorkAsync(
+            runnerId,
+            task.WorkId,
+            "session-cancel");
+
+        Assert.Equal(ReportAck.Accepted, acknowledgement);
+        Assert.Equal("Failed", await workflow.GetRunStatusAsync());
+        Assert.Null(await workflow.GetCurrentWorkIdAsync());
+
+        var rerun = await workflow.RerunFromStageAsync("build");
+        Assert.True(rerun.Success, rerun.Error);
+        var (rerunTask, _) = await PollWorkAnyAsync();
+        Assert.NotEqual(task.WorkId, rerunTask.WorkId);
+    }
+
+    [Fact]
     public async Task StoppedWorkflow_Resume_ThrowsInvalidOperationException()
     {
         var workflow = await StartWorkflowAsync(SingleStage());

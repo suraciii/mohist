@@ -830,9 +830,9 @@ public class IssueQuerier : IScopedService
 
         var stageModels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var stageModelVariants = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (stage, variables) in effective.Stages)
+        foreach (var stage in effective.Stages.Keys)
         {
-            var stageAgentConfig = ReadAgentConfig(variables.Vars);
+            var stageAgentConfig = ReadAgentConfig(effective.ResolveStageVars(stage));
             var model = ReadAgentModel(stageAgentConfig);
             if (!string.IsNullOrWhiteSpace(model))
                 stageModels[stage] = model;

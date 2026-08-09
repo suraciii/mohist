@@ -83,5 +83,41 @@ public static partial class WorkflowRunExtensions
             run.Failure = current.Failure;
             return [new TaskFailed(current.Id, task.Id, message)];
         }
+
+        /// <summary>
+        /// Releases a task whose runtime was confirmed stopped while the run
+        /// was paused. Pausing deliberately leaves the current task running so
+        /// a normal task report can finish it; a confirmed session stop is the
+        /// explicit boundary that makes requeueing safe.
+        /// </summary>
+        public bool RequeueTaskAfterPausedStop(string workId, string workerId)
+        {
+            if (run.Status != WorkflowRunStatus.Paused)
+                return false;
+
+            var current = run.CurrentStage();
+            var task = current.RunningTask;
+            var effectiveWorkId = task?.WorkId ?? task?.Id;
+            if (task is null
+                || !string.Equals(effectiveWorkId, workId, StringComparison.Ordinal)
+                || !string.Equals(task.WorkerId, workerId, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            task.Status = TaskRunStatus.Pending;
+            task.StartedAt = null;
+            task.FinishedAt = null;
+            task.WorkerId = null;
+            task.WorkId = null;
+            task.Output = null;
+            task.Error = null;
+
+            if (current.Failure?.TaskId == task.Id)
+                current.Failure = null;
+            if (run.Failure?.TaskId == task.Id)
+                run.Failure = null;
+            return true;
+        }
     }
 }

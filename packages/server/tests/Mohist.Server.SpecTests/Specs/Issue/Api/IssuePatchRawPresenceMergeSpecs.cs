@@ -60,12 +60,13 @@ public class IssuePatchRawPresenceMergeSpecs
         response.EnsureSuccessStatusCode();
 
         // The variant is stored on the workflow profile's variables bundle
-        // (stages.plan.vars.agent.variant); the read path currently surfaces
-        // stageModels but not variants. We assert the model merge round-trip
-        // to confirm the partial bundle was persisted and didn't drop fields.
+        // (stages.plan.vars.agent.variant) and is projected alongside the
+        // stage model.
         var detail = await ReadDataAsync<IssueDto>(response);
         Assert.NotNull(detail.StageModels);
         Assert.Equal("openai/gpt-5.5", detail.StageModels!["plan"]);
+        Assert.NotNull(detail.StageModelVariants);
+        Assert.Equal("max", detail.StageModelVariants!["plan"]);
     }
 
     [Fact]
@@ -148,5 +149,6 @@ public class IssuePatchRawPresenceMergeSpecs
         bool IsDraft,
         string[] AttachmentIds,
         string? Model,
-        Dictionary<string, string>? StageModels);
+        Dictionary<string, string>? StageModels,
+        Dictionary<string, string>? StageModelVariants);
 }
