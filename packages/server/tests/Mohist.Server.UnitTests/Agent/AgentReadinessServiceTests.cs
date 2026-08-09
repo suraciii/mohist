@@ -18,6 +18,16 @@ public sealed class AgentReadinessServiceTests
     }
 
     [Fact]
+    public void MissingAgentConfiguration_RequiresSetup()
+    {
+        var result = AgentReadinessService.Evaluate(Agent() with { AgentConfig = null }, null);
+
+        Assert.Equal(AgentReadinessConclusions.NeedsSetup, result.Conclusion);
+        Assert.Contains(result.Gaps, gap => gap.Code == "model-missing");
+        Assert.NotNull(result.Setup);
+    }
+
+    [Fact]
     public void SuccessfulExecution_IsReady_IndependentOfRuntimeAvailability()
     {
         var result = AgentReadinessService.Evaluate(

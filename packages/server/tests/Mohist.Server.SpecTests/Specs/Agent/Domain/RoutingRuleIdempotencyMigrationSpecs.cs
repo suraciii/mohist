@@ -73,7 +73,9 @@ public sealed class RoutingRuleIdempotencyMigrationSpecs
                 var sql = Assert.IsType<SqlOperation>(operation);
                 Assert.Contains("CREATE TEMP TRIGGER", sql.Sql, StringComparison.Ordinal);
                 Assert.Contains("UPDATE main.\"RoutingRules\"", sql.Sql, StringComparison.Ordinal);
+                Assert.Contains("SET \"IdempotencyKey\" = \"IdempotencyKey\";", sql.Sql, StringComparison.Ordinal);
                 Assert.Contains("RAISE(ABORT", sql.Sql, StringComparison.Ordinal);
+                Assert.Contains("duplicate.\"ProjectId\" = OLD.\"ProjectId\"", sql.Sql, StringComparison.Ordinal);
             },
             operation => Assert.Equal(
                 "UX_RoutingRules_ProjectId_IdempotencyKey",
@@ -156,6 +158,52 @@ public sealed class RoutingRuleIdempotencyMigrationSpecs
         Assert.False(await TempTriggerExistsAsync(connection, RollbackGuardTrigger));
     }
 
+    [Fact]
+    public async Task Down_WithDeletedTombstoneNameReuseAbortsBeforeDroppingAnythingOnSqlite()
+    {
+        await using var database = TestSqliteDatabase.CreateEmpty();
+        await using var context = database.CreateContext();
+        var connection = (SqliteConnection)context.Database.GetDbConnection();
+        await connection.OpenAsync();
+        var migrator = context.GetService<IMigrator>();
+        await migrator.MigrateAsync(CurrentMigration);
+        Assert.Equal(CurrentMigration, await LatestMigrationIdAsync(connection));
+
+        context.RoutingRules.AddRange(
+            NewRoutingRule("rule_migration_active", "active"),
+            NewRoutingRule("rule_migration_deleted", "deleted"));
+        await context.SaveChangesAsync();
+
+        await Assert.ThrowsAsync<SqliteException>(() =>
+            migrator.MigrateAsync(PreviousMigration));
+
+        Assert.Equal(CurrentMigration, await LatestMigrationIdAsync(connection));
+        Assert.True(await ColumnExistsAsync(connection, "RoutingRules", "IdempotencyKey"));
+        Assert.True(await IndexExistsAsync(connection, "UX_RoutingRules_ProjectId_IdempotencyKey"));
+        Assert.True(await IndexExistsAsync(connection, "UX_RoutingRules_ProjectId_Name"));
+        var nameIndexSql = await IndexSqlAsync(connection, "UX_RoutingRules_ProjectId_Name");
+        Assert.Contains("Status", nameIndexSql, StringComparison.Ordinal);
+        Assert.Equal(2, await CountRoutingRulesAsync(connection));
+        Assert.Equal(0, await CountIdempotencyFactsAsync(connection));
+        Assert.False(await TempTriggerExistsAsync(connection, RollbackGuardTrigger));
+    }
+
+    private static RoutingRuleRow NewRoutingRule(string id, string status) => new()
+    {
+        Id = id,
+        ProjectId = "project_migration_name_reuse",
+        Name = "reused-name",
+        Position = status == "active" ? 1 : 2,
+        Match = "event.type == \"migration\"",
+        AgentId = $"agent_{id}",
+        ResponsePrompt = "Keep this rule.",
+        Continue = false,
+        Status = status,
+        CreatedAt = DateTimeOffset.Parse("2026-08-09T00:00:00+00:00"),
+        UpdatedAt = DateTimeOffset.Parse("2026-08-09T00:00:00+00:00"),
+        IdempotencyKey = null,
+    };
+
     private static async Task<bool> ColumnExistsAsync(SqliteConnection connection, string table, string column)
     {
         await using var command = connection.CreateCommand();
@@ -188,6 +236,20 @@ public sealed class RoutingRuleIdempotencyMigrationSpecs
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT \"IdempotencyKey\" FROM \"RoutingRules\" WHERE \"Id\" = 'rule_migration_fact'";
         return (string?)await command.ExecuteScalarAsync();
+    }
+
+    private static async Task<int> CountRoutingRulesAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM \"RoutingRules\"";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private static async Task<int> CountIdempotencyFactsAsync(SqliteConnection connection)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM \"RoutingRules\" WHERE \"IdempotencyKey\" IS NOT NULL";
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task<string?> LatestMigrationIdAsync(SqliteConnection connection)

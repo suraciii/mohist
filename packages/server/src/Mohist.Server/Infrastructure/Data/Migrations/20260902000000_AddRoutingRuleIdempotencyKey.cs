@@ -47,13 +47,20 @@ public partial class AddRoutingRuleIdempotencyKey : Migration
             """
             CREATE TEMP TRIGGER "__Mohist_RoutingRuleIdempotencyRollbackGuard"
             BEFORE UPDATE OF "IdempotencyKey" ON main."RoutingRules"
-            WHEN OLD."IdempotencyKey" IS NOT NULL
             BEGIN
-                SELECT RAISE(ABORT, 'RoutingRule idempotency facts cannot be represented after removing IdempotencyKey.');
+                SELECT RAISE(ABORT, 'RoutingRule idempotency facts cannot be represented after removing IdempotencyKey.')
+                WHERE OLD."IdempotencyKey" IS NOT NULL;
+                SELECT RAISE(ABORT, 'RoutingRule names cannot be represented by the restored unique index.')
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM main."RoutingRules" AS duplicate
+                    WHERE duplicate."ProjectId" = OLD."ProjectId"
+                      AND duplicate."Name" = OLD."Name"
+                      AND duplicate."Id" <> OLD."Id"
+                );
             END;
             UPDATE main."RoutingRules"
-            SET "IdempotencyKey" = "IdempotencyKey"
-            WHERE "IdempotencyKey" IS NOT NULL;
+            SET "IdempotencyKey" = "IdempotencyKey";
             DROP TRIGGER "__Mohist_RoutingRuleIdempotencyRollbackGuard";
             """);
 

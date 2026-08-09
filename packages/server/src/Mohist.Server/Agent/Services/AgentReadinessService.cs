@@ -75,6 +75,23 @@ public sealed class AgentReadinessService : IScopedService
             gaps.Add(new("instructions-missing", "Instructions are missing.", "Add instructions in Agent settings."));
 
         var (model, variant) = AgentLauncher.ResolveModelAndVariant(agent.AgentConfig);
+        if (agent.AgentConfig is null
+            || agent.AgentConfig.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            gaps.Add(new(
+                "model-missing",
+                "A model is not configured.",
+                "Set a model in Agent settings."));
+            return gaps;
+        }
+        if (agent.AgentConfig.Value.ValueKind != JsonValueKind.Object)
+            return gaps;
+
+        if (string.IsNullOrWhiteSpace(model))
+            gaps.Add(new(
+                "model-missing",
+                "A model is not configured.",
+                "Set a model in Agent settings."));
         if (agent.AgentConfig is { ValueKind: JsonValueKind.Object } rawConfig
             && rawConfig.TryGetProperty("variant", out var rawVariant)
             && rawVariant.ValueKind == JsonValueKind.String)
