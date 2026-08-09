@@ -31,6 +31,7 @@ public sealed class CommentMentionDispatchSpecs
     public async Task MentionOfActiveAgent_LaunchesItWithFullCommentBodyAsPrompt()
     {
         var harness = await SeedAsync("mention-one");
+        var body = $"@supervisor @{new string('a', 100_000)}-";
 
         var evt = RoutingDispatchTestSupport.BuildCommentAddedEvent(
             projectId: harness.ProjectId,
@@ -38,14 +39,14 @@ public sealed class CommentMentionDispatchSpecs
             eventId: "evt-mention-1",
             commentId: "cmt-1",
             author: "Ada",
-            body: "@supervisor push this issue forward");
+            body: body);
 
         await harness.MentionHandler.HandleAsync(evt, CancellationToken.None);
 
         var launch = Assert.Single(harness.Launcher.MentionLaunches);
         Assert.Equal(harness.SupervisorId, launch.AgentId);
         Assert.Equal("supervisor", launch.AgentName);
-        Assert.Equal("@supervisor push this issue forward", launch.Prompt);
+        Assert.Equal(body, launch.Prompt);
         Assert.Equal("cmt-1", launch.CommentId);
         Assert.Equal("evt-mention-1", launch.TriggeringEventId);
         Assert.Equal(harness.ProjectId, launch.ProjectId);

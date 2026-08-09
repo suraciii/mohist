@@ -52,7 +52,7 @@ internal static partial class MentionTokenParser
     /// </summary>
     [GeneratedRegex(
         @"(?:^|[\s\p{P}])@(?<token>[A-Za-z0-9_](?:[A-Za-z0-9_.\-]*[A-Za-z0-9_])?)",
-        RegexOptions.CultureInvariant,
+        RegexOptions.CultureInvariant | RegexOptions.NonBacktracking,
         matchTimeoutMilliseconds: 100)]
     private static partial Regex MentionRegex { get; }
 }
