@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Mohist.Server.TestSupport;
 using System.Collections.Concurrent;
 using Microsoft.Data.Sqlite;
@@ -37,6 +38,10 @@ public static class MigratedSqliteTemplate
     // concurrently; a schema-only backup is sub-millisecond, so a single
     // lock never becomes a bottleneck.
     private static readonly object BackupLock = new();
+
+    // Build the expensive migration template before xUnit starts timing test
+    // cases; each case should pay only for cloning and its own seed data.
+    internal static void Warm() => _ = Template.Value;
 
     /// <summary>
     /// Copies the fully migrated schema (including
@@ -124,4 +129,10 @@ public static class MigratedSqliteTemplate
             .Options;
         return new MohistDbContext(options);
     }
+}
+
+internal static class MigratedSqliteTemplateWarmup
+{
+    [ModuleInitializer]
+    internal static void Initialize() => MigratedSqliteTemplate.Warm();
 }
