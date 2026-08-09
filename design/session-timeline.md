@@ -5,6 +5,16 @@ AgentSession 页时间线的呈现模型：把 transcript 事实派生为可扫�
 （见 [`agent-execution.md`](agent-execution.md)）。产品行为见
 [`../docs/web-ui.md`](../docs/web-ui.md) 的 AgentSession 页一节。
 
+[`agent-api.md`](agent-api.md) 的外部 Session event stream 是另一份 Server-owned、持久化的
+公开 projection：它有自己的 sequence、cursor、retention 和严格字段 allowlist。它不能复用
+本地 `TimelineItem`、浏览器实时订阅或原始 transcript 事实作为事件记录，也不能由本页的
+呈现规则决定外部排序、去重或可见性。
+
+canonical `session.context_reset` 发生时，外部 stream 只追加 `session.context_reset` 的公开
+边界事件：稳定 Session/Project/Agent 身份、公开 Session 状态、安全 reason code、timestamp 和
+sequence。它不是 TimelineItem 的 raw payload，也不携带 runtime、path、prompt、memory 或原始
+transcript。
+
 ## Model
 
 **时间线条目（TimelineItem）**：从一段 transcript 事实派生的呈现单元。它是客户端
@@ -111,6 +121,10 @@ Salience 只影响呈现（醒目程度、折叠资格、当前活动摘要的�
 - 页面级开关：同一时间线数据切换为原始事实序视图——每条 transcript 事实一行，可
   展开 payload。
 - 两种视图是同一数据的两个海拔，不是两条 feed；切换时按条目 Id 锚定滚动位置。
+
+这个原始视图仍是受控 Web 诊断面的呈现能力，不是对外 API export，也不定义任何外部
+caller 可读取的 payload。直接外部调用只能使用 `agent-api.md` 规定的 public projection，
+其中不得出现 prompt、memory、path、runtime/connection identity 或 raw payload。
 
 ## Examples
 
