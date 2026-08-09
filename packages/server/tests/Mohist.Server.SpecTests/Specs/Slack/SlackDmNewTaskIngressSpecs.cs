@@ -97,7 +97,7 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
 
         var first = await PostIngressAsync(connection, "D-DM-RUNNING", "1710000000.000300", "long running task");
         var firstJobKey = first.GetProperty("jobKey").GetString()!;
-        var firstDispatch = await AcceptLaunchAsync(firstJobKey, runnerId);
+        var firstDispatch = await AcceptLaunchAsync(firstJobKey, runnerId, connection.ProjectId);
         var firstJob = _fixture.Grains.GetGrain<IAgentJobGrain>(firstJobKey);
         Assert.Equal(AgentJobStatus.Running, await firstJob.GetStatusAsync());
 
@@ -273,7 +273,10 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         slots.EnsureSuccessStatusCode();
     }
 
-    private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(string jobKey, string runnerId)
+    private async Task<(string RunnerId, string WorkId)> AcceptLaunchAsync(
+        string jobKey,
+        string runnerId,
+        string projectId)
     {
         var job = _fixture.Grains.GetGrain<IAgentJobGrain>(jobKey);
         await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(
@@ -283,50 +286,18 @@ public sealed class SlackDmNewTaskIngressSpecs : IAsyncLifetime
         var assignment = await job.GetRuntimeSnapshotAsync();
         Assert.Equal(runnerId, assignment.RunnerId);
         Assert.Equal(AgentJobStatus.Pending, assignment.Status);
+        Assert.False(string.IsNullOrWhiteSpace(assignment.CurrentWorkId));
 
-        var poll = await TestWait.ForAsync(
-            async () =>
-            {
-                using var response = await _fixture.Client.PostAsync($"/api/runner/{runnerId}/poll", null);
-                var dispatches = await response.ReadDispatchElementsAsync();
-                var matching = dispatches
-                    .Where(element => element.TryGetProperty("agentJobId", out var agentJobId)
-                        && agentJobId.ValueKind != JsonValueKind.Null
-                        && string.Equals(agentJobId.GetString(), jobKey, StringComparison.Ordinal))
-                    .ToList();
-                var workId = matching.Count == 1
-                    ? matching[0].GetProperty("workId").GetString()
-                    : null;
-                return new PollObservation(
-                    workId,
-                    matching.Count,
-                    dispatches
-                        .Select(element => element.TryGetProperty("agentJobId", out var agentJobId)
-                            && agentJobId.ValueKind != JsonValueKind.Null
-                            ? agentJobId.GetString() ?? "<missing>"
-                            : "<non-agent-job>")
-                        .ToArray());
-            },
-            observation => observation.TargetCount == 1
-                && !string.IsNullOrWhiteSpace(observation.TargetWorkId),
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to claim AgentJob '{jobKey}' via HTTP /poll");
-
-        var workId = poll.TargetWorkId;
-        Assert.False(string.IsNullOrWhiteSpace(workId));
-        Assert.Equal(assignment.CurrentWorkId, workId);
-        return (runnerId, workId!);
-    }
-
-    private sealed record PollObservation(
-        string? TargetWorkId,
-        int TargetCount,
-        IReadOnlyList<string> AgentJobIds)
-    {
-        public override string ToString() =>
-            $"TargetCount={TargetCount}, TargetWorkId={TargetWorkId ?? "<missing>"}, "
-            + $"AgentJobIds=[{string.Join(", ", AgentJobIds)}]";
+        // Slack ingress owns the job lifecycle assertion. Claim through the
+        // registered fake runner's authoritative grain boundary so this spec
+        // does not depend on /poll candidate enumeration converging first.
+        var claim = await _fixture.Grains.GetGrain<IRunnerGrain>(runnerId)
+            .TryClaimAgentJobAsync(jobKey, projectId);
+        Assert.NotNull(claim);
+        Assert.Equal(jobKey, claim.AgentJobId);
+        Assert.Equal(runnerId, claim.RunnerId);
+        Assert.Equal(assignment.CurrentWorkId, claim.WorkId);
+        return (claim.RunnerId, claim.WorkId);
     }
 
     private async Task AssertReceivedProjectionAsync(AgentConnection connection, string conversationId, string messageTs)
