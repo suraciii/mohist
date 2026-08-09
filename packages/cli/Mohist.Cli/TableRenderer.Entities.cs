@@ -590,9 +590,13 @@ internal sealed partial class TableRenderer
         var partCount = data is null ? "" : NumberOf(data, "partCount");
         var firstActivity = turns.Count > 0 ? StringOf(turns[0], "startedAt") : "";
         var lastActivity = data is null ? "" : StringOf(data, "lastActivityAt");
+        var activity = data is null ? "" : StringOf(data, "activity");
+        var status = data is null ? "" : StringOf(data, "status");
 
         _out.WriteLine($"turns:          {turns.Count}");
         _out.WriteLine($"parts:          {partCount}");
+        _out.WriteLine($"activity:       {activity}");
+        _out.WriteLine($"status:         {status}");
         _out.WriteLine($"first activity: {firstActivity}");
         _out.WriteLine($"last activity:  {lastActivity}");
     }

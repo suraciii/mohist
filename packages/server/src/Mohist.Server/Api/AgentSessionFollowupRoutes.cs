@@ -60,11 +60,12 @@ public static class AgentSessionFollowupRoutes
             string projectRef,
             string sessionId,
             string? runtimeSessionId,
+            string? view,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            var transcript = await sessions.GetGenericSessionTranscriptAsync(project.Id, sessionId, runtimeSessionId, ct);
+            var transcript = await sessions.GetGenericSessionTranscriptAsync(project.Id, sessionId, runtimeSessionId, ct, view);
             return transcript is null
                 ? ApiResults.NotFound($"Agent session {sessionId} not found")
                 : ApiResults.Ok(transcript);

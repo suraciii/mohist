@@ -56,9 +56,10 @@ public static class UnifiedSessionRoutes
             string projectRef,
             string sessionId,
             string? runtimeSessionId,
+            string? view,
             AgentSessionQuerier sessions,
             CancellationToken ct) =>
-            HandleTranscriptAsync(context.GetResolvedProject(), sessionId, runtimeSessionId, sessions, ct));
+            HandleTranscriptAsync(context.GetResolvedProject(), sessionId, runtimeSessionId, view, sessions, ct));
 
         return app;
     }
@@ -119,17 +120,26 @@ public static class UnifiedSessionRoutes
         ProjectInfo project,
         string sessionId,
         string? runtimeSessionId,
+        string? view,
         AgentSessionQuerier sessions,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(sessionId))
             return ApiResults.NotFound("Session not found");
 
-        var transcript = await sessions.GetUnifiedSessionTranscriptAsync(project.Id, sessionId, runtimeSessionId, ct);
+        var transcript = await sessions.GetUnifiedSessionTranscriptAsync(project.Id, sessionId, runtimeSessionId, ct, view);
         return transcript is null
             ? ApiResults.NotFound($"Session {sessionId} not found")
             : ApiResults.Ok(transcript);
     }
+
+    internal static Task<IResult> HandleTranscriptAsync(
+        ProjectInfo project,
+        string sessionId,
+        string? runtimeSessionId,
+        AgentSessionQuerier sessions,
+        CancellationToken ct) =>
+        HandleTranscriptAsync(project, sessionId, runtimeSessionId, null, sessions, ct);
 
     private static async Task<IResult> ListByAgentAsync(
         ProjectInfo project,

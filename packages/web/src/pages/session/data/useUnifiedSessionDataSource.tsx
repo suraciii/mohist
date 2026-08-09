@@ -92,13 +92,18 @@ export function useUnifiedSessionDataSource(
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
+  const [transcriptView, setTranscriptView] = useState<'public' | 'raw'>('public')
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
   const jobId = searchParams.get('jobId')
 
   useDocumentTitle('Session — Mohist')
 
   const { data: summary, isLoading: summaryLoading, isError: summaryError } = useSummary(sessionId)
-  const { data: transcriptResponse } = useTranscriptResponse(sessionId, summary?.runtimeSessionId)
+  const { data: transcriptResponse, isFetching: transcriptViewLoading } = useTranscriptResponse(
+    sessionId,
+    summary?.runtimeSessionId,
+    transcriptView,
+  )
   const { data: launchObservation } = useQuery<AgentLaunchObservationDto>(launchObservationQueryOptions(projectId, jobId))
   const followup = useFollowup()
   const turnControl = useTurnControl()
@@ -120,8 +125,8 @@ export function useUnifiedSessionDataSource(
     [projectId, sessionId],
   )
   const transcriptQueryKey = useMemo(
-    () => ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId || null] as const,
-    [projectId, runtimeSessionId, sessionId],
+    () => ['unified-session', projectId, sessionId, 'transcript', runtimeSessionId || null, transcriptView] as const,
+    [projectId, runtimeSessionId, sessionId, transcriptView],
   )
 
   const reconcileUnifiedQueries = useCallback(() => {
@@ -279,6 +284,9 @@ export function useUnifiedSessionDataSource(
     runtimeSessionId,
     meta,
     transcriptResponse: transcriptResponse ?? null,
+    transcriptView,
+    setTranscriptView,
+    transcriptViewLoading,
     launchObservation: launchObservation ?? null,
     initialTurns,
     statusKind,

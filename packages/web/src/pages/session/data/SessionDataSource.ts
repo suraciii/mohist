@@ -46,6 +46,9 @@ export interface SessionDataSourceResult {
   historicalRuntimeId?: string | null
   meta: SessionMetadata | null
   transcriptResponse: AgentSessionTranscriptResponse | null
+  transcriptView?: 'public' | 'raw'
+  setTranscriptView?: (view: 'public' | 'raw') => void
+  transcriptViewLoading?: boolean
   launchObservation?: AgentLaunchObservationDto | null
   initialTurns: SessionTurn[]
 

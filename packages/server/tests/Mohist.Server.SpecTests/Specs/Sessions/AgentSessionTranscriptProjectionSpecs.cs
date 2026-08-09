@@ -141,6 +141,31 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     }
 
     [Fact]
+    public async Task UnboundQueuedSessionTranscript_ProjectsCanonicalTurnWithoutRuntimeBinding()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("unbound-transcript", start: false, sessionName: "plan");
+        var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"input-{session.Id}",
+            TurnId: $"turn-{session.Id}",
+            Prompt: "queued task",
+            Source: "agent-launch",
+            JobId: work.WorkId,
+            Runtime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}"));
+
+        var raw = await _client.GetRawAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
+        using var document = JsonDocument.Parse(raw);
+        var data = document.RootElement.GetProperty("data");
+        var turn = Assert.Single(data.GetProperty("turns").EnumerateArray());
+        Assert.Equal("queued", data.GetProperty("status").GetString());
+        Assert.Equal("queued", turn.GetProperty("status").GetString());
+        Assert.True(turn.GetProperty("incomplete").GetBoolean());
+        Assert.Equal("queued task", turn.GetProperty("user").GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task IssueSessionMetadataEndpoint_MissingSession_ReturnsNotFound()
     {
         var projectName = $"metadata-not-found-{Guid.NewGuid():N}";
@@ -163,6 +188,15 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
 
         var currentWorkflowRunId = (await issueGrain.GetWorkflowStatusAsync())!.WorkflowRunId!;
         var session = await OpenRunnerSessionAsync(project.Id, issue.Number, currentWorkflowRunId, "plan", work, "Plan session");
+        var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: "input-canonical",
+            TurnId: "turn-canonical",
+            Prompt: "plan the refactor",
+            Source: "workflow",
+            JobId: work.WorkId,
+            Runtime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}"));
         var persistence = _fixture.Persistence.Checkpoint(session.Id);
         await _client.PostOkAsync(RunnerAgentSessionAttachPath(session), new { runtimeSessionId = session.Id, workDir = $"/workspaces/{project.Id}", processPid = 1234 });
         var runtimeEvents = Enumerable.Range(0, 96)
@@ -207,7 +241,7 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
             runtimeSessionId = session.Id,
             runtimeEvents = new object[]
             {
-                new { type = "session.input", payload = new { text = "plan the refactor", kind = "task" } },
+                new { type = "session.input", payload = new { text = "[mohist-workspace-anchor]\n/workspaces/internal\n[/mohist-workspace-anchor]\n\ninternal system prompt\n\nplan the refactor", kind = "task" } },
                 new { type = "message.delta", payload = new { text = "first", messageId = "msg-1" } },
                 new { type = "message.delta", payload = new { text = " second", messageId = "msg-1" } },
                 new { type = "reasoning.delta", payload = new { text = "thinking", messageId = "reason-1" } },
@@ -277,6 +311,20 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
         Assert.Equal("read", toolPart.ToolName);
         Assert.Equal("completed", toolPart.Status);
         Assert.Equal("Read README", toolPart.Title);
+
+        var publicJson = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
+        using (var publicDocument = JsonDocument.Parse(publicJson))
+        {
+            var publicTurn = publicDocument.RootElement.GetProperty("data").GetProperty("turns")[0];
+            Assert.Equal("plan the refactor", publicTurn.GetProperty("user").GetProperty("text").GetString());
+            Assert.False(publicTurn.GetProperty("assistant")[3].GetProperty("tool").TryGetProperty("rawInput", out _));
+        }
+
+        var rawJson = await _client.GetRawAsync($"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript?view=raw");
+        using var rawDocument = JsonDocument.Parse(rawJson);
+        var rawTurn = rawDocument.RootElement.GetProperty("data").GetProperty("turns")[0];
+        Assert.Contains("mohist-workspace-anchor", rawTurn.GetProperty("user").GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Contains("README.md", rawTurn.GetProperty("assistant")[3].GetProperty("tool").GetProperty("rawInput").GetString(), StringComparison.Ordinal);
     }
 
 }
