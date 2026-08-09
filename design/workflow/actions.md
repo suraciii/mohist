@@ -274,9 +274,9 @@ task or a check.
 
 ## Built-In Actions
 
-### `mohist/opencode` and `mohist/pi`
+### `mohist/opencode`
 
-These Runtime-specific Actions declare `agent-execution`. See
+This Runtime-specific Action declares `agent-execution`. See
 [`../agent-execution.md`](../agent-execution.md) for invariants about its ownership relationship
 with Agent and Session, including that direct use means an Inline Agent and does not resolve an
 Agent definition. Because `uses` already selects the Runtime, inputs need no `kind` or `type`
@@ -288,57 +288,18 @@ Input contract:
 type OpenCodeActionInput = {
   prompt: string                    // Non-empty string rendered by Runner
   session?: string                  // Logical Session name
-  options?: RuntimeAgentActionOptions
-}
-
-type PiActionInput = {
-  prompt: string                    // Non-empty string rendered by Runner
-  session?: string                  // Logical Session name
-  options?: RuntimeAgentActionOptions
-}
-
-type RuntimeAgentActionOptions = {
-  model?: string                    // provider/model; model itself may contain '/'
-  reasoningEffort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
-  variant?: string                  // runtime-specific sibling; never joined to model ID
+  options?: {
+    model?: string                  // provider/model; model itself may contain '/'
+    variant?: string                // Separate sibling of model; never joined to the model ID
+  }
 }
 ```
 
 `options` is normally expanded as a whole value from `${{ vars.agent }}`. See
-[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. It is a
-closed object: only `model`, `reasoningEffort`, and `variant` are accepted. The
-Action's `uses` fixes Runtime and is passed to the shared
-`ResolveExecutionConfiguration` resolver as
-`workflow-action-runtime`; an Action cannot supply a second Runtime field.
-
-The optional fields are resolved as one partial tuple. The resolver starts from
-the catalog default Model for the Runtime named by `uses`. An omitted `model`
-uses that Model; an omitted ReasoningEffort or Variant then uses the selected
-Model's catalog default, including a null Variant only when that Model has no
-Variant dimension. A supplied Model, ReasoningEffort, or Variant is marked
-`workflow-action-override`. A Model change therefore re-defaults omitted effort
-and Variant for that Model rather than retaining values from a different Model.
-The resolved attempt snapshot carries the final tuple, catalog version, native
-mapping, and per-field sources; a retry of that dispatched attempt never probes
-or re-resolves it.
-
-An unknown key, empty or `null` value, non-string model or Variant, or an effort
-outside the listed enum rejects Profile validation and task dispatch with
-`invalid_execution_configuration`; no value is ignored or retained as a
-diagnostic-only success. A well-formed Runtime or Model absent from the accepted
-static catalog returns `unsupported_execution_configuration`; a catalog Model
-with an invalid effort/Variant combination returns
-`incompatible_execution_configuration`; an unavailable catalog returns
-`execution_catalog_unavailable`. These checks never probe the Runtime or
-provider. Workflow provides `expect` separately as the task completion contract.
-Legacy `with.expect` and `with.agent` are rejected with actionable errors when
-the Profile loads.
-
-The two Actions share this grammar and error model, while each Runtime catalog owns its supported
-models, effort combinations, variants, and final native mapping. `variant` never carries a
-ReasoningEffort value. A `mohist/agent` definition reference is a separate Action contract: a new
-AgentJob without an allowed override uses the saved Agent default, never a Runtime or existing
-Session selection.
+[`task-dispatch.md`](task-dispatch.md) for template evaluation timing. Keys other than `model` and
+`variant` in `options` are ignored and recorded in diagnostics without failing execution. Workflow
+provides `expect` separately as the task completion contract. Legacy `with.expect` and `with.agent`
+are rejected with actionable errors when the Profile loads.
 
 Output contract:
 
@@ -347,10 +308,10 @@ type OpenCodeActionOutput = null | { promise: string }
 ```
 
 The task executor synthesizes this `{ promise }` output for an `agent-execution` Action based on
-`expect`; neither Action nor the capability layer produces it. Runtime Session identity, model,
+`expect`; neither the Action nor the capability layer produces it. Runtime Session identity, model,
 usage, transcript, diagnostics, and expectation details stay in the models that own them and are
-not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) and
-[`../runtimes/pi.md`](../runtimes/pi.md) for Runtime-specific implementation contracts.
+not copied into Action output. See [`../runtimes/opencode.md`](../runtimes/opencode.md) for the
+OpenCode implementation.
 
 ### Git and GitHub PR Actions
 

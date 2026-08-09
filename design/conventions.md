@@ -139,8 +139,7 @@ Concept ownership and origin rules are defined in
 ### Canonical AgentSession, launch, and Turn result projections
 
 `AgentSessionRead` is the only Session admission projection. The durable Session row uses the same
-fields except the read-only `execution` association summary; callers use
-`admission=ready|blocked` and do not invent another safety field.
+fields; callers use `admission=ready|blocked` and do not invent another safety field.
 
 ```text literal
 AgentSessionRead {
@@ -154,103 +153,8 @@ AgentSessionRead {
   currentBinding: BindingTuple | null
   unresolvedPrevious = [UnresolvedTargetRead]
   unresolvedPreviousCount
-  execution: SessionExecutionSummaryRead | null
   revision
   observedAt
-}
-
-ReasoningEffort = none | minimal | low | medium | high | xhigh | max
-
-AgentExecutionConfigurationRead {
-  runtime: string | null
-  model: string | null
-  reasoningEffort: ReasoningEffort | null
-  variant: string | null
-  catalogVersion: string | null
-  nativeMapping: NativeExecutionMappingRead | null
-  readiness: ExecutionReadinessRead
-}
-
-RuntimeCapabilityCatalogRead {
-  catalogVersion
-  defaultExecution {
-    runtime
-    model
-    reasoningEffort: ReasoningEffort
-    variant: string | null
-  }
-  entries: [RuntimeCapabilityCatalogEntryRead]
-}
-
-RuntimeCapabilityCatalogEntryRead {
-  catalogVersion
-  runtime
-  model
-  isDefaultModel: boolean
-  supportedReasoningEfforts: [ReasoningEffort]
-  defaultReasoningEffort: ReasoningEffort
-  hasVariantDimension: boolean
-  supportedVariants: [string]
-  defaultVariant: string | null
-  nativeMapping: NativeExecutionMappingRead
-}
-
-NativeExecutionMappingRead {
-  format                         # runtime-owned mapping format from catalogVersion
-  values                         # complete non-secret native model/effort/variant mapping
-}
-
-ExecutionResolutionFenceRead {
-  agentExecutionRevision: string | null
-                                  # null for Agent creation and an inline Workflow Runtime Action
-  catalogVersion
-  catalogEntryFingerprint         # digest of the selected entry and native mapping
-}
-
-ExecutionFieldSource = agent-default
-                     | launch-override
-                     | workflow-action-runtime
-                     | workflow-catalog-default
-                     | workflow-action-override
-
-ExecutionReadinessRead {
-  state = ready | needs-setup | unknown
-  gaps: [ExecutionReadinessGapRead]
-}
-
-ExecutionReadinessGapRead {
-  code = missing_execution_configuration
-       | unsupported_execution_configuration
-       | incompatible_execution_configuration
-       | execution_catalog_unavailable
-  message
-  action = configure_execution
-         | select_supported_execution
-         | select_compatible_execution
-         | wait_for_catalog
-}
-
-ResolvedExecutionRead {
-  catalogVersion
-  runtime
-  model
-  reasoningEffort: ReasoningEffort
-  variant                         # explicit null when no runtime-specific variant applies
-  nativeMapping: NativeExecutionMappingRead
-  source {
-    runtime: ExecutionFieldSource
-    model: ExecutionFieldSource
-    reasoningEffort: ExecutionFieldSource
-    variant: ExecutionFieldSource
-  }
-}
-
-SessionExecutionSummaryRead {
-  jobId
-  runtime
-  model
-  reasoningEffort: ReasoningEffort
-  variant                         # explicit null when no runtime-specific variant applies
 }
 
 AgentJobLaunchRead {
@@ -269,7 +173,6 @@ AgentJobLaunchRead {
   workspaceReason
   target: ResourceKey | null
   targetReason
-  execution: ResolvedExecutionRead
   revision
   observedAt
 }
@@ -279,321 +182,6 @@ LaunchWorkspaceRead {
   workspaceId
   path
 }
-
-WorkspaceMaterializationPlanRead {
-  disposition = existing | wouldCreate
-  workspace: LaunchWorkspaceRead | null
-  derivedName: string | null
-}
-
-AttachmentMaterializationPlanRead {
-  disposition = existing | wouldUpload
-  attachmentId: string | null
-  name
-  byteLength
-  contentFingerprint: string | null
-}
-
-AttachmentDescriptorRead {
-  name
-  byteLength
-  contentFingerprint               # descriptor fingerprint of the exact content bytes
-}
-
-LaunchMaterializationPlanRead {
-  workspace: WorkspaceMaterializationPlanRead
-  attachments: [AttachmentMaterializationPlanRead]
-}
-
-AgentLaunchPreviewRead {
-  execution: ResolvedExecutionRead
-  materializationPlan: LaunchMaterializationPlanRead
-  launchOperationId: null
-  jobId: null
-  sessionId: null
-  inputId: null
-  turnId: null
-}
-
-LaunchResolutionProblemRead {
-  code = workspace_not_resolvable
-       | attachment_not_found
-       | attachment_not_readable
-       | attachment_ambiguous
-       | attachment_limit_exceeded
-       | invalid_launch_input
-  message
-  action = correct_workspace
-         | correct_attachment
-         | reduce_attachment
-         | correct_launch_input
-}
-
-LaunchAdmissionRejectionRead {
-  code = invalid_execution_configuration
-       | unsupported_execution_configuration
-       | incompatible_execution_configuration
-       | execution_catalog_unavailable
-       | workspace_not_resolvable
-       | attachment_not_found
-       | attachment_not_readable
-       | attachment_ambiguous
-       | attachment_limit_exceeded
-       | attachment_content_changed
-       | invalid_launch_input
-  message
-  action = correct_execution_configuration
-         | select_supported_execution_configuration
-         | select_compatible_execution_configuration
-         | wait_for_catalog
-         | correct_workspace
-         | correct_attachment
-         | reduce_attachment
-         | resupply_attachment_with_new_key
-         | correct_launch_input
-}
-
-AdmissionScope {
-  callerId                         # canonical authenticated principal or trusted adapter identity
-  projectId
-  operationKind = agent-launch | session-followup | subagent-spawn | turn-stop
-  targetId                         # Agent, Session, or parent Session for the operation kind
-  idempotencyKey
-}
-
-OperationEffectLookup {
-  launchOperationId
-  effectKind = workspace | attachment | job
-  ordinal                          # 0 for Workspace and Job; attachment input order otherwise
-}
-
-LaunchMaterializationEffectRead {
-  lookup: OperationEffectLookup
-  phase = planned
-        | materializing
-        | materialized
-        | compensating
-        | compensated
-        | terminal-rejected
-        | uncertain
-  materializedId: string | null
-  attachmentDescriptor: AttachmentDescriptorRead | null
-  recoveryFence {
-    launchOperationId
-    launchRequestFingerprint
-    effectKind
-    ordinal
-  }
-}
-
-LaunchAdmissionClaim {
-  scope: AdmissionScope             # operationKind=agent-launch; targetId=agentId
-  callerIntentFingerprint
-  launchRequestFingerprint
-  launchOperationId
-  state = pending | committed | rejected | uncertain
-  execution: ResolvedExecutionRead | null
-  resolutionFence: ExecutionResolutionFenceRead | null
-  materialization: [LaunchMaterializationEffectRead]
-  jobId: string | null
-  sessionId: string | null
-  inputId: string | null
-  turnId: string | null
-  rejection: LaunchAdmissionRejectionRead | null
-  terminalDisposition = pre-materialization-tombstone
-                      | post-materialization-rejection
-                      | null
-  reconciliationAction: string | null
-}
-```
-
-`AgentExecutionConfigurationRead` is the `execution` member of every Agent
-read and list item. Its values are saved Agent defaults, not a pending launch or
-a Runtime Session selection. `runtime`, `model`, and `reasoningEffort` are null
-only while the Agent definition is incomplete. `variant=null` means only that
-the selected Model has no Variant dimension; it never represents a request to
-clear Variant. `catalogVersion` and `nativeMapping` are non-null exactly for a
-saved tuple and are null only while the configuration is incomplete. They retain
-the last accepted saved mapping even when current Readiness is unknown; Unknown
-prevents new dispatch but does not erase saved configuration facts. A ready
-configuration has no gaps. `needs-setup` has one or more of the first three gap
-codes below; `unknown` has exactly `execution_catalog_unavailable`.
-
-| Gap code | Stable message | Stable action |
-|---|---|---|
-| `missing_execution_configuration` | `Choose a Runtime and Model before starting this Agent.` | `configure_execution` |
-| `unsupported_execution_configuration` | `The selected execution configuration is not supported.` | `select_supported_execution` |
-| `incompatible_execution_configuration` | `The selected Model, Reasoning effort, and Variant cannot be used together.` | `select_compatible_execution` |
-| `execution_catalog_unavailable` | `Mohist cannot load the required execution catalog.` | `wait_for_catalog` |
-
-`RuntimeCapabilityCatalogRead` is the only versioned capability metadata
-shape. `defaultExecution` is one complete valid tuple and is used when Agent
-creation omits all four configuration fields. Each Runtime has exactly one
-entry with `isDefaultModel=true`, used when a retained or explicitly supplied
-Runtime needs its Model reset. Its reasoning-effort set is non-empty and its
-`defaultReasoningEffort` belongs to that set. For an entry with
-`hasVariantDimension=false`, `supportedVariants` is empty and
-`defaultVariant=null`; only then may the effective Variant be null. For an
-entry with `hasVariantDimension=true`, `supportedVariants` is non-empty and
-`defaultVariant` is a non-empty member of it. Server owns the accepted static
-catalog registry and its versioning. The catalog contains no provider
-credentials, health observation, or live model probe result.
-
-`ResolveExecutionConfiguration` is the one pure, static resolver for Agent
-create/edit, Agent launch, and Workflow Runtime Actions. It accepts a complete
-baseline, a closed partial selection, and the accepted catalog; it returns one
-complete `ResolvedExecutionRead` plus an `ExecutionResolutionFenceRead`. It
-does not allocate an identity, observe a provider, or perform an effect. Its
-baseline and source rules are fixed:
-
-| Caller | Baseline | Omitted partial field | Supplied field source |
-|---|---|---|---|
-| Agent create | catalog `defaultExecution` | catalog default | not a launch snapshot; the resolved tuple becomes the saved Agent tuple |
-| Agent edit | saved Agent tuple | retain saved value unless its one clear resets it | not a launch snapshot; the resolved tuple replaces the saved Agent tuple atomically |
-| Agent launch | saved Agent tuple | `agent-default` | `launch-override` only for Model or ReasoningEffort |
-| Workflow Runtime Action | default Model tuple for the Runtime selected by `uses` | `workflow-catalog-default` for Model, ReasoningEffort, and Variant | `workflow-action-override`; Runtime is `workflow-action-runtime` |
-
-For a Workflow Runtime Action, `uses` fixes Runtime before option resolution.
-The resolver chooses that Runtime's default Model when `model` is omitted; it
-then chooses the resulting Model's default ReasoningEffort and Variant unless
-those fields are supplied. Thus a supplied Model never inherits effort or
-Variant from a different Model. The selected entry supplies both
-`catalogVersion` and the final native mapping. The resolver rejects an unknown,
-empty, `null`, malformed, unsupported, or incompatible value with the stable
-execution error model; it never discards a partial field or probes a Runtime.
-
-Agent create and edit use this dependency order: Runtime, Model, then the
-independent ReasoningEffort and Variant choices for that Model. On create,
-every omitted field starts from `defaultExecution`; supplied values replace
-their field and the resulting complete tuple is statically validated and
-persisted. On edit, every omitted field retains its saved value. An explicit
-clear is represented only by that field's dedicated clear flag; exactly one
-execution clear flag may appear in an edit, it is mutually exclusive with a
-value for that field, and it resets that field and its dependent tuple to the
-current catalog default: clearing Runtime selects `defaultExecution`; clearing
-Model selects that Runtime's default Model, effort, and Variant; clearing
-ReasoningEffort selects that Model's default effort; clearing Variant selects
-that Model's `defaultVariant`. A supplied Runtime or Model does not silently
-replace retained dependent values: an incompatible resulting tuple is rejected.
-Empty strings, JSON `null`, unknown properties, and invalid enum values are not
-clear operations and are rejected. Every successful clear recomputes
-Readiness, `catalogVersion`, and `nativeMapping`; any failed recalculation
-rejects atomically and preserves the prior saved configuration.
-
-`ResolvedExecutionRead` is the immutable execution snapshot resolved before the
-durable admission claim and therefore before the Job's first durable write. It
-is present for every `AgentJobLaunchRead`. `catalogVersion` and `nativeMapping`
-are copied from one accepted static catalog entry into that claim and then the
-Job. Neither is recomputed from a later catalog, and neither contains provider
-credentials or availability observations. `source` is per field and never
-inferred from nullability. Agent launch uses `agent-default` and
-`launch-override`; Workflow Runtime Actions use `workflow-action-runtime`,
-`workflow-catalog-default`, and `workflow-action-override`. A
-`SessionExecutionSummaryRead` is a read-only association
-for an Agent-launched Session: all configuration fields are non-null except an
-inapplicable Variant, and `jobId` is non-null. It deliberately omits source,
-catalog version, and native mapping; it never owns, duplicates, or updates the
-Job snapshot. `AgentSessionRead.execution=null` for a Session without an
-associated AgentJob; clients must not synthesize a summary from current Agent,
-catalog, or Runtime state.
-
-`AgentLaunchPreviewRead` is a successful dry-run result. It has no durable or
-reserved identity: all five identity fields are present and `null`. An existing
-Workspace or attachment is read-only resolved and carries its real identity. A
-derivable missing Workspace has `disposition=wouldCreate`, `workspace=null`,
-and a non-empty `derivedName`; an existing Workspace has a non-null `workspace`
-and `derivedName=null`. A local attachment that would be uploaded has
-`disposition=wouldUpload`, `attachmentId=null`, a non-empty `name`, a positive
-`byteLength`, and a non-empty `contentFingerprint`; an existing attachment has
-a non-null `attachmentId` and `contentFingerprint=null` unless the existing
-resource owns a comparable fingerprint. The plan never contains the local path
-and does not mint placeholder IDs. Missing, unreadable, ambiguous, over-limit,
-or otherwise invalid Workspace or attachment input fails with
-`LaunchResolutionProblemRead`, rather than returning a partial plan.
-
-`AdmissionScope` is the canonical internal idempotency namespace. It always
-contains the authenticated or trusted `callerId`, Project, operation kind,
-operation target, and caller key. For a launch it is `(callerId, projectId,
-agent-launch, agentId, launchRequestId)`; a Follow-up substitutes
-`(session-followup, sessionId, requestId)`; a subagent spawn substitutes
-`(subagent-spawn, parentSessionId, idempotencyKey)`; a direct Turn stop
-substitutes `(turn-stop, turnId, idempotencyKey)`. A path or parent Session does
-not stand in for `callerId`. Public routes derive `callerId` from their
-credential and never expose it or accept it in a body.
-
-`LaunchAdmissionClaim` is Server-internal durable admission state, not a public
-or CLI resource. Its `callerIntentFingerprint` hashes the closed, normalized
-caller intent, including task, Workspace or attachment descriptors, and the
-explicit presence/value of permitted launch fields. Its
-`launchRequestFingerprint` hashes that caller-intent block together with the
-final `ResolvedExecutionRead`: Runtime, Model, ReasoningEffort, Variant,
-per-field source, `catalogVersion`, and complete native mapping. It also retains
-the `ExecutionResolutionFenceRead` that proves the Agent execution revision and
-catalog entry observed while resolving. A rejected claim with no resolvable
-tuple has a null execution/fence and fingerprints its normalized rejection
-outcome with the caller-intent block instead.
-
-Resolve is pure, but admission is linearized by one durable compare-and-claim
-fence. The Server may retry pure resolution when the Agent execution revision
-or selected catalog-entry fingerprint changes. It can create a new claim only
-when the same atomic operation both verifies that resolution fence and records
-the full fingerprint and outcome. The same operation first checks an existing
-`AdmissionScope`: a different caller-intent fingerprint returns
-`idempotency_key_reused` (409); a matching caller intent returns the original
-claim and does not re-resolve mutable defaults or a newer catalog. The stored
-full fingerprint is therefore immutable evidence of the first accepted
-semantics, rather than a value recalculated on replay.
-
-After authentication, authorization, parseable keyed envelope, and closed
-request validation, every pure launch or Follow-up rejection is recorded as a
-same-scope tombstone. Only authentication, authorization, malformed envelope,
-or missing/invalid key failures precede the admission namespace and write no
-claim. A matching retry returns the original tombstone even if capacity,
-Readiness, or catalog facts later recover; a new key represents a new request.
-
-`pending` has exactly one operation identity and a non-null resolved snapshot.
-`committed` has the accepted IDs and no rejection. `rejected` is either a
-`pre-materialization-tombstone`, with no started effect, or a
-`post-materialization-rejection`, whose durable effect rows preserve every
-identity and compensation result; it never becomes a new success on replay.
-`uncertain` retains the resolved snapshot and blocks a second materialization.
-`reconciliationAction` is non-null only for `uncertain`. Claim records are the
-sole owner of materialized Workspace, attachment, Job, Session, Input, Turn,
-and dispatch effects for their operation.
-
-Every Workspace, attachment, and Job has a `LaunchMaterializationEffectRead`
-row before its effect begins. The row's `lookup` is the durable identity lookup
-for that one effect and the `recoveryFence` binds it to one claim fingerprint;
-the Workspace and Job use ordinal `0`, while each attachment uses its input
-order. The owner transitions only its own row through `planned`,
-`materializing`, and `materialized`. A definite failure transitions started rows
-through `compensating`/`compensated` or `terminal-rejected` and then publishes a
-post-materialization rejection. An indeterminate result remains `uncertain`.
-Recovery first looks up the effect by that durable lookup and checks the same
-recovery fence; it may finish only that effect or compensate it, never allocate
-a new identity or rerun the whole plan. No cross-aggregate transaction is
-claimed.
-
-| Admission result | Durable effect facts | Same-key behavior |
-|---|---|---|
-| `rejected` with `pre-materialization-tombstone` | All effects remain `planned` or `terminal-rejected`; no effect began and no materialized identity exists. | Return the tombstone; never retry resolution or materialization. |
-| `rejected` with `post-materialization-rejection` | Every started Workspace, attachment, or Job records its lookup, phase, materialized identity when known, and compensation result. | Return the terminal rejection; recovery work may finish only recorded compensation, never admit a replacement. |
-| `uncertain` | At least one effect has an indeterminate result and retains its lookup and recovery fence. | Reread or wait for the claim owner, then reconcile the same effect identities; do not create a new claim or effect. |
-
-For a `wouldUpload` attachment, the effect row freezes its
-`AttachmentDescriptorRead`; its `contentFingerprint` is the descriptor
-fingerprint. After claim admission, the transferring adapter must bind the
-actual byte stream to the same byte length and descriptor fingerprint
-before it marks an attachment materialized. A changed or mismatched stream
-produces `attachment_content_changed`. If no effect has started, the claim
-becomes a pre-materialization tombstone; otherwise it reaches a durable
-post-materialization rejection after deterministic compensation where possible.
-Same-key replay returns that stored result even if the local file later changes
-back. A retry whose descriptor differs from the original caller intent receives
-`idempotency_key_reused` (409); a new key is required to submit new bytes. Local
-paths are neither part of the descriptor nor persisted in the claim.
-
-```text literal
 
 TurnResultRead {
   sessionId
@@ -842,29 +430,18 @@ DispatchRetryWork {
 }
 ```
 
-The durable request map is the `AdmissionScope`
-`(callerId, projectId, session-followup, sessionId, requestId)`. It stores the
-`callerIntentFingerprint`, a full `requestFingerprint`, nullable `inputId`,
-nullable `turnId`, `turnRelation`, acceptance state, `acceptanceReason`,
-`nextAction` and current revision. For a Follow-up that dispatches through an
-existing Job or attempt, the full fingerprint includes both caller intent and
-that immutable execution snapshot's tuple, catalog version, and native mapping.
-The Session accept transaction creates the map and the Input/Turn together. A
-duplicate key with matching caller intent returns the stored mapping or stored
-rejection tombstone without re-resolving execution; a duplicate key with a
-different caller intent is `rejected(idempotency_key_reused)` and creates
-nothing. A unique-key race rereads the winner.
-
-After authentication, authorization, a parseable keyed envelope, and closed
-request validation, every pure Follow-up admission rejection is definitive:
-before returning `rejected(queue_full)`,
-`rejected(execution_catalog_unavailable)`, or another pure rejection, the
-Session transaction inserts a durable map tombstone with the caller-intent
-fingerprint, `inputId=null`, `turnId=null`, the stable reason, and an actionable
-`nextAction`. The same request ID and caller intent therefore always returns the
-same rejection, including after response loss; a changed payload can never pass
-the same key. The caller must use a new request ID after capacity or catalog
-availability recovers. Different request IDs are different inputs and still
+The durable request map has a unique constraint on `(sessionId, requestId)` and stores the
+`requestFingerprint`, nullable `inputId`, nullable `turnId`, `turnRelation`, acceptance state,
+`acceptanceReason`, `nextAction` and current revision. The Session accept transaction creates the
+map and the Input/Turn together. A duplicate key with the same fingerprint returns the stored
+mapping or stored rejection tombstone; a duplicate key with a different fingerprint is
+`rejected(idempotency_key_reused)` and creates nothing. A unique-key race rereads the winner.
+When queue capacity is full, this design makes the rejection definitive: before returning
+`rejected(queue_full)`, the Session transaction inserts a durable map tombstone with the caller's
+fingerprint, `inputId=null`, `turnId=null`, `acceptanceReason=queue_full` and an actionable
+`nextAction`. The same request ID and fingerprint therefore always returns the same rejection,
+including after response loss; a changed payload can never pass the same key. The caller must use a
+new request ID after capacity is available. Different request IDs are different inputs and still
 pass the Session's canonical `admission=ready` and queue capacity checks.
 
 For `turnRelation=steer`, the same Session transaction also creates one canonical
@@ -1350,10 +927,9 @@ Turn outcome. A lost or unknown Runtime response keeps the operation and Turn `u
 actionable `nextAction` to query the same `operationId` or perform bounded same-operation retry;
 it never creates a new stop operation or claims success.
 
-The launch identities are separate. The caller provides `launchRequestId` inside
-`AdmissionScope(callerId, projectId, agent-launch, agentId, launchRequestId)`;
-Server creates `launchOperationId` exactly once and durably maps that complete
-scope to the operation. Neither identity is a Session operation ID.
+The launch identities are separate. The caller provides `launchRequestId`; Server creates
+`launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither
+identity is a Session operation ID.
 
 Every operation projection returns all fields above, plus the current Server `revision` and
 `observedAt` used to read it. Job, Session, Input and Turn projections may reference an operation

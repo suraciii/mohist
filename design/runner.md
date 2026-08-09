@@ -48,17 +48,8 @@ Runner
 RunnerInfo
   state: online|offline          established by register, maintained by poll freshness
   hostname, buildGitHash
-  capabilities, runtimeCatalogs # runtime -> supported catalogVersions and nativeMapping formats
+  capabilities, coderModels, coderModelVariants
 ```
-
-Runtime integrations publish their static capability catalog with the Runner
-release. `runtimeCatalogs` declares which catalog versions and native mapping
-formats this Runner can apply; it is not a live provider or model-discovery
-result. Server owns acceptance and validation of catalog entries. Dispatch is
-eligible only when an adapter can apply the Job's persisted catalog version and
-native mapping. Otherwise the Job remains waiting with
-`exact_execution_unavailable` until that exact configuration is available; the
-Runner never substitutes a newer catalog, model, effort, or variant.
 
 A Runner holds no work records. The two work types remain authoritative in
 their owners' stores: Workflow work in the run row model and AgentJob work in
