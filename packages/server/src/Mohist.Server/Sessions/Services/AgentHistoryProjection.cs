@@ -24,6 +24,22 @@ internal static class AgentHistoryProjector
         var transcriptBySequence = source.Transcript.Turns
             .GroupBy(turn => turn.Sequence)
             .ToDictionary(group => group.Key, group => group.OrderBy(turn => turn.Id).First());
+        var transcriptSequenceByTurnId = source.Transcript.Turns
+            .ToDictionary(turn => turn.Id, turn => turn.Sequence);
+        var modelBySequence = source.Transcript.Parts
+            .Where(part => part.Type == TranscriptPartTypes.Model
+                && transcriptSequenceByTurnId.ContainsKey(part.TurnId))
+            .OrderBy(part => transcriptSequenceByTurnId[part.TurnId])
+            .ThenBy(part => part.Sequence)
+            .ThenBy(part => part.Id)
+            .GroupBy(part => transcriptSequenceByTurnId[part.TurnId])
+            .ToDictionary(
+                group => group.Key,
+                group => group
+                    .Select(part => AgentSessionJsonHelper.GetStringProp(
+                        AgentSessionJsonHelper.ParsePayload(part.PayloadJson),
+                        "resolvedModel"))
+                    .LastOrDefault(model => !string.IsNullOrWhiteSpace(model)));
         var usage = AgentSessionJsonHelper.Usage(session);
         var contextRefs = AgentSessionContextRefs.TryBuild(source.Record);
         var context = contextRefs is null
@@ -44,6 +60,7 @@ internal static class AgentHistoryProjector
                 turn,
                 inputs,
                 transcriptBySequence.GetValueOrDefault(turn.Sequence),
+                modelBySequence.GetValueOrDefault(turn.Sequence),
                 source.ResolvedModel,
                 usage,
                 context,
@@ -57,6 +74,7 @@ internal static class AgentHistoryProjector
         AgentTurnRecord turn,
         IReadOnlyDictionary<string, AgentSessionInputRecord> inputs,
         AgentSessionTranscriptTurnRow? transcriptTurn,
+        string? turnModel,
         string? resolvedModel,
         AgentUsageSummary usage,
         AgentHistoryContextDto? context,
@@ -96,7 +114,7 @@ internal static class AgentHistoryProjector
             StartedAt: startedAt.ToString("o"),
             EndedAt: endedAt?.ToString("o"),
             DurationMs: durationMs,
-            Model: resolvedModel ?? session.Settings.Model,
+            Model: turnModel ?? resolvedModel ?? session.Settings.Model,
             Cost: new AgentHistoryCostDto(usage.CostAmount, usage.CostCurrency, "session"),
             Workspace: workspace,
             Target: record.Label(GenericAgentSessionMetadata.TargetId),
@@ -174,6 +192,7 @@ internal static class AgentHistoryBucketReducer
     {
         if (item.Status is "queued" or "executing") return "running";
         if (item.Status is "failed" or "cancelled") return "failed";
+        if (item.Status == "unknown") return "unknown";
         if (recentKeys.Contains((item.SessionId, item.TurnId))) return "recent";
         if (item.Status == "completed") return "ended";
         return "recent";

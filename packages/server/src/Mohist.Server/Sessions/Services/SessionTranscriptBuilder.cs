@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Mohist.Server.Infrastructure.Data.Sessions;
 using Mohist.Server.Sessions;
 using Mohist.Server.Sessions.Domain;
@@ -40,10 +41,12 @@ internal static class SessionTranscriptBuilder
                 Incomplete = status is "queued" or "executing",
                 Status = status,
                 Result = ToResult(canonicalTurn?.Result),
-                User = new AgentSessionTranscriptUserDto
+                    User = new AgentSessionTranscriptUserDto
                 {
                     Text = diagnostic
-                        ? (string.IsNullOrWhiteSpace(turn.PromptText) ? recoveryPrompt ?? string.Empty : turn.PromptText)
+                        ? (string.IsNullOrWhiteSpace(turn.PromptText)
+                            ? recoveryPrompt ?? string.Empty
+                            : StripInternalPromptSections(turn.PromptText))
                         : PublicPromptText(turn, canonicalTurn, session?.Status.Inputs, recoveryPrompt),
                     Kind = diagnostic
                         ? AgentSessionJsonHelper.NormalizePromptKind(turn.PromptKind)
@@ -175,9 +178,9 @@ internal static class SessionTranscriptBuilder
                                 Type = part.Type,
                                 CorrelationKey = part.CorrelationKey,
                                 CorrelationId = part.CorrelationId,
-                                Text = part.Text,
-                                Payload = payload.Clone(),
-                                PayloadJson = string.IsNullOrWhiteSpace(part.PayloadJson) ? "{}" : part.PayloadJson,
+                                Text = SanitizeDiagnosticText(part.Text),
+                                Payload = SanitizeDiagnosticPayload(payload),
+                                PayloadJson = SanitizeDiagnosticPayload(payload).GetRawText(),
                                 FirstSeenAt = part.FirstSeenAt.ToString("o"),
                                 LastSeenAt = part.LastSeenAt.ToString("o"),
                                 RawEventCount = part.RawEventCount,
@@ -522,11 +525,11 @@ internal static class SessionTranscriptBuilder
 
     private static string? GetToolRaw(JsonElement payload, string name)
     {
-        if (TryGetRaw(payload, name, out var raw)) return raw;
+        if (TryGetRaw(payload, name, out var raw)) return SanitizeToolRaw(raw);
         if (payload.ValueKind == JsonValueKind.Object
             && payload.TryGetProperty("toolCall", out var toolCall)
             && TryGetRaw(toolCall, name, out raw))
-            return raw;
+            return SanitizeToolRaw(raw);
         return null;
     }
 
@@ -538,4 +541,74 @@ internal static class SessionTranscriptBuilder
         raw = prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.GetRawText();
         return true;
     }
+
+    private static string SanitizeToolRaw(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return raw ?? string.Empty;
+        try
+        {
+            using var document = JsonDocument.Parse(raw);
+            return SanitizeDiagnosticPayload(document.RootElement).GetRawText();
+        }
+        catch (JsonException)
+        {
+            return SanitizeDiagnosticText(raw);
+        }
+    }
+
+    private static JsonElement SanitizeDiagnosticPayload(JsonElement payload)
+    {
+        var node = JsonNode.Parse(payload.GetRawText());
+        var sanitized = SanitizeDiagnosticNode(node);
+        using var document = JsonDocument.Parse(sanitized?.ToJsonString() ?? "null");
+        return document.RootElement.Clone();
+    }
+
+    private static JsonNode? SanitizeDiagnosticNode(JsonNode? node)
+    {
+        if (node is JsonObject jsonObject)
+        {
+            foreach (var property in jsonObject.ToList())
+            {
+                if (IsSensitiveDiagnosticKey(property.Key))
+                {
+                    jsonObject.Remove(property.Key);
+                    continue;
+                }
+
+                jsonObject[property.Key] = SanitizeDiagnosticNode(property.Value);
+            }
+
+            return jsonObject;
+        }
+
+        if (node is JsonArray jsonArray)
+        {
+            for (var index = 0; index < jsonArray.Count; index++)
+                jsonArray[index] = SanitizeDiagnosticNode(jsonArray[index]);
+            return jsonArray;
+        }
+
+        if (node is JsonValue jsonValue && jsonValue.TryGetValue<string>(out var text))
+            return JsonValue.Create(SanitizeDiagnosticText(text));
+
+        return node;
+    }
+
+    private static bool IsSensitiveDiagnosticKey(string key)
+    {
+        var compact = key.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
+        return compact.Contains("prompt", StringComparison.Ordinal)
+            || compact.Contains("memory", StringComparison.Ordinal)
+            || compact.Contains("workspace", StringComparison.Ordinal)
+            || compact.Contains("workdir", StringComparison.Ordinal)
+            || compact.Contains("rawinput", StringComparison.Ordinal)
+            || compact.Contains("rawoutput", StringComparison.Ordinal)
+            || compact is "path" or "filepath" or "oldpath" or "cwd" or "system";
+    }
+
+    private static string SanitizeDiagnosticText(string? text) =>
+        StripInternalPromptSections(text).Trim();
 }

@@ -106,13 +106,13 @@ describe('buildTimelineFacts', () => {
     )
   })
 
-  it('keeps live header/payload raw and deduplicates repeated source ids without collapsing updates', () => {
+  it('keeps live event identity while applying the public payload boundary', () => {
     const started: AgentTranscriptDetail = {
       type: 'tool_call.started',
       sourceId: 'event-start',
       sequence: 7,
       createdAt: at,
-      payload: { raw: true },
+      payload: { raw: true, workspacePath: '/private/worktree', memory: 'internal' },
       sessionId: 'session-1',
       runtimeSessionId: 'runtime-1',
       runtime: 'opencode',
@@ -121,7 +121,7 @@ describe('buildTimelineFacts', () => {
       ...started,
       sourceId: 'event-complete',
       sequence: 8,
-      payload: { raw: 'complete' },
+      payload: { raw: 'complete', path: '/private/file' },
     }
     const facts = buildTimelineFacts({
       liveDetails: [started, started, completed],
@@ -130,10 +130,31 @@ describe('buildTimelineFacts', () => {
     })
 
     expect(facts.filter(fact => fact.source === 'live')).toHaveLength(2)
-    expect(facts[0]?.raw).toBe(started)
-    expect(facts[1]?.raw).toBe(completed)
+    expect(facts[0]?.raw).not.toHaveProperty('payload')
+    expect(facts[1]?.raw).not.toHaveProperty('payload')
+    expect(JSON.stringify(facts)).not.toContain('/private')
     expect(facts[0]).toMatchObject({ sourceId: 'event-start', order: 7_000_001, kind: 'tool' })
     expect(facts[1]).toMatchObject({ sourceId: 'event-complete', order: 8_000_002, kind: 'tool' })
+  })
+
+  it('does not duplicate a canonical input when its live event has arrived', () => {
+    const liveInput = {
+      type: 'session.input',
+      sourceId: 'live-input',
+      inputId: 'input-1',
+      sessionId: 'session-1',
+      runtimeSessionId: 'runtime-1',
+      text: 'prompt-turn-1',
+    } as AgentTranscriptDetail
+    const facts = buildTimelineFacts({
+      turns: [turn('turn-1')],
+      inputs: [{ id: 'input-1', sequence: 1, source: 'web', acceptance: 'accepted' }],
+      agentTurns: [{ id: 'turn-1', sequence: 1, inputIds: ['input-1'], status: 'executing' }],
+      liveDetails: [liveInput],
+    })
+
+    expect(facts.filter((fact) => fact.kind === 'input')).toHaveLength(1)
+    expect(facts.find((fact) => fact.source === 'live')).toBeUndefined()
   })
 
   it('keeps an input independent with unknown acceptance when no association is proven', () => {

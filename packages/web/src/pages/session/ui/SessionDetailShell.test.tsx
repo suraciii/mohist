@@ -113,6 +113,8 @@ function makeComponents(): Partial<SessionDetailShellComponents> {
       return (
         <div data-testid="timeline-fixture" data-view={props.viewMode}>
           {values.map((value: string) => <div key={value} data-timeline-source-id={value}>{value}</div>)}
+          <div data-timeline-source-id="input:input-1">input:input-1</div>
+          <div data-timeline-source-id="turn:turn-1:result">turn:turn-1:result</div>
         </div>
       )
     }) as SessionDetailShellComponents['SessionTranscriptLayout'],
@@ -153,6 +155,20 @@ describe('SessionDetailShell timeline integration', () => {
     expect(scrollSpy.mock.instances[0]).toHaveAttribute('data-timeline-source-id', sourceId)
 
     rectSpy.mockRestore()
+    scrollSpy.mockRestore()
+  })
+
+  it('scrolls to the canonical turn selected by history navigation context', () => {
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => {})
+    render(
+      <MemoryRouter>
+        <SessionDetailShell data={{ ...makeData(), focusedTurnId: 'turn-1', focusedInputId: 'input-1' }} components={makeComponents()} />
+      </MemoryRouter>,
+    )
+
+    expect(scrollSpy).toHaveBeenCalled()
+    expect(screen.getByTestId('timeline-fixture').querySelector('[data-timeline-source-id="input:input-1"]'))
+      .toHaveAttribute('data-timeline-focused', 'true')
     scrollSpy.mockRestore()
   })
 })

@@ -102,18 +102,20 @@ public sealed class AgentHistoryProjectionTests
             Item("s-3", "t-3", "failed", "2026-08-09T11:00:00.0000000Z"),
             Item("s-4", "t-4", "executing", "2026-08-09T12:00:00.0000000Z"),
             Item("s-5", "t-5", "completed", "2026-08-09T08:00:00.0000000Z"),
+            Item("s-6", "t-6", "unknown", "2026-08-09T07:00:00.0000000Z"),
         };
 
         var result = AgentHistoryBucketReducer.Reduce(rows, recentLimit: 2);
 
-        Assert.Equal(5, result.Count);
-        Assert.Equal(5, result.Select(item => (item.SessionId, item.TurnId)).Distinct().Count());
+        Assert.Equal(6, result.Count);
+        Assert.Equal(6, result.Select(item => (item.SessionId, item.TurnId)).Distinct().Count());
         Assert.Equal("done", result.Single(item => item.TurnId == "t-1").Result!.Message);
         Assert.Equal("running", result.Single(item => item.TurnId == "t-4").Bucket);
         Assert.Equal("failed", result.Single(item => item.TurnId == "t-3").Bucket);
         Assert.Equal("recent", result.Single(item => item.TurnId == "t-1").Bucket);
         Assert.Equal("recent", result.Single(item => item.TurnId == "t-2").Bucket);
         Assert.Equal("ended", result.Single(item => item.TurnId == "t-5").Bucket);
+        Assert.Equal("unknown", result.Single(item => item.TurnId == "t-6").Bucket);
         Assert.Empty(result.Where(item => item.Bucket == "ended")
             .Intersect(result.Where(item => item.Bucket == "recent")));
     }

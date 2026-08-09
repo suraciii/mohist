@@ -75,7 +75,7 @@ export interface AgentHistoryItemDto {
   cost: AgentHistoryCostDto
   workspace: string | null
   target: string | null
-  bucket: 'running' | 'failed' | 'ended' | 'recent'
+  bucket: 'running' | 'failed' | 'ended' | 'recent' | 'unknown'
 }
 
 export interface GenericAgentSessionSummaryDto {

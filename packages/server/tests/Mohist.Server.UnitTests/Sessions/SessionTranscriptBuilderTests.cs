@@ -20,7 +20,7 @@ public sealed class SessionTranscriptBuilderTests
         runtime: "opencode");
 
     [Fact]
-    public void Build_DefaultUsesCanonicalInputAndHidesRuntimePayloads_RawIsExplicit()
+    public void Build_UsesCanonicalInputAndAppliesTheSameSensitiveBoundaryToRaw()
     {
         var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
         var session = CreateSession(at);
@@ -72,9 +72,9 @@ public sealed class SessionTranscriptBuilderTests
         var diagnostic = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], [part]), session, "raw");
         var diagnosticTurn = Assert.Single(diagnostic.Turns);
         var diagnosticTool = Assert.Single(diagnosticTurn.Assistant).Tool!;
-        Assert.Contains("mohist-workspace-anchor", diagnosticTurn.User.Text, StringComparison.Ordinal);
-        Assert.Contains("/workspace/secret.txt", diagnosticTool.RawInput, StringComparison.Ordinal);
-        Assert.Contains("/workspace/secret.txt", diagnosticTool.Input, StringComparison.Ordinal);
+        Assert.DoesNotContain("mohist-workspace-anchor", diagnosticTurn.User.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("/workspace/secret.txt", diagnosticTool.RawInput, StringComparison.Ordinal);
+        Assert.DoesNotContain("/workspace/secret.txt", diagnosticTool.Input, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public sealed class SessionTranscriptBuilderTests
             CorrelationKey = "future-1",
             CorrelationId = "future-1",
             Text = "future payload",
-            PayloadJson = "{\"state\":\"preserved\"}",
+            PayloadJson = "{\"state\":\"preserved\",\"workspacePath\":\"/private/worktree\",\"memory\":\"internal\"}",
             FirstSeenAt = at,
             LastSeenAt = at,
             RawEventCount = 2,
@@ -125,7 +125,10 @@ public sealed class SessionTranscriptBuilderTests
         Assert.Equal("future.runtime.event", diagnosticPart.Raw.Type);
         Assert.Equal("future-1", diagnosticPart.Raw.CorrelationKey);
         Assert.Equal("preserved", diagnosticPart.Raw.Payload.GetProperty("state").GetString());
-        Assert.Equal(part.PayloadJson, diagnosticPart.Raw.PayloadJson);
+        Assert.False(diagnosticPart.Raw.Payload.TryGetProperty("workspacePath", out _));
+        Assert.False(diagnosticPart.Raw.Payload.TryGetProperty("memory", out _));
+        Assert.DoesNotContain("/private/worktree", diagnosticPart.Raw.PayloadJson, StringComparison.Ordinal);
+        Assert.Equal("{\"state\":\"preserved\"}", diagnosticPart.Raw.PayloadJson);
         Assert.Equal(2, diagnosticPart.Raw.RawEventCount);
     }
 

@@ -436,4 +436,22 @@ describe('useUnifiedSessionDataSource — history navigation context', () => {
     expect(result.current.focusedTurnId).toBe('turn-7')
     expect(result.current.contextJobId).toBe('job-7')
   })
+
+  it('keeps the selected transcript view in the Session URL alongside history context', () => {
+    server.use(
+      http.get('*/api/projects/:projectId/agent-jobs/:jobId/launch-observation', () =>
+        HttpResponse.json({ success: true, data: { turnStatus: 'completed' } })),
+    )
+
+    const { result } = renderWithSummary(
+      {},
+      '/sessions/session-1?inputId=input-7&turnId=turn-7&jobId=job-7&view=raw',
+    )
+
+    expect(result.current.transcriptView).toBe('raw')
+    act(() => {
+      result.current.setTranscriptView?.('public')
+    })
+    expect(result.current.transcriptView).toBe('public')
+  })
 })

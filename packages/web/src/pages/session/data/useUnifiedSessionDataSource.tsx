@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useProject, useProjectPath } from '../../../entities/project'
@@ -91,12 +91,28 @@ export function useUnifiedSessionDataSource(
   const { projectId } = useProject()
   const toProjectPath = useProjectPath()
   const queryClient = useQueryClient()
-  const [searchParams] = useSearchParams()
-  const [transcriptView, setTranscriptView] = useState<'public' | 'raw'>('public')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [transcriptView, setTranscriptViewState] = useState<'public' | 'raw'>(() =>
+    searchParams.get('view') === 'raw' ? 'raw' : 'public',
+  )
   const sessionId = rawSessionId ? decodeURIComponent(rawSessionId) : ''
   const jobId = searchParams.get('jobId')
   const focusedInputId = searchParams.get('inputId')
   const focusedTurnId = searchParams.get('turnId')
+
+  useEffect(() => {
+    setTranscriptViewState(searchParams.get('view') === 'raw' ? 'raw' : 'public')
+  }, [searchParams])
+
+  const setTranscriptView = useCallback((view: 'public' | 'raw') => {
+    setTranscriptViewState(view)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      if (view === 'raw') next.set('view', 'raw')
+      else next.delete('view')
+      return next
+    }, { replace: true })
+  }, [setSearchParams])
 
   useDocumentTitle('Session — Mohist')
 

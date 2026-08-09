@@ -98,6 +98,47 @@ function formatTime(iso: string | null | undefined): string {
   return d.toLocaleDateString()
 }
 
+function formatDuration(durationMs: number | null): string {
+  if (durationMs == null || durationMs < 0) return 'duration unknown'
+  const seconds = Math.round(durationMs / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) {
+    const remainder = seconds % 60
+    return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`
+  }
+  const hours = Math.floor(minutes / 60)
+  const remainder = minutes % 60
+  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`
+}
+
+function resultSummary(session: AgentHistoryItemDto): string {
+  const result = session.result
+  return result?.message?.trim()
+    || result?.output?.trim()
+    || result?.failureReason?.trim()
+    || session.outcome
+}
+
+function costSummary(session: AgentHistoryItemDto): string {
+  const { amount, currency, scope } = session.cost
+  if (amount == null) return 'cost unknown'
+  const value = `${amount} ${currency ?? ''}`.trim()
+  return scope === 'session' ? `session ${value}` : value
+}
+
+function contextSummary(session: AgentHistoryItemDto): string | null {
+  const context = session.context
+  if (!context) return null
+  const refs = [
+    context.issueNumber ? `#${context.issueNumber}` : null,
+    context.epicNumber ? `Epic #${context.epicNumber}` : null,
+    context.repository,
+    context.workspaceName,
+  ].filter((value): value is string => Boolean(value))
+  return refs.length > 0 ? refs.join(' · ') : null
+}
+
 function statusIcon(status: string) {
   switch (status.toLowerCase()) {
     case 'queued':
@@ -302,16 +343,32 @@ function SessionSection({
           key={`${s.sessionId}:${s.turnId}`}
           href={toProjectPath(sessionHistoryPath(s))}
           data-testid={`session-row-${s.sessionId}-${s.turnId}`}
-          className="flex items-center gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
+          className="flex items-start gap-3 px-3 py-2 rounded-md hover:bg-muted/50 transition-colors text-sm"
         >
-          {statusIcon(s.status)}
-          <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
-            {s.task}
+          <span className="mt-0.5 shrink-0" title={s.status}>{statusIcon(s.status)}</span>
+          <span className="min-w-0 flex-1 space-y-1">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="text-xs text-foreground font-medium truncate min-w-0 flex-1">
+                {s.task}
+              </span>
+              <span className="text-xs text-muted-foreground shrink-0" data-testid={`session-model-${s.sessionId}-${s.turnId}`}>
+                {s.model ?? 'unknown'}
+              </span>
+            </span>
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-muted-foreground/70">
+              <span className="truncate" title={resultSummary(s)} data-testid={`session-result-${s.sessionId}-${s.turnId}`}>
+                {resultSummary(s)}
+              </span>
+              <span data-testid={`session-duration-${s.sessionId}-${s.turnId}`}>{formatDuration(s.durationMs)}</span>
+              <span data-testid={`session-cost-${s.sessionId}-${s.turnId}`}>{costSummary(s)}</span>
+              {contextSummary(s) && (
+                <span className="truncate" title={contextSummary(s) ?? undefined} data-testid={`session-context-${s.sessionId}-${s.turnId}`}>
+                  {contextSummary(s)}
+                </span>
+              )}
+            </span>
           </span>
-          <span className="text-xs text-muted-foreground shrink-0">
-            {s.model ?? 'unknown'}
-          </span>
-          <span className="text-[10px] text-muted-foreground/60 shrink-0">
+          <span className="text-[10px] text-muted-foreground/60 shrink-0" title={s.endedAt ?? s.startedAt}>
             {formatTime(s.endedAt ?? s.startedAt)}
           </span>
         </a>
@@ -366,6 +423,7 @@ export function AgentDetailPage({
   const failedSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'failed'), [allSessions])
   const endedSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'ended'), [allSessions])
   const recentSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'recent'), [allSessions])
+  const unknownSessions = useMemo(() => allSessions.filter((s) => s.bucket === 'unknown'), [allSessions])
 
   function handleArchive() {
     if (!agent) return
@@ -518,6 +576,9 @@ export function AgentDetailPage({
                   )}
                   {recentSessions.length > 0 && (
                     <SessionSection title="Recent" sessions={recentSessions} toProjectPath={toProjectPath} />
+                  )}
+                  {unknownSessions.length > 0 && (
+                    <SessionSection title="Unknown" sessions={unknownSessions} toProjectPath={toProjectPath} />
                   )}
                 </div>
               )}
