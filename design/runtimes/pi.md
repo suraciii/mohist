@@ -1,43 +1,46 @@
 # Pi Runtime
 
-## Decision
+## Design Drivers and Decision
 
-`mohist/pi` is a Runtime-specific Action implemented **in process** with the
-`@earendil-works/pi-coding-agent` SDK. See
-[`agent-execution.md`](../agent-execution.md) for the Agent / Session ownership
-model and its invariants, including Inline Agents, work ownership, and the rule
-that a shared Runtime creates no dependency. `PiRuntime` and
-`OpenCodeRuntime` are parallel deep modules: they share no interface and wrap
-neither one around the other.
+Pi exposes coding-agent capabilities as an in-process SDK with file-backed
+Sessions. Mohist needs direct completion and typed control without letting Pi's
+service assembly, trust model, credentials, or event vocabulary escape into
+Workflow, AgentJob, or AgentSession. The shared ownership contract remains
+authoritative in [`agent-execution.md`](../agent-execution.md).
 
-Integration choices:
+Four pressures shape this adapter:
 
-- **No ACP.** Pi has no native ACP support. Every existing ACP path is a
-  community adapter, either bridging to `pi --mode rpc` or embedding the SDK.
-  Adding one would put another third-party moving part above the SDK and would
-  conflict with the existing decision to remove `mohist/acp-agent` without an
-  ACP fallback.
-- **No `--mode rpc`.** The RPC `prompt` response confirms only acceptance;
-  completion must be inferred from the event stream. One RPC process holds only
-  one active Session, so concurrent Sessions require child-process management,
-  and the interface is not type-safe. SDK `session.prompt()` awaits execution
-  completion directly, matching the `OpenCodeRuntime` rule that the prompt
-  response is the sole completion decision. If process isolation later becomes
-  a hard requirement, for example to prevent a Pi crash from terminating the
-  Runner, RPC can be reconsidered. That change would stay inside `PiRuntime`
-  and would not affect the Workflow Action or Session product contract.
-- **No generic `AgentRuntime` interface.** The stable boundaries are the
-  Workflow Action contract, AgentJob execution contract, and Session commands.
-  `PiRuntime` deliberately owns a separate set of boundary types with
-  `runtime: "pi"`. Their shape parallels `runtime/opencode/types.ts`; that is
-  intentional duplication, not a missing abstraction.
+- **Completion must be direct.** The result of the awaited Prompt, not an event
+  inferred from an acceptance-only protocol, decides when execution ends.
+- **Isolation has a real cost.** In-process execution avoids a child process per
+  Session and preserves typed SDK access, but a Runner crash terminates every
+  active Pi Prompt. Persisted Session files survive; uncertain work is not replayed.
+- **Binding identity follows restoration.** Pi restores by absolute Session-file
+  path, not by its diagnostic Session UUID. The binding must use the identity that
+  can actually reopen provider state.
+- **Repository trust must be explicit.** Pi can load executable project resources
+  and runs tools with Runner permissions, so unattended execution must disable
+  project-level Pi configuration and keep credentials inside the SDK boundary.
 
-The responsibility difference from OpenCode is that Pi is an npm dependency of
-the Runner, shipped and version-locked with it. The operator need not install a
-Pi CLI. Provider credentials follow Pi's own environment-variable and auth
-storage mechanisms; Mohist does not manage API keys. The SDK authentication
-manager is the only reader of credential values. Mohist request/result types,
-events, registration, and smoke artifacts contain no credential fields.
+### Options and rationale
+
+ACP is rejected because Pi has no native ACP surface; adding a community bridge
+would introduce a second moving protocol without improving completion authority.
+RPC mode would isolate crashes, but its Prompt response confirms only acceptance,
+completion must be inferred from events, and concurrent Sessions require managed
+child processes. A generic `AgentRuntime` interface would then force Pi and
+OpenCode into one artificial lifecycle.
+
+Mohist therefore implements `mohist/pi` directly with the in-process SDK inside an
+independent `PiRuntime` deep module. If crash isolation becomes a hard product
+requirement, RPC may replace the private transport only after it preserves the
+same completion and effect contracts; no Workflow Action or Session contract may
+change.
+
+Unlike OpenCode, Pi ships as a version-locked Runner dependency and needs no
+operator-installed CLI or external Server readiness loop. That simpler topology
+is balanced by stronger Runner-process failure coupling and Session-file recovery
+rules.
 
 ## Action Input and Output Contract
 
@@ -73,67 +76,32 @@ a `runtime` key, used by the Mohist Agent path, or legacy keys to remain
 bindable to this Action. `options` does not carry `runtime`; the Workflow path
 selects its backend through `uses`.
 
-## SDK Surface
+## Capability Boundary
 
-The dependency is `@earendil-works/pi-coding-agent`; its npm scope migrated from
-`@mariozechner/*` to `@earendil-works/*`. It requires Node >= 22.19. The SDK is
-purely in process: LLM requests and built-in tool execution occur inside the
-Runner process, with no separate Server process.
+```text
+Workflow Action ----+
+AgentJob executor ---+--> PiRuntime --> in-process SDK --> provider and tools
+Session commands ----+                    |
+                                         +--> physical Session files
+```
 
-| Capability | SDK operation |
-|---|---|
-| create a physical Session | `SessionManager.create(cwd, sessionDir?)`, then `createAgentSession({ sessionManager, modelRuntime, settingsManager, resourceLoader, ... })` |
-| restore a physical Session | `SessionManager.open(sessionFile)`, then create `AgentSession` with the same explicit services |
-| execute and await a Workflow / AgentJob Prompt | `await session.prompt(text, { expandPromptTemplates: false })` |
-| inject a closeout warning during execution | `session.steer(text)` |
-| submit a user Follow-up during execution | `session.steer(text)` |
-| submit a user Follow-up while the Session is idle | `session.prompt(text)` without awaiting completion |
-| interrupt execution | `await session.abort()`; confirm stop through `session.isStreaming`, not the abort return value |
-| compact context | `session.compact()` |
-| apply execution model and reasoning level | `session.setModel()`, `session.setThinkingLevel()` |
-| read Session state and messages | `session.sessionId`, `session.sessionFile`, `session.messages`, `session.isStreaming` |
-| receive real-time events | `session.subscribe(listener)` |
-| read the model catalog | create `ModelRuntime` with `ModelRuntime.create({ ... })`, then `await modelRuntime.getAvailable()` |
+`PiRuntime` owns SDK service assembly, readiness, the model catalog, physical
+Session creation and restoration, in-memory Session caching, Prompt completion,
+Follow-up, interruption, native compaction, event projection, provider-error
+classification, project trust, credential redaction, and compatibility
+diagnostics. Callers use Mohist request/result types with `runtime: "pi"`; SDK
+objects and provider payloads never cross the boundary.
 
-Before implementation, lock the SDK package version and smoke-test every SDK
-claim in this table against a real Pi installation, including event payload
-shapes. If the surface has drifted, revise this table before implementing. The
-real 0.80.10 verification is stored at
-`openspec/changes/issue-450/sdk-smoke-verification.json`, following the artifact
-practice demonstrated by
-[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).
+The module receives fully assembled execution input and a resolved Session binding.
+It receives no Mohist Agent identity and never loads an Agent definition. Workflow
+expectation evaluation, artifacts, work results, and Session ownership remain with
+their existing authorities.
 
-## Deep Module Boundary
-
-`PiRuntime` is a deep module inside the Runner. It owns:
-
-- SDK service assembly (`ModelRuntime`, `SettingsManager`, and
-  `DefaultResourceLoader`) and the model catalog;
-- readiness and compatibility diagnostics;
-- physical Session creation, restoration by binding, instance caching, and
-  interruption;
-- Prompt execution, Follow-up, Compact, and Reset;
-- event subscription and normalized projection;
-- Pi errors and version-compatibility diagnostics.
-
-Its boundary follows the same rule as `OpenCodeRuntime`: the `mohist/pi`
-Action, AgentJob execution adapter, and Session command handler depend only on
-Mohist request/result types in `runtime/pi/types.ts`, whose `runtime` literal is
-`"pi"`. They expose no SDK types. The Runtime receives fully assembled execution
-input and a Session binding. It receives no Mohist Agent ID or name and does not
-load a Mohist Agent definition. Model-string parsing, `Model` object creation,
-call ordering, instance caching, and Pi error interpretation remain inside the
-module.
-
-This is not a method-by-method SDK wrapper. Callers request Mohist capabilities
-such as execute Prompt, Follow-up, Compact, and Reset. The module decides which
-SDK operations implement each capability.
-
-Execution input is submitted as plain text. `PiRuntime` does not load Prompt
-templates or expand slash commands; a Workflow Prompt beginning with `/` must
-reach the model unchanged. In 0.80.10, `prompt()` expands file-based Prompt
-templates by default, so every Workflow call must explicitly pass
-`{ expandPromptTemplates: false }`.
+Pi can expand file-based Prompt templates, but Mohist has already rendered the
+Workflow Prompt under its own authority. The Runtime therefore submits plain text
+with provider template expansion disabled. A leading `/` reaches the model
+unchanged. This prevents repository-local Pi templates from silently changing the
+meaning of a validated Workflow input.
 
 ## Process Topology and Readiness
 
@@ -184,9 +152,9 @@ rejecting a changed working directory before Prompt submission with an
 actionable error. This section defines only Pi-specific behavior.
 
 The physical binding `runtimeSessionId` persists the **absolute path to the Pi
-Session file**, `session.sessionFile`. A path must exist for a Session created by
-`SessionManager.create()`; absence of the file path is
-`incompatible-runtime`. The SDK restoration entry point
+Session file**, `session.sessionFile`. Session creation must return that absolute
+path identity; an absent or relative value is `incompatible-runtime`. The SDK
+restoration entry point
 `SessionManager.open()` is keyed by file path and has no open-by-UUID surface.
 The Session UUID, `session.sessionId`, is diagnostic only.
 
@@ -199,8 +167,9 @@ binding is missing. On a cache miss, the bound Runner uses
 Only an explicitly absent binding path yields a `definitely-missing` fact and
 permits automatic replacement before a new independent input is submitted. If
 the file exists but cannot be opened, its JSONL is corrupt, permission fails, or
-the SDK error cannot be classified, fail the work instead of hiding data or
-compatibility failure with an empty Session.
+the SDK error cannot be classified, existence is unknown rather than missing.
+Fail the work instead of hiding data or compatibility failure with an empty
+Session.
 
 Pi does not write its Session file until the first assistant message appears.
 A Runner crash during the first Prompt can therefore leave a binding whose file
@@ -214,51 +183,51 @@ redelivery duplicate-execution limitation.
 A Runtime change or Reset creates a new physical Session and atomically replaces
 the current binding without migrating context. Compact and changes to model or
 variant keep the same Session file. Model and thinking level are execution
-parameters: when reusing a Session, call `setModel()` and
-`setThinkingLevel()` on the existing physical Session before the Prompt. They
-do not trigger binding replacement.
+parameters applied to the existing physical Session before the Prompt; they do
+not trigger binding replacement.
 
 Worktree-cleanup Follow-up behaves exactly as in `OpenCodeRuntime`: the executor
 invokes the original task's resolved Action again, using the same Runtime and
 physical Session, without replacing the binding.
 
-## Prompt Execution
+## Execution and Completion Authority
 
-A Prompt requested by a Workflow Action adapter or AgentJob executor runs in
-this order:
+Pi follows the same identity-before-effect rule as OpenCode, but restoration uses
+the bound Session-file path:
 
-1. Parse the optional model string.
-2. With no binding, create a physical Session. With a binding, restore it from
-   cache or `SessionManager.open()`, then apply shared missing-recovery rules to
-   choose either the original path or a newly rebound path.
-3. Wait until the Session confirms that the current binding is persisted.
-4. Record and persist this input using the confirmed Runtime Session ID.
-5. Apply this execution's model and thinking level to the Session.
-6. Call and await `session.prompt(text)`.
-7. Project received events into AgentSession.
-8. Read final text from the last assistant message in `session.messages`.
-9. Return a normalized completion fact.
+```text
+restore or create physical Session
+               |
+               v
+persist complete binding and Input identity
+               |
+               v
+apply model and thinking level
+               |
+               v
+submit Prompt
+```
 
-Resolution of `session.prompt()` means the entire Agent run, including tool
-loops and automatic retries, has ended. It is the sole completion decision;
-`agent_end` projects state but is not authoritative. `PiRuntime` does not
-evaluate Workflow expectations or decide AgentJob success. The caller must
-declare execution duration. For issue #450, the Workflow task executor supplies
-a fixed 60 minutes through Runner-private Action context, invisible to and not
-overridable by `mohist/pi` Action input. After open/bind, input reporting, and
-model/thinking application, the Action passes the duration to `executePrompt`.
-Immediately before `session.prompt()`, the Runtime reads the injected clock and
-creates an absolute deadline. Queueing, binding, and input reporting consume no
-Prompt budget. A cleanup Prompt is a separate execution with a fresh 60-minute
-duration. The AgentJob executor's deadline belongs to its own Issue.
+No Prompt is submitted through an unpersisted or stale binding. Preparation and
+Input reporting occur before the execution deadline starts, because they establish
+the identity needed to interpret any later provider effect.
 
-There is no transport timeout for this in-process call. The executor AbortSignal
-and declared deadline are the single execution-deadline authority. At deadline,
-the Runtime fixes the result as `deadline-exceeded` and then calls
-`session.abort()` to close out. A late resolution of `prompt()` cannot reverse
-that result. No failure automatically replays a Prompt with uncertain
-submission state. Redelivery can duplicate execution inside the crash window;
-this is the same accepted limitation as OpenCode.
+Resolution of the awaited Prompt means the agent run, including tool loops and
+provider retries, has ended. It is the sole completion decision. Events such as
+`agent_end` project observations but cannot decide the result; final assistant
+text is reconciled from the Session messages. Workflow expectation evaluation and
+AgentJob success remain with their respective work owners.
+
+Workflow execution supplies a fixed 60-minute duration through Runner-private
+context; it is not an Action input. AgentJob execution supplies its own deadline.
+Immediately before Prompt submission, the Runtime creates the absolute deadline
+from an injected clock. There is no separate transport timeout for the in-process
+call. At the deadline, the result is fixed as `deadline-exceeded` before
+interruption begins, and a late Prompt resolution cannot reverse it.
+
+A failure with uncertain submission state is never replayed automatically. Runner
+redelivery can duplicate execution inside the accepted crash window; that explicit
+limitation is safer than reconstructing a fictitious provider replay identity.
 
 ## Prompt Deadline and Two-Phase Closeout
 
@@ -285,32 +254,21 @@ and the event sequence.
 ## Events and State Reconciliation
 
 The shared activity and transcript contract is authoritative in
-[`agent-execution.md`](../agent-execution.md#activity-and-transcript). This
-section defines only how Pi signals become those canonical facts.
+[`agent-execution.md`](../agent-execution.md#activity-and-transcript). Pi events
+are observations used for low-latency projection, not a completion protocol.
 
-`PiRuntime` maintains one `session.subscribe()` subscription for each active
-`AgentSession` instance. Known events normalize into stable Mohist transcript,
-tool, usage, model, status, and compaction facts:
+Each cached physical Session has one in-process subscription. Message and tool
+lifecycle signals become idempotent transcript and tool facts; assistant usage
+becomes input, output, cache-read, cache-write, thought, and cost facts; compaction
+and provider-retry signals become their corresponding canonical facts. Pi message
+IDs and tool-call IDs provide projection identity. Unknown events enter diagnostics
+only.
 
-- `message_start`, `message_update` (`text_delta`, `thinking_delta`,
-  `toolcall_start` / `delta` / `end`), and `message_end` become transcript and
-  tool facts;
-- `tool_execution_start` / `update` / `end` become tool-execution facts
-  correlated by `toolCallId`;
-- assistant-message `usage`, including input, output, cacheRead, cacheWrite,
-  thought, and cost, becomes usage facts;
-- `compaction_start` and `compaction_end` become compaction facts;
-- `auto_retry_start` and `auto_retry_end` become provider-retry facts as
-  described below.
-
-Projection is idempotent by Pi message ID and `toolCallId`. Unknown events enter
-diagnostics only and do not change Workflow or Session state.
-
-The event channel is an in-process callback, so it has no OpenCode-style
-transport reconnection or snapshot reconciliation. Final execution state comes
-from the resolved `prompt()` value and `session.messages`. Terminating the
-Runner process terminates the event channel and current execution together; a
-restart does not reconstruct a fiction that execution is still active.
+Because the channel is an in-process callback, it has no OpenCode-style reconnect
+or remote snapshot cursor. Final state is reconciled from the completed Prompt and
+Session messages. Runner termination ends both the callback and current execution;
+restart must not project the old Prompt as still active or infer a result that Pi
+never confirmed.
 
 ## Provider Error Failure Policy
 
@@ -332,207 +290,96 @@ error aborts and fails the current execution. Pi provides these signals:
 - Errors Pi itself classifies as unrecoverable, such as auth, invalid request,
   or context overflow, end automatic retry and resolve `prompt()` normally with
   `stopReason: "error"`. The Runtime reads the last assistant message's error
-  information and normalizes it to `execution-failed`.
+  information and normalizes it to `turn-failed`.
 
 When either unrecoverable rule matches, call `session.abort()`, confirm stop as
 above, and return a failure fact containing the original provider message. Keep
 the AgentSession and physical Session binding unchanged and do not suggest
 Reset.
 
-## Session Commands
+## Session Command Semantics
 
-The generic Session-command rules, including the distinction between
-`notStarted` and `unavailable`, expected-current-binding checks, and stable
-AgentSession IDs, match the Session Commands contract in
-[`opencode.md`](opencode.md). Pi maps them to these channels.
+The generic external-effect rules match
+[`opencode.md`](opencode.md#session-command-semantics): a command rejected before
+Runtime acquisition is `notStarted`; once a provider call may have started, an
+unconfirmed result is `unavailable`, retains the original operation identity, and
+is never replayed automatically. Every command routes by the persisted complete
+binding, not by an in-memory Session object.
 
-### Follow-up
+| Command | Pi-specific contract |
+|---|---|
+| Follow-up | Active execution receives a native steer at an iteration boundary. Idle execution starts a Prompt whose preflight callback is the acceptance authority. Model and thinking level are applied first. Preflight rejection is definitive; active or unknown state never triggers binding replacement. |
+| Compact | Allowed only while idle. Uses native compaction with the current model, keeps the Session-file binding and AgentSession identity, and never falls back to a Mohist-generated summary. |
+| Reset | Allowed only while idle. Creates an empty Session in the same work directory, then replaces the complete expected binding. A definitely absent old file may skip selection inheritance; corruption, permission failure, and unclassified reads remain explicit failures. |
+| Cancel | Requests interruption. Provider acceptance of the request does not prove execution stopped; events and `isStreaming` provide stop confirmation. |
 
-- While executing, use `session.steer(text)` to inject into the current
-  execution. While idle, call `session.prompt(text, { preflightResult })`.
-  The preflight callback is the point at which Pi confirms acceptance, and its
-  RPC mode uses the same hook. Return preflight rejection, such as a missing
-  model or credentials, to the user as command failure. Return immediately
-  after acceptance; completion continues through Session events.
-- Apply any selected current model / variant to the Session with `setModel()` /
-  `setThinkingLevel()` before injection. Do not rotate the physical Session.
-- An idle AgentSession performs shared binding preparation before accepting the
-  input; if the binding path is definitely absent, create and persist a
-  replacement first. An active or unknown AgentSession must not replace it.
-- Routing or admission failure is returned to the user and is never retried or
-  replayed automatically.
+Compact and Reset preserve the AgentSession ID and transcript. Only Reset replaces
+the physical Session-file binding and begins empty provider context. A stale
+expected binding can never overwrite a newer one.
 
-### Compact
+## Trust, Credentials, and Errors
 
-Compact is allowed only while the logical Session is idle and shares the Reset
-concurrency boundary. `session.compact()` performs native Pi compaction with
-the Session's current model. It does not create a physical Session, change the
-Session-file identity, or fall back to a Mohist synthetic summary. A Pi
-compaction failure is explicit. Resulting compaction events continue to project
-into the transcript.
+Pi has no per-tool approval mechanism or sandbox. Configured tools execute with
+Runner-process permissions, so `permission-required` is not a Pi result and there
+is no equivalent of OpenCode's one-time permission reply.
 
-### Reset
+Pi can also load executable settings, extensions, skills, and Prompt templates
+from a repository's `.pi/` directory. Mohist always sets project trust to false,
+so repository-local Pi resources cannot alter unattended Runner behavior. Root
+`AGENTS.md` and `CLAUDE.md` remain model context rather than executable Pi
+configuration, and the Runner user's global Pi configuration still loads. This is
+a fixed determinism boundary, not a user option.
 
-Reset is allowed only while the logical Session is idle. Read the current model
-and thinking level if available, then call `SessionManager.create(cwd)` to
-create an empty Pi Session in the same working directory. Replace the logical
-Session's current binding with the new Session-file path only after creation
-succeeds. AgentSession does not retain old bindings. The existing transcript
-remains, while the new physical Session starts with empty context. If the old
-path is already absent, skip model/thinking inheritance and continue creation;
-other read failures remain explicit.
+Provider credentials remain under Pi's environment and auth-store mechanisms. The
+SDK authentication manager is their only reader; Mohist requests, results, events,
+registration, and smoke artifacts have no credential fields. SDK and provider
+text is redacted before it enters logs or diagnostics, and structured boundaries
+use allowlists rather than serializing SDK objects.
 
-### Cancel
-
-Call `session.abort()` for the current execution. `cancelled: true` means only
-that the Runtime accepted and executed the interrupt request. Pi decides when
-execution actually stops, and the Runtime reports the attempt exactly.
-
-## Permissions, Project Trust, and Errors
-
-Pi has no per-tool approval mechanism and provides no sandbox. Configured tools
-execute directly with Runner-process permissions, with no interactive prompt in
-headless mode. Pi therefore has no equivalent of OpenCode's
-`permission.asked` -> one-time reply path, and `permission-required` is not a Pi
-normalized error.
-
-Pi's only approval-like concept is project trust: whether it loads project-level
-`.pi/` resources such as settings, extensions, skills, and prompts from the
-working directory. `PiRuntime` always constructs its `SettingsManager` with
-`SettingsManager.create(cwd, agentDir, { projectTrusted: false })` and passes
-that same manager plus explicit `cwd` and `agentDir` to
-`DefaultResourceLoader` and `createAgentSession`. Executable resources under a
-repository's `.pi/` directory never enter execution, so a work repository
-cannot alter Runner behavior by carrying Pi configuration. Root `AGENTS.md` and
-`CLAUDE.md` files are unrelated to project trust and remain model context, as in
-OpenCode: they affect Prompt context, not Runner execution configuration. The
-Runner user's global configuration under `~/.pi/agent` loads normally. This is
-not configurable; it is a determinism guarantee for unattended execution.
-
-The Pi boundary reuses Runner credential masking. Before SDK or provider text
-enters a task log, diagnostic, or Runtime event, it is redacted. Structured
-requests/results and Runner registration use Mohist field allowlists rather
-than serializing SDK objects. Action output contains no diagnostic. A real
-smoke artifact records only versions, operation names, Boolean results, and a
-redacted field-name/type summary. It does not record environment values, auth
-files, raw provider responses, Prompts, or message bodies.
-
-At the `PiRuntime` boundary, normalize SDK errors to the small set of Mohist
-kebab-case wire results: `invalid-input`, `unavailable-runtime`,
+The Runtime normalizes failures to `invalid-input`, `unavailable-runtime`,
 `missing-session`, `incompatible-runtime`, `deadline-exceeded`, `interrupted`,
-and `execution-failed`. Provider-specific details remain diagnostics and never
-become Action output fields.
+`turn-failed`, or `conflict`. Provider detail remains redacted diagnostics and
+never becomes Action output.
 
-## Model Catalog
+## Model Catalog and Integration Boundary
 
-Load the model catalog through `modelRuntime.getAvailable()`. It returns only
-models from providers with configured credentials, which is exactly the
-configuration-assistance meaning required. Each catalog model's variants are
-Pi thinking levels. Runner registration reports the Pi and OpenCode catalogs
-side by side, grouped by Runtime in Server and Web. When model is omitted, use
-the Session's current choice or Pi default; Pi still makes the final validity
-decision for a selected model.
+Pi's catalog contains only models whose providers have configured credentials.
+That makes it useful for configuration assistance, but not final execution
+authority. Thinking levels are the model variants; Pi still validates the selected
+model and level when execution begins.
 
-## Server and Web Touchpoints
+Runtime selection is frozen into the Agent execution snapshot and current Session
+binding. Server routes launch and Session commands by that value; Runner dispatches
+to the corresponding independent deep module; clients request the catalog for the
+selected Runtime. Shared Session projections carry normalized transcript, model,
+cost, and usage facts, including cache-read and cache-write tokens, without
+exposing Pi SDK types. This capability boundary replaces component-by-component
+Pi special cases in Server and Web.
 
-Pi is the second Runtime, so these existing single-Runtime assumptions must be
-generalized without changing product contracts:
+## Verification Boundary
 
-- Server Runtime registry: `AgentSessionGrain` method `IsRuntimeRegistered`
-  registers `"pi"`; Reset fallback for an unregistered historical Runtime stays
-  unchanged.
-- Agent launch: `AgentLauncher` reads the execution backend from Agent
-  configuration instead of hard-coding `"opencode"`; the backend is fixed into
-  AgentJob input with the Agent snapshot.
-- AgentJob executor: dispatch by the Runtime carried in dispatch to
-  `OpenCodeRuntime` or `PiRuntime`. Both paths share Session infrastructure but
-  not Runtime instances.
-- Runner open / attach write-back: use the Runtime resolved by the caller
-  instead of hard-coding one.
-- Session usage: add independent `cachedWriteTokens` across
-  `AgentUsageSummary`, grain state and surrogate, Runtime event parser, API/read
-  model, and shared Web types. Append new Orleans field IDs without reordering;
-  absent values mean null/0 and are accumulated separately from
-  `cachedReadTokens`.
-- TaskRun classification: classify `mohist/pi` as UserFacing, like
-  `mohist/opencode`.
-- Model catalog API: generalize the OpenCode-only route to query by Runtime, or
-  add a parallel Pi route.
-- Session command handlers for Follow-up, Cancel, Compact, and Reset: route by
-  the AgentSession's current binding Runtime.
-- Runner host: construct and start `PiRuntime`; inject execution capability into
-  the Workflow Action through the manifest's `agent-execution` capability and
-  inject the Runtime into `AgentJobExecutor`; drive promise projection by
-  capability. If #450 lands before capability-narrowing issue #447, it will
-  temporarily retain the current Runtime-bearing `ActionContext` and named
-  projection mechanism. That is an implementation gap explicitly owned by
-  #447, not the target interface in this design.
-- Web: add execution backend to Mohist Agent editing and Issue model selection;
-  list models for the selected backend from the OpenCode or Pi catalog.
+Default verification replaces SDK services, Sessions, provider events, storage,
+and time with deterministic fakes. It proves readiness gating, binding-before-effect,
+absolute-path restoration, missing versus corrupt or unknown classification,
+completion authority, no replay, active versus idle Follow-up, native Compact and
+Reset semantics, project-trust exclusion, provider retry policy, and two-phase
+closeout. A real smoke test is upgrade evidence for the locked SDK surface; it is
+not a substitute for these state and failure assertions.
 
-## Tests
+## Upgrade Boundary
 
-Default tests must not start real Pi or use a real process, network, filesystem
-configuration, or clock. All SDK dependencies remain inside the `PiRuntime`
-module and are replaced through a factory seam with a fake `PiRuntime` or fake
-SDK factory. Tests drive events, completion state, process termination, and
-errors deterministically.
+Mohist locks `@earendil-works/pi-coding-agent` at 0.80.10 and requires the
+compatible Node runtime. Pi is a rapidly evolving 0.x dependency whose breaking
+changes concentrate in service assembly, Session creation/restoration, and type
+shapes. All SDK access remains inside `PiRuntime` so upgrade drift changes one
+deep module rather than the Workflow Action or AgentSession contracts.
 
-Coverage includes at least:
+Every upgrade reads the upstream breaking-change notes and smoke-tests the exact
+locked package against real service assembly, catalog loading, Session create and
+restore, Prompt completion, active and idle Follow-up acceptance, interruption and
+stop confirmation, compaction, model/thinking selection, event payloads, and
+credential redaction. A method existing in generated types is not evidence that
+its completion or failure semantics still satisfy Mohist.
 
-- Action input expansion with no hidden `vars.agent` fallback;
-- ignored and diagnosed unknown `options` keys, including `runtime`, without
-  execution failure;
-- model strings containing multiple `/` characters, with variant independent
-  and mapped to thinking level;
-- shared Runtime code for Workflow and AgentJob execution without shared work
-  or Session identity;
-- physical Session reuse and rotation invariants, including no rotation on
-  model or thinking-level change;
-- binding restoration through cache hit, lazy open, and exactly one create for
-  a definitely absent path, with expected-binding replacement persisted before
-  input or Prompt;
-- no create for file corruption, permission failure, or unclassified open
-  error, and no Prompt submission through a stale binding;
-- a non-bound Runner neither opens nor replaces the Session file, and its local
-  absence does not trigger create;
-- Prompt completion, interruption, uncertain submission, and no replay;
-- `steer` for active Follow-up and deadline warning, idle Follow-up with missing
-  recovery, native Compact, Reset including a missing old path, and stale
-  binding rejection;
-- assembly with `projectTrusted: false`, proving project-level `.pi/` resources
-  do not enter execution;
-- provider policy for immediate pattern failure, threshold failure, and Pi's
-  own unrecoverable-error normalization to `execution-failed`;
-- two-phase closeout with one steer warning, immediate warning for deadlines
-  under five minutes, abort at deadline, and no abort after an early normal end;
-  all driven by a fake clock;
-- minimal `{ promise }` Workflow Action output with existing expectation
-  semantics.
-
-## Upstream Boundary
-
-Pi is a rapidly evolving 0.x dependency, with roughly one minor release each
-week. Breaking changes concentrate in creation and service assembly, including
-scope migration, Runtime assembly refactoring, and parameter-type changes; the
-event protocol is relatively stable. The response is to:
-
-- lock the SDK package version, read every Breaking / Changed entry in the
-  CHANGELOG during upgrades, and run an integration smoke test;
-- keep all SDK access inside `PiRuntime`, so upgrade drift changes one deep
-  module;
-- treat `@earendil-works/pi-coding-agent` 0.80.10 as the reference version when
-  this table was written, then lock and smoke-test again at implementation time
-  as required by SDK Surface.
-
-## Implementation Gaps
-
-Both Workflow and AgentJob paths are implemented: `PiRuntime`, the `mohist/pi`
-Action, AgentJob Runtime selection, Runtime-aware Session binding, the model
-catalog API and Web selector, and the existing Session transcript, tool,
-status, compaction, model, usage, and cost views.
-
-A missing Pi Session file still produces `missing-session` directly. A new
-independent input does not yet perform
-`definitely-missing -> create -> expected binding replacement`. An
-implementation Issue still needs to be created from this specification.
+Upgrade evidence follows the redacted artifact shape demonstrated by
+[`sdk-smoke-verification.json`](../../openspec/changes/archive/2026-07-18-issue-409/sdk-smoke-verification.json).
