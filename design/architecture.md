@@ -222,9 +222,8 @@ may be Slack, an IDE, a terminal, or Web, but that does not decide which Agent o
 
 There are two distinct paths:
 
-1. A Mohist Agent is launched through Web, CLI, an Agent Connection, an event, or a mention. These
-   trusted paths reach the same internal Agent launch command; provider adapters first enter through
-   the Server Connection boundary. It is distinct from the text-only `/api/v1` External Agent API.
+1. A Mohist Agent is launched through Web, CLI, an Agent Connection, an event, or a mention. Every path
+   reaches the same Agent API; provider adapters first enter through the Server Connection boundary.
    Mohist owns the Agent definition, AgentJob, AgentSession, SessionInput,
    AgentTurn, durable transcript, activity, result, and evidence. Server infrastructure owns durable
    provider conversation mapping and delivery state; the external surface owns only presentation and
@@ -236,7 +235,7 @@ There are two distinct paths:
 Slack Bot therefore is not a Runtime or another Agent. One `mohist-slack` service operates the Slack
 Connections for one Server. It exists as a separate process because Slack's first-class client lives in
 Node, not because it is a separate state boundary: it is stateless, enters through the Connection boundary
-and reaches the trusted Agent command boundary, and never reads Mohist storage, shells out to `mo`, parses Runner logs, persists
+and reaches Agent API, and never reads Mohist storage, shells out to `mo`, parses Runner logs, persists
 provider inbox, thread mappings or pending deliveries, or stores a shadow copy of Agent
 instructions/config/skills. Detailed contracts: [`agent-api.md`](agent-api.md) and
 [`slack.md`](slack.md).
@@ -248,10 +247,8 @@ Agent/Session ownership invariants: [`agent-execution.md`](agent-execution.md).
 ## Constraints
 
 - CLI never merges into Server.
-- Official Web, CLI, and provider clients use the trusted Agent command boundary; direct external
-  callers use the separate restricted `/api/v1` boundary. Provider adapters enter through the Server
-  Connection boundary, which invokes the trusted command and cannot bypass it through CLI, database,
-  grain, Runner, or Runtime protocols.
+- Official Agent clients use Agent API; provider adapters enter through the Server Connection boundary,
+  which invokes Agent API and cannot bypass it through CLI, database, grain, Runner, or Runtime protocols.
 - Provider credentials, durable ingress, conversation mappings and delivery state live in Server
   infrastructure, outside Agent/Session domains; Agent Connection owns only the external binding, access
   policy and lifecycle.
