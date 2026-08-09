@@ -599,6 +599,40 @@ public class CliRunControlSpecs
         Assert.Equal($"/api/workflow-runs/{WrId}/retry", postReq.RequestUri?.PathAndQuery);
     }
 
+    [Theory]
+    [InlineData("approve")]
+    [InlineData("reject")]
+    [InlineData("retry")]
+    [InlineData("rerun")]
+    [InlineData("pause")]
+    [InlineData("resume")]
+    [InlineData("stop")]
+    public async Task RunControl_WithJsonSelectionAndEmptySuccessData_ReturnsProjectedObject(string verb)
+    {
+        var (handler, http, output, error, fs, executor) = CliTestFactory.CreateSync(req =>
+            req.Method == HttpMethod.Post
+                ? RecordingHttpHandler.Json(new { success = true, data = (object?)null })
+                : null!);
+
+        var args = verb switch
+        {
+            "approve" => new[] { "run", verb, WrId, "--display-name", "supervisor", "--json", "workflowRunId,status" },
+            "reject" => new[] { "run", verb, WrId, "--message", "reason", "--json", "workflowRunId,status" },
+            "stop" => new[] { "run", verb, WrId, "--yes", "--json", "workflowRunId,status" },
+            _ => new[] { "run", verb, WrId, "--json", "workflowRunId,status" },
+        };
+
+        var exitCode = await MohistCliCommands.RunAsync(http, args, output, error, fs, executor);
+
+        Assert.Equal(0, exitCode);
+        var projected = JsonNode.Parse(output.ToString().Trim()) as JsonObject;
+        Assert.NotNull(projected);
+        Assert.True(projected!.ContainsKey("workflowRunId"));
+        Assert.True(projected.ContainsKey("status"));
+        Assert.DoesNotContain("invalid-response", error.ToString(), StringComparison.Ordinal);
+        Assert.Single(handler.Requests);
+    }
+
     [Fact]
     public async Task Retry_BothRunIdAndIssue_FailsLocallyWithoutHttp()
     {
