@@ -141,6 +141,31 @@ public class AgentSessionTranscriptProjectionSpecs : AgentSessionTestSupport
     }
 
     [Fact]
+    public async Task UnboundQueuedSessionTranscript_ProjectsCanonicalTurnWithoutRuntimeBinding()
+    {
+        var (project, issue, work, session) = await CreateStartedAgentSessionAsync("unbound-transcript", start: false, sessionName: "plan");
+        var sessionGrain = _fixture.Grains.GetGrain<IAgentSessionGrain>(session.Id);
+        await sessionGrain.EnsureInitialLaunchAsync(new EnsureInitialLaunchCommand(
+            InputId: $"input-{session.Id}",
+            TurnId: $"turn-{session.Id}",
+            Prompt: "queued task",
+            Source: "agent-launch",
+            JobId: work.WorkId,
+            Runtime: "opencode",
+            WorkDir: $"/workspaces/{project.Id}"));
+
+        var raw = await _client.GetRawAsync(
+            $"/api/projects/{project.Id}/issues/{issue.Number}/sessions/plan/transcript");
+        using var document = JsonDocument.Parse(raw);
+        var data = document.RootElement.GetProperty("data");
+        var turn = Assert.Single(data.GetProperty("turns").EnumerateArray());
+        Assert.Equal("queued", data.GetProperty("status").GetString());
+        Assert.Equal("queued", turn.GetProperty("status").GetString());
+        Assert.True(turn.GetProperty("incomplete").GetBoolean());
+        Assert.Equal("queued task", turn.GetProperty("user").GetProperty("text").GetString());
+    }
+
+    [Fact]
     public async Task IssueSessionMetadataEndpoint_MissingSession_ReturnsNotFound()
     {
         var projectName = $"metadata-not-found-{Guid.NewGuid():N}";

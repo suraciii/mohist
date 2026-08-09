@@ -17,9 +17,14 @@ internal static class SessionTranscriptBuilder
         var partsByTurn = transcript.Parts
             .GroupBy(p => p.TurnId)
             .ToDictionary(g => g.Key, g => g.OrderBy(p => p.Sequence).ThenBy(p => p.Id).ToList());
+        var turns = transcript.Turns
+            .Concat(MissingCanonicalTurns(transcript.Turns, session))
+            .OrderBy(turn => turn.Sequence)
+            .ThenBy(turn => turn.Id)
+            .ToList();
         var toolPartIndex = new Dictionary<string, AgentSessionTranscriptPartDto>(StringComparer.Ordinal);
 
-        foreach (var turn in transcript.Turns)
+        foreach (var turn in turns)
         {
             var at = turn.StartedAt.ToString("o");
             partsByTurn.TryGetValue(turn.Id, out var parts);
@@ -141,6 +146,31 @@ internal static class SessionTranscriptBuilder
                             "compaction",
                             string.IsNullOrWhiteSpace(message) ? "Context history was compacted." : message,
                             partAt);
+                        continue;
+                    }
+
+                    if (diagnostic)
+                    {
+                        dto.Assistant.Add(new AgentSessionTranscriptPartDto
+                        {
+                            Id = $"{dto.Id}-p{++partIndex}",
+                            Type = "unknown",
+                            Kind = "unknown",
+                            StartedAt = partAt,
+                            Raw = new AgentSessionTranscriptRawPartDto
+                            {
+                                Kind = "unknown",
+                                Type = part.Type,
+                                CorrelationKey = part.CorrelationKey,
+                                CorrelationId = part.CorrelationId,
+                                Text = part.Text,
+                                Payload = payload.Clone(),
+                                PayloadJson = string.IsNullOrWhiteSpace(part.PayloadJson) ? "{}" : part.PayloadJson,
+                                FirstSeenAt = part.FirstSeenAt.ToString("o"),
+                                LastSeenAt = part.LastSeenAt.ToString("o"),
+                                RawEventCount = part.RawEventCount,
+                            },
+                        });
                     }
                 }
             }
@@ -160,6 +190,46 @@ internal static class SessionTranscriptBuilder
             Activity = ActivityName(session?.Status.Activity, responseTurns),
             Status = ResolveResponseStatus(session, responseTurns),
         };
+    }
+
+    private static IEnumerable<AgentSessionTranscriptTurnRow> MissingCanonicalTurns(
+        IReadOnlyList<AgentSessionTranscriptTurnRow> transcriptTurns,
+        AgentSession? session)
+    {
+        if (session?.Status.Turns is not { Count: > 0 } canonicalTurns)
+            yield break;
+
+        var persistedSequences = transcriptTurns
+            .Select(turn => turn.Sequence)
+            .ToHashSet();
+        var inputById = (session.Status.Inputs ?? [])
+            .ToDictionary(input => input.Id, StringComparer.Ordinal);
+
+        foreach (var canonicalTurn in canonicalTurns.OrderBy(turn => turn.Sequence))
+        {
+            if (canonicalTurn.Status is not (AgentTurnStatus.Queued or AgentTurnStatus.Executing or AgentTurnStatus.Unknown)
+                || persistedSequences.Contains(canonicalTurn.Sequence))
+                continue;
+
+            var recordedAt = canonicalTurn.RecordedAt ?? session.Status.CreatedAt;
+            var prompt = string.Join(
+                "\n",
+                canonicalTurn.InputIds
+                    .Where(inputById.ContainsKey)
+                    .Select(inputId => inputById[inputId].Text)
+                    .Where(text => !string.IsNullOrWhiteSpace(text)));
+            yield return new AgentSessionTranscriptTurnRow
+            {
+                Id = -Math.Max(1L, canonicalTurn.Sequence),
+                SessionId = session.Id,
+                RuntimeSessionId = session.Status.AgentRuntimeSessionId,
+                Sequence = canonicalTurn.Sequence,
+                PromptText = prompt,
+                PromptKind = canonicalTurn.Sequence > 1 ? "followup" : "task",
+                StartedAt = recordedAt,
+                UpdatedAt = canonicalTurn.UpdatedAt ?? recordedAt,
+            };
+        }
     }
 
     private static string PublicPromptText(

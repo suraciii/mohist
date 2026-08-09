@@ -77,6 +77,54 @@ public sealed class SessionTranscriptBuilderTests
         Assert.Contains("/workspace/secret.txt", diagnosticTool.Input, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Build_UnknownPartIsOnlyProjectedAsStructuredRawDiagnostic()
+    {
+        var at = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc);
+        var session = CreateSession(at);
+        var turn = new AgentSessionTranscriptTurnRow
+        {
+            Id = 1,
+            SessionId = session.Id,
+            Sequence = 1,
+            PromptText = "inspect the event",
+            PromptKind = "task",
+            StartedAt = at,
+            UpdatedAt = at,
+        };
+        var part = new AgentSessionTranscriptPartRow
+        {
+            Id = 7,
+            TurnId = turn.Id,
+            Sequence = 1,
+            Type = "future.runtime.event",
+            CorrelationKey = "future-1",
+            CorrelationId = "future-1",
+            Text = "future payload",
+            PayloadJson = "{\"state\":\"preserved\"}",
+            FirstSeenAt = at,
+            LastSeenAt = at,
+            RawEventCount = 2,
+        };
+
+        var publicResponse = SessionTranscriptBuilder.Build(new AgentSessionTranscriptData([turn], [part]), session);
+        Assert.Equal(1, publicResponse.PartCount);
+        Assert.Empty(Assert.Single(publicResponse.Turns).Assistant);
+
+        var diagnosticResponse = SessionTranscriptBuilder.Build(
+            new AgentSessionTranscriptData([turn], [part]), session, "raw");
+        var diagnosticPart = Assert.Single(Assert.Single(diagnosticResponse.Turns).Assistant);
+        Assert.Equal("unknown", diagnosticPart.Type);
+        Assert.Equal("unknown", diagnosticPart.Kind);
+        Assert.NotNull(diagnosticPart.Raw);
+        Assert.Equal("unknown", diagnosticPart.Raw!.Kind);
+        Assert.Equal("future.runtime.event", diagnosticPart.Raw.Type);
+        Assert.Equal("future-1", diagnosticPart.Raw.CorrelationKey);
+        Assert.Equal("preserved", diagnosticPart.Raw.Payload.GetProperty("state").GetString());
+        Assert.Equal(part.PayloadJson, diagnosticPart.Raw.PayloadJson);
+        Assert.Equal(2, diagnosticPart.Raw.RawEventCount);
+    }
+
     [Theory]
     [InlineData(AgentSessionActivity.Unknown, "unknown")]
     [InlineData(AgentSessionActivity.Idle, "completed")]

@@ -355,7 +355,27 @@ export interface ErrorPart {
   at: string
 }
 
-export type SessionPart = TextPart | ReasoningPart | ToolPart | ErrorPart
+export interface UnknownPart {
+  id: string
+  type: 'unknown'
+  kind: 'unknown'
+  startedAt: string
+  completedAt: string | null
+  raw: {
+    kind: 'unknown'
+    type: string
+    correlationKey: string
+    correlationId?: string | null
+    text: string
+    payload: unknown
+    payloadJson: string
+    firstSeenAt: string
+    lastSeenAt: string
+    rawEventCount: number
+  }
+}
+
+export type SessionPart = TextPart | ReasoningPart | ToolPart | ErrorPart | UnknownPart
 
 export interface SessionTurn {
   id: string

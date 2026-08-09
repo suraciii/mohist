@@ -102,6 +102,21 @@ public sealed class AgentSessionTranscriptPartDto
     public string? StartedAt { get; init; }
     public string? CompletedAt { get; set; }
     public string? At { get; init; }
+    public AgentSessionTranscriptRawPartDto? Raw { get; init; }
+}
+
+public sealed class AgentSessionTranscriptRawPartDto
+{
+    public string Kind { get; init; } = "unknown";
+    public string Type { get; init; } = string.Empty;
+    public string CorrelationKey { get; init; } = string.Empty;
+    public string? CorrelationId { get; init; }
+    public string Text { get; init; } = string.Empty;
+    public JsonElement Payload { get; init; }
+    public string PayloadJson { get; init; } = "{}";
+    public string FirstSeenAt { get; init; } = string.Empty;
+    public string LastSeenAt { get; init; } = string.Empty;
+    public int RawEventCount { get; init; }
 }
 
 public sealed class AgentSessionTranscriptToolDto

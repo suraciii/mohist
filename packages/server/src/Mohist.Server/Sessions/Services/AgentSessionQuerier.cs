@@ -638,11 +638,14 @@ public class AgentSessionQuerier : IScopedService
         TranscriptPartLoaderResult loaded)
     {
         _ = turnSequenceByTurnId;
-        if (string.IsNullOrWhiteSpace(currentRuntimeSessionId)) return false;
         var turn = loaded.Turns.FirstOrDefault(t => t.Id == projection.TurnId);
-        return turn is not null
-            && string.Equals(turn.RuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal);
+        return turn is not null && MatchesRuntimeSession(turn.RuntimeSessionId, currentRuntimeSessionId);
     }
+
+    private static bool MatchesRuntimeSession(string? turnRuntimeSessionId, string? currentRuntimeSessionId) =>
+        string.IsNullOrWhiteSpace(currentRuntimeSessionId)
+            ? string.IsNullOrWhiteSpace(turnRuntimeSessionId)
+            : string.Equals(turnRuntimeSessionId, currentRuntimeSessionId, StringComparison.Ordinal);
 
     public async Task<AgentSessionTranscriptResponse?> GetGenericSessionTranscriptAsync(
         string projectId,
@@ -1111,8 +1114,7 @@ public class AgentSessionQuerier : IScopedService
     {
         var loaded = await TranscriptPartLoader.LoadAsync(db, new[] { sessionId }, ct: ct);
         var turns = loaded.Turns
-            .Where(turn => !string.IsNullOrWhiteSpace(runtimeSessionId)
-                && string.Equals(turn.RuntimeSessionId, runtimeSessionId, StringComparison.Ordinal))
+            .Where(turn => MatchesRuntimeSession(turn.RuntimeSessionId, runtimeSessionId))
             .OrderBy(e => e.Sequence)
             .ThenBy(e => e.Id)
             .ToList();
