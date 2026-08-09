@@ -1,64 +1,100 @@
-# Hermes 通知
+# Hermes Notifications
 
-Mohist 面向 self-host 的长跑场景：issue 启动后，生产线可能一跑几十分钟甚至几小时，你不会一直守在屏幕前。但生产线上有些时刻必须等你——到达审批点、执行失败、issue 完成。Hermes 通知把这些时刻推送到你的聊天工具（Telegram、微信等），在手机上就能看到，回一条命令就能让生产线继续。
+Mohist supports long-running self-hosted work. After an Issue starts, its
+Workflow can run for minutes or hours, and the user should not need to watch the
+screen. Some moments still require attention: an Approval point is reached,
+execution fails, or the Issue finishes. Hermes notifications send these moments
+to a chat platform such as Telegram or WeChat. The user can see them on a phone
+and respond with a command so work can continue.
 
-## 心智模型
+## Mental Model
 
-- **Mohist 决定何时通知、说什么**：它盯着生产线，在关键时刻把消息写好。
-- **Hermes 负责送达**：消息交给通知伙伴 Hermes，由它推送到具体聊天平台。Mohist 不直接对接任何聊天平台。
-- 通知是**即时推送，不是持久记录**：错过的通知不会补发；要回看完整历史，Web 收件箱才是真源。
-- 通知**永不干扰生产线**：推送失败只会被记下后放弃，绝不阻塞或影响 issue 与 workflow 的执行。
+- **Mohist decides when and what to notify:** It observes the Workflow and
+  prepares a message at important moments.
+- **Hermes delivers:** Mohist gives the message to Hermes, which sends it to a
+  specific chat platform. Mohist does not integrate directly with chat
+  platforms.
+- A notification is an **immediate delivery, not a durable record**. Missed
+  notifications are not replayed. The Web inbox is the source of truth for
+  complete history.
+- Notifications **never interfere with work**. A delivery failure is recorded
+  and abandoned. It never blocks or changes Issue or Workflow execution.
 
-## 哪些时刻会通知
+## Notification Events
 
-五种时刻，四种默认开启：
+Four of the five event types are enabled by default:
 
-| 时刻 | 默认 |
+| Event | Default |
 |---|---|
-| 到达审批点，等你决策 | 开 |
-| 工作流失败，issue 阻塞 | 开 |
-| issue 完成 | 开 |
-| Agent 响应失败（它没能处理本该处理的事） | 开 |
-| issue 开始工作 | **关**（多半是你刚亲手启动的，属于噪音） |
+| An Approval point is waiting for a decision | On |
+| The Workflow failed and blocked the Issue | On |
+| The Issue completed | On |
+| An Agent response failed to handle its work | On |
+| The Issue started work | **Off**, because the user usually started it and the notice is noise |
 
-每条通知包含：发生了什么、哪个 issue（编号 + 标题）、建议的下一步动作。建议动作总是带着 issue 编号（例如 `approve 42`），在聊天里回话不需要任何上下文。失败通知只给简短原因，不含堆栈。
+Each notification says what happened, identifies the Issue by number and title,
+and suggests a next action. A suggested command always includes the Issue
+number, such as `approve 42`, so a chat response needs no conversational
+context. Failure notifications contain a short reason, not a stack trace.
 
-## 开启
+## Setup
 
-一条向导命令完成 Mohist 侧配置：
+One guided command configures the Mohist side:
 
 ```bash
 mo notification setup --platform telegram
 ```
 
-向导会探测本机的 Hermes、生成一个共享密钥、写好 Mohist 的通知配置，并打印出需要在 Hermes 侧执行的订阅命令——照着跑一遍，链路就通了。完整选项见 `mo notification setup --help`。
+The guide detects local Hermes, generates a shared secret, writes Mohist
+notification configuration, and prints the subscription command to run in
+Hermes. Run that command to complete the connection. See
+`mo notification setup --help` for all options.
 
-微信没有默认的接收会话，需要显式指定会话 id（可用 `hermes send --list weixin` 查到）：
+WeChat has no default receiving chat. Specify its chat ID explicitly. Use
+`hermes send --list weixin` to find one.
 
 ```bash
-mo notification setup --platform weixin --deliver-chat-id "<你的微信会话 id>"
+mo notification setup --platform weixin --deliver-chat-id "<your WeChat chat ID>"
 ```
 
-配置写好后重载服务端：
+Reload Server after writing the configuration:
 
 ```bash
 mo update server
 ```
 
-最直接的端到端验证：驱动一个真实 issue 走到审批点或完成，看聊天工具里是否收到推送。
+For a direct end-to-end check, drive a real Issue to an Approval point or
+completion and verify that the chat platform receives the notification.
 
-## 和故障恢复的衔接
+## Failure Recovery
 
-失败通知的建议动作直接对应恢复命令：手机上看到「issue 42 失败」，回到任何一台终端（或让聊天里的 agent 代劳）执行 `mo run retry --issue 42` 即可原地重试。审批通知同理对应 `mo run approve --issue 42` / `mo run reject --issue 42 --message "说明需要修改的内容"`。恢复手段的完整地图见[故障恢复](troubleshooting.md)。
+Suggested actions in failure notifications map directly to recovery commands.
+After seeing that Issue 42 failed, run `mo run retry --issue 42` in any terminal,
+or ask an Agent in chat to do so. An Approval notification similarly maps to
+`mo run approve --issue 42` or
+`mo run reject --issue 42 --message "describe the required changes"`. See
+[Troubleshooting](troubleshooting.md) for the complete recovery map.
 
-## 微信的推送窗口限制
+## WeChat Delivery Window
 
-微信只允许机器人在你**最近主动发过消息之后的一段窗口内**（实践中约 48 小时）向你推送；窗口过期后推送会静默失败。这与价值最高的「issue 完成」通知天然冲突——它往往在你走开很久之后才触发。因此**推荐 Telegram 作为默认通知渠道**，微信当作你正在会话中时的辅助渠道。给机器人随便发一条消息（比如 `hi`），窗口就会重新打开，直到再次过期。
+WeChat permits a bot to push messages only for a limited period after the user
+last sent it a message, approximately 48 hours in practice. Delivery fails
+silently after the window closes. This conflicts with high-value Issue
+completion notifications, which often occur long after the user leaves.
+Telegram is therefore the recommended default notification channel. Use WeChat
+as a secondary channel during an active conversation. Sending any message,
+such as `hi`, reopens the window until it expires again.
 
-## 实装差距
+## Implementation Gaps
 
-- 按时刻开关通知（例如打开默认关闭的「issue 开始工作」）还没有命令面：通知相关配置目前需重跑向导或手工编辑服务端配置，统一命令面已列为后续事项。
+- There is no command surface for per-event toggles, such as enabling the
+  default-off Issue-started notification. For now, rerun the guide or edit
+  Server configuration manually. A unified command surface remains future
+  work.
 
 ---
 
-对应源码：`packages/server/src/Mohist.Server/Notifications/`；CLI `packages/cli/Mohist.Cli/MohistCliCommands.Notify.cs`。协议、配置键与 Hermes 侧接线细节见 [`design/hermes-webhook.md`](../design/hermes-webhook.md)。
+Source: `packages/server/src/Mohist.Server/Notifications/`; CLI:
+`packages/cli/Mohist.Cli/MohistCliCommands.Notify.cs`. See
+[`design/hermes-webhook.md`](../design/hermes-webhook.md) for protocol,
+configuration keys, and Hermes integration details.

@@ -2,36 +2,49 @@
 status: wip-not-implemented
 ---
 
-# Mobile PWA + Push Notification
+# Mobile PWA and Push Notifications
 
-> 原 backlog issue #106 已关闭。本文件记录产品方案的开放问题。
+> The original backlog issue #106 is closed. This document records open
+> questions about the product proposal.
 
-## 背景
+## Background
 
-自治工作流的本质是"不用一直盯着"——用户离开桌面时，plan ready 了不知道是 throughput 杀手。移动端访问 + 推送提醒是 self-host 自治系统的 promise 组成部分。
+An autonomous Workflow should not require constant attention. When a user
+leaves their desk, failing to notice that a plan is ready limits throughput.
+Mobile access and push notifications may be part of the self-hosted autonomous
+system's product promise.
 
-## 原始方案（#106）
+## Original Proposal (#106)
 
-走 PWA 路线，场景优先级：
+Use a PWA, with scenarios in this priority order:
 
-1. 审批（plan ready / check ready）
-2. 观察（看板、进度）
-3. 干预（force stop / retry）
-4. 启动（从 backlog 启动）
-5. 创建（quick backlog）
+1. Decide an Approval when a plan or check is ready.
+2. Observe the board and progress.
+3. Intervene with force stop or retry.
+4. Start work from the backlog.
+5. Create a quick backlog item.
 
-交付物设想：PWA 基础设施（manifest + service worker）、Web Push、移动端核心页面（审批页、看板优化、issue 简化版）、设置端桌面专属。
+Possible deliverables include PWA infrastructure (manifest and service worker),
+Web Push, mobile versions of core pages (Approval, optimized board, and a
+simplified Issue page), and desktop-only settings.
 
-## 当前状态
+## Current State
 
-- 仅 KanbanBoard 局部适配（`md:hidden`），其他页面未适配
-- 无 PWA 基础设施、无 Web Push
-- 已有 `mo notify setup`（#352，Hermes chat-platform 出站通知）——但那是聊天通知，不是浏览器内 Web Push
+- Only part of KanbanBoard has a mobile adaptation (`md:hidden`). Other pages
+  are not adapted.
+- There is no PWA infrastructure or Web Push.
+- `mo notify setup` exists (#352) for outbound Hermes chat-platform
+  notifications. Those are chat notifications, not in-browser Web Push.
 
-## 后续需想清的问题
+## Open Questions
 
-1. **移动场景是否真的是核心需求**：个人开发者是否真的需要手机审批？还是 desktop + Hermes 聊天通知已够用？
-2. **PWA vs Hermes 通知**：两者是否重复——Hermes = 消息流，PWA = 直达操作？
-3. **self-host HTTPS**：Web Push 强制 HTTPS，证书方案待定（mkcert？Caddy？内置？）
-4. **最小可行版本**：只做 plan-ready push + 移动端审批页？还是补齐所有页面移动适配？
-5. **VAPID key 与多设备订阅管理**。
+1. **Is mobile a core need?** Do individual developers need to decide
+   Approvals from a phone, or are desktop access and Hermes chat notifications
+   sufficient?
+2. **PWA or Hermes notifications?** Are they redundant, or is Hermes the
+   message stream while the PWA provides direct actions?
+3. **HTTPS for self-hosting:** Web Push requires HTTPS. Certificate handling is
+   undecided: mkcert, Caddy, or a built-in option.
+4. **Minimum viable version:** Should it provide only plan-ready push and a
+   mobile Approval page, or adapt every page?
+5. **VAPID keys and multi-device subscription management.**

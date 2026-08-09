@@ -1,19 +1,27 @@
-# 仓库
+# Repositories
 
-一个 Project 是一个产品在 Mohist 中的范围与执行边界。产品的代码可能分布在多个代码库
-里——server 一个、web 一个。Project 通过声明**仓库（repository）**来引用这些代码库：
-仓库是 Project 声明的执行资源，每个 Issue 绑定其中一个目标仓库工作。
+A Project is the scope and execution boundary for one product in Mohist. Its
+code can span multiple codebases, such as separate server and web codebases. A
+Project references them by declaring **Repositories**. A Repository is an
+execution resource declared by a Project, and each Issue binds to one target
+Repository.
 
-## 心智模型
+## Mental Model
 
-- **Project = 产品，仓库 = 资源**。Project 不再等于"一个代码库"；它声明自己用到的一个或多个仓库，就像流水线声明它要用到的资源。
-- 每个仓库有一个**资源名**（project 内唯一，如 `server`、`web`）、git 地址和 base branch。资源名是稳定的管理引用句柄。
-- 每个 project 恰好有一个 **default 仓库**。只有一个仓库时它自然就是 default。
-- 不同 Project 的数据仍然完全隔离；仓库声明不跨 project 共享。
+- **Project = product; Repository = resource.** A Project is not the same as
+  one codebase. It declares one or more Repositories as a pipeline declares its
+  resources.
+- Each Repository has a resource name that is unique within the Project, such
+  as `server` or `web`, plus a Git URL and base branch. The resource name is its
+  stable management reference.
+- Each Project has exactly one **default Repository**. When there is only one,
+  it is naturally the default.
+- Data remains isolated between Projects. Repository declarations are not
+  shared across Projects.
 
-## 管理仓库
+## Managing Repositories
 
-仓库是往项目集合里加成员，动词用 `add`：
+Repositories are members of the Project's collection:
 
 ```bash
 mo repo list
@@ -24,26 +32,51 @@ mo repo edit web --base-branch develop
 mo repo delete web
 ```
 
-- 创建 project 时用 `--path` 指定的代码库，会注册为该 project 的 default 仓库——单仓库场景一条命令起步，和过去完全一样。
-- default 仓库不能直接删除：先 `set-default` 到别的仓库。
-- 非 default 仓库只有在没有未完成 Issue 绑定时可以删除。backlog 和 in_progress Issue 会阻止删除；done 和 cancelled Issue 保留历史目标仓库名但不阻止删除。
-- 有 backlog 或 in_progress Issue 使用仓库时，不能修改它的 git 地址或 base branch。切换 default 不影响已经绑定的 Issue。
+- A codebase supplied with `--path` when a Project is created is registered as
+  that Project's default Repository. A single-Repository Project still starts
+  with one command.
+- The default Repository cannot be deleted. Select another default first.
+- A non-default Repository can be deleted only when no unfinished Issue is
+  bound to it. Backlog and in-progress Issues prevent deletion. Done and
+  cancelled Issues retain the historical target Repository name but do not
+  prevent deletion.
+- The Git URL or base branch cannot change while a backlog or in-progress Issue
+  uses the Repository. Changing the default does not affect existing Issue
+  bindings.
 
-## Issue 与仓库
+## Issues and Repositories
 
-每个 Issue 在创建时绑定一个目标仓库。`mo issue create "Web change" --repo web` 显式选择；省略 `--repo` 时绑定创建时的 default 仓库，之后切换 default 不会改写已有 Issue。未启动的 Issue 可用 `mo issue edit <编号> --repo <资源名>` 重指派；首次启动后绑定永久锁定。`mo issue list --repo <资源名>` 根据已存储的绑定筛选，`mo issue view` 显示目标仓库。
+Each Issue binds to a target Repository when it is created. Use
+`mo issue create "Web change" --repo web` to select one explicitly. Without
+`--repo`, the Issue binds to the current default Repository. Later default
+changes do not rewrite existing Issues. Before its first start, an Issue can be
+reassigned with `mo issue edit <number> --repo <resource-name>`. The binding is
+permanently locked after the first start. `mo issue list --repo <resource-name>`
+filters by the stored binding, and `mo issue view` displays the target
+Repository.
 
-工作流的 workspace、分支、diff、rebase、本地集成和 GitHub Pull Request 都使用该 Issue 的目标仓库。Issue 运行期间，目标仓库的 git 地址和 base branch 保持不变；Runner 必须能访问 Project 声明的每个仓库。
+The Workflow workspace, branch, diff, rebase, local integration, and GitHub
+Pull Request all use the Issue's target Repository. Its Git URL and base branch
+remain unchanged while the Issue runs. Runner must be able to access every
+Repository declared by the Project.
 
-## Runner 约束
+## Runner Constraint
 
-Runner 必须能访问 Project 声明的**所有**仓库。把仓库加进 Project 前，确认 Runner 所在机器上该 Git 地址可用；使用本机路径或 `file://` 地址时，该路径必须对 Runner 所在机器可见。
+Runner must be able to access **every** Repository declared by a Project.
+Before adding a Repository, confirm that its Git URL is available on the Runner
+host. A local path or `file://` URL must be visible from that host.
 
-## 单仓库承诺
+## Single-Repository Promise
 
-只有一个仓库的 Project，体验与过去完全一致：所有 Issue 自动使用该仓库，你不需要理解本篇的任何概念。多仓库是**加入第二个仓库那一刻**才需要面对的复杂度。
+A Project with one Repository behaves like the original single-codebase model.
+Every Issue uses that Repository automatically, and the user does not need to
+understand the concepts in this document. The additional complexity appears
+only when a second Repository is added.
 
 ## Non-goals
 
-- **发布协同**：多个仓库的变更"同时上线"的协调不在 Mohist 职责内。
-- **一个 issue 检出多个仓库**：联调型工作（需要同时看到两个代码库）暂不支持，将来按真实需求单独评估。
+- **Release coordination:** Mohist does not coordinate simultaneous deployment
+  of changes from several Repositories.
+- **Several Repositories checked out for one Issue:** Integration work that
+  needs two codebases at once is not supported. Evaluate it separately when a
+  real requirement appears.
