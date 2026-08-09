@@ -30,7 +30,10 @@ By default, each interaction location has one Workspace:
 
 - **Slack**: Each channel has one Workspace. All Sessions and invited Agents in
   the channel use that Workspace.
-- **Web**: Each conversation has one Workspace.
+- **Web**: Composer must first select an existing active named Workspace. If the
+  Project has none available, the user can explicitly create a `manual`
+  Workspace and select it. Launch is rejected without a selected Workspace and
+  never creates or binds a hidden Workspace in the background.
 - **CLI**: Create one explicitly with `mo workspace create <name>` and bind a
   Session with `--workspace <name>`. Without `--workspace`,
   `mo agent launch` binds the current Project's default Workspace. When needed,
@@ -105,7 +108,9 @@ are not enforced by the platform.
 
 Workspace creation and archival produce the `com.mohist.workspace.created` and
 `com.mohist.workspace.archived` platform events. Each event includes the Project,
-Workspace name, and source: `issue`, `manual`, `slack`, `web`, or `cli`.
+Workspace name, and source: `issue`, `manual`, `slack`, or `cli`. The Web
+Composer only selects or explicitly creates a `manual` Workspace; it does not
+provision a Workspace implicitly from a Web conversation.
 Subscribers can filter by source. For example, a channel Agent can perform
 cleanup after an archive event, or a create event can trigger dependency
 installation. See [Event Routing](event-routing.md) and
