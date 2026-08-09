@@ -43,4 +43,5 @@ public sealed class AgentJobState
     [Id(28)] public long ConcurrencyGeneration { get; set; }
     [Id(29)] public AgentConcurrencyPermitStatus ConcurrencyGateStatus { get; set; } = AgentConcurrencyPermitStatus.DispatchPending;
     [Id(30)] public bool ConcurrencyReleasePending { get; set; }
+    [Id(31)] public string? ConcurrencyWaiterId { get; set; }
 }

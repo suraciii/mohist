@@ -244,6 +244,31 @@ public sealed class AgentAvailabilityListRoutesSpecs : IClassFixture<AgentAvaila
         var followup = Assert.Single(waiting);
         Assert.Equal("session-followup", followup.GetProperty("jobId").GetString());
         Assert.Equal("capacity-full", followup.GetProperty("waitingReason").GetString());
+
+        await gate.ReleaseAsync(projectId, agent.Id, "job-active");
+
+        using var pendingAvailabilityResponse = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agents/availability");
+        Assert.Equal(HttpStatusCode.OK, pendingAvailabilityResponse.StatusCode);
+        var pendingAvailabilityPayload =
+            await pendingAvailabilityResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var pendingEntry = Assert.Single(pendingAvailabilityPayload.GetProperty("data").EnumerateArray());
+        Assert.Equal(1, pendingEntry.GetProperty("activeRuns").GetInt32());
+        Assert.Equal(1, pendingEntry.GetProperty("queuedCount").GetInt32());
+        Assert.Equal("capacity-full", pendingEntry.GetProperty("waitingReason").GetString());
+
+        using var pendingStatusResponse = await _fixture.Client.GetAsync(
+            $"/api/projects/{projectId}/agents/{agent.Id}/status");
+        Assert.Equal(HttpStatusCode.OK, pendingStatusResponse.StatusCode);
+        var pendingStatusPayload = await pendingStatusResponse.Content.ReadFromJsonAsync<JsonElement>();
+        var pendingWaiting = pendingStatusPayload
+            .GetProperty("data")
+            .GetProperty("waitingWork")
+            .EnumerateArray()
+            .ToArray();
+        var pendingFollowup = Assert.Single(pendingWaiting);
+        Assert.Equal("session-followup", pendingFollowup.GetProperty("jobId").GetString());
+        Assert.Equal("dispatch-pending", pendingFollowup.GetProperty("waitingReason").GetString());
     }
 
     private async Task SeedPendingJobAsync(string projectId, string agentId, string jobKey)

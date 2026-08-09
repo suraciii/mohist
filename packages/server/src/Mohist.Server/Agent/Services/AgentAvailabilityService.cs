@@ -73,7 +73,7 @@ public sealed class AgentAvailabilityService : IScopedService
             agent.MaxConcurrentRuns,
             _timeProvider.GetUtcNow(),
             runners.Count > 0,
-            snapshot.Waiters.Count);
+            GateWaitingCount(snapshot));
         return result;
     }
 
@@ -103,7 +103,9 @@ public sealed class AgentAvailabilityService : IScopedService
             var pendingCount = pendingCounts.TryGetValue(agent.Id, out var count) ? count : 0;
             var followupWaiters = snapshot.Waiters.Count(waiter =>
                 waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
-            var queuedCount = pendingCount + followupWaiters;
+            var pendingFollowupNotifications = snapshot.PendingNotifications.Count(notification =>
+                notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup);
+            var queuedCount = pendingCount + followupWaiters + pendingFollowupNotifications;
             entries[agent.Id] = BuildListEntry(
                 agent,
                 capacity,
@@ -111,7 +113,7 @@ public sealed class AgentAvailabilityService : IScopedService
                 queuedCount,
                 hasOnlineRunner,
                 observedAt,
-                snapshot.Waiters.Count);
+                GateWaitingCount(snapshot));
         }
 
         return entries;
@@ -172,7 +174,15 @@ public sealed class AgentAvailabilityService : IScopedService
                 waiter.WaitingReason,
                 null))
             .ToList();
-        return jobs.Concat(followups).ToList();
+        var pendingFollowupNotifications = snapshot.PendingNotifications
+            .Where(notification => notification.OwnerKind == AgentConcurrencyPermitOwnerKind.Followup)
+            .Select(notification => new AgentWaitingWork(
+                notification.OwnerId,
+                "waiting",
+                AgentAvailabilityWaitReasons.DispatchPending,
+                null))
+            .ToList();
+        return jobs.Concat(followups).Concat(pendingFollowupNotifications).ToList();
     }
 
     public static AgentAvailabilityResult Compute(
@@ -230,6 +240,9 @@ public sealed class AgentAvailabilityService : IScopedService
                     : availabilityReason ?? AgentAvailabilityWaitReasons.DispatchPending,
                 job.SubmittedAt))
             .ToList();
+
+    private static int GateWaitingCount(AgentConcurrencySnapshot snapshot) =>
+        snapshot.Waiters.Count + snapshot.PendingNotifications.Count;
 
     private static RunnerCapacityView SumCapacity(IReadOnlyList<RunnerStatusView> runners)
     {

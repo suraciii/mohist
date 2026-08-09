@@ -1084,7 +1084,13 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             dispatchId);
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
+            var waiter = (await gate.GetSnapshotAsync()).Waiters.FirstOrDefault(candidate =>
+                string.Equals(candidate.Token, token, StringComparison.Ordinal)
+                && string.Equals(candidate.OwnerId, Key, StringComparison.Ordinal));
             State.ConcurrencyPermitHeld = false;
+            State.ConcurrencyPermitId = null;
+            State.ConcurrencyWaiterId = waiter?.WaiterId;
+            State.ConcurrencyGeneration = waiter?.Generation ?? State.ConcurrencyGeneration;
             State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
             State.WaitingReason = AgentAvailabilityWaitReasons.CapacityFull;
             await PersistAsync();
@@ -1094,6 +1100,7 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
         var permit = await gate.GetPermitAsync(token);
         State.ConcurrencyPermitHeld = permit is not null;
         State.ConcurrencyPermitId = permit?.PermitId;
+        State.ConcurrencyWaiterId = null;
         State.ConcurrencyGeneration = permit?.Generation ?? 0;
         State.ConcurrencyDispatchId = permit?.DispatchId ?? dispatchId;
         State.ConcurrencyGateStatus = AgentConcurrencyPermitStatus.DispatchPending;
@@ -1177,7 +1184,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
                 agentId,
                 State.ConcurrencyPermitToken,
                 State.ConcurrencyPermitId,
-                State.ConcurrencyGeneration == 0 ? null : State.ConcurrencyGeneration);
+                State.ConcurrencyGeneration == 0 ? null : State.ConcurrencyGeneration,
+                State.ConcurrencyWaiterId);
             State.ConcurrencyReleasePending = false;
             await PersistAsync();
         }
@@ -1514,7 +1522,8 @@ public sealed class AgentJobGrain : Grain, IAgentJobGrain
             ? AgentConcurrencyPermitStatus.Cancelled
             : AgentConcurrencyPermitStatus.Terminal;
         State.ConcurrencyReleasePending = State.ConcurrencyPermitId is not null
-            || State.ConcurrencyPermitHeld;
+            || State.ConcurrencyPermitHeld
+            || State.ConcurrencyWaiterId is not null;
         await EnsureRecoveryReminderAsync();
         await PersistAsync();
         await TryReleaseConcurrencyPermitAsync();

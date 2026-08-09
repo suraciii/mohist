@@ -75,8 +75,8 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
 
         if (limit is null)
         {
-            var waiters = DrainWaiters();
-            if (waiters.Count > 0)
+            await GrantWaitersAsync(projectId, agentId, null);
+            if (_state.State.PendingNotifications.Count > 0)
             {
                 await _state.WriteStateAsync();
                 await ProcessPendingNotificationsAsync();
@@ -155,25 +155,20 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             return;
 
         var limit = await ReadLimitAsync(projectId, agentId);
-        var granted = limit is null
-            ? DrainWaiters()
-            : await GrantWaitersAsync(projectId, agentId, limit.Value);
+        await GrantWaitersAsync(projectId, agentId, limit);
         await _state.WriteStateAsync();
         await ProcessPendingNotificationsAsync();
-        _ = granted;
     }
 
     public async Task ReconcileAsync(string projectId, string agentId, IReadOnlySet<string> activeTokens)
     {
+        await RemoveStaleWaitersAsync(projectId, agentId);
         _state.State.ActivePermits.RemoveAll(permit =>
             !activeTokens.Contains(permit.Token)
             && !IsAwaitingOwnerPersistence(permit));
 
         var limit = await ReadLimitAsync(projectId, agentId);
-        if (limit is null)
-            DrainWaiters();
-        else
-            await GrantWaitersAsync(projectId, agentId, limit.Value);
+        await GrantWaitersAsync(projectId, agentId, limit);
 
         await _state.WriteStateAsync();
         await ProcessPendingNotificationsAsync();
@@ -254,12 +249,9 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         int? knownLimit = null)
     {
         var limit = knownLimit ?? await ReadLimitAsync(projectId, agentId);
-        if (limit is null)
-            return DrainWaiters();
-
         var granted = new List<AgentConcurrencyWaiter>();
         while (_state.State.Waiters.Count > 0
-            && _state.State.ActivePermits.Count < limit.Value)
+            && (limit is null || _state.State.ActivePermits.Count < limit.Value))
         {
             var waiter = _state.State.Waiters[0];
             _state.State.Waiters.RemoveAt(0);
@@ -289,6 +281,23 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
         }
 
         return granted;
+    }
+
+    private async Task RemoveStaleWaitersAsync(string projectId, string agentId)
+    {
+        for (var index = _state.State.Waiters.Count - 1; index >= 0; index--)
+        {
+            var waiter = _state.State.Waiters[index];
+            if (await IsWaiterActiveAsync(projectId, agentId, waiter))
+                continue;
+
+            _state.State.Waiters.RemoveAt(index);
+            _log.LogInformation(
+                "Removed stale agent concurrency waiter {WaiterId} for {OwnerKind} {OwnerId}",
+                waiter.WaiterId ?? waiter.Token,
+                waiter.OwnerKind,
+                waiter.OwnerId);
+        }
     }
 
     private AgentConcurrencyPermit CreatePermit(
@@ -422,6 +431,38 @@ public sealed class AgentConcurrencyGrain : Grain, IAgentConcurrencyGrain
             ? session.Status.PendingFollowups
             : session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
         return leases.Any(lease => string.Equals(lease.ConcurrencyToken, permit.Token, StringComparison.Ordinal));
+    }
+
+    private async Task<bool> IsWaiterActiveAsync(
+        string projectId,
+        string agentId,
+        AgentConcurrencyWaiter waiter)
+    {
+        if (waiter.OwnerKind == AgentConcurrencyPermitOwnerKind.Job)
+        {
+            return await _jobs.HoldsConcurrencyWaiterAsync(
+                waiter.OwnerId,
+                waiter.Token,
+                waiter.WaiterId,
+                waiter.Generation);
+        }
+
+        var session = await _sessions.LoadAsync(waiter.OwnerId);
+        if (session is null
+            || !string.Equals(session.Metadata.Label(AgentSessionQueryMetadataKeys.ProjectId), projectId, StringComparison.Ordinal)
+            || !string.Equals(session.Metadata.Label(GenericAgentSessionMetadata.AgentId), agentId, StringComparison.Ordinal))
+            return false;
+
+        var leases = session.Status.PendingFollowups is { Count: > 0 }
+            ? session.Status.PendingFollowups
+            : session.Status.PendingFollowup is null ? [] : [session.Status.PendingFollowup];
+        return leases.Any(lease =>
+            string.Equals(lease.ConcurrencyToken, waiter.Token, StringComparison.Ordinal)
+            && (waiter.WaiterId is null
+                || string.Equals(lease.ConcurrencyWaiterId, waiter.WaiterId, StringComparison.Ordinal))
+            && (waiter.Generation == 0 || lease.ConcurrencyGeneration == waiter.Generation)
+            && lease.ConcurrencyPermitId is null
+            && !string.Equals(lease.ConcurrencyGateStatus, "cancelled", StringComparison.Ordinal));
     }
 
     private bool IsAwaitingOwnerPersistence(AgentConcurrencyPermit permit) =>

@@ -115,6 +115,45 @@ public class AgentSessionFollowupConcurrencySpecs
     }
 
     [Fact]
+    public async Task LimitBecomingUnbounded_GrantsExistingFollowupWaiter()
+    {
+        var projectId = $"followup-unbounded-{Guid.NewGuid():N}";
+        var agentId = $"agent-{Guid.NewGuid():N}";
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: 1);
+        var session = await _fixture.OpenGenericAgentSessionAsync(projectId, agentId);
+        var gate = Gate(projectId, agentId);
+
+        Assert.Equal(
+            AgentConcurrencyAcquireResult.Granted,
+            await gate.AcquireAsync(
+                projectId,
+                agentId,
+                "launch:active",
+                "job-active",
+                AgentConcurrencyPermitOwnerKind.Job));
+        var queued = await session.BeginFollowupAsync();
+        Assert.False(queued.ConcurrencyPermitHeld);
+
+        await _fixture.SeedAgentAsync(projectId, agentId, maxConcurrentRuns: null);
+        var now = _fixture.TimeProvider.GetUtcNow().UtcDateTime;
+        await gate.ReceiveReminder(
+            "agent-concurrency-reconciliation",
+            new TickStatus(now, TimeSpan.FromSeconds(30), now));
+
+        var snapshot = await gate.GetSnapshotAsync();
+        var permit = Assert.Single(
+            snapshot.ActivePermits,
+            candidate => candidate.OwnerId == session.GetPrimaryKeyString());
+        Assert.DoesNotContain(
+            snapshot.Waiters,
+            waiter => waiter.OwnerId == session.GetPrimaryKeyString());
+
+        var lease = Assert.Single(_fixture.StateStore.State?.Status.PendingFollowups!);
+        Assert.Equal(permit.PermitId, lease.ConcurrencyPermitId);
+        Assert.Equal("dispatch-pending", lease.ConcurrencyGateStatus);
+    }
+
+    [Fact]
     public async Task BeginFollowupAsync_BusySession_UnaffectedNoPermit()
     {
         var projectId = $"followup-{Guid.NewGuid():N}";

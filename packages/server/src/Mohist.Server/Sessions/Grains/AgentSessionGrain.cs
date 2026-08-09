@@ -962,10 +962,19 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
 
         if (result == AgentConcurrencyAcquireResult.Waiting)
         {
+            var waiter = (await _grains
+                .GetGrain<IAgentConcurrencyGrain>(GrainKey.Agent(projectId, agentId))
+                .GetSnapshotAsync())
+                .Waiters
+                .FirstOrDefault(candidate =>
+                    string.Equals(candidate.Token, token, StringComparison.Ordinal)
+                    && string.Equals(candidate.OwnerId, session.Id, StringComparison.Ordinal));
             leasesAfterAcquire[acquiredIndex] = leasesAfterAcquire[acquiredIndex] with
             {
                 ConcurrencyGateStatus = "queued",
                 WaitingReason = "capacity-full",
+                ConcurrencyWaiterId = waiter?.WaiterId,
+                ConcurrencyGeneration = waiter?.Generation ?? leasesAfterAcquire[acquiredIndex].ConcurrencyGeneration,
             };
             SetPendingFollowups(session, leasesAfterAcquire);
             await CommitAsync(session, []);
@@ -983,6 +992,7 @@ public sealed class AgentSessionGrain : Grain, IAgentSessionGrain, IRemindable
             ConcurrencyPermitId = permit.PermitId,
             ConcurrencyDispatchId = permit.DispatchId,
             ConcurrencyGeneration = permit.Generation,
+            ConcurrencyWaiterId = null,
             ConcurrencyGateStatus = "dispatch-pending",
             WaitingReason = null,
         };
