@@ -10,26 +10,26 @@ stdout/stderr from git clone, rebase, branch check, workspace cleanup is discard
 
 TaskLog belongs to Runner domain. Never in WorkflowRun.
 
-```
-POST /api/{ownerKind}/{ownerId}/work/{workId}/task-log  →  TaskLogStore  →  independent
-POST /api/runner/{runnerId}/report                       →  WorkResult   →  WorkflowGrain
+```text
+POST /api/{ownerKind}/{ownerId}/work/{workId}/task-log  -> TaskLogStore -> independent
+POST /api/runner/{runnerId}/report                       -> WorkResult   -> WorkflowGrain
 ```
 
 Owner = `workflow-runs` | `agent-jobs`. Same pattern as artifact upload.
 
 ## Model
 
-```
+```text
 TaskRun (existing, in WorkflowRun)
- ├─ status / message / output        ← final result
- ├─ Artifacts                        ← outputs
- ├─ AgentSession transcript          ← agent conversation
- └─ TaskLog                          ← execution trace
-      └─ LogEntry[]
-           ├  seq          monotonic, cursor pagination + jump anchor
-           ├  timestamp
-           ├  source       workspace-prep | action:rebase | cleanup | ...
-           └  text
+ |-- status / message / output       <- final result
+ |-- Artifacts                       <- outputs
+ |-- AgentSession transcript         <- agent conversation
+ `-- TaskLog                         <- execution trace
+      `-- LogEntry[]
+           |-- seq        monotonic, cursor pagination + jump anchor
+           |-- timestamp
+           |-- source     workspace-prep | action:rebase | cleanup | ...
+           `-- text
 ```
 
 No stdout/stderr split. Same as GA.
@@ -39,7 +39,7 @@ No stdout/stderr split. Same as GA.
 ### Single funnel
 
 ```ts
-ActionContext.log.write(source, text)  →  seq
+ActionContext.log.write(source, text) -> seq
 ```
 
 All output enters here. Secret masking, sequence, buffering. One method.
@@ -67,11 +67,11 @@ Must guarantee: capture last line without trailing newline, drain after process 
 
 ### Collector
 
-```
+```text
 TaskLogCollector (per work)
-  buffer: LogEntry[]           ← append only
-  flush()                      ← batch POST (end-of-task or periodic)
-  capacity limit               ← drop head, keep tail (error context)
+  buffer: LogEntry[]           <- append only
+  flush()                      <- batch POST (end-of-task or periodic)
+  capacity limit               <- drop head, keep tail (error context)
 ```
 
 ## Report channel
@@ -85,7 +85,7 @@ Separate endpoint. Never in report payload.
 
 ## Storage (server side)
 
-```
+```text
 TaskLogEntries
   Id (PK)
   OwnerKind       "workflow" | "agent-job"
