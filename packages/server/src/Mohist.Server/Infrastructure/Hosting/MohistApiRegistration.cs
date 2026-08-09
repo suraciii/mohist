@@ -41,6 +41,7 @@ public static class MohistApiRegistration
         app.MapEpicRoutes();
         app.MapInboxRoutes();
         app.MapAgentDefinitionRoutes();
+        app.MapAgentSubscriptionRoutes();
         app.MapAgentRoutes();
         app.MapAgentJobRoutes();
         app.MapAgentJobReadRoutes();

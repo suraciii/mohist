@@ -1248,6 +1248,8 @@ internal sealed class MohistCliApi
         AgentSessionList,
         AgentSessionShow,
         AgentSessionTranscript,
+        AgentSubscriptionList,
+        AgentSubscription,
         RoutingRuleList,
         RoutingRule,
         ProjectTemplateList,

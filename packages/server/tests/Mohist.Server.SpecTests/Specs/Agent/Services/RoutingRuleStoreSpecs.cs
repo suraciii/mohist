@@ -53,6 +53,46 @@ public sealed class RoutingRuleStoreSpecs : IClassFixture<MohistDbFixture>
     }
 
     [Fact]
+    public async Task CreateWithIdempotencyKeyReplaysAndUpdateIsFinalStateIdempotent()
+    {
+        await SeedAgentAsync("project-idempotency", "agent-idempotency", AgentStatus.Active);
+        using var scope = _fixture.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<RoutingRuleStore>();
+
+        var first = await store.CreateAsync(
+            NewRule("retry", "project-idempotency", "agent-idempotency"),
+            idempotencyKey: "retry-key");
+        var replay = await store.CreateAsync(
+            NewRule("retry", "project-idempotency", "agent-idempotency"),
+            idempotencyKey: "retry-key");
+
+        Assert.Equal(first.Id, replay.Id);
+        Assert.Single(await store.ListAsync("project-idempotency"));
+
+        var updated = await store.UpdateAsync(
+            first.ProjectId,
+            first.Id,
+            null,
+            null,
+            null,
+            null,
+            true,
+            new HashSet<string> { "continue" });
+        var repeated = await store.UpdateAsync(
+            first.ProjectId,
+            first.Id,
+            null,
+            null,
+            null,
+            null,
+            true,
+            new HashSet<string> { "continue" });
+
+        Assert.True(updated!.Continue);
+        Assert.Equal(updated.UpdatedAt, repeated!.UpdatedAt);
+    }
+
+    [Fact]
     public async Task InvalidCreateAndUpdateDoNotPersistChanges()
     {
         await SeedAgentAsync("project-validation", "agent-validation", AgentStatus.Active);

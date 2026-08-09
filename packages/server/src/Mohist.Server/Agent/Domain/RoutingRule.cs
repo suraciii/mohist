@@ -13,6 +13,7 @@ public sealed class RoutingRule
     public string Status { get; set; } = RoutingRuleStatus.Active;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
+    public string? IdempotencyKey { get; set; }
 }
 
 public static class RoutingRuleStatus

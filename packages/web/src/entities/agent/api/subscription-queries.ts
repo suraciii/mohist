@@ -3,15 +3,16 @@ import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useProject } from '../../project/@x/project-context'
 import {
-  archiveAgentSubscription,
   createAgentSubscription,
   deleteAgentSubscription,
   listAgentSubscriptions,
-  restoreAgentSubscription,
+  updateAgentSubscription,
 } from './subscriptions'
 import type {
   AgentSubscriptionCreateRequest,
   AgentSubscriptionDto,
+  AgentSubscriptionListDto,
+  AgentSubscriptionUpdateRequest,
 } from './subscriptions'
 
 const subscriptionKeySegment = 'subscriptions' as const
@@ -34,12 +35,13 @@ export function agentSubscriptionsQueryOptions(projectId: string | null | undefi
     queryKey: agentSubscriptionsQueryKey(projectId, agentRef),
     queryFn: () => listAgentSubscriptions(projectId!, agentRef),
     enabled: !!projectId && !!agentRef,
+    retry: false,
   }
 }
 
 export function useAgentSubscriptions(agentRef: string) {
   const { projectId } = useProject()
-  return useQuery<AgentSubscriptionDto[]>(agentSubscriptionsQueryOptions(projectId, agentRef))
+  return useQuery<AgentSubscriptionListDto>(agentSubscriptionsQueryOptions(projectId, agentRef))
 }
 
 export function createAgentSubscriptionMutationOptions(
@@ -52,15 +54,13 @@ export function createAgentSubscriptionMutationOptions(
       createAgentSubscription(projectId!, agentRef, data),
     onSuccess: (created: AgentSubscriptionDto) => {
       if (projectId) {
-        queryClient.invalidateQueries({
-          queryKey: agentSubscriptionsQueryKey(projectId, agentRef),
-        })
+        queryClient.invalidateQueries({ queryKey: agentSubscriptionsQueryKey(projectId, agentRef) })
         queryClient.invalidateQueries({ queryKey: agentScopedQueryKey(projectId, agentRef) })
       }
-      toast.success(`Subscription "${created.name}" created`)
+      toast.success(`Subscription "${created.name}" saved`)
     },
     onError: (err: Error) => {
-      toast.error(err.message || 'Failed to create subscription')
+      toast.error(err.message || 'Failed to save subscription')
     },
   }
 }
@@ -71,66 +71,33 @@ export function useCreateAgentSubscription(agentRef: string) {
   return useMutation(createAgentSubscriptionMutationOptions(projectId, agentRef, queryClient))
 }
 
-interface TransitionVariables {
+interface SubscriptionVariables {
   subscriptionId: string
 }
 
-export function archiveAgentSubscriptionMutationOptions(
+export function updateAgentSubscriptionMutationOptions(
   projectId: string | null | undefined,
   agentRef: string,
   queryClient: InvalidationClient,
 ) {
   return {
-    mutationFn: ({ subscriptionId }: TransitionVariables) =>
-      archiveAgentSubscription(projectId!, agentRef, subscriptionId),
+    mutationFn: ({ subscriptionId, data }: SubscriptionVariables & { data: AgentSubscriptionUpdateRequest }) =>
+      updateAgentSubscription(projectId!, agentRef, subscriptionId, data),
     onSuccess: (updated: AgentSubscriptionDto) => {
       if (projectId) {
-        queryClient.invalidateQueries({
-          queryKey: agentSubscriptionsQueryKey(projectId, agentRef),
-        })
+        queryClient.invalidateQueries({ queryKey: agentSubscriptionsQueryKey(projectId, agentRef) })
         queryClient.invalidateQueries({ queryKey: agentScopedQueryKey(projectId, agentRef) })
       }
-      toast.success(`Subscription "${updated.name}" archived`)
+      toast.success(`Subscription "${updated.name}" saved`)
     },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to archive subscription')
-    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to update subscription'),
   }
 }
 
-export function useArchiveAgentSubscription(agentRef: string) {
+export function useUpdateAgentSubscription(agentRef: string) {
   const queryClient = useQueryClient()
   const { projectId } = useProject()
-  return useMutation(archiveAgentSubscriptionMutationOptions(projectId, agentRef, queryClient))
-}
-
-export function restoreAgentSubscriptionMutationOptions(
-  projectId: string | null | undefined,
-  agentRef: string,
-  queryClient: InvalidationClient,
-) {
-  return {
-    mutationFn: ({ subscriptionId }: TransitionVariables) =>
-      restoreAgentSubscription(projectId!, agentRef, subscriptionId),
-    onSuccess: (updated: AgentSubscriptionDto) => {
-      if (projectId) {
-        queryClient.invalidateQueries({
-          queryKey: agentSubscriptionsQueryKey(projectId, agentRef),
-        })
-        queryClient.invalidateQueries({ queryKey: agentScopedQueryKey(projectId, agentRef) })
-      }
-      toast.success(`Subscription "${updated.name}" restored`)
-    },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to restore subscription')
-    },
-  }
-}
-
-export function useRestoreAgentSubscription(agentRef: string) {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation(restoreAgentSubscriptionMutationOptions(projectId, agentRef, queryClient))
+  return useMutation(updateAgentSubscriptionMutationOptions(projectId, agentRef, queryClient))
 }
 
 export function deleteAgentSubscriptionMutationOptions(
@@ -139,20 +106,16 @@ export function deleteAgentSubscriptionMutationOptions(
   queryClient: InvalidationClient,
 ) {
   return {
-    mutationFn: ({ subscriptionId }: TransitionVariables) =>
+    mutationFn: ({ subscriptionId }: SubscriptionVariables) =>
       deleteAgentSubscription(projectId!, agentRef, subscriptionId),
-    onSuccess: (_data: unknown, { subscriptionId }: TransitionVariables) => {
+    onSuccess: (_deleted: { id: string; status: 'deleted' }, { subscriptionId }: SubscriptionVariables) => {
       if (projectId) {
-        queryClient.invalidateQueries({
-          queryKey: agentSubscriptionsQueryKey(projectId, agentRef),
-        })
+        queryClient.invalidateQueries({ queryKey: agentSubscriptionsQueryKey(projectId, agentRef) })
         queryClient.invalidateQueries({ queryKey: agentScopedQueryKey(projectId, agentRef) })
       }
       toast.success(`Subscription ${subscriptionId} deleted`)
     },
-    onError: (err: Error) => {
-      toast.error(err.message || 'Failed to delete subscription')
-    },
+    onError: (err: Error) => toast.error(err.message || 'Failed to delete subscription'),
   }
 }
 

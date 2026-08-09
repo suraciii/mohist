@@ -44,9 +44,35 @@ public sealed class RoutingRuleStore : IScopedService
         return row is null ? null : ToDomain(row);
     }
 
-    public async Task<RoutingRule> CreateAsync(RoutingRule rule, string? beforeId = null, string? afterId = null, CancellationToken ct = default)
+    public async Task<RoutingRule?> GetByIdempotencyKeyAsync(string projectId, string key, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        var row = await db.RoutingRules.AsNoTracking()
+            .FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.IdempotencyKey == key, ct);
+        return row is null ? null : ToDomain(row);
+    }
+
+    public async Task<RoutingRule> CreateAsync(
+        RoutingRule rule,
+        string? beforeId = null,
+        string? afterId = null,
+        CancellationToken ct = default,
+        string? idempotencyKey = null)
     {
         ArgumentNullException.ThrowIfNull(rule);
+        idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? null : idempotencyKey.Trim();
+        if (idempotencyKey is { Length: > 256 })
+            throw new RoutingRuleValidationException("Idempotency-Key must be 256 characters or fewer.", "idempotency_key_invalid");
+
+        if (idempotencyKey is not null)
+        {
+            var existing = await GetByIdempotencyKeyAsync(rule.ProjectId, idempotencyKey, ct);
+            if (existing is not null)
+                return existing;
+        }
+
         await ValidateAsync(rule.ProjectId, rule.Name, rule.Match, rule.AgentId, rule.ResponsePrompt, null, ct);
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -56,6 +82,7 @@ public sealed class RoutingRuleStore : IScopedService
         rule.CreatedAt = now;
         rule.UpdatedAt = now;
         rule.Position = InsertPosition(rules, beforeId, afterId);
+        rule.IdempotencyKey = idempotencyKey;
         var newRow = ToRow(rule);
         db.RoutingRules.Add(newRow);
         Renumber(rules, newRow, beforeId, afterId);
@@ -67,6 +94,15 @@ public sealed class RoutingRuleStore : IScopedService
         catch (DbUpdateException ex) when (IsNameConflict(ex))
         {
             throw new RoutingRuleNameConflictException(rule.ProjectId, rule.Name);
+        }
+        catch (DbUpdateException ex) when (IsIdempotencyConflict(ex) && idempotencyKey is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            var existing = await db.RoutingRules.AsNoTracking()
+                .FirstOrDefaultAsync(candidate => candidate.ProjectId == rule.ProjectId && candidate.IdempotencyKey == idempotencyKey, ct);
+            if (existing is not null)
+                return ToDomain(existing);
+            throw;
         }
         return rule;
     }
@@ -88,12 +124,18 @@ public sealed class RoutingRuleStore : IScopedService
         var newMatch = fields.Contains(nameof(match)) ? match : existing.Match;
         var newAgentId = fields.Contains(nameof(agentId)) ? agentId : existing.AgentId;
         var newPrompt = fields.Contains(nameof(responsePrompt)) ? responsePrompt : existing.ResponsePrompt;
-        var newContinue = fields.Contains(nameof(continueValue)) ? continueValue : existing.Continue;
+        var newContinue = fields.Contains("continue") ? continueValue : existing.Continue;
         await ValidateAsync(projectId, newName, newMatch, newAgentId, newPrompt, id, ct);
 
         await using var db = await _dbFactory.CreateDbContextAsync(ct);
         var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
         if (row is null) return null;
+        if (row.Name == newName!.Trim()
+            && row.Match == newMatch
+            && row.AgentId == newAgentId
+            && row.ResponsePrompt == newPrompt
+            && row.Continue == (newContinue ?? false))
+            return ToDomain(row);
         row.Name = newName!.Trim();
         row.Match = newMatch!;
         row.AgentId = newAgentId!;
@@ -109,6 +151,23 @@ public sealed class RoutingRuleStore : IScopedService
             throw new RoutingRuleNameConflictException(projectId, row.Name);
         }
         return ToDomain(row);
+    }
+
+    public async Task<RoutingRule?> DeleteAsync(string projectId, string id, CancellationToken ct = default)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync(ct);
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var row = await db.RoutingRules.FirstOrDefaultAsync(rule => rule.ProjectId == projectId && rule.Id == id, ct);
+        if (row is null) return null;
+        var deleted = ToDomain(row);
+        var rows = await LoadProjectRulesAsync(db, projectId, ct);
+        rows.RemoveAll(candidate => candidate.Id == id);
+        for (var position = 0; position < rows.Count; position++)
+            rows[position].Position = position + 1;
+        db.RoutingRules.Remove(row);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return deleted;
     }
 
     public async Task<RoutingRule?> ArchiveAsync(string projectId, string id, CancellationToken ct = default)
@@ -200,6 +259,7 @@ public sealed class RoutingRuleStore : IScopedService
         Id = row.Id, ProjectId = row.ProjectId, Name = row.Name, Position = row.Position, Match = row.Match,
         AgentId = row.AgentId, ResponsePrompt = row.ResponsePrompt, Continue = row.Continue,
         Status = row.Status, CreatedAt = row.CreatedAt, UpdatedAt = row.UpdatedAt,
+        IdempotencyKey = row.IdempotencyKey,
     };
 
     private static RoutingRuleRow ToRow(RoutingRule rule) => new()
@@ -207,9 +267,16 @@ public sealed class RoutingRuleStore : IScopedService
         Id = rule.Id, ProjectId = rule.ProjectId, Name = rule.Name, Position = rule.Position, Match = rule.Match,
         AgentId = rule.AgentId, ResponsePrompt = rule.ResponsePrompt, Continue = rule.Continue,
         Status = rule.Status, CreatedAt = rule.CreatedAt, UpdatedAt = rule.UpdatedAt,
+        IdempotencyKey = rule.IdempotencyKey,
     };
 
-    private static bool IsNameConflict(DbUpdateException ex) => ex.InnerException is SqliteException sqlite && sqlite.SqliteErrorCode == 19 && sqlite.Message.Contains("RoutingRules", StringComparison.OrdinalIgnoreCase);
+    private static bool IsNameConflict(DbUpdateException ex) => ex.InnerException is SqliteException sqlite
+        && sqlite.SqliteErrorCode == 19
+        && sqlite.Message.Contains("RoutingRules", StringComparison.OrdinalIgnoreCase)
+        && !sqlite.Message.Contains("IdempotencyKey", StringComparison.OrdinalIgnoreCase);
+    private static bool IsIdempotencyConflict(DbUpdateException ex) => ex.InnerException is SqliteException sqlite
+        && sqlite.SqliteErrorCode == 19
+        && sqlite.Message.Contains("IdempotencyKey", StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed class RoutingRuleValidationException(string message, string code) : Exception(message)

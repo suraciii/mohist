@@ -626,6 +626,7 @@ public class MohistDbContext : DbContext
             entity.Property(e => e.Status).HasMaxLength(32).IsRequired();
             entity.Property(e => e.CreatedAt).IsRequired();
             entity.Property(e => e.UpdatedAt).IsRequired();
+            entity.Property(e => e.IdempotencyKey).HasMaxLength(256);
             entity.HasIndex(e => new { e.ProjectId, e.Name })
                 .IsUnique()
                 .HasDatabaseName("UX_RoutingRules_ProjectId_Name");
@@ -633,6 +634,10 @@ public class MohistDbContext : DbContext
                 .HasDatabaseName("IX_RoutingRules_ProjectId_Position");
             entity.HasIndex(e => e.ProjectId)
                 .HasDatabaseName("IX_RoutingRules_ProjectId");
+            entity.HasIndex(e => new { e.ProjectId, e.IdempotencyKey })
+                .IsUnique()
+                .HasFilter("\"IdempotencyKey\" IS NOT NULL")
+                .HasDatabaseName("UX_RoutingRules_ProjectId_IdempotencyKey");
         });
 
         modelBuilder.Entity<WebhookSubscriptionRow>(entity =>

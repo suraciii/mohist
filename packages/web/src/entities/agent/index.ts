@@ -18,8 +18,7 @@ export {
   agentSubscriptionsQueryKey,
   useAgentSubscriptions,
   useCreateAgentSubscription,
-  useArchiveAgentSubscription,
-  useRestoreAgentSubscription,
+  useUpdateAgentSubscription,
   useDeleteAgentSubscription,
 } from './api/subscription-queries'
 export { costRollupQueryKey, fetchCostRollup, useCostRollup } from './api/cost-rollup'
@@ -59,17 +58,16 @@ export type {
   AgentUpdateRequest,
 } from './api/client'
 export {
-  archiveAgentSubscription,
   createAgentSubscription,
   deleteAgentSubscription,
-  formatAgentSubscriptionFilter,
   listAgentSubscriptions,
-  restoreAgentSubscription,
+  updateAgentSubscription,
 } from './api/subscriptions'
 export type {
   AgentSubscriptionCreateRequest,
   AgentSubscriptionDto,
-  AgentSubscriptionFilterDto,
+  AgentSubscriptionListDto,
+  AgentSubscriptionUpdateRequest,
 } from './api/subscriptions'
 export {
   cancelGenericSession,
