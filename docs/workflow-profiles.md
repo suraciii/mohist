@@ -223,7 +223,7 @@ read from stdin. The save operation then checks Action availability and Action
 Input against contracts from the current Runner.
 
 See [CLI Reference](cli-reference.md#workflow-profile) for the commands. A
-A Profile ID must be unique within its Project; global uniqueness is not
+Profile ID must be unique within its Project; global uniqueness is not
 required. It may contain `/`. Pass the complete ID as one CLI argument. Built-in
 Profiles use `mohist/<name>`. Custom Profiles must use an ID that describes
 their purpose and remains stable.
@@ -238,11 +238,11 @@ their purpose and remains stable.
 - An Issue with an active Workflow cannot currently change its Profile. The
   target behavior allows selecting the Profile for the next run without
   changing the current run.
-- Mohist already reloads the Definition when a Stage starts and reads current
-  Variables and Prompts before a normal Task starts. However, a recovery
-  self-retry can still carry values from the previous attempt into the next
-  retry (issue #465). Profile collection migration must preserve the body
-  semantics. It must not add a Definition snapshot to WorkflowRun or turn the
-  input used by one Task into the declaration for a later attempt.
+- Mohist reloads the Definition when a Stage starts and reads current Variables
+  and Prompts before a normal Task starts. Recovery self-retry and manual retry
+  now reconstruct the original declaration and resolve a fresh attempt snapshot
+  (issue #465). Profile collection migration must preserve those semantics. It
+  must not add a Definition snapshot to WorkflowRun or turn the input used by one
+  Task into the declaration for a later attempt.
 - Some built-in Tasks still use legacy Action Input. The target interfaces are
   defined by the Action documentation.
