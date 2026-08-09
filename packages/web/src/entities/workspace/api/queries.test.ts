@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
-import { closeWorkspaceMutationOptions } from './queries'
+import { closeWorkspaceMutationOptions, createWorkspaceMutationOptions } from './queries'
 
 useMswServer()
 
@@ -44,5 +44,42 @@ describe('closeWorkspaceMutationOptions', () => {
     const invalidatedKeys = qc.invalidateQueries.mock.calls.map((call) => call[0].queryKey)
     expect(invalidatedKeys).toEqual([['workspaces']])
     expect(toast.success).toHaveBeenCalledWith('Workspace archived')
+  })
+})
+
+describe('createWorkspaceMutationOptions', () => {
+  it('posts the explicit name and repository membership', async () => {
+    const captured: { url: string; method: string; body: unknown }[] = []
+    server.use(
+      http.post('*/api/projects/:projectId/workspaces', async ({ request }) => {
+        captured.push({
+          url: new URL(request.url).pathname,
+          method: request.method,
+          body: await request.json(),
+        })
+        return HttpResponse.json({ success: true, data: { projectId: 'proj-1', name: 'manual', repositories: ['main'] } })
+      }),
+    )
+
+    const result = await createWorkspaceMutationOptions('proj-1', createInvalidationClient()).mutationFn({
+      name: 'manual',
+      repos: ['main'],
+    })
+
+    expect(captured).toEqual([{
+      url: '/api/projects/proj-1/workspaces',
+      method: 'POST',
+      body: { name: 'manual', repos: ['main'] },
+    }])
+    expect(result).toMatchObject({ name: 'manual', repositories: ['main'] })
+  })
+
+  it('fails closed without a project id and invalidates workspaces after creation', async () => {
+    const missingProject = createWorkspaceMutationOptions(null, createInvalidationClient())
+    expect(() => missingProject.mutationFn({ name: 'manual', repos: [] })).toThrow('Project is required')
+
+    const queryClient = createInvalidationClient()
+    createWorkspaceMutationOptions('proj-1', queryClient).onSuccess()
+    expect(queryClient.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['workspaces'] })
   })
 })

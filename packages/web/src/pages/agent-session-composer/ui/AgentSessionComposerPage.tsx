@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ComponentType } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon } from 'lucide-react'
+import { BotIcon, ChevronDownIcon, XIcon, AlertTriangleIcon, SearchIcon, InfoIcon, PlusIcon } from 'lucide-react'
 import {
   getAgentAvailabilityFeedback,
   getAgentLaunchErrorFeedback,
@@ -24,6 +24,7 @@ import type { Repository } from '../../../entities/project'
 import { useRepositories } from '../../../entities/project'
 import type { Workspace } from '../../../entities/workspace'
 import { useWorkspaces } from '../../../entities/workspace'
+import { CreateWorkspaceDialog } from '../../../features/create-workspace'
 import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { AttachmentComposer as DefaultAttachmentComposer } from '../../../shared/ui/attachment-composer'
 import { AttachmentResults, type AttachmentResultAccepted, type AttachmentResultRejected } from '../../../shared/ui/attachment-results'
@@ -69,6 +70,7 @@ function ContextPicker({
   epics,
   loading,
   onChange,
+  onCreateWorkspace,
 }: {
   contextRefs: ContextRef[]
   repositories: Repository[]
@@ -77,6 +79,7 @@ function ContextPicker({
   epics: EpicWithProgress[]
   loading: boolean
   onChange: (type: ContextRef['type'], value: string) => void
+  onCreateWorkspace: () => void
 }) {
   const selectedValue = (type: ContextRef['type']) => contextRefs.find((item) => item.type === type)?.value ?? ''
   const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm'
@@ -99,7 +102,20 @@ function ContextPicker({
         </select>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="launch-workspace">Workspace</Label>
+        <div className="flex items-center justify-between gap-2">
+          <Label htmlFor="launch-workspace">Workspace</Label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={onCreateWorkspace}
+            disabled={loading}
+            data-testid="create-workspace-from-composer"
+          >
+            <PlusIcon className="mr-1 h-3.5 w-3.5" aria-hidden="true" />
+            Create
+          </Button>
+        </div>
         <select
           id="launch-workspace"
           aria-label="Workspace"
@@ -112,6 +128,11 @@ function ContextPicker({
           <option value="">No workspace selected</option>
           {workspaces.map((workspace) => <option key={workspace.name} value={workspace.name}>{workspace.name}</option>)}
         </select>
+        {workspaces.length === 0 && !loading && (
+          <p className="text-xs text-muted-foreground" data-testid="composer-no-workspaces">
+            No active workspaces.
+          </p>
+        )}
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="launch-issue">Issue</Label>
@@ -357,6 +378,8 @@ export function AgentSessionComposerPage({
 
   const [prompt, setPrompt] = useState('')
   const [promptTouched, setPromptTouched] = useState(false)
+  const [createWorkspaceOpen, setCreateWorkspaceOpen] = useState(false)
+  const [createdWorkspace, setCreatedWorkspace] = useState<Workspace | null>(null)
   const [launchAttachmentResult, setLaunchAttachmentResult] = useState<{
     accepted: AttachmentResultAccepted[]
     rejected: AttachmentResultRejected[]
@@ -403,8 +426,12 @@ export function AgentSessionComposerPage({
     [contextRefs],
   )
   const activeWorkspaces = useMemo(
-    () => workspaces.filter((workspace) => workspace.status === 'active'),
-    [workspaces],
+    () => {
+      const active = workspaces.filter((workspace) => workspace.status === 'active')
+      if (!createdWorkspace || active.some((workspace) => workspace.name === createdWorkspace.name)) return active
+      return [...active, createdWorkspace]
+    },
+    [createdWorkspace, workspaces],
   )
   const selectedRepository = contextByType.get('repository')?.value ?? null
   const selectedWorkspaceRef = contextByType.get('workspace')
@@ -425,6 +452,20 @@ export function AgentSessionComposerPage({
       (name) => name.localeCompare(selectedRepository, undefined, { sensitivity: 'accent' }) === 0,
     ),
   )
+  const initialWorkspaceRepositoryNames = useMemo(
+    () => selectedRepository ? [selectedRepository] : [],
+    [selectedRepository],
+  )
+  const handleWorkspaceCreated = useCallback((workspace: Workspace) => {
+    setCreatedWorkspace(workspace)
+    const keepRepository = selectedRepository !== null && workspace.repositories.some(
+      (name) => name.localeCompare(selectedRepository, undefined, { sensitivity: 'accent' }) === 0,
+    )
+    setContextRefs((previous) => [
+      ...previous.filter((item) => item.type !== 'workspace' && (item.type !== 'repository' || keepRepository)),
+      { type: 'workspace', label: `Workspace: ${workspace.name}`, value: workspace.name, workspaceField: 'workspace' },
+    ])
+  }, [selectedRepository])
   const selectedIssue = contextByType.get('issue')?.value ?? null
   const selectedEpic = contextByType.get('epic')?.value ?? null
   const promptEmpty = !prompt.trim()
@@ -639,6 +680,7 @@ export function AgentSessionComposerPage({
             epics={epics}
             loading={contextLoading}
             onChange={updateContextRef}
+            onCreateWorkspace={() => setCreateWorkspaceOpen(true)}
           />
           {selectedAgent && !workspaceScopeConfirmed && (
             <div
@@ -747,6 +789,14 @@ export function AgentSessionComposerPage({
             {launchMutation.isPending ? 'Launching...' : 'Launch Session'}
           </Button>
         </div>
+        {createWorkspaceOpen && (
+          <CreateWorkspaceDialog
+            open
+            onClose={() => setCreateWorkspaceOpen(false)}
+            initialRepositoryNames={initialWorkspaceRepositoryNames}
+            onCreated={handleWorkspaceCreated}
+          />
+        )}
       </div>
     </div>
   )

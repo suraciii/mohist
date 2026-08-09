@@ -7,6 +7,48 @@ namespace Mohist.Server.UnitTests.Agent;
 public sealed class AgentJobDispatchProbeTests
 {
     [Fact]
+    public async Task WaitForAssignmentPreparedAsync_WithoutTimeout_CompletesWhenSignalArrivesBeforeWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+
+        await probe.AssignmentPreparedAsync("job", "runner", "work");
+
+        await probe.WaitForAssignmentPreparedAsync("job");
+    }
+
+    [Fact]
+    public async Task WaitForAssignmentPreparedAsync_WithoutTimeout_CompletesWhenSignalArrivesAfterWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+        var waiting = probe.WaitForAssignmentPreparedAsync("job");
+
+        await probe.WaiterRegisteredAsync("job");
+        await probe.AssignmentPreparedAsync("job", "runner", "work");
+
+        await waiting;
+    }
+
+    [Fact]
+    public async Task WaitForAssignmentPreparedAsync_WithoutTimeout_CancellationReleasesWaiter()
+    {
+        var probe = new AgentJobDispatchProbe();
+        using var cancellation = new CancellationTokenSource();
+        var waiting = probe.WaitForAssignmentPreparedAsync("job", cancellation.Token);
+
+        await probe.WaiterRegisteredAsync("job");
+        Assert.Equal(1, probe.RetainedSignalCount("job"));
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waiting);
+        Assert.Equal(0, probe.RetainedSignalCount("job"));
+
+        var nextWaiting = probe.WaitForAssignmentPreparedAsync("job");
+        await probe.WaiterRegisteredAsync("job");
+        await probe.AssignmentPreparedAsync("job", "runner", "work");
+        await nextWaiting;
+    }
+
+    [Fact]
     public async Task WaitForAssignmentPreparedAsync_CompletesWhenSignalArrivesBeforeWaiter()
     {
         var probe = new AgentJobDispatchProbe();

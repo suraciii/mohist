@@ -46,6 +46,29 @@ public sealed class AgentJobDispatchProbe : IAgentJobDispatchObserver
 
     public async Task WaitForAssignmentPreparedAsync(
         string agentJobId,
+        CancellationToken cancellationToken = default)
+    {
+        if (_preparedCounts.ContainsKey(agentJobId))
+            return;
+
+        var signal = AcquireSignal(agentJobId);
+        try
+        {
+            if (_preparedCounts.ContainsKey(agentJobId))
+                signal.Completion.TrySetResult();
+
+            signal.WaiterRegistered.TrySetResult();
+            await signal.Completion.Task.WaitAsync(cancellationToken);
+        }
+        finally
+        {
+            if (signal.ReleaseWaiter())
+                RemoveSignal(agentJobId, signal);
+        }
+    }
+
+    public async Task WaitForAssignmentPreparedAsync(
+        string agentJobId,
         TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {

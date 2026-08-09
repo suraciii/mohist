@@ -44,19 +44,17 @@ public abstract class AgentSessionLaunchRoutesTestSupport
         string runnerId,
         string expectedSessionId)
     {
-        await AgentJobConvergence.WaitForAssignmentPreparedAsync(
-            _fixture.Grains.GetGrain<IAgentJobGrain>(agentJobId));
-        // Assignment-prepared does not guarantee the dispatch has propagated to
-        // the runner's poll endpoint; retry over a window (as PollAgentJobDispatchAsync
-        // does) instead of a fixed two attempts, which flaked on slower CI runners.
-        var dispatch = (await TestWait.ForAsync(
-            () => PollDispatchOnceAsync(runnerId, expectedSessionId),
-            candidate => candidate is not null,
-            TimeSpan.FromSeconds(5),
-            TimeSpan.FromMilliseconds(25),
-            $"Runner '{runnerId}' to return AgentJob '{agentJobId}' for AgentSessionId '{expectedSessionId}'"))!;
+        await _fixture.AgentJobDispatches.WaitForAssignmentPreparedAsync(agentJobId);
+        var dispatch = await PollDispatchOnceAsync(
+            runnerId,
+            expectedSessionId,
+            expectedAgentJobId: agentJobId);
+
+        Assert.NotNull(dispatch);
 
         Assert.Equal(agentJobId, dispatch.AgentJobId);
+        Assert.Equal(expectedSessionId, dispatch.AgentSessionId);
+        Assert.Equal(WorkDispatchOwnerKinds.AgentJob, dispatch.OwnerKind);
         return dispatch;
     }
 
@@ -93,9 +91,9 @@ public abstract class AgentSessionLaunchRoutesTestSupport
                 && agentJobIdElement.ValueKind != JsonValueKind.Null
                 ? agentJobIdElement.GetString()
                 : null;
-            var matchesSession = expectedSessionId is not null && polledSessionId == expectedSessionId;
-            var matchesAgentJob = expectedAgentJobId is not null && polledAgentJobId == expectedAgentJobId;
-            if (match is null && (matchesSession || matchesAgentJob))
+            var matchesSession = expectedSessionId is null || polledSessionId == expectedSessionId;
+            var matchesAgentJob = expectedAgentJobId is null || polledAgentJobId == expectedAgentJobId;
+            if (match is null && matchesSession && matchesAgentJob)
             {
                 var workId = data.GetProperty("workId").GetString() ?? string.Empty;
                 var projectId = data.TryGetProperty("projectId", out var projectIdElement)
