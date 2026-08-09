@@ -4,17 +4,18 @@ status: implemented
 
 # Workflow Definition
 
-Workflow Definition 是 Workflow Profile 的核心内容：声明阶段、任务、检查、审批点与恢复
-规则的 YAML 文档。它是产品命令面之一，语法与作者可见语义的权威在
-[`docs/workflow-definition.md`](../../docs/workflow-definition.md)。
-本篇定义它的语义模型与唯一权威校验器；不复述语法。
+A Workflow Definition is the core content of a Workflow Profile: a YAML document that declares
+stages, tasks, checks, approval points, and recovery rules. It is one of the product's command
+surfaces. [`docs/workflow-definition.md`](../../docs/workflow-definition.md) is authoritative for
+syntax and author-visible semantics. This document defines the semantic model and its single
+authoritative validator; it does not repeat the syntax.
 
 ## Model
 
-### 语义模型
+### Semantic Model
 
-语义模型与载体语法分离：YAML 解析为下列类型。引擎、runner 与校验器只面对类型，不面对
-语法树。
+The semantic model is separate from its carrier syntax. YAML is parsed into the following types.
+The engine, Runner, and validator operate on these types, not on a syntax tree.
 
 ```text
 WorkflowDefinition(Approval?, Stages[])
@@ -28,91 +29,104 @@ Recovery(Budget = 0, Handlers[]: Handler(When, Tasks[], RetrySelf = false))
 Check(Id, Uses, Title?, With?)
 ```
 
-- 语言的每个构造都有类型对应。`With` 是唯一的开放结构：Definition 层只要求它是 JSON
-  object，并递归校验其中的模板表达式；内部 key、required 与值类型由所选 Action 的
-  manifest 裁决。
-- `Expect` 是一等构造，位于 task 顶层，不进入 `With`。执行分工（executor 验证、合成
-  promise output）见 [`actions.md`](actions.md) 与 [`task-dispatch.md`](task-dispatch.md)。
-- 审批反馈任务就是有序的 `Task[]`，不设独立类型。全部完成后，当前 stage 的 checks
-  重新执行。
+- Every language construct has a corresponding type. `With` is the only open structure: the
+  Definition layer only requires a JSON object and recursively validates template expressions in
+  it. The selected Action manifest decides which keys are allowed, which are required, and what
+  value types they accept.
+- `Expect` is a first-class construct at the task level and does not enter `With`. See
+  [`actions.md`](actions.md) and [`task-dispatch.md`](task-dispatch.md) for the execution split
+  between executor validation and synthesized promise output.
+- Approval feedback tasks are an ordered `Task[]`; they do not need a distinct type. The current
+  stage's checks run again after all feedback tasks complete.
 
-### 不属于模型的
+### Outside the Model
 
-- 执行状态：`recoveryRemaining`、attempt、任务输出。不能在 YAML 中声明；见
-  [`recovery.md`](recovery.md)。
-- Variables 值与 Prompt 正文：独立资源，模型只持有 `${{ }}` 引用。
-- Profile 元数据（id、名称、适用场景）：由 Profile 资源持有；definition 顶层只有
-  `approval` 与 `stages`。
+- Execution state: `recoveryRemaining`, attempts, and task output. These cannot be declared in
+  YAML; see [`recovery.md`](recovery.md).
+- Variable values and Prompt bodies: these are separate resources, and the model only holds
+  `${{ }}` references.
+- Profile metadata, including ID, name, and applicable scenario: the Profile resource owns this
+  metadata. The Definition top level contains only `approval` and `stages`.
 
-### 放置
+### Placement
 
-模型、解析器与校验器放在独立类库 `Mohist.Workflow.Definition`，无 Orleans / ASP.NET
-依赖（Orleans surrogate 留在 server，沿用现有 `WorkflowDefinitionSurrogates` 方式）。
-server 与 CLI 都引用它：保存 API 与 `mo` 本地校验跑同一份代码。
+The model, parser, and validator live in the independent `Mohist.Workflow.Definition` library with
+no Orleans or ASP.NET dependency. Orleans surrogates remain in Server, following the existing
+`WorkflowDefinitionSurrogates` pattern. Both Server and CLI reference this library, so the save API
+and local `mo` validation run the same code.
 
 ## Semantics
 
-### 解析即校验
+### Parsing Is Validation
 
-唯一入口：`Parse(yaml) → Definition | Error[]`。
+There is one entry point: `Parse(yaml) -> Definition | Error[]`.
 
-- 未知 key 是错误，不忽略、不降级为告警。agent 的生成—校验—修复循环依赖这个信号。
-- 类型错误是错误。`budget: abc` 报错，不静默取默认值。
-- 错误全量收集，不在首错中断。
-- 每条错误 = YAML 路径 + 领域语言消息，不出现异常堆栈或实现术语：
+- An unknown key is an error, not something to ignore or downgrade to a warning. The Agent's
+  generate-validate-repair loop depends on this signal.
+- A type mismatch is an error. `budget: abc` reports an error instead of silently taking a default.
+- All errors are collected; validation does not stop at the first error.
+- Each error consists of a YAML path and a message in domain language, without a stack trace or
+  implementation terminology:
 
 ```text
-stages[1].tasks[0].recovery.handlers[0]: handler 需要声明 tasks 或 retrySelf 之一
+stages[1].tasks[0].recovery.handlers[0]: handler must declare tasks or retrySelf
 ```
 
-### 校验规则
+### Validation Rules
 
-| 位置 | 规则 |
+| Location | Rule |
 |---|---|
-| 顶层 | 只允许 `approval`、`stages`；`stages` 非空 |
-| approval.feedback | `tasks` 非空；每项遵守 task 规则 |
-| stage | `stage` 名非空且在 definition 内唯一；`tasks` 非空 |
-| stage | `lockBehavior` 仅允许 `sequential`，且必须与非空 `resources` 同时出现；`resources` 不得单独出现 |
-| task | `id` 非空且在所属任务列表内唯一；`uses` 必填；`title` 可选 |
-| expect | `files[].path` 非空；`markers[].oneOf` 非空；`failIf` 必须是 `oneOf` 的成员 |
-| artifacts | `files[].path` 非空 |
-| setVars | key 非空；值必须是 `output.` 开头的输出字段路径 |
-| recovery | `budget` 为非负整数；`handlers` 非空、有序 |
-| handler | 可选 `when` 形如 `field=value`，两侧非空；缺省时为唯一且最后一个默认 handler；至少声明 `tasks` 或 `retrySelf` 之一 |
-| check | `id` 非空且在 stage 内唯一；`uses` 必填 |
-| 模板 | 所有 `${{ }}` 可解析；根命名空间必须在产品参考的表内；`failure.*` 只允许出现在 recovery handler 的 tasks 内 |
-| 模板 | `tasks.<id>` 引用的 id 必须是 definition 中声明的任务 |
-| with | 缺省或 JSON object；Definition 校验器不解释内部 key，只递归校验值中的模板表达式 |
+| top level | Only `approval` and `stages` are allowed; `stages` must not be empty |
+| approval.feedback | `tasks` must not be empty; every item follows the task rules |
+| stage | `stage` name must not be empty and must be unique within the Definition; `tasks` must not be empty |
+| stage | `lockBehavior` only accepts `sequential` and must appear with non-empty `resources`; `resources` cannot appear alone |
+| task | `id` must not be empty and must be unique within its task list; `uses` is required; `title` is optional |
+| expect | `files[].path` must not be empty; `markers[].oneOf` must not be empty; `failIf` must be a member of `oneOf` |
+| artifacts | `files[].path` must not be empty |
+| setVars | key must not be empty; value must be an output field path beginning with `output.` |
+| recovery | `budget` must be a non-negative integer; `handlers` must be non-empty and ordered |
+| handler | Optional `when` has the form `field=value`, with both sides non-empty; an omitted `when` denotes the only default handler and it must be last; at least one of `tasks` or `retrySelf` is required |
+| check | `id` must not be empty and must be unique within the stage; `uses` is required |
+| template | Every `${{ }}` must parse; the root namespace must appear in the product reference table; `failure.*` is allowed only in recovery handler tasks |
+| template | An ID referenced by `tasks.<id>` must be declared in the Definition |
+| with | Omitted or a JSON object; the Definition validator does not interpret internal keys and only recursively validates template expressions in values |
 
-### 校验入口
+### Validation Entry Points
 
-同一实现暴露三处，规则只有上表一份：
+The same implementation is exposed through three entry points, with only one copy of the rules
+above:
 
-- Profile 保存 API：非法 definition 拒绝保存，返回错误列表。
-- `mo workflow validate --file <path>`：本地校验，不解析 Project、不经服务器；`--file -`
-  从 stdin 读取。
-- CI：内置 profile 与 `docs/workflow-definition.md` 中的完整示例作为黄金用例，必须通过
-  校验——语法参考与校验器由此互相锁定。含 `<...>` 占位符的骨架片段不进用例。
+- Profile save API: rejects an invalid Definition and returns the error list.
+- `mo workflow validate --file <path>`: validates locally without resolving a Project or contacting
+  Server; `--file -` reads from stdin.
+- CI: built-in Profiles and complete examples from `docs/workflow-definition.md` are golden cases
+  and must validate. This locks the syntax reference and validator together. Skeleton snippets that
+  contain `<...>` placeholders are excluded.
 
-Profile 保存入口组合两种互不重叠的判断：本篇校验器拥有 Definition 结构、字段类型与
-模板语言；Action catalog 拥有 `uses` 是否存在以及 `with` 的 key、required 与类型。
-两类错误使用同一 YAML path 规则并标明来源，但不能互相复制规则。纯本地命令只运行前者；
-保存入口把通过解析得到的语义模型交给 Action catalog 校验。
+The Profile save entry point combines two non-overlapping decisions. The validator in this
+document owns Definition structure, field types, and the template language. The Action catalog
+owns whether `uses` exists and which `with` keys, required fields, and types it accepts. Both kinds
+of errors use the same YAML path convention and identify their source, but neither duplicates the
+other's rules. The pure local command runs only Definition validation. The save entry point passes
+the parsed semantic model to Action catalog validation.
 
-### 运行时任务
+### Runtime Tasks
 
-`WorkflowDefinition` 不是完整执行计划，`WorkflowRun` 也不保存 Definition snapshot。
-Run 创建时物化推进生命周期所需的 StageRun 和审批事实；每个 Stage 初始化时重新读取所选
-Profile 的当前 Definition。已初始化 Stage 不被后续编辑追溯改写。运行期间 recovery、
-retry、审批反馈和控制命令（如 `mo issue rebase` 插入 `uses: mohist/rebase`）都可以产生
-新的 `TaskRun`，使用相同的 dispatch、report 与 Variables 解析语义。
+`WorkflowDefinition` is not a complete execution plan, and `WorkflowRun` does not store a
+Definition snapshot. Run creation materializes the StageRun and approval facts required to advance
+the lifecycle. When each Stage initializes, it rereads the current Definition of the selected
+Profile. Later edits do not retroactively rewrite an initialized Stage. During a run, recovery,
+retry, approval feedback, and control commands such as `mo issue rebase`, which inserts
+`uses: mohist/rebase`, may all create new `TaskRun` instances. They use the same dispatch, report,
+and Variables resolution semantics.
 
-运行时插入的任务不再过 definition 校验：runner 构造的恢复任务来自已校验 definition 的
-子树；服务端控制命令构造的任务由构造方保证合法。
+Runtime-inserted tasks do not pass through Definition validation again. Runner-built recovery
+tasks come from a subtree of an already validated Definition. The producer of a task built by a
+Server control command is responsible for its validity.
 
 ## Examples
 
-未知 key（拼写错误）：
+Unknown key caused by a typo:
 
 ```yaml
 handlers:
@@ -121,10 +135,10 @@ handlers:
 ```
 
 ```text
-stages[0].tasks[0].recovery.handlers[0]: 未知字段 retryself，是否想写 retrySelf
+stages[0].tasks[0].recovery.handlers[0]: unknown field retryself; did you mean retrySelf
 ```
 
-lockBehavior 缺少 resources：
+`lockBehavior` without `resources`:
 
 ```yaml
 - stage: integrate
@@ -133,26 +147,28 @@ lockBehavior 缺少 resources：
 ```
 
 ```text
-stages[1]: lockBehavior 需要同时声明非空 resources
+stages[1]: lockBehavior requires non-empty resources
 ```
 
-Definition 校验器不检查 `with` 内部 key：键名由各 Action 契约管理，只检查值里的模板
-表达式。Profile 保存入口随后可以把同一任务交给 Action catalog，因此“Definition 合法”
-不等于“所选 Action 及其输入在当前 Project 可用”。
+The Definition validator does not inspect keys inside `with`. Each Action contract owns those
+keys; this validator only checks template expressions in their values. The Profile save entry point
+can then submit the same task to the Action catalog. A valid Definition therefore does not imply
+that the selected Action and its inputs are available in the current Project.
 
-## 实现侧语义索引
+## Implementation Semantics Index
 
-| 构造 | 实现语义所在 |
+| Construct | Authoritative implementation semantics |
 |---|---|
-| `with` / `expect` 的展开时机与 dispatch 输入 | [`task-dispatch.md`](task-dispatch.md) |
-| `expect` / `artifacts` / `setVars` / `error` 的执行分工 | [`actions.md`](actions.md) |
-| recovery 的匹配位置、预算流转（`recoveryRemaining`）、人工 retry 重建 | [`recovery.md`](recovery.md) |
-| `vars.*` 的合并算法与写入 API | [`variables.md`](variables.md) |
-| Profile 资源、实时 Definition 解析与 API | [`profile.md`](profile.md) |
-| 内置 profile 的取舍与不变量 | [`builtin-workflows.md`](builtin-workflows.md) |
+| expansion timing and dispatch input for `with` / `expect` | [`task-dispatch.md`](task-dispatch.md) |
+| execution ownership for `expect` / `artifacts` / `setVars` / `error` | [`actions.md`](actions.md) |
+| recovery matching, `recoveryRemaining` budget flow, and manual retry reconstruction | [`recovery.md`](recovery.md) |
+| merge algorithm and write API for `vars.*` | [`variables.md`](variables.md) |
+| Profile resources, live Definition parsing, and APIs | [`profile.md`](profile.md) |
+| built-in Profile tradeoffs and invariants | [`builtin-workflows.md`](builtin-workflows.md) |
 
 ## Status
 
-权威 Definition 校验器已实现并由 Profile 保存入口、`mo workflow validate --file` 和 CI
-黄金用例共同使用。未知字段、字段类型、`check.id`、`uses` 必填及保存期预校验均由
-Definition 校验器负责；Action 是否存在以及 `with` 的契约仍由 Action catalog 负责。
+The authoritative Definition validator is implemented and shared by the Profile save entry point,
+`mo workflow validate --file`, and CI golden cases. The Definition validator owns unknown fields,
+field types, `check.id`, required `uses`, and save-time structural validation. The Action catalog
+continues to own Action availability and the `with` contract.
