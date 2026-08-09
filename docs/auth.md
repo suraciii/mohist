@@ -1,167 +1,194 @@
 # Authentication and Access
 
-Mohist is a self-hosted software production system for one person. Its
-authentication model therefore assumes **one administrator, you**, plus several
-machine callers. Every request must belong to an authenticated identity. Who is
-calling determines what they can do and provides a trusted actor for Activity
-and Approval records.
+Mohist is self-hosted for one person, but it is not used by one process. The Web
+UI, remote CLI, Runner, integrations, scripts, and external Agents all need to
+act without sharing the administrator's long-lived secret. Mohist therefore
+keeps one human administrator and gives each machine caller a separate,
+revocable identity.
 
-## Access Overview
+This model preserves zero-login use on the Server host while making remote
+effects attributable. It also limits a leaked credential to the access selected
+when that credential was issued.
 
-| Caller | Proof of identity | Access |
+## Choose the Right Access Method
+
+| Caller | Access method | Why |
 |---|---|---|
-| Local `mo` on the Server host | Reads the administrator credential file automatically | Operator |
-| Remote `mo` | Device authorization with `mo auth login` | Operator |
-| Web UI | Exchanges an administrator-level token for a browser session | Operator |
-| Scripts, CI, and external Agents | Personal access token in `MOHIST_TOKEN` | Operator or read-only, selected at issuance |
-| Runner | Registers during installation and receives a machine credential | Runner surface only |
-| Local service processes, such as a Slack adapter | Service credential file | Operator |
-| Inbound integrations and external callbacks | Endpoint-specific token | Only that integration endpoint, scoped to a Project |
-| GitHub | Native GitHub HMAC signature | GitHub ingress endpoints only |
+| Local `mo` on the Server host | Administrator credential file, discovered automatically | Access to the host is already the local trust boundary. |
+| Remote `mo` | Device authorization with `mo auth login` | The administrator approves the machine without copying the root credential to it. |
+| Web UI | Administrator-level token exchanged for a browser session | The browser receives a revocable session instead of retaining the root token. |
+| Script or CI | Personal access token in `MOHIST_TOKEN` | Each automation can have its own lifetime and read or write capability. |
+| Direct external Agent caller | Personal access token with an explicit Project grant | A headless caller can reach only the private Projects selected for that token. |
+| Runner | Machine credential issued during registration | A Runner can claim and report work but cannot act as the administrator. |
+| Local service or inbound integration | Dedicated service or integration credential | A compromise remains inside that component's boundary. |
+| GitHub | Native GitHub signature | Mohist can trust the platform event without sharing a general Mohist token. |
 
-Every request must present an identity that Mohist validates consistently.
-Invalid authentication returns 401. Insufficient permission returns 403. The
-unauthenticated surface is a closed list: health checks, login pages and APIs,
-and GitHub ingress endpoints.
+Invalid credentials are rejected as unauthenticated. Valid credentials without
+the required capability are rejected as forbidden. Mohist does not reveal
+whether a private resource exists until the caller has access to its Project.
 
-## Identity Model
+## One Administrator, Several Machine Identities
 
-There are three caller types:
+Mohist has one administrator. It does not create a second Mohist login, role, or
+permission group for a collaborator. Instead, each machine receives a separate
+credential, and each Mohist Agent receives a stable identity for attribution.
 
-| Caller | Meaning | Origin |
-|---|---|---|
-| Administrator | The system's only user, with every capability | Created automatically during Server installation |
-| Machine | Runner, local service such as a Slack adapter, script, external Agent, or inbound integration | Holds its own token |
-| Agent | Attribution identity for a Mohist Agent | Created automatically with the Agent definition |
+This separation has three consequences:
 
-Rules:
+- A token can expire or be revoked without rotating every other credential.
+- Activity and Approval records identify the actual administrator, machine, or
+  Agent that caused an effect.
+- Agent attribution does not make the Agent a login identity. External callers
+  authenticate with their own personal access token.
 
-- There is one administrator. There is no second user, role, or permission
-  group.
-- Each token can be issued, revoked, and expired independently. Compromise of
-  one token does not affect the others.
-- An issued token is shown in full only once. The Mohist database stores only
-  its fingerprint, so a database disclosure does not reveal the token.
-- Agent identity provides attribution. Mohist records an Agent's actions under
-  that Agent instead of the administrator.
+Mohist shows an issued token in full only once and stores only its fingerprint.
+A database disclosure therefore does not reveal the token value.
 
-## Collaborators Do Not Get Mohist Logins
+## Collaborators Use Platform Identity
 
-Mohist does not issue credentials to a second person. Colleagues participate
-through identities on external platforms. They review a Pull Request under
-their GitHub account and are checked against the approver list; see
-[GitHub](github.md). They invoke an Agent as a Slack workspace member and are
-checked by Connection access policy; see [Slack](slack.md). The platform
-authenticates the person. Mohist validates only the platform-backed identity
-and configured list.
+Mohist does not issue credentials to another person. A colleague reviews a Pull
+Request through their GitHub account and is checked against the approver list;
+see [GitHub](github.md). A Slack workspace member invokes an Agent through a
+Connection access policy; see [Slack](slack.md).
 
-## Local Use Requires No Login
+The platform proves who the person is. Mohist validates the platform-backed
+identity and the configured access policy. That boundary is separate from the
+personal access token required by a direct external Agent caller.
 
-Use on the Server host remains login-free. On first start, Server generates an
-administrator credential file under `~/.mohist/` with mode 600. Local `mo`
-reads it automatically and receives administrator identity. The ability to read
-this file is the local trust boundary, equivalent to the ability to sign in to
-the host through SSH.
+## Local CLI Requires No Login
 
-## Remote CLI Device Authorization
+On first start, Server creates an administrator credential under `~/.mohist/`
+with mode 600. Local `mo` reads it automatically. Anyone who can read that file
+already has access equivalent to signing in to the host, so another login prompt
+would not add a useful security boundary.
 
-On another machine, configure the Server address with `MOHIST_SERVER_URL` and
-run:
+## Remote CLI Uses Device Authorization
+
+On another machine, configure `MOHIST_SERVER_URL` and run:
 
 ```bash
 mo auth login
 ```
 
-The command prints a verification code and confirmation link, and opens a
-browser when available. After the administrator confirms in the Web UI, the CLI
-completes login and stores a local session with mode 600. It renews an expiring
-session automatically. Run `mo auth login` again when renewal fails.
+The command prints a verification code and confirmation link and opens a browser
+when available. After the administrator confirms in the Web UI, CLI stores a
+local session with mode 600. It renews an expiring session automatically. Run
+`mo auth login` again when renewal fails.
 
 ```bash
-mo auth status    # Show the current identity and Server
-mo auth logout    # Sign out and remove the local session
+mo auth status
+mo auth logout
 ```
 
-## Scripts and External Agents
+Device authorization keeps the administrator credential off the remote machine
+and makes every new login an explicit decision in an already trusted browser.
 
-Callers without a browser, including CI, scripts, and external Agents, use a
-personal access token:
+## Scripts and CI Use Personal Access Tokens
+
+Create a separate token for each headless caller:
 
 ```bash
 mo auth token create --name ci-bot --scope readonly --ttl 720h
 ```
 
-The token is shown in full only once and must expire. The default lifetime is
-90 days and the maximum is one year, so a leaked token is not valid forever.
-The caller supplies it through an environment variable:
+The token is shown in full only once. Its default lifetime is 90 days and its
+maximum lifetime is one year, so a leaked token cannot remain valid forever.
+Supply it through the environment:
 
 ```bash
 export MOHIST_TOKEN=moh_pat_...
 mo issue list
 ```
 
-Manage tokens with:
+Manage tokens independently:
 
 ```bash
 mo auth token list
 mo auth token revoke ci-bot
 ```
 
-## Web UI Token Login
+Use read-only Scope when automation only observes state. Use operator Scope only
+when it must create or change work.
 
-The Web UI requires login. Paste an administrator-level token, either the
-contents of the local credential file or a full-scope personal access token, to
-receive a browser session. Device-authorization confirmation also occurs in the
-Web UI and requires an existing login.
+## Direct Agent Calls Need a Project Grant
 
-## Runner Registration
+The [External Agent API](agent-api.md) is intended for headless callers that
+launch or continue Agent work directly. A general PAT Scope is not enough for
+this private-Project boundary. The token must also name the Projects it can use.
 
-During `mo install runner`, the installer obtains a one-time registration token
-from Server. On first start, Runner exchanges it for a machine credential and
-uses that credential for every report and connection. Runner credentials cover
-only the Runner surface and bind to that Runner identity, so another caller
-cannot impersonate it. Revoking a Runner credential invalidates it immediately.
-Run the installation registration again to recover.
+The target issuance forms are:
 
-## Inbound Integration Tokens
+```bash
+mo auth token create --name release-agent --scope operator --ttl 720h --project proj_123
+mo auth token create --name owner-agent --scope operator --ttl 720h --all-projects
+```
 
-Each inbound integration endpoint that receives an external callback has its
-own Project-scoped token. Compromise of one endpoint does not affect others.
-GitHub ingress uses native GitHub signatures instead; see [GitHub](github.md).
+Repeat `--project` to grant more than one Project. Use `--all-projects` only with
+operator Scope. These choices are mutually exclusive, and Mohist never infers
+all-Project access from operator Scope alone.
 
-## Token Scopes
+Mohist will authenticate the PAT and check its Scope and Project grant before it
+looks for a matching prior request or creates work. This order prevents an
+unauthorized caller from discovering private resources through retries, status
+differences, or request identifiers. A PAT without a Project grant can continue
+to use its existing control-plane access, but it cannot use the direct external
+Agent boundary.
 
-| Scope | Access |
+## Web UI Uses a Revocable Session
+
+Paste an administrator-level token into the Web UI to receive a browser session.
+The browser does not retain the root token as its everyday credential. Device
+authorization confirmation also occurs in the Web UI and requires an existing
+login.
+
+## Runner Registration Separates Execution Access
+
+During `mo install runner`, the installer obtains a one-time registration token.
+Runner exchanges it for a credential bound to that Runner identity and uses the
+credential for all later connections and reports. This prevents another machine
+from presenting the same Runner name to gain its access.
+
+Revocation invalidates the Runner credential immediately. Repeat the
+installation registration flow to recover; do not reuse the revoked secret.
+
+## Integrations Keep Independent Boundaries
+
+Each inbound integration receives a Project-constrained credential so a leak in
+one callback does not authorize another. GitHub ingress uses native GitHub
+signatures instead. Local adapters use service credentials and still apply the
+external platform's own member and workspace policies.
+
+## Capability Summary
+
+| Capability | Access |
 |---|---|
-| Operator | All reads, writes, and administration |
-| Read-only | View state and resources without modification |
-| Runner | Claim work and report heartbeats, results, and logs |
-| Integration | Invoke inbound integration endpoints for one Project |
+| Operator | Reads, writes, and administration. |
+| Read-only | Product observation without modification. |
+| Runner | Work claim, heartbeat, result, artifact, and log reporting. |
+| Integration | One inbound integration within its Project boundary. |
 
-Administrator credentials and personal access tokens default to operator scope. A
-personal access token can be narrowed to read-only when issued. Machine
-credential scopes are fixed and cannot be expanded.
-
-## Agent Identity and External Delivery
-
-A Mohist Agent has its own identity. Mohist attributes its Activity to that
-Agent. When it delivers to an external system by creating a GitHub Issue, Pull
-Request, or comment, it also appears under an independent bot identity instead
-of impersonating the administrator. See [GitHub](github.md) for GitHub identity
-configuration.
+Machine credentials have fixed capabilities and cannot expand themselves.
+Sensitive infrastructure remains operator-only even when an operation only
+reads data.
 
 ## Non-goals
 
-- Multiple users, roles, permission groups, or Project-level authorization.
+- Multiple Mohist users, roles, permission groups, or reusable Project ACLs.
 - A public developer platform or third-party application registration.
 - Single sign-on or enterprise identity federation.
 
-## Status
+The explicit Project grant on an external Agent PAT is only a credential safety
+boundary. It does not introduce any of these broader identity models.
+
+## Implementation Gaps
 
 The single-administrator model, local bootstrap, authenticated Web UI, remote
 CLI device authorization and renewal, personal access tokens, Runner and
-integration credentials, Scope enforcement, attribution, and audit records are
-implemented. API and SignalR access require authentication outside the closed
-exemption list described above. Multiple users, external identity federation,
-and public application registration remain Non-goals, not unfinished parts of
-this model.
+integration credentials, capability enforcement, attribution, and audit records
+are implemented.
+
+Project grants for personal access tokens and the direct External Agent API are
+target behavior only. They remain tracked by
+[#387](https://github.com/suraciii/mohist/issues/387). The `--project` and
+`--all-projects` examples above will become executable with that work; do not use
+them as current installation steps.

@@ -2,9 +2,9 @@
 
 This document defines why Workflow work, Agent work, logical Sessions, physical Runtime Sessions,
 and Runtime adapters have separate owners. Runtime-specific behavior belongs in
-[`runtimes/`](runtimes/README.md). Public read schemas and the complete fencing protocol belong in
-[`conventions.md`](conventions.md). Invocation behavior belongs in
-[`agent-api.md`](agent-api.md).
+[`runtimes/`](runtimes/README.md). Canonical internal read schemas and the complete fencing
+protocol belong in [`conventions.md`](conventions.md). Authentication, transport, public replay-key
+mapping, and external API projections belong in [`agent-api.md`](agent-api.md).
 
 ## Design Drivers
 
@@ -55,9 +55,15 @@ the definition that exists for that attempt. A missing or archived Agent fails d
 falling back to another Runtime path.
 
 Web, CLI, Agent Connection, event routing, and mentions are call origins for the AgentJob path.
-They all enter through the Agent API and cannot create a third execution path. A provider adapter
-such as Slack may translate ingress and delivery, but it cannot snapshot an Agent, own a Runtime
-Session, or decide a work result.
+They all enter through the canonical AgentJob launch boundary and cannot create a third execution
+path. A provider adapter such as Slack may translate ingress and delivery, but it cannot snapshot
+an Agent, own a Runtime Session, or decide a work result.
+
+Direct API callers cross an additional trust and projection boundary. Bearer PAT authentication
+and Project/scope authorization finish before resource or idempotency lookup, admission, durable
+write, or external effect. Responses and events expose only the public projection defined in
+[`agent-api.md`](agent-api.md); canonical internal models, physical Binding, workspace paths,
+prompt or memory content, and Runner control remain private.
 
 An Inline Agent is a usage mode, not another entity. It is a TaskRun that directly selects a
 Runtime-specific Action. The Workflow Action adapter and AgentJob executor may reuse the same deep
@@ -106,6 +112,9 @@ AgentJob prepare -- durable accept request --> AgentSession
        +-------- durable accept result ---------+
 ```
 
+- The caller supplies a stable `launchRequestId`. After authentication and authorization, Server
+  normalizes the complete accepted envelope and derives its fingerprint; a caller-supplied
+  fingerprint is never trusted.
 - The first accepted `(launchRequestId, fingerprint)` maps once to a Server-owned
   `launchOperationId` and reserved Job, Session, Input, and Turn identities.
 - AgentSession either materializes its Session, first Input, first Turn, dispatch fact, and durable
@@ -158,24 +167,30 @@ The invariants are:
   superseded under the canonical operation contract.
 
 The persisted domain records may contain write-side data needed to enforce these invariants, but
-they do not define another public schema. Canonical Session, Input, Turn, dispatch, operation, and
-fence fields are defined only in [`conventions.md`](conventions.md).
+they do not define another schema. Canonical internal Session, Input, Turn, dispatch, operation,
+and fence fields are defined only in [`conventions.md`](conventions.md).
 
 ### Operation identity
 
-Durable identity is chosen at the public boundary before any external effect:
+Durable identity is fixed at ingress before any external effect. Trusted callers provide the
+canonical command identity directly; an external adapter durably maps its caller-held public key
+to that identity before invoking the command.
 
-| Intent | Public replay identity | Durable operation identity |
+| Intent | Ingress replay identity | Durable operation identity |
 |---|---|---|
 | Launch | caller `launchRequestId` | Server creates and durably maps one `launchOperationId` |
 | Follow-up with new Turn | caller `requestId` | the same request map identity |
 | Steer | caller `requestId` | the same `SessionOperationRead.operationId` |
 | Compact, Reset, recovery, rebind, handoff, force-reset | caller `operationId` | the same operation ID |
+| Direct API Turn stop | caller `Idempotency-Key` | adapter maps one private operation ID for the frozen Turn |
 | Cascade stop | root Session plus caller `Idempotency-Key` | Server derives the tree operation and stable per-target operation IDs |
 
-[`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the sole public stop authority. A
-per-target `kind=stop` operation is an internal child of that cascade, not another public caller
-contract.
+The direct API mapping, authentication scope, and response contract are authoritative only in
+[`agent-api.md`](agent-api.md). The private operation ID is never serialized externally; replay or
+query resolves the original public key to that same identity. Cascade membership and its derived
+per-target identities remain authoritative in
+[`subagents.md#cascade-stop`](subagents.md#cascade-stop). A direct Turn stop does not redefine the
+cascade contract.
 
 For caller-owned keys, a missing key is rejected before a durable write or external effect. The
 same key and fingerprint return the original operation; a changed fingerprint conflicts. Internal
@@ -285,10 +300,11 @@ idempotently and the complete fence still matches. A terminal or superseded targ
 steer operation without moving the accepted Input. The authoritative adapter seam and result
 mapping are in [`conventions.md#durable-steer-adapter-seam`](conventions.md#durable-steer-adapter-seam).
 
-`cancel` is a Server-only control for one identified queued Turn and never contacts Runtime.
-Public `stop` is not its running-Turn counterpart: it creates the durable cascade defined in
-[`subagents.md#cascade-stop`](subagents.md#cascade-stop). Each frozen target uses the per-target
-rules below:
+`cancel` is a Server-only control for one identified queued Turn and never contacts Runtime. A
+cascade stop freezes a Session subtree under
+[`subagents.md#cascade-stop`](subagents.md#cascade-stop). A direct API stop freezes one named Turn
+through the external key mapping in [`agent-api.md`](agent-api.md). Neither path is a loose
+running-Turn counterpart to cancel; each frozen target uses the same canonical rules below:
 
 - a queued Turn is cancelled without contacting Runner;
 - a running Turn is addressed only through its snapshotted Turn and complete expected Binding;
@@ -425,11 +441,12 @@ presentation record, not a command source.
 | `rebind` | replace on same Runner; runtime may change | increment generation | explicit request; never inferred from reconnect |
 | `handoff` | replace on an explicit different Runner | increment generation | only this operation may change `runnerId` |
 | `force-reset` | replace after explicit risk acknowledgement | increment generation | preserves and supersedes old unknown facts |
-| per-target `stop` | keep Binding | keep generation | internal to cascade; acts only on frozen Turn/Binding |
+| per-target `stop` | keep Binding | keep generation | derived by cascade or direct API mapping; acts only on frozen Turn/Binding |
 
-Except for the Server-derived cascade target identity, each context operation starts from a
-caller-owned operation ID and canonical request fingerprint. Replay first returns the stored
-operation. A different intent cannot join or overwrite another active operation.
+Each context operation has one stable canonical operation ID and request fingerprint before any
+effect. Internal callers supply that ID, cascade derives its per-target IDs, and the direct API
+durably maps its public key. Replay first returns the stored operation. A different intent cannot
+join or overwrite another active operation.
 
 Binding-changing operations follow one semantic order:
 
@@ -487,8 +504,9 @@ original identities and a risk warning.
   state.
 - Runtime adapters hide provider SDK, protocol, process, cache, and error details. They do not
   define public Session identity or idempotency.
-- Web, CLI, and integrations consume canonical Server projections. They do not derive current state
-  from logs, provider responses, or historical terminal events.
+- Web, CLI, and trusted integrations consume canonical internal Server projections. Direct API
+  callers consume only the public projection in [`agent-api.md`](agent-api.md). Neither derives
+  current state from logs, provider responses, or historical terminal events.
 
 Server is the sole arbiter for Binding, Activity, admission, and operation results. Runner cannot
 independently replace a Binding or close an AgentSession because a process exited.
@@ -518,7 +536,9 @@ model yet.
 
 - Launch acceptance does not yet converge through one durable path from caller identity to every
   accepted or rejected Job/Session/Input/Turn result.
-- Canonical projections are not yet the only state consumed by clients.
+- Canonical internal projections are not yet the only state consumed by trusted clients. The
+  direct API does not yet enforce its PAT-first admission and allowlisted public projection from
+  [`agent-api.md`](agent-api.md) end to end.
 - Confirmed-missing recovery is available for safely idle Workflow input. AgentJob initial Turns
   are already queued before that boundary, and idle Follow-up does not yet initiate it. Non-idle
   reconnect reconciliation can replace a binding without the complete proof that an old effect is
@@ -534,7 +554,3 @@ Every Follow-up requires a non-empty caller `requestId`. Compact, Reset, recover
 and force-reset require a caller `operationId`; steer reuses its Follow-up `requestId`. Some current
 entry points still synthesize a hidden key when the caller omits one. This remains a safety gap
 because response-loss retry cannot name the original intent.
-
-Public stop is deliberately excluded from that caller-owned operation list. It uses root Session
-plus `Idempotency-Key`, and Server derives the cascade and per-target identities as defined in
-[`subagents.md#cascade-stop`](subagents.md#cascade-stop).

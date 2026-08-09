@@ -89,6 +89,9 @@ If you are new to Mohist, read the [repository README](../README.md) first.
 
 - [Mobile PWA and Push](mobile-pwa.md): A deferred proposal for viewing progress
   and receiving notifications on a phone
+- [External Agent API](agent-api.md): A private, retry-safe boundary for
+  delegating work to a Mohist Agent and resuming public progress after a
+  disconnect
 
 ## Writing Contract
 

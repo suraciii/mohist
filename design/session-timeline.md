@@ -6,6 +6,19 @@ second session record. The transcript contract and Session state authority remai
 (see [`agent-execution.md`](agent-execution.md)). See the AgentSession page section in
 [`../docs/web-ui.md`](../docs/web-ui.md) for product behavior.
 
+The external Session event stream in [`agent-api.md`](agent-api.md) is a separate,
+Server-owned durable public projection. It has its own sequence, cursor,
+retention, and strict field allowlist. It cannot reuse local `TimelineItem`
+values, browser live subscriptions, or raw transcript facts as its event record,
+and the presentation rules in this document cannot define its ordering,
+deduplication, or visibility.
+
+When the canonical `session.context_reset` fact occurs, the external stream
+appends only a public `session.context_reset` boundary event: stable
+Session/Project/Agent identities, public Session status, a safe reason code,
+timestamp, and sequence. It is not a raw `TimelineItem` payload and carries no
+runtime, path, prompt, memory, or raw transcript data.
+
 ## Model
 
 **Timeline item (`TimelineItem`)**: a presentation unit derived from a span of transcript facts.
@@ -123,6 +136,12 @@ Session state derivation.
   fact with an expandable payload.
 - The two views are two levels of the same data, not two feeds. Switching anchors the scroll
   position by item Id.
+
+This raw view remains a controlled Web diagnostic presentation. It is not an
+external API export and does not define any payload available to an external
+caller. Direct callers can use only the public projection defined by
+`agent-api.md`, which excludes prompts, memory, paths, runtime or connection
+identity, and raw payloads.
 
 ## Examples
 

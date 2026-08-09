@@ -326,8 +326,9 @@ the audit record, starts a new context, and permits new work only after that new
 context is established. Retry a lost force-reset response with its original
 operation key.
 
-See [Agent API design](../design/agent-api.md#reliability-contract) for the read
-and idempotency contracts and
+See [External Agent API idempotency](../design/agent-api.md#normalized-fingerprint-and-idempotency)
+and its [public projection](../design/agent-api.md#public-execution-projection) for direct caller
+contracts, and
 [Agent execution design](../design/agent-execution.md#work-lifecycle-and-session)
 for transaction, dispatch, retry, and fencing details.
 

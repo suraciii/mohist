@@ -68,6 +68,28 @@ Leading slash. Plural nouns. URL path segments. No trailing slash.
 | AgentSession | sessionId | sessionId | /projects/{projectId}/agent-sessions/{sessionId} |
 | Event | eventId | — | /events/{eventId} |
 
+## External Agent API serialization
+
+The canonical schemas in this document are Server/control-plane read models.
+They are not an external serialization allowlist. In particular,
+`AgentJobLaunchRead`, `AgentSessionRead`, `SessionInputRead`, `TurnResultRead`,
+`TurnDispatchRead`, `BindingTuple`, `LaunchWorkspaceRead`, and
+`SessionOperationRead` may contain facts needed by a trusted adapter or
+recovery coordinator that a direct caller must never receive.
+
+The direct external Agent API serializes only the explicit public projection in
+[`agent-api.md`](agent-api.md). It may expose canonical IDs, public
+status/output/error/reason code, timestamps, per-Session public sequence, and
+opaque cursor continuation. That projection is a durable Server-owned view fed
+by canonical aggregate/outbox facts: its snapshot, journal entries, and source
+checkpoint commit together, but it does not make Job and Session cross-aggregate
+writes atomic. It must not serialize a binding or operation field,
+`runtimeSessionId`, runner/connection identity, request fingerprint, dispatch
+attempt/retry/lease/fence state, workspace/workdir/path, prompt/input content,
+memory, or raw provider payload. A future public field must be added to the
+allowlist in `agent-api.md`; copying it from a canonical schema is not
+authorization to expose it.
+
 ## AgentSession runtime identity
 
 `sessionId` is Mohist's stable logical AgentSession identity. A runtime-owned physical

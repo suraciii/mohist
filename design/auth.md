@@ -1,252 +1,301 @@
 # Authentication and Identity
 
-This document defines authentication and attribution for the Mohist control plane. Every access is
-attributed to a Principal. A Credential proves identity, a Scope determines permitted operations,
-and the authenticated identity becomes the actor recorded on approvals and activities.
+Authentication in Mohist must preserve two properties that are easy to lose in
+a self-hosted system: local use stays frictionless, and every remote effect has
+a trusted identity. One administrator owns the deployment, while CLI clients,
+Runners, integrations, and external Agents receive credentials that can be
+revoked independently.
 
-Scope: authentication, Scope evaluation, and attribution for Mohist-owned APIs and SignalR hubs.
-Identity precedes authorization. The primary invariant is that every request belongs to a
-Principal; Scope evaluation is a second-stage capability layered on top, as reflected in the
-implementation order under Status. See [`github-integration.md`](github-integration.md) for
-identity and credential issuance on external platforms such as GitHub. Slack member access policy
-remains within the Connection boundaries defined by [`slack.md`](slack.md) and
-[`agent-api.md`](agent-api.md). Multi-user support, roles, permission groups, third-party
-application registration, and enterprise identity federation are out of scope.
+This design covers authentication, authorization, and attribution for
+Mohist-owned APIs and SignalR hubs. GitHub verifies its own ingress as described
+in [github-integration.md](github-integration.md). Slack member policy remains
+inside the Agent Connection boundary in [slack.md](slack.md). The direct
+external Agent boundary builds on this model and is defined in
+[agent-api.md](agent-api.md).
 
-## Model
+## Drivers
+
+- Local commands should not require an interactive login. Access to the Server
+  host is already the local trust boundary.
+- Browser, remote CLI, service, Runner, integration, and direct Agent callers
+  must not share one long-lived secret. A leaked credential must have a bounded
+  lifetime and blast radius.
+- Authentication must establish one stable Principal before authorization or
+  domain work begins. This makes Activity and Approval attribution trustworthy.
+- A direct external Agent caller must receive explicit access to private
+  Projects. An operator Scope alone must not silently become access to every
+  Project.
+- Authorization failures must not reveal whether a private resource or a prior
+  idempotent request exists. Authentication and Project authorization therefore
+  precede resource lookup, idempotency, and admission.
+- The model must stay smaller than a multi-user identity system. Project grants
+  for direct Agent PATs are credential boundaries, not roles, memberships, or a
+  general ACL.
+
+```text diagram
+local administrator file -----------+
+browser or remote CLI session ------+--> Principal --> Scope --> product action
+service or Runner credential -------+
+integration credential -------------+
+direct Agent PAT --> Project grant -+
+
+external platform identity --> Connection or ingress policy --> product action
+```
+
+## Identity Model
 
 ### Principal
 
-A Principal is a Server-level resource and is not Project-scoped. There are three kinds:
+A Principal is the stable identity recorded for an action. It is a Server-level
+resource rather than a Project membership.
 
-| Kind | Cardinality | Source | Maximum capability |
-|---|---|---|---|
-| `admin` | exactly 1 | created during bootstrap | `operator` |
-| `service` | one per built-in component | created during bootstrap for local service processes such as the Slack adapter | `operator` |
-| `agent` | one per Mohist Agent definition | created with the Agent | no credentials are issued; attribution anchor only |
+| Kind | Cardinality | Why it exists |
+|---|---|---|
+| `admin` | exactly one | Represents the owner of the self-hosted deployment. |
+| `service` | one per built-in component | Separates trusted local machines and adapters from the administrator. |
+| `agent` | one per Mohist Agent | Preserves Agent attribution without giving the Agent a login credential. |
 
-Fields: `Id`, `Kind`, `Name`, and `CreatedAt`.
-
-The following invariants always hold: there is exactly one admin; no API creates or deletes a
-Principal; archiving an Agent does not delete its agent Principal, so historical attribution
-records always retain a stable target.
+Mohist does not expose Principal creation or deletion. Archiving an Agent does
+not delete its Principal because historical attribution must remain stable.
 
 ### Credential
 
-A Credential belongs to a Principal. The database stores only the SHA-256 hash of a token. The
-token is high-entropy random data and does not need a salt.
+A Credential proves a Principal's identity. Persisted credentials store only a
+SHA-256 token hash, never the token value. The token uses high-entropy random
+data, so hashing protects the secret without introducing a password-style salt
+or recovery path.
 
-Fields: `Id`, `PrincipalId`, `Kind`, `TokenHash`, `Scopes`, `Name`, `ExpiresAt`, `RevokedAt`, and
-`CreatedAt`.
-
-| Kind | Purpose | Carrier |
-|---|---|---|
-| `session` | Web and CLI login session | cookie or local CLI storage |
-| `refresh` | CLI session renewal | local CLI storage |
-| `pat` | admin-issued personal token for scripts, CI, and external Agents | `MOHIST_TOKEN` environment variable |
-| `runner` | Runner machine credential bound to `RunnerId` | local Runner file |
-| `integration` | inbound integration token constrained by ProjectId | integration configuration |
-
-Token format: `moh_<kind>_<base64url(32B)>`. The kind prefix supports visual identification and
-leak scanning.
-
-**File credentials** are not stored in the database. Admin bootstrap and service credentials use
-the existing `OperatorCredential` file mechanism. A missing file is populated with 32 random
-bytes, permission mode 0600 is required, symbolic links are rejected, and the value is loaded into
-memory for comparison at startup. These credentials are deployment-level roots. Database storage
-would create a circular dependency over who initializes the database. The file is the credential;
-revocation means replacing its contents.
-
-**Scope** is a closed set:
-
-| Scope | Satisfies |
+| Kind | Trust boundary |
 |---|---|
-| `operator` | every route |
-| `readonly` | GET only |
-| `runner` | `/api/runner/**`, artifact and log reports, and `/hubs/runner` |
-| `webhook` | inbound integration endpoints within the Project constrained by the Credential |
+| `session` | Short-lived Web or CLI access. |
+| `refresh` | CLI session renewal with rolling family revocation. |
+| `pat` | Headless callers such as scripts, CI, and external Agents. |
+| `runner` | One Runner identity and the Runner-only surface. |
+| `integration` | One inbound integration constrained to a Project. |
 
-Credential Scopes must not exceed the maximum capability of their Principal. `operator` satisfies
-every Scope.
+Issued tokens use `moh_<kind>_<base64url(32B)>`. The prefix supports human
+recognition and leak scanning; it is not an authorization input.
 
-Sensitive infrastructure surfaces are not exposed to `readonly` merely because they use GET.
-`/api/fs/**`, `/api/logs/tail`, `/api/config/**`, `/api/system/**`, and dead-letter routes always
-declare `operator`. `readonly` covers only observation of business resources, including
-`/hubs/events` and queries under `/otel/api/**`. Dead-letter routes retain the additional current
-constraint that they are mounted only on a loopback-only listener.
+Administrator bootstrap and built-in service roots remain file credentials.
+They cannot depend on the database because they authorize the process that
+initializes it. Mohist creates a missing root with 32 random bytes, requires
+mode 0600, rejects symbolic links, and loads the value at startup. Replacing the
+file value revokes that deployment root.
+
+### Scope
+
+Scope limits which class of operation a credential can perform.
+
+| Scope | Capability |
+|---|---|
+| `operator` | All control-plane capabilities. |
+| `readonly` | Observation of business resources only. |
+| `runner` | Runner work, artifact, log, heartbeat, and connection capabilities. |
+| `webhook` | One inbound integration within its constrained Project. |
+
+`operator` satisfies every Scope. A Credential cannot exceed the maximum
+capability of its Principal. `readonly` does not gain access to infrastructure
+or secret-bearing surfaces merely because an operation is a read. Filesystem,
+configuration, system, log-tail, and dead-letter operations remain
+operator-only; dead-letter operations also retain their loopback-only listener
+boundary.
+
+### ExternalAgentCaller
+
+A Bearer PAT used at the direct external Agent boundary resolves to an
+`ExternalAgentCaller`. This model gives authorization and idempotency one stable
+caller identity without exposing or persisting the plaintext token.
+
+| Fact | Contract |
+|---|---|
+| `callerKeyId` | The Credential ID. It is stable across retries and never supplied or returned by the caller. |
+| `principalId` | The Principal used for attribution. |
+| `scopes` | The route capabilities granted to the PAT. |
+| `projectGrant` | Either `explicit` or `operator_all`. |
+| `allowedProjectIds` | A non-empty Project set when the grant is `explicit`. |
+
+`operator_all` is an explicit grant to all current private Projects owned by the
+deployment. It is not inferred from `operator` Scope. An `explicit` grant allows
+only the listed Projects. An empty or absent grant denies the direct Agent API,
+including for PATs issued before Project grants exist.
+
+The grant answers one question: may this credential use the direct Agent API for
+this private Project? It does not create reusable Project membership,
+cross-user visibility, or RBAC.
 
 ### EnrollmentToken
 
-An EnrollmentToken is a one-use registration token with `TokenHash`, `ExpiresAt`, which is 15
-minutes after issuance, and `ConsumedAt`. It is not pre-bound to RunnerId. The consumer registers
-its own RunnerId.
+A Runner installation needs a short bridge from administrator authorization to
+a distinct machine credential. An EnrollmentToken is single-use, expires 15
+minutes after issuance, and is not pre-bound to a Runner ID. The first valid
+consumer registers its Runner identity and exchanges the token for a bound
+Runner credential.
 
-## Semantics
+## Authentication Boundary
 
-### Authentication Resolution
-
-Use the first matching carrier in this order:
+Mohist accepts the first valid carrier in this order:
 
 1. `Authorization: Bearer <token>`.
-2. The `mohist_session` cookie for same-origin Web access, which browser WebSockets carry
-   automatically.
+2. The `mohist_session` cookie for same-origin Web access.
 
-Tokens are not accepted in query strings. RFC 6750 Section 2.3 and RFC 9700 identify that URIs
-enter access logs, browser history, and proxy records. Neither SignalR hub has an exception: Web
-uses a same-origin cookie and the Runner SignalR client uses a header.
-
-```text diagram
-token FixedTimeEquals each file credential
-  -> admin / service Principal
-otherwise query Credential by SHA-256(token)
-  -> validate RevokedAt and ExpiresAt -> Principal + Scopes
-all fail
-  -> 401 + WWW-Authenticate: Bearer error="invalid_token" (RFC 6750 Section 3)
-  -> do not distinguish missing, expired, or revoked externally
-```
-
-Exemptions are `/api/health`; login and device authorization endpoints; Web static assets; GitHub
-ingress, which performs its own HMAC validation as defined in
-[`github-integration.md`](github-integration.md); and `/otel/v1/*` on the OTLP listener, which
-already has a port-isolation boundary. Every other endpoint requires authentication and Scope.
-
-For Scope evaluation, each route declares its required Scope. `readonly` satisfies only GET, and
-other Scopes follow the table above. Insufficient Scope returns 403.
-
-### Bootstrap
+Tokens are never accepted in a query string because URIs enter browser history,
+access logs, and proxy records. Web SignalR uses the same-origin cookie. Runner
+SignalR uses the authorization header.
 
 ```text diagram
-~/.mohist/admin-token
-  absent -> generate and write (0600, reject symlinks)  # admin Principal
-~/.mohist/operator-token
-  absent -> same                                       # service Principal, existing mechanism
-startup
-  -> load both as file credentials
+present credential
+  -> compare deployment root credentials in constant time
+  -> otherwise hash token and resolve a stored Credential
+  -> reject expired or revoked credentials
+  -> resolve Principal and Scope
+  -> for a direct Agent PAT, also resolve ExternalAgentCaller and Project grant
+  -> authorize the requested capability
+  -> begin resource lookup and domain work
 ```
 
-The `X-Mohist-Operator-Token` header is retired in favor of `Authorization: Bearer` everywhere. The
-Slack adapter uses its service credential as a Bearer token. Existing deployments do not need to
-rotate because the current operator token file content becomes that service credential.
+Invalid authentication returns 401 with the Bearer challenge and does not reveal
+whether a token was missing, expired, or revoked. Insufficient Scope returns
+403. Health, authentication entry points, Web static assets, GitHub's
+signature-verified ingress, and the isolated OTLP listener form the closed
+unauthenticated set.
+
+## Direct External Agent Authorization
+
+Direct external Agent calls accept a Bearer PAT only. A Web cookie and a trusted
+Agent Connection identity belong to different adapters and cannot substitute
+for that caller key.
+
+Writes that launch, continue, or stop work require `operator`. Public reads may
+use `readonly` or `operator`. Every request follows one security order:
+
+```text diagram
+Bearer PAT authentication
+  -> ExternalAgentCaller resolution
+  -> Scope authorization
+  -> Project grant authorization
+  -> canonical resource ownership check
+  -> request validation and normalization
+  -> idempotency lookup and fingerprint comparison
+  -> admission and durable effects
+```
+
+A Project outside the grant returns 403 even when that Project does not exist.
+Only after the grant passes may a missing Project or resource return 404. This
+ordering prevents a credential from using status codes or idempotency mappings
+as an oracle for private resources.
+
+On 401 or 403, Mohist does not read or return a request mapping, create a
+rejection, Job, Session, Input, Turn, outbox record, or public event, or contact
+a Runner. The complete retry, public projection, cursor, and stop contracts are
+owned by [agent-api.md](agent-api.md).
+
+## Human Access
+
+### Local Bootstrap
+
+On first Server start, Mohist creates the administrator credential file and the
+built-in service credential file when absent. Local `mo` discovers the
+administrator file automatically. This preserves zero-login local use while
+still requiring every request to resolve to a Principal.
+
+The retired `X-Mohist-Operator-Token` header is not a parallel credential path.
+All callers use Bearer authentication or the Web session cookie. Existing
+operator file content becomes the service credential, so this unification does
+not require a deployment-wide secret rotation.
 
 ### Web Login
 
-`POST /api/auth/session {token}` validates an `operator` credential, issues
-`Credential(kind=session, 7 days)`, and writes
-`Set-Cookie: mohist_session=<token>; HttpOnly; SameSite=Lax; Path=/`. HTTPS requests add `Secure`.
-SameSite=Lax combined with a JSON API prevents cross-site forms from carrying the session, so no
-separate CSRF token is introduced. Logout revokes the Credential. On a 401 response, the SPA
-presents a login page. There is no password; pasting the token logs in.
+The Web UI exchanges an administrator-level token for a seven-day, HttpOnly,
+SameSite=Lax session cookie. HTTPS adds `Secure`. Logout revokes the session.
+Same-site cookies and the JSON-only API prevent cross-site forms from creating
+authenticated effects without adding a separate CSRF token.
 
-### CLI Device Authorization (RFC 8628)
+### Remote CLI
 
-Exempt endpoints are `POST /api/auth/device/code` and `POST /api/auth/token`. The confirmation page
-at `/device` requires an authenticated Web session. Both endpoints are rate-limited. Polling or
-code guessing beyond a small per-source, per-minute allowance returns `slow_down` or 429.
+Remote CLI uses RFC 8628 device authorization because it keeps the administrator
+secret out of the remote machine and lets the already authenticated Web UI
+approve the login. Device codes expire after ten minutes and rate limits protect
+the polling and guessing surfaces.
 
-```text diagram
-CLI   POST device/code {name}
-      -> {device_code, user_code, verification_uri,
-          verification_uri_complete, interval=5, expires_in=600}
-User  opens verification_uri or verification_uri_complete
-      -> enters user_code -> approve -> record approval by admin Principal
-CLI   polls POST token
-      {grant_type=urn:ietf:params:oauth:grant-type:device_code, device_code}
-      <- authorization_pending / slow_down / expired_token
-      <- success {access_token(kind=session, 1h), refresh_token(kind=refresh, 30d)}
-```
+The resulting access token lasts one hour. A refresh token lasts 30 days and is
+rotated on every use. Reuse of an invalidated refresh token revokes its entire
+session family because reuse indicates likely credential leakage. CLI resolves
+credentials in this order: `MOHIST_TOKEN`, the Server-matched local session, and
+the administrator file on the Server host.
 
-`user_code` has 8 characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, excluding I, O, 0, and 1 as
-in the Slack claim-code precedent. CLI displays it as `XXXX-XXXX`; confirmation input ignores
-hyphens and case.
+## Personal Access Tokens
 
-Renewal uses `POST token {grant_type=refresh_token}`. The old refresh token is invalidated
-immediately and its hash remains through the end of the window while a new access and refresh pair
-is issued through rolling rotation. Reuse of the invalidated refresh token indicates leakage and
-revokes the entire session chain derived from that device authorization, following family
-revocation in RFC 9700 Section 4.14.2. CLI sessions are stored in
-`~/.mohist/credentials.json` with mode 0600.
+PATs support callers that cannot complete a browser flow. The token is shown in
+full once, must expire, defaults to 90 days, and cannot exceed one year. Active
+names are unique per Principal. Revocation is immediate; listing exposes only a
+recognizable prefix.
 
-CLI credential resolution order is `MOHIST_TOKEN` environment variable, then
-`credentials.json` matched by Server, then the local `admin-token` file. On 401, CLI first attempts
-renewal and prompts the user to run `mo auth login` if renewal fails.
-
-### PAT
-
-`mo auth token create --name <n> --scope operator|readonly [--ttl <hours>]` issues
-`Credential(kind=pat)` and returns the complete value exactly once. Every PAT must expire. `--ttl`
-defaults to 90 days and is capped at 1 year, following the discipline of GitHub fine-grained PATs;
-an unbounded lifetime is not allowed. `--name` is unique among active Credentials for the same
-Principal. `revoke` sets `RevokedAt`. `list` displays only the name and prefix, `moh_pat_...`, never
-the complete value. This command does not issue integration tokens with `kind=integration`; the
-specification for each inbound integration defines its issuance entry point.
-
-### Runner Registration and Credentials
-
-```text diagram
-mo install runner (admin authenticated)
-  -> POST /api/auth/runner-enrollments -> EnrollmentToken
-installer
-  -> inject token into Runner environment
-Runner first start
-  -> POST /api/auth/runner/credentials {enrollment_token, runner_id, hostname}
-  -> validate unconsumed and unexpired -> consume
-  -> issue Credential(kind=runner, bound to runner_id)
-  -> Runner stores $RUNNER_ROOT/credential (0600)
-later
-  -> Bearer access to /api/runner/** and /hubs/runner
-```
-
-The `runnerId` in a path or hub query must equal the `RunnerId` bound to the Credential; otherwise
-the request returns 403. This impersonation defense belongs in authentication and no longer trusts
-self-assertion. After revocation, every request from that Runner returns 401. Recovery repeats the
-registration flow.
-
-### Attribution
-
-After authentication, a mutating handler records the Principal as the actor for the domain action,
-including approval `decidedBy`, comment author, and activity records. `--author` remains a display
-alias and is no longer an ownership source. Agent attribution retains the existing job and agent
-identity reports in the execution protocol. The agent Principal is the stable anchor referenced by
-those records.
-
-### Audit Events
-
-Persist records without plaintext tokens for Credential issuance, revocation, and consumption;
-EnrollmentToken issuance and consumption; device authorization approval; and Session creation.
-
-## Examples
-
-Local CLI:
+The target issuance contract is:
 
 ```text literal
-Server first start -> generate admin-token
-mo issue list -> match admin-token file -> admin Principal, operator
+mo auth token create --name <name> --scope operator|readonly [--ttl <hours>]
+  [--project <projectId>]... [--all-projects]
 ```
 
-Remote CI:
+A PAT for the direct Agent API must choose exactly one Project grant form:
 
-```text literal
-mo auth token create --name ci --scope readonly --ttl 720h -> moh_pat_... (shown once)
-MOHIST_TOKEN=moh_pat_... mo issue list    -> readonly satisfies GET -> 200
-MOHIST_TOKEN=moh_pat_... mo issue create  -> insufficient Scope -> 403
-```
+- Repeated `--project` options persist an `explicit` grant.
+- `--scope operator --all-projects` persists `operator_all`.
+- `--project` and `--all-projects` are mutually exclusive.
+- `--all-projects` is invalid without `operator` Scope.
+- A PAT without either grant remains usable on its existing control-plane
+  surfaces but cannot call the direct Agent API.
 
-Runner impersonation defense:
+Issuance authenticates the issuer and validates the complete private-Project
+grant before it persists the Credential. Any failed binding returns 403 and
+persists neither the Credential nor its grant. Use of the PAT repeats Scope and
+Project authorization before idempotency or admission; issuance-time validation
+is not a permanent substitute for request-time authorization.
 
-```text literal
-Credential is bound to runner-a
-POST /api/runner/runner-b/heartbeat with runner-a Credential -> 403
-```
+## Machine Access
+
+### Runner Registration
+
+`mo install runner` obtains a one-use EnrollmentToken. On first start, Runner
+exchanges it for a credential bound to its Runner ID and stores that credential
+with mode 0600. Every later Runner report and connection uses that credential.
+The asserted Runner ID must match the credential binding; a mismatch returns
+403. Recovery after revocation repeats enrollment rather than reusing the old
+secret.
+
+### Integrations and Services
+
+Each inbound integration uses a distinct Project-constrained credential so one
+leak cannot authorize another integration. GitHub uses its native HMAC signature
+instead. Built-in local adapters use service credentials and retain their own
+external identity and access-policy checks.
+
+## Attribution and Audit
+
+After authentication, mutating operations record the Principal as their actor.
+Display aliases such as `--author` never become ownership evidence. Agent
+execution continues to attribute work to the Agent Principal.
+
+Audit records contain no plaintext token. They cover credential issuance,
+revocation, and consumption; Runner enrollment issuance and consumption; device
+authorization approval; and session creation.
+
+## Non-goals
+
+- Multiple Mohist users, roles, permission groups, or reusable Project ACLs.
+- Third-party application registration or a public developer platform.
+- Single sign-on, external OIDC, or enterprise identity federation.
 
 ## Status
 
-Principal and Credential bootstrap, unified request and SignalR authentication, Web login,
-personal access tokens, CLI device authorization, rolling refresh-family protection, Runner
-enrollment, Project-constrained integration credentials, Scope enforcement, actor attribution,
-and audit events are implemented. The old operator header is retired; local deployment roots use
-Bearer authentication through the same resolution boundary as stored credentials.
+Principal and Credential bootstrap, unified API and SignalR authentication, Web
+login, CLI device authorization and refresh-family protection, personal access
+tokens, Runner enrollment, Project-constrained integration credentials, Scope
+enforcement, actor attribution, and audit records are implemented.
 
-The implementation keeps authentication and authorization as separate decisions even though both
-are now active. That separation preserves the core invariant: Mohist first establishes one trusted
-Principal, then decides whether that Principal's Scope can perform the requested capability.
-External identity federation and multiple users remain outside this single-administrator model.
+The direct external Agent API remains WIP under
+[#387](https://github.com/suraciii/mohist/issues/387). Its PAT ProjectGrant,
+`ExternalAgentCaller` resolution, grant-aware PAT issuance, and authorization
+before idempotency and admission are target behavior only. The direct API must
+not ship until this authentication slice and the public execution boundary in
+[agent-api.md](agent-api.md) are implemented together.
