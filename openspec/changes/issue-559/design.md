@@ -445,8 +445,9 @@ workspace. After the Agent runtime returns, that adapter:
   contentHash, size)`. The Server-side
   `WorkflowAgentInvocationArtifactResolver` validates the immutable
   WorkflowAgentInvocation and Job identity instead of looking for active
-  Workflow work. Uploads are idempotent under
-  `(finalizerKey, path, contentHash)`; the Server computes a SHA-256 content
+  Workflow work. The pending upload row stores `workflowRunId`, `taskRunId`,
+  `jobId`, and `finalizerKey`; uploads are idempotent under
+  `(finalizerKey, path, contentHash)`. The Server computes a SHA-256 content
   hash when the Runner does not supply one, so the idempotency key is never
   based on a missing hash; and
 - extracts `_output`, declared outputs, and `setVars` values into a typed
@@ -479,10 +480,24 @@ WorkflowAgentFinalizationRequest {
 
 `AgentJobGrain` persists this envelope with the terminal result and copies it
 verbatim into `PendingWorkflowTerminalDelivery`. The Server finalizer verifies
-every lineage field, checks that each artifact upload belongs to the same
-invocation and `finalizerKey`, then records a
-`WorkflowAgentFinalizationReceipt` containing the request fingerprint, bound
-artifact ids, and variable-patch fingerprint.
+every lineage field, then invokes the invocation-specific artifact bind command:
+
+```text
+IWorkflowArtifactBindService.BindAgentInvocationAsync(
+  WorkflowAgentArtifactBindRequest {
+    workflowRunId, taskRunId, jobId, finalizerKey
+    artifactUploadIds, declaredArtifacts, projectId, issueNumber
+  })
+```
+
+The bind resolver verifies every upload against the immutable invocation and
+`finalizerKey`, creates the visible `WorkflowArtifact` rows for `taskRunId`, and
+removes the matching pending uploads in one idempotent transaction. It does not
+require active Workflow work or derive TaskRun identity from `workId`. The
+Server finalizer then records a `WorkflowAgentFinalizationReceipt` containing
+the request fingerprint, bound artifact ids, and variable-patch fingerprint.
+The bind result is part of the receipt, so a replay returns the existing bound
+ids without creating another artifact row or deleting unrelated pending data.
 It applies `setVars` only through a keyed
 `WorkflowRunVariablesStore.PatchVariablesIfNewAsync(workflowRunId,
 finalizerKey, vars)` operation and applies the existing Workflow completion or
@@ -578,8 +593,8 @@ inventing a success or failure.
 - [Workflow `expect`, artifact, and variable side effects cross from a
   Workflow owner to an AgentJob owner] -> Freeze a separate Workflow task
   contract, let the Runner completion adapter prepare workspace facts, and let
-  the Server-side WorkflowAgentFinalizer validate artifacts and apply all
-  Workflow effects under the durable `finalizerKey` receipt.
+  the Server-side WorkflowAgentFinalizer bind invocation-keyed artifacts and
+  apply all Workflow effects under the durable `finalizerKey` receipt.
 - [Workflow and Agent read surfaces could disagree during terminal delivery] ->
   AgentJob remains the sole execution authority; Workflow stores only lineage
   and application acknowledgement. Assemblers expose both the Job terminal
@@ -613,9 +628,9 @@ inventing a success or failure.
 4. **Runner handoff and AgentJob execution:** implement virtual Action render /
    validate plus the typed internal handoff command. Extend AgentJob dispatch
    with the frozen Workflow task contract and finalizer key; implement the
-   Runner completion adapter, invocation-keyed artifact upload route, and
-   Server-side WorkflowAgentFinalizer for `expect`, artifacts, and `setVars`.
-   Keep the AgentJob runtime branch above ordinary Action resolution.
+   Runner completion adapter, invocation-keyed artifact upload and bind routes,
+   and Server-side WorkflowAgentFinalizer for `expect`, artifact binding, and
+   `setVars`. Keep the AgentJob runtime branch above ordinary Action resolution.
 5. **Result and read projections:** implement the durable AgentJob-to-Workflow
    terminal delivery, Workflow result application, cross-links, status mapping,
    and `WorkflowAgentInvocationRead`. Add tests for every required lifecycle,
