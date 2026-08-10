@@ -83,7 +83,7 @@ The managed runtime root SHALL be absolute and deterministic across CLI, service
 - **AND** the active record and transaction files are readable by the service account that owns the managed installation
 
 ### Requirement: Publish one atomic active target set
-The managed runtime SHALL represent the active Server, Runner, and CLI targets with one atomically replaced activation record. Service backends SHALL resolve their component target from that record or its stable managed launcher, so a full candidate activation cannot expose a partially published target set. A component-scoped activation MAY intentionally retain the previous entries for untouched components, but the result SHALL be marked scoped. A failed activation SHALL leave the previous activation record intact until recovery chooses a terminal state.
+The managed runtime SHALL represent the active Server, Runner, and CLI targets with one atomically replaced activation record. During activation the record SHALL carry the transaction ID, target generation, and activation lease containing the coordinator owner process-start token. Service backends SHALL resolve their component target from that record or its stable managed launcher, so a full candidate activation cannot expose a partially published target set. A stable launcher MAY start a candidate only when the transaction record and active record contain the same live activation lease; otherwise it SHALL invoke reconciliation before starting anything associated with that nonterminal transaction. A component-scoped activation MAY intentionally retain the previous entries for untouched components, but the result SHALL be marked scoped. A failed activation SHALL leave the previous activation record intact until recovery chooses a terminal state.
 
 #### Scenario: Activation cannot publish a partial target set
 - **WHEN** writing or activating one component target fails before the complete candidate target set is published
@@ -94,6 +94,18 @@ The managed runtime SHALL represent the active Server, Runner, and CLI targets w
 - **WHEN** a managed service starts after its source worktree is unavailable
 - **THEN** its stable absolute launcher resolves the active-set record to a versioned managed artifact
 - **AND** it does not derive a target from the current process directory or source worktree
+
+#### Scenario: Activation lease authorizes the candidate launcher
+- **WHEN** the active record points to a candidate in `ActivationAuthorized`, `CandidateActivated`, or `Verifying`
+- **AND** the transaction record contains the same target generation and a live coordinator process-start token
+- **THEN** the stable launcher starts only the recorded candidate artifact for that activation
+- **AND** it does not invoke a second reconciler or acquire a competing transaction lock
+
+#### Scenario: Stale activation lease transfers to recovery
+- **WHEN** the active record points to a nonterminal candidate but the matching activation lease is missing or its owner process-start token is no longer live
+- **THEN** the stable launcher invokes the CLI-owned reconciler before starting the candidate
+- **AND** reconciliation either verifies the candidate or restores the previous target
+- **AND** it never starts the candidate as an unverified fallback
 
 ### Requirement: Record artifact-owned target identity in every runtime artifact
 The CLI, Server, and Runner artifacts SHALL carry the target source revision, release version, and release ID needed for runtime readback. Managed runtime readback SHALL use this artifact-owned metadata as authoritative; service environment values may be used only as equality checks and a mismatch SHALL make the identity unavailable. A managed artifact SHALL not fall back to the machine's current working directory or source HEAD at runtime.

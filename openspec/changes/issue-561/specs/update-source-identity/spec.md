@@ -12,7 +12,7 @@ The update command SHALL resolve one effective repository root before it perform
 - **AND** the resolved root is recorded as a default-root update rather than being indistinguishable from an explicit-root update
 
 ### Requirement: Carry an immutable source identity through the update
-The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, the immutable `SnapshotRoot` used as read-only source input, transaction-owned writable `BuildWorkspaceRoot` and `CandidateRoot` paths, and the lockfile/toolchain identities used for the build. `BuildWorkspaceRoot` SHALL be the writable transaction parent of `SnapshotRoot` and SHALL contain the build dependency projection, npm cache, NuGet cache, compiler intermediates, and generated metadata; it SHALL not contain an untracked source copy. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
+The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, the immutable `SnapshotRoot` used as read-only source input, transaction-owned writable `BuildWorkspaceRoot` and `CandidateRoot` paths, the stable update ID and continuation generation, and the lockfile/toolchain identities used for the build. `BuildWorkspaceRoot` SHALL be the writable transaction parent of `SnapshotRoot` and SHALL contain the build dependency projection, npm cache, NuGet cache, compiler intermediates, and generated metadata; it SHALL not contain an untracked source copy. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
 
 #### Scenario: Server and Runner are built from the same explicit source
 - **WHEN** the selected repository root resolves to source revision `target-123`
@@ -68,6 +68,20 @@ The command SHALL fail before changing a managed service target when the effecti
 - **WHEN** the selected root exists but its source revision cannot be read
 - **THEN** the command exits unsuccessfully before artifact activation
 - **AND** it does not claim that the update target is current
+
+### Requirement: Continue a self-update by durable transaction ID
+The pre-update CLI SHALL invoke the refreshed CLI with the exact hidden command `update --continue-after-cli-update --update-id <id> --cli-path <candidate-cli-path>`. `--update-id` SHALL be mandatory when `--continue-after-cli-update` is present; the continuation SHALL reject a missing, unknown, terminal, wrong-slot, or already-claimed ID before creating update context or performing any build or service operation. The continuation SHALL load the persisted source context, projection lease, CLI slots, recovery path, target set, and lock ownership by ID, atomically claim the next continuation generation with its process-start token, and reuse the original job ID and source identity. It SHALL not accept a repository-root argument for continuation and SHALL not create a new transaction, projection lease, source context, or lock.
+
+#### Scenario: Continuation loads the original context
+- **WHEN** the pre-update CLI has durably staged transaction `update-123` and invokes the candidate CLI
+- **THEN** it passes `--update-id update-123` and the recorded candidate CLI path
+- **AND** the continuation loads `SnapshotRoot`, `BuildWorkspaceRoot`, `CandidateRoot`, target identity, projection sequence, and recovery CLI path from that transaction
+- **AND** it uses the same job ID and lock rather than resolving a new root or creating a new transaction
+
+#### Scenario: Continuation arguments are incomplete or stale
+- **WHEN** the refreshed CLI receives `--continue-after-cli-update` without the update ID, with an unknown ID, or from a path that is not the recorded candidate slot
+- **THEN** it exits unsuccessfully before building, activating, posting an outcome, or changing a service target
+- **AND** it leaves the existing transaction for the recovery CLI and reports the continuation failure
 
 ### Requirement: Make source selection visible in previews and results
 Human-readable update output and dry-run output SHALL identify whether the source was explicit or default, show the effective repository root, and show the target source revision when it is available. Results that include observed runtime identity SHALL distinguish the target identity from the observed identity.

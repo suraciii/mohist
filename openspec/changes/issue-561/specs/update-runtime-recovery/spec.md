@@ -14,9 +14,9 @@ An update SHALL track the last verified runtime release and its managed service 
 - **AND** the update returns failure without a success result
 
 ### Requirement: Persist activation before destructive changes and reconcile crashes
-Before any candidate target, service unit, or CLI slot can affect managed runtime execution, the coordinator SHALL atomically persist a transaction record containing the operation scope, candidate active-target set, previous verified active-target set, CLI slot state, desired service states, required identities, and current state. For a full update, `CandidateStaged` SHALL not be persisted until the CLI, Server, Runner, web assets, dependency closure, launch metadata, and identity metadata are complete; the CLI slot SHALL not be changed and a service SHALL not be stopped before that point. A component update SHALL apply the same rule to every artifact in its declared scope. The active-target set SHALL be written as one same-directory temporary file followed by a durable atomic replacement; it SHALL contain one generation and one transaction ID for the complete Server, Runner, and CLI set. A transaction SHALL use this write-ahead order: acquire the transaction lock, persist `Prepared`, stage the scoped candidate, persist `CandidateStaged`, publish the complete candidate active-target record, persist `CandidateActivated`, persist `Verifying`, then persist `Committed` only after required identity checks pass. Rollback SHALL persist `RollingBack` before restoring the previous record and SHALL end in `RolledBack`, `NoVerifiedRuntime`, or `RecoveryFailed`. Cancellation before activation SHALL end in `Cancelled` after candidate cleanup; cancellation after activation SHALL persist `Cancelling`, restore and verify the previous scope when possible, and then end in `Cancelled` or `RecoveryFailed`.
+Before any candidate target, service unit, or CLI slot can affect managed runtime execution, the coordinator SHALL atomically persist a transaction record containing the operation scope, candidate active-target set, previous verified active-target set, CLI slot state, desired service states, required identities, continuation claim, activation lease, and current state. For a full update, `CandidateStaged` SHALL not be persisted until the CLI, Server, Runner, web assets, dependency closure, launch metadata, and identity metadata are complete; the CLI slot SHALL not be changed and a service SHALL not be stopped before that point. A component update SHALL apply the same rule to every artifact in its declared scope. The active-target set SHALL be written as one same-directory temporary file followed by a durable atomic replacement; it SHALL contain one generation, one transaction ID, and the matching activation lease for the complete Server, Runner, and CLI set. A transaction SHALL use this write-ahead order: acquire the transaction lock, persist `Prepared`, stage the scoped candidate, persist `CandidateStaged`, persist `ActivationAuthorized` with a live-owner activation lease, publish the complete candidate active-target record, persist `CandidateActivated`, persist `Verifying`, then persist `Committed` only after required identity checks pass. A stable launcher MAY start a target associated with `ActivationAuthorized`, `CandidateActivated`, or `Verifying` only when the active record and transaction record contain the same live activation lease; this is the coordinator's activation handoff, not a second transaction. A launcher with no matching live lease SHALL invoke reconciliation and SHALL not start the candidate. Rollback SHALL persist `RollingBack` before restoring the previous record and SHALL end in `RolledBack`, `NoVerifiedRuntime`, or `RecoveryFailed`. Cancellation before activation SHALL end in `Cancelled` after candidate cleanup; cancellation after activation SHALL persist `Cancelling`, restore and verify the previous scope when possible, and then end in `Cancelled` or `RecoveryFailed`.
 
-The CLI-owned reconciler SHALL run before a new update accepts work and before a managed launcher starts a target associated with a nonterminal transaction. It SHALL resolve every nonterminal transaction to a terminal state: clean a `Prepared` transaction that never reached `CandidateStaged`, verify and commit a candidate that is active and passes bounded checks, restore the previous verified target when verification fails, clean an unapplied candidate when activation never published it, resume `Cancelling` or `RollingBack`, or report `RecoveryFailed` when neither target can be verified. A second update SHALL not proceed while reconciliation is unresolved.
+The CLI-owned reconciler SHALL run before a new update accepts work and before a managed launcher starts a target associated with a nonterminal transaction that has no live activation lease. It SHALL resolve every nonterminal transaction: clean a `Prepared` transaction that never reached `CandidateStaged`, clean an `ActivationAuthorized` transaction whose active record was never published, leave activation to the live coordinator when the matching lease owner is alive, verify and commit a candidate that is active after taking over a stale lease, restore the previous verified target when verification fails, clean an unapplied candidate when activation never published it, resume `Cancelling` or `RollingBack`, or report `RecoveryFailed` when neither target can be verified. A second update SHALL not proceed while reconciliation is unresolved.
 
 #### Scenario: Crash before candidate activation
 - **WHEN** the process dies after `CandidateStaged` is persisted but before the candidate active-target record is published
@@ -35,6 +35,18 @@ The CLI-owned reconciler SHALL run before a new update accepts work and before a
 - **AND** it performs bounded candidate verification before either committing the candidate or restoring the previous verified target
 - **AND** it does not treat the candidate as verified merely because the active record was written
 
+#### Scenario: Activation handoff is owned by a live coordinator
+- **WHEN** a stable launcher observes a candidate active record in `ActivationAuthorized`, `CandidateActivated`, or `Verifying`
+- **AND** the transaction record contains the same target generation and a live activation owner token
+- **THEN** the launcher starts the recorded candidate and does not run a competing reconciliation
+- **AND** the coordinator retains the transaction lock until verification or rollback reaches a durable terminal state
+
+#### Scenario: Activation handoff transfers after coordinator death
+- **WHEN** a stable launcher observes a candidate active record but the matching activation owner token is stale
+- **THEN** it invokes the CLI-owned reconciler
+- **AND** the reconciler claims the lock, verifies or restores the recorded target set, and releases the stale lease
+- **AND** no launcher starts the candidate before that recovery decision
+
 #### Scenario: Crash during partial service or CLI target activation
 - **WHEN** activation fails or the process dies after a Server unit, Runner unit, or CLI slot side effect is applied but before the complete target set is committed
 - **THEN** the transaction's recorded prior targets and slot are used to restore every changed side effect
@@ -43,8 +55,9 @@ The CLI-owned reconciler SHALL run before a new update accepts work and before a
 
 #### Scenario: Managed startup encounters an unresolved transaction
 - **WHEN** a stable managed launcher observes an active-target record associated with a nonterminal transaction
-- **THEN** it invokes the CLI-owned reconciler before starting that candidate
-- **AND** it starts only the reconciled verified target, or refuses the start and reports no verified runtime when reconciliation fails
+- **THEN** it checks the matching activation lease and its owner process-start token
+- **AND** it starts the candidate only for a live coordinator-owned activation handoff
+- **AND** otherwise it invokes the CLI-owned reconciler before starting any target, or refuses the start and reports no verified runtime when reconciliation fails
 
 ### Requirement: Restore the last verified runtime after a candidate failure
 When a last verified release exists, a failed candidate transaction SHALL restore the previous release as the active service target, restart any affected managed service as needed, and verify that the restored runtime identity is the recorded last verified identity. Recovery SHALL not silently leave the candidate active.
@@ -88,7 +101,7 @@ If the CLI is replaced before the Server and Runner transaction completes, the c
 - **AND** it does not exit with a success result merely because the CLI replacement succeeded
 
 ### Requirement: Bootstrap legacy CLI installations before managed self-update
-An installed CLI that cannot read or write the managed transaction record SHALL return `bootstrap_required` before replacing its executable, stopping a service, or changing `active.json`. The bootstrap instruction SHALL identify the supported current CLI installation operation. The bootstrap operation SHALL install the stable launcher, recovery CLI slot, fixed runtime-root metadata, and transaction schema without claiming the legacy source-bound runtime as verified. A managed self-update SHALL begin only after the new CLI persists `Prepared` with a recovery path that remains runnable if the candidate slot is invalid.
+An installed CLI that cannot read or write the managed transaction record SHALL return `bootstrap_required` before replacing its executable, stopping a service, or changing `active.json`. The bootstrap instruction SHALL identify the supported current CLI installation operation. The bootstrap operation SHALL install an always-available `cli/bootstrap/mo` helper outside both update slots, the stable launcher, recovery CLI slot, fixed runtime-root metadata, and transaction schema without claiming the legacy source-bound runtime as verified. A managed self-update SHALL begin only after the new CLI persists `Prepared` with a recovery path that remains runnable if the candidate slot is invalid. The bootstrap helper SHALL be installed with the initial CLI distribution, SHALL never be replaced by candidate activation, and SHALL implement only the restricted `install cli` repair operation.
 
 #### Scenario: Legacy CLI fails closed before mutation
 - **WHEN** a pre-transaction CLI invokes `mo update`
@@ -99,6 +112,12 @@ An installed CLI that cannot read or write the managed transaction record SHALL 
 - **WHEN** a managed transaction crashes before or after replacing the candidate CLI slot
 - **THEN** the stable launcher invokes the recorded recovery CLI slot rather than the candidate slot
 - **AND** reconciliation restores or quarantines the target set without recursively executing the unverified candidate
+
+#### Scenario: Legacy bootstrap has a runnable repair path
+- **WHEN** the active CLI reports `bootstrap_required` or no trusted recovery CLI slot is available
+- **THEN** the stable wrapper dispatches only the exact `install cli` command to `cli/bootstrap/mo`
+- **AND** every other command returns `bootstrap_required` without executing the candidate slot
+- **AND** the bootstrap helper recreates the recovery slot, stable launchers, and runtime-root metadata before another update
 
 ### Requirement: Make cancellation a durable transaction outcome
 Cancellation SHALL be recorded as a state-machine event rather than only as a process interruption. Before activation, cancellation SHALL clean the candidate and persist `Cancelled` while leaving the previous active target and CLI slot unchanged. After activation or any service/CLI target effect, cancellation SHALL persist `Cancelling`, restore and verify the previous scope when possible, persist `Cancelled`, return exit code 130, release the lock only after the terminal record is durable, and project the terminal cancellation outcome. If restoration cannot be verified, cancellation SHALL stop or disable the candidate, clear the active target when required, preserve diagnostic paths, and end in `RecoveryFailed` without success. A `Cancelling` record SHALL be reconciled before any new update or managed launch.
@@ -125,7 +144,7 @@ Cancellation SHALL be recorded as a state-machine event rather than only as a pr
 - **AND** the transaction ends in `RecoveryFailed` with the cancellation and recovery facts
 
 ### Requirement: Keep a trusted CLI executable for every terminal recovery state
-The selected CLI slot SHALL be part of `active.json` and the stable `launchers/cli` wrapper SHALL resolve only that record. `Committed` and `RolledBack` SHALL select a verified release CLI slot. `NoVerifiedRuntime`, `Cancelled` after candidate activation, and `RecoveryFailed` SHALL set the Server and Runner target set to none while selecting the last trusted recovery CLI slot. If no trusted recovery slot exists, the wrapper SHALL refuse to execute the candidate and SHALL report `bootstrap_required`. The supported manual repair command SHALL be `mo install cli`; it SHALL recreate the recovery slot, stable launchers, and runtime-root metadata before another `mo update`.
+The selected CLI slot SHALL be part of `active.json` and the stable `launchers/cli` wrapper SHALL resolve only that record for normal commands. `Committed` and `RolledBack` SHALL select a verified release CLI slot. `NoVerifiedRuntime`, `Cancelled` after candidate activation, and `RecoveryFailed` SHALL set the Server and Runner target set to none while selecting the last trusted recovery CLI slot. If no trusted recovery slot exists, the wrapper SHALL dispatch only `install cli` to the always-available `cli/bootstrap/mo` helper and SHALL report `bootstrap_required` for every other command; it SHALL never execute the candidate slot as a general CLI. The supported manual repair command SHALL be `mo install cli`; it SHALL recreate the bootstrap helper, recovery slot, stable launchers, and runtime-root metadata before another `mo update`.
 
 #### Scenario: Rollback selects the verified CLI slot
 - **WHEN** a candidate fails after the candidate CLI was selected and the previous verified release is restored
@@ -140,19 +159,31 @@ The selected CLI slot SHALL be part of `active.json` and the stable `launchers/c
 
 #### Scenario: Recovery slot is unavailable
 - **WHEN** rollback or recovery fails and no trusted recovery CLI slot is runnable
-- **THEN** the stable wrapper refuses to execute the candidate slot
-- **AND** it returns `bootstrap_required` with no normal update success result
+- **THEN** the stable wrapper executes only the restricted bootstrap helper for `mo install cli`
+- **AND** it refuses every other command and returns `bootstrap_required` with no normal update success result
+
+#### Scenario: Bootstrap helper is unavailable
+- **WHEN** no trusted recovery slot and no `cli/bootstrap/mo` helper are present
+- **THEN** the stable wrapper reports installation corruption and does not execute the candidate slot
+- **AND** operator guidance directs reinstall of the original Mohist CLI distribution before rerunning `mo install cli`
 
 ### Requirement: Make transaction persistence and locking crash-durable
-The transaction lock SHALL be an OS-backed exclusive file containing a schema version, transaction ID, owner process ID, owner process-start token, and creation time. File contents and the containing directory SHALL be flushed before `Prepared` is considered durable. A process-local semaphore SHALL be only an optimization and SHALL not establish ownership. A lock SHALL be considered stale only when its owner process-start token is not live or its transaction is terminal; an ambiguous owner SHALL fail closed. The reconciler SHALL resolve the transaction before removing a stale lock. The lock SHALL remain held until a terminal transaction state is durable; a release failure SHALL persist `lockReleasePending` and SHALL be retried before the next update.
+The transaction lock SHALL be an OS-backed exclusive file containing a schema version, transaction ID, owner process ID, owner process-start token, creation time, and phase (`acquiring`, `prepared`, or `terminal`). File contents and the containing directory SHALL be flushed before the lock acquisition call returns. A process-local semaphore SHALL be only an optimization and SHALL not establish ownership. A lock SHALL be considered stale only when its owner process-start token is not live or its transaction is terminal; an ambiguous owner SHALL fail closed. If an `acquiring` lock has no transaction record, the reconciler SHALL first prove that the owner token is stale, persist an `OrphanedLock` record with the current active target snapshot, and persist `RolledBack` when a previous verified target exists or `NoVerifiedRuntime` otherwise. It SHALL remove the orphan lock only after the diagnostic and terminal records are durable; a record-write failure SHALL leave the lock for retry. The reconciler SHALL resolve the transaction before removing any other stale lock. The lock SHALL remain held until a terminal transaction state is durable; a release failure SHALL persist `lockReleasePending` and SHALL be retried before the next update.
 
-Transaction records and `active.json` SHALL be written through an injected atomic-file boundary that flushes file contents, replaces only within the same directory, and flushes the directory entry after replacement. The Linux implementation SHALL use a write-through file flush and directory flush; the Windows implementation SHALL use the platform replace operation with write-through semantics. The write order SHALL be: lock, `Prepared`, candidate files and manifest, `CandidateStaged`, active record, `CandidateActivated`, service/launcher effects, `Verifying`, terminal state, and lock release. Stable launchers SHALL not start a target while its transaction is unresolved.
+Transaction records and `active.json` SHALL be written through an injected atomic-file boundary that flushes file contents, replaces only within the same directory, and flushes the directory entry after replacement. The Linux implementation SHALL use a write-through file flush and directory flush; the Windows implementation SHALL use the platform replace operation with write-through semantics. The write order SHALL be: lock with `acquiring` phase, `Prepared`, candidate files and manifest, `CandidateStaged`, `ActivationAuthorized` with a live activation lease, active record with the same lease, `CandidateActivated`, service/launcher effects, `Verifying`, terminal state, and lock release. Stable launchers SHALL start a candidate during an unresolved transaction only for the matching live activation lease; all other unresolved transactions SHALL be reconciled before launch.
 
 #### Scenario: Crash leaves a lock file
 - **WHEN** the process dies after acquiring the transaction lock or after a terminal state is persisted but before lock release
 - **THEN** startup reads the lock owner and transaction record
 - **AND** it removes the lock only when the owner is stale or the transaction is terminal
 - **AND** a new update is rejected until reconciliation completes
+
+#### Scenario: Crash before `Prepared` leaves only an acquisition lock
+- **WHEN** the process dies after creating and flushing an `acquiring` lock but before a transaction record is durable
+- **THEN** startup proves whether the recorded owner process-start token is stale
+- **AND** for a stale owner it persists an `OrphanedLock` diagnostic record and then `RolledBack` when the current active target is verified or `NoVerifiedRuntime` otherwise
+- **AND** it removes the lock only after those records are durable
+- **AND** for a live or ambiguous owner it leaves the lock in place and rejects new work
 
 #### Scenario: Atomic replacement fails
 - **WHEN** a state or active-record replacement cannot complete or its durability boundary fails
