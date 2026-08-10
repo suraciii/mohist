@@ -7,7 +7,7 @@ stage: approval
 Read the current Mohist issue details before interpreting this task:
 
 ```bash
-mo issue show ${{ issue.number }} --project ${{ issue.projectId }}
+mo issue view ${{ issue.number }} --project ${{ issue.projectId }}
 ```
 
 This task exists because the user requested changes at the `${{ stage.name }}` approval gate.
