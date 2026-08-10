@@ -308,6 +308,12 @@ export class ServerConnection {
     return response.json() as Promise<WorkflowAgentSession>
   }
 
+  async resetWorkflowAgentSession(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<WorkflowAgentSession> {
+    const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/reset`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
+    if (!response.ok) throw new Error(`session retry reset failed: ${response.status} ${await response.text()}`)
+    return response.json() as Promise<WorkflowAgentSession>
+  }
+
   async workflowAgentSessionRuntimeEvents(projectId: string, workflowRunId: string, sessionName: string, body: unknown, signal: AbortSignal): Promise<AgentSessionRuntimeEventAcceptance[]> {
     const response = await this.fetchWithAuth(this.url(`sessions/${encodeURIComponent(projectId)}/${encodeURIComponent(workflowRunId)}/${encodeURIComponent(sessionName)}/runtime-events`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal })
     if (!response.ok) throw new Error(`session runtime events failed: ${response.status} ${await response.text()}`)
@@ -550,6 +556,7 @@ export interface WorkflowAgentSession {
   workDir?: string | null
   model?: string | null
   resolvedModel?: string | null
+  needsFreshRuntimeSession?: boolean
 }
 
 export interface AgentSessionRuntimeEventReceipt {

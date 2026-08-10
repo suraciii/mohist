@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkExecutor } from "../src/runtime/executor.js"
 import type { DispatchWorkItem } from "../src/core/types.js"
@@ -17,7 +20,7 @@ const runtimeFailureErrors = [
   "runtime-session-missing",
 ].map((code) => ({ code, description: code }))
 
-function work(): DispatchWorkItem {
+function work(workspacePath = workDir): DispatchWorkItem {
   return {
     workflowRunId: "wf-runtime-failure",
     workId: "plan.1",
@@ -27,7 +30,7 @@ function work(): DispatchWorkItem {
     uses: "test/agent",
     with: {},
     projectId: "project-1",
-    variables: { workspace: { path: workDir } },
+    variables: { workspace: { path: workspacePath } },
   }
 }
 
@@ -70,12 +73,12 @@ function fakeRuntime(overrides: Record<string, unknown> = {}) {
   } as never
 }
 
-function createExecutor(runtime: unknown, connection: unknown, outbox = makeRecordingOutbox()) {
+function createExecutor(runtime: unknown, connection: unknown, outbox = makeRecordingOutbox(), executionWorkDir = workDir) {
   const executor = new WorkExecutor(
     actionRegistry(),
-    verifyOnlyWorkspaceManager({ path: workDir, branch: null }),
+    verifyOnlyWorkspaceManager({ path: executionWorkDir, branch: null }),
     connection as never,
-    workDir,
+    executionWorkDir,
     undefined,
     runtime as never,
     null,
@@ -191,5 +194,72 @@ describe("WorkExecutor runtime failure convergence", () => {
     expect(result.error?.message).toContain("attach rejected")
     expect(outbox.eventTypeList()).toEqual(["turn.failed", "session.activity"])
     expect(outbox.eventsByType("session.activity")[0]?.runtimeSessionId).toBe("runtime-created")
+  })
+
+  it("creates a fresh physical session before retrying a failed binding and satisfies the task artifact", async () => {
+    const retryWorkDir = await mkdtemp(join(tmpdir(), "mohist-retry-session-"))
+    try {
+      const createSession = vi.fn(async () => ({
+        ok: true as const,
+        value: { runtimeSessionId: "runtime-new", workDir: retryWorkDir },
+        diagnostics: [],
+      }))
+      const resolveSession = vi.fn(async () => ({ ok: true as const, value: { activeTurn: false }, diagnostics: [] }))
+      const resetWorkflowAgentSession = vi.fn(async (_projectId: string, _workflowRunId: string, _sessionName: string, _body: unknown, _signal: AbortSignal) => ({ runtimeSessionId: "runtime-new", workDir: retryWorkDir }))
+      const runTurn = vi.fn(async (request: { target: { runtimeSessionId: string | null; workDir: string } }) => {
+        if (request.target.runtimeSessionId === "runtime-old") {
+          return {
+            ok: false as const,
+            error: { kind: "turn-failed" as const, message: "old runtime session was aborted", diagnostics: [] },
+            diagnostics: [],
+          }
+        }
+        const proposalPath = join(request.target.workDir, "openspec/changes/issue-557/proposal.md")
+        await mkdir(join(request.target.workDir, "openspec/changes/issue-557"), { recursive: true })
+        await writeFile(proposalPath, "proposal", "utf8")
+        return {
+          ok: true as const,
+          value: {
+            facts: { finalAssistantText: "proposal written", runtimeSessionId: "runtime-new", workDir: request.target.workDir },
+            diagnostics: [],
+          },
+          diagnostics: [],
+        }
+      })
+      const { executor, outbox } = createExecutor(
+        fakeRuntime({ createSession, resolveSession, runTurn }),
+        fakeConnection({
+          openWorkflowAgentSession: async () => ({
+            runtimeSessionId: "runtime-old",
+            workDir: retryWorkDir,
+            needsFreshRuntimeSession: true,
+          }),
+          resetWorkflowAgentSession,
+        }),
+        makeRecordingOutbox(),
+        retryWorkDir,
+      )
+
+      const result = await executor.execute({
+        ...work(retryWorkDir),
+        expect: { files: [{ path: "openspec/changes/issue-557/proposal.md" }] },
+      }, new AbortController().signal)
+
+      expect(result.status).toBe("completed")
+      expect(result.error).toBeUndefined()
+      expect(createSession).toHaveBeenCalledTimes(1)
+      expect(resolveSession).not.toHaveBeenCalled()
+      expect(resetWorkflowAgentSession).toHaveBeenCalledTimes(1)
+      expect((resetWorkflowAgentSession.mock.calls[0]?.[3] as Record<string, unknown>)).toMatchObject({
+        expectedRunnerId: "runner-1",
+        expectedRuntime: "opencode",
+        expectedRuntimeSessionId: "runtime-old",
+        replacementRuntimeSessionId: "runtime-new",
+      })
+      expect(runTurn.mock.calls.map((call) => call[0].target.runtimeSessionId)).toEqual(["runtime-new"])
+      expect(outbox.eventsByType("session.input")[0]?.runtimeSessionId).toBe("runtime-new")
+    } finally {
+      await rm(retryWorkDir, { recursive: true, force: true })
+    }
   })
 })

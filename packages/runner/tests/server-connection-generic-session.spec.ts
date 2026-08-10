@@ -93,6 +93,31 @@ describe("ServerConnection.attachAgentSession (generic)", () => {
   })
 })
 
+describe("ServerConnection.resetWorkflowAgentSession", () => {
+  it("ResetWorkflowAgentSession_PostsTheExpectedBindingCasToTheWorkflowResetUrl", async () => {
+    fetchMock.mockResolvedValueOnce(mockResponse({
+      status: 200,
+      body: JSON.stringify({ runtimeSessionId: "runtime-new", runtime: "opencode", workDir: "/workspace" }),
+    }))
+    const connection = new ServerConnection(options())
+    const body = {
+      expectedRunnerId: "runner-1",
+      expectedRuntime: "opencode",
+      expectedRuntimeSessionId: "runtime-old",
+      replacementRuntimeSessionId: "runtime-new",
+      replacementRuntime: "opencode",
+    }
+
+    const result = await connection.resetWorkflowAgentSession("project-1", "wf-1", "plan", body, new AbortController().signal)
+
+    expect(result).toEqual({ runtimeSessionId: "runtime-new", runtime: "opencode", workDir: "/workspace" })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toMatch(/\/api\/runner\/runner-1\/sessions\/project-1\/wf-1\/plan\/reset$/)
+    expect(init.method).toBe("POST")
+    expect(JSON.parse(init.body as string)).toEqual(body)
+  })
+})
+
 describe("ServerConnection.agentSessionRuntimeEvents (generic)", () => {
   it("AgentSessionRuntimeEvents_PostsToGenericRuntimeEventsUrl", async () => {
     fetchMock.mockResolvedValueOnce(mockResponse({ status: 200, body: "[]" }))
