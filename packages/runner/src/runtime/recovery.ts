@@ -83,11 +83,13 @@ export function tryRecovery(
   }
 
   const label = work.title?.trim() || work.uses || work.workId
+  const schedulingMessage = result.error?.message ?? `${label} recovery scheduled`
   return {
+    ...result,
     status: "completed",
-    message: result.error?.message ?? `${label} recovery scheduled`,
-    error: result.error,
-    output: result.output,
+    message: result.message
+      ? `${result.message}; ${schedulingMessage}`.slice(0, 4000)
+      : schedulingMessage,
     addTasks,
   }
 }
