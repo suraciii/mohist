@@ -1,6 +1,6 @@
 ### Requirement: Durable per-Session public event stream
 
-The Server MUST provide `GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events` as a read-only stream for exactly one authorized Session. The stream MUST be backed by a durable public projection rather than an in-memory event bus, SignalR delivery, Runner notification, UI timeline, internal transcript dump, or Project-wide mixed feed. Each page MUST contain `sessionId`, an ascending `events` collection, `nextCursor`, and `highWaterSequence`. Each event MUST contain its sequence, opaque cursor, type, occurrence timestamp, and either an allowlisted public execution observation or the separately constrained context-reset Session payload. Public execution events MUST be limited to `input.accepted`, `input.rejected`, `turn.queued`, `turn.running`, `turn.outcome_pending`, `turn.terminal`, and `session.unknown`.
+The Server MUST provide `GET /api/v1/projects/{projectId}/agent-sessions/{sessionId}/events` as a read-only stream for exactly one authorized Session. The stream MUST be backed by a durable public projection rather than an in-memory event bus, SignalR delivery, Runner notification, UI timeline, internal transcript dump, or Project-wide mixed feed. The page schema MUST contain exactly the public envelope fields `sessionId`, an ascending `events` collection, `nextCursor`, and `highWaterSequence`, with no internal metadata. Each event MUST contain its sequence, opaque cursor, type, occurrence timestamp, and either an allowlisted public execution observation or the separately constrained context-reset Session payload. Public execution events MUST be limited to `input.accepted`, `input.rejected`, `turn.queued`, `turn.running`, `turn.outcome_pending`, `turn.terminal`, and `session.unknown`; `session.context_reset` is the only additional event type and uses only its separately defined payload.
 
 #### Scenario: Read one Session after reconnect
 - **WHEN** an authorized caller reads the event route for a known Session
@@ -36,7 +36,7 @@ The event route MUST accept an optional opaque `after` cursor and `limit`, with 
 
 ### Requirement: Stable sequence and projection transaction
 
-Each Session stream MUST use strictly increasing positive sequence values that are never reused or renumbered, including across projector restart, crash recovery, outbox replay, or stream-generation changes. The projector MUST commit the public snapshot, corresponding event entries, event identity, next sequence, and source checkpoint in one projection transaction. A crash before commit MUST leave no partial public event, snapshot, or checkpoint; a restart after commit MUST NOT append a duplicate for the same normalized source transition.
+Each Session stream MUST use strictly increasing positive sequence values that are never reused or renumbered, including across projector restart, crash recovery, outbox replay, or stream-generation changes. A new stream generation MUST invalidate old cursors without resetting `nextSequence`; the `(SessionId, sequence)` identity remains globally monotonic for the retained stream and closed-stream tombstones. The projector MUST commit the public snapshot, corresponding event entries, event identity, next sequence, and source checkpoint in one projection transaction. A crash before commit MUST leave no partial public event, snapshot, or checkpoint; a restart after commit MUST NOT append a duplicate for the same normalized source transition.
 
 #### Scenario: Projector crash before commit
 - **WHEN** projection processing crashes before its transaction commits
@@ -45,6 +45,10 @@ Each Session stream MUST use strictly increasing positive sequence values that a
 #### Scenario: Projector restarts after commit
 - **WHEN** the projector restarts after a public event and checkpoint have committed
 - **THEN** it resumes after the checkpoint and preserves the existing sequence without emitting a duplicate event
+
+#### Scenario: Projection rebuild creates a new generation
+- **WHEN** a projection rebuild creates a new stream generation for a retained Session
+- **THEN** old-generation cursors return `400 cursor_invalid`, and later public events continue above the prior high-water sequence without reusing or renumbering any `(SessionId, sequence)` identity
 
 ### Requirement: Repeated and concurrent page reads
 
@@ -73,6 +77,21 @@ The Server MUST reject malformed, tampered, cross-Project, cross-Session, and ol
 #### Scenario: Closed stream tombstone
 - **WHEN** an authorized control-plane action has closed a Session and the caller submits a valid cursor during the tombstone retention window
 - **THEN** the Server returns `410 cursor_expired` with the last safe sequence, while a request without a valid cursor returns `404 session_not_found`
+
+### Requirement: First-release history eligibility
+
+The first release MUST expose the public stream only for Sessions created after
+the typed `ExternalAgentProjectionSourceFact` contract is enabled and whose
+source history is complete through the required projection watermark. It MUST
+NOT backfill or infer public history from a current snapshot or raw internal
+`AgentSessionEvents` payload. An authorized request for a known older or
+otherwise incomplete Session MUST return `503 projection_lag` with a safe
+projection-unavailable reason, not `404`, an empty stream, or fabricated
+`unknown` events.
+
+#### Scenario: Ineligible historical Session
+- **WHEN** an authorized caller requests events for a known Session without complete typed source history
+- **THEN** the Server returns `503 projection_lag` and does not expose a partial or inferred event stream
 
 ### Requirement: Projection lag and retained history
 

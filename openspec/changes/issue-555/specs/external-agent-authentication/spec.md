@@ -12,7 +12,7 @@ The `/api/v1` External Agent surface MUST authenticate every request with exactl
 
 ### Requirement: Explicit External Agent Project grant
 
-Each PAT used by the direct API MUST resolve to an `ExternalAgentCaller` containing a stable credential identity, Principal identity, granted scopes, and exactly one grant form: a non-empty explicit set of Project IDs or an explicit `operator_all` grant. `operator_all` MUST be valid only with `operator` scope. An operator scope without a Project grant MUST NOT authorize direct Agent access, and the grant MUST NOT act as a general Project membership or multi-user ACL.
+Each PAT used by the direct API MUST resolve to an `ExternalAgentCaller` containing a stable credential identity, Principal identity, granted scopes, and exactly one grant form: a non-empty explicit set of Project IDs or an explicit `operator_all` grant. The deployment-owned authorization catalog MUST contain only current private Projects owned by the deployment. `operator_all` MUST be checked against that catalog at every direct request, so removing a Project from the catalog or changing it to non-private or non-owned MUST deny subsequent access immediately. Explicit grant issuance MUST validate every requested canonical Project ID against the same catalog before the Credential/grant transaction commits; a failed binding MUST return `403` and persist neither row. Explicit grants remain caller-selected ID allowlists after issuance, and canonical resource ownership is still checked at request time. `operator_all` MUST be valid only with `operator` scope. An operator scope without a Project grant MUST NOT authorize direct Agent access, and the grant MUST NOT act as a general Project membership or multi-user ACL.
 
 #### Scenario: Explicit Project grant
 - **WHEN** an operator PAT has an explicit grant for Project `proj_a` and calls a direct route for `proj_a`
@@ -24,7 +24,11 @@ Each PAT used by the direct API MUST resolve to an `ExternalAgentCaller` contain
 
 #### Scenario: Operator-wide grant validation
 - **WHEN** a PAT is issued with `operator_all` and `operator` scope
-- **THEN** the PAT can be authorized for each current private Project owned by the deployment; a readonly PAT requesting `operator_all` is rejected before issuance
+- **THEN** the PAT can be authorized for each current private Project owned by the deployment; a readonly PAT requesting `operator_all` is rejected before issuance, and a later non-private, non-owned, or removed Project is denied before Project or resource lookup
+
+#### Scenario: Explicit grant binding validation
+- **WHEN** an operator requests explicit bindings containing a Project that is unknown, non-private, non-owned, or outside the deployment authorization catalog
+- **THEN** the Server returns `403` before persistence and creates neither the Credential nor any External Agent grant row
 
 ### Requirement: Grant-aware PAT lifecycle
 

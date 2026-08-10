@@ -102,6 +102,24 @@ the token value. Request-time resolution loads the PAT by hash and builds an
 `ExternalAgentCaller` containing `callerKeyId`, Principal ID, scopes, and the
 grant.
 
+`operator_all` is a dynamic grant, not a snapshot of Project IDs. On every
+direct request, `ExternalAgentAuthorization` checks the canonical Project ID
+against a deployment-owned authorization catalog containing only current
+private Projects. The check reads this authorization index, not the Project
+entity or a resource, so an out-of-grant request still returns `403` before
+Project lookup. In the current single-administrator data model, every current
+Project catalog entry is private and deployment-owned; this index is a narrow
+grant boundary, not a Project membership, user, role, or ACL model. If a
+Project is removed from that catalog or later becomes non-private or
+non-owned, `operator_all` access stops immediately; it is never grandfathered.
+
+Explicit grants are validated against the same catalog at issuance. The issuer
+must already satisfy the existing operator authorization, every requested
+canonical Project ID must be a current catalog entry, and any failed binding
+returns `403` before the Credential/grant transaction commits. Explicit grant
+rows remain caller-selected ID allowlists after issuance; canonical resource
+ownership is still checked at request time.
+
 For `/api/v1`, `AuthResolutionMiddleware` will require exactly one Bearer
 header, reject cookies, query-string tokens, file credentials, and non-PAT
 credentials, and perform the route scope check. A small
@@ -176,8 +194,39 @@ recover after process loss.
 
 ### 5. Build a separate public projection and public event journal
 
-Add a projector fed by durable canonical AgentJob/AgentSession facts and their
-outboxes. The projector writes, in one database transaction:
+Add typed `ExternalAgentProjectionSourceFact` records to the existing durable
+AgentJob/AgentSession outboxes. These are internal source facts, not public
+events and not a second execution lifecycle. The canonical producers append
+them in the same aggregate transaction as the state mutation, with a stable
+source identity and a monotonic source revision for the Job/Session lineage
+(per-Session once a Session exists). The source contract has these kinds and
+mappings:
+
+- `job.prepared` creates or updates the Job-anchored accepted snapshot but does
+  not create a Session event before a Session exists.
+- `input.accepted` and `input.rejected` map to the same public event types.
+- `turn.queued`, `turn.running`, `turn.outcome_pending`, and `turn.terminal`
+  map one-to-one to the public event types.
+- `session.unknown` records an unresolved acceptance, dispatch, binding, stop,
+  or outcome fact without authorizing replay.
+- `session.context_reset` is emitted only for a committed canonical context
+  boundary and carries a safe reason.
+
+Every canonical launch, follow-up, capacity decision, runner/result update,
+stop-fence decision, and context-boundary mutation that can affect the public
+contract must emit the corresponding typed source fact. The source fact
+contains only canonical IDs, source revision/time, public state components,
+and already-allowlisted output/error data. The projector never infers an
+ordered public transition from the current aggregate snapshot or from the
+existing raw `AgentSessionEvents` payload alone. A Session is eligible for
+first-release replay only when it was created after the typed source contract
+was enabled and has complete source history from accepted launch through its
+current watermark. The first release does not backfill or expose older
+Sessions from snapshots or raw internal events. A known legacy Session without
+that complete typed source history is ineligible and is handled by the rollout
+rule below.
+
+The projector writes, in one database transaction:
 
 1. the allowlisted `PublicExecutionRead` snapshot;
 2. the public Session event rows and their stable identity;
@@ -194,7 +243,10 @@ latter is one of its inputs. The projector filters source transitions into the
 finite public event vocabulary, applies the five-state precedence rules, and
 maps output/error through explicit allowlists. The journal has per-Session
 strictly increasing sequences, deduplication by normalized source transition,
-retention metadata, and closed-stream tombstones.
+retention metadata, and closed-stream tombstones. `nextSequence` is never reset
+when a stream generation changes: generation invalidates old cursors, while
+the `(SessionId, sequence)` identity remains strictly increasing and never
+reused or renumbered.
 
 The `after` cursor is an opaque, tamper-evident token containing the Project,
 Session, stream generation, and exclusive sequence position. Its codec is
@@ -237,18 +289,21 @@ response and could allow a late result to overwrite a stop outcome.
 - [Event storage growth] A retained public journal is additional durable data and cannot follow transcript compaction. -> Add configurable retention/pruning, retain cursor tombstones for the same recovery window, and monitor per-Session journal size.
 - [Cursor key rotation] A signing-key change can invalidate active client cursors unexpectedly. -> Version the cursor codec and retain verification keys for at least the cursor retention window; finalize rotation policy before enabling the route.
 - [Stop/result race] Stop, Runner result, and projector delivery can arrive in different orders. -> Make the terminal fence and revision part of the canonical stop decision and apply it again in the projection reducer.
-- [Backfill ambiguity] Historical internal events do not all have the public vocabulary or safe final-output shape. -> Backfill only from durable canonical facts that satisfy the public mapper; mark unresolved observations as `unknown` or keep the route disabled for an unprojected Session rather than fabricating history.
+- [Historical Session eligibility] Historical internal events do not all have the public vocabulary or safe final-output shape. -> Do not backfill or expose Sessions created before the complete typed source contract in the first release; an authorized read of a known ineligible Session returns `503 projection_lag` with a safe projection-unavailable reason and no fabricated events.
 
 ## Migration Plan
 
-1. Add additive database migrations and stores for External Agent grants,
-   request mappings, public snapshots, public Session events, projection
+1. Add additive database migrations and stores for the deployment Project
+   authorization catalog, External Agent grants, request mappings, public
+   snapshots, typed projection source facts, public Session events, projection
    checkpoints/generations, and cursor tombstones. Add unique indexes for
-   caller-scoped keys, event identity, and `(SessionId, sequence)`.
+   caller-scoped keys, source transition identity, event identity, and
+   `(SessionId, sequence)`.
 2. Ship the domain/application contracts and projector behind a disabled
-   feature flag. Start projection workers in observe-only mode, verify source
-   checkpoints and safe-field mapping, and backfill retained Sessions where
-   canonical facts are sufficient.
+   feature flag. Start projection workers in observe-only mode and verify that
+   every new canonical lifecycle mutation emits a typed source fact, that
+   source checkpoints and safe-field mapping converge, and that no public
+   event is inferred from an incomplete historical snapshot.
 3. Extend `mo auth token create`, `list`, and the server PAT routes with repeated
    `--project` and `--all-projects`. Validate all bindings before persistence;
    existing PATs remain valid on existing surfaces but have no direct API
@@ -261,7 +316,10 @@ response and could allow a late result to overwrite a stop outcome.
    stop races, cursor expiry/generation, projection lag, retention, and privacy.
    Run CLI coverage for grant validation and token disclosure.
 6. Enable the feature only after the projector has caught up for newly created
-   and selected backfilled Sessions. Publish `docs/auth.md`,
+   Sessions with complete typed source history. The first release does not
+   expose historical Sessions without that history; an authorized read of a
+   known but ineligible Session returns `503 projection_lag` with a safe
+   projection-unavailable reason and no fabricated events. Publish `docs/auth.md`,
    `docs/agent-api.md`, and the implementation-status guidance with the exact
    shipped contract.
 
@@ -278,16 +336,7 @@ from the durable checkpoints.
 
 - What retention duration and maximum journal size should apply to public
   Session events and cursor tombstones?
-- Which existing AgentJob and AgentSession source facts are sufficient to
-  reconstruct every public transition and safe final output for historical
-  Sessions, and which new typed outbox facts are needed?
 - Where should cursor verification keys live, and how long should old key
   versions remain valid during rotation?
-- Should `operator_all` include only currently private Projects at request
-  time, or also preserve access to a Project that later changes ownership or
-  visibility?
 - What policy should limit the size and content of persisted public final
   output and safe error messages?
-- Should the first release expose backfilled historical Sessions, or enable
-  event replay only for Sessions whose public projection was created after the
-  migration?

@@ -42,6 +42,34 @@ The Server alone MUST create and update AgentJob, AgentSession, Session Input, T
 - **WHEN** a launch request tries to select a Runner, Runtime, physical Runtime Session, model, Instructions, Skills, workspace path, or provider operation
 - **THEN** the request is rejected as invalid and the selected Agent and canonical Session remain the only sources of those execution facts
 
+### Requirement: Typed public-projection source facts
+
+The canonical AgentJob and AgentSession producers MUST append typed
+`ExternalAgentProjectionSourceFact` records to their durable outboxes in the
+same aggregate transaction as every launch, follow-up, capacity, runner/result,
+stop-fence, or committed context-boundary mutation that can affect the public
+contract. Each fact MUST have a stable source identity, a monotonic source
+revision for its Job/Session lineage, canonical IDs, public state components,
+and only already-allowlisted output or error data. The source contract MUST
+define these mappings: `job.prepared` updates the Job-anchored accepted
+snapshot without creating a Session event before a Session exists;
+`input.accepted` and `input.rejected` map to their corresponding public event
+types; `turn.queued`, `turn.running`, `turn.outcome_pending`, and
+`turn.terminal` map one-to-one; `session.unknown` records unresolved
+acceptance, dispatch, binding, stop, or outcome facts without authorizing
+replay; and `session.context_reset` is emitted only for a committed canonical
+context boundary with a safe reason. The projector MUST NOT infer ordered
+public transitions from a current aggregate snapshot or raw `AgentSessionEvents`
+payload alone.
+
+#### Scenario: Canonical lifecycle source inventory
+- **WHEN** a canonical launch, follow-up, capacity decision, Runner/result update, stop-fence decision, or context boundary commits
+- **THEN** the corresponding typed source fact is durable with the state needed to produce the defined public observation or event, and replaying the source fact does not create a second execution lifecycle
+
+#### Scenario: Incomplete historical source history
+- **WHEN** an authorized caller reads a known Session created before the typed source contract or otherwise lacking complete typed source history in the first release
+- **THEN** the Server returns `503 projection_lag` with a safe projection-unavailable reason and no fabricated public events or snapshot transitions
+
 ### Requirement: Strict public execution projection
 
 Every command and resource read MUST return only an allowlisted public execution object containing `projectId`, `agentId`, `jobId`, `sessionId`, `inputId`, `turnId`, `status`, `jobStatus`, `sessionActivity`, `admission`, `inputStatus`, `turnStatus`, `outcome`, `reasonCode`, `output`, `error`, `acceptedAt`, `queuedAt`, `startedAt`, `terminalAt`, `observedAt`, and `sequence`. Every listed key MUST be present. IDs and timestamps MUST be null only when their canonical fact does not exist; `observedAt` MUST always be present. `output` MUST contain only persisted public final text, and `error` MUST contain only a stable public code and safe message.
@@ -56,7 +84,7 @@ Every command and resource read MUST return only an allowlisted public execution
 
 ### Requirement: Five-state public status
 
-The aggregate `status` MUST be exactly one of `accepted`, `queued`, `running`, `terminal`, or `unknown`. A prepared Job or accepted Input without a queued, running, unresolved, or terminal fact MUST be `accepted`; queued work, including retryable capacity blocking, MUST be `queued`; running or `outcome_pending` work MUST be `running`; a durable rejection or terminal outcome MUST be `terminal`; and an unresolved acceptance, dispatch, binding, stop, or outcome fact MUST be `unknown`. A fenced terminal fact MUST take precedence over late non-terminal observations, and `unknown` MUST NOT authorize automatic replay.
+The aggregate `status` MUST be exactly one of `accepted`, `queued`, `running`, `terminal`, or `unknown`. A prepared Job or accepted Input without a queued, running, unresolved, or terminal fact MUST be `accepted`; queued work, including retryable capacity blocking, MUST be `queued`; running or `outcome_pending` work MUST be `running`; a durable rejection or terminal outcome MUST be `terminal`; and an unresolved acceptance, dispatch, binding, stop, or outcome fact MUST be `unknown`. A fenced terminal fact MUST take precedence over late non-terminal observations, and `unknown` MUST NOT authorize automatic replay. A first-release public projection MUST only serve Sessions with complete typed source history; a known ineligible historical Session follows the `projection_lag` behavior above.
 
 #### Scenario: Retryable capacity block
 - **WHEN** accepted work is waiting for execution capacity and no unresolved or terminal fact exists
