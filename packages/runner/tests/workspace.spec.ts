@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, symlink, writeFile } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../src/actions/git.js"
-import { issueWorkspacePath, WorkspaceManager, slugify } from "../src/runtime/workspace.js"
+import { issueWorkspacePath, withManagedWorkspacePath, WorkspaceManager, slugify } from "../src/runtime/workspace.js"
 import { WorkspaceRegistry } from "../src/runtime/workspace-registry.js"
 import { DefaultCleanupRunner } from "../src/runtime/cleanup-loop.js"
 import type { WorkspaceRegistryEntry } from "../src/runtime/workspace-registry.js"
@@ -135,6 +135,17 @@ afterEach(() => {
 })
 
 describe("WorkspaceManager.prepare", () => {
+  it.runIf(process.platform === "linux")("PublicManagedPath_NeverExposesTheProcessFdPath", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const workspacePath = issueWorkspacePath(runnerRoot, "wr-public-path")
+
+    const observed = await withManagedWorkspacePath(runnerRoot, workspacePath, false, async (path) => path)
+
+    expect(observed).toBe(workspacePath)
+    expect(observed).not.toMatch(/\/proc\/\d+\/fd\/\d+/)
+  })
+
   it("FreshRun_CreatesRunBranchAndWorkspaceMarker", async () => {
     const root = await createTestTempDir("mohist-workspace-")
     const runnerRoot = join(root, "runner")
@@ -380,6 +391,88 @@ describe("WorkspaceManager.prepare", () => {
 
     await manager.prepare(item, new AbortController().signal)
     expect(registry.get(item.workflowRunId)).toMatchObject({ workspacePath: path, workflowRunId: item.workflowRunId })
+  })
+
+  it.runIf(process.platform === "linux")("RunnerRestart_DropsStaleFdBindingAndRematerializesStableWorkspace", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const registry = new WorkspaceRegistry(runnerRoot, { runnerId: "runner-1" })
+    await mkdir(join(runnerRoot, ".mohist", "runner-state"), { recursive: true })
+    await writeFile(join(runnerRoot, ".mohist", "runner-state", "workspaces.json"), JSON.stringify({
+      version: 3,
+      entries: {
+        "wr-restart": {
+          issueNumber: 558,
+          workflowRunId: "wr-restart",
+          workspacePath: "/proc/79181/fd/30/wr_restart",
+          binding: {
+            runnerId: "runner-1",
+            runnerRoot,
+            workflowRunId: "wr-restart",
+            gitUrl: "https://example.test/mohist.git",
+            baseBranch: "master",
+          },
+          runBranch: "mohist/run-wr-restart",
+          phase: "active",
+          materializedAt: "2026-08-11T00:00:00.000Z",
+          terminalAt: null,
+        },
+      },
+    }, null, 2))
+
+    await registry.load()
+    expect(registry.get("wr-restart")).toBeNull()
+
+    const result = await new WorkspaceManager(runnerRoot, registry, "runner-1")
+      .prepare(work("wr-restart"), new AbortController().signal)
+
+    const stablePath = issueWorkspacePath(runnerRoot, "wr-restart")
+    expect(result.path).toBe(stablePath)
+    const persisted = JSON.parse(await readFile(registry.getFilePath(), "utf8"))
+    expect(persisted.entries["wr-restart"]).toMatchObject({
+      workspacePath: stablePath,
+      binding: {
+        runnerId: "runner-1",
+        runnerRoot,
+        workflowRunId: "wr-restart",
+        gitUrl: "https://example.test/mohist.git",
+        baseBranch: "master",
+      },
+    })
+    expect(JSON.stringify(persisted)).not.toContain("/proc/79181/fd/30")
+  })
+
+  it("RepositoryIdentityMismatch_IsRejectedBeforeReusingTheStableWorkspace", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const registry = new WorkspaceRegistry(runnerRoot, { runnerId: "runner-1" })
+    await registry.load()
+    const manager = new WorkspaceManager(runnerRoot, registry, "runner-1")
+    const first = await manager.prepare(work("wr-repo-mismatch"), new AbortController().signal)
+    gitRunner.calls.length = 0
+
+    const mismatched = work("wr-repo-mismatch")
+    ;(mismatched.variables.repository as Record<string, unknown>).gitUrl = "https://example.test/other.git"
+
+    await expect(manager.prepare(mismatched, new AbortController().signal)).rejects.toMatchObject({ kind: "workspace-identity-mismatch" })
+    expect(first.path).toBe(issueWorkspacePath(runnerRoot, "wr-repo-mismatch"))
+    expect(gitRunner.commandArgs()).toEqual([])
+  })
+
+  it("ConcurrentRuns_MaterializeIndependentStableWorkspaces", async () => {
+    const root = await createTestTempDir("mohist-workspace-")
+    const runnerRoot = join(root, "runner")
+    const manager = new WorkspaceManager(runnerRoot)
+
+    const [first, second] = await Promise.all([
+      manager.prepare(work("wr-concurrent-a"), new AbortController().signal),
+      manager.prepare(work("wr-concurrent-b"), new AbortController().signal),
+    ])
+
+    expect(first.path).toBe(issueWorkspacePath(runnerRoot, "wr-concurrent-a"))
+    expect(second.path).toBe(issueWorkspacePath(runnerRoot, "wr-concurrent-b"))
+    expect(first.path).not.toBe(second.path)
+    expect(gitRunner.commandArgs().filter((args) => args[0] === "clone")).toHaveLength(2)
   })
 })
 

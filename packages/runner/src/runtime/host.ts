@@ -198,7 +198,7 @@ export class RunnerHost {
     // The registry is shared with WorkspaceManager (for materialize /
     // verify registration hooks) and RunnerSignalRClient (for the
     // RemoveWorkspace entry-removal hook).
-    this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot)
+    this.workspaceRegistry = new WorkspaceRegistry(options.runnerRoot, { runnerId: options.runnerId })
     this.namedWorkspaceRegistry = new NamedWorkspaceRegistry(options.runnerRoot)
     this.agentSessionRuntimeEventOutbox = createAgentSessionRuntimeEventOutbox({
       filePath: `${options.runnerRoot}/${RUNTIME_EVENT_OUTBOX_FILE}`,
@@ -236,7 +236,7 @@ export class RunnerHost {
       options.runnerRoot,
       () => this.openCodeRuntime,
     )
-    this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry)
+    this.workspace = new WorkspaceManager(options.runnerRoot, this.workspaceRegistry, options.runnerId)
     this.sessionCommandJournal = new SessionCommandJournal(options.runnerRoot)
     this.followupOperationJournal = new FollowupOperationJournal(options.runnerRoot)
     this.cancelOperationJournal = new CancelOperationJournal(options.runnerRoot)

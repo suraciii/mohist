@@ -6,7 +6,7 @@ import type { JsonObject, DispatchWorkItem } from "../core/types.js"
 import { getSegments, stringAt } from "../core/json-path.js"
 import { NETWORK_COMMAND_TIMEOUT_MS } from "../actions/git.js"
 import { deleteDirectory, ensureDir, exists, readText, runCommand, writeText, type CommandResult } from "../system/process.js"
-import type { WorkspaceRegistry } from "./workspace-registry.js"
+import type { WorkspaceBindingIdentity, WorkspaceRegistry } from "./workspace-registry.js"
 import type { TaskLogger } from "./task-log.js"
 
 /**
@@ -87,6 +87,7 @@ export class WorkspaceManager {
   constructor(
     private readonly runnerRoot = defaultRunnerRoot(),
     private readonly registry: WorkspaceRegistry | null = null,
+    private readonly runnerId = "unknown",
   ) {}
 
   // Ensure this run has a usable workspace: a clone of the repo on the
@@ -104,13 +105,15 @@ export class WorkspaceManager {
 
     const runId = work.workflowRunId
     const expected = workspaceIdentity(runId)
+    const binding = workspaceBindingIdentity(this.runnerRoot, this.runnerId, runId, gitUrl, baseBranch)
+    this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
     const workspaceExistedBeforePreparation = pathExists(workspacePath)
     if (!workspaceExistedBeforePreparation) {
       await this.verifyBaseBranch(gitUrl, baseBranch, signal, log)
     }
-    await withManagedWorkspacePath(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
+    await withManagedWorkspaceHandle(this.runnerRoot, workspacePath, false, async (managedWorkspacePath) => {
       if (await pathExists(managedWorkspacePath)) {
         await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log)
         if (!await this.hasRunBranch(managedWorkspacePath, runBranch, signal, log)) {
@@ -127,6 +130,7 @@ export class WorkspaceManager {
         issueNumber,
         workflowRunId: expected.workflowRunId,
         workspacePath,
+        binding,
         runBranch: expected.runBranch,
       })
     }
@@ -143,9 +147,11 @@ export class WorkspaceManager {
       throw new WorkspaceIdentityMismatchError("Issue workspace identity is incomplete")
     }
     const expected = workspaceIdentity(runId)
+    const binding = workspaceBindingIdentity(this.runnerRoot, this.runnerId, runId, gitUrl, baseBranch)
+    this.assertExistingBinding(binding)
     const runBranch = expected.runBranch
     const workspacePath = issueWorkspacePath(this.runnerRoot, runId)
-    await withManagedWorkspacePath(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
+    await withManagedWorkspaceHandle(this.runnerRoot, workspacePath, true, async (managedWorkspacePath) => {
       await validateWorkspaceIdentity(managedWorkspacePath, expected, gitUrl, signal, log)
 
       // Health gate: every dispatch passes through verify(), so this is
@@ -297,6 +303,23 @@ export class WorkspaceManager {
     }
     return null
   }
+
+  private assertExistingBinding(expected: WorkspaceBindingIdentity): void {
+    const existing = this.registry?.get(expected.workflowRunId)
+    const binding = existing?.binding
+    if (!binding) return
+    const matches = binding.runnerId === expected.runnerId
+      && resolve(binding.runnerRoot) === resolve(expected.runnerRoot)
+      && binding.workflowRunId === expected.workflowRunId
+      && binding.gitUrl === expected.gitUrl
+      && binding.baseBranch === expected.baseBranch
+    if (!matches) {
+      throw new WorkspaceIdentityMismatchError(
+        `Workflow workspace ${issueWorkspacePath(this.runnerRoot, expected.workflowRunId)} binding identity does not match the requested runner or repository`,
+        issueWorkspacePath(this.runnerRoot, expected.workflowRunId),
+      )
+    }
+  }
 }
 
 function workspaceNetworkTimeout(name: string, command: string, result: CommandResult): WorkspaceNetworkTimeoutError {
@@ -334,6 +357,22 @@ function workspaceIdentity(workflowRunId: string): IssueWorkspaceMarker {
   return {
     workflowRunId,
     runBranch: runBranchName(workflowRunId),
+  }
+}
+
+function workspaceBindingIdentity(
+  runnerRoot: string,
+  runnerId: string,
+  workflowRunId: string,
+  gitUrl: string,
+  baseBranch: string,
+): WorkspaceBindingIdentity {
+  return {
+    runnerId,
+    runnerRoot: resolve(runnerRoot),
+    workflowRunId,
+    gitUrl: gitUrl.trim(),
+    baseBranch: baseBranch.trim(),
   }
 }
 
@@ -413,6 +452,19 @@ export async function assertManagedWorkspacePath(runnerRoot: string, candidate: 
 }
 
 export async function withManagedWorkspacePath<T>(
+  runnerRoot: string,
+  workspacePath: string,
+  requireFinal: boolean,
+  operation: (workspacePath: string) => Promise<T>,
+): Promise<T> {
+  const stablePath = resolve(workspacePath)
+  return await withManagedWorkspaceHandle(runnerRoot, stablePath, requireFinal, async () => operation(stablePath))
+}
+
+// Internal filesystem operations receive a process-owned directory handle
+// path. It is valid only for the duration of this callback and must never
+// escape into a registry, server binding, runtime session, or recovery task.
+export async function withManagedWorkspaceHandle<T>(
   runnerRoot: string,
   workspacePath: string,
   requireFinal: boolean,
