@@ -247,14 +247,16 @@ export function formatDirtyWorktreeSummary(evidence: DirtyWorktreeEvidence): str
   return parts.join("; ")
 }
 
-export function worktreeProbeFailure(work: DispatchWorkItem, error: WorktreeProbeError): WorkItemResult {
+export function worktreeProbeFailure(work: DispatchWorkItem, error: WorktreeProbeError, result: WorkItemResult = { status: "failed" }): WorkItemResult {
   const label = work.title?.trim() || work.uses || work.workId
-  const message = `git worktree probe failed for ${label}: ${error.message}`.slice(0, 4000)
+  const detail = `git worktree probe failed for ${label}: ${error.message}`
+  const message = [result.message?.trim(), detail].filter(Boolean).join("; ").slice(0, 4000)
   return {
+    ...result,
     status: "failed",
     message,
     error: { code: "worktree-probe-failed", message },
-    cleanupAttempts: 0,
+    cleanupAttempts: result.cleanupAttempts ?? 0,
   }
 }
 
@@ -282,11 +284,11 @@ export async function enforceCleanWorktree(
   contextParts: ContextParts,
   log: TaskLogger | null = null,
 ): Promise<WorkItemResult> {
+  let attempts = 0
   try {
     const agentBacked = isAgentBackedTask(work)
     const maxCleanupAttempts = resolveMaxCleanupAttempts(variables)
 
-    let attempts = 0
     let snapshot = await readWorktreeSnapshot(workDir, signal, log)
     while (!snapshot.isClean) {
       if (!agentBacked) {
@@ -310,6 +312,7 @@ export async function enforceCleanWorktree(
         signal,
         cleanupAction,
         contextParts,
+        result,
       )
       if (cleanupResult !== "ok") {
         return cleanupResult
@@ -321,9 +324,17 @@ export async function enforceCleanWorktree(
     return mergeCleanupCount(result, attempts)
   } catch (error) {
     if (error instanceof WorktreeProbeError) {
-      return worktreeProbeFailure(work, error)
+      return worktreeProbeFailure(work, error, mergeCleanupCount(result, attempts))
     }
-    throw error
+    const detail = `worktree cleanup failed: ${errorMessage(error)}`
+    const message = [result.message?.trim(), detail].filter(Boolean).join("; ").slice(0, 4000)
+    return {
+      ...result,
+      status: "failed",
+      message,
+      error: { code: "worktree-cleanup-failed", message },
+      cleanupAttempts: attempts,
+    }
   }
 }
 
@@ -337,19 +348,20 @@ export async function runAgentCleanupAttempt(
   signal: AbortSignal,
   cleanupAction: CleanupAgentAction,
   contextParts: ContextParts,
+  baseResult: WorkItemResult = { status: "completed" },
 ): Promise<WorkItemResult | "ok"> {
   const cleanupWith = buildCleanupWith(work, renderedWith, snapshot, attempt)
   const host = contextParts.buildHost(work, signal, workDir)
 
-  let result: ActionResult
+  let cleanupResult: ActionResult
   try {
-    result = await cleanupAction(host, cleanupWith)
+    cleanupResult = await cleanupAction(host, cleanupWith)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} threw: ${message}`)
+    return dirtyWorktreeFailure(mergeCleanupCount(baseResult, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} threw: ${message}`)
   }
-  if (isActionFailure(result)) {
-    return dirtyWorktreeFailure(mergeCleanupCount({ status: "completed" }, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} failed: ${result.error.message}`)
+  if (isActionFailure(cleanupResult)) {
+    return dirtyWorktreeFailure(mergeCleanupCount(baseResult, attempt - 1), snapshot, attempt, `Cleanup attempt ${attempt} failed: ${cleanupResult.error.message}`)
   }
   return "ok"
 }
