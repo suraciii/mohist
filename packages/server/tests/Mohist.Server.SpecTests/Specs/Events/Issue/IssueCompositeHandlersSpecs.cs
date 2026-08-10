@@ -543,7 +543,7 @@ public class IssueCompositeHandlersSpecs
         public Task<IssueStartReadiness> GetStartReadinessAsync() => Task.FromResult(new IssueStartReadiness(true, true, null));
         public Task RecomputeCompositeStatusAsync() => Task.CompletedTask;
         public Task StartCompositeAsync() => Task.CompletedTask;
-        public Task<IssueCommentResult> AddCommentAsync(string a, string? displayName, string b, string[]? ids = null) => Task.FromResult(new IssueCommentResult("cmt_test", b, a, displayName));
+        public Task<IssueCommentResult> AddCommentAsync(string a, string? displayName, string b, string[]? ids = null) => Task.FromResult(new IssueCommentResult("cmt_test", b, a, displayName, "proj_test", 1, "2026-01-01T00:00:00.0000000+00:00"));
         public Task<bool> AssignEpicAsync(int epicNumber) => Task.FromResult(true);
         public Task<bool> RemoveEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
         public Task<bool> TryStartFromEpicAsync(int expectedEpicNumber) => Task.FromResult(true);
