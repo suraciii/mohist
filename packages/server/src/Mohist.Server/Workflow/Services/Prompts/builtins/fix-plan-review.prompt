@@ -5,8 +5,14 @@ tags: [plan, review]
 stage: plan
 ---
 `openspec/changes/issue-${{ issue.number }}/self-review.md` lists the problems found by the plan
-review. Fix every one of them in the plan artifacts under
-`openspec/changes/issue-${{ issue.number }}/`.
+review. Dispose of every must-fix finding in the plan artifacts under
+`openspec/changes/issue-${{ issue.number }}/`: fix it, or explain why it does not meet the
+must-fix bar (leaving it unfixed would not make the plan wrong or incomplete
+relative to the issue's goals or acceptance criteria). Observations do not
+require action.
+
+State each finding's disposition — fixed, or won't-fix with the reason — in your
+final response; the next self-review verifies them one by one.
 
 You may be interrupted at any time: commit incrementally and keep your progress
 notes current.
