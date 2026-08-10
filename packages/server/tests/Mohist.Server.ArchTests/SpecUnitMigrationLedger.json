@@ -1,0 +1,2560 @@
+{
+  "schemaVersion": 1,
+  "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+  "validationSourceFileCount": 825,
+  "validationSourceTreeDigest": "a06fa371856070cc809fc516b1e5fbb3934fc48bad7133d1d87bb0de032c0333",
+  "validationBaselineDigest": "03cad8aca4e8ddf9688d7b3532d03cb1b93c039e8a9ec4e0e38ee73e5b403c62",
+  "validationHeadMeaning": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8 with tree ff159609b97df5b1fac6d6404a6d1811f6bda99a is the exact current master baseline used to interpret the checked-in migration ledger; it is not the final validation commit. Planned Unit targets are contracts only, while PR #388 history remains 602efa6abd6fca3efcd43b66b47ba10a80d9faba.",
+  "history": {
+    "rawRenameCount": 40,
+    "specRenameCount": 39,
+    "supportRenameCount": 1,
+    "deleteCount": 2,
+    "claimedClassCount": 41,
+    "claimedFocusedCaseCount": 355,
+    "claimedMovedCaseCount": 334,
+    "claimedAlreadyOwnedCaseCount": 21,
+    "claimedUnitBefore": 2235,
+    "claimedUnitAfter": 2565,
+    "claimedSpecBefore": 4101,
+    "claimedSpecAfter": 3767,
+    "reconciliation": "PR #388 reports 41 audited classes: 39 Spec owner renames plus 2 deleted Spec owners. The raw merge has one additional helper rename (SystemUpdateTestFactory.cs), so git reports 40 renames. The two deleted owners were consolidated into existing Unit owners; the 334 moved and 21 already-owned focused cases explain the aggregate without counting the helper as a test class.",
+    "sourceCaseManifestDigest": "08f8da2c077df6f786dfc2dc0a65086e6ac1b56e09cde694c440765d405319fe"
+  },
+  "rows": [
+    {
+      "id": "rename-agent-availability",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Agent/Services/AgentAvailabilityListSummaryServiceSpecs.cs Mohist.Server.SpecTests.Specs.Agent.Services.AgentAvailabilityListSummaryServiceSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Agent/Services/AgentAvailabilityListSummaryServiceSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Agent.Services.AgentAvailabilityListSummaryServiceSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Agent/Services/AgentAvailabilityListSummaryServiceTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Agent/Services/AgentAvailabilityListSummaryServiceTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests"
+      },
+      "discovered": {
+        "factMethods": 5,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 5
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests"
+        ],
+        "digest": "88a135a8afa8b474e416fac617bd3a7447eb243d9b8cdc6236aaf2986f80d402",
+        "evidence": "source-path=Mohist.Server.UnitTests/Agent/Services/AgentAvailabilityListSummaryServiceTests.cs source-fqn=Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests case-digest=c04dd0d40082e346a2b06fc41253a4fddb1f3f97e2404571f025df0f9781f38f source-content-digest=efac5ee068a9106c8740a9901973b62c03b533d61f3a2cdef75c0808a457768f executable-closure-digest=88a135a8afa8b474e416fac617bd3a7447eb243d9b8cdc6236aaf2986f80d402 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Agent/Services/AgentAvailabilityListSummaryServiceSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Agent.Services.AgentAvailabilityListSummaryServiceSpecs",
+        "sourceContentDigest": "1264c5e7649d1697de6108622ed311cf207d9b48c66f4b9b09de4f505070ef6d"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Agent/Services/AgentAvailabilityListSummaryServiceTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Agent.Services.AgentAvailabilityListSummaryServiceTests",
+        "caseCount": 5,
+        "caseIdentityDigest": "c04dd0d40082e346a2b06fc41253a4fddb1f3f97e2404571f025df0f9781f38f",
+        "closureIdentityDigest": "88a135a8afa8b474e416fac617bd3a7447eb243d9b8cdc6236aaf2986f80d402",
+        "sourceContentDigest": "efac5ee068a9106c8740a9901973b62c03b533d61f3a2cdef75c0808a457768f"
+      }
+    },
+    {
+      "id": "rename-epic-progress-build",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Epic/Domain/EpicProgressBuildSpecs.cs Mohist.Server.SpecTests.Specs.Epic.Domain.EpicProgressBuildSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicProgressBuildSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicProgressBuildSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicProgressBuildTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicProgressBuildTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests"
+      },
+      "discovered": {
+        "factMethods": 19,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 19
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests"
+        ],
+        "digest": "fb5c49a543d0f2a8794a56420ee68beda228e72bc9680bde6c4a1e35c4ef5c06",
+        "evidence": "source-path=Mohist.Server.UnitTests/Epic/Domain/EpicProgressBuildTests.cs source-fqn=Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests case-digest=31092f2eac4490a27e6065c0c357952eba1d91017ae247d2810d6a178c398cee source-content-digest=0a6885db9c33dffbf524da20d72d1aa842691ae574bcc1542e0a11789e9716e4 executable-closure-digest=fb5c49a543d0f2a8794a56420ee68beda228e72bc9680bde6c4a1e35c4ef5c06 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicProgressBuildSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicProgressBuildSpecs",
+        "sourceContentDigest": "e8f80178b7e319832342bebc22905dbdd7796abe4dfe7c66f575c13eb957587b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicProgressBuildTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicProgressBuildTests",
+        "caseCount": 19,
+        "caseIdentityDigest": "31092f2eac4490a27e6065c0c357952eba1d91017ae247d2810d6a178c398cee",
+        "closureIdentityDigest": "fb5c49a543d0f2a8794a56420ee68beda228e72bc9680bde6c4a1e35c4ef5c06",
+        "sourceContentDigest": "0a6885db9c33dffbf524da20d72d1aa842691ae574bcc1542e0a11789e9716e4"
+      }
+    },
+    {
+      "id": "rename-epic-external-prerequisites",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs Mohist.Server.SpecTests.Specs.Epic.Domain.EpicQuerierExternalPrerequisitesSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicQuerierExternalPrerequisitesSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicQuerierExternalPrerequisitesTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicQuerierExternalPrerequisitesTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests"
+      },
+      "discovered": {
+        "factMethods": 6,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 6
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests"
+        ],
+        "digest": "7c7784c3b8ff199cfbd8e5f103a89f22fb6a56a87d322aba41f3314929198ac5",
+        "evidence": "source-path=Mohist.Server.UnitTests/Epic/Domain/EpicQuerierExternalPrerequisitesTests.cs source-fqn=Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests case-digest=507796330e5eda3c0efa1a7fa2b99e56217107d6eaf970d5f3e59abd6b36288a source-content-digest=e3b0f831c91d701b00628a257b8af37cee8608bc3ebc90b13cf9b1cab6c03078 executable-closure-digest=7c7784c3b8ff199cfbd8e5f103a89f22fb6a56a87d322aba41f3314929198ac5 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Epic/Domain/EpicQuerierExternalPrerequisitesSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Epic.Domain.EpicQuerierExternalPrerequisitesSpecs",
+        "sourceContentDigest": "4f5690efa9d038c7bf9851e81c88d893c37ba91d76339e996d86edf888295b1b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Epic/Domain/EpicQuerierExternalPrerequisitesTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Epic.Domain.EpicQuerierExternalPrerequisitesTests",
+        "caseCount": 6,
+        "caseIdentityDigest": "507796330e5eda3c0efa1a7fa2b99e56217107d6eaf970d5f3e59abd6b36288a",
+        "closureIdentityDigest": "7c7784c3b8ff199cfbd8e5f103a89f22fb6a56a87d322aba41f3314929198ac5",
+        "sourceContentDigest": "e3b0f831c91d701b00628a257b8af37cee8608bc3ebc90b13cf9b1cab6c03078"
+      }
+    },
+    {
+      "id": "rename-events-event-bridge",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs Mohist.Server.SpecTests.Specs.Events.EventBridgeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.EventBridgeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Events/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventBridgeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventBridgeTests"
+      },
+      "discovered": {
+        "factMethods": 4,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 4
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Events.EventBridgeTests",
+          "Mohist.Server.UnitTests.Events.EventBridgeTests.RecordingHubContext",
+          "Mohist.Server.UnitTests.Events.EventBridgeTests.RecordingHubContext.NoopGroupManager",
+          "Mohist.Server.UnitTests.Events.EventBridgeTests.RecordingHubContext.RecordingEventsClient",
+          "Mohist.Server.UnitTests.Events.EventBridgeTests.RecordingHubContext.RecordingHubClients",
+          "TestTime"
+        ],
+        "digest": "a8dcc31bc71f10cb4a2744ea68270b6ced78d16bb8a671642d16acc90e1d4d75",
+        "evidence": "source-path=Mohist.Server.UnitTests/Events/EventBridgeTests.cs source-fqn=Mohist.Server.UnitTests.Events.EventBridgeTests case-digest=3f74fa53c099028082c6b0af1d9bc83e53f5ae90ae0c10c1ed677f9e58865d2d source-content-digest=4680c6741a06541c005487856086ae963dab91686a2a30a80689f4aef8b24623 executable-closure-digest=a8dcc31bc71f10cb4a2744ea68270b6ced78d16bb8a671642d16acc90e1d4d75 edges-digest=c596261f87a013edddd0ffbafdf50b00213718c94ddc785e32f1e318ba8697cc"
+      },
+      "owner": "Mohist.Server.UnitTests.Events.EventBridgeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/EventBridgeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.EventBridgeSpecs",
+        "sourceContentDigest": "c8c37a5007e17db7a4e5df66b686092a43d26b39e209d863de08b1bb2f0d3065"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Events/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventBridgeTests",
+        "caseCount": 4,
+        "caseIdentityDigest": "3f74fa53c099028082c6b0af1d9bc83e53f5ae90ae0c10c1ed677f9e58865d2d",
+        "closureIdentityDigest": "a8dcc31bc71f10cb4a2744ea68270b6ced78d16bb8a671642d16acc90e1d4d75",
+        "sourceContentDigest": "4680c6741a06541c005487856086ae963dab91686a2a30a80689f4aef8b24623"
+      }
+    },
+    {
+      "id": "rename-events-event-push",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/EventPushSpecs.cs Mohist.Server.SpecTests.Specs.Events.EventPushSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/EventPushSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.EventPushSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Events/EventPushTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventPushTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/EventPushTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventPushTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Events.EventPushTests",
+          "Mohist.Server.UnitTests.Events.EventPushTests.DelegatePushHandler",
+          "TestTime"
+        ],
+        "digest": "a0212313c43a505903266f12d7fe1e8db76636930eaa20bbd65232a363469c96",
+        "evidence": "source-path=Mohist.Server.UnitTests/Events/EventPushTests.cs source-fqn=Mohist.Server.UnitTests.Events.EventPushTests case-digest=e224d9ab3c7db2f64c4d12b2c588b7643d616c25df6d554d609340b84b5bf1f5 source-content-digest=49cbc0c970f97002b7812bf2ada30d629961b80d498b69b09e1eac7b97237da5 executable-closure-digest=a0212313c43a505903266f12d7fe1e8db76636930eaa20bbd65232a363469c96 edges-digest=f11fef5448a58804048410151d13c66e3f732c345cc52bc51bc17ac76a16a38a"
+      },
+      "owner": "Mohist.Server.UnitTests.Events.EventPushTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/EventPushSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.EventPushSpecs",
+        "sourceContentDigest": "d420b8486983b737a13211d928fc276c1a3b92e42bc9a208a0bb6ca0e0de799a"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Events/EventPushTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.EventPushTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "e224d9ab3c7db2f64c4d12b2c588b7643d616c25df6d554d609340b84b5bf1f5",
+        "closureIdentityDigest": "a0212313c43a505903266f12d7fe1e8db76636930eaa20bbd65232a363469c96",
+        "sourceContentDigest": "49cbc0c970f97002b7812bf2ada30d629961b80d498b69b09e1eac7b97237da5"
+      }
+    },
+    {
+      "id": "rename-events-project-isolation",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs Mohist.Server.SpecTests.Specs.Events.ProjectIsolationIntegrationSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.ProjectIsolationIntegrationSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Events/ProjectIsolationIntegrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/ProjectIsolationIntegrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests"
+      },
+      "discovered": {
+        "factMethods": 6,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 6
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests",
+          "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests.RecordingHubContext",
+          "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests.RecordingHubContext.NoopGroupManager",
+          "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests.RecordingHubContext.RecordingEventsClient",
+          "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests.RecordingHubContext.RecordingHubClients",
+          "TestTime"
+        ],
+        "digest": "76fa3bb2dce7b95bf8f766015cf3c7a4de655d481f32fe7f4da4ad1524356a90",
+        "evidence": "source-path=Mohist.Server.UnitTests/Events/ProjectIsolationIntegrationTests.cs source-fqn=Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests case-digest=805826d88025c792b4224ee8822f336a30040a1aae320a808cf9d448831821a8 source-content-digest=41e6e3338bb7f49a8d3ab9fa1bcc105dadef5bb486f321b994f34133b0548d68 executable-closure-digest=76fa3bb2dce7b95bf8f766015cf3c7a4de655d481f32fe7f4da4ad1524356a90 edges-digest=165136f00c4a5de478776cdd9f9aa3f04ea1ec089bd10e9be3c14442b446f8e7"
+      },
+      "owner": "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/ProjectIsolationIntegrationSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.ProjectIsolationIntegrationSpecs",
+        "sourceContentDigest": "06eae49e5afe5bffa66b1298b5115505b606de99d5c8de18108130fd967e0de5"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Events/ProjectIsolationIntegrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.ProjectIsolationIntegrationTests",
+        "caseCount": 6,
+        "caseIdentityDigest": "805826d88025c792b4224ee8822f336a30040a1aae320a808cf9d448831821a8",
+        "closureIdentityDigest": "76fa3bb2dce7b95bf8f766015cf3c7a4de655d481f32fe7f4da4ad1524356a90",
+        "sourceContentDigest": "41e6e3338bb7f49a8d3ab9fa1bcc105dadef5bb486f321b994f34133b0548d68"
+      }
+    },
+    {
+      "id": "rename-events-signalr-delta",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs Mohist.Server.SpecTests.Specs.Events.SignalRTaskLogDeltaPublisherSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.SignalRTaskLogDeltaPublisherSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Events/SignalRTaskLogDeltaPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/SignalRTaskLogDeltaPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 9
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.ListLogger",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.ListLogger.NoopDisposable",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.RecordingHubContext",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.RecordingHubContext.NoopGroupManager",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.RecordingHubContext.RecordingEventsClient",
+          "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests.RecordingHubContext.RecordingHubClients",
+          "TestTime"
+        ],
+        "digest": "fbb6fd65dc3978643a6db73ccb84ce379b2ba4d78c275e83c72aecb0b2cd8a81",
+        "evidence": "source-path=Mohist.Server.UnitTests/Events/SignalRTaskLogDeltaPublisherTests.cs source-fqn=Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests case-digest=25f89183045a69bd3536a10db6c02c317b135028a382d7174381bc14bef5ca42 source-content-digest=092b33ed24c4d100ad85c383c467caa50e1e0e28762ebab5659db0cc116c8403 executable-closure-digest=fbb6fd65dc3978643a6db73ccb84ce379b2ba4d78c275e83c72aecb0b2cd8a81 edges-digest=b08c966a610b507284d8aabb3df9c3834e1494dc8b9b254c3d7ca29481f3f450"
+      },
+      "owner": "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/SignalRTaskLogDeltaPublisherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.SignalRTaskLogDeltaPublisherSpecs",
+        "sourceContentDigest": "3ebc1fc2ba8f51d4d24306b67a2c04aafa514027e381450c945cafc120263a60"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Events/SignalRTaskLogDeltaPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.SignalRTaskLogDeltaPublisherTests",
+        "caseCount": 9,
+        "caseIdentityDigest": "25f89183045a69bd3536a10db6c02c317b135028a382d7174381bc14bef5ca42",
+        "closureIdentityDigest": "fbb6fd65dc3978643a6db73ccb84ce379b2ba4d78c275e83c72aecb0b2cd8a81",
+        "sourceContentDigest": "092b33ed24c4d100ad85c383c467caa50e1e0e28762ebab5659db0cc116c8403"
+      }
+    },
+    {
+      "id": "rename-events-transcript-publisher",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs Mohist.Server.SpecTests.Specs.Events.TranscriptEventPublisherSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.TranscriptEventPublisherSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Events/TranscriptEventPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/TranscriptEventPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests"
+      },
+      "discovered": {
+        "factMethods": 8,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 8
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests",
+          "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests.RecordingHubContext",
+          "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests.RecordingHubContext.NoopGroupManager",
+          "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests.RecordingHubContext.RecordingEventsClient",
+          "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests.RecordingHubContext.RecordingHubClients",
+          "TestTime"
+        ],
+        "digest": "6470699f854153ed8f78cc36c6c29bdd66b914192ed98f2a5bb3444e89c27b14",
+        "evidence": "source-path=Mohist.Server.UnitTests/Events/TranscriptEventPublisherTests.cs source-fqn=Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests case-digest=5cdef7137535c43a67f2839d238f98270aa13cfd45b3d8cff7470d66b2bee0e7 source-content-digest=971008d098eef5b9257a5c577c546cb64efb5017b571350e50f11be9b6013402 executable-closure-digest=6470699f854153ed8f78cc36c6c29bdd66b914192ed98f2a5bb3444e89c27b14 edges-digest=a8313e0165a9ef7318041e49b514faafb39d5ce6d4e0ae8b2e84dea812711645"
+      },
+      "owner": "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/TranscriptEventPublisherSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.TranscriptEventPublisherSpecs",
+        "sourceContentDigest": "6d04945122723ed299d7b87f1a2d53f64b98de33b6cb0d43d9696a101d4a1b07"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Events/TranscriptEventPublisherTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.TranscriptEventPublisherTests",
+        "caseCount": 8,
+        "caseIdentityDigest": "5cdef7137535c43a67f2839d238f98270aa13cfd45b3d8cff7470d66b2bee0e7",
+        "closureIdentityDigest": "6470699f854153ed8f78cc36c6c29bdd66b914192ed98f2a5bb3444e89c27b14",
+        "sourceContentDigest": "971008d098eef5b9257a5c577c546cb64efb5017b571350e50f11be9b6013402"
+      }
+    },
+    {
+      "id": "rename-issue-patch-raw-merge",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Domain/IssuePatchRawMergeDomainSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Domain.IssuePatchRawMergeDomainSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssuePatchRawMergeDomainSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssuePatchRawMergeDomainSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssuePatchRawMergeDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssuePatchRawMergeDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests"
+      },
+      "discovered": {
+        "factMethods": 12,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 12
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests"
+        ],
+        "digest": "14b1a3b6523bebf8e9f2392bac0aadd88864acc7c4ebbf83476a3dd4ef25e328",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssuePatchRawMergeDomainTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests case-digest=a47bea24640213c2ce17358e39d6c96fdfa4943b9832f8c9c359ea1f63e5f46e source-content-digest=b1435a128e9c70b366d2dfa7473b7295a4944b802d18f92a0d6c043bc2ba491a executable-closure-digest=14b1a3b6523bebf8e9f2392bac0aadd88864acc7c4ebbf83476a3dd4ef25e328 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssuePatchRawMergeDomainSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssuePatchRawMergeDomainSpecs",
+        "sourceContentDigest": "71fa65ef79039ee243ab1c3afe991238a67aa05ce72dcf391bffeb86ed24fbd5"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssuePatchRawMergeDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssuePatchRawMergeDomainTests",
+        "caseCount": 12,
+        "caseIdentityDigest": "a47bea24640213c2ce17358e39d6c96fdfa4943b9832f8c9c359ea1f63e5f46e",
+        "closureIdentityDigest": "14b1a3b6523bebf8e9f2392bac0aadd88864acc7c4ebbf83476a3dd4ef25e328",
+        "sourceContentDigest": "b1435a128e9c70b366d2dfa7473b7295a4944b802d18f92a0d6c043bc2ba491a"
+      }
+    },
+    {
+      "id": "rename-issue-repository-binding",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRepositoryBindingDomainSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRepositoryBindingDomainSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRepositoryBindingDomainSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRepositoryBindingDomainSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRepositoryBindingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRepositoryBindingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests"
+        ],
+        "digest": "00f4dc0eb330ab63b297b3724ed641a7314b7b6f48c82a25a1f2d76aa1691431",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueRepositoryBindingDomainTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests case-digest=2e81cf075b4f6a519b0f107b456710086ba2db71298ae86cb61d3bce5a90805e source-content-digest=f7c52f50202d6741c25f58cecf05405a6896ff0be044cd7d2e1c5612ff35e0b7 executable-closure-digest=00f4dc0eb330ab63b297b3724ed641a7314b7b6f48c82a25a1f2d76aa1691431 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRepositoryBindingDomainSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRepositoryBindingDomainSpecs",
+        "sourceContentDigest": "46b993a7793dabec0eed92a1d0718310f6965fba4963a8c0b43d011a449ffb2b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRepositoryBindingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRepositoryBindingDomainTests",
+        "caseCount": 7,
+        "caseIdentityDigest": "2e81cf075b4f6a519b0f107b456710086ba2db71298ae86cb61d3bce5a90805e",
+        "closureIdentityDigest": "00f4dc0eb330ab63b297b3724ed641a7314b7b6f48c82a25a1f2d76aa1691431",
+        "sourceContentDigest": "f7c52f50202d6741c25f58cecf05405a6896ff0be044cd7d2e1c5612ff35e0b7"
+      }
+    },
+    {
+      "id": "rename-issue-risk-persisting",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRiskPersistingDomainSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRiskPersistingDomainSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRiskPersistingDomainSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRiskPersistingDomainSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRiskPersistingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRiskPersistingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests"
+      },
+      "discovered": {
+        "factMethods": 10,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 10
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests"
+        ],
+        "digest": "14799ca5d7cf10108c5a73ec7bc8b8cd9a2664c723259831e112af4f7ec28758",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueRiskPersistingDomainTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests case-digest=ad3f288a4cdc6930939b2d415be54399e9bcde174fa6aaa1238e7a86e2508833 source-content-digest=fc13b984accb4400624aa7d71d855269e58dd5dfbb0fa7a16219575e4b518d62 executable-closure-digest=14799ca5d7cf10108c5a73ec7bc8b8cd9a2664c723259831e112af4f7ec28758 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueRiskPersistingDomainSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueRiskPersistingDomainSpecs",
+        "sourceContentDigest": "6ce15053c7a710f9e843392ce0778ac245983ff8473d3880262296c51c2e001a"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueRiskPersistingDomainTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueRiskPersistingDomainTests",
+        "caseCount": 10,
+        "caseIdentityDigest": "ad3f288a4cdc6930939b2d415be54399e9bcde174fa6aaa1238e7a86e2508833",
+        "closureIdentityDigest": "14799ca5d7cf10108c5a73ec7bc8b8cd9a2664c723259831e112af4f7ec28758",
+        "sourceContentDigest": "fc13b984accb4400624aa7d71d855269e58dd5dfbb0fa7a16219575e4b518d62"
+      }
+    },
+    {
+      "id": "rename-issue-start-readiness",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Domain/IssueStartReadinessDomainSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Domain.IssueStartReadinessDomainSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueStartReadinessDomainSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueStartReadinessDomainSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueStartReadinessDomainCoverageTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueStartReadinessDomainCoverageTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests"
+      },
+      "discovered": {
+        "factMethods": 13,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 13
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests"
+        ],
+        "digest": "76a6e5f720132bbaf59611e7306637a686fec21052c0d3ae4d246357f6c07d5a",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueStartReadinessDomainCoverageTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests case-digest=747a6b8090b4825bbfbcc68f29c67378e2794995767a37287903d2e5b34d7e76 source-content-digest=69156ad69db9ffb299405421d446b39c516a3230212902191b7b72fc214475f5 executable-closure-digest=76a6e5f720132bbaf59611e7306637a686fec21052c0d3ae4d246357f6c07d5a edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueStartReadinessDomainSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueStartReadinessDomainSpecs",
+        "sourceContentDigest": "9c60aa6f0a75460854d6e460418a35c973c9ade71a0b5a92ed12332cd3977abb"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueStartReadinessDomainCoverageTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueStartReadinessDomainCoverageTests",
+        "caseCount": 13,
+        "caseIdentityDigest": "747a6b8090b4825bbfbcc68f29c67378e2794995767a37287903d2e5b34d7e76",
+        "closureIdentityDigest": "76a6e5f720132bbaf59611e7306637a686fec21052c0d3ae4d246357f6c07d5a",
+        "sourceContentDigest": "69156ad69db9ffb299405421d446b39c516a3230212902191b7b72fc214475f5"
+      }
+    },
+    {
+      "id": "rename-issue-effective-profile",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Profile/EffectiveWorkflowProfileResolverSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Profile.EffectiveWorkflowProfileResolverSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/EffectiveWorkflowProfileResolverSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.EffectiveWorkflowProfileResolverSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/EffectiveWorkflowProfileResolverTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/EffectiveWorkflowProfileResolverTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests"
+      },
+      "discovered": {
+        "factMethods": 19,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 19
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests"
+        ],
+        "digest": "089d75ed20609fc5e66f760c28167f8de53a41a17c037a2608af467db823ed46",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Profile/EffectiveWorkflowProfileResolverTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests case-digest=832e6da776a1cbdb1bddd74fc937c8193385128778f162b6f97188c13e843e53 source-content-digest=d1a549a30d6a498c5c8d240176729a09d1c692d2569048f3a6684b20e62005ca executable-closure-digest=089d75ed20609fc5e66f760c28167f8de53a41a17c037a2608af467db823ed46 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Profile/EffectiveWorkflowProfileResolverSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.EffectiveWorkflowProfileResolverSpecs",
+        "sourceContentDigest": "4b72801b24c09ce28a38615188dcfad534900ec37947207a181144d7f8dc176c"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/EffectiveWorkflowProfileResolverTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.EffectiveWorkflowProfileResolverTests",
+        "caseCount": 19,
+        "caseIdentityDigest": "832e6da776a1cbdb1bddd74fc937c8193385128778f162b6f97188c13e843e53",
+        "closureIdentityDigest": "089d75ed20609fc5e66f760c28167f8de53a41a17c037a2608af467db823ed46",
+        "sourceContentDigest": "d1a549a30d6a498c5c8d240176729a09d1c692d2569048f3a6684b20e62005ca"
+      }
+    },
+    {
+      "id": "rename-issue-default-profile",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Profile/MohistDefaultWorkflowProjectionSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Profile.MohistDefaultWorkflowProjectionSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistDefaultWorkflowProjectionSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistDefaultWorkflowProjectionSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistDefaultWorkflowProjectionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistDefaultWorkflowProjectionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests"
+      },
+      "discovered": {
+        "factMethods": 11,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 11
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests"
+        ],
+        "digest": "e359d89928d848714924343e9215625122ae600b99403f0eb637e79ae22f4c45",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Profile/MohistDefaultWorkflowProjectionTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests case-digest=33f4a98b089c04604fca40d619d794289e9cb36fb22f9ed0a62ce2b010e807af source-content-digest=40a93e5469d14e3b6a55b72c6612fc549f7a7e7f1e59fc678d4957d74e3ef7b2 executable-closure-digest=e359d89928d848714924343e9215625122ae600b99403f0eb637e79ae22f4c45 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistDefaultWorkflowProjectionSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistDefaultWorkflowProjectionSpecs",
+        "sourceContentDigest": "12beec9893eba2e2bc17cb7dbed0a7b04bfac435c8b8302505ed988606bae08c"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistDefaultWorkflowProjectionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistDefaultWorkflowProjectionTests",
+        "caseCount": 11,
+        "caseIdentityDigest": "33f4a98b089c04604fca40d619d794289e9cb36fb22f9ed0a62ce2b010e807af",
+        "closureIdentityDigest": "e359d89928d848714924343e9215625122ae600b99403f0eb637e79ae22f4c45",
+        "sourceContentDigest": "40a93e5469d14e3b6a55b72c6612fc549f7a7e7f1e59fc678d4957d74e3ef7b2"
+      }
+    },
+    {
+      "id": "rename-issue-github-pr-profile",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Profile.MohistPrIssueWorkflowProfileSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistPrIssueWorkflowProfileSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests"
+      },
+      "discovered": {
+        "factMethods": 27,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 27
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests"
+        ],
+        "digest": "d6f816b66ca4be9cba9f2aa4fba657d90d1c3df62ffff2ce2ab93d76ff990dd4",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests case-digest=5700a77b75fa973a38c8a689c72758aaf8b076461fbb9711ba248165ff34284d source-content-digest=81ca1d28ec4816d025ef8aebc0af5272e8306d3fb3012c72229fb137a31d3b09 executable-closure-digest=d6f816b66ca4be9cba9f2aa4fba657d90d1c3df62ffff2ce2ab93d76ff990dd4 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Profile/MohistPrIssueWorkflowProfileSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.MohistPrIssueWorkflowProfileSpecs",
+        "sourceContentDigest": "fde7054c5f457dd70729338a2e4884b92e330692e122e6892a74f5990cd35da1"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/MohistGithubPrIssueWorkflowProfileTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.MohistGithubPrIssueWorkflowProfileTests",
+        "caseCount": 27,
+        "caseIdentityDigest": "5700a77b75fa973a38c8a689c72758aaf8b076461fbb9711ba248165ff34284d",
+        "closureIdentityDigest": "d6f816b66ca4be9cba9f2aa4fba657d90d1c3df62ffff2ce2ab93d76ff990dd4",
+        "sourceContentDigest": "81ca1d28ec4816d025ef8aebc0af5272e8306d3fb3012c72229fb137a31d3b09"
+      }
+    },
+    {
+      "id": "rename-issue-profile-catalog",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Profile/WorkflowProfileCatalogSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Profile.WorkflowProfileCatalogSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Profile/WorkflowProfileCatalogSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.WorkflowProfileCatalogSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/WorkflowProfileCatalogTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/WorkflowProfileCatalogTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests"
+        ],
+        "digest": "6e179b4fac7ca42dee140f774e0d0cef082609663cba3af9be5290e5cb52974e",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Profile/WorkflowProfileCatalogTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests case-digest=beccfc0cb36745a721c6598289d56188886b082204297f1e9e7f0a312a92c548 source-content-digest=9f6546142264f4cc9780917153c5d163e4401c335da5011757adc13d4faac810 executable-closure-digest=6e179b4fac7ca42dee140f774e0d0cef082609663cba3af9be5290e5cb52974e edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Profile/WorkflowProfileCatalogSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Profile.WorkflowProfileCatalogSpecs",
+        "sourceContentDigest": "82964ddebb1dd3d4a6304157c8a4c1e618a204088242854e1472811ee47ec78d"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Profile/WorkflowProfileCatalogTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Profile.WorkflowProfileCatalogTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "beccfc0cb36745a721c6598289d56188886b082204297f1e9e7f0a312a92c548",
+        "closureIdentityDigest": "6e179b4fac7ca42dee140f774e0d0cef082609663cba3af9be5290e5cb52974e",
+        "sourceContentDigest": "9f6546142264f4cc9780917153c5d163e4401c335da5011757adc13d4faac810"
+      }
+    },
+    {
+      "id": "rename-project-repository-policy",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Project/Domain/RepositoryPolicySpecs.cs Mohist.Server.SpecTests.Specs.Project.Domain.RepositoryPolicySpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Project/Domain/RepositoryPolicySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Project.Domain.RepositoryPolicySpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyGitUrlTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyGitUrlTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests"
+      },
+      "discovered": {
+        "factMethods": 2,
+        "theoryMethods": 1,
+        "inlineDataRows": 8,
+        "mtpCases": 10
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests"
+        ],
+        "digest": "e264a332bca9efa5058833ba80c08fadf5a3b2a44f0e9ac84bb4850af969b5b6",
+        "evidence": "source-path=Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyGitUrlTests.cs source-fqn=Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests case-digest=c4147cd13b5d395c14a9bb70cce4517aba2476dbb11223c8ffeb160ff5f64441 source-content-digest=fabab777120d961c9cea77d4bfef36504095367f8a0db0dc0029ac38ca4cb606 executable-closure-digest=e264a332bca9efa5058833ba80c08fadf5a3b2a44f0e9ac84bb4850af969b5b6 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Project/Domain/RepositoryPolicySpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Project.Domain.RepositoryPolicySpecs",
+        "sourceContentDigest": "92cf1612cb53e8f6847ed01f89a946c27dc8f113f96804dce7970cdd596a77df"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Project/Domain/RepositoryPolicyGitUrlTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Project.Domain.RepositoryPolicyGitUrlTests",
+        "caseCount": 10,
+        "caseIdentityDigest": "c4147cd13b5d395c14a9bb70cce4517aba2476dbb11223c8ffeb160ff5f64441",
+        "closureIdentityDigest": "e264a332bca9efa5058833ba80c08fadf5a3b2a44f0e9ac84bb4850af969b5b6",
+        "sourceContentDigest": "fabab777120d961c9cea77d4bfef36504095367f8a0db0dc0029ac38ca4cb606"
+      }
+    },
+    {
+      "id": "rename-runner-poll-parent-context",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Runner/Api/RunnerPollParentContextMapperSpecs.cs Mohist.Server.SpecTests.Specs.Runner.Api.RunnerPollParentContextMapperSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Runner/Api/RunnerPollParentContextMapperSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Runner.Api.RunnerPollParentContextMapperSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Runner/Api/RunnerPollParentContextMapperTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Runner/Api/RunnerPollParentContextMapperTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 1,
+        "inlineDataRows": 3,
+        "mtpCases": 6
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests"
+        ],
+        "digest": "fbb047b15feb598663abc6266ae728da512e705e2186a72fe595116905b6d369",
+        "evidence": "source-path=Mohist.Server.UnitTests/Runner/Api/RunnerPollParentContextMapperTests.cs source-fqn=Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests case-digest=f1b8f7f585f5a4fef4e83c92435b8cfb1a79c782ae03e40d9607cdf942bd764a source-content-digest=e0f468e71a0c0919dcc8b8555f4340da0f025f11a6f4fcd8ff29f1ebc2e8d086 executable-closure-digest=fbb047b15feb598663abc6266ae728da512e705e2186a72fe595116905b6d369 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Runner/Api/RunnerPollParentContextMapperSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Runner.Api.RunnerPollParentContextMapperSpecs",
+        "sourceContentDigest": "faad71582d5d2f883a9714bca41e6be0631f18758ffdbc3885a79215fdc59cdd"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Runner/Api/RunnerPollParentContextMapperTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Api.RunnerPollParentContextMapperTests",
+        "caseCount": 6,
+        "caseIdentityDigest": "f1b8f7f585f5a4fef4e83c92435b8cfb1a79c782ae03e40d9607cdf942bd764a",
+        "closureIdentityDigest": "fbb047b15feb598663abc6266ae728da512e705e2186a72fe595116905b6d369",
+        "sourceContentDigest": "e0f468e71a0c0919dcc8b8555f4340da0f025f11a6f4fcd8ff29f1ebc2e8d086"
+      }
+    },
+    {
+      "id": "rename-runner-config-hot-reload",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Runner/Config/ConfigHotReloadSpecs.cs Mohist.Server.SpecTests.Specs.Runner.Config.ConfigHotReloadSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Runner/Config/ConfigHotReloadSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Runner.Config.ConfigHotReloadSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Runner/Config/ConfigHotReloadTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Runner/Config/ConfigHotReloadTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests",
+          "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests.ReloadableOptionsFixture"
+        ],
+        "digest": "a1380500d6ea298d5f227de961d1b64de2d530e8a27ee31483aa6af0d620f0d6",
+        "evidence": "source-path=Mohist.Server.UnitTests/Runner/Config/ConfigHotReloadTests.cs source-fqn=Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests case-digest=1c21be408584f9ee74be6de438e6e9e4bb1a3e884816b8c6010c6965508a0ca1 source-content-digest=81a64acfcd8cd81ba34e16bf27b038dc456bd0926598cb116286f119477a9493 executable-closure-digest=a1380500d6ea298d5f227de961d1b64de2d530e8a27ee31483aa6af0d620f0d6 edges-digest=b9f37757e08de2d9850512380d3bd4e0f1d0793a85da1f8bf971bcb65e19c094"
+      },
+      "owner": "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Runner/Config/ConfigHotReloadSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Runner.Config.ConfigHotReloadSpecs",
+        "sourceContentDigest": "5578cada15ac2c0c31163c4e752bf05653eff3392b45edfee1b7fbe6118bd19f"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Runner/Config/ConfigHotReloadTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Config.ConfigHotReloadTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "1c21be408584f9ee74be6de438e6e9e4bb1a3e884816b8c6010c6965508a0ca1",
+        "closureIdentityDigest": "a1380500d6ea298d5f227de961d1b64de2d530e8a27ee31483aa6af0d620f0d6",
+        "sourceContentDigest": "81a64acfcd8cd81ba34e16bf27b038dc456bd0926598cb116286f119477a9493"
+      }
+    },
+    {
+      "id": "rename-runner-hub",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Runner/SignalR/RunnerHubSpecs.cs Mohist.Server.SpecTests.Specs.Runner.SignalR.RunnerHubSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Runner/SignalR/RunnerHubSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Runner.SignalR.RunnerHubSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests",
+          "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests.TestHubCallerContext",
+          "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests.ThrowingGrainFactory"
+        ],
+        "digest": "dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546",
+        "evidence": "source-path=Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs source-fqn=Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests case-digest=66f3ecb5ccb12894789983ff3367791a94459e3671da6efcee6253df7ec0e666 source-content-digest=557fa8fe78b4f0c83274d24e7d929204ea175229438a1c2680ecf0e5b3311e04 executable-closure-digest=dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546 edges-digest=cc60e6bce4c93d4d3d3c66c75a04917096ad50fe7180d65b766e1c1907038144"
+      },
+      "owner": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Runner/SignalR/RunnerHubSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Runner.SignalR.RunnerHubSpecs",
+        "sourceContentDigest": "3bc416c6baf2e399ad07f686cab7f961d25e8dc951a50e37425c22d528fc7a7b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Runner/SignalR/RunnerHubTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.SignalR.RunnerHubTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "66f3ecb5ccb12894789983ff3367791a94459e3671da6efcee6253df7ec0e666",
+        "closureIdentityDigest": "dafa992ccd98920e1fe6f601597b3a44d60527ea640ffa41bf5dd97f86639546",
+        "sourceContentDigest": "557fa8fe78b4f0c83274d24e7d929204ea175229438a1c2680ecf0e5b3311e04"
+      }
+    },
+    {
+      "id": "rename-runner-terminal-status",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs Mohist.Server.SpecTests.Specs.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests",
+          "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests.RecordingStatusRouter",
+          "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests.ThrowingStatusRouter"
+        ],
+        "digest": "e7d4b41f3432cba347c330043470c77ea106cb453dd662834ba7501bbe2b7684",
+        "evidence": "source-path=Mohist.Server.UnitTests/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerTests.cs source-fqn=Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests case-digest=a2502361d32adbe1b266d777e395cdaad38bee0b21b84947dc7529bad7a21c28 source-content-digest=fdd1ed6ac09e9e317e3769fd04383e0d0f19614b4cc0119be5199af8389d54e3 executable-closure-digest=e7d4b41f3432cba347c330043470c77ea106cb453dd662834ba7501bbe2b7684 edges-digest=82478a4546599c951033094238298a85fd27fe0c5930e4586422fc1a5be144b4"
+      },
+      "owner": "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerSpecs",
+        "sourceContentDigest": "309fdeb18a31df41156b14937cca9a4c1cfd95e25485259d152e0ae9e147b2ff"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Runner/Subscriptions/RunnerWorkflowTerminalStatusHandlerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Runner.Subscriptions.RunnerWorkflowTerminalStatusHandlerTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "a2502361d32adbe1b266d777e395cdaad38bee0b21b84947dc7529bad7a21c28",
+        "closureIdentityDigest": "e7d4b41f3432cba347c330043470c77ea106cb453dd662834ba7501bbe2b7684",
+        "sourceContentDigest": "fdd1ed6ac09e9e317e3769fd04383e0d0f19614b4cc0119be5199af8389d54e3"
+      }
+    },
+    {
+      "id": "rename-session-activity-summary",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Sessions/AgentSessionActivitySummaryReducerSpecs.cs Mohist.Server.SpecTests.Specs.Sessions.AgentSessionActivitySummaryReducerSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionActivitySummaryReducerSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionActivitySummaryReducerSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionActivitySummaryReducerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionActivitySummaryReducerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests"
+        ],
+        "digest": "1cb388c15506f6f4430e36b84e878a094003928efb77918db55e12b2d9f4938a",
+        "evidence": "source-path=Mohist.Server.UnitTests/Sessions/AgentSessionActivitySummaryReducerTests.cs source-fqn=Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests case-digest=f9c99c771436d7f321894817c7abf36b902e1b8b91fbf7bf08389b23f5edc54f source-content-digest=4b3665582edfe9c18068a1f23748b1eb8da9ac1a55847c351bc46c0fe29fc881 executable-closure-digest=1cb388c15506f6f4430e36b84e878a094003928efb77918db55e12b2d9f4938a edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionActivitySummaryReducerSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionActivitySummaryReducerSpecs",
+        "sourceContentDigest": "efd92fb0a71681a1f02778b74e8a2db9f3bc0c5532991dbb857b618eebceff98"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionActivitySummaryReducerTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionActivitySummaryReducerTests",
+        "caseCount": 7,
+        "caseIdentityDigest": "f9c99c771436d7f321894817c7abf36b902e1b8b91fbf7bf08389b23f5edc54f",
+        "closureIdentityDigest": "1cb388c15506f6f4430e36b84e878a094003928efb77918db55e12b2d9f4938a",
+        "sourceContentDigest": "4b3665582edfe9c18068a1f23748b1eb8da9ac1a55847c351bc46c0fe29fc881"
+      }
+    },
+    {
+      "id": "rename-session-persistence-probe",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Sessions/AgentSessionPersistenceTestProbeSpecs.cs Mohist.Server.SpecTests.Specs.Sessions.AgentSessionPersistenceTestProbeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionPersistenceTestProbeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionPersistenceTestProbeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionPersistenceTestProbeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionPersistenceTestProbeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.AgentSessionPersistenceTestProbe",
+          "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests"
+        ],
+        "digest": "5a1e56b0ad9e8ece6de180df30de790737dd705bc3f9dd91d332477a3c6cde28",
+        "evidence": "source-path=Mohist.Server.UnitTests/Sessions/AgentSessionPersistenceTestProbeTests.cs source-fqn=Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests case-digest=9ddc59dd09fe319ab776590cb8847abd700238214e131dffa1f944d45a4e0f95 source-content-digest=3fff1cc0019ffea862cf49e2021a2aec4dba6ed88c52d21ad3f6bb76afda46eb executable-closure-digest=5a1e56b0ad9e8ece6de180df30de790737dd705bc3f9dd91d332477a3c6cde28 edges-digest=e938975cf8db2770e303abb038f205ae77685a9b3e32cebb1b5633741d536db7"
+      },
+      "owner": "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Sessions/AgentSessionPersistenceTestProbeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Sessions.AgentSessionPersistenceTestProbeSpecs",
+        "sourceContentDigest": "5b8ebd19a8079e5ba4e37086e3facdd3a0477efd01446d5b12f1081c227fc2be"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Sessions/AgentSessionPersistenceTestProbeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.AgentSessionPersistenceTestProbeTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "9ddc59dd09fe319ab776590cb8847abd700238214e131dffa1f944d45a4e0f95",
+        "closureIdentityDigest": "5a1e56b0ad9e8ece6de180df30de790737dd705bc3f9dd91d332477a3c6cde28",
+        "sourceContentDigest": "3fff1cc0019ffea862cf49e2021a2aec4dba6ed88c52d21ad3f6bb76afda46eb"
+      }
+    },
+    {
+      "id": "rename-session-transcript-accumulator",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Sessions/TranscriptAccumulatorSpecs.cs Mohist.Server.SpecTests.Specs.Sessions.TranscriptAccumulatorSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Sessions/TranscriptAccumulatorSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Sessions.TranscriptAccumulatorSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Sessions/TranscriptAccumulatorTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Sessions/TranscriptAccumulatorTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.TestData.AgentSessionTestData",
+          "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests"
+        ],
+        "digest": "4f71ccf7f304a5d751771d9efd9f16a7815e37d72cdec31c15da0aecbccb8f26",
+        "evidence": "source-path=Mohist.Server.UnitTests/Sessions/TranscriptAccumulatorTests.cs source-fqn=Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests case-digest=7708405a2a1e6331aca8c7408d5cf7e3d02c995662f3ba19549e6d2e53160cfb source-content-digest=ba7da9cedb852c25f85ddea4958384ea4be19e681f590e4e9a8040f3c143c881 executable-closure-digest=4f71ccf7f304a5d751771d9efd9f16a7815e37d72cdec31c15da0aecbccb8f26 edges-digest=fbceb709d5edeae637fa9ccb60220fe1f1c310aeb8f22d961ff10e1f60e32fc5"
+      },
+      "owner": "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Sessions/TranscriptAccumulatorSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Sessions.TranscriptAccumulatorSpecs",
+        "sourceContentDigest": "ded8f1d24f855aaf97cbda2bdb29c5f24c432e04832a80e6768054dccb195583"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Sessions/TranscriptAccumulatorTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Sessions.TranscriptAccumulatorTests",
+        "caseCount": 7,
+        "caseIdentityDigest": "7708405a2a1e6331aca8c7408d5cf7e3d02c995662f3ba19549e6d2e53160cfb",
+        "closureIdentityDigest": "4f71ccf7f304a5d751771d9efd9f16a7815e37d72cdec31c15da0aecbccb8f26",
+        "sourceContentDigest": "ba7da9cedb852c25f85ddea4958384ea4be19e681f590e4e9a8040f3c143c881"
+      }
+    },
+    {
+      "id": "rename-system-event-bridge",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.EventBridgeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.EventBridgeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests"
+      },
+      "discovered": {
+        "factMethods": 2,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 2
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests",
+          "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests.RecordingHubContext",
+          "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests.RecordingHubContext.NoopGroupManager",
+          "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests.RecordingHubContext.RecordingEventsClient",
+          "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests.RecordingHubContext.RecordingHubClients",
+          "TestTime"
+        ],
+        "digest": "e42a0cab4a0ae0772a92f5e4e84f0db89a37a95e2c815d77c1fa9f570a25880d",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/EventBridgeTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests case-digest=8ea37a7776bb98e9576849a20cc0b180460c720656c3866734ffa85f57f276ba source-content-digest=987a99218afa6631cbcfccaea4a01c5a7a3b5c7222b3293132490f7c64fb2c50 executable-closure-digest=e42a0cab4a0ae0772a92f5e4e84f0db89a37a95e2c815d77c1fa9f570a25880d edges-digest=35bd0fe1672d391c7f9f0ebc15cad90c758df02b0bce79870fa881dc556ab6fe"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/EventBridgeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.EventBridgeSpecs",
+        "sourceContentDigest": "af77b926698bc7e59f821e816013a365135a991061c9862768c145ac342a5f20"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/EventBridgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.EventBridgeTests",
+        "caseCount": 2,
+        "caseIdentityDigest": "8ea37a7776bb98e9576849a20cc0b180460c720656c3866734ffa85f57f276ba",
+        "closureIdentityDigest": "e42a0cab4a0ae0772a92f5e4e84f0db89a37a95e2c815d77c1fa9f570a25880d",
+        "sourceContentDigest": "987a99218afa6631cbcfccaea4a01c5a7a3b5c7222b3293132490f7c64fb2c50"
+      }
+    },
+    {
+      "id": "rename-system-update-cli",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateCliOutcomeSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateCliOutcomeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateCliOutcomeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateCliOutcomeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateCliOutcomeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateCliOutcomeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "954c3046cde679a7b828b9e1edf13eef28aa4e6d60c892bd353e60444200db80",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateCliOutcomeTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests case-digest=9fc955221b7cf5825be3ff4862a5e99ad9c0d48f4efeca7c7654ad0fa0cb899a source-content-digest=8dc7c22ac33a5c06612be317757e974c5a54633b76ddd92c2b9c91d17617afab executable-closure-digest=954c3046cde679a7b828b9e1edf13eef28aa4e6d60c892bd353e60444200db80 edges-digest=6b13b5a543457605da3f368a368ca417f541b46e10ea243848f6a6babc2a99d0"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateCliOutcomeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateCliOutcomeSpecs",
+        "sourceContentDigest": "16733ac84f53f228a37e24cecf534a4de4d4e27e067f5097c43f458fe97bf093"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateCliOutcomeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateCliOutcomeTests",
+        "caseCount": 7,
+        "caseIdentityDigest": "9fc955221b7cf5825be3ff4862a5e99ad9c0d48f4efeca7c7654ad0fa0cb899a",
+        "closureIdentityDigest": "954c3046cde679a7b828b9e1edf13eef28aa4e6d60c892bd353e60444200db80",
+        "sourceContentDigest": "8dc7c22ac33a5c06612be317757e974c5a54633b76ddd92c2b9c91d17617afab"
+      }
+    },
+    {
+      "id": "rename-system-update-consistency",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateConsistencySpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateConsistencySpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateConsistencySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateConsistencySpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateConsistencyTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateConsistencyTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests"
+      },
+      "discovered": {
+        "factMethods": 2,
+        "theoryMethods": 1,
+        "inlineDataRows": 2,
+        "mtpCases": 4
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "17e7c2d29f6b0fb1cf70e02cbc8255d69eb901a322e6ae8138456bfca21588b3",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateConsistencyTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests case-digest=322bea3fd516d0c62bcb2d7e2776fcdfb323ed1dacc055d70a0e97fcb42aec75 source-content-digest=2ecb57d0eddc40c69bc51092d24520aea7de13962b9c06224aeef66f796e07f8 executable-closure-digest=17e7c2d29f6b0fb1cf70e02cbc8255d69eb901a322e6ae8138456bfca21588b3 edges-digest=d24927683774de437e07f47e1093e0cd60f9c502791384ded20ab33d857142e4"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateConsistencySpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateConsistencySpecs",
+        "sourceContentDigest": "06c308cca3e0a6754aa19e82263eb4344177ad713cacef26df1d8e89da395afa"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateConsistencyTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateConsistencyTests",
+        "caseCount": 4,
+        "caseIdentityDigest": "322bea3fd516d0c62bcb2d7e2776fcdfb323ed1dacc055d70a0e97fcb42aec75",
+        "closureIdentityDigest": "17e7c2d29f6b0fb1cf70e02cbc8255d69eb901a322e6ae8138456bfca21588b3",
+        "sourceContentDigest": "2ecb57d0eddc40c69bc51092d24520aea7de13962b9c06224aeef66f796e07f8"
+      }
+    },
+    {
+      "id": "rename-system-update-failure-recovery",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateFailureRecoverySpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateFailureRecoverySpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateFailureRecoverySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateFailureRecoverySpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateFailureRecoveryTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateFailureRecoveryTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests"
+      },
+      "discovered": {
+        "factMethods": 5,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 5
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "25788a101f4bcb8840555a57ed99ab82bed9a17d8b9e312b7cca36506f814465",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateFailureRecoveryTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests case-digest=64afa42eec4b9295755cb89a9b9b0af5c5d4c3dc6ddf7544ec21d8dabc74d7f3 source-content-digest=2cffbd50b680b85713fac4106f0a01bd22c2fd31579c597e66c07c13944552a0 executable-closure-digest=25788a101f4bcb8840555a57ed99ab82bed9a17d8b9e312b7cca36506f814465 edges-digest=cf133e2cf7bb6f32ff4a5f6024694295fa1216bcfa30474ad8e6257cd012e02c"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateFailureRecoverySpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateFailureRecoverySpecs",
+        "sourceContentDigest": "9fc71c324f2aa0d08dfffdbb4514d4b05be91ef085d76bb7ee419336f3f36bf4"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateFailureRecoveryTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateFailureRecoveryTests",
+        "caseCount": 5,
+        "caseIdentityDigest": "64afa42eec4b9295755cb89a9b9b0af5c5d4c3dc6ddf7544ec21d8dabc74d7f3",
+        "closureIdentityDigest": "25788a101f4bcb8840555a57ed99ab82bed9a17d8b9e312b7cca36506f814465",
+        "sourceContentDigest": "2cffbd50b680b85713fac4106f0a01bd22c2fd31579c597e66c07c13944552a0"
+      }
+    },
+    {
+      "id": "rename-system-update-reconnect",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateReconnectSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateReconnectSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateReconnectSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateReconnectSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateReconnectTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateReconnectTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests"
+      },
+      "discovered": {
+        "factMethods": 13,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 13
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "1f646a9aaacc09c0cd091400b66851c87bc1a4c9d9207ab29459d92607540bc9",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateReconnectTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests case-digest=fbeb491109bd55867d12df50e8168975ec7968feee18e5692f16e01a0655cd7e source-content-digest=346b3c733d6384cb74e7610cfeaf68a00180bcd9cc74fdea8b3adb1228e8d01d executable-closure-digest=1f646a9aaacc09c0cd091400b66851c87bc1a4c9d9207ab29459d92607540bc9 edges-digest=ecafbddc05fd0ece40962402d4f6c20d54a28c662ab3a91bae78585896639ae3"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateReconnectSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateReconnectSpecs",
+        "sourceContentDigest": "ebac3b44dd887c19499f41b13515d3c850857203249ebcd919fed5fa69eda65b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateReconnectTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateReconnectTests",
+        "caseCount": 13,
+        "caseIdentityDigest": "fbeb491109bd55867d12df50e8168975ec7968feee18e5692f16e01a0655cd7e",
+        "closureIdentityDigest": "1f646a9aaacc09c0cd091400b66851c87bc1a4c9d9207ab29459d92607540bc9",
+        "sourceContentDigest": "346b3c733d6384cb74e7610cfeaf68a00180bcd9cc74fdea8b3adb1228e8d01d"
+      }
+    },
+    {
+      "id": "rename-system-update-start",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateStartSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateStartSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateStartSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateStartSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateStartTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateStartTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests"
+      },
+      "discovered": {
+        "factMethods": 13,
+        "theoryMethods": 2,
+        "inlineDataRows": 6,
+        "mtpCases": 19
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "a3bdfefcc4595419fd00687fbefe7d27ad5e128b5cd74ae91da364f6f00a2122",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateStartTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests case-digest=f68961c49613c89bec185c587ed93916110def1b33921483db6c9a4a2593a069 source-content-digest=cc91461103603f3e4c04a2fcaeec3af40e507591c9053d46f73b12953485b34c executable-closure-digest=a3bdfefcc4595419fd00687fbefe7d27ad5e128b5cd74ae91da364f6f00a2122 edges-digest=2b56be61dde36715cf40c329e2f3b506093d4cd57942e4c26d9e73eb487819f2"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateStartSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateStartSpecs",
+        "sourceContentDigest": "1314469682591a2865bdf58cb85a86a5c00af062aae1ade7a52991db111ba9a4"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateStartTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateStartTests",
+        "caseCount": 19,
+        "caseIdentityDigest": "f68961c49613c89bec185c587ed93916110def1b33921483db6c9a4a2593a069",
+        "closureIdentityDigest": "a3bdfefcc4595419fd00687fbefe7d27ad5e128b5cd74ae91da364f6f00a2122",
+        "sourceContentDigest": "cc91461103603f3e4c04a2fcaeec3af40e507591c9053d46f73b12953485b34c"
+      }
+    },
+    {
+      "id": "rename-system-windows-install-argument",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallArgumentSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallArgumentSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallArgumentSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallArgumentSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallArgumentTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallArgumentTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests"
+      },
+      "discovered": {
+        "factMethods": 15,
+        "theoryMethods": 1,
+        "inlineDataRows": 4,
+        "mtpCases": 19
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic-fake-seam",
+        "symbols": [
+          "Mohist.Server.TestSupport.FakeFileSystem",
+          "Mohist.Server.TestSupport.FakeFileSystem.RecordingStream",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport.FakeCommandExecutor"
+        ],
+        "digest": "d9ac2c04e56aa59e17cc6ab6af8acb4e3a5c1ebcaaf3146fe9ce93984aa3f1b1",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/WindowsInstallArgumentTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests case-digest=56f8033a24f5eb0fdbaf4451ef65ce875778fa1ed848ade86fd9692ab9f89bf4 source-content-digest=a37aabc2492f05ffe678161a82a152282391cbc58d5ebb5afcbbd91704b27a4f executable-closure-digest=d9ac2c04e56aa59e17cc6ab6af8acb4e3a5c1ebcaaf3146fe9ce93984aa3f1b1 edges-digest=98b66cd37ea4c6e3553b038819f42abd61161b91a7eabc5aa6afa28b2abb7fe4"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallArgumentSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallArgumentSpecs",
+        "sourceContentDigest": "a00d4a2e2782d14ed8eaf52e3d253d0d06101ce119a0975a7abea4e42a4a30c8"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallArgumentTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallArgumentTests",
+        "caseCount": 19,
+        "caseIdentityDigest": "56f8033a24f5eb0fdbaf4451ef65ce875778fa1ed848ade86fd9692ab9f89bf4",
+        "closureIdentityDigest": "d9ac2c04e56aa59e17cc6ab6af8acb4e3a5c1ebcaaf3146fe9ce93984aa3f1b1",
+        "sourceContentDigest": "a37aabc2492f05ffe678161a82a152282391cbc58d5ebb5afcbbd91704b27a4f"
+      }
+    },
+    {
+      "id": "rename-system-windows-install-registration",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallRegistrationSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallRegistrationSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallRegistrationSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallRegistrationSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallRegistrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallRegistrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests"
+      },
+      "discovered": {
+        "factMethods": 0,
+        "theoryMethods": 3,
+        "inlineDataRows": 6,
+        "mtpCases": 6
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic-fake-seam",
+        "symbols": [
+          "Mohist.Server.TestSupport.FakeFileSystem",
+          "Mohist.Server.TestSupport.FakeFileSystem.RecordingStream",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport.FakeCommandExecutor"
+        ],
+        "digest": "e514269e62db0ae67ebbe5342a38316a3c80bda17a5a15a8f35ae707aaa026bd",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/WindowsInstallRegistrationTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests case-digest=271040fc528c3efcf6ffb13250c7c9f707a3cff4210edc9dd96937250b693753 source-content-digest=b373741f5b25ad0b30f869a45826d5c27fbeb0f989df0111247ba8b39b75f764 executable-closure-digest=e514269e62db0ae67ebbe5342a38316a3c80bda17a5a15a8f35ae707aaa026bd edges-digest=215f90dcf38a28198773ca4d72630700de5b9bd830e7c7380c093bd00d1a15fc"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsInstallRegistrationSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallRegistrationSpecs",
+        "sourceContentDigest": "fcdead362009e2547bd3fdc98071f0bbaabf195c3f5551875c57a6c6994a79b0"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsInstallRegistrationTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallRegistrationTests",
+        "caseCount": 6,
+        "caseIdentityDigest": "271040fc528c3efcf6ffb13250c7c9f707a3cff4210edc9dd96937250b693753",
+        "closureIdentityDigest": "e514269e62db0ae67ebbe5342a38316a3c80bda17a5a15a8f35ae707aaa026bd",
+        "sourceContentDigest": "b373741f5b25ad0b30f869a45826d5c27fbeb0f989df0111247ba8b39b75f764"
+      }
+    },
+    {
+      "id": "rename-system-windows-server-edge",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServerInstallEdgeSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServerInstallEdgeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServerInstallEdgeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServerInstallEdgeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServerInstallEdgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServerInstallEdgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 9
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic-fake-seam",
+        "symbols": [
+          "Mohist.Server.TestSupport.FakeFileSystem",
+          "Mohist.Server.TestSupport.FakeFileSystem.RecordingStream",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsInstallTestSupport.FakeCommandExecutor",
+          "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests"
+        ],
+        "digest": "d01ee78e6ed6b695ef5cfbf0ed9453b1ef23890d9e1d5dfcc138601543d151f1",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/WindowsServerInstallEdgeTests.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests case-digest=9ff3182ec8749954f29bb6150c01821395395eeaa25edf2c566bac0e2f11ef2f source-content-digest=0e76b9dd752a52d485fee0fae036667030eadfb3b228ef6bc472eb4df6ae9c77 executable-closure-digest=d01ee78e6ed6b695ef5cfbf0ed9453b1ef23890d9e1d5dfcc138601543d151f1 edges-digest=cec9bd5cf2537d7464aaf2fc3908fad9276508fa84762cdccaae2de5003d3460"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServerInstallEdgeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServerInstallEdgeSpecs",
+        "sourceContentDigest": "83883a9ff44141f95ced53adfd7e9d5c577a0e377dde31cd86455c4ed9403516"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServerInstallEdgeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServerInstallEdgeTests",
+        "caseCount": 9,
+        "caseIdentityDigest": "9ff3182ec8749954f29bb6150c01821395395eeaa25edf2c566bac0e2f11ef2f",
+        "closureIdentityDigest": "d01ee78e6ed6b695ef5cfbf0ed9453b1ef23890d9e1d5dfcc138601543d151f1",
+        "sourceContentDigest": "0e76b9dd752a52d485fee0fae036667030eadfb3b228ef6bc472eb4df6ae9c77"
+      }
+    },
+    {
+      "id": "rename-telemetry-diagnostics-sampler",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs Mohist.Server.SpecTests.Specs.Telemetry.OtelDiagnosticsSamplerEnabledSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelDiagnosticsSamplerEnabledSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelDiagnosticsSamplerEnabledTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelDiagnosticsSamplerEnabledTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests",
+          "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests.NoopProcessResourceReader",
+          "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests.NoopStorageProbe",
+          "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests.RecordingMaintenanceCallback",
+          "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests.TestApplicationLifetime"
+        ],
+        "digest": "3484de9176013cf555009e54e0420c022338403fe81fe537a94bf11ae59ff1bb",
+        "evidence": "source-path=Mohist.Server.UnitTests/Telemetry/OtelDiagnosticsSamplerEnabledTests.cs source-fqn=Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests case-digest=0c7a8e20eab569239f895d0709629cd50d7ee094eadd8aed37684847296dcb6a source-content-digest=0ea853824dba1c2f1e2b16ebffc40bf48ff3a87f72f2fef6dc7f889859365be4 executable-closure-digest=3484de9176013cf555009e54e0420c022338403fe81fe537a94bf11ae59ff1bb edges-digest=aaded8551d7830655b713cf5a145bda5721ed0123216aa4235b7144dea40d6c4"
+      },
+      "owner": "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Telemetry/OtelDiagnosticsSamplerEnabledSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelDiagnosticsSamplerEnabledSpecs",
+        "sourceContentDigest": "e953f1848c845cfccf1500827da668c7e05ded7b42e85ed96a9a81d2e599b9c8"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelDiagnosticsSamplerEnabledTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelDiagnosticsSamplerEnabledTests",
+        "caseCount": 3,
+        "caseIdentityDigest": "0c7a8e20eab569239f895d0709629cd50d7ee094eadd8aed37684847296dcb6a",
+        "closureIdentityDigest": "3484de9176013cf555009e54e0420c022338403fe81fe537a94bf11ae59ff1bb",
+        "sourceContentDigest": "0ea853824dba1c2f1e2b16ebffc40bf48ff3a87f72f2fef6dc7f889859365be4"
+      }
+    },
+    {
+      "id": "rename-telemetry-port-isolation",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Telemetry/OtelPortIsolationMiddlewareSpecs.cs Mohist.Server.SpecTests.Specs.Telemetry.OtelPortIsolationMiddlewareSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Telemetry/OtelPortIsolationMiddlewareSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelPortIsolationMiddlewareSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelPortIsolationMiddlewareTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelPortIsolationMiddlewareTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests"
+        ],
+        "digest": "06af70fed3ec45e458c620e8f9651315d2dce7fa8ef4465c60b9d60682fef90a",
+        "evidence": "source-path=Mohist.Server.UnitTests/Telemetry/OtelPortIsolationMiddlewareTests.cs source-fqn=Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests case-digest=ce4d555a4e17b5b25bdf6b950dee51a6b874964f725e6f43c7bfdf912dd41122 source-content-digest=34199b3b3c2938205427989d650ec5eb39f2a2add941c53f0bf322c339356231 executable-closure-digest=06af70fed3ec45e458c620e8f9651315d2dce7fa8ef4465c60b9d60682fef90a edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Telemetry/OtelPortIsolationMiddlewareSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Telemetry.OtelPortIsolationMiddlewareSpecs",
+        "sourceContentDigest": "45ace57438fd29b3d32f9dd7b51f94b7bf84d15ea4896515cd9c717611d6a9d8"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Telemetry/OtelPortIsolationMiddlewareTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Telemetry.OtelPortIsolationMiddlewareTests",
+        "caseCount": 7,
+        "caseIdentityDigest": "ce4d555a4e17b5b25bdf6b950dee51a6b874964f725e6f43c7bfdf912dd41122",
+        "closureIdentityDigest": "06af70fed3ec45e458c620e8f9651315d2dce7fa8ef4465c60b9d60682fef90a",
+        "sourceContentDigest": "34199b3b3c2938205427989d650ec5eb39f2a2add941c53f0bf322c339356231"
+      }
+    },
+    {
+      "id": "rename-workflow-runtime-variable",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Grain.RuntimeVariableMergeSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.RuntimeVariableMergeSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/RuntimeVariableMergeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/RuntimeVariableMergeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests"
+      },
+      "discovered": {
+        "factMethods": 4,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 4
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests",
+          "TestTime"
+        ],
+        "digest": "97b6d7f8ef8c121214b49dd871571699b87ed5bea286efd41a7495457a54e492",
+        "evidence": "source-path=Mohist.Server.UnitTests/Workflow/Grain/RuntimeVariableMergeTests.cs source-fqn=Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests case-digest=2a788d63bace2a89d8af3e193bd415c74a10587f8b9782f09c1700c4044efd13 source-content-digest=fb6ba072c36084dd82f5450830d390a3df8748e72c884a23bdf1ec7f357fb2e0 executable-closure-digest=97b6d7f8ef8c121214b49dd871571699b87ed5bea286efd41a7495457a54e492 edges-digest=b54339d3de78eb7a34a432a839c6e55ac39fecfbd962865f89ef42f039398213"
+      },
+      "owner": "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/RuntimeVariableMergeSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.RuntimeVariableMergeSpecs",
+        "sourceContentDigest": "551966311bddcee6c41d7420375b52abb621077baa4ea0a76be801594987bfba"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/RuntimeVariableMergeTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.RuntimeVariableMergeTests",
+        "caseCount": 4,
+        "caseIdentityDigest": "2a788d63bace2a89d8af3e193bd415c74a10587f8b9782f09c1700c4044efd13",
+        "closureIdentityDigest": "97b6d7f8ef8c121214b49dd871571699b87ed5bea286efd41a7495457a54e492",
+        "sourceContentDigest": "fb6ba072c36084dd82f5450830d390a3df8748e72c884a23bdf1ec7f357fb2e0"
+      }
+    },
+    {
+      "id": "rename-workflow-task-output",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Grain.TaskOutputCaptureSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.TaskOutputCaptureSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/TaskOutputCaptureTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/TaskOutputCaptureTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests"
+      },
+      "discovered": {
+        "factMethods": 5,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 5
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests"
+        ],
+        "digest": "b13dfee0e48579e75b457828263a2675cadc9bd6b021c816f09e1c544e4f1b9a",
+        "evidence": "source-path=Mohist.Server.UnitTests/Workflow/Grain/TaskOutputCaptureTests.cs source-fqn=Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests case-digest=37a9a46627a0d8b35ee883a848411c5fbfc830c670f3180bb6abfadc71d0a8ec source-content-digest=23800df50741be7d5f4a4af5f6a6d5e3ad5851252809877be015ff151db8c1c8 executable-closure-digest=b13dfee0e48579e75b457828263a2675cadc9bd6b021c816f09e1c544e4f1b9a edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/TaskOutputCaptureSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.TaskOutputCaptureSpecs",
+        "sourceContentDigest": "160e4bb51870a211de175ea620fabc2082870b3eb3584b52815f3f377247acf6"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/TaskOutputCaptureTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.TaskOutputCaptureTests",
+        "caseCount": 5,
+        "caseIdentityDigest": "37a9a46627a0d8b35ee883a848411c5fbfc830c670f3180bb6abfadc71d0a8ec",
+        "closureIdentityDigest": "b13dfee0e48579e75b457828263a2675cadc9bd6b021c816f09e1c544e4f1b9a",
+        "sourceContentDigest": "23800df50741be7d5f4a4af5f6a6d5e3ad5851252809877be015ff151db8c1c8"
+      }
+    },
+    {
+      "id": "rename-workflow-attachment-storage",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Workflow/Storage/AttachmentStorageContractSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Storage.AttachmentStorageContractSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Storage/AttachmentStorageContractSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.AttachmentStorageContractSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/AttachmentStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/AttachmentStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests"
+      },
+      "discovered": {
+        "factMethods": 8,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 8
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryAttachmentStorage",
+          "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests"
+        ],
+        "digest": "ebcb1f5662a1bfe3668d17850b8f82eab78a1c7a59fe6996deb25ffb867bd80c",
+        "evidence": "source-path=Mohist.Server.UnitTests/Workflow/Storage/AttachmentStorageContractTests.cs source-fqn=Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests case-digest=228481dfb7d019f5f62fb61141acb636de657f098259484942d6dead5f4c4b87 source-content-digest=40688d7818ce7a79d1dd93279f3ca2bb12de66d5771756b221e055e3d4a73ac2 executable-closure-digest=ebcb1f5662a1bfe3668d17850b8f82eab78a1c7a59fe6996deb25ffb867bd80c edges-digest=3708cfc1792a8a3cf742eed14279f3dbe11dbbfe8905f638b0b835f1766a407f"
+      },
+      "owner": "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Storage/AttachmentStorageContractSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.AttachmentStorageContractSpecs",
+        "sourceContentDigest": "9a960dc971ad24ce1e2b86aa371ba634da7c47ad2afec5d6b9e711b7489d1ce9"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/AttachmentStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.AttachmentStorageContractTests",
+        "caseCount": 8,
+        "caseIdentityDigest": "228481dfb7d019f5f62fb61141acb636de657f098259484942d6dead5f4c4b87",
+        "closureIdentityDigest": "ebcb1f5662a1bfe3668d17850b8f82eab78a1c7a59fe6996deb25ffb867bd80c",
+        "sourceContentDigest": "40688d7818ce7a79d1dd93279f3ca2bb12de66d5771756b221e055e3d4a73ac2"
+      }
+    },
+    {
+      "id": "rename-workflow-artifact-storage",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowArtifactStorageContractSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Storage.WorkflowArtifactStorageContractSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowArtifactStorageContractSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.WorkflowArtifactStorageContractSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/WorkflowArtifactStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/WorkflowArtifactStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 1,
+        "inlineDataRows": 3,
+        "mtpCases": 12
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "pure-logic",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryWorkflowArtifactStorage",
+          "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests"
+        ],
+        "digest": "4759bbbc2c5e8d33f3ee911348b6c4de61de66624083c1d50eb564301e2f0fb6",
+        "evidence": "source-path=Mohist.Server.UnitTests/Workflow/Storage/WorkflowArtifactStorageContractTests.cs source-fqn=Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests case-digest=80078f15c42dea5b47adab5ace344d0487809d349b00e292a6fa9cdb567f4ed3 source-content-digest=b6c70286b7db40f87371a8e00d3e2402272e37cb675aaf1d4edd99e59c239aeb executable-closure-digest=4759bbbc2c5e8d33f3ee911348b6c4de61de66624083c1d50eb564301e2f0fb6 edges-digest=3bafb5754cec743bbefd9ea11f01d1539c0f90f34f27c66a628bb420ea1f932e"
+      },
+      "owner": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests",
+      "history": {
+        "operation": "rename-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Legacy Spec MTP count.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Storage/WorkflowArtifactStorageContractSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Storage.WorkflowArtifactStorageContractSpecs",
+        "sourceContentDigest": "f0e479eaeefdc6d3138ed1925e0e44c53b715fc0d52f4ff50234ee7f820f910b"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Workflow/Storage/WorkflowArtifactStorageContractTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Storage.WorkflowArtifactStorageContractTests",
+        "caseCount": 12,
+        "caseIdentityDigest": "80078f15c42dea5b47adab5ace344d0487809d349b00e292a6fa9cdb567f4ed3",
+        "closureIdentityDigest": "4759bbbc2c5e8d33f3ee911348b6c4de61de66624083c1d50eb564301e2f0fb6",
+        "sourceContentDigest": "b6c70286b7db40f87371a8e00d3e2402272e37cb675aaf1d4edd99e59c239aeb"
+      }
+    },
+    {
+      "id": "delete-issue-manual-done",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Issue/Domain/IssueManualDoneDomainSpecs.cs Mohist.Server.SpecTests.Specs.Issue.Domain.IssueManualDoneDomainSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueManualDoneDomainSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueManualDoneDomainSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests"
+      },
+      "discovered": {
+        "factMethods": 6,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 6
+      },
+      "status": "DELETE",
+      "closure": {
+        "classification": "overlap-consolidation",
+        "symbols": [
+          "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests"
+        ],
+        "digest": "a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008",
+        "evidence": "source-path=Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs source-fqn=Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests case-digest=0a6acd0c75f214a0701e93ba3a78f733462becaf3b87c36209978b63cad6aee3 source-content-digest=b7335ae9bbdc18b7e105c71104bcc4bd4acdea50cc97b93d90633f67da22eac9 executable-closure-digest=a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008 edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests",
+      "history": {
+        "operation": "delete-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Counts the deleted legacy Spec source; current owner has six cases.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Issue/Domain/IssueManualDoneDomainSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Issue.Domain.IssueManualDoneDomainSpecs",
+        "sourceContentDigest": "e03396b54b5da3a2e44b66deaf823709aed07ecd532ac001c323d80d07eb2e1e"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Issue/Domain/IssueManualCompletionTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Issue.Domain.IssueManualCompletionTests",
+        "caseCount": 6,
+        "caseIdentityDigest": "0a6acd0c75f214a0701e93ba3a78f733462becaf3b87c36209978b63cad6aee3",
+        "closureIdentityDigest": "a7ef96570758ae86cac38f252aae7bbe662d90f3577f5ce2c3db1395b52ec008",
+        "sourceContentDigest": "b7335ae9bbdc18b7e105c71104bcc4bd4acdea50cc97b93d90633f67da22eac9"
+      }
+    },
+    {
+      "id": "delete-slack-final-reply",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/Slack/SlackFinalReplyRendererSpecs.cs Mohist.Server.SpecTests.Specs.Slack.SlackFinalReplyRendererSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Slack/SlackFinalReplyRendererSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Slack.SlackFinalReplyRendererSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/Slack/SlackFinalReplyRendererTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Slack/SlackFinalReplyRendererTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests"
+      },
+      "discovered": {
+        "factMethods": 17,
+        "theoryMethods": 1,
+        "inlineDataRows": 5,
+        "mtpCases": 22
+      },
+      "status": "DELETE",
+      "closure": {
+        "classification": "existing-owner-closure",
+        "symbols": [
+          "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests"
+        ],
+        "digest": "fbf93416834b1637b5e65db3b733e985679d98ca022f39ed9a5ec56e3155711a",
+        "evidence": "source-path=Mohist.Server.UnitTests/Slack/SlackFinalReplyRendererTests.cs source-fqn=Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests case-digest=a8da9e822cf0e39c63d565739e0e0af10280909209ae11e258e8cd6cf0fe6e55 source-content-digest=80b07bfe99caf06f8c66038d73ea331434823e445ed8ab7cf443a6483712a291 executable-closure-digest=fbf93416834b1637b5e65db3b733e985679d98ca022f39ed9a5ec56e3155711a edges-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "owner": "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests",
+      "history": {
+        "operation": "delete-spec",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "Counts the deleted legacy Spec source; current owner has 22 cases.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Slack/SlackFinalReplyRendererSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Slack.SlackFinalReplyRendererSpecs",
+        "sourceContentDigest": "af3f10d24b1fd2f95b3f74f426177b4bc0a945efaf392fb09572c89c6b56fa06"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/Slack/SlackFinalReplyRendererTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Slack.SlackFinalReplyRendererTests",
+        "caseCount": 22,
+        "caseIdentityDigest": "a8da9e822cf0e39c63d565739e0e0af10280909209ae11e258e8cd6cf0fe6e55",
+        "closureIdentityDigest": "fbf93416834b1637b5e65db3b733e985679d98ca022f39ed9a5ec56e3155711a",
+        "sourceContentDigest": "80b07bfe99caf06f8c66038d73ea331434823e445ed8ab7cf443a6483712a291"
+      }
+    },
+    {
+      "id": "rename-system-update-test-factory",
+      "kind": "historical",
+      "source": "git:602efa6abd6fca3efcd43b66b47ba10a80d9faba^ legacy source Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateTestFactory.cs Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateTestFactory.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory"
+      },
+      "current": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateTestFactory.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateTestFactory.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory"
+      },
+      "discovered": {
+        "factMethods": 0,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 0
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "support-helper",
+        "symbols": [
+          "Mohist.Server.TestSupport.InMemoryManagedAssetCatalog",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.CountWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.InMemoryUpdateStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.OrderTrackingStore",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.RecordingCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ScriptedCommandRunner",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequenceReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.SequencedSystemInfo",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StatusWaiter",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.StubReadinessProbe",
+          "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory.ThrowingCommandRunner"
+        ],
+        "digest": "4513cde2197fd63599f528e4a76a9b65518293f69050bcc155a1f6791990bc01",
+        "evidence": "source-path=Mohist.Server.UnitTests/SystemSpecs/SystemUpdateTestFactory.cs source-fqn=Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory case-digest=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855 source-content-digest=62109ac8e1b280c9aa78d7b250665cb9409679eb21c9ecb2ca87bcd1d93cb350 executable-closure-digest=4513cde2197fd63599f528e4a76a9b65518293f69050bcc155a1f6791990bc01 edges-digest=bf1365012ea60e3810d519ed787ee877cdded1b111c5daf2e671a750913987e1"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+      "history": {
+        "operation": "rename-support",
+        "pr": "#388",
+        "commit": "602efa6abd6fca3efcd43b66b47ba10a80d9faba",
+        "note": "The 40th raw rename is a helper, not a test owner.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/SystemUpdateTestFactory.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.SystemUpdateTestFactory",
+        "sourceContentDigest": "4c4ef598df375edb1316ad849dfbf77a68c52549b2c0bce220b11915b0944aeb"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/SystemUpdateTestFactory.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.SystemUpdateTestFactory",
+        "caseCount": 0,
+        "caseIdentityDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "closureIdentityDigest": "4513cde2197fd63599f528e4a76a9b65518293f69050bcc155a1f6791990bc01",
+        "sourceContentDigest": "62109ac8e1b280c9aa78d7b250665cb9409679eb21c9ecb2ca87bcd1d93cb350"
+      }
+    },
+    {
+      "id": "current-windows-service-lifecycle",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs",
+        "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests"
+      },
+      "discovered": {
+        "factMethods": 0,
+        "theoryMethods": 15,
+        "inlineDataRows": 30,
+        "mtpCases": 30
+      },
+      "status": "MOVE",
+      "closure": {
+        "classification": "static-light-fake-seam",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallTestSupport",
+          "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallTestSupport.FakeCommandExecutor",
+          "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsInstallTestSupport.FakeFileSystemWatcher",
+          "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
+          "Mohist.Server.TestSupport.FakeFileSystem",
+          "Mohist.Server.TestSupport.FakeFileSystem.RecordingStream",
+          "Mohist.Server.TestSupport.TestWait"
+        ],
+        "digest": "372db43df8c415252b11e963476c409589a2fc3816f9d65a8483fbd7cb7fb607",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs case-digest=509ddac3aff2c35f5390d71caea9710f3fe5420992423c473414a252840674f3 source-content-digest=8aac709cc3297158e1e6302c3407b81e3868ba78ebe70dde1abbf620bc8fbceb executable-closure-digest=372db43df8c415252b11e963476c409589a2fc3816f9d65a8483fbd7cb7fb607 edges-digest=6393ad1c9f616479a94b0a534c7c3eef58b546f00a6b865ca0410804643bdb27 move-contract-schema=1"
+      },
+      "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests",
+      "moveContract": {
+        "owner": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests",
+        "helpers": [{"role": "filesystem"}, {"role": "command"}, {"role": "process"}, {"role": "watcher"}, {"role": "time"}],
+        "target": {"path": "Mohist.Server.UnitTests/SystemSpecs/WindowsServiceLifecycleTests.cs", "fqn": "Mohist.Server.UnitTests.SystemSpecs.WindowsServiceLifecycleTests"},
+        "split": {"maxTargetLines": 299, "maxTargetFiles": 2, "maxHelperFiles": 5}
+      },
+      "history": {
+        "operation": "residual-review",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "note": "Explicit MOVE candidate; #423 does not move tests.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
+        "sourceContentDigest": "8aac709cc3297158e1e6302c3407b81e3868ba78ebe70dde1abbf620bc8fbceb"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/SystemSpecs/WindowsServiceLifecycleSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.SystemSpecs.WindowsServiceLifecycleSpecs",
+        "caseCount": 30,
+        "caseIdentityDigest": "509ddac3aff2c35f5390d71caea9710f3fe5420992423c473414a252840674f3",
+        "closureIdentityDigest": "372db43df8c415252b11e963476c409589a2fc3816f9d65a8483fbd7cb7fb607",
+        "sourceContentDigest": "8aac709cc3297158e1e6302c3407b81e3868ba78ebe70dde1abbf620bc8fbceb"
+      }
+    },
+    {
+      "id": "current-fail-if-marker-review",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"
+      },
+      "discovered": {
+        "factMethods": 3,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 3
+      },
+      "status": "BLOCKED",
+      "closure": {
+        "classification": "serializer-only-no-fixture-body",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Issue.Profile.FakePromptLoader",
+          "Mohist.Server.SpecTests.Specs.Workflow.ControllableDispatchPollObserver",
+          "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
+          "Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainFixture",
+          "Mohist.Server.SpecTests.Specs.Workflow.WorkflowGrainSpecs",
+          "Mohist.Server.SpecTests.Support.GrainTestConfig",
+          "Mohist.Server.SpecTests.Support.GrainTestConfig.NoopSlackConnectionHealthBackpressurer",
+          "Mohist.Server.SpecTests.Support.GrainTestConfig.NoopTranscriptEventPublisher",
+          "Mohist.Server.SpecTests.Support.MigratedSqliteTemplate",
+          "Mohist.Server.TestSupport.AgentSessionPersistenceTestProbe",
+          "Mohist.Server.TestSupport.DispatchTestExtensions",
+          "Mohist.Server.TestSupport.FakeRunnerWorkspaceClient",
+          "Mohist.Server.TestSupport.InMemoryAttachmentStorage",
+          "Mohist.Server.TestSupport.InMemoryConfigDocumentStore",
+          "Mohist.Server.TestSupport.InMemoryPromptLoader",
+          "Mohist.Server.TestSupport.NoopDeadLetterStore",
+          "Mohist.Server.TestSupport.NullActionCatalogSource",
+          "Mohist.Server.TestSupport.RecordingEventStore",
+          "Mohist.Server.TestSupport.TestLifecycle",
+          "Mohist.Server.TestSupport.TestServices",
+          "Mohist.Server.TestSupport.TestTime",
+          "Mohist.Server.TestSupport.TestWait",
+          "Mohist.Server.TestSupport.WorkflowGrainTestHelpers",
+          "TestTime"
+        ],
+        "digest": "20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs case-digest=25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884 source-content-digest=066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34 executable-closure-digest=20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238 edges-digest=e01982e711f7637385e6ffad4ee0eac50c8e20a430cb66b16302e9508de59e1d move-contract-schema=1"
+      },
+      "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
+      "moveContract": {
+        "owner": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests",
+        "helpers": [{"role": "serializer"}, {"role": "extension"}, {"role": "fixture"}],
+        "target": {"path": "Mohist.Server.UnitTests/Workflow/Grain/FailIfMarkerSemanticTests.cs", "fqn": "Mohist.Server.UnitTests.Workflow.Grain.FailIfMarkerSemanticTests"},
+        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 3}
+      },
+      "history": {
+        "operation": "residual-review",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "note": "Explicit closure review; no migration PR is created.",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
+        "sourceContentDigest": "066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34"
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Workflow/Grain/FailIfMarkerSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Workflow.Grain.FailIfMarkerSpecs",
+        "caseCount": 3,
+        "caseIdentityDigest": "25a439440f70f32fc5b519713bd2630e001aec7a5a054d004ac91bed03fa6884",
+        "closureIdentityDigest": "20f159a7e8826d70307317589475771c2ab4afa2d9d9b2710fdd8d3e74ec5238",
+        "sourceContentDigest": "066751d6536f7c0fb1419fc9f7797aba4cef51803b5857b562a13ad7ab275a34"
+      }
+    },
+    {
+      "id": "current-mohist-hub",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"
+      },
+      "status": "MOVE",
+      "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
+      "moveContract": {
+        "owner": "Mohist.Server.UnitTests.Events.MohistHubTests",
+        "helpers": [{"role": "events"}],
+        "target": {"path": "Mohist.Server.UnitTests/Events/MohistHubTests.cs", "fqn": "Mohist.Server.UnitTests.Events.MohistHubTests"},
+        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 1}
+      },
+      "history": {
+        "operation": "current-inventory",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
+        "sourceContentDigest": "dce46e9d2d56160b2a6e6c53191375030c1c6da20c8a3753637fb3ab5091af0a",
+        "note": "Current compiled static-light spec; no PR #388 move."
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "closure": {
+        "classification": "fake-only-no-integration-boundary",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs.NoopGroupManager",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs.ScriptedConnectionSubscriptionGrain",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs.ScriptedConnectionSubscriptionGrainFactory",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs.TestHubCallerContext"
+        ],
+        "digest": "9c4df5f7e33ae763698d510b1cebf72a68108d3b1088458c17ae3b7f0113c049",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs case-digest=5f03a4051c78c5014c22d88f892ceff2fefbeda12e5ef4bee94ade3927a46c02 source-content-digest=dce46e9d2d56160b2a6e6c53191375030c1c6da20c8a3753637fb3ab5091af0a executable-closure-digest=9c4df5f7e33ae763698d510b1cebf72a68108d3b1088458c17ae3b7f0113c049 edges-digest=ada821a8b1d6023388d4d5ae77ccee3803f580c1aa885dab57955988d729ee8d move-contract-schema=1"
+      },
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubSpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubSpecs",
+        "caseCount": 9,
+        "caseIdentityDigest": "5f03a4051c78c5014c22d88f892ceff2fefbeda12e5ef4bee94ade3927a46c02",
+        "closureIdentityDigest": "9c4df5f7e33ae763698d510b1cebf72a68108d3b1088458c17ae3b7f0113c049",
+        "sourceContentDigest": "dce46e9d2d56160b2a6e6c53191375030c1c6da20c8a3753637fb3ab5091af0a"
+      },
+      "discovered": {
+        "factMethods": 9,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 9
+      }
+    },
+    {
+      "id": "current-mohist-hub-project-affinity",
+      "kind": "current",
+      "source": "Roslyn embedded Spec/Unit/TestSupport source inventory Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
+      "legacy": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs"
+      },
+      "current": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs"
+      },
+      "target": {
+        "path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs",
+        "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"
+      },
+      "status": "MOVE",
+      "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
+      "moveContract": {
+        "owner": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests",
+        "helpers": [{"role": "events"}],
+        "target": {"path": "Mohist.Server.UnitTests/Events/MohistHubProjectAffinityTests.cs", "fqn": "Mohist.Server.UnitTests.Events.MohistHubProjectAffinityTests"},
+        "split": {"maxTargetLines": 299, "maxTargetFiles": 1, "maxHelperFiles": 1}
+      },
+      "history": {
+        "operation": "current-inventory",
+        "pr": "#423",
+        "commit": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+        "sourcePath": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
+        "sourceFqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
+        "sourceContentDigest": "1fee21506932ae4a5599ae7b39509e90a401602b181fb769e7b195274601aa74",
+        "note": "Current compiled static-light spec; no PR #388 move."
+      },
+      "validationHead": "2c96e43e2bc89fcfbd4e051576faec8f2861a8a8",
+      "closure": {
+        "classification": "fake-only-no-integration-boundary",
+        "symbols": [
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs.NoopGroupManager",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs.ScriptedConnectionSubscriptionGrain",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs.ScriptedConnectionSubscriptionGrainFactory",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs.TestHttpContextFeature",
+          "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs.TestHubCallerContext"
+        ],
+        "digest": "ab7def2cc0c7ab15aaa2b3b0946802c32d1b54e108e38a13abe168ed53ec7d7d",
+        "evidence": "source-path=Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs source-fqn=Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs case-digest=9bec8cdf652e3376e4f41a46bae24a5dff2315e58ee2f0127fa5c2c70a6cf0f2 source-content-digest=1fee21506932ae4a5599ae7b39509e90a401602b181fb769e7b195274601aa74 executable-closure-digest=ab7def2cc0c7ab15aaa2b3b0946802c32d1b54e108e38a13abe168ed53ec7d7d edges-digest=5ec70a95512f81e3317d0d28ffccd7c60464f4d137ec1f67a694df401ba65468 move-contract-schema=1"
+      },
+      "executable": {
+        "path": "Mohist.Server.SpecTests/Specs/Events/MohistHubProjectAffinitySpecs.cs",
+        "fqn": "Mohist.Server.SpecTests.Specs.Events.MohistHubProjectAffinitySpecs",
+        "caseCount": 7,
+        "caseIdentityDigest": "9bec8cdf652e3376e4f41a46bae24a5dff2315e58ee2f0127fa5c2c70a6cf0f2",
+        "closureIdentityDigest": "ab7def2cc0c7ab15aaa2b3b0946802c32d1b54e108e38a13abe168ed53ec7d7d",
+        "sourceContentDigest": "1fee21506932ae4a5599ae7b39509e90a401602b181fb769e7b195274601aa74"
+      },
+      "discovered": {
+        "factMethods": 7,
+        "theoryMethods": 0,
+        "inlineDataRows": 0,
+        "mtpCases": 7
+      }
+    }
+  ]
+}
