@@ -41,7 +41,7 @@ public class CliSessionCommandSpecs
         Assert.Contains("compact", stdout, StringComparison.Ordinal);
         Assert.Contains("reset", stdout, StringComparison.Ordinal);
         Assert.Contains("followup", stdout, StringComparison.Ordinal);
-        Assert.Contains("cancel", stdout, StringComparison.Ordinal);
+        Assert.Contains("stop", stdout, StringComparison.Ordinal);
         Assert.Contains("schedule", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("show", stdout, StringComparison.Ordinal);
         Assert.DoesNotContain("ls", stdout, StringComparison.Ordinal);
@@ -894,10 +894,10 @@ public class CliSessionCommandSpecs
         Assert.Contains("Idempotency-Key:", output.ToString(), StringComparison.Ordinal);
     }
 
-    // ----- cancel (runtime-only, no job rewrite) -----
+    // ----- stop (single Turn verb, no job rewrite) -----
 
     [Fact]
-    public async Task SessionCancel_Table_PostsCancelAndPrintsState()
+    public async Task SessionStop_Table_PostsStopAndPrintsState()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -907,17 +907,17 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var request = handler.Requests.Single();
         Assert.Equal(HttpMethod.Post, request.Method);
-        Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/cancel", request.RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/{ActiveProjectId}/agent-sessions/{StableSessionId}/stop", request.RequestUri?.PathAndQuery);
         Assert.Contains("state: cancelled", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionCancel_OnlyHitsCancelRoute_DoesNotTouchAgentJobRoutes()
+    public async Task SessionStop_OnlyHitsStopRoute_DoesNotTouchAgentJobRoutes()
     {
         // The cancel action is runtime interruption only; the AgentJob
         // lifecycle is the sole terminal authority and must not be
@@ -930,7 +930,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         var path = handler.Requests.Single().RequestUri?.PathAndQuery ?? string.Empty;
@@ -940,7 +940,7 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionCancel_NotCancellable_SurfacesStateHonestly()
+    public async Task SessionStop_NotCancellable_SurfacesStateHonestly()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -950,7 +950,7 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("state: not-cancellable", output.ToString(), StringComparison.Ordinal);
@@ -958,7 +958,7 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionCancel_TerminalState_SurfacesTerminal()
+    public async Task SessionStop_TerminalState_SurfacesTerminal()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -968,14 +968,14 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("state: completed", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionCancel_SelectedJson_ProjectsState()
+    public async Task SessionStop_SelectedJson_ProjectsState()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -985,21 +985,21 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123", "--json", "state"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key", "--json", "state"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
         Assert.Contains("\"state\": \"cancelled\"", output.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task SessionCancel_UnknownSession_SurfacesServerError()
+    public async Task SessionStop_UnknownSession_SurfacesServerError()
     {
         var (http, _, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.JsonError(
                 "Agent session nope not found", "session_not_found", HttpStatusCode.NotFound)));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", "nope", "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", "nope", "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.Equal(1, exitCode);
         Assert.Contains("not found", error.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -1007,7 +1007,7 @@ public class CliSessionCommandSpecs
     }
 
     [Fact]
-    public async Task SessionCancel_RespectsProjectOption()
+    public async Task SessionStop_RespectsProjectOption()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             Task.FromResult(RecordingHttpHandler.Json(new
@@ -1017,20 +1017,20 @@ public class CliSessionCommandSpecs
             })));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123", "--project", "proj_other"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key", "--project", "proj_other"], output, error, fileSystem, executor);
 
         Assert.Equal(0, exitCode);
-        Assert.Equal($"/api/projects/proj_other/agent-sessions/{StableSessionId}/cancel", handler.Requests[0].RequestUri?.PathAndQuery);
+        Assert.Equal($"/api/projects/proj_other/agent-sessions/{StableSessionId}/stop", handler.Requests[0].RequestUri?.PathAndQuery);
     }
 
     [Fact]
-    public async Task SessionCancel_ServerUnavailableSurfacesStandardError()
+    public async Task SessionStop_ServerUnavailableSurfacesStandardError()
     {
         var (http, handler, output, error, fileSystem, executor) = SetupEnv((_, _) =>
             throw new HttpRequestException("offline"));
 
         var exitCode = await MohistCliCommands.RunAsync(
-            http, ["session", "cancel", StableSessionId, "--turn-id", "turn-123"], output, error, fileSystem, executor);
+            http, ["session", "stop", StableSessionId, "--turn-id", "turn-123", "--idempotency-key", "stop-key"], output, error, fileSystem, executor);
 
         Assert.NotEqual(0, exitCode);
         Assert.Contains(MohistCliApi.ServerUnavailableMessage, error.ToString(), StringComparison.Ordinal);

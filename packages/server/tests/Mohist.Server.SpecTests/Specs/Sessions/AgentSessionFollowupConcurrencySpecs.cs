@@ -434,7 +434,7 @@ public class AgentSessionFollowupConcurrencySpecs
             IdempotencyKey: "cancel-while-queued"));
         Assert.Null(await session.BeginNextFollowupDispatchAsync());
 
-        var cancelled = await session.CancelQueuedTurnAsync(accepted.TurnId!);
+        var cancelled = await session.StopQueuedTurnAsync(accepted.TurnId!);
 
         Assert.True(cancelled.Cancelled);
         Assert.DoesNotContain(

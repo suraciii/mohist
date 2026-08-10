@@ -85,7 +85,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.AgentJobList => ["jobId", "agentId", "agentName", "status", "submittedAt", "terminalAt"],
             MohistCliApi.TableShape.AgentJobView => ["jobId", "status", "message", "output", "artifactUploadIds", "failureReason", "exitCode", "executionDefinition"],
             MohistCliApi.TableShape.AgentSessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
-            MohistCliApi.TableShape.AgentSessionCancel => ["state", "interruptUnconfirmed"],
+            MohistCliApi.TableShape.AgentSessionStop => ["state", "interruptUnconfirmed"],
             MohistCliApi.TableShape.SessionList =>
                 ["id", "source", "runtimeSessionId", "runtime", "activity", "createdAt", "lastActivityAt", "model", "agentId", "agentName", "workflowRunId", "sessionName", "origin", "targetId", "contextRefs"],
             MohistCliApi.TableShape.SessionShow =>
@@ -93,8 +93,7 @@ internal static class ResourceOutputCatalog
             MohistCliApi.TableShape.SessionTree => ["root", "revision", "nodes", "edges", "continuation"],
             MohistCliApi.TableShape.SessionTranscript => ["turns", "partCount", "lastActivityAt", "activity", "status"],
             MohistCliApi.TableShape.SessionFollowup => ["sessionId", "status", "inputId", "turnId", "inputAcceptance", "turnStatus", "error", "code", "attachments", "rejectedAttachments"],
-            MohistCliApi.TableShape.SessionCancel => ["state", "interruptUnconfirmed"],
-            MohistCliApi.TableShape.SessionStop => ["operationId", "rootSessionId", "status", "admissionFenceActive", "graphRevision", "membership", "targets"],
+            MohistCliApi.TableShape.SessionStop => ["state", "interruptUnconfirmed", "operationId", "rootSessionId", "status", "admissionFenceActive", "graphRevision", "membership", "targets"],
             MohistCliApi.TableShape.SessionDetach => ["state", "childSessionId", "parentSessionId", "edgeId", "childLaunchJobId", "attachedRevision", "detachedRevision", "historic", "reason"],
             MohistCliApi.TableShape.SessionScheduleCreate or
             MohistCliApi.TableShape.SessionScheduleList or

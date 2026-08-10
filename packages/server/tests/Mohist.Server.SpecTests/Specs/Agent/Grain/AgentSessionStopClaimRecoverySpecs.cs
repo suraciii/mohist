@@ -1,4 +1,5 @@
 using Mohist.Server.Infrastructure;
+using Mohist.Server.Api;
 using Mohist.Server.Sessions.Domain;
 using Mohist.Server.Sessions.Grains;
 using Mohist.Server.Sessions.Services;
@@ -13,6 +14,53 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
 {
     public AgentSessionStopClaimRecoverySpecs(AgentJobGrainFixture fixture) : base(fixture)
     {
+    }
+
+    [Fact]
+    public async Task RecoveryReminder_RedeliversSameClaimUntilRunnerConfirmsStop()
+    {
+        _fixture.StopDelivery.Reset();
+        _fixture.StopDelivery.Enqueue(null);
+        _fixture.StopDelivery.Enqueue(new RunnerStopReply("stopped"));
+
+        var sessionId = $"session-stop-recovery-{Guid.NewGuid():N}";
+        var projectId = $"project-stop-recovery-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-stop-recovery",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/stop-recovery",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = projectId,
+                [AgentSessionQueryMetadataKeys.SourceKind] = "agent-launch",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-stop-recovery", WorkDir: "/tmp/stop-recovery"));
+        _fixture.TimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+        const string turnId = "turn-stop-recovery";
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-stop-recovery",
+            turnId,
+            "follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync(turnId);
+        var claim = await session.ClaimTurnStopAsync(turnId, "stop-recovery-operation");
+        Assert.True(claim.CanDispatch);
+
+        await session.RunStopRecoveryAsync();
+
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(await session.ListTurnsAsync()).Status);
+        Assert.Equal("stop-recovery-operation", Assert.Single(_fixture.StopDelivery.Requests).OperationId);
+
+        await session.RunStopRecoveryAsync();
+
+        var requests = _fixture.StopDelivery.Requests;
+        Assert.Equal(2, requests.Count);
+        Assert.All(requests, request => Assert.Equal("stop-recovery-operation", request.OperationId));
+        Assert.Equal(AgentTurnStatus.Cancelled, Assert.Single(await session.ListTurnsAsync()).Status);
     }
 
     [Fact]
@@ -141,5 +189,57 @@ public class AgentSessionStopClaimRecoverySpecs : AgentJobGrainTestSupport
         var reservation = await session.BeginFollowupAsync();
         Assert.True(reservation.StartsIdleTurn);
         await session.AbandonFollowupAsync(reservation.OperationId!);
+    }
+
+    [Fact]
+    public async Task RuntimeSettlement_OnlyAbandonsForANewNonSuccessTurn()
+    {
+        _fixture.WorkPort.Reset();
+
+        var sessionId = $"session-work-settlement-{Guid.NewGuid():N}";
+        var session = Grains.GetGrain<IAgentSessionGrain>(sessionId);
+        await session.OpenAsync(new OpenAgentSessionCommand(
+            RunnerId: "runner-work-settlement",
+            AgentRuntime: "opencode",
+            WorkDir: "/tmp/work-settlement",
+            Metadata: new AgentSessionMetadata(new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                [AgentSessionQueryMetadataKeys.ProjectId] = "project-work-settlement",
+                [AgentSessionQueryMetadataKeys.SourceKind] = "workflow",
+                [AgentSessionQueryMetadataKeys.WorkflowRunId] = "workflow-work-settlement",
+                [AgentSessionQueryMetadataKeys.SessionName] = "session-work-settlement",
+                [AgentSessionQueryMetadataKeys.WorkId] = "work-work-settlement",
+                [GenericAgentSessionMetadata.AgentId] = "agent-test",
+            })));
+        await session.AttachPhysicalSessionAsync(
+            new AttachPhysicalSessionCommand("runtime-work-settlement", WorkDir: "/tmp/work-settlement"));
+
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-work-settlement-1",
+            "turn-work-settlement-1",
+            "first follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-work-settlement-1");
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"idle\",\"status\":\"failed\",\"turnId\":\"turn-work-settlement-1\"}") },
+            "runtime-work-settlement"));
+
+        Assert.Single(_fixture.WorkPort.Requests);
+
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "input-work-settlement-2",
+            "turn-work-settlement-2",
+            "second follow up",
+            "generic-followup"));
+        await session.MarkTurnExecutingAsync("turn-work-settlement-2");
+        await session.AppendRuntimeEventsAsync(new AppendAgentSessionRuntimeEventsCommand(
+            new[] { new AgentSessionRuntimeEventInput(
+                RuntimeEventTypes.SessionActivity,
+                "{\"activity\":\"active\",\"status\":\"running\",\"turnId\":\"turn-work-settlement-2\"}") },
+            "runtime-work-settlement"));
+
+        Assert.Single(_fixture.WorkPort.Requests);
     }
 }

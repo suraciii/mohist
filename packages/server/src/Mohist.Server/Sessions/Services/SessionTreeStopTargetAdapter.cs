@@ -13,8 +13,7 @@ namespace Mohist.Server.Agent.Services;
 public sealed class SessionTreeStopTargetAdapter(
     IGrainFactory grains,
     IHubContext<RunnerHub> runnerHub,
-    RunnerConnectionTracker connections,
-    WorkflowSessionWorkReconciler workReconciler) : ISessionTreeStopTargetAdapter, IScopedService
+    RunnerConnectionTracker connections) : ISessionTreeStopTargetAdapter, IScopedService
 {
     public async Task<SessionTreeStopTargetResult> StopAsync(
         string projectId,
@@ -22,17 +21,7 @@ public sealed class SessionTreeStopTargetAdapter(
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(target.TurnId))
-        {
-            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-stop", cancellationToken);
             return Result(target, SessionTreeStopTargetOutcome.AlreadyIdle, "no active turn");
-        }
-        if (target.TurnStatus is AgentTurnStatus.Completed or AgentTurnStatus.Failed or AgentTurnStatus.Cancelled)
-        {
-            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-stop", cancellationToken);
-            return Result(target, SessionTreeStopTargetOutcome.AlreadyIdle, "turn already terminal");
-        }
-        if (target.TurnStatus == AgentTurnStatus.Unknown)
-            return Result(target, SessionTreeStopTargetOutcome.Unknown, "turn activity is unknown");
 
         var session = grains.GetGrain<IAgentSessionGrain>(target.SessionId);
         var current = await session.GetAsync();
@@ -49,41 +38,12 @@ public sealed class SessionTreeStopTargetAdapter(
             return Result(target, SessionTreeStopTargetOutcome.Rejected, "binding replaced");
         }
 
-        if (control.Classification == AgentTurnControlClassification.Queued)
-        {
-            var cancelled = await AgentSessionTurnControlOperations.CancelAsync(
-                grains,
-                target.SessionId,
-                target.TurnId);
-            if (cancelled.Kind == TurnControlResultKind.Cancelled)
-                return await ReconcileAndResultAsync(
-                    projectId,
-                    target,
-                    SessionTreeStopTargetOutcome.Cancelled,
-                    "queued turn cancelled",
-                    "session-cancel",
-                    cancellationToken);
-            if (cancelled.Kind == TurnControlResultKind.AlreadyEnded)
-            {
-                if (cancelled.Status == AgentTurnStatus.Unknown)
-                    return Result(target, SessionTreeStopTargetOutcome.Unknown, "turn became unknown");
-                return await ReconcileAndResultAsync(
-                    projectId,
-                    target,
-                    SessionTreeStopTargetOutcome.AlreadyIdle,
-                    "turn already terminal",
-                    "session-stop",
-                    cancellationToken);
-            }
-            return Result(target, SessionTreeStopTargetOutcome.Rejected, "queued turn was replaced");
-        }
-
-        var stopped = await AgentSessionTurnControlOperations.StopAsync(
+        var stopped = await AgentSessionStopOperations.StopAsync(
             projectId,
             grains,
             runnerHub,
             connections,
-            new SessionCancelTarget(
+            new SessionStopTarget(
                 target.RunnerId ?? string.Empty,
                 target.SessionId,
                 "agent-launch",
@@ -96,14 +56,14 @@ public sealed class SessionTreeStopTargetAdapter(
             cancellationToken,
             target.StopOperationId);
 
+        if (stopped.Kind == TurnControlResultKind.Cancelled)
+            return Result(target, SessionTreeStopTargetOutcome.Cancelled, "turn cancelled");
+
         if (stopped.Kind == TurnControlResultKind.Stopped)
-        {
-            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-stop", cancellationToken);
             return Result(target, SessionTreeStopTargetOutcome.Cancelled, "executing turn stopped");
-        }
 
         if (stopped.Kind == TurnControlResultKind.NotCancellable)
-            return Result(target, SessionTreeStopTargetOutcome.Cancelled, "executing turn stopped");
+            return Result(target, SessionTreeStopTargetOutcome.NotCancellable, "runtime reported not-cancellable");
 
         if (stopped.Kind == TurnControlResultKind.Unknown)
             return Result(target, SessionTreeStopTargetOutcome.Unknown, "runner could not confirm stop");
@@ -124,27 +84,9 @@ public sealed class SessionTreeStopTargetAdapter(
         {
             if (stopped.Status == AgentTurnStatus.Unknown)
                 return Result(target, SessionTreeStopTargetOutcome.Unknown, "turn became unknown");
-            return await ReconcileAndResultAsync(
-                projectId,
-                target,
-                SessionTreeStopTargetOutcome.AlreadyIdle,
-                "turn already terminal",
-                "session-stop",
-                cancellationToken);
+            return Result(target, SessionTreeStopTargetOutcome.AlreadyIdle, "turn already terminal");
         }
         return Result(target, SessionTreeStopTargetOutcome.Rejected, "turn control rejected the target");
-    }
-
-    private async Task<SessionTreeStopTargetResult> ReconcileAndResultAsync(
-        string projectId,
-        SessionTreeStopTargetSnapshot target,
-        SessionTreeStopTargetOutcome outcome,
-        string detail,
-        string reason,
-        CancellationToken cancellationToken)
-    {
-        await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, reason, cancellationToken);
-        return Result(target, outcome, detail);
     }
 
     private static SessionTreeStopTargetResult Result(

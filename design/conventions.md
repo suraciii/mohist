@@ -122,7 +122,7 @@ Concept ownership and origin rules are defined in
   independent monotonic values; an unqualified `generation` in an implementation means
   `claimGeneration`, never `ContextGeneration`. The single `FenceToken` contract below is used
   by every phase write, candidate create/get/discard/cleanup, binding CAS, completion, Compact,
-  and Cancel/per-target stop. Before any external effect, Server atomically rechecks that token,
+  and per-target stop. Before any external effect, Server atomically rechecks that token,
   the current owner lease, and the current binding, then passes the same token to Runtime/provider. A stale
   owner fails closed before the effect and before its result is persisted.
 - Confirmed-missing recovery stays on the bound Runner and only replaces `runtimeSessionId` while
@@ -611,7 +611,7 @@ both old pre and old post tokens fail closed.
 
 Every non-CAS effect follows this shape, including `Runtime.resolve`, `Runtime.createOrGetEmpty`,
 `Runtime.submitInputExactlyOnce`, cleanup `Runtime.getByKey` and `Runtime.discardCandidate`,
-`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and Cancel/per-target stop. Binding CAS uses
+`recordCandidate`, dispatch enqueue/query, `complete`, Compact, and per-target stop. Binding CAS uses
 `compareAndSwapBinding` above and does not use `effectWithFence` with a pre-CAS token:
 
 ```text literal
@@ -635,10 +635,11 @@ is terminal `blocked` and a new binding operation may proceed.
 `Compact`, `Reset`, confirmed-missing recovery, `force-reset`, `handoff`, `rebind`, and `steer` are
 durable Session operations whose caller supplies a reusable `operationId`; steer reuses its
 caller-provided `requestId`. Server never creates an unqueryable operation key for those commands.
-A cascade stop is different: the public caller supplies only root Session plus `Idempotency-Key`,
-and Server derives the tree operation identity, fingerprint, frozen membership, and stable
+Stop is the sole public end-work verb and has two scopes. A single-Turn stop maps the caller key to
+one per-target stop operation. A cascade stop takes only root Session plus `Idempotency-Key`, and
+Server derives the tree operation identity, fingerprint, frozen membership, and stable
 per-target stop-operation identities. [`subagents.md#cascade-stop`](subagents.md#cascade-stop) is the
-sole public stop authority. Each target still projects its derived internal operation through the
+sole authority for cascade membership. Each target still projects its derived internal operation through the
 same `SessionOperationRead` shape below. This is the only authoritative `SessionOperationRead`
 schema. `agent-api.md` and `agent-execution.md` link to it; they do not define another operation
 field list.
@@ -919,13 +920,18 @@ from being claimed after the original operation is terminal.
 `kind=stop` uses the operation row itself as the durable Turn-stop fence. Its `targetTurnId`,
 `expectedBinding`, complete owner/claim/deadline fields and `reason` are queryable; there is no
 in-memory `stopFence` model. The operation ID is the stable per-target identity derived by the
-cascade stop; it is not a second public caller key. A queued target can be cancelled in the same
-Session transaction.
+caller key mapping or the cascade stop; it is not a second public caller key. A queued target
+settles locally in the same Session transaction and is recorded `Cancelled`.
 For a running target, the owner claims or takes over this operation, rechecks the complete
 `FenceToken` immediately before and immediately after `Runtime.stop`, and only then persists the
-Turn outcome. A lost or unknown Runtime response keeps the operation and Turn `unknown`, with an
+Turn outcome. A confirmed stop records the Turn `Cancelled`; a not-cancellable answer leaves the
+Turn executing and is reported as not-cancellable, never as stopped. A lost or unknown Runtime
+response keeps the operation and Turn `unknown`, with an
 actionable `nextAction` to query the same `operationId` or perform bounded same-operation retry;
 it never creates a new stop operation or claims success.
+An accepted stop is Server-owned: a recovery pass re-delivers a claimed but undelivered or
+unconfirmed delivery with the same operation identity and fence. It never creates another
+operation, and caller disconnect does not abandon delivery.
 
 The launch identities are separate. The caller provides `launchRequestId`; Server creates
 `launchOperationId` exactly once and durably maps `launchRequestId -> launchOperationId`. Neither

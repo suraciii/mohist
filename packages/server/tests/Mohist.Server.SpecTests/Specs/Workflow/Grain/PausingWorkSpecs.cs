@@ -131,7 +131,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
     }
 
     [Fact]
-    public async Task RunningWorkflow_ConfirmedSessionCancel_FailsTaskAndUnlocksRerun()
+    public async Task RunningWorkflow_ConfirmedSessionStop_FailsTaskAndUnlocksRerun()
     {
         var workflow = await StartWorkflowAsync(SingleStage(
             tasks: [new("task-1", "Task 1", "spec/task")],
@@ -141,7 +141,7 @@ public class PausingWorkSpecs : WorkflowGrainSpecs
         var acknowledgement = await workflow.AbandonActiveWorkAsync(
             runnerId,
             task.WorkId,
-            "session-cancel");
+            "session-stop");
 
         Assert.Equal(ReportAck.Accepted, acknowledgement);
         Assert.Equal("Failed", await workflow.GetRunStatusAsync());

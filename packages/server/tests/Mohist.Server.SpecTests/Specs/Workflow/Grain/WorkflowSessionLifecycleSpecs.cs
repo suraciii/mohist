@@ -50,8 +50,10 @@ public sealed class WorkflowSessionLifecycleSpecs
                         {
                             activity = "idle",
                             status = "completed",
-                            source = "cancel",
-                            stopConfirmed = true,
+                            source = "stop",
+                            stopOperationId = (await _fixture.Grains
+                                .GetGrain<IAgentSessionGrain>(active.SessionId)
+                                .ClaimTurnStopAsync(active.TurnId, $"stop-{Guid.NewGuid():N}")).OperationId,
                             work = (object?)null,
                         }
                     }
@@ -145,19 +147,24 @@ public sealed class WorkflowSessionLifecycleSpecs
     }
 
     [Fact]
-    public async Task GivenPausedWorkflow_WhenQueuedSessionCancelCompletes_ThenWorkflowTaskIsReleased()
+    public async Task GivenPausedWorkflow_WhenQueuedSessionStopCompletes_ThenWorkflowTaskIsReleased()
     {
-        var active = await CreateActiveWorkflowSessionAsync("paused-session-cancel");
+        var active = await CreateActiveWorkflowSessionAsync("paused-session-stop", createActiveTurn: false);
         await active.Workflow.PauseAsync("user-pause");
 
-        const string turnId = "queued-cancel-turn";
+        const string turnId = "queued-stop-turn";
         var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(active.SessionId);
         await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
-            "queued-cancel-input", turnId, "queued", "test"));
+            "queued-stop-input", turnId, "queued", "test"));
 
-        using var response = await _client.PostAsJsonAsync(
-            $"/api/projects/{active.Project.Id}/agent-sessions/{active.SessionId}/cancel",
-            new { turnId });
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{active.Project.Id}/agent-sessions/{active.SessionId}/stop")
+        {
+            Content = JsonContent.Create(new { turnId }),
+        };
+        request.Headers.Add("Idempotency-Key", $"queued-stop-{Guid.NewGuid():N}");
+        using var response = await _client.SendAsync(request);
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
 
@@ -171,9 +178,9 @@ public sealed class WorkflowSessionLifecycleSpecs
     }
 
     [Fact]
-    public async Task GivenPausedWorkflow_WhenTreeStopSeesNoTurn_ThenAlreadyIdleStillReleasesWorkflowWork()
+    public async Task GivenPausedWorkflow_WhenTreeStopSeesNoTurn_DoesNotAbandonUnsettledWorkflowWork()
     {
-        var active = await CreateActiveWorkflowSessionAsync("paused-tree-stop");
+        var active = await CreateActiveWorkflowSessionAsync("paused-tree-stop", createActiveTurn: false);
         await active.Workflow.PauseAsync("user-pause");
 
         using var request = new HttpRequestMessage(
@@ -189,15 +196,14 @@ public sealed class WorkflowSessionLifecycleSpecs
         var target = Assert.Single(data.GetProperty("targets").EnumerateArray());
         Assert.Equal("alreadyidle", target.GetProperty("outcome").GetString());
         Assert.Equal("Paused", await active.Workflow.GetRunStatusAsync());
-        Assert.Null(await active.Workflow.GetCurrentWorkIdAsync());
-        Assert.Null(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
+        Assert.Equal(active.Work.Id, await active.Workflow.GetCurrentWorkIdAsync());
+        Assert.NotNull(await active.Workflow.GetActiveWorkAsync(active.Work.Id!));
         Assert.Equal("idle", Assert.Single(await ListWorkflowSessionsAsync(active.WorkflowRunId)).Status);
-
-        var rerun = await active.Workflow.RerunFromStageAsync(active.Work.Stage);
-        Assert.True(rerun.Success, rerun.Error);
     }
 
-    private async Task<ActiveWorkflowSession> CreateActiveWorkflowSessionAsync(string title)
+    private async Task<ActiveWorkflowSession> CreateActiveWorkflowSessionAsync(
+        string title,
+        bool createActiveTurn = true)
     {
         var (project, issue, workflowRunId) = await CreateIssueWorkflowAsync(title);
         var workflow = _fixture.Grains.GetGrain<IWorkflowGrain>(workflowRunId);
@@ -224,7 +230,19 @@ public sealed class WorkflowSessionLifecycleSpecs
             ExpectedRunnerId: _runnerId,
             ExpectedRuntime: "opencode"));
 
-        return new ActiveWorkflowSession(project, _runnerId, workflowRunId, sessionName, sessionId, runtimeSessionId, work, workflow);
+        var turnId = string.Empty;
+        if (createActiveTurn)
+        {
+            turnId = $"turn-{Guid.NewGuid():N}";
+            await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+                $"input-{Guid.NewGuid():N}",
+                turnId,
+                "workflow task",
+                "workflow"));
+            await session.MarkTurnExecutingAsync(turnId);
+        }
+
+        return new ActiveWorkflowSession(project, _runnerId, workflowRunId, sessionName, sessionId, runtimeSessionId, work, workflow, turnId);
     }
 
     private async Task<(ProjectDto Project, IssueDto Issue, string WorkflowRunId)> CreateIssueWorkflowAsync(string title)
@@ -288,7 +306,8 @@ public sealed class WorkflowSessionLifecycleSpecs
         string SessionId,
         string RuntimeSessionId,
         WorkItem Work,
-        IWorkflowGrain Workflow);
+        IWorkflowGrain Workflow,
+        string TurnId);
 
     private sealed record ProjectDto(string Id, string Name);
     private sealed record IssueDto(string Id, int Number, string Title, string Status, string? WorkflowRunId);

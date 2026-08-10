@@ -11,24 +11,20 @@ import type { SessionTimelineCurrentActivity } from '../../../widgets/session-tr
 export type StatusKind = SessionStatusKind | 'live' | 'finalizing' | 'probing' | 'completed' | 'failed' | 'stale'
 export type EmptyStateKind = 'active-no-content' | 'idle-no-content' | 'unknown-no-content'
 
-export interface SessionCancelOptions {
+export interface SessionStopOptions {
   onSuccess?: (result: { state: string }) => void
   onSettled?: () => void
 }
 
 /**
- * Authoritative handle for one turn-control operation against the
- * canonical Session-ID API. `cancel` is present only when the current
- * turn is queued; `stop` is present only when the current turn is
- * executing. Mutating either dispatches the matching Server command
- * (deterministic cancellation for queued, interrupt request for
- * executing) and invalidates the unified summary, transcript, and
- * Session-list queries through the data source.
+ * Authoritative handle for the single stop operation against the canonical
+ * Session-ID API. It is available for both queued and executing Turns;
+ * the Server chooses local cancellation or fenced runtime delivery.
  */
 export interface SessionTurnControlHandle {
   turnId: string
   state: 'queued' | 'executing'
-  mutate: (options?: SessionCancelOptions) => void
+  mutate: (options?: SessionStopOptions) => void
   isPending: boolean
 }
 
@@ -62,7 +58,6 @@ export interface SessionDataSourceResult {
   supportsInputAttachments?: boolean
   projectId?: string | null
 
-  cancel: SessionTurnControlHandle | null
   stop: SessionTurnControlHandle | null
 
   contextWindowUsed: number | null

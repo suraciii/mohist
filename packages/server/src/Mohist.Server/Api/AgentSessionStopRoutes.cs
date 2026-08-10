@@ -16,9 +16,11 @@ namespace Mohist.Server.Api;
 
 public static class AgentSessionStopRoutes
 {
+    public const string PathPrefix = "/api/projects/{projectRef}/agent-sessions";
+
     public static WebApplication MapAgentSessionStopRoutes(this WebApplication app)
     {
-        var group = app.MapGroup(AgentSessionCancelRoutes.CancelPathPrefix)
+        var group = app.MapGroup(PathPrefix)
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
         group.MapPost("/{sessionId}/stop", async (
@@ -30,11 +32,10 @@ public static class AgentSessionStopRoutes
             IHubContext<RunnerHub> runnerHub,
             RunnerConnectionTracker connections,
             SessionTreeStopOrchestrator cascadeStop,
-            WorkflowSessionWorkReconciler workReconciler,
             CancellationToken ct) =>
         {
             var project = context.GetResolvedProject();
-            AgentSessionCancelRequest? request = null;
+            SessionStopRequest? request = null;
             var hasBody = context.Request.ContentLength is > 0;
             if (hasBody)
             {
@@ -48,7 +49,7 @@ public static class AgentSessionStopRoutes
                             "Cascade stop accepts no revision, membership, targets, or other request body.",
                             "stop_body_not_allowed");
                     }
-                    request = document.RootElement.Deserialize<AgentSessionCancelRequest>(JSON.Options);
+                    request = document.RootElement.Deserialize<SessionStopRequest>(JSON.Options);
                 }
                 catch (JsonException)
                 {
@@ -79,6 +80,11 @@ public static class AgentSessionStopRoutes
                 }
             }
 
+            if (!context.Request.Headers.TryGetValue("Idempotency-Key", out StringValues directValues)
+                || StringValues.IsNullOrEmpty(directValues)
+                || string.IsNullOrWhiteSpace(directValues.ToString()))
+                return ApiResults.BadRequest("Idempotency-Key is required", "idempotency_key_missing");
+
             return await ExecuteStopAsync(
                 project.Id,
                 sessionId,
@@ -87,7 +93,7 @@ public static class AgentSessionStopRoutes
                 grains,
                 runnerHub,
                 connections,
-                workReconciler,
+                directValues.ToString(),
                 ct);
         });
 
@@ -96,7 +102,7 @@ public static class AgentSessionStopRoutes
 
     public static void MapAgentSessionStopOperationReadRoute(this WebApplication app)
     {
-        var group = app.MapGroup(AgentSessionCancelRoutes.CancelPathPrefix)
+        var group = app.MapGroup(PathPrefix)
             .AddEndpointFilter<ProjectResolutionEndpointFilter>();
 
         group.MapGet("/{sessionId}/stop/{operationId}", async (
@@ -116,34 +122,32 @@ public static class AgentSessionStopRoutes
     internal static async Task<IResult> ExecuteStopAsync(
         string projectId,
         string sessionId,
-        AgentSessionCancelRequest? request,
+        SessionStopRequest? request,
         AgentSessionQuerier sessions,
         IGrainFactory grains,
         IHubContext<RunnerHub> runnerHub,
         RunnerConnectionTracker connections,
-        WorkflowSessionWorkReconciler workReconciler,
+        string operationId,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(request?.TurnId))
             return ApiResults.BadRequest("turnId is required", "turn_id_missing");
 
-        var target = await sessions.ResolveCancelTargetAsync(projectId, sessionId, ct);
+        var target = await sessions.ResolveStopTargetAsync(projectId, sessionId, ct);
         if (target is null)
             return ApiResults.NotFound($"Agent session {sessionId} not found");
 
-        var result = await AgentSessionTurnControlOperations.StopAsync(
-            projectId, grains, runnerHub, connections, target, request.TurnId, ct);
-        if (result.Kind is TurnControlResultKind.Stopped or TurnControlResultKind.AlreadyEnded)
-            await workReconciler.ReconcileAsync(projectId, target.SessionId, target.RunnerId, "session-stop", ct);
+        var result = await AgentSessionStopOperations.StopAsync(
+            projectId, grains, runnerHub, connections, target, request.TurnId, ct, operationId);
         return result.Kind switch
         {
             TurnControlResultKind.NotFound => ApiResults.NotFound($"Turn {request.TurnId} not found"),
             TurnControlResultKind.AlreadyEnded => ApiResults.Ok(new
             {
                 state = "turn-already-ended",
-                turnStatus = result.Status!.Value.ToString().ToLowerInvariant(),
+                turnStatus = result.StatusText ?? result.Status?.ToString().ToLowerInvariant(),
             }),
-            TurnControlResultKind.Queued => ApiResults.Ok(new { state = "queued", action = "cancel" }),
+            TurnControlResultKind.Cancelled => ApiResults.Ok(new { state = "cancelled" }),
             TurnControlResultKind.StopRequested => ApiResults.Ok(new { state = "stop-requested" }),
             TurnControlResultKind.RunnerUnavailable => ApiResults.Fail(
                 "Runner is unavailable", 503, "runner_unavailable", new { runnerId = target.RunnerId }),
@@ -161,6 +165,8 @@ public static class AgentSessionStopRoutes
         };
     }
 }
+
+public sealed record SessionStopRequest(string? TurnId);
 
 public sealed record RunnerStopReply(string? State, bool? InterruptUnconfirmed = null);
 
@@ -191,7 +197,7 @@ public sealed record SessionTreeStopResponse(
                 target.RuntimeSessionId,
                 target.WorkDir,
                 target.BindingEpoch,
-                result?.Outcome.ToString().ToLowerInvariant(),
+                result is { } completed ? StopOutcomeText(completed.Outcome) : null,
                 result?.Detail);
         }).ToArray() ?? [];
         return new(
@@ -203,6 +209,11 @@ public sealed record SessionTreeStopResponse(
             snapshot?.Membership ?? [],
             targets);
     }
+
+    private static string StopOutcomeText(SessionTreeStopTargetOutcome outcome) =>
+        outcome == SessionTreeStopTargetOutcome.NotCancellable
+            ? "not-cancellable"
+            : outcome.ToString().ToLowerInvariant();
 }
 
 public sealed record SessionTreeStopTargetResponse(

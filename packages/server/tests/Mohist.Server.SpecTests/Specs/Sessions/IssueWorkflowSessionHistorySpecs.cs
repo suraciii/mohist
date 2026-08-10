@@ -58,11 +58,13 @@ public class IssueWorkflowSessionHistorySpecs
         var basePath = $"/api/projects/{projectId}/issues/{issueNumber}/sessions/{sessionName}";
         using var compact = await _fixture.Client.PostAsync($"{basePath}/compact", content: null);
         using var reset = await _fixture.Client.PostAsync($"{basePath}/reset", content: null);
-        using var cancel = await _fixture.Client.PostAsync($"{basePath}/cancel", content: null);
+        using var stopRequest = new HttpRequestMessage(HttpMethod.Post, $"{basePath}/stop");
+        stopRequest.Headers.Add("Idempotency-Key", $"historical-stop-{Guid.NewGuid():N}");
+        using var stop = await _fixture.Client.SendAsync(stopRequest);
 
         Assert.Equal(HttpStatusCode.NotFound, compact.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, reset.StatusCode);
-        Assert.Equal(HttpStatusCode.NotFound, cancel.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, stop.StatusCode);
     }
 
     private async Task<string> CreateProjectAsync(string name)

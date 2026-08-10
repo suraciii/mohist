@@ -72,7 +72,6 @@ export type {
   AgentSubscriptionUpdateRequest,
 } from './api/subscriptions'
 export {
-  cancelGenericSession,
   stopGenericSession,
   getAgentSessions as getAgentScopedSessions,
   getGenericSessionSummary,
@@ -83,7 +82,6 @@ export {
   getAgentLaunchObservationMeaning,
   launchAgentSession,
   postGenericFollowup,
-  useCancelGenericSession,
   useGenericTurnControl,
   useGenericFollowup,
   useGenericSessionSummary,

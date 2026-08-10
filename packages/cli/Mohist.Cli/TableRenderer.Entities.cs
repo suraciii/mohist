@@ -306,7 +306,7 @@ internal sealed partial class TableRenderer
         RenderFollowupResult(data);
     }
 
-    private void RenderAgentSessionCancel(JsonNode? data)
+    private void RenderAgentSessionStop(JsonNode? data)
     {
         if (data is null)
         {
@@ -671,7 +671,7 @@ internal sealed partial class TableRenderer
         }
     }
 
-    private void RenderSessionCancel(JsonNode? data)
+    private void RenderSessionStop(JsonNode? data)
     {
         if (data is null)
         {
@@ -679,18 +679,13 @@ internal sealed partial class TableRenderer
             return;
         }
 
-        var state = StringOf(data, "state");
-        var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
-        _out.WriteLine($"state: {stateText}");
-        if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
-            _out.WriteLine("verification: Session view");
-    }
-
-    private void RenderSessionStop(JsonNode? data)
-    {
-        if (data is null)
+        if (data["state"] is not null)
         {
-            _out.WriteLine("");
+            var state = StringOf(data, "state");
+            var stateText = string.IsNullOrEmpty(state) ? "(no state returned)" : state;
+            _out.WriteLine($"state: {stateText}");
+            if (string.Equals(state, "unknown", StringComparison.OrdinalIgnoreCase))
+                _out.WriteLine("verification: Session view");
             return;
         }
 

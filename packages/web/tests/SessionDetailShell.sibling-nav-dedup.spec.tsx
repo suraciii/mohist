@@ -71,7 +71,6 @@ function makeDataWithSiblings(): SessionDataSourceResult {
     canFollowup: true,
     followupIsPending: false,
     sendFollowup: async () => {},
-    cancel: null,
     stop: null,
     contextWindowUsed: null,
     contextWindowSize: null,

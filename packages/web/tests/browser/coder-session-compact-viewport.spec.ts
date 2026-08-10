@@ -268,7 +268,7 @@ async function mockCoderSessionApi(page: Page, fixture: CoderSessionFixture = {}
     if (fixture.compactError && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${session.id}/compact`) {
       return route.fulfill({ status: 409, json: { success: false, error: fixture.compactError } })
     }
-    if (fixture.genericSession && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/cancel`) {
+    if (fixture.genericSession && method === 'POST' && path === `/projects/${project.id}/agent-sessions/${genericSessionId}/stop`) {
       return route.fulfill({ json: apiResponse({ state: 'cancelled' }) })
     }
 

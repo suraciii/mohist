@@ -18,7 +18,7 @@ namespace Mohist.Server.Slack.Services;
 public sealed class SlackTurnControlService : IScopedService
 {
     public const string StopActionId = "mohist_stop_turn";
-    private const string StopOrCancelAction = "stop_or_cancel";
+    private const string StopAction = "stop";
     private static readonly TimeSpan StopActionLifetime = TimeSpan.FromMinutes(5);
 
     private readonly ISecretStore _secrets;
@@ -75,7 +75,7 @@ public sealed class SlackTurnControlService : IScopedService
         var expiresAt = _time.GetUtcNow().Add(StopActionLifetime);
         var payload = new SlackStopActionPayload(
             Version: "v1",
-            Action: StopOrCancelAction,
+            Action: StopAction,
             ConnectionId: connection.Id,
             SessionId: sessionId,
             TurnId: turnId,
@@ -155,32 +155,14 @@ public sealed class SlackTurnControlService : IScopedService
             return Rejected("stale_action", "That Turn is no longer available.");
         }
 
-        if (turn.Classification == AgentTurnControlClassification.Queued)
-        {
-            var cancellation = await AgentSessionTurnControlOperations.CancelAsync(
-                _grains,
-                payload.SessionId,
-                payload.TurnId);
-            if (cancellation.Kind == TurnControlResultKind.Cancelled)
-            {
-                await _inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return Confirmed("cancelled", "Work cancelled.");
-            }
-            if (cancellation.Kind is not TurnControlResultKind.Executing)
-            {
-                await _inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
-                return Rejected("stale_action", "That Turn is no longer available.");
-            }
-        }
-
-        var target = await _sessions.ResolveCancelTargetAsync(projectId, payload.SessionId, ct);
+        var target = await _sessions.ResolveStopTargetAsync(projectId, payload.SessionId, ct);
         if (target is null)
         {
             await _inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
             return Rejected("stale_action", "That Turn is no longer available.");
         }
 
-        var control = await AgentSessionTurnControlOperations.StopAsync(
+        var control = await AgentSessionStopOperations.StopAsync(
             projectId,
             _grains,
             _runnerHub,
@@ -191,6 +173,7 @@ public sealed class SlackTurnControlService : IScopedService
         await _inbox.MarkDispatchedAsync(projectId, accepted.Id, ct);
         return control.Kind switch
         {
+            TurnControlResultKind.Cancelled => Confirmed("cancelled", "Work cancelled."),
             TurnControlResultKind.Stopped => Confirmed("stopped", "Work stopped."),
             TurnControlResultKind.StopRequested => Confirmed("stop_requested", "Stop requested. Waiting for the runtime to confirm."),
             TurnControlResultKind.Unknown => Confirmed("unknown", "The runtime could not confirm whether work stopped."),
@@ -228,7 +211,7 @@ public sealed class SlackTurnControlService : IScopedService
 
         if (payload is null
             || !string.Equals(payload.Version, "v1", StringComparison.Ordinal)
-            || !string.Equals(payload.Action, StopOrCancelAction, StringComparison.Ordinal)
+            || !string.Equals(payload.Action, StopAction, StringComparison.Ordinal)
             || string.IsNullOrWhiteSpace(payload.Signature)
             || string.IsNullOrWhiteSpace(payload.Nonce))
             return null;

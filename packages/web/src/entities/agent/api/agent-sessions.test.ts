@@ -3,9 +3,8 @@ import { http, HttpResponse } from 'msw'
 import { server, useMswServer } from '../../../../tests/support/msw'
 import { toast } from 'sonner'
 import {
-  cancelGenericSession,
   stopGenericSession,
-  cancelGenericSessionMutationOptions,
+  stopGenericSessionMutationOptions,
   genericFollowupMutationOptions,
   genericSessionSummaryQueryOptions,
   genericSessionTranscriptQueryOptions,
@@ -186,20 +185,30 @@ describe('postGenericFollowup (client fn)', () => {
   })
 })
 
-describe('cancelGenericSession (client fn)', () => {
-  it('POSTs to the cancel endpoint', async () => {
-    const captured: { url: string; method: string; body: unknown }[] = []
+describe('stopGenericSession (queued client fn)', () => {
+  it('POSTs queued Turns to the single stop endpoint with an idempotency key', async () => {
+    const captured: { url: string; method: string; body: unknown; key: string }[] = []
     server.use(
-      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/cancel', async ({ request }) => {
-        captured.push({ url: new URL(request.url).pathname, method: request.method, body: await request.json() })
+      http.post('*/api/projects/:projectId/agent-sessions/:sessionId/stop', async ({ request }) => {
+        captured.push({
+          url: new URL(request.url).pathname,
+          method: request.method,
+          body: await request.json(),
+          key: request.headers.get('Idempotency-Key') ?? '',
+        })
         return HttpResponse.json({ success: true, data: { state: 'cancelled' } })
       }),
     )
 
-    await cancelGenericSession('proj-1', 'sess-abc', 'turn-1')
+    await stopGenericSession('proj-1', 'sess-abc', 'turn-1', 'stop-key')
 
     expect(captured).toEqual([
-      { url: '/api/projects/proj-1/agent-sessions/sess-abc/cancel', method: 'POST', body: { turnId: 'turn-1' } },
+      {
+        url: '/api/projects/proj-1/agent-sessions/sess-abc/stop',
+        method: 'POST',
+        body: { turnId: 'turn-1' },
+        key: 'stop-key',
+      },
     ])
   })
 })
@@ -398,13 +407,13 @@ describe('genericFollowupMutationOptions', () => {
   })
 })
 
-/* ── cancelGenericSessionMutationOptions ───────────────── */
-describe('cancelGenericSessionMutationOptions', () => {
+/* ── stopGenericSessionMutationOptions ─────────────────── */
+describe('stopGenericSessionMutationOptions', () => {
   it('emits a success toast and invalidates session queries on cancelled', () => {
     const qc = createInvalidationClient()
-    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
+    stopGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'cancelled' },
-      { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel', agentRef: 'agent-foo' },
+      { sessionId: 'sess-abc', turnId: 'turn-1', agentRef: 'agent-foo' },
     )
     expect(toast.success).toHaveBeenCalledWith('cancelled')
     expect(toast.warning).not.toHaveBeenCalled()
@@ -417,9 +426,9 @@ describe('cancelGenericSessionMutationOptions', () => {
   it.each(['stop-requested', 'stopped', 'unknown'])(
     'emits a success toast for the shared Turn state (%s)',
     (terminalState) => {
-      cancelGenericSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
+      stopGenericSessionMutationOptions('proj-1', createInvalidationClient()).onSuccess(
         { state: terminalState },
-        { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'stop', agentRef: 'agent-foo' },
+        { sessionId: 'sess-abc', turnId: 'turn-1', agentRef: 'agent-foo' },
       )
       expect(toast.success).toHaveBeenCalledWith(terminalState)
       expect(toast.warning).not.toHaveBeenCalled()
@@ -428,11 +437,11 @@ describe('cancelGenericSessionMutationOptions', () => {
 
   it('emits a warning toast and still invalidates session queries on not-cancellable', () => {
     const qc = createInvalidationClient()
-    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess(
+    stopGenericSessionMutationOptions('proj-1', qc).onSuccess(
       { state: 'not-cancellable' },
-      { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel', agentRef: 'agent-foo' },
+      { sessionId: 'sess-abc', turnId: 'turn-1', agentRef: 'agent-foo' },
     )
-    expect(toast.warning).toHaveBeenCalledWith('Turn cancel was not applied')
+    expect(toast.warning).toHaveBeenCalledWith('Turn stop was not applied')
     expect(toast.success).not.toHaveBeenCalled()
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-session', 'proj-1', 'sess-abc'] })
     expect(qc.invalidateQueries).toHaveBeenCalledWith({ queryKey: ['agent-status'] })
@@ -442,7 +451,7 @@ describe('cancelGenericSessionMutationOptions', () => {
 
   it('skips agent sessions invalidation when agentRef is omitted', () => {
     const qc = createInvalidationClient()
-    cancelGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc', turnId: 'turn-1', operation: 'cancel' })
+    stopGenericSessionMutationOptions('proj-1', qc).onSuccess({ state: 'cancelled' }, { sessionId: 'sess-abc', turnId: 'turn-1' })
     const agentSessionsCalls = qc.invalidateQueries.mock.calls.filter(
       (c) => (c[0] as { queryKey: string[] }).queryKey[3] === 'sessions',
     )
@@ -450,7 +459,7 @@ describe('cancelGenericSessionMutationOptions', () => {
   })
 
   it('shows error toast on failure', () => {
-    cancelGenericSessionMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NOT_CANCELLABLE'))
+    stopGenericSessionMutationOptions('proj-1', createInvalidationClient()).onError(new Error('NOT_CANCELLABLE'))
     expect(toast.error).toHaveBeenCalledWith('NOT_CANCELLABLE')
     expect(toast.success).not.toHaveBeenCalled()
     expect(toast.warning).not.toHaveBeenCalled()

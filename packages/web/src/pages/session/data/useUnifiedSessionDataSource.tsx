@@ -17,7 +17,7 @@ import { useDocumentTitle } from '../../../shared/lib/useDocumentTitle'
 import { createIdempotencyKey } from '../../../shared/lib/idempotency-key'
 import { ApiError } from '../../../shared/api/client'
 import { resolveFollowupStatus } from './followupStatus'
-import type { EmptyStateKind, SessionCancelOptions, SessionDataSourceResult, SessionTurnControlHandle } from './SessionDataSource'
+import type { EmptyStateKind, SessionStopOptions, SessionDataSourceResult, SessionTurnControlHandle } from './SessionDataSource'
 
 export interface UnifiedSessionDataSourceDependencies {
   useSessionTranscript: typeof useSessionTranscript
@@ -200,13 +200,13 @@ export function useUnifiedSessionDataSource(
     return resolveFollowupStatus(followupResult, input, turn)
   }, [followupResult, summary?.inputs, summary?.turns])
 
-  const cancelSession = useCallback((operation: 'cancel' | 'stop', options?: SessionCancelOptions) => {
+  const stopSession = useCallback((options?: SessionStopOptions) => {
     if (!summary?.currentTurnId) {
       options?.onSettled?.()
       return
     }
     turnControl.mutate(
-      { sessionId, turnId: summary.currentTurnId, operation },
+      { sessionId, turnId: summary.currentTurnId },
       {
         onSuccess: (result) => {
           reconcileUnifiedQueries()
@@ -225,27 +225,15 @@ export function useUnifiedSessionDataSource(
     return summary.turns.find((turn) => turn.id === summary.currentTurnId) ?? null
   }, [summary?.currentTurnId, summary?.turns])
 
-  const cancel = useMemo<SessionTurnControlHandle | null>(() => {
-    if (!summary?.currentTurnId || !runtimeSessionId || !summary.runtime) return null
-    if (currentTurn?.status !== 'queued') return null
-    return {
-      turnId: summary.currentTurnId,
-      state: 'queued',
-      mutate: (options) => cancelSession('cancel', options),
-      isPending: turnControl.isPending,
-    }
-  }, [cancelSession, currentTurn?.status, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending])
-
   const stop = useMemo<SessionTurnControlHandle | null>(() => {
-    if (!summary?.currentTurnId || !runtimeSessionId || !summary.runtime) return null
-    if (currentTurn?.status !== 'executing') return null
+    if (!summary?.currentTurnId || (currentTurn?.status !== 'queued' && currentTurn?.status !== 'executing')) return null
     return {
       turnId: summary.currentTurnId,
-      state: 'executing',
-      mutate: (options) => cancelSession('stop', options),
+      state: currentTurn.status,
+      mutate: stopSession,
       isPending: turnControl.isPending,
     }
-  }, [cancelSession, currentTurn?.status, isRunning, runtimeSessionId, summary?.currentTurnId, summary?.runtime, turnControl.isPending])
+  }, [currentTurn?.status, stopSession, summary?.currentTurnId, turnControl.isPending])
 
   const fromActivity = searchParams.get('from') === 'activity'
   const issueNumber = summary?.contextRefs?.issueNumber ?? 0
@@ -297,7 +285,6 @@ export function useUnifiedSessionDataSource(
     followupIsPending: followup.isPending,
     followupStatus,
     sendFollowup,
-    cancel,
     stop,
     contextWindowUsed: meta?.usage?.contextWindowUsed ?? null,
     contextWindowSize: meta?.usage?.contextWindowSize ?? null,

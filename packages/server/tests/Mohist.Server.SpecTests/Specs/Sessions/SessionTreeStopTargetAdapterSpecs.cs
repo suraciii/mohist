@@ -58,8 +58,13 @@ public sealed class SessionTreeStopTargetAdapterSpecs
             "adapter-idle", null, null, "adapter-idle-op"));
         Assert.Equal(SessionTreeStopTargetOutcome.AlreadyIdle, idleResult.Outcome);
 
+        var unknown = await OpenSessionAsync(projectId, "adapter-unknown");
+        const string unknownTurn = "adapter-unknown-turn";
+        await unknown.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "adapter-unknown-input", unknownTurn, "unknown", "test"));
+        await unknown.MarkTurnTerminalAsync(unknownTurn, AgentTurnStatus.Unknown, null);
         var unknownResult = await adapter.StopAsync(projectId, Target(
-            "adapter-unknown", "adapter-unknown-turn", AgentTurnStatus.Unknown, "adapter-unknown-op"));
+            "adapter-unknown", unknownTurn, AgentTurnStatus.Unknown, "adapter-unknown-op"));
         Assert.Equal(SessionTreeStopTargetOutcome.Unknown, unknownResult.Outcome);
 
         var replaced = await OpenSessionAsync(projectId, "adapter-replaced");
@@ -69,6 +74,36 @@ public sealed class SessionTreeStopTargetAdapterSpecs
         var replacedResult = await adapter.StopAsync(projectId, Target(
             "adapter-replaced", replacedTurn, AgentTurnStatus.Queued, "adapter-replaced-op", "wrong-runner"));
         Assert.Equal(SessionTreeStopTargetOutcome.Rejected, replacedResult.Outcome);
+    }
+
+    [Fact]
+    public async Task TargetAdapterReportsNotCancellableWithoutClaimingTheTurnStopped()
+    {
+        var projectId = $"adapter-not-cancellable-{Guid.NewGuid():N}";
+        await using var scope = _fixture.Services.CreateAsyncScope();
+        var adapter = scope.ServiceProvider.GetRequiredService<ISessionTreeStopTargetAdapter>();
+        var hub = scope.ServiceProvider.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
+            ?? throw new InvalidOperationException("Recording runner hub context is not configured.");
+        var runnerId = "adapter-runner";
+        _fixture.Services.GetRequiredService<RunnerConnectionTracker>().Register(
+            runnerId,
+            "adapter-not-cancellable-connection");
+        hub.SetInvocationResponse("CancelAgentSession", new RunnerStopReply("not-cancellable"));
+
+        var sessionId = $"adapter-not-cancellable-{Guid.NewGuid():N}";
+        var session = await OpenSessionAsync(projectId, sessionId);
+        const string turnId = "adapter-not-cancellable-turn";
+        await session.RecordFollowupTurnAsync(new RecordFollowupTurnCommand(
+            "adapter-not-cancellable-input", turnId, "executing", "test"));
+        await session.MarkTurnExecutingAsync(turnId);
+
+        var result = await adapter.StopAsync(
+            projectId,
+            Target(sessionId, turnId, AgentTurnStatus.Executing, "adapter-not-cancellable-op", runnerId));
+
+        Assert.Equal(SessionTreeStopTargetOutcome.NotCancellable, result.Outcome);
+        Assert.Equal("runtime reported not-cancellable", result.Detail);
+        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(await session.ListTurnsAsync()).Status);
     }
 
     private async Task<IAgentSessionGrain> OpenSessionAsync(string projectId, string sessionId)

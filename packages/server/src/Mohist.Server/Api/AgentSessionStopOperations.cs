@@ -12,11 +12,9 @@ internal enum TurnControlResultKind
     NotFound,
     Cancelled,
     AlreadyEnded,
-    Executing,
     StopRequested,
     Stopped,
     Unknown,
-    Queued,
     NotCancellable,
     RunnerUnavailable,
 }
@@ -28,45 +26,14 @@ internal sealed record TurnControlResult(
     string? StatusText = null,
     bool DispatchStarted = false);
 
-internal static class AgentSessionTurnControlOperations
+internal static class AgentSessionStopOperations
 {
-    public static async Task<TurnControlResult> CancelAsync(
-        IGrainFactory grains,
-        string sessionId,
-        string turnId)
-    {
-        var session = grains.GetGrain<IAgentSessionGrain>(sessionId);
-        var cancellation = await session.CancelQueuedTurnAsync(turnId);
-        var control = cancellation.Control;
-        if (control is null)
-            return new(TurnControlResultKind.NotFound);
-        if (cancellation.Cancelled)
-            return new(TurnControlResultKind.Cancelled, control.Status);
-        if (control.Classification == AgentTurnControlClassification.Terminal)
-            return new(TurnControlResultKind.AlreadyEnded, control.Status);
-        if (control.Classification == AgentTurnControlClassification.Executing)
-            return new(TurnControlResultKind.Executing, control.Status);
-        if (control.IsLaunchTurn)
-        {
-            var result = await grains.GetGrain<IAgentJobGrain>(control.JobId!).CancelAsync();
-            return result.Disposition switch
-            {
-                AgentJobCancelDisposition.Cancelled => new(TurnControlResultKind.Cancelled),
-                AgentJobCancelDisposition.Executing => new(TurnControlResultKind.Executing),
-                _ => new(
-                    TurnControlResultKind.AlreadyEnded,
-                    StatusText: result.Status.ToString().ToLowerInvariant()),
-            };
-        }
-        return new(TurnControlResultKind.Cancelled, control.Status);
-    }
-
     public static async Task<TurnControlResult> StopAsync(
         string projectId,
         IGrainFactory grains,
         IHubContext<RunnerHub> runnerHub,
         RunnerConnectionTracker connections,
-        SessionCancelTarget target,
+        SessionStopTarget target,
         string turnId,
         CancellationToken ct,
         string? expectedOperationId = null)
@@ -78,18 +45,40 @@ internal static class AgentSessionTurnControlOperations
             return new(TurnControlResultKind.NotFound);
         if (control.Classification == AgentTurnControlClassification.Terminal && !claim.CanDispatch)
             return new(TurnControlResultKind.AlreadyEnded, control.Status);
+
         if (control.Classification == AgentTurnControlClassification.Queued)
-            return new(TurnControlResultKind.Queued, control.Status);
+        {
+            var queued = await session.StopQueuedTurnAsync(turnId);
+            if (queued.Cancelled)
+                return new(TurnControlResultKind.Cancelled, queued.Control?.Status ?? AgentTurnStatus.Cancelled);
+            if (queued.Control?.Classification == AgentTurnControlClassification.Terminal)
+                return new(TurnControlResultKind.AlreadyEnded, queued.Control.Status);
+
+            if (control.IsLaunchTurn && control.JobId is not null)
+            {
+                var jobResult = await grains.GetGrain<IAgentJobGrain>(control.JobId).CancelAsync();
+                return jobResult.Disposition switch
+                {
+                    AgentJobCancelDisposition.Cancelled => new(TurnControlResultKind.Cancelled, AgentTurnStatus.Cancelled),
+                    AgentJobCancelDisposition.Executing => new(TurnControlResultKind.StopRequested, AgentTurnStatus.Executing),
+                    _ => new(
+                        TurnControlResultKind.AlreadyEnded,
+                        StatusText: jobResult.Status.ToString().ToLowerInvariant()),
+                };
+            }
+
+            return new(TurnControlResultKind.StopRequested, queued.Control?.Status);
+        }
+
         if (!claim.CanDispatch || string.IsNullOrWhiteSpace(claim.OperationId))
             return new(TurnControlResultKind.StopRequested, control.Status);
 
-        var runnerId = connections.GetConnectionId(target.RunnerId);
-        if (string.IsNullOrWhiteSpace(runnerId)
+        var connectionId = connections.GetConnectionId(target.RunnerId);
+        if (string.IsNullOrWhiteSpace(connectionId)
             || string.IsNullOrWhiteSpace(target.Runtime)
             || string.IsNullOrWhiteSpace(target.RuntimeSessionId)
             || string.IsNullOrWhiteSpace(target.WorkDir))
         {
-            await session.AbandonUndispatchedTurnStopAsync(control.TurnId, claim.OperationId);
             return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: false);
         }
 
@@ -122,7 +111,7 @@ internal static class AgentSessionTurnControlOperations
         RunnerStopReply? reply;
         try
         {
-            reply = await runnerHub.Clients.Client(runnerId).InvokeAsync<RunnerStopReply?>(
+            reply = await runnerHub.Clients.Client(connectionId).InvokeAsync<RunnerStopReply?>(
                 "CancelAgentSession",
                 new { target = wireTarget, sessionId = target.SessionId, turnId, operationId = claim.OperationId },
                 ct);
@@ -139,32 +128,32 @@ internal static class AgentSessionTurnControlOperations
         if (reply is null)
             return new(TurnControlResultKind.RunnerUnavailable, control.Status, DispatchStarted: true);
 
-        if (control.IsLaunchTurn
-            && string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
         {
-            await grains.GetGrain<IAgentJobGrain>(control.JobId!).MarkUnknownAsync("stop-unconfirmed");
-        }
-        else if (string.Equals(reply.State, "unknown", StringComparison.OrdinalIgnoreCase))
-        {
-            await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
-        }
-        else if (string.Equals(reply.State, "stopped", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!control.IsLaunchTurn)
-                await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Completed, null);
-            await session.CompleteTurnStopAsync(control.TurnId, claim.OperationId);
-        }
-        else if (string.Equals(reply.State, "not-cancellable", StringComparison.OrdinalIgnoreCase))
-        {
-            await session.CompleteTurnStopAsync(control.TurnId, claim.OperationId);
+            if (control.IsLaunchTurn && control.JobId is not null)
+            {
+                await grains.GetGrain<IAgentJobGrain>(control.JobId).MarkUnknownAsync("stop-unconfirmed");
+            }
+            else
+            {
+                await session.MarkTurnTerminalAsync(control.TurnId, AgentTurnStatus.Unknown, null);
+            }
+
+            return new(TurnControlResultKind.Unknown, AgentTurnStatus.Unknown, reply.InterruptUnconfirmed);
         }
 
-        return reply.State?.ToLowerInvariant() switch
+        if (string.Equals(reply.State, "stopped", StringComparison.OrdinalIgnoreCase))
         {
-            "stopped" => new(TurnControlResultKind.Stopped, control.Status, reply.InterruptUnconfirmed),
-            "unknown" => new(TurnControlResultKind.Unknown, control.Status, reply.InterruptUnconfirmed),
-            "not-cancellable" => new(TurnControlResultKind.NotCancellable, control.Status, reply.InterruptUnconfirmed),
-            _ => new(TurnControlResultKind.StopRequested, control.Status, reply.InterruptUnconfirmed),
-        };
+            await session.CompleteTurnStopAsync(control.TurnId, claim.OperationId);
+            return new(TurnControlResultKind.Stopped, AgentTurnStatus.Cancelled, reply.InterruptUnconfirmed);
+        }
+
+        if (string.Equals(reply.State, "not-cancellable", StringComparison.OrdinalIgnoreCase))
+        {
+            await session.ReleaseTurnStopAsync(control.TurnId, claim.OperationId);
+            return new(TurnControlResultKind.NotCancellable, AgentTurnStatus.Executing, reply.InterruptUnconfirmed);
+        }
+
+        return new(TurnControlResultKind.StopRequested, control.Status, reply.InterruptUnconfirmed);
     }
 }

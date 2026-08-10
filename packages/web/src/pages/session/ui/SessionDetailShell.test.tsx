@@ -68,7 +68,6 @@ function makeData(): SessionDataSourceResult {
     sendFollowup: vi.fn(),
     supportsInputAttachments: false,
     projectId: 'project-1',
-    cancel: null,
     stop: null,
     contextWindowUsed: null,
     contextWindowSize: null,

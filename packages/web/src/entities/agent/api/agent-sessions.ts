@@ -156,7 +156,7 @@ export interface GenericFollowupResult {
   code?: string | null
 }
 
-export type TurnControlState = 'cancelled' | 'stop-requested' | 'stopped' | 'unknown'
+export type TurnControlState = 'cancelled' | 'stop-requested' | 'stopped' | 'unknown' | 'not-cancellable'
 export interface TurnControlResult {
   state?: string
   interruptUnconfirmed?: boolean | null
@@ -237,22 +237,20 @@ export function postGenericFollowup(projectId: string, sessionId: string, input:
   )
 }
 
-export function controlGenericSession(projectId: string, sessionId: string, turnId: string, operation: 'cancel' | 'stop') {
+export function controlGenericSession(projectId: string, sessionId: string, turnId: string, idempotencyKey?: string) {
+  const requestKey = idempotencyKey ?? createIdempotencyKey()
   return request<TurnControlResult>(
-    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/${operation}`),
+    projectApiPath(projectId, `/agent-sessions/${encodeURIComponent(sessionId)}/stop`),
     {
       method: 'POST',
       body: JSON.stringify({ turnId }),
+      headers: { 'Idempotency-Key': requestKey },
     },
   )
 }
 
-export function cancelGenericSession(projectId: string, sessionId: string, turnId: string) {
-  return controlGenericSession(projectId, sessionId, turnId, 'cancel')
-}
-
-export function stopGenericSession(projectId: string, sessionId: string, turnId: string) {
-  return controlGenericSession(projectId, sessionId, turnId, 'stop')
+export function stopGenericSession(projectId: string, sessionId: string, turnId: string, idempotencyKey?: string) {
+  return controlGenericSession(projectId, sessionId, turnId, idempotencyKey)
 }
 
 /* ── Query hooks ────────────────────────────────────────── */
@@ -359,11 +357,11 @@ export function useGenericFollowup() {
   return useMutation(genericFollowupMutationOptions(projectId, queryClient))
 }
 
-export function cancelGenericSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+export function stopGenericSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: ({ sessionId, turnId, operation }: { sessionId: string; turnId: string; operation: 'cancel' | 'stop'; agentRef?: string }) =>
-      controlGenericSession(projectId!, sessionId, turnId, operation),
-    onSuccess: (data: TurnControlResult, variables: { sessionId: string; turnId: string; agentRef?: string; operation: 'cancel' | 'stop' }) => {
+    mutationFn: ({ sessionId, turnId, idempotencyKey }: { sessionId: string; turnId: string; idempotencyKey?: string; agentRef?: string }) =>
+      stopGenericSession(projectId!, sessionId, turnId, idempotencyKey),
+    onSuccess: (data: TurnControlResult, variables: { sessionId: string; turnId: string; agentRef?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['agent-status'] })
       queryClient.invalidateQueries({ queryKey: ['agent-activity'] })
       queryClient.invalidateQueries({ queryKey: ['agent-session', projectId, variables.sessionId] })
@@ -375,7 +373,7 @@ export function cancelGenericSessionMutationOptions(projectId: string | null | u
         toast.success(state)
         return
       }
-      toast.warning(`Turn ${variables.operation} was not applied`)
+      toast.warning('Turn stop was not applied')
     },
     onError: (err: Error) => {
       toast.error(err.message || 'Request failed')
@@ -383,13 +381,7 @@ export function cancelGenericSessionMutationOptions(projectId: string | null | u
   }
 }
 
-export const genericTurnControlMutationOptions = cancelGenericSessionMutationOptions
-
-export function useCancelGenericSession() {
-  const queryClient = useQueryClient()
-  const { projectId } = useProject()
-  return useMutation(cancelGenericSessionMutationOptions(projectId, queryClient))
-}
+export const genericTurnControlMutationOptions = stopGenericSessionMutationOptions
 
 export function useGenericTurnControl() {
   const queryClient = useQueryClient()

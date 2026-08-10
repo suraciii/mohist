@@ -87,6 +87,7 @@ public enum SessionTreeStopTargetOutcome
     Pending,
     AlreadyIdle,
     Cancelled,
+    NotCancellable,
     StopRequested,
     Unknown,
     Rejected,

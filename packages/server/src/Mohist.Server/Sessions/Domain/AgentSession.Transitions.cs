@@ -737,7 +737,7 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        public IReadOnlyList<AgentSessionEvent> CancelTurn(string turnId, DateTime now)
+        public IReadOnlyList<AgentSessionEvent> StopTurn(string turnId, DateTime now)
         {
             var turns = (session.Status.Turns ?? []).ToList();
             var index = turns.FindIndex(candidate =>
@@ -768,14 +768,14 @@ public static partial class AgentSessionExtensions
             return [];
         }
 
-        public AgentTurnCancelResult CancelQueuedTurn(string turnId, DateTime now)
+        public AgentTurnStopResult StopQueuedTurn(string turnId, DateTime now)
         {
             var control = session.ResolveTurnControl(turnId);
             if (control?.Classification != AgentTurnControlClassification.Queued || control.IsLaunchTurn)
-                return new AgentTurnCancelResult(control, false);
+                return new AgentTurnStopResult(control, false);
 
-            _ = session.CancelTurn(turnId, now);
-            return new AgentTurnCancelResult(session.ResolveTurnControl(turnId), true);
+            _ = session.StopTurn(turnId, now);
+            return new AgentTurnStopResult(session.ResolveTurnControl(turnId), true);
         }
 
         public AgentTurnStopClaimResult ClaimTurnStop(string turnId, string? operationId = null)
@@ -821,16 +821,6 @@ public static partial class AgentSessionExtensions
             }
         }
 
-        public void AbandonUndispatchedTurnStop(string turnId, string operationId)
-        {
-            var pending = session.Status.PendingStop;
-            if (pending is not null
-                && string.Equals(pending.TurnId, turnId, StringComparison.Ordinal)
-                && string.Equals(pending.OperationId, operationId, StringComparison.Ordinal)
-                && !pending.DispatchStarted)
-                session.Status = session.Status with { PendingStop = null };
-        }
-
         public void CompleteTurnStop(string turnId, string operationId)
         {
             if (string.Equals(session.Status.PendingStop?.TurnId, turnId, StringComparison.Ordinal)
@@ -865,7 +855,7 @@ public static partial class AgentSessionExtensions
 
         /// <summary>
         /// Resolves a Turn by id and classifies it for control-plane
-        /// targeting (cancel / stop). Returns <c>null</c> when no Turn
+        /// targeting. Returns <c>null</c> when no Turn
         /// matches; the caller treats that as <c>turn-not-found</c>.
         /// </summary>
         public AgentTurnControlState? ResolveTurnControl(string turnId)

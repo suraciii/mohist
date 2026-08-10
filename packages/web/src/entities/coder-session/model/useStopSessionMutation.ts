@@ -2,28 +2,26 @@ import { useMutation, useQueryClient, type QueryClient, type UseMutationResult }
 import { ApiError } from '@/shared/api/client'
 import { useProject } from '../../project/@x/project-context'
 import { issueWorkflowKeys } from '../../issue/@x/query-keys'
-import { cancelSession, stopSession, type SessionCancelResult } from '../api/client'
+import { stopSession, type SessionStopResult } from '../api/client'
 
-export interface CancelSessionMutationInput {
+export interface StopSessionMutationInput {
   issueNumber: number
   sessionName: string
   turnId: string
-  operation: 'cancel' | 'stop'
+  idempotencyKey?: string
 }
 
 type InvalidationClient = Pick<QueryClient, 'invalidateQueries'>
 
-export function cancelSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
+export function stopSessionMutationOptions(projectId: string | null | undefined, queryClient: InvalidationClient) {
   return {
-    mutationFn: (input: CancelSessionMutationInput) => {
+    mutationFn: (input: StopSessionMutationInput) => {
       if (!projectId) {
         return Promise.reject(new ApiError('Project is required', 400))
       }
-      return input.operation === 'stop'
-        ? stopSession(input.issueNumber, input.sessionName, input.turnId, projectId)
-        : cancelSession(input.issueNumber, input.sessionName, input.turnId, projectId)
+      return stopSession(input.issueNumber, input.sessionName, input.turnId, projectId, input.idempotencyKey)
     },
-    onSuccess: (_result: SessionCancelResult, { issueNumber, sessionName }: CancelSessionMutationInput) => {
+    onSuccess: (_result: SessionStopResult, { issueNumber, sessionName }: StopSessionMutationInput) => {
       queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'coder-sessions'), exact: true })
       queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'session-metadata', sessionName), exact: true })
       queryClient.invalidateQueries({ queryKey: issueWorkflowKeys.session(projectId, issueNumber, 'session-transcript', sessionName) })
@@ -32,10 +30,10 @@ export function cancelSessionMutationOptions(projectId: string | null | undefine
   }
 }
 
-export function useCancelSessionMutation(): UseMutationResult<SessionCancelResult, ApiError, CancelSessionMutationInput> {
+export function useStopSessionMutation(): UseMutationResult<SessionStopResult, ApiError, StopSessionMutationInput> {
   const { projectId } = useProject()
   const queryClient = useQueryClient()
-  return useMutation<SessionCancelResult, ApiError, CancelSessionMutationInput>(
-    cancelSessionMutationOptions(projectId, queryClient),
+  return useMutation<SessionStopResult, ApiError, StopSessionMutationInput>(
+    stopSessionMutationOptions(projectId, queryClient),
   )
 }

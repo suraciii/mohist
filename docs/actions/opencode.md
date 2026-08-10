@@ -133,7 +133,7 @@ OpenCode drives execution directly, and the built-in Profiles use this Action.
 Configuration, Session, command results, and diagnostics for Workflow and Agent
 origins no longer contain historical ACP identity fields.
 
-Stable Session identity, origin resolution, Follow-up, Cancel, and Reset are
+Stable Session identity, origin resolution, Follow-up, Stop, and Reset are
 implemented. Reset creates empty OpenCode context and replaces the binding while
 the AgentSession remains the same. Native Compact is still unavailable.
 

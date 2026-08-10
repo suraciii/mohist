@@ -22,7 +22,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Cancel_QueuedTurnWithoutRunner_ReturnsCancelledAndPreservesRecords()
+    public async Task Stop_QueuedTurnWithoutRunner_ReturnsCancelledAndPreservesRecords()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         var before = await ReadSessionEvidenceAsync(sessionId);
@@ -46,7 +46,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Cancel_TerminalTurnReturnsAlreadyEndedAndDoesNotTouchOtherTurns()
+    public async Task Stop_TerminalTurnReturnsAlreadyEndedAndDoesNotTouchOtherTurns()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         using var first = await PostCancelAsync(project.Id, sessionId, turnId);
@@ -64,7 +64,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Cancel_ExecutingTurnReportsExecutingAndDoesNotContactRunner()
+    public async Task Stop_ExecutingWithoutReplyLeavesStopPending()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -73,11 +73,10 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
 
         using var response = await PostCancelAsync(project.Id, sessionId, turnId);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        var data = await ReadDataAsync(response);
-        Assert.Equal("executing", data.GetProperty("state").GetString());
-        Assert.Equal("stop", data.GetProperty("action").GetString());
-        Assert.Empty(hub.Invocations);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Single(hub.Invocations);
+        await Assert.ThrowsAsync<StopOperationInProgressException>(
+            () => _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).BeginFollowupAsync());
     }
 
     [Fact]
@@ -113,17 +112,16 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
         using var response = await PostStopAsync(project.Id, sessionId, turnId);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(AgentTurnStatus.Executing, Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Status);
+        Assert.Equal(AgentTurnStatus.Cancelled, Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync()).Status);
 
         await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).FailAsync("job-reported-failure");
 
         var turn = Assert.Single(await _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId).ListTurnsAsync());
-        Assert.Equal(AgentTurnStatus.Failed, turn.Status);
-        Assert.Equal("job-reported-failure", turn.Result?.FailureReason);
+        Assert.Equal(AgentTurnStatus.Cancelled, turn.Status);
     }
 
     [Fact]
-    public async Task Stop_OfflineBeforeDispatchReleasesTurnClaim()
+    public async Task Stop_OfflineBeforeDispatchKeepsTurnClaimForRecovery()
     {
         var (project, sessionId, turnId) = await CreateExecutingSessionForCancelAsync();
         var tracker = _fixture.Services.GetRequiredService<RunnerConnectionTracker>();
@@ -134,9 +132,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
             var session = _fixture.Grains.GetGrain<IAgentSessionGrain>(sessionId);
-            var reservation = await session.BeginFollowupAsync();
-            Assert.False(reservation.StartsIdleTurn);
-            await session.AbandonFollowupAsync(reservation.OperationId!);
+            await Assert.ThrowsAsync<StopOperationInProgressException>(session.BeginFollowupAsync);
         }
         finally
         {
@@ -145,7 +141,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Stop_QueuedTurnDirectsCallerToCancelWithoutContactingRunner()
+    public async Task Stop_QueuedTurnRecordsCancelledWithoutContactingRunner()
     {
         var (project, sessionId, turnId) = await CreateQueuedSessionForCancelAsync();
         var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -156,8 +152,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var data = await ReadDataAsync(response);
-        Assert.Equal("queued", data.GetProperty("state").GetString());
-        Assert.Equal("cancel", data.GetProperty("action").GetString());
+        Assert.Equal("cancelled", data.GetProperty("state").GetString());
         Assert.Empty(hub.Invocations);
     }
 
@@ -344,7 +339,7 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     [Fact]
-    public async Task Cancel_LaterTurnDoesNotChangeTerminalLaunchJob()
+    public async Task Stop_LaterTurnDoesNotChangeTerminalLaunchJobWhenNoReply()
     {
         var (project, sessionId, turnId, jobId) = await CreateTerminalLaunchWithExecutingFollowupAsync();
         var hub = _fixture.Services.GetRequiredService<IHubContext<RunnerHub>>() as RecordingRunnerHubContext
@@ -353,9 +348,8 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
 
         using var response = await PostCancelAsync(project.Id, sessionId, turnId);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("executing", (await ReadDataAsync(response)).GetProperty("state").GetString());
-        Assert.Empty(hub.Invocations);
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+        Assert.Single(hub.Invocations);
         Assert.Equal(AgentJobStatus.Failed, await _fixture.Grains.GetGrain<IAgentJobGrain>(jobId).GetStatusAsync());
     }
 
@@ -416,12 +410,18 @@ public class GenericAgentSessionCancelApiSpecs : GenericAgentSessionCancelApiTes
     }
 
     private Task<HttpResponseMessage> PostCancelAsync(string projectId, string sessionId, string turnId) =>
-        _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agent-sessions/{sessionId}/cancel",
-            new { turnId });
+        PostStopAsync(projectId, sessionId, turnId);
 
-    private Task<HttpResponseMessage> PostStopAsync(string projectId, string sessionId, string turnId) =>
-        _client.PostAsJsonAsync(
-            $"/api/projects/{projectId}/agent-sessions/{sessionId}/stop",
-            new { turnId });
+    private async Task<HttpResponseMessage> PostStopAsync(string projectId, string sessionId, string turnId)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/projects/{projectId}/agent-sessions/{sessionId}/stop"
+        )
+        {
+            Content = JsonContent.Create(new { turnId }),
+        };
+        request.Headers.Add("Idempotency-Key", $"stop-{Guid.NewGuid():N}");
+        return await _client.SendAsync(request);
+    }
 }

@@ -566,7 +566,7 @@ same public key --> same frozen Turn --> terminal public fact
 ```
 
 A Turn already terminal at the first request produces a durable no-op observation and no Runner
-call. A queued Turn can be cancelled without contacting Runtime. A running Turn uses the canonical
+call. A queued Turn ends locally without contacting Runtime and is recorded cancelled. A running Turn uses the canonical
 fenced stop lifecycle; a changed Turn, binding, context, or owner cannot redirect the request to
 replacement work.
 

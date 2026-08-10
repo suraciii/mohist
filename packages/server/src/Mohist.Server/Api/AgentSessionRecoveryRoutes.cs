@@ -11,7 +11,7 @@ namespace Mohist.Server.Api;
 /// Canonical Compact and Reset routes for AgentSessions from either source.
 /// Workflow-scoped aliases resolve their lookup keys to a stable session id
 /// and delegate to the same command executors used by these routes.
-/// Followup and Cancel already preserve that canonical AgentSession identity;
+/// Follow-up and stop already preserve that canonical AgentSession identity;
 /// their existing runner transport remains outside recovery routing.
 /// </summary>
 public static class AgentSessionRecoveryRoutes
