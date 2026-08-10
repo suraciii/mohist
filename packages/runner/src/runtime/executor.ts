@@ -34,7 +34,7 @@ import type { ActionHost, ActionEffects, AgentTurnRequest } from "../actions/hos
 import { capabilitySet } from "../actions/host.js"
 import { composeOpencodePrompt, DEFAULT_TURN_DEADLINE_MS } from "../actions/opencode.js"
 import { WorkflowAgentSessionReporter } from "../actions/workflow-agent-session-reporter.js"
-import { parseModelIdentifier } from "./opencode/index.js"
+import { hasUnconfirmedCleanup, parseModelIdentifier } from "./opencode/index.js"
 import { resolveOrRecoverBinding, type BindingRecoveryCoordinator } from "./binding-recovery.js"
 import { resolveIssueFields, type IssueFields } from "../actions/issue-fields.js"
 import { createHash } from "node:crypto"
@@ -962,7 +962,7 @@ function enqueueTerminalClose(
     return
   }
   reporter.registerClose({
-    status: "failed",
+    status: hasUnconfirmedCleanup(result.diagnostics ?? result.error?.diagnostics ?? []) ? "unknown" : "failed",
     exitCode: 1,
     failureReason: result.error.message,
     runtimeSessionId,

@@ -192,6 +192,16 @@ export function isTransportFailure(cause: unknown): boolean {
     || (cause instanceof Error && /fetch failed|network error/i.test(cause.message))
 }
 
+const UNCONFIRMED_CLEANUP_CODES = new Set([
+  "abort-unconfirmed",
+  "abort-cleanup-timeout",
+  "status-cleanup-timeout",
+])
+
+export function hasUnconfirmedCleanup(diagnostics: readonly RuntimeDiagnostic[] = []): boolean {
+  return diagnostics.some((diagnostic) => UNCONFIRMED_CLEANUP_CODES.has(diagnostic.code))
+}
+
 function transportErrorCode(value: unknown): string | undefined {
   let current = value
   for (let depth = 0; depth < 4 && current && typeof current === "object"; depth++) {

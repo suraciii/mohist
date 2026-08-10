@@ -59,12 +59,14 @@ interface BuildArgs {
   abortResult?: boolean
   abortHangs?: boolean
   statusHangs?: boolean
+  rebuildDelayMs?: number
 }
 
 interface BuildResult {
   deps: OpenCodeRuntimeDeps
   client: FakeClientHandles
   server: OpencodeServerHandle
+  serverFactory: ReturnType<typeof vi.fn>
 }
 
 function buildRuntime(args: BuildArgs = {}): BuildResult {
@@ -123,6 +125,7 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
       closed.value = true
     },
   }
+  const serverFactory = vi.fn(async () => server)
   const client: FakeClientHandles = {
     sessionCreate,
     sessionPrompt,
@@ -134,11 +137,12 @@ function buildRuntime(args: BuildArgs = {}): BuildResult {
   }
   const deps: OpenCodeRuntimeDeps = {
     directory: "/tmp/work",
-    serverFactory: async () => server,
+    serverFactory,
     eventSubscriptionFactory: () => subscription,
     ...(args.policy ? { providerErrorPolicy: args.policy } : {}),
+    ...(args.rebuildDelayMs !== undefined ? { rebuildDelayMs: args.rebuildDelayMs } : {}),
   }
-  return { deps, client, server }
+  return { deps, client, server, serverFactory }
 }
 
 afterEach(() => {
@@ -561,6 +565,51 @@ describe("OpenCodeRuntime.runTurn — deadline abort", () => {
         code: "status-cleanup-timeout",
         message: expect.stringContaining(`${CLEANUP_OPERATION_TIMEOUT_MS}ms`),
       }))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("invalidates the runtime generation after cleanup is unconfirmed and prevents reuse until rebuild", async () => {
+    vi.useFakeTimers()
+    try {
+      const { deps, client, serverFactory } = buildRuntime({ abortHangs: true, rebuildDelayMs: 100 })
+      const runtime = new OpenCodeRuntime(deps)
+      await runtime.start()
+      client.sessionPrompt.mockImplementationOnce(() => new Promise<never>(() => {}))
+
+      const turnPromise = runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "must quarantine the uncertain turn",
+        deadlineMs: 1_000,
+      }, new AbortController().signal)
+      await vi.advanceTimersByTimeAsync(1_000)
+      await vi.advanceTimersByTimeAsync(CLEANUP_OPERATION_TIMEOUT_MS)
+
+      const result = await turnPromise
+      expect(result.ok).toBe(false)
+      expect(runtime.ready()).toBe(false)
+      expect(runtime.diagnostic()).toMatchObject({ code: "cleanup-unconfirmed" })
+      expect(await runtime.release("/tmp/projA")).toMatchObject({ outcome: "untracked" })
+
+      const blocked = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "must not overlap the old generation",
+      }, new AbortController().signal)
+      expect(blocked.ok).toBe(false)
+      expect(client.sessionPrompt).toHaveBeenCalledTimes(1)
+      expect(serverFactory).toHaveBeenCalledTimes(1)
+
+      await vi.advanceTimersByTimeAsync(100)
+      expect(serverFactory).toHaveBeenCalledTimes(2)
+      expect(runtime.ready()).toBe(true)
+
+      const recovered = await runtime.runTurn({
+        target: { runtime: "opencode", runtimeSessionId: null, workDir: "/tmp/projA" },
+        prompt: "run only on the rebuilt generation",
+      }, new AbortController().signal)
+      expect(recovered.ok).toBe(true)
+      expect(client.sessionPrompt).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

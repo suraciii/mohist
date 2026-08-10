@@ -37,6 +37,7 @@ export type { ParsedModelIdentifier, ParseModelResult } from "./model-string.js"
 
 export {
   DEFAULT_PROVIDER_ERROR_POLICY,
+  hasUnconfirmedCleanup,
   isNonRecoverableProviderMessage,
   isNonRecoverableProviderRetry,
   errorKindFor,
