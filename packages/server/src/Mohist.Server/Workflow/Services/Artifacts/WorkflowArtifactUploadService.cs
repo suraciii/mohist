@@ -184,7 +184,7 @@ public sealed class WorkflowArtifactUploadService : IScopedService
                     cancellationToken).ConfigureAwait(false);
             }
 
-            if (writeResult.Size != request.Size && request.Size >= 0)
+            if (kind == "file" && writeResult.Size != request.Size && request.Size >= 0)
             {
                 _log.LogWarning(
                     "Pending upload {UploadId} declared size {Declared} but wrote {Actual} bytes",

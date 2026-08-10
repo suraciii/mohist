@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mohist.Server.Infrastructure.Data.Db;
 using Mohist.Server.SpecTests.Support;
@@ -25,7 +26,9 @@ public class WorkflowArtifactUploadServiceSpecs
         _fixture = fixture;
     }
 
-    private WorkflowArtifactUploadService BuildService(StubWorkContextResolver? resolver = null)
+    private WorkflowArtifactUploadService BuildService(
+        StubWorkContextResolver? resolver = null,
+        ILogger<WorkflowArtifactUploadService>? log = null)
     {
         var dbFactory = _fixture.Services.GetRequiredService<IDbContextFactory<MohistDbContext>>();
         resolver ??= new StubWorkContextResolver();
@@ -33,7 +36,7 @@ public class WorkflowArtifactUploadServiceSpecs
             dbFactory,
             _storage,
             resolver,
-            NullLogger<WorkflowArtifactUploadService>.Instance,
+            log ?? NullLogger<WorkflowArtifactUploadService>.Instance,
             new FixedTimeProvider(new DateTimeOffset(2026, 6, 11, 12, 0, 0, TimeSpan.Zero)),
             TimeSpan.FromHours(24));
     }
@@ -317,7 +320,7 @@ public class WorkflowArtifactUploadServiceSpecs
         var resolver = new StubWorkContextResolver();
         resolver.Register(workflowRunId, workId, taskRunId);
 
-        var service = BuildService(resolver);
+        var service = BuildService(resolver, new ThrowOnWarningLogger<WorkflowArtifactUploadService>());
 
         // Build a directory envelope mirroring what the runner
         // produces: a JSON object with kind=directory and base64
@@ -485,11 +488,13 @@ public class WorkflowArtifactUploadServiceSpecs
     }
 
     [Theory]
-    [InlineData("not-valid-json")]
-    [InlineData("{\"kind\":\"directory\",\"files\":[]}")]
-    [InlineData("{\"kind\":\"file\",\"files\":[{\"path\":\"a.md\",\"data\":\"YQ==\"}]}")]
-    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"data\":\"!!!\"}]}")]
-    public async Task UploadAsync_DirectoryContent_MalformedEnvelopeReturnsInvalid(string envelopeJson)
+    [InlineData("not-valid-json", false)]
+    [InlineData("{\"kind\":\"directory\",\"files\":[]}", false)]
+    [InlineData("{\"kind\":\"file\",\"files\":[{\"path\":\"a.md\",\"data\":\"YQ==\"}]}", false)]
+    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"data\":\"!!!\"}]}", false)]
+    [InlineData("{\"kind\":\"directory\",\"files\":[{\"path\":\"a.md\",\"size\":2,\"data\":\"YQ==\"}]}", true)]
+    public async Task UploadAsync_DirectoryContent_MalformedEnvelopeReturnsInvalid(
+        string envelopeJson, bool assertEntrySizeDiagnostic)
     {
         // Directory envelope validation failures (bad JSON, wrong kind,
         // empty file list, invalid base64) must surface as an Invalid
@@ -516,6 +521,12 @@ public class WorkflowArtifactUploadServiceSpecs
 
         Assert.Equal(WorkflowArtifactUploadResultKind.Invalid, result.Kind);
         Assert.False(string.IsNullOrWhiteSpace(result.Error));
+        if (assertEntrySizeDiagnostic)
+        {
+            Assert.Contains("a.md", result.Error);
+            Assert.Contains("declared 2", result.Error);
+            Assert.Contains("wrote 1", result.Error);
+        }
     }
 
     [Fact]
