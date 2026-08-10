@@ -218,7 +218,7 @@ describe("RunnerHost", () => {
       heartbeatIntervalMs: QUIET_INTERVAL_MS,
       dispatchLivenessProbeIntervalMs: QUIET_INTERVAL_MS,
     })
-    blockingAction.mockResolvedValue({ output: { message: "ok" } })
+    blockingAction.mockResolvedValue({ error: { code: "action-failed", message: "runtime turn failed" }, exitCode: 1 })
     const run = host.run(controller.signal)
 
     try {
@@ -307,6 +307,8 @@ describe("RunnerHost", () => {
       await secondFailureLogged.promise
       await vi.advanceTimersByTimeAsync(AWAITING_ACK_RETRY_INTERVAL_MS)
       await thirdReport.promise
+
+      expect(report.mock.calls.map((calls) => calls[1]?.status)).toEqual(["failed", "failed", "failed"])
 
       controller.abort()
       await expect(run).resolves.toBeUndefined()
