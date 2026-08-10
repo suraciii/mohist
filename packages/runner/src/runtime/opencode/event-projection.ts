@@ -217,9 +217,27 @@ export function createRuntimeTurnEventProjector(
     return emitTool(callId, type, sourceState, toolName, rawInput, projected)
   }
 
+  const projectRuntimeFailure = (event: RuntimeGlobalEvent): RuntimeTurnEvent[] => {
+    const payload = event.payload ?? {}
+    const error = recordValue(payload["error"])
+    const message = stringValue(error?.["message"])
+      ?? stringValue(payload["error"])
+      ?? stringValue(payload["message"])
+      ?? "OpenCode Session failed"
+    return [build("turn.failed", {
+      code: "turn-failed",
+      failureReason: message,
+      message,
+      source: event.type,
+    })]
+  }
+
   const project = (event: RuntimeGlobalEvent): RuntimeTurnEvent[] => {
     const payload = event.payload ?? {}
     switch (event.type) {
+      case "session.next.step.failed":
+      case "session.error":
+        return projectRuntimeFailure(event)
       case "message.updated": {
         const info = recordValue(payload["info"])
         return info ? projectMessage(info) : []
