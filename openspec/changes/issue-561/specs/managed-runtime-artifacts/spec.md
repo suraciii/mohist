@@ -45,6 +45,21 @@ Managed service definitions SHALL start the active installed Server and Runner a
 - **THEN** the managed services can resolve their configured absolute artifact paths
 - **AND** service startup does not silently switch to another worktree or relative output
 
+### Requirement: Publish a complete platform launch contract
+The Server candidate SHALL be published as a self-contained, single-file executable for `linux-x64` or `win-x64`, with web assets included from the transaction's staged web output. Its release entry SHALL record the runtime identifier, executable path, working directory, arguments, and non-secret runtime environment values. The Runner release SHALL record the absolute supported Node executable, candidate `dist/cli.js`, and dependency root. Stable launchers SHALL execute only these recorded target fields; they SHALL not invoke `dotnet`, an SDK, a project file, a source path, a relative Node path, or a PATH-resolved Node binary.
+
+#### Scenario: Server release starts without the SDK or source tree
+- **WHEN** a `linux-x64` or `win-x64` Server release is activated after the source worktree and .NET SDK are unavailable
+- **THEN** its stable launcher executes the recorded self-contained Server executable and recorded arguments from the managed release
+- **AND** web assets resolve from that same release
+- **AND** startup does not read a project file, source worktree, relative publish directory, or current working directory
+
+#### Scenario: Runner release uses the recorded host and dependencies
+- **WHEN** a managed Runner release is activated after the source worktree and workspace dependencies are unavailable
+- **THEN** its stable launcher executes the recorded absolute supported Node executable with the candidate `dist/cli.js`
+- **AND** module resolution uses only the candidate dependency root or its recorded immutable dependency store
+- **AND** a missing or unsupported Node host fails activation before the candidate is selected
+
 ### Requirement: Resolve one deterministic managed runtime root
 The managed runtime root SHALL be absolute and deterministic across CLI, service launcher, and recovery processes. The first implementation SHALL use `$HOME/.local/share/mohist/runtime` on Linux and `%LOCALAPPDATA%/Mohist/runtime` on Windows, with tests injecting an equivalent absolute root. The implementation SHALL not depend on a process working directory or an unresolved runtime-root configuration.
 

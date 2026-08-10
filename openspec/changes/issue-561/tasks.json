@@ -10,10 +10,10 @@
       "acceptanceCriteria": [
         "Explicit roots are normalized to absolute paths, default roots are resolved once, and dry-run/human output distinguishes the selection mode, root, and target revision.",
         "Missing, unusable, dirty, revision-less, unsnapshotable, or unwritable-root inputs fail before any managed service target is stopped or replaced and report the selected root, target revision, and failure reason.",
-        "Server, web, Runner, and CLI builds read source files only from SnapshotRoot and write intermediates, generated metadata, web output, and candidate artifacts only under BuildWorkspaceRoot or CandidateRoot; the snapshot marker and source digest remain unchanged.",
+        "BuildWorkspaceRoot is the writable transaction parent of the read-only SnapshotRoot and contains the explicit build dependency projection, npm cache, NuGet cache, .NET intermediates, and generated metadata; Server, web, Runner, and CLI builds run with SnapshotRoot as their source directory and write no output or dependency files to SnapshotRoot.",
         "The continuation process loads the original source context and transaction state by ID, including SnapshotRoot, BuildWorkspaceRoot, CandidateRoot, and recovery CLI path after the CLI executable has been replaced.",
         "A legacy CLI without the transaction schema returns bootstrap_required before replacing the CLI, stopping a service, or changing active.json; the supported bootstrap handoff is explicit and tested.",
-        "Focused CLI tests cover explicit/default roots, invalid source failure ordering, single revision resolution, immutable snapshot creation, source mutation during build, write-boundary enforcement, bootstrap refusal, dry-run reporting, and continuation argument/state propagation using fake command and filesystem boundaries."
+        "Focused CLI tests cover explicit/default roots, invalid source failure ordering, single revision resolution, immutable snapshot creation, source mutation during build, exact build-command/output/cache properties, absent source/workspace dependencies, write-boundary enforcement, bootstrap refusal, dry-run reporting, and continuation argument/state propagation using fake command and filesystem boundaries."
       ],
       "priority": 1,
       "mode": "AFK",
@@ -30,10 +30,10 @@
       "description": "Implement the managed runtime store and release-oriented artifact builder for Server, web, Runner, and CLI outputs. Keep the source snapshot read-only, stage a self-contained Runner dependency closure, and extend both service-installer backends to use stable absolute launchers and atomically activate a complete RuntimeTargetSet from a candidate release while preserving data roots and credentials outside the release.",
       "acceptanceCriteria": [
         "A successful full build creates an isolated release directory containing release.json plus the required Server, web, Runner, and CLI artifacts, with one canonical source revision/version/release identity recorded for the set; component builds retain untouched active entries.",
-        "Server and web publishing read from the immutable snapshot but write MSBuild, web, generated metadata, and publish output only to transaction-owned roots; Runner metadata uses the transaction identity and an explicit output path rather than source-tree git discovery.",
+        "Server and web publishing read from the immutable snapshot but use the explicit BuildEnvironment contract for MSBuild intermediate/restore paths, npm/toolchain dependencies, web output, generated metadata, and publish output; Runner metadata uses the transaction identity and an explicit output path rather than source-tree git discovery.",
         "The managed Runner release contains its runtime package.json, compiled dist, all lockfile-resolved production dependencies, and a dependency manifest that does not resolve through the source worktree or workspace node_modules.",
         "A Server, Runner, or required metadata failure leaves the previous active release and service target unchanged and never exposes a partial candidate as active.",
-        "The Linux runtime root is $HOME/.local/share/mohist/runtime and the Windows runtime root is %LOCALAPPDATA%/Mohist/runtime; both installer backends use stable absolute launchers that resolve one atomically replaced active target record.",
+        "The Server is published self-contained and single-file for linux-x64 or win-x64, the release manifest records its executable/working directory/arguments/runtime identifier, the Runner records an absolute supported Node executable and dependency root, and both installer backends use stable absolute launchers that resolve one atomically replaced active target record.",
         "Artifact-store, snapshot write-boundary, dependency-closure, active-record, build-command, release-manifest, systemd-rendering, Windows-launcher, and source-removal tests use fake process/filesystem boundaries and verify the release starts without the source worktree or workspace dependencies."
       ],
       "priority": 2,

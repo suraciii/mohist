@@ -37,11 +37,12 @@ Add an `UpdateSourceContext` owned by the CLI update boundary. It contains:
 - the full source revision returned by `git rev-parse HEAD` from that root;
 - the immutable snapshot root materialized from that exact revision;
 - the source snapshot marker/digest used to validate the snapshot without relying on a `.git` directory;
-- the transaction-owned writable build workspace root and candidate release root;
+- the transaction-owned writable `BuildWorkspaceRoot` and candidate release root;
+- the build-time dependency projection and toolchain identities used by every build command;
 - the clean/usable validation result needed to build an identity; and
 - the requested update scope and CLI path needed by the transaction.
 
-The resolver runs once before CLI publication, service changes, or artifact builds. It rejects a missing root, a root without `Mohist.sln`, an unavailable Git revision, and a dirty worktree, then materializes the resolved revision into a staging snapshot and makes the source files read-only to builders. The snapshot carries a sidecar source marker and digest because a staged source tree is not required to contain `.git`. The transaction creates separate writable `BuildWorkspaceRoot` and `CandidateRoot` directories; compiler intermediates, web output, generated identity files, dependency staging, and release files are written only there. The clean-worktree rule is deliberate: a Git HEAD alone cannot identify uncommitted content, and the issue acceptance criteria explicitly use a clean source directory. Snapshot creation, snapshot validation, and writable-root preparation are part of preflight; a failure stops before managed runtime state changes. Every operation receives the context rather than calling `ResolveRepoRoot` or `git rev-parse` again.
+The resolver runs once before CLI publication, service changes, or artifact builds. It rejects a missing root, a root without `Mohist.sln`, an unavailable Git revision, and a dirty worktree, then materializes the resolved revision into a staging snapshot and makes the source files read-only to builders. The snapshot carries a sidecar source marker and digest because a staged source tree is not required to contain `.git`. `BuildWorkspaceRoot` is the writable transaction directory and is the parent of the read-only `SnapshotRoot`; it contains only `build/`, build-time dependency/tool caches, and the transaction's `candidate/` directory. The build dependency projection is materialized from a lockfile-matching preinstalled cache with no network access; the supported .NET SDK, Node/npm versions, and toolchain paths are recorded in the transaction, and missing or mismatched tools fail preflight. Compiler intermediates, web output, generated identity files, dependency staging, and release files are written only below `BuildWorkspaceRoot` or `CandidateRoot`. The clean-worktree rule is deliberate: a Git HEAD alone cannot identify uncommitted content, and the issue acceptance criteria explicitly use a clean source directory. Snapshot creation, snapshot validation, toolchain/dependency preparation, and writable-root preparation are part of preflight; a failure stops before managed runtime state changes. Every operation receives the context rather than calling `ResolveRepoRoot` or `git rev-parse` again.
 
 The existing mutable `UpdateContext.SourceHead` becomes a value from this context. Human output and dry-run output use the same context to label explicit/default source mode, authority root, snapshot root, build workspace, candidate root, and target revision. Build commands read source files only from `SnapshotRoot`; the requested repository root is retained for reporting and source-authority diagnostics.
 
@@ -69,12 +70,12 @@ The product runtime root is fixed for the first implementation: `$HOME/.local/sh
 
 ```text
 <managed-runtime-root>/
-  snapshots/<job-id>/
-    source-marker.json
   releases/<release-id>/
     release.json
     cli/mo
-    server/...
+    server/
+      Mohist.Server
+      web-assets/...
     runner/
       dist/...
       package.json
@@ -83,15 +84,25 @@ The product runtime root is fixed for the first implementation: `$HOME/.local/sh
   active.json
   transactions/<job-id>/
     record.json
-    build/...
+    snapshot/
+      source-marker.json
+      ...read-only source files...
+    build/
+      dotnet/obj/...
+      web/dist/...
+      cli-generated/...
+      node-modules/...
+      npm-cache/...
+      nuget/...
     candidate/...
   dependencies/node/<lock-id>/...
+  dependencies/node/build/<lock-id>/...
   launchers/server
   launchers/runner
   launchers/cli
 ```
 
-`release.json` is the canonical local artifact record. It contains the release ID, authority source root, source revision, scope, canonical version, snapshot marker/digest, dependency-lock identity, and one entry per built component with `component`, `version`, `sourceRevision`, `releaseId`, and an absolute artifact path. A candidate is complete only when the required component files, runtime dependency closure, and manifest are present. `active.json` is one atomically replaced activation record containing a generation, transaction ID, status, and the complete CLI/Server/Runner target set. Component-scoped updates replace one entry while retaining the other active entries and are reported as scoped; a full update publishes one shared release ID for all three entries. A candidate is never written in place over an active release.
+`release.json` is the canonical local artifact record. It contains the release ID, authority source root, source revision, scope, canonical version, snapshot marker/digest, dependency-lock identity, build-toolchain identity, and one entry per built component with `component`, `version`, `sourceRevision`, `releaseId`, and an absolute artifact path. Each Server entry also records `runtimeIdentifier`, `entrypoint`, `workingDirectory`, `arguments`, and non-secret runtime environment names; each Runner entry records the absolute `nodeExecutable` and supported Node major. A candidate is complete only when the required component files, runtime dependency closure, launch metadata, and manifest are present. `active.json` is one atomically replaced activation record containing a generation, transaction ID, status, and the complete CLI/Server/Runner target set. Component-scoped updates replace one entry while retaining the other active entries and are reported as scoped; a full update publishes one shared release ID for all three entries. A candidate is never written in place over an active release.
 
 The canonical release identity is generated before any artifact is compiled: the normalized full source revision is lowercase with no whitespace, `version` is `0.0.0+<sourceRevision>`, and `releaseId` is `mohist-full-<sourceRevision>` for a full release or `mohist-<scope>-<sourceRevision>` for a component release. Build timestamps, host paths, package-manager paths, and compatibility package versions do not enter the identity. Stable absolute launchers read `active.json` at process start, so services never read the source worktree and never observe a partially written target record.
 
@@ -101,15 +112,17 @@ The canonical release identity is generated before any artifact is compiled: the
 
 ### D. Publish artifacts into the candidate release, then activate service targets
 
-`UpdateOperations` gains release-oriented build methods. The Server publish command reads the project from `SnapshotRoot`, writes MSBuild intermediates below `BuildWorkspaceRoot/server`, and writes its publish output below `CandidateRoot/server`. The web typecheck/build reads `SnapshotRoot/packages/web` but receives an explicit output directory below `BuildWorkspaceRoot/web`; the Server publish target copies that staged web output into `CandidateRoot/server/wwwroot` instead of reading `SnapshotRoot/packages/web/dist`. No command uses the source tree's default `bin`, `obj`, `dist`, or `.publish` location.
+`UpdateOperations` gains release-oriented build methods and one `BuildEnvironment` contract. All commands use `cwd=SnapshotRoot` and receive explicit roots; no command uses a source-tree default `bin`, `obj`, `dist`, `.publish`, `node_modules`, npm cache, or NuGet cache. The environment assigns `MSBuildProjectExtensionsPath` and `BaseIntermediateOutputPath` below `BuildWorkspaceRoot/build/dotnet/obj`, `RestorePackagesPath` and `NUGET_PACKAGES` below `BuildWorkspaceRoot/build/nuget`, `WebOutputRoot` to `BuildWorkspaceRoot/build/web/dist`, `RunnerOutputRoot` to `CandidateRoot/runner/dist`, `CliGeneratedRoot` to `BuildWorkspaceRoot/build/cli-generated`, and the npm cache and build dependency projection to `BuildWorkspaceRoot/build/npm-cache` and `BuildWorkspaceRoot/build/node-modules`. The npm/Node adapter resolves all build-time packages from that projection and never installs from or writes to `SnapshotRoot`.
+
+The web builder invokes `tsc -p <SnapshotRoot>/packages/web/tsconfig.json --noEmit` and Vite with an explicit `--outDir <WebOutputRoot>` and explicit config path; the web assertion receives the same output root. The Server builder invokes `dotnet publish <SnapshotRoot>/packages/server/src/Mohist.Server/Mohist.Server.csproj -c Release -r <runtimeIdentifier> --self-contained true /p:PublishSingleFile=true /p:PublishTrimmed=false /p:BaseIntermediateOutputPath=<BuildWorkspaceRoot>/build/dotnet/obj/ /p:MSBuildProjectExtensionsPath=<BuildWorkspaceRoot>/build/dotnet/obj/ /p:RestorePackagesPath=<BuildWorkspaceRoot>/build/nuget/ /p:WebSourceRoot=<SnapshotRoot>/packages/web /p:WebOutputRoot=<WebOutputRoot> /p:PublishDir=<CandidateRoot>/server/`. The publish target copies only `<WebOutputRoot>` into the Server candidate. The CLI publish uses the same isolated .NET properties and generated-source root. Supported Server runtime identifiers are `linux-x64` and `win-x64`; an unsupported host fails preflight.
 
 The Runner builder reads TypeScript source and package metadata from `SnapshotRoot`, writes compiler output to `CandidateRoot/runner/dist`, and writes `build-info.json` with the transaction's canonical identity and explicit output path; it does not invoke a script that runs `git rev-parse` or writes under the snapshot. Before publication, the builder materializes the lockfile-resolved production dependency closure into `CandidateRoot/runner/node_modules` and writes the runtime `package.json` and dependency manifest beside it. The package-manager cache/toolchain used to build is separate from the release dependency closure. The update may reuse a preinstalled lockfile-matching cache but does not fetch dependencies from the network; if the closure is unavailable, staging fails before activation.
 
-The CLI is published into `CandidateRoot/cli` from the same snapshot. The builder supplies the canonical identity through generated source under `BuildWorkspaceRoot/cli-generated` and redirects .NET intermediates and publish output to transaction-owned paths. The generated identity is compiled into the executable; it is not read from the mutable authority worktree or launcher environment.
+The CLI is published into `CandidateRoot/cli` from the same snapshot. The builder supplies the canonical identity through generated source under `BuildWorkspaceRoot/build/cli-generated` and redirects .NET intermediates and publish output to transaction-owned paths. The generated identity is compiled into the executable; it is not read from the mutable authority worktree or launcher environment.
 
 The Runner build manifest is extended from `{ gitHash, builtAt }` to include `component`, `version`, `sourceRevision`, and `releaseId`, plus the dependency-lock identity. Server `RuntimeBuildInfo` is extended with the same release identity and reads it from generated artifact-owned metadata. The service environment includes expected identity values only as a cross-check; a missing or conflicting embedded value is unavailable identity, and no managed artifact falls back to source HEAD.
 
-Extend `IServiceInstaller` with a target-set activation seam. A `RuntimeTargetSet` contains the complete CLI, Server, and Runner entries, absolute launcher paths, managed release working directories, data roots, and identity environment values. The systemd backend and the Windows scheduled-task/Startup backend are installed once with stable absolute launchers; those launchers resolve the component entry from `active.json` and never use a source worktree or relative `dist` path. Existing data directories, enrollment credentials, operator credentials, and `RUNNER_ROOT` remain outside the release and are passed through unchanged.
+Extend `IServiceInstaller` with a target-set activation seam. A `RuntimeTargetSet` contains the complete CLI, Server, and Runner entries, absolute launcher paths, managed release working directories, data roots, runtime identifiers, entrypoints, arguments, supported absolute Node executable, and identity environment values. The Server candidate is a self-contained single-file executable at `server/Mohist.Server` for `linux-x64` or `win-x64`; its launcher never invokes `dotnet`, an SDK, a project file, or a source path. The Runner launcher uses the recorded absolute Node executable and the candidate `runner/dist/cli.js`, with its recorded dependency root. The systemd backend and the Windows scheduled-task/Startup backend are installed once with stable absolute launchers; those launchers resolve the component entry from `active.json` and never use a source worktree or relative `dist` path. Existing data directories, enrollment credentials, operator credentials, and `RUNNER_ROOT` remain outside the release and are passed through unchanged.
 
 The activation coordinator writes or replaces the complete `active.json` target record only after the candidate release is complete and the transaction write-ahead record is durable. It then reloads the stable launcher units and restarts only the components in the update scope. A component update changes one target entry but publishes the complete record atomically. Legacy unit migration stages unit files and keeps backups under the transaction record; a partial migration is reconciled before any candidate is treated as active.
 
@@ -211,7 +224,7 @@ On Server startup, persisted web-owned jobs in `running` or `waiting-for-reconne
 ## Migration Plan
 
 1. Add `RuntimeIdentity`, `UpdateSourceContext`, fixed `RuntimeRootResolver`, immutable snapshot materialization, writable build/candidate roots, release manifest serialization, and the transaction store with unit tests. Preserve current command registration while routing all update scopes through the single source resolver and returning `bootstrap_required` for legacy CLIs.
-2. Add staged Server, web, Runner, and CLI artifact builds from `SnapshotRoot` with all writes redirected to transaction-owned roots. Update Runner build-info/dependency closure generation, generated CLI identity metadata, and Server artifact-owned runtime identity to carry release metadata. Add dry-run output for snapshot, build, dependency, release, and target identities.
+2. Add staged Server, web, Runner, and CLI artifact builds from `SnapshotRoot` with the explicit `BuildEnvironment` contract and all writes redirected to transaction-owned roots. Update Runner build-info/dependency closure generation, generated CLI identity metadata, self-contained Server publish/launcher metadata, and Server artifact-owned runtime identity to carry release metadata. Add dry-run output for snapshot, toolchain, build, dependency, release, and target identities.
 3. Add stable absolute launchers for systemd and Windows scheduled-task/Startup fallback. Make `active.json` the single atomic target-set pointer and migrate supported units without silently rewriting unsupported custom source-bound units.
 4. Add activation/rollback orchestration, transaction-ID continuation, and crash reconciliation. Publish a complete candidate active-target record only after staging; commit it as verified only after required readback, and restore it when verification or reconciliation fails.
 5. Make CLI, Server, and Runner identity checks fail closed, implement the explicit full/component operation matrix, reject and quarantine the Server web mutation path, and extend terminal/outcome reporting with target/observed facts.

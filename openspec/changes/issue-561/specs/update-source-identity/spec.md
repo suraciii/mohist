@@ -12,7 +12,7 @@ The update command SHALL resolve one effective repository root before it perform
 - **AND** the resolved root is recorded as a default-root update rather than being indistinguishable from an explicit-root update
 
 ### Requirement: Carry an immutable source identity through the update
-The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, the immutable `SnapshotRoot` used as read-only source input, and transaction-owned writable `BuildWorkspaceRoot` and `CandidateRoot` paths. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
+The command SHALL create an update source context containing the effective normalized repository root, the source revision identity resolved from that root, the immutable `SnapshotRoot` used as read-only source input, transaction-owned writable `BuildWorkspaceRoot` and `CandidateRoot` paths, and the lockfile/toolchain identities used for the build. `BuildWorkspaceRoot` SHALL be the writable transaction parent of `SnapshotRoot` and SHALL contain the build dependency projection, npm cache, NuGet cache, compiler intermediates, and generated metadata; it SHALL not contain an untracked source copy. The context SHALL be passed unchanged to CLI self-update continuation, Server build, Runner build, artifact installation, service activation, and runtime verification. No stage SHALL independently re-resolve a root or compare against the process working directory.
 
 #### Scenario: Server and Runner are built from the same explicit source
 - **WHEN** the selected repository root resolves to source revision `target-123`
@@ -21,7 +21,7 @@ The command SHALL create an update source context containing the effective norma
 - **AND** the installed services and final verification use that same target identity
 
 ### Requirement: Build from an immutable source snapshot
-After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. Build commands SHALL read source files only from `SnapshotRoot` and SHALL write compiler intermediates, generated metadata, web output, and candidate artifacts only under `BuildWorkspaceRoot` or `CandidateRoot`; no build command may write to `SnapshotRoot`. The requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation or writable build-root preparation failure SHALL stop the update before managed runtime state is changed.
+After resolving a usable clean source revision, the command SHALL materialize a read-only build snapshot of that revision before any artifact build or service change. Build commands SHALL run with `SnapshotRoot` as their source working directory, use the transaction's explicit .NET intermediate/restore paths and Node/npm dependency projection, and write compiler intermediates, generated metadata, web output, and candidate artifacts only under `BuildWorkspaceRoot` or `CandidateRoot`; no build command may write to `SnapshotRoot` or use its `node_modules`. Missing lockfile-matching build dependencies, supported SDK/toolchain versions, or explicit output paths SHALL fail before artifact staging. The requested repository root remains the reported source authority but changes to it after snapshot creation SHALL not change the candidate artifacts. Snapshot creation or writable build-root preparation failure SHALL stop the update before managed runtime state is changed.
 
 #### Scenario: Selected worktree changes after source resolution
 - **WHEN** the selected repository resolves to `target-123` and the original worktree is modified or advances after the snapshot is materialized
@@ -33,6 +33,12 @@ After resolving a usable clean source revision, the command SHALL materialize a 
 - **THEN** all compiler intermediates, generated identity files, web output, and Runner build metadata are written below the transaction build or candidate roots
 - **AND** the snapshot revision marker and source-file digest remain unchanged
 - **AND** the candidate records both the snapshot revision and its writable output roots
+
+#### Scenario: Build commands use the isolated build contract
+- **WHEN** the selected revision is built with no source-tree `node_modules` and no writable source output directories
+- **THEN** web typecheck/Vite, Server publish/restore, Runner compilation/dependency staging, and CLI publish use the recorded build dependency/toolchain projection
+- **AND** .NET `obj`/NuGet files, npm cache and dependency files, web output, generated CLI identity, Runner output, and Server publish output are all below `BuildWorkspaceRoot` or `CandidateRoot`
+- **AND** the command records the exact runtime identifier, toolchain identity, and output roots in the transaction
 
 #### Scenario: Snapshot creation fails
 - **WHEN** the selected revision is readable but the immutable build snapshot cannot be materialized
