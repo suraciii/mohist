@@ -127,6 +127,7 @@ internal partial class SourceCodeUpdater
     private readonly RunnerRefreshVerifier _runnerRefreshVerifier;
     private readonly UpdateOutcomeReporter _outcomeReporter;
     private readonly TimeProvider _timeProvider;
+    private readonly bool _managedUpdatesEnabled;
 
     public SourceCodeUpdater(
         TextWriter output,
@@ -137,7 +138,8 @@ internal partial class SourceCodeUpdater
         RunnerRefreshVerifier runnerRefreshVerifier,
         UpdateOutcomeReporter outcomeReporter,
         TimeSpan? serverReadyTimeout = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool managedUpdatesEnabled = true)
     {
         _out = output;
         _err = error;
@@ -148,6 +150,7 @@ internal partial class SourceCodeUpdater
         _outcomeReporter = outcomeReporter;
         _serverReadyTimeout = serverReadyTimeout ?? ServerReadyTimeout;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _managedUpdatesEnabled = managedUpdatesEnabled;
     }
 
     public const string ServerUrlEnvironmentVariable = "MOHIST_SERVER_URL";
@@ -167,7 +170,8 @@ internal partial class SourceCodeUpdater
         TimeSpan? runnerIdentityPollInterval = null,
         Func<string?>? getLocalHostname = null,
         string? unitDir = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        bool managedUpdatesEnabled = true)
     {
         var fs = fileSystem ?? RealFileSystem.Instance;
         var env = environment ?? SystemEnvironmentVariableProvider.Instance;
@@ -206,7 +210,8 @@ internal partial class SourceCodeUpdater
             runnerRefreshVerifier,
             outcomeReporter,
             serverReadyTimeout,
-            timeProvider);
+            timeProvider,
+            managedUpdatesEnabled);
     }
 
     internal RuntimeConsistencyValidator Validator => _validator;
@@ -225,6 +230,17 @@ internal partial class SourceCodeUpdater
         CancellationToken cancellationToken = default,
         bool continueAfterCliUpdate = false)
     {
+        if (!dryRun && _managedUpdatesEnabled)
+        {
+            return await ExecuteManagedUpdateAsync(
+                repoRoot,
+                "full",
+                dryRun: false,
+                cliPath,
+                cancellationToken,
+                postOutcome: true);
+        }
+
         var resolvedCliPath = await ResolveCliPathAsync(cliPath);
         var context = new UpdateContext(dryRun, repoRoot, resolvedCliPath, cancellationToken);
         if (string.IsNullOrWhiteSpace(resolvedCliPath))

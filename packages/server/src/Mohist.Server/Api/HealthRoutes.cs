@@ -14,6 +14,10 @@ public static class HealthRoutes
                 timestamp = DateTime.UtcNow.ToString("o"),
                 version = buildInfo.Version,
                 gitHash = buildInfo.GitHash,
+                treeHash = buildInfo.TreeHash,
+                artifactDigest = buildInfo.ArtifactDigest,
+                releaseId = buildInfo.ReleaseId,
+                generation = buildInfo.Generation,
             });
         });
 

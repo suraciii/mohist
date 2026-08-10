@@ -1,3 +1,4 @@
+using System.Globalization;
 using Mohist.Server.Agent.Grains;
 using Mohist.Server.Infrastructure.Data.AgentJobs;
 using Mohist.Server.Infrastructure.Data.Db;
@@ -33,6 +34,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
     private RunnerStatus _status = RunnerStatus.Offline;
     private RunnerInfo? _info;
     private string? _pendingBuildGitHash;
+    private PendingRuntimeIdentity? _pendingRuntimeIdentity;
     private readonly IPersistentState<RunnerState> _state;
     private readonly IPersistentState<LegacyRunnerRegistrationState> _legacyState;
     private readonly SemaphoreSlim _lifecycleGate = new(1, 1);
@@ -146,6 +148,7 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
             _status = RunnerStatus.Online;
             _lastPresenceAt = _timeProvider.GetUtcNow();
             _pendingBuildGitHash = null;
+            _pendingRuntimeIdentity = null;
             _slots = await _definitions.GetOrInitAsync(RunnerId);
             await PersistAsync();
             await UpsertRegistryAsync();
@@ -421,11 +424,101 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         }
     }
 
+    public async Task UpdateRuntimeIdentityAsync(
+        string? buildGitHash,
+        string? component,
+        string? version,
+        string? sourceRevision,
+        string? treeHash,
+        string? artifactDigest,
+        string? releaseId,
+        long? generation,
+        string? connectionGeneration = null)
+    {
+        await _lifecycleGate.WaitAsync();
+        try
+        {
+            if (_info is null)
+            {
+                _pendingRuntimeIdentity = new PendingRuntimeIdentity(
+                    NormalizeIdentity(buildGitHash),
+                    NormalizeIdentity(component),
+                    NormalizeIdentity(version),
+                    NormalizeIdentity(sourceRevision),
+                    NormalizeIdentity(treeHash),
+                    NormalizeIdentity(artifactDigest),
+                    NormalizeIdentity(releaseId),
+                    generation is > 0 ? generation : null,
+                    NormalizeIdentity(connectionGeneration));
+                _pendingBuildGitHash = _pendingRuntimeIdentity.BuildGitHash;
+                return;
+            }
+
+            var normalizedConnectionGeneration = NormalizeIdentity(connectionGeneration);
+            if (IsStaleConnectionGeneration(_info.ConnectionGeneration, normalizedConnectionGeneration))
+                return;
+
+            var next = _info with
+            {
+                BuildGitHash = NormalizeIdentity(buildGitHash) ?? _info.BuildGitHash,
+                Component = NormalizeIdentity(component) ?? _info.Component,
+                Version = NormalizeIdentity(version) ?? _info.Version,
+                SourceRevision = NormalizeIdentity(sourceRevision) ?? _info.SourceRevision,
+                TreeHash = NormalizeIdentity(treeHash) ?? _info.TreeHash,
+                ArtifactDigest = NormalizeIdentity(artifactDigest) ?? _info.ArtifactDigest,
+                ReleaseId = NormalizeIdentity(releaseId) ?? _info.ReleaseId,
+                Generation = generation is > 0 ? generation : _info.Generation,
+                ConnectionGeneration = normalizedConnectionGeneration ?? _info.ConnectionGeneration,
+            };
+            if (Equals(next, _info))
+                return;
+
+            SetRunnerInfo(next);
+            await PersistAsync();
+            if (_status == RunnerStatus.Online)
+                await UpsertRegistryAsync();
+        }
+        finally
+        {
+            _lifecycleGate.Release();
+        }
+    }
+
+    private static string? NormalizeIdentity(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsStaleConnectionGeneration(string? current, string? incoming)
+    {
+        if (string.IsNullOrWhiteSpace(current))
+            return false;
+        if (string.IsNullOrWhiteSpace(incoming))
+            return true;
+        var currentParts = current.Split(':', 2, StringSplitOptions.None);
+        var incomingParts = incoming.Split(':', 2, StringSplitOptions.None);
+        if (currentParts.Length == 2
+            && incomingParts.Length == 2
+            && long.TryParse(currentParts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var currentValue)
+            && long.TryParse(incomingParts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var incomingValue))
+        {
+            return string.Equals(currentParts[0], incomingParts[0], StringComparison.Ordinal)
+                && incomingValue < currentValue;
+        }
+        return !string.Equals(current, incoming, StringComparison.Ordinal);
+    }
+
     private RunnerInfo InfoForRegister(RunnerInfo info)
     {
         return info with
         {
-            BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash,
+            BuildGitHash = info.BuildGitHash ?? _pendingRuntimeIdentity?.BuildGitHash ?? _pendingBuildGitHash,
+            Component = info.Component ?? _pendingRuntimeIdentity?.Component,
+            Version = info.Version ?? _pendingRuntimeIdentity?.Version,
+            SourceRevision = info.SourceRevision ?? _pendingRuntimeIdentity?.SourceRevision,
+            TreeHash = info.TreeHash ?? _pendingRuntimeIdentity?.TreeHash,
+            ArtifactDigest = info.ArtifactDigest ?? _pendingRuntimeIdentity?.ArtifactDigest,
+            ReleaseId = info.ReleaseId ?? _pendingRuntimeIdentity?.ReleaseId,
+            Generation = info.Generation ?? _pendingRuntimeIdentity?.Generation,
+            ConnectionGeneration = info.ConnectionGeneration ?? _pendingRuntimeIdentity?.ConnectionGeneration,
             RegisteredAt = info.RegisteredAt ?? _timeProvider.GetUtcNow(),
             ActionCatalog = info.ActionCatalog,
         };
@@ -436,6 +529,14 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         return info with
         {
             BuildGitHash = info.BuildGitHash ?? _pendingBuildGitHash ?? _info?.BuildGitHash,
+            Component = info.Component ?? _info?.Component,
+            Version = info.Version ?? _info?.Version,
+            SourceRevision = info.SourceRevision ?? _info?.SourceRevision,
+            TreeHash = info.TreeHash ?? _info?.TreeHash,
+            ArtifactDigest = info.ArtifactDigest ?? _info?.ArtifactDigest,
+            ReleaseId = info.ReleaseId ?? _info?.ReleaseId,
+            Generation = info.Generation ?? _info?.Generation,
+            ConnectionGeneration = info.ConnectionGeneration ?? _info?.ConnectionGeneration,
             RegisteredAt = _info?.RegisteredAt ?? info.RegisteredAt ?? _timeProvider.GetUtcNow(),
             ActionCatalog = info.ActionCatalog,
         };
@@ -449,6 +550,17 @@ public class RunnerGrain : Grain, IRunnerGrain, IRemindable
         var registry = GrainFactory.GetGrain<IRunnerRegistryGrain>(RunnerRegistryKeys.Global);
         await registry.RegisterAsync(_info);
     }
+
+    private sealed record PendingRuntimeIdentity(
+        string? BuildGitHash,
+        string? Component,
+        string? Version,
+        string? SourceRevision,
+        string? TreeHash,
+        string? ArtifactDigest,
+        string? ReleaseId,
+        long? Generation,
+        string? ConnectionGeneration);
 
     public Task<RunnerInfo?> GetInfoAsync()
     {
