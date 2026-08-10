@@ -7,11 +7,17 @@ import { WorkspaceHomeClaimedError } from "../runtime/workspace-entity.js"
 
 export class ServerConnection {
   private readonly buildGitHash: string | null
+  private readonly artifactDigest: string | null
   private readonly credential: string | null
   readonly runnerId: string
 
-  constructor(private readonly options: RunnerOptions, buildGitHash: string | null = null) {
+  constructor(
+    private readonly options: RunnerOptions,
+    buildGitHash: string | null = null,
+    artifactDigest: string | null = null,
+  ) {
     this.buildGitHash = buildGitHash
+    this.artifactDigest = artifactDigest
     this.credential = options.credential ?? null
     this.runnerId = options.runnerId
   }
@@ -25,15 +31,32 @@ export class ServerConnection {
   }
 
   async connect(registration: RunnerRegistration, signal: AbortSignal) {
-    await this.post("register", { hostname: hostname(), ...registration }, signal)
+    await this.post("register", {
+      hostname: hostname(),
+      ...registration,
+      buildGitHash: this.buildGitHash,
+      artifactDigest: this.artifactDigest,
+      runtimeGeneration: this.options.runtimeGeneration ?? null,
+      runtimeSessionToken: this.options.runtimeSessionToken ?? null,
+    }, signal)
   }
 
   async heartbeat(state: RunnerRegistration, signal: AbortSignal) {
-    await this.post("heartbeat", { hostname: hostname(), ...state, buildGitHash: this.buildGitHash }, signal)
+    await this.post("heartbeat", {
+      hostname: hostname(),
+      ...state,
+      buildGitHash: this.buildGitHash,
+      artifactDigest: this.artifactDigest,
+      runtimeGeneration: this.options.runtimeGeneration ?? null,
+      runtimeSessionToken: this.options.runtimeSessionToken ?? null,
+    }, signal)
   }
 
   async disconnect(signal: AbortSignal) {
-    await this.post("unregister", undefined, signal)
+    await this.post("unregister", {
+      runtimeGeneration: this.options.runtimeGeneration ?? null,
+      runtimeSessionToken: this.options.runtimeSessionToken ?? null,
+    }, signal)
   }
 
   /**

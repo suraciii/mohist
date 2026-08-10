@@ -48,7 +48,8 @@ public sealed class SystemInfoService : ISingletonService
             Running: new RunningInfo(
                 _runtimeBuildInfo.Version,
                 _runtimeBuildInfo.GitHash,
-                _runtimeBuildInfo.StartedAt),
+                _runtimeBuildInfo.StartedAt,
+                _runtimeBuildInfo.ArtifactDigest),
             Source: source,
             Install: new InstallInfo(
                 install.Mode,

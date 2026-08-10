@@ -29,7 +29,7 @@ internal partial class SourceCodeUpdater
         {
             var reason = "runner service is not installed";
             context.RecordStage(StageLabels.PrepareRunner, reason);
-            _out.WriteLine("Runner service is not installed; skipping pre-server runner stop.");
+            _out.WriteLine("Runner service is not installed; skipping managed runner candidate preparation.");
             _out.WriteLine($"Runner refresh skipped: {reason}");
             _runnerRefreshVerifier.WriteSkippedSummary(reason, _out, _err);
             return 0;
@@ -47,22 +47,93 @@ internal partial class SourceCodeUpdater
 
         if (!context.RunnerWasRunning)
         {
-            context.RecordStage(StageLabels.PrepareRunner, "runner not running; nothing to stop");
-            _out.WriteLine("Runner was not running; nothing to stop for the server update.");
+            context.RecordStage(StageLabels.PrepareRunner, "runner not running; no candidate activation needed");
+            _out.WriteLine("Runner was not running; its active target remains unchanged.");
             return 0;
         }
 
-        context.RecordStage(StageLabels.PrepareRunner, "stopping runner for server update");
-        var stop = await _operations.StopRunnerAsync(context.DryRun);
+        context.RecordStage(StageLabels.PrepareRunner, "runner remains active until candidate is prepared");
+        _out.WriteLine("Runner remains active while Server and Runner candidates are prepared.");
+        return 0;
+    }
+
+    private async Task<int> PrepareRunnerCandidateStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.PrepareRunnerCandidate;
+        _out.WriteLine(StageLabels.PrepareRunnerCandidate);
+        context.RecordStage(StageLabels.PrepareRunnerCandidate, "building validated runner candidate without stopping current runner");
+
+        if (!context.RunnerWasRunning)
+        {
+            context.RecordStage(StageLabels.PrepareRunnerCandidate, "skipped; runner was not running");
+            return 0;
+        }
+
+        if (context.DryRun)
+        {
+            _out.WriteLine("Dry run: would build and validate the Runner artifact before stopping its current service.");
+            context.RecordStage(StageLabels.PrepareRunnerCandidate, "complete (dry run)");
+            return 0;
+        }
+
+        if (context.UpdateSource is null)
+        {
+            context.RecordStage(StageLabels.PrepareRunnerCandidate, "source missing");
+            return 1;
+        }
+
+        var candidate = await _operations.PrepareRunnerRuntimeCandidateAsync(
+            context.UpdateSource,
+            null,
+            token,
+            context.RuntimeManager);
+        if (candidate is null)
+        {
+            context.RecordStage(StageLabels.PrepareRunnerCandidate, "runner candidate build or validation failed");
+            return 1;
+        }
+
+        context.RunnerCandidate = candidate;
+        context.RecordStage(StageLabels.PrepareRunnerCandidate, "runner candidate built and recovery snapshot held");
+        return 0;
+    }
+
+    private async Task<int> StopRunnerStageAsync(UpdateContext context, CancellationToken token)
+    {
+        context.Stage = UpdateStage.StopRunner;
+        _out.WriteLine(StageLabels.StopRunner);
+        context.RecordStage(StageLabels.StopRunner, "stopping current runner after candidate validation");
+
+        if (!context.RunnerWasRunning)
+        {
+            context.RecordStage(StageLabels.StopRunner, "skipped; runner was not running");
+            return 0;
+        }
+
+        if (context.DryRun)
+        {
+            _out.WriteLine("Dry run: would stop the current Runner immediately before candidate activation.");
+            context.RunnerStopped = true;
+            context.RecordStage(StageLabels.StopRunner, "complete (dry run)");
+            return 0;
+        }
+
+        if (context.RunnerCandidate is null)
+        {
+            context.RecordStage(StageLabels.StopRunner, "candidate missing");
+            return 1;
+        }
+
+        var stop = await _operations.StopRunnerAsync(dryRun: false);
         if (stop != 0)
         {
-            context.RecordStage(StageLabels.PrepareRunner, "stop failed");
+            context.RecordStage(StageLabels.StopRunner, "stop failed");
             return stop;
         }
 
         context.RunnerStopped = true;
-        _out.WriteLine("Runner is stopped. Workflows cannot run until the runner is restored.");
-        context.RecordStage(StageLabels.PrepareRunner, "runner stopped; workflows paused");
+        _out.WriteLine("Runner is stopped; its validated candidate will now be activated.");
+        context.RecordStage(StageLabels.StopRunner, "runner stopped after candidate validation");
         return 0;
     }
 
@@ -70,23 +141,36 @@ internal partial class SourceCodeUpdater
     {
         context.Stage = UpdateStage.UpdateServer;
         _out.WriteLine(StageLabels.UpdateServer);
-        context.RecordStage(StageLabels.UpdateServer, "building and restarting server");
+        context.RecordStage(StageLabels.UpdateServer, "installing versioned server runtime");
 
         if (context.DryRun)
         {
-            _out.WriteLine($"  cd {_operations.ResolveRepoRoot(context.RepoRoot)} && dotnet build Mohist.sln");
-            _out.WriteLine($"  {UpdateOperations.RestartCommandLine("server")} (if installed)");
+            var root = _operations.ResolveRepoRoot(context.RepoRoot);
+            _out.WriteLine($"  cd {root} && git rev-parse HEAD");
+            _out.WriteLine($"  cd {root} && dotnet publish packages/server/src/Mohist.Server/Mohist.Server.csproj -c Release -o <stable-server-version>");
+            _out.WriteLine("  point the absolute server service target at the installed current version");
             context.RecordStage(StageLabels.UpdateServer, "complete (dry run)");
             return 0;
         }
 
-        var root = _operations.ResolveRepoRoot(context.RepoRoot);
-        var exitCode = await _operations.BuildAndRestartServerAsync(root, token);
-        if (exitCode != 0)
+        if (context.UpdateSource is null)
+        {
+            _err.WriteLine("Update source was not resolved. No server runtime was changed.");
+            context.RecordStage(StageLabels.UpdateServer, "source missing");
+            return 1;
+        }
+
+        var prepared = await _operations.PrepareServerRuntimeAsync(
+            context.UpdateSource,
+            null,
+            token,
+            context.RuntimeManager);
+        if (prepared is null)
         {
             context.RecordStage(StageLabels.UpdateServer, "failed");
-            return exitCode;
+            return 1;
         }
+        context.ServerRuntime = prepared;
         context.RecordStage(StageLabels.UpdateServer, "complete");
         return 0;
     }
@@ -107,9 +191,51 @@ internal partial class SourceCodeUpdater
         if (!ready.Ready)
         {
             context.RecordStage(StageLabels.WaitingForReady, $"timed out: {ready.LastFailure ?? "no readiness signal"}");
+            if (context.ServerRuntime is not null)
+            {
+                await _operations.RollBackRuntimeAsync(
+                    context.ServerRuntime,
+                    actualHash: null,
+                    ready.LastFailure ?? "readiness did not pass",
+                    token);
+                context.ServerRuntime = null;
+            }
             return 1;
         }
-        context.RecordStage(StageLabels.WaitingForReady, "server is ready");
+
+        if (context.ServerRuntime is null || context.UpdateSource is null)
+        {
+            _err.WriteLine("Server runtime candidate was not available for identity verification.");
+            context.RecordStage(StageLabels.WaitingForReady, "server candidate missing");
+            return 1;
+        }
+
+        var identity = await _validator.VerifyServerRuntimeIdentityAsync(
+            context.ServerRuntime.Activation.Candidate,
+            token);
+        if (!identity.Matches)
+        {
+            await _operations.RollBackRuntimeAsync(context.ServerRuntime, identity.ActualHash, identity.Reason, token);
+            context.ServerRuntime = null;
+            context.RecordStage(StageLabels.WaitingForReady, "server identity mismatch");
+            return 1;
+        }
+
+        if (!_operations.TryMarkRuntimeVerified(context.ServerRuntime, retainLease: true))
+        {
+            await _operations.RollBackRuntimeAsync(
+                context.ServerRuntime,
+                identity.ActualHash,
+                "could not record the verified server version",
+                token);
+            context.ServerRuntime = null;
+            context.RecordStage(StageLabels.WaitingForReady, "could not record verified server version");
+            return 1;
+        }
+        context.ServerRuntimeVerified = true;
+        context.RuntimeBatch.Stage(context.ServerRuntime);
+        _out.WriteLine($"Server runtime identity matched (expected {identity.ExpectedHash}, actual {identity.ActualHash}); batch commit is pending.");
+        context.RecordStage(StageLabels.WaitingForReady, "server identity matched; batch commit pending");
         return 0;
     }
 
@@ -126,67 +252,79 @@ internal partial class SourceCodeUpdater
             return 0;
         }
 
-        if (!context.DryRun)
+        if (context.DryRun)
         {
             var root = _operations.ResolveRepoRoot(context.RepoRoot);
-            var build = await _operations.BuildRunnerAsync(root);
-            if (build != 0)
-            {
-                context.RecordStage(StageLabels.RestoreRunner, "runner build failed");
-                context.UnavailableCapability ??= "Runner unavailable";
-                return build;
-            }
-            _out.WriteLine("Runner updated successfully.");
-        }
-        else
-        {
-            var root = _operations.ResolveRepoRoot(context.RepoRoot);
+            _out.WriteLine($"  cd {root} && git rev-parse HEAD");
             _out.WriteLine($"  cd {root} && npm run build -w packages/runner");
+            _out.WriteLine("  install runner dist and dependencies into a stable versioned runtime directory");
+            context.RunnerRestored = true;
+            context.RecordStage(StageLabels.RestoreRunner, "complete (dry run)");
+            return 0;
         }
 
-        var start = await _operations.StartRunnerAsync(context.DryRun);
-        if (start != 0)
+        if (!context.ServerRuntimeVerified || context.RunnerCandidate is null)
         {
-            context.RecordStage(StageLabels.RestoreRunner, "failed to start");
-            context.UnavailableCapability ??= "Runner unavailable";
-            return start;
+            context.RecordStage(StageLabels.RestoreRunner, "validated runner candidate missing");
+            return 1;
         }
 
-        if (!context.DryRun)
+        var candidate = context.RunnerCandidate;
+        context.RunnerCandidate = null;
+        var prepared = await _operations.ActivatePreparedRuntimeAsync(candidate, token);
+        if (prepared is null)
         {
-            _out.WriteLine("Waiting for runner service to become active...");
-            using var activeCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-            using var activeTimer = StartTimeoutTimer(activeCts, RunnerActiveTimeout);
-            var becameActive = false;
-            while (!activeCts.IsCancellationRequested)
-            {
-                if (await _operations.IsRunnerRunningAsync(activeCts.Token))
-                {
-                    becameActive = true;
-                    break;
-                }
-
-                try
-                {
-                    await Task.Delay(RunnerActivePollInterval, _timeProvider, activeCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-            }
-
-            if (!becameActive)
-            {
-                context.RecordStage(StageLabels.RestoreRunner, "runner did not become active in time");
-                context.UnavailableCapability ??= "Runner unavailable";
-                return 1;
-            }
+            context.RecordStage(StageLabels.RestoreRunner, "runner artifact install failed");
+            return 1;
         }
 
+        context.RunnerRuntime = prepared;
+        var outcome = await _runnerRefreshVerifier.VerifyRunnerRuntimeAsync(
+            UpdateOperations.CreateRunnerIdentityExpectation(prepared),
+            token);
+        outcome.WriteSummary(_out, _err);
+        var reportedRunnerHash = outcome is RunnerRefreshOutcome.StaleRunnerRuntime staleRuntime
+            ? staleRuntime.ReportedHash
+            : null;
+        if (outcome.ExitCode != 0)
+        {
+            var recovery = await _operations.RollBackRuntimeWithResultAsync(
+                prepared,
+                reportedRunnerHash,
+                outcome switch
+                {
+                    RunnerRefreshOutcome.UnknownIdentity unknown => unknown.Reason,
+                    RunnerRefreshOutcome.StaleRunnerRuntime stale => stale.Reason,
+                    RunnerRefreshOutcome.NotReconnected => "runner did not reconnect with a runtime identity",
+                    _ => "runner runtime verification did not pass",
+                },
+                token);
+            context.RunnerRuntime = null;
+            context.RunnerRestored = recovery.Restored;
+            context.RecordStage(StageLabels.RestoreRunner, "runner identity mismatch");
+            if (!recovery.Restored)
+                context.UnavailableCapability ??= "Runtime recovery failed";
+            return 1;
+        }
+
+        if (!_operations.TryMarkRuntimeVerified(prepared, retainLease: true))
+        {
+            var recovery = await _operations.RollBackRuntimeWithResultAsync(
+                prepared,
+                reportedRunnerHash,
+                "could not record the verified runner version",
+                token);
+            context.RunnerRuntime = null;
+            context.RunnerRestored = recovery.Restored;
+            context.RecordStage(StageLabels.RestoreRunner, "could not record verified runner version");
+            if (!recovery.Restored)
+                context.UnavailableCapability ??= "Runtime recovery failed";
+            return 1;
+        }
+        context.RuntimeBatch.Stage(prepared);
         context.RunnerRestored = true;
-        _out.WriteLine("Runner service restored.");
-        context.RecordStage(StageLabels.RestoreRunner, "runner started");
+        _out.WriteLine("Runner runtime identity matched; batch commit is pending.");
+        context.RecordStage(StageLabels.RestoreRunner, "runner identity matched; batch commit pending");
         return 0;
     }
 
@@ -198,7 +336,7 @@ internal partial class SourceCodeUpdater
 
         if (context.DryRun)
         {
-            _out.WriteLine("Dry run: would verify CLI binary, server identity, web assets, runner connection, runner identity, and managed skill assets.");
+            _out.WriteLine("Dry run: would verify CLI binary, web assets, runner connection, and managed skill assets after activation verifies server and runner identities.");
             context.Outcome = UpdateOutcome.Ready;
             context.RecordStage(StageLabels.VerifyRuntime, "skipped (dry run)");
             return 0;
@@ -207,12 +345,11 @@ internal partial class SourceCodeUpdater
         var checks = new List<RuntimeCheckResult>
         {
             await _validator.CheckCliBinaryAsync(context, token),
-            await _validator.CheckServerIdentityAsync(context, token),
             await _validator.CheckWebAssetsAsync(context, token),
-            await _validator.CheckRunnerConnectionAsync(context, token),
-            await _validator.CheckRunnerIdentityAsync(context, token),
-            await _validator.CheckManagedSkillAssetsAsync(context, token),
         };
+        if (context.RunnerInstalled)
+            checks.Add(await _validator.CheckRunnerConnectionAsync(context, token));
+        checks.Add(await _validator.CheckManagedSkillAssetsAsync(context, token));
 
         foreach (var check in checks)
         {

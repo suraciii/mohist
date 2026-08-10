@@ -25,8 +25,18 @@ public static class RunnerRoutes
     {
         var group = app.MapGroup("/api/runner/{runnerId}").RequireScopes(Scope.Runner);
 
-        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains) =>
+        group.MapPost("/register", async (string runnerId, RunnerRegisterRequest req, IGrainFactory grains, RunnerConnectionTracker connections) =>
         {
+            if (!connections.ReportRuntime(
+                    runnerId,
+                    req.RuntimeGeneration,
+                    req.BuildGitHash,
+                    req.ArtifactDigest,
+                    req.RuntimeSessionToken))
+            {
+                return ApiResults.Conflict("Runner runtime instance is stale or incomplete.", "runner_runtime_fenced");
+            }
+
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.RegisterAsync(new RunnerInfo(
                 runnerId,
@@ -41,8 +51,16 @@ public static class RunnerRoutes
             return Results.Ok();
         });
 
-        group.MapPost("/unregister", async (string runnerId, IGrainFactory grains) =>
+        group.MapPost("/unregister", async (string runnerId, RunnerUnregisterRequest? req, IGrainFactory grains, RunnerConnectionTracker connections) =>
         {
+            if (!connections.UnregisterRuntime(
+                    runnerId,
+                    req?.RuntimeGeneration,
+                    req?.RuntimeSessionToken))
+            {
+                return Results.Ok();
+            }
+
             var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             await runner.UnregisterAsync();
             return Results.Ok();
@@ -50,13 +68,23 @@ public static class RunnerRoutes
 
         group.MapPost("/heartbeat", async (string runnerId, HttpRequest request, IGrainFactory grains, RunnerConnectionTracker connections) =>
         {
-            var runner = grains.GetGrain<IRunnerGrain>(runnerId);
             var req = request.ContentLength.GetValueOrDefault() > 0
                 ? await JsonSerializer.DeserializeAsync<RunnerHeartbeatRequest>(request.Body, JSON.Options)
                 : null;
 
             if (req is not null)
             {
+                if (!connections.ReportRuntime(
+                        runnerId,
+                        req.RuntimeGeneration,
+                        req.BuildGitHash,
+                        req.ArtifactDigest,
+                        req.RuntimeSessionToken))
+                {
+                    return ApiResults.Conflict("Runner runtime instance is stale or incomplete.", "runner_runtime_fenced");
+                }
+
+                var runner = grains.GetGrain<IRunnerGrain>(runnerId);
                 var info = new RunnerInfo(
                     runnerId,
                     req.Capabilities ?? [],
@@ -68,14 +96,10 @@ public static class RunnerRoutes
                     ActionCatalog: req.ActionCatalog,
                     RuntimeCatalogs: NormalizeRuntimeCatalogs(req.RuntimeCatalogs));
                 await runner.HeartbeatRepairAsync(info);
-
-                if (!string.IsNullOrWhiteSpace(req.ConnectionId))
-                {
-                    connections.Register(runnerId, req.ConnectionId);
-                }
             }
             else
             {
+                var runner = grains.GetGrain<IRunnerGrain>(runnerId);
                 await runner.HeartbeatAsync();
             }
             return Results.Ok();
@@ -840,9 +864,15 @@ public record RunnerRegisterRequest(
     string? BuildGitHash = null,
     Dictionary<string, string[]>? CoderModelVariants = null,
     ActionCatalog? ActionCatalog = null,
-    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null,
+    string? RuntimeGeneration = null,
+    string? ArtifactDigest = null,
+    string? RuntimeSessionToken = null);
 public record RunnerSlotsPatchRequest(int Slots);
 public record RunnerSlotsPatchResponse(string RunnerId, int Slots);
+public record RunnerUnregisterRequest(
+    string? RuntimeGeneration = null,
+    string? RuntimeSessionToken = null);
 public record RunnerHeartbeatRequest(
     string[]? Capabilities = null,
     string? ProjectId = null,
@@ -852,7 +882,10 @@ public record RunnerHeartbeatRequest(
     Dictionary<string, string[]>? CoderModelVariants = null,
     string? ConnectionId = null,
     ActionCatalog? ActionCatalog = null,
-    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null);
+    Dictionary<string, RuntimeCatalogEntry>? RuntimeCatalogs = null,
+    string? RuntimeGeneration = null,
+    string? ArtifactDigest = null,
+    string? RuntimeSessionToken = null);
 public record RunnerReportRequest(
     string WorkId,
     string Status,

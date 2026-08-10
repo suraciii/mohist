@@ -9,6 +9,8 @@ namespace Mohist.Cli.Tests.Support;
 internal sealed class FakeSourceCodeUpdater : SourceCodeUpdater
 {
     public List<string> Calls { get; } = new();
+    public List<ServiceInstallOptions> ServerInstallOptions { get; } = new();
+    public List<ServiceInstallOptions> RunnerInstallOptions { get; } = new();
 
     public FakeSourceCodeUpdater()
         : base(
@@ -67,6 +69,20 @@ internal sealed class FakeSourceCodeUpdater : SourceCodeUpdater
         CancellationToken cancellationToken = default)
     {
         Calls.Add(nameof(UpdateSlackAsync));
+        return Task.FromResult(0);
+    }
+
+    public override Task<int> InstallServerAsync(ServiceInstallOptions options, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(nameof(InstallServerAsync));
+        ServerInstallOptions.Add(options);
+        return Task.FromResult(0);
+    }
+
+    public override Task<int> InstallRunnerAsync(ServiceInstallOptions options, CancellationToken cancellationToken = default)
+    {
+        Calls.Add(nameof(InstallRunnerAsync));
+        RunnerInstallOptions.Add(options);
         return Task.FromResult(0);
     }
 }

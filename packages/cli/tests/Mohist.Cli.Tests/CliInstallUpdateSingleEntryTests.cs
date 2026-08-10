@@ -80,15 +80,16 @@ public class CliInstallUpdateSingleEntryTests
     public async Task VerbRootInstallServer_StillInvokesInstallServerAsync()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
             ["install", "server", "--repo-root", "/repo", "--listen-url", "http://127.0.0.1:3456", "--dry-run", "--unit-dir", "/etc/systemd/system"],
             output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
-        var call = Assert.Single(installer.InstallServerCalls);
+        var call = Assert.Single(updater.ServerInstallOptions);
         Assert.Equal("/repo", call.RepoRoot);
         Assert.Equal("http://127.0.0.1:3456", call.ListenUrl);
         Assert.True(call.DryRun);
@@ -99,13 +100,14 @@ public class CliInstallUpdateSingleEntryTests
     public async Task VerbRootInstallServer_DefaultsAreUnchanged()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "server"], output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
-        var call = Assert.Single(installer.InstallServerCalls);
+        var call = Assert.Single(updater.ServerInstallOptions);
         Assert.Null(call.RepoRoot);
         Assert.Null(call.ListenUrl);
         Assert.False(call.DryRun);
@@ -118,15 +120,16 @@ public class CliInstallUpdateSingleEntryTests
     public async Task VerbRootInstallRunner_StillInvokesInstallRunnerAsync()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
             ["install", "runner", "--repo-root", "/repo", "--server-url", "http://127.0.0.1:3456", "--runner-root", "/var/lib/runner", "--dry-run", "--unit-dir", "/etc/systemd/system"],
             output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
-        var call = Assert.Single(installer.InstallRunnerCalls);
+        var call = Assert.Single(updater.RunnerInstallOptions);
         Assert.Equal("/repo", call.RepoRoot);
         Assert.Equal("http://127.0.0.1:3456", call.ServerUrl);
         Assert.Equal("/var/lib/runner", call.RunnerRoot);
@@ -143,13 +146,14 @@ public class CliInstallUpdateSingleEntryTests
                 success = true,
                 data = new { token = "moh_enroll_defaults", expiresAt = "2026-08-21T00:15:00+00:00" },
             })));
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "runner"], output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
-        var call = Assert.Single(installer.InstallRunnerCalls);
+        var call = Assert.Single(updater.RunnerInstallOptions);
         Assert.Null(call.RepoRoot);
         Assert.Null(call.ServerUrl);
         Assert.Null(call.RunnerRoot);
@@ -167,18 +171,19 @@ public class CliInstallUpdateSingleEntryTests
                 success = true,
                 data = new { token = "moh_enroll_abc123", expiresAt = "2026-08-21T00:15:00+00:00" },
             })));
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http,
             ["install", "runner", "--repo-root", "/repo", "--server-url", "http://127.0.0.1:3456", "--runner-root", "/var/lib/runner", "--unit-dir", "/etc/systemd/system"],
             output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
         var request = Assert.Single(handler.Requests);
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Equal("/api/runners/enrollment-tokens", request.RequestUri!.AbsolutePath);
-        var call = Assert.Single(installer.InstallRunnerCalls);
+        var call = Assert.Single(updater.RunnerInstallOptions);
         Assert.Equal("/repo", call.RepoRoot);
         Assert.Equal("http://127.0.0.1:3456", call.ServerUrl);
         Assert.Equal("/var/lib/runner", call.RunnerRoot);
@@ -191,13 +196,14 @@ public class CliInstallUpdateSingleEntryTests
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal(
             (_, _) => throw new HttpRequestException("connection refused"));
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "runner"], output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.NotEqual(0, exitCode);
-        Assert.Empty(installer.InstallRunnerCalls);
+        Assert.Empty(updater.RunnerInstallOptions);
         Assert.Contains("Server is not running", error.ToString());
     }
 
@@ -205,14 +211,15 @@ public class CliInstallUpdateSingleEntryTests
     public async Task VerbRootInstallRunner_DryRun_StaysOffline()
     {
         var (handler, http, output, error, fs, executor, installer) = CliTestFactory.CreateInternal();
+        var updater = new FakeSourceCodeUpdater();
 
         var exitCode = await MohistCliCommands.RunAsync(
             http, ["install", "runner", "--dry-run"], output, error, fs, executor,
-            installer: installer);
+            installer: installer, updater: updater);
 
         Assert.Equal(0, exitCode);
         Assert.Empty(handler.Requests);
-        var call = Assert.Single(installer.InstallRunnerCalls);
+        var call = Assert.Single(updater.RunnerInstallOptions);
         Assert.True(call.DryRun);
         Assert.Null(call.EnrollmentToken);
     }

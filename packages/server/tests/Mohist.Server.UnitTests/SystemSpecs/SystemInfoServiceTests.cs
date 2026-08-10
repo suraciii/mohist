@@ -12,7 +12,8 @@ public class SystemInfoServiceTests
     [Fact]
     public async Task GetSystemInfo_ReturnsAllSections()
     {
-        var runtime = new FakeRuntimeBuildInfo("1.0.0", "abc123");
+        const string artifactDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var runtime = new FakeRuntimeBuildInfo("1.0.0", "abc123", artifactDigest);
         var fs = new FakeFileSystem();
         var unitDir = "/units";
         var repoDir = "/repo";
@@ -40,6 +41,7 @@ public class SystemInfoServiceTests
         Assert.NotNull(info.Paths);
         Assert.Equal("Detected local-source systemd user install from mohist.service", info.Install.Reason);
         Assert.NotEqual(default, info.Running.StartedAt);
+        Assert.Equal(artifactDigest, info.Running.ArtifactDigest);
     }
 
     [Fact]
@@ -328,12 +330,14 @@ public class SystemInfoServiceTests
     {
         public string? Version { get; }
         public string? GitHash { get; }
+        public string? ArtifactDigest { get; }
         public DateTimeOffset StartedAt { get; }
 
-        public FakeRuntimeBuildInfo(string? version, string? gitHash)
+        public FakeRuntimeBuildInfo(string? version, string? gitHash, string? artifactDigest = null)
         {
             Version = version;
             GitHash = gitHash;
+            ArtifactDigest = artifactDigest;
             StartedAt = TestTime.UtcNow;
         }
     }

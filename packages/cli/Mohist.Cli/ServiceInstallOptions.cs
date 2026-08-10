@@ -7,7 +7,12 @@ internal sealed record ServiceInstallOptions(
     string? ListenUrl,
     string? ServerUrl,
     string? RunnerRoot,
-    string? EnrollmentToken = null)
+    string? EnrollmentToken = null,
+    string? RuntimeRoot = null,
+    string? RunnerId = null,
+    string? RuntimeGeneration = null,
+    string? RuntimeSessionToken = null,
+    string? ArtifactDigest = null)
 {
     public static ServiceInstallOptions From(string[] args) => new(
         DryRun: args.Contains("--dry-run"),

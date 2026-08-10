@@ -137,6 +137,7 @@ export class RunnerHost {
   private readonly modelRediscoveryIntervalMs: number
   private readonly workflowSessionTurnCoordinator = new WorkflowSessionTurnCoordinator()
   private readonly buildGitHash: string | null
+  private readonly artifactDigest: string | null
   private coderModels: string[] = []
   private coderModelVariants: Record<string, string[]> = {}
 
@@ -188,7 +189,8 @@ export class RunnerHost {
     this.modelRediscoveryIntervalMs = Math.max(60_000, Math.floor(options.modelRediscoveryIntervalMs ?? 30 * 60_000))
     const build = loadBuildInfo()
     this.buildGitHash = build.gitHash
-    this.connection = new ServerConnection(options, this.buildGitHash)
+    this.artifactDigest = build.artifactDigest
+    this.connection = new ServerConnection(options, this.buildGitHash, this.artifactDigest)
     // Runner-local registry of workspaces this host has materialized.
     // Loaded eagerly at startup so the in-memory cache is hot before the
     // first dispatch or SignalR RPC: active
@@ -245,6 +247,9 @@ export class RunnerHost {
       this.buildGitHash,
       {
         onReconnected: () => this.onDispatchReconnected(),
+        artifactDigest: this.artifactDigest,
+        runtimeGeneration: options.runtimeGeneration ?? null,
+        runtimeSessionToken: options.runtimeSessionToken ?? null,
         credential: options.credential ?? null,
         followupTargetResolver: (target) => this.resolveFollowupTarget(target),
         agentSessionRuntimeEventOutbox: this.agentSessionRuntimeEventOutbox,
@@ -983,6 +988,10 @@ export class RunnerHost {
       coderModelVariants: this.coderModelVariants,
       runtimeCatalogs,
       connectionId: this.signalR.getConnectionId(),
+      buildGitHash: this.buildGitHash,
+      artifactDigest: this.artifactDigest,
+      runtimeGeneration: this.options.runtimeGeneration ?? null,
+      runtimeSessionToken: this.options.runtimeSessionToken ?? null,
     }
   }
 

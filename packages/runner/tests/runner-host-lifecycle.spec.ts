@@ -165,11 +165,15 @@ describe("RunnerHost", () => {
         expect.objectContaining({
           projectId: "project-1",
           coderModels: ["openai/gpt-5.5"],
+          artifactDigest: null,
+          runtimeGeneration: null,
+          runtimeSessionToken: null,
         }),
         expect.any(AbortSignal),
       )
       expect(Object.keys(connect.mock.calls[0][0]).sort()).toEqual([
         "actionCatalog",
+        "artifactDigest",
         "buildGitHash",
         "capabilities",
         "coderModelVariants",
@@ -177,6 +181,8 @@ describe("RunnerHost", () => {
         "connectionId",
         "projectId",
         "runtimeCatalogs",
+        "runtimeGeneration",
+        "runtimeSessionToken",
       ])
     } finally {
       controller.abort()

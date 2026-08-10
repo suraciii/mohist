@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { RunnerOptions } from "../src/core/types.js"
 import { ServerConnection } from "../src/server/connection.js"
 
 interface MockResponseInit {
@@ -25,8 +26,16 @@ function mockResponse({ status, contentType = "application/json", body = "{}" }:
   return new Response(typeof body === "string" ? body : new Uint8Array(body), { status, headers: { "content-type": contentType } })
 }
 
-function options() {
-  return { serverUrl: "http://localhost:3456", runnerId: "runner-1", runnerRoot: "/tmp", pollIntervalMs: 100, heartbeatIntervalMs: 60_000, dispatchLivenessProbeIntervalMs: 60_000 }
+function options(overrides: Partial<RunnerOptions> = {}): RunnerOptions {
+  return {
+    serverUrl: "http://localhost:3456",
+    runnerId: "runner-1",
+    runnerRoot: "/tmp",
+    pollIntervalMs: 100,
+    heartbeatIntervalMs: 60_000,
+    dispatchLivenessProbeIntervalMs: 60_000,
+    ...overrides,
+  }
 }
 
 describe("ServerConnection.uploadArtifact", () => {
@@ -415,5 +424,36 @@ describe("ServerConnection.buildGitHash", () => {
     expect(url).toContain("/api/runner/runner-1/heartbeat")
     const body = JSON.parse(init.body as string)
     expect(body.buildGitHash).toBeNull()
+  })
+
+  it("registerHeartbeatAndUnregisterCarryTheActivationSessionFence", async () => {
+    fetchMock.mockResolvedValue(mockResponse({ status: 200, body: "" }))
+    const hash = "abcdef1234567890abcdef1234567890abcdef12"
+    const digest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    const connection = new ServerConnection(options({
+      runtimeGeneration: "2",
+      runtimeSessionToken: "session-2",
+    }), hash, digest)
+    const registration = {
+      capabilities: ["spec/*"],
+      actionCatalog: { actions: [], tombstones: [] },
+      projectId: "project-1",
+      coderModels: ["openai/gpt-4"],
+    }
+
+    await connection.connect(registration, new AbortController().signal)
+    await connection.heartbeat(registration, new AbortController().signal)
+    await connection.disconnect(new AbortController().signal)
+
+    const register = JSON.parse(fetchMock.mock.calls[0][1].body as string)
+    const heartbeat = JSON.parse(fetchMock.mock.calls[1][1].body as string)
+    const unregister = JSON.parse(fetchMock.mock.calls[2][1].body as string)
+    for (const body of [register, heartbeat]) {
+      expect(body.runtimeGeneration).toBe("2")
+      expect(body.runtimeSessionToken).toBe("session-2")
+      expect(body.buildGitHash).toBe(hash)
+      expect(body.artifactDigest).toBe(digest)
+    }
+    expect(unregister).toEqual({ runtimeGeneration: "2", runtimeSessionToken: "session-2" })
   })
 })

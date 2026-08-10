@@ -78,6 +78,19 @@ public sealed class SystemdInstallDetector : ISingletonService
             return Unsupported("mohist.service has no ExecStart");
 
         var workingDir = unit.WorkingDirectory.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar);
+        var runnerUnitPath = Path.Combine(unitDir, RunnerUnitName);
+        var hasRunnerUnit = _fileSystem.Exists(runnerUnitPath);
+        if (IsManagedRuntimeShape(unit.ExecStart, unit.WorkingDirectory))
+        {
+            return new InstallDetectionResult(
+                Mode: "managed-runtime",
+                ServiceManager: "systemd-user",
+                ServerUnit: ServerUnitName,
+                RunnerUnit: hasRunnerUnit ? RunnerUnitName : null,
+                SourcePath: null,
+                Reason: "Detected immutable managed runtime systemd user install from mohist.service");
+        }
+
         var solutionPath = Path.Combine(workingDir, SolutionFile);
         if (!IsSourceRunShape(unit.ExecStart))
         {
@@ -89,9 +102,6 @@ public sealed class SystemdInstallDetector : ISingletonService
 
         if (!_fileSystem.Exists(solutionPath))
             return Unsupported("WorkingDirectory does not contain Mohist.sln");
-
-        var runnerUnitPath = Path.Combine(unitDir, RunnerUnitName);
-        var hasRunnerUnit = _fileSystem.Exists(runnerUnitPath);
 
         return new InstallDetectionResult(
             Mode: "local-source",
@@ -114,6 +124,16 @@ public sealed class SystemdInstallDetector : ISingletonService
             return false;
 
         return true;
+    }
+
+    private static bool IsManagedRuntimeShape(string execStart, string workingDirectory)
+    {
+        if (!execStart.Contains("dotnet", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var normalizedWorkingDirectory = workingDirectory.Replace('\\', '/').TrimEnd('/');
+        var expectedAssembly = normalizedWorkingDirectory + "/current/Mohist.Server.dll";
+        return execStart.Replace('\\', '/').Contains(expectedAssembly, StringComparison.Ordinal);
     }
 
     private static bool LooksLikeDotnetRun(string execStart)

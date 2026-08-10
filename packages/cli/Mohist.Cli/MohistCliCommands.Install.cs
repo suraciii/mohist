@@ -13,15 +13,16 @@ internal static class InstallCommands
         var install = new Command("install", "Install mohist components from source");
         var installer = provider.GetRequiredService<IServiceInstaller>();
         var api = provider.GetRequiredService<MohistCliApi>();
+        var updater = MohistCliCommands.ResolveSourceCodeUpdater(provider);
 
-        install.Subcommands.Add(BuildServerInstall(installer));
-        install.Subcommands.Add(BuildRunnerInstall(installer, api));
+        install.Subcommands.Add(BuildServerInstall(updater));
+        install.Subcommands.Add(BuildRunnerInstall(updater, api));
         install.Subcommands.Add(BuildSlackInstall(installer));
 
         return install;
     }
 
-    private static Command BuildServerInstall(IServiceInstaller installer)
+    private static Command BuildServerInstall(SourceCodeUpdater updater)
     {
         var cmd = new Command("server", "Install server as a managed background service from source");
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
@@ -38,12 +39,12 @@ internal static class InstallCommands
             var unitDir = ctx.GetValue(unitDirOpt);
             var repoRoot = ctx.GetValue(repoRootOpt);
             var listenUrl = ctx.GetValue(listenUrlOpt);
-            return installer.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
+            return updater.InstallServerAsync(new ServiceInstallOptions(dryRun, unitDir, repoRoot, listenUrl, null, null));
         });
         return cmd;
     }
 
-    private static Command BuildRunnerInstall(IServiceInstaller installer, MohistCliApi api)
+    private static Command BuildRunnerInstall(SourceCodeUpdater updater, MohistCliApi api)
     {
         var cmd = new Command("runner", "Install runner as a managed background service from source");
         var repoRootOpt = new Option<string?>("--repo-root") { Description = "Repository root path" };
@@ -76,7 +77,7 @@ internal static class InstallCommands
                     return 1;
             }
 
-            return await installer.InstallRunnerAsync(
+            return await updater.InstallRunnerAsync(
                 new ServiceInstallOptions(dryRun, unitDir, repoRoot, null, serverUrl, runnerRoot, enrollmentToken));
         });
         return cmd;

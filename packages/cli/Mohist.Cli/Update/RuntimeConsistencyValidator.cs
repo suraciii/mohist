@@ -15,8 +15,6 @@ internal sealed class RuntimeConsistencyValidator
     private static readonly Regex AssetPathRegex = new(
         """(?:src|href)=["'](?<path>/assets/[^"']+)["']""",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
-    private static readonly TimeSpan DefaultRunnerIdentityTimeout = TimeSpan.FromSeconds(30);
-    private static readonly TimeSpan DefaultRunnerIdentityPollInterval = TimeSpan.FromMilliseconds(500);
 
     private readonly HttpClient _http;
     private readonly ICommandExecutor _commandExecutor;
@@ -24,9 +22,6 @@ internal sealed class RuntimeConsistencyValidator
     private readonly IEnvironmentVariableProvider _environment;
     private readonly Func<string?>? _getUserHome;
     private readonly TextWriter _out;
-    private readonly TimeProvider _timeProvider;
-    private readonly TimeSpan _runnerIdentityTimeout;
-    private readonly TimeSpan _runnerIdentityPollInterval;
 
     public RuntimeConsistencyValidator(
         HttpClient http,
@@ -34,10 +29,7 @@ internal sealed class RuntimeConsistencyValidator
         IFileSystem fileSystem,
         IEnvironmentVariableProvider environment,
         TextWriter output,
-        Func<string?>? getUserHome = null,
-        TimeProvider? timeProvider = null,
-        TimeSpan? runnerIdentityTimeout = null,
-        TimeSpan? runnerIdentityPollInterval = null)
+        Func<string?>? getUserHome = null)
     {
         _http = http;
         _commandExecutor = commandExecutor;
@@ -45,9 +37,6 @@ internal sealed class RuntimeConsistencyValidator
         _environment = environment;
         _getUserHome = getUserHome;
         _out = output;
-        _timeProvider = timeProvider ?? TimeProvider.System;
-        _runnerIdentityTimeout = runnerIdentityTimeout ?? DefaultRunnerIdentityTimeout;
-        _runnerIdentityPollInterval = runnerIdentityPollInterval ?? DefaultRunnerIdentityPollInterval;
     }
 
     internal async Task<RuntimeCheckResult> CheckCliBinaryAsync(UpdateContext context, CancellationToken token)
@@ -186,120 +175,6 @@ internal sealed class RuntimeConsistencyValidator
             $"Runner service is '{runner}'; expected 'active'");
     }
 
-    internal async Task<RuntimeCheckResult> CheckRunnerIdentityAsync(UpdateContext context, CancellationToken token)
-    {
-        var sourceHead = await TryGetSourceHeadAsync(context);
-        if (string.IsNullOrWhiteSpace(sourceHead))
-        {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
-                "Source HEAD could not be determined; skipping identity check");
-        }
-
-        var identity = await PollForRunnerIdentityAsync(token);
-        if (identity is null)
-        {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
-                "GET /api/runner/identity did not respond");
-        }
-
-        var runnerHash = identity.BuildGitHash;
-        if (string.IsNullOrWhiteSpace(runnerHash))
-        {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
-                "Runner did not report a buildGitHash; cannot verify identity");
-        }
-
-        if (!string.Equals(runnerHash, sourceHead, StringComparison.Ordinal))
-        {
-            return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Warn,
-                $"Runner buildGitHash '{runnerHash}' does not match source HEAD '{sourceHead}'");
-        }
-
-        return new RuntimeCheckResult("Runner identity", RuntimeCheckOutcome.Pass,
-            $"Runner identity matches source HEAD '{sourceHead}'");
-    }
-
-    private async Task<RunnerIdentitySnapshot?> PollForRunnerIdentityAsync(CancellationToken token)
-    {
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
-        using var timeoutTimer = StartRunnerIdentityTimeoutTimer(timeoutCts, _runnerIdentityTimeout);
-        var waitToken = timeoutCts.Token;
-        var deadline = _timeProvider.GetUtcNow() + _runnerIdentityTimeout;
-        while (!waitToken.IsCancellationRequested && _timeProvider.GetUtcNow() < deadline)
-        {
-            var identity = await TryGetRunnerIdentityWithinWindowAsync(deadline, waitToken, token);
-            token.ThrowIfCancellationRequested();
-            if (identity is not null)
-                return identity;
-
-            if (waitToken.IsCancellationRequested)
-                break;
-
-            var now = _timeProvider.GetUtcNow();
-            if (now >= deadline)
-                break;
-
-            var remaining = deadline - now;
-            var delay = remaining < _runnerIdentityPollInterval
-                ? remaining
-                : _runnerIdentityPollInterval;
-            try
-            {
-                await Task.Delay(delay, _timeProvider, waitToken);
-            }
-            catch (OperationCanceledException) when (waitToken.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-
-        token.ThrowIfCancellationRequested();
-        return null;
-    }
-
-    private async Task<RunnerIdentitySnapshot?> TryGetRunnerIdentityWithinWindowAsync(
-        DateTimeOffset deadline,
-        CancellationToken waitToken,
-        CancellationToken callerToken)
-    {
-        var remaining = deadline - _timeProvider.GetUtcNow();
-        if (remaining <= TimeSpan.Zero)
-            return null;
-
-        using var attemptWaitCts = CancellationTokenSource.CreateLinkedTokenSource(waitToken);
-        var identityTask = TryGetRunnerIdentityAsync(waitToken);
-        var timeoutTask = Task.Delay(remaining, _timeProvider, attemptWaitCts.Token);
-        var completed = await Task.WhenAny(identityTask, timeoutTask);
-        if (completed == identityTask)
-        {
-            attemptWaitCts.Cancel();
-            return await identityTask;
-        }
-
-        callerToken.ThrowIfCancellationRequested();
-        return null;
-    }
-
-    private ITimer? StartRunnerIdentityTimeoutTimer(CancellationTokenSource cts, TimeSpan timeout)
-    {
-        if (timeout <= TimeSpan.Zero)
-        {
-            cts.Cancel();
-            return null;
-        }
-
-        return _timeProvider.CreateTimer(static state =>
-        {
-            try
-            {
-                ((CancellationTokenSource)state!).Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-            }
-        }, cts, timeout, Timeout.InfiniteTimeSpan);
-    }
-
     internal async Task<RuntimeCheckResult> CheckManagedSkillAssetsAsync(UpdateContext context, CancellationToken token)
     {
         await Task.CompletedTask;
@@ -342,25 +217,46 @@ internal sealed class RuntimeConsistencyValidator
         return Path.Combine(AppContext.BaseDirectory, "skill-data");
     }
 
-    private async Task<RunnerIdentitySnapshot?> TryGetRunnerIdentityAsync(CancellationToken token)
+    internal async Task<RuntimeIdentityVerification> VerifyServerRuntimeIdentityAsync(
+        InstalledRuntimeArtifact expected,
+        CancellationToken token)
     {
-        try
+        var info = await TryGetSystemInfoAsync(token);
+        var actual = info?.Running?.GitHash;
+        var actualDigest = info?.Running?.ArtifactDigest;
+        if (string.IsNullOrWhiteSpace(actual))
         {
-            using var response = await _http.GetAsync("/api/runner/identity", HttpCompletionOption.ResponseHeadersRead, token);
-            if (!response.IsSuccessStatusCode)
-                return null;
+            return new RuntimeIdentityVerification(
+                expected.SourceHash,
+                null,
+                false,
+                "Server did not report a runtime gitHash",
+                expected.ArtifactDigest,
+                actualDigest);
+        }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(token);
-            using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
-            var root = document.RootElement;
-            if (root.TryGetProperty("data", out var data))
-                return data.Deserialize<RunnerIdentitySnapshot>(RunnerIdentitySnapshot.JsonOptions);
-            return root.Deserialize<RunnerIdentitySnapshot>(RunnerIdentitySnapshot.JsonOptions);
-        }
-        catch
+        if (string.IsNullOrWhiteSpace(actualDigest))
         {
-            return null;
+            return new RuntimeIdentityVerification(
+                expected.SourceHash,
+                actual,
+                false,
+                "Server did not report an installed artifactDigest",
+                expected.ArtifactDigest,
+                null);
         }
+
+        var matches = string.Equals(expected.SourceHash, actual, StringComparison.Ordinal)
+            && string.Equals(expected.ArtifactDigest, actualDigest, StringComparison.Ordinal);
+        return new RuntimeIdentityVerification(
+            expected.SourceHash,
+            actual,
+            matches,
+            matches
+                ? "Server runtime identity matches expected source and artifact identities"
+                : $"server source identity expected {expected.SourceHash}, actual {actual}; artifact identity expected {expected.ArtifactDigest}, actual {actualDigest}",
+            expected.ArtifactDigest,
+            actualDigest);
     }
 
     private async Task<SystemInfoSnapshot?> TryGetSystemInfoAsync(CancellationToken token)
@@ -433,23 +329,15 @@ internal sealed class RuntimeConsistencyValidator
     {
         [System.Text.Json.Serialization.JsonPropertyName("gitHash")]
         public string? GitHash { get; set; }
+
+        [System.Text.Json.Serialization.JsonPropertyName("artifactDigest")]
+        public string? ArtifactDigest { get; set; }
     }
 
     private sealed class SystemInfoServiceSnapshot
     {
         [System.Text.Json.Serialization.JsonPropertyName("runner")]
         public string? Runner { get; set; }
-    }
-
-    private sealed class RunnerIdentitySnapshot
-    {
-        public static readonly JsonSerializerOptions JsonOptions = new()
-        {
-            PropertyNameCaseInsensitive = true,
-        };
-
-        [System.Text.Json.Serialization.JsonPropertyName("buildGitHash")]
-        public string? BuildGitHash { get; set; }
     }
 
     private sealed class SystemInfoSnapshot

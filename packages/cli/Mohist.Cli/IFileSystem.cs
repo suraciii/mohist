@@ -28,6 +28,17 @@ internal interface IFileSystem
     Stream OpenWrite(string path);
     bool IsSymbolicLink(string path) => false;
     bool IsUserOnlyFile(string path) => true;
+
+    /// <summary>
+    /// Replaces a managed directory link. The target is always an already-built,
+    /// immutable runtime version; callers never use it to point at source trees.
+    /// </summary>
+    void ReplaceDirectorySymbolicLink(string linkPath, string targetPath) =>
+        throw new PlatformNotSupportedException("Directory symbolic links are not available from this filesystem.");
+
+    string? ReadDirectorySymbolicLink(string linkPath) => null;
+
+    void DeleteDirectorySymbolicLink(string linkPath) => Delete(linkPath);
 }
 
 internal sealed class RealFileSystem : IFileSystem
@@ -85,6 +96,42 @@ internal sealed class RealFileSystem : IFileSystem
     public Stream OpenWrite(string path) => File.Create(path);
 
     public bool IsSymbolicLink(string path) => File.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint);
+
+    public void ReplaceDirectorySymbolicLink(string linkPath, string targetPath)
+    {
+        var parent = Path.GetDirectoryName(linkPath);
+        if (!string.IsNullOrWhiteSpace(parent))
+            Directory.CreateDirectory(parent);
+
+        var temporaryLink = linkPath + ".next";
+        DeleteDirectorySymbolicLink(temporaryLink);
+        Directory.CreateSymbolicLink(temporaryLink, targetPath);
+        File.Move(temporaryLink, linkPath, overwrite: true);
+    }
+
+    public string? ReadDirectorySymbolicLink(string linkPath)
+    {
+        var directory = new DirectoryInfo(linkPath);
+        var target = directory.LinkTarget;
+        if (string.IsNullOrWhiteSpace(target))
+            return null;
+        return Path.IsPathRooted(target)
+            ? target
+            : Path.GetFullPath(target, directory.Parent?.FullName ?? Directory.GetCurrentDirectory());
+    }
+
+    public void DeleteDirectorySymbolicLink(string linkPath)
+    {
+        var directory = new DirectoryInfo(linkPath);
+        if (!string.IsNullOrWhiteSpace(directory.LinkTarget))
+        {
+            directory.Delete();
+            return;
+        }
+
+        if (File.Exists(linkPath) && new FileInfo(linkPath).LinkTarget is not null)
+            File.Delete(linkPath);
+    }
 
     public bool IsUserOnlyFile(string path)
     {

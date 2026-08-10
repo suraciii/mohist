@@ -366,6 +366,128 @@ format, stable error codes, and exit status. Implementation adds:
   does not automatically resend a state-changing request and provides a retry hint only when retry
   is confirmed safe.
 
+## Managed Runtime Updates
+
+`mo install server`, `mo install runner`, `mo update server`, and `mo update runner` share one
+local deployment contract. It covers only managed Server and Runner installations; it does not
+change CLI, Slack, authentication, or other components.
+
+Each Server or Runner installation/update follows this fact chain:
+
+```text diagram
+UpdateSource --repo-root -> InstalledArtifact <component>/<source-hash>
+  -> ServiceTarget (absolute, stable) -> RuntimeIdentity <source-hash>
+```
+
+- `--repo-root` is the sole source authority for that invocation. The command resolves one source
+  hash there and carries it through build, installation, and runtime verification. It never infers
+  the source revision from the current directory, an existing unit `WorkingDirectory`, or another
+  checkout.
+- Build outputs are installed at the stable versioned path
+  `~/.local/share/mohist/runtime/<component>/versions/<source-hash>/`. The Server publish output,
+  plus Runner `dist` and required Node dependencies, belong to that installed version and do not
+  read a Git worktree at runtime.
+- Managed unit `WorkingDirectory` and `ExecStart` are absolute paths beneath the installed runtime
+  root and point at the active version. They contain neither relative `packages/...` paths nor a
+  `--repo-root` path. Updates switch installed versions; they never turn an arbitrary worktree into
+  a service runtime directory.
+- A Server installation carries a source-hash manifest; a Runner installation carries and verifies
+  `dist/build-info.json`. Server reads identity from its installed manifest and Runner reports its
+  build hash through its existing connection. Both are compared with the resolved source hash.
+- The candidate version is fully built and installed, then activated, restarted, and verified. It
+  becomes verified and may report success only after its runtime identity equals the expected source
+  hash. A managed Runner identity is valid only when its Runner ID, monotonic activation generation,
+  activation session token, source hash, and artifact digest are all present and exact; absence is
+  rejection, never evidence that two missing values match.
+- Missing or mismatched identity, service startup failure, and readiness failure all fail the
+  operation. When a previously verified version exists, CLI restores and restarts it; the error
+  reports expected hash, actual hash when available, and the recovery action. A first installation
+  with no verified version stops the unverified candidate and explicitly reports that nothing could
+  be restored.
+
+Each component update is one bounded transaction. Its state is private to that component, so a
+Server update never blocks an unrelated Runner update:
+
+```text diagram
+probe manager -> acquire <component> lease -> snapshot target
+  -> build and validate candidate -> activate expected candidate -> install target
+  -> await exact runtime identity -> read back target -> mark verified -> commit
+                                      | failure
+                                      v
+                         restore snapshot -> restart -> read back recovery
+```
+
+- The command probes the selected service manager before it stops a Runner, acquires a transaction
+  lease, or changes `current`, `verified`, or a unit. The all-components flow carries that one
+  successful probe into its Server and Runner transactions; a manager that is unavailable leaves
+  an existing local-source or managed installation untouched.
+- The snapshot contains the prior unit bytes, active target, verified target, and service options.
+  A failed install restores the exact prior unit and links before restarting it. When there was no
+  prior managed target, recovery removes the candidate target and restores the prior unit rather
+  than leaving it pointed at a deleted `current` link. Recovery is successful only after target and
+  runtime readback agree with the snapshot; its result is reported separately from readiness.
+  An activation readback failure retains that same snapshot and enters recovery before any unit is
+  considered committed; it is never reported as an unchanged target.
+  If link restoration itself cannot be confirmed, recovery still restores and reloads the exact
+  prior unit, then stops the candidate rather than attempting to start an unverified target.
+- A component-scoped cross-process lease serializes only updates for that component. It is held by
+  the operating-system lock primitive and is released on process termination, so it has no clock
+  expiry, polling loop, or stale-owner timeout. Link writes compare the expected prior target and
+  candidate target, preventing a late transaction from committing or rolling back another
+  transaction's activation.
+- Installed artifacts are immutable after promotion. Their manifest records the source hash, a
+  deterministic artifact digest, required entry point, and the payload file set used for that
+  digest. Activation, verification, and recovery validate all of those facts; a manifest hash alone
+  is insufficient. The digest incorporates each sorted relative payload path and the exact bytes
+  read from that payload stream, with unambiguous boundaries; file metadata and decoded text are not
+  digest inputs. The Server exposes the installed artifact digest with its runtime identity, and
+  Runner publishes the same digest from `dist/build-info.json`.
+- A managed Runner unit persists a generated opaque Runner ID, a strictly increasing activation
+  generation, and an activation session token. A legacy hostname-only unit receives a new opaque ID
+  on its first managed update. Runtime readiness binds to that exact
+  `(RunnerId, generation, session token)`, requires `connected` as well as `online`, and checks
+  source hash and artifact digest. The tracker accepts a new connection only when its generation is
+  not older than the active fence and its session token matches that generation; disconnect uses the
+  same tuple plus the SignalR connection token as a compare-and-swap delete. A delayed old
+  registration or disconnect therefore cannot overwrite or remove a newer generation. The Server
+  signals that identity transition through an injectable readiness source; it does not select the
+  first matching hostname or infer readiness from a single HTTP read. A short restart gap remains
+  pending until the exact connection arrives, while another Runner on the same hostname cannot
+  satisfy the candidate. The identity endpoint derives both `status` and `connectionState` from
+  this exact match, so a physical but mismatched connection is reported offline/disconnected.
+- When no local managed Runner unit exists, `mo update` reports the Runner refresh as skipped and
+  omits the managed-runner connection check from its final readiness result. An uninstalled local
+  component is not converted into an unavailable capability by a synthetic Server status response.
+- Intermediate output may describe candidate build, activation, or an identity match, but it must
+  not say `current`, `verified`, or `success`. Those terms are emitted only after verified-link and
+  service-target readback succeed following runtime identity verification.
+- `mo update` stages Server and an installed, previously-running Runner as one batch. It probes,
+  builds, validates manifests, and captures component-scoped lease/snapshot recovery facts without
+  stopping the old Runner. The old Runner is stopped only immediately before its already-validated
+  candidate target is activated. Server and Runner verified links remain staged until all final
+  checks pass; any later Runner prepare, activation, identity, or readback failure restores both
+  components in reverse order through their generation/lease compare-and-swap snapshots. A failed
+  recovery is reported with the component and the failed restoration fact rather than being
+  presented as a ready or recovered update.
+
+This boundary keeps source build facts, installed versions, service targets, and runtime reports
+separate: a successful build or systemd restart alone does not constitute a successful update.
+
+### Control-Plane Readback
+
+`mo issue view <number>` addresses a Mohist workflow-tracker Issue in the selected local Project.
+Its number is not a GitHub issue-number mapping and cannot establish that a managed runtime came
+from a particular GitHub issue or source checkout.
+
+The canonical local post-update readback is `mo server info --json running,services`. It reads the
+same `/api/system/info` control-plane response used to verify the Server candidate. Its `running`
+value must include the installed Server `gitHash` and `artifactDigest`; the exact Runner
+`(runnerId, generation)` readback supplies the corresponding Runner source and artifact identity.
+The `server info` JSON field catalog, help output, and `SystemInfoResponse` contract must agree, so
+the updated CLI cannot advertise a local control-plane field that the updated Server response does
+not provide. A missing identity is a failed managed-runtime verification, not a compatibility
+fallback or a reason to reset local tracker state.
+
 ## Reliability Checks
 
 CLI spec tests verify the public contract without a real Server, process, Git repository, network,
@@ -395,6 +517,13 @@ or wall clock:
   configure operations.
 - `runner` and `server` commands do not call a local service manager. `service` commands neither
   depend on Project nor represent local process status as Runner resource state.
+- Server and Runner install/update contract tests use one scoped fake source of truth for source
+  hash, artifact digest, filesystem state, service target, service manager, and runtime identity.
+  The fake runtime can become ready only through the installed target it is executing; serialized
+  JSON cannot manufacture a matching identity. Tests assert versioned installation paths, absolute
+  unit targets, identity verification, recovery, concurrent component isolation, and rollback
+  without real systemd, processes, network, or Git; sleeps, polling, and retries do not mask
+  identity failures.
 - `otel` queries use the Server query capability. CLI neither opens trace storage files directly
   nor resolves a local storage path.
 - Activity list, Event tail, and dead-letter recovery preserve different results for a durable read

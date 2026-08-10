@@ -19,6 +19,7 @@ public class CliSystemInfoCommandSpecs
     private static object SystemInfoPayload(
         string version = "1.2.3",
         string gitHash = "abc123def456",
+        string artifactDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
         string startedAt = "2026-06-20T11:00:00Z",
         string sourcePath = "/opt/mohist",
         string sourceBranch = "master",
@@ -41,7 +42,7 @@ public class CliSystemInfoCommandSpecs
     {
         return new
         {
-            running = new { version, gitHash, startedAt },
+            running = new { version, gitHash, artifactDigest, startedAt },
             source = new { path = sourcePath, branch = sourceBranch, head = sourceHead, dirty = sourceDirty },
             install = new
             {
@@ -90,6 +91,7 @@ public class CliSystemInfoCommandSpecs
         Assert.Contains("Paths", stdout);
         Assert.Contains("version: 1.2.3", stdout);
         Assert.Contains("gitHash: abc123def456", stdout);
+        Assert.Contains("artifactDigest: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", stdout);
         Assert.Contains("startedAt: 2026-06-20T11:00:00Z", stdout);
         Assert.Contains("path: /opt/mohist", stdout);
         Assert.Contains("branch: master", stdout);
@@ -136,6 +138,7 @@ public class CliSystemInfoCommandSpecs
         Assert.NotNull(parsed);
         Assert.Equal("1.2.3", parsed!["running"]?["version"]?.GetValue<string>());
         Assert.Equal("abc123def456", parsed["running"]?["gitHash"]?.GetValue<string>());
+        Assert.Equal("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", parsed["running"]?["artifactDigest"]?.GetValue<string>());
         Assert.Equal("/opt/mohist", parsed["source"]?["path"]?.GetValue<string>());
         Assert.Equal("master", parsed["source"]?["branch"]?.GetValue<string>());
         Assert.False(parsed["source"]?["dirty"]?.GetValue<bool>());
@@ -206,6 +209,55 @@ public class CliSystemInfoCommandSpecs
         Assert.Contains("server-side system diagnostics", stdout, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("mo info", stdout, StringComparison.Ordinal);
         Assert.Contains("CLI-local", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("JSON FIELDS", stdout, StringComparison.Ordinal);
+        Assert.Contains("running", stdout, StringComparison.Ordinal);
+        Assert.Contains("services", stdout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ServerInfo_HelpAndCanonicalReadbackExposeTheSameRuntimeResource()
+    {
+        var (helpHttp, helpHandler, helpOutput, helpError, helpFiles, helpExecutor, helpEnv) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new { success = true })));
+        var helpExit = await MohistCliCommands.RunAsync(
+            helpHttp,
+            ["server", "info", "--help"],
+            helpOutput,
+            helpError,
+            helpFiles,
+            helpExecutor,
+            helpEnv);
+
+        Assert.Equal(0, helpExit);
+        Assert.Contains("running", helpOutput.ToString(), StringComparison.Ordinal);
+        Assert.Contains("services", helpOutput.ToString(), StringComparison.Ordinal);
+        Assert.Empty(helpHandler.Requests);
+
+        const string sourceHash = "0123456789abcdef0123456789abcdef01234567";
+        const string artifactDigest = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        var (http, handler, output, error, fileSystem, executor, env) = SetupEnv((_, _) =>
+            Task.FromResult(RecordingHttpHandler.Json(new
+            {
+                success = true,
+                data = SystemInfoPayload(gitHash: sourceHash, artifactDigest: artifactDigest),
+            })));
+
+        var exitCode = await MohistCliCommands.RunAsync(
+            http,
+            ["server", "info", "--json", "running,services"],
+            output,
+            error,
+            fileSystem,
+            executor,
+            env);
+
+        Assert.Equal(0, exitCode);
+        Assert.Equal("/api/system/info", handler.Requests.Single().RequestUri?.PathAndQuery);
+        var readback = Assert.IsType<JsonObject>(JsonNode.Parse(output.ToString().Trim()));
+        Assert.Equal(sourceHash, readback["running"]?["gitHash"]?.GetValue<string>());
+        Assert.Equal(artifactDigest, readback["running"]?["artifactDigest"]?.GetValue<string>());
+        Assert.Equal("active", readback["services"]?["server"]?.GetValue<string>());
+        Assert.Equal("active", readback["services"]?["runner"]?.GetValue<string>());
     }
 
     [Fact]
