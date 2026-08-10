@@ -82,7 +82,9 @@ public static class EpicRoutes
                     return ApiResults.Conflict(ex.Message, "DUPLICATE_EPIC_MEMBERSHIP");
                 throw;
             }
-            return ApiResults.Ok(new { epicNumber = number, issueNumber = issue.Number });
+            return ApiResults.Ok(new BatchMembershipResponse([
+                BatchMembershipOutcome.Linked(issue.Number.ToString(), issue.Number),
+            ]));
         });
 
         group.MapDelete("/{number:int}/issues/{issueNumber:int}", async (HttpContext context, int number, int issueNumber, IGrainFactory grains, EpicQuerier queryService, IssueQuerier issuesQuery) =>
@@ -95,7 +97,9 @@ public static class EpicRoutes
 
             var grain = GetEpicGrain(grains, pid, number);
             await grain.UnlinkIssueAsync(issueNumber, pid);
-            return ApiResults.Ok(new { epicNumber = number, issueNumber });
+            return ApiResults.Ok(new BatchMembershipResponse([
+                BatchMembershipOutcome.Unlinked(issueNumber.ToString(), issueNumber),
+            ]));
         });
 
         group.MapPost("/{number:int}/issues:batch", BatchLinkRouteAsync);

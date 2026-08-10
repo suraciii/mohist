@@ -118,7 +118,7 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
-    public async Task CheckServerIdentityAsync_ServerHashMissing_ReportsWarn()
+    public async Task CheckServerIdentityAsync_ServerHashMissing_ReportsFail()
     {
         var handler = new RecordingHttpHandler((req, _) =>
         {
@@ -136,7 +136,7 @@ public class RuntimeConsistencyValidatorSpecs
             BuildContext(repoRoot: "/repo"),
             CancellationToken.None);
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("empty git hash", result.Message);
     }
 
@@ -271,7 +271,7 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_DifferingRunnerHash_ReportsWarn()
+    public async Task CheckRunnerIdentityAsync_DifferingRunnerHash_ReportsFail()
     {
         var handler = new RecordingHttpHandler((req, _) =>
         {
@@ -290,13 +290,13 @@ public class RuntimeConsistencyValidatorSpecs
 
         var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Equal("Runner identity", result.Component);
         Assert.Equal("Runner buildGitHash 'def456' does not match source HEAD 'abc123'", result.Message);
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_MissingRunnerHash_ReportsWarn()
+    public async Task CheckRunnerIdentityAsync_MissingRunnerHash_ReportsFail()
     {
         var handler = new RecordingHttpHandler((req, _) =>
         {
@@ -315,12 +315,12 @@ public class RuntimeConsistencyValidatorSpecs
 
         var result = await validator.CheckRunnerIdentityAsync(context, CancellationToken.None);
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Equal("Runner identity", result.Component);
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_SourceHeadUnavailable_ReportsWarn()
+    public async Task CheckRunnerIdentityAsync_SourceHeadUnavailable_ReportsFail()
     {
         var validator = BuildValidator(BuildUnusedHttpClient());
 
@@ -328,7 +328,7 @@ public class RuntimeConsistencyValidatorSpecs
             BuildContext(repoRoot: "/repo"),
             CancellationToken.None);
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Equal("Runner identity", result.Component);
         Assert.Contains("Source HEAD", result.Message);
     }
@@ -412,7 +412,7 @@ public class RuntimeConsistencyValidatorSpecs
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_IdentityNeverAvailable_ReportsWarnAfterTimeout()
+    public async Task CheckRunnerIdentityAsync_IdentityNeverAvailable_ReportsFailAfterTimeout()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         var handler = new RecordingHttpHandler((req, _) =>
@@ -439,13 +439,13 @@ public class RuntimeConsistencyValidatorSpecs
         time.Advance(timeout);
         var result = await checkTask;
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.NotEmpty(handler.Requests);
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_HangingIdentityRequest_ReportsWarnAtTimeout()
+    public async Task CheckRunnerIdentityAsync_HangingIdentityRequest_ReportsFailAtTimeout()
     {
         var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(startedAt);
@@ -479,14 +479,14 @@ public class RuntimeConsistencyValidatorSpecs
         Assert.True(requestCanceled.Task.IsCompleted, "Expected the in-flight request token to be canceled by fake time.");
         var result = await checkTask;
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.Equal(timeout, time.GetUtcNow() - startedAt);
         Assert.Single(handler.Requests);
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_TimeoutShorterThanPollInterval_ReportsWarnAtTimeout()
+    public async Task CheckRunnerIdentityAsync_TimeoutShorterThanPollInterval_ReportsFailAtTimeout()
     {
         var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(startedAt);
@@ -512,14 +512,14 @@ public class RuntimeConsistencyValidatorSpecs
         time.Advance(timeout);
         var result = await checkTask;
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.Equal(timeout, time.GetUtcNow() - startedAt);
         Assert.Single(handler.Requests);
     }
 
     [Fact]
-    public async Task CheckRunnerIdentityAsync_NonDivisibleTimeoutReportsWarnAtTimeout()
+    public async Task CheckRunnerIdentityAsync_NonDivisibleTimeoutReportsFailAtTimeout()
     {
         var startedAt = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var time = new FakeTimeProvider(startedAt);
@@ -550,7 +550,7 @@ public class RuntimeConsistencyValidatorSpecs
         time.Advance(timeout - pollInterval);
         var result = await checkTask;
 
-        Assert.Equal(RuntimeCheckOutcome.Warn, result.Outcome);
+        Assert.Equal(RuntimeCheckOutcome.Fail, result.Outcome);
         Assert.Contains("did not respond", result.Message);
         Assert.Equal(timeout, time.GetUtcNow() - startedAt);
         Assert.Equal(2, handler.Requests.Count);

@@ -235,7 +235,7 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
     }
 
     [Fact]
-    public async Task VerifyRuntime_RunnerIdentityMismatch_ReportsWarnInOrder()
+    public async Task VerifyRuntime_RunnerIdentityMismatch_FailsClosedInOrder()
     {
         var sourceHead = "abc123";
         var handler = CreateSuccessHandler(sourceHead, "def456");
@@ -249,22 +249,19 @@ public class SourceCodeUpdaterVerifyRuntimeSpecs
         fs.CreateDirectory(skillDir);
         fs.AddFile(Path.Combine(skillDir, "SKILL.md"), "# Skill");
 
-        var updater = BuildUpdater(http, out var output, out _, commands, fs);
+        var updater = BuildUpdater(http, out var output, out var error, commands, fs);
         var context = BuildContext(output, sourceHead: sourceHead);
 
         var exitCode = await InvokeVerifyRuntimeStageAsync(updater, context);
 
-        Assert.Equal(0, exitCode);
-        Assert.Equal(UpdateOutcome.Recovered, context.Outcome);
+        Assert.Equal(1, exitCode);
+        Assert.Equal(UpdateOutcome.Failed, context.Outcome);
 
-        var lines = output.ToString().Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries);
-        var connectionIndex = Array.FindIndex(lines, l => l.Contains("Runner connection"));
-        var identityIndex = Array.FindIndex(lines, l => l.Contains("Runner identity"));
-        var assetsIndex = Array.FindIndex(lines, l => l.Contains("Managed skill assets"));
-
-        Assert.True(connectionIndex < identityIndex, "Runner identity should follow Runner connection");
-        Assert.True(identityIndex < assetsIndex, "Managed skill assets should follow Runner identity");
-        Assert.Contains("[warn] Runner identity:", lines[identityIndex]);
+        var components = context.RuntimeChecks.Select(check => check.Component).ToArray();
+        Assert.Equal(
+            ["CLI binary", "Server identity", "Web assets", "Runner connection", "Runner identity", "Managed skill assets"],
+            components);
+        Assert.Contains("[fail] Runner identity:", error.ToString());
     }
 
     [Fact]
